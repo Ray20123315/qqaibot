@@ -899,7 +899,7 @@ export default {
               // ==========================================
               if (!model.startsWith('gemma') && !model.includes('deep-research') && !model.includes('antigravity')) {
                 // ⭕️ 這裡必須是小寫蛇形命名法 google_search，最新模型才能正確識別
-                requestBody.tools = [{ google_search: {} }];
+                requestBody.tools = [{ googlesearch: {} }];
               }
 
               const geminiRes = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`, {
