@@ -151,35 +151,6 @@ export default {
           restText: match && match[3] ? match[3].replace(/\[CQ:[^\]]+\]/g, '').trim() : ""
         };
       };
-
-      // ==========================================
-      // 🚫 【前置防禦】空訊息 / 純空格攔截器 (放在最頂層，最省資源)
-      // ==========================================
-      if (!msgDesc || msgDesc.trim() === "") {
-        console.log(`⚠️ 偵測到群友 ${userId} 僅 @機器人 但未輸入有效內容，已自動快速攔截。`);
-        return new Response(null, { status: 204 });
-      }
-
-      // ==========================================
-      // ⏳ 【神級優化】Cloudflare 原生速率限制器 (10秒冷卻鎖)
-      // ==========================================
-      // 開發者、群主、管理員豁免冷卻限制，不被卡住
-      const isBypassCooldown = isDeveloper || senderRole === 'owner' || senderRole === 'admin';
-
-      if (!isBypassCooldown && env.MY_RATE_LIMITER) {
-        // 以 「群號:群員QQ」 作為唯一的 Key，這樣他在 A 群冷卻，去 B 群也要乖乖等 10 秒
-        const rateLimitKey = `${currentGroupId}:${userId}`;
-        
-        // 呼叫 Cloudflare 內核進行極速判定
-        const { success } = await env.MY_RATE_LIMITER.limit({ key: rateLimitKey });
-        
-        if (!success) {
-          console.log(`⏳ 群友 ${userId} 頻繁調用，觸發 10 秒冷卻限制，已自動攔截。`);
-
-          // 選擇二：調皮提示模式 (若想提醒普通群員，可改用下面這行)
-          return jsonReply(`${atSender} ⏳ 群友 ${userId} 頻繁調用，觸發 10 秒冷卻限制，已自動攔截。`);
-        }
-      }
       
       // ==========================================
       // 📜 基礎系統指令管理模組
@@ -216,6 +187,36 @@ export default {
                       `!黑名单 [@成员/QQ号] / !解除黑名单 [@成员]`;
         return jsonReply(helpMsg);
       }
+      
+      // ==========================================
+      // 🚫 【前置防禦】空訊息 / 純空格攔截器 (放在最頂層，最省資源)
+      // ==========================================
+      if (!msgDesc || msgDesc.trim() === "") {
+        console.log(`⚠️ 偵測到群友 ${userId} 僅 @機器人 但未輸入有效內容，已自動快速攔截。`);
+        return new Response(null, { status: 204 });
+      }
+
+      // ==========================================
+      // ⏳ 【神級優化】Cloudflare 原生速率限制器 (10秒冷卻鎖)
+      // ==========================================
+      // 開發者、群主、管理員豁免冷卻限制，不被卡住
+      const isBypassCooldown = isDeveloper || senderRole === 'owner' || senderRole === 'admin';
+
+      if (!isBypassCooldown && env.MY_RATE_LIMITER) {
+        // 以 「群號:群員QQ」 作為唯一的 Key，這樣他在 A 群冷卻，去 B 群也要乖乖等 10 秒
+        const rateLimitKey = `${currentGroupId}:${userId}`;
+        
+        // 呼叫 Cloudflare 內核進行極速判定
+        const { success } = await env.MY_RATE_LIMITER.limit({ key: rateLimitKey });
+        
+        if (!success) {
+          console.log(`⏳ 群友 ${userId} 頻繁調用，觸發 10 秒冷卻限制，已自動攔截。`);
+
+          // 選擇二：調皮提示模式 (若想提醒普通群員，可改用下面這行)
+          return jsonReply(`${atSender} ⏳ 群友 ${userId} 頻繁調用，觸發 10 秒冷卻限制，已自動攔截。`);
+        }
+      }
+      
       // 📊 【新功能】智慧狀態指令攔截（支援繁、簡、英、全形驚嘆號且不區分大小寫）
       if (['!status', '!配额', '!配額', '！status', '！配额', '！配額'].includes(msgLower)) {
         try {
