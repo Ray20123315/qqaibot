@@ -159,17 +159,19 @@ export default {
       const isPrivate = body.message_type === 'private';
 
       // ==========================================
-      // 💬 D1 歷史紀錄讀取 (維持上下文記憶) - ✨已修復 catch 語法
+      // 💬 D1 歷史紀錄讀取 (維持上下文記憶)
       // ==========================================
-      let history = [];
+      let history = []; 
       try {
-        const historyData = await dbGet(env, historyKey);
+        // 🎯 修正核心：把 historyKey 改成 sessionKey
+        const historyData = await dbGet(env, sessionKey); 
         if (historyData) {
           history = JSON.parse(historyData);
+          console.log(`🧠 成功載入歷史記憶，當前記憶條數: ${history.length}`);
         }
       } catch (historyError) {
-        console.error("讀取 D1 歷史紀錄失敗，改用空歷史紀錄:", historyError);
-        history = []; // 防崩潰保底
+        console.error("讀取 D1 歷史紀錄失敗:", historyError);
+        history = []; 
       }
 
       // 精準提取群組身分
@@ -1343,7 +1345,7 @@ export default {
       history.push({ role: 'model', parts: [{ text: baseText }] }); 
       // 保持最近 8 条上下文流，防止 Token 爆炸
       if (history.length > 8) history = history.slice(-8); 
-      ctx.waitUntil(dbPut(env, historyKey, JSON.stringify(history)));
+      ctx.waitUntil(dbPut(env, sessionKey, JSON.stringify(history)));
 
       // 组装最终回覆，并进行动态去 @ 处理
       const senderDndCheck = await dbGet(env, `dnd:${currentGroupId}:${userId}`);
