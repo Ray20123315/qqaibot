@@ -1048,7 +1048,9 @@ export default {
                 baseText = baseText.replace(/[\*#\-\`~>_]/g, '').trim(); 
 
                 // 🏷️ 格式化輸出：附帶 reply by 標籤
-                replyText = `${baseText}\n\nreply by ${model}`;
+                // replyText = `${baseText}\n\nreply by ${model}`;
+                //  真正的修復：不帶標籤，但要把答案傳給 replyText！
+                replyText = baseText;
                 
                 // 📊 異步後台統計更新
                 try {
@@ -1071,7 +1073,7 @@ export default {
         } // 外迴圈結束 (apiKey)
       }
       
-// ==========================================
+      // ==========================================
       // 🛠 終端發送閘 (智慧防禦：修正主動聊天報錯漏洞)
       // ==========================================
       if (success) {
