@@ -1013,8 +1013,8 @@ export default {
         } // 外迴圈結束 (apiKey)
       }
       
-      // ==========================================
-      // 🛠 終端發送閘
+// ==========================================
+      // 🛠 終端發送閘 (智慧防禦：修正主動聊天報錯漏洞)
       // ==========================================
       if (success) {
         if (env.QQ_STORE) {
@@ -1031,11 +1031,22 @@ export default {
 
         finalReply = finalReply.replace(/(\[CQ:at,qq=\d+\]\s*)\1+/g, '$1');
         return jsonReply(finalReply);
+        
       } else {
+        // 🚨 【關鍵核心修復】
+        // 判斷當前是否是「主動式聊天 / 隨機插話」。
+        // 依據你前面定義隨機插話的布林值變數（例如 isAutoInterject 或 requiresInterject，請對齊你程式碼前面的命名）
+        if (typeof isAutoInterject !== 'undefined' && isAutoInterject === true) {
+          console.log(`⚠️ [主動聊天攔截] AI 額度耗盡`);
+          return new Response(null, { status: 204 }); // ➔ 默默裝死，群友什麼都不會看到！
+        }
+
+        // 只有在群友【真的動手 @ 機器人】卻失敗時，才吐出這個除錯報錯，方便你排查問題
         return jsonReply(`${atSender}❌ 请检查 API 是否额度耗尽或节点连接失败。`);
       }
 
     } catch (e) { 
+      console.error("全域未捕獲異常:", e);
       return new Response(null, { status: 204 }); 
     }
   },
