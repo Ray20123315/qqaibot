@@ -19,3 +19,4 @@ index_name = "qqai"
 
 [vars]
 BACKGROUND_BROWSER_TIMEOUT = "60"
+DEVELOPER_ID = "3569028262"
