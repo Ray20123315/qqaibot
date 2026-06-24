@@ -586,24 +586,29 @@ export default {
           if (logs.length > 100) logs = logs.slice(-100);
           await env.QQ_STORE.put(logKey, JSON.stringify(logs));
 
-          // 2. 寫入供長期語意聯想用的 Vectorize
+// 2. 寫入供長期語意聯想用的 Vectorize
           if (env.VECTORIZE && memoSwitch !== "false" && cleanMessage.length > 2) {
-            const vec = await getVector(cleanMessage);
-            if (vec && typeof vec !== 'string') {
-              const recordId = `chat_${currentGroupId}_${Date.now()}`;
-              await env.VECTORIZE.insert([{
-                id: recordId,
-                values: vec,
-                metadata: { 
-                  text: `[${roleName} ${senderCard}(QQ:${userId}) 曾说]: ${cleanMessage}`, 
-                  group: currentGroupId,
-                  author: userId
-                }
-              }]);
+            // 【新增這行】過濾掉 QQ 表情，只留下純文字存進記憶庫
+            const pureMessage = cleanMessage.replace(/\[CQ:face,[^\]]+\]/g, '').trim();
+            
+            // 如果過濾完發現只剩表情（變空字串），就不存這條無意義的記憶
+            if (pureMessage.length > 0) {
+              const vec = await getVector(pureMessage); // 用純文字去轉向量
+              if (vec && typeof vec !== 'string') {
+                const recordId = `chat_${currentGroupId}_${Date.now()}`;
+                await env.VECTORIZE.insert([{
+                  id: recordId,
+                  values: vec,
+                  metadata: { 
+                    // 【修改這行】把 cleanMessage 改成 pureMessage，確保存進去的是乾淨的記憶
+                    text: `[${roleName} ${senderCard}(QQ:${userId}) 曾说]: ${pureMessage}`, 
+                    group: currentGroupId,
+                    author: userId
+                  }
+                }]);
+              }
             }
           }
-        })().catch(() => {}));
-      }
 
       // 🛡️ 黑名單與聊天開關門檻
       const isBlacklisted = await env.QQ_STORE?.get(`status:blacklist:${userId}`);
