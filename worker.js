@@ -918,7 +918,7 @@ export default {
       let replyText = "";
       let success = false;
 
-// ==========================================
+      // ==========================================
       // 💬 呼叫 Gemini / Gemma AI 核心 (金鑰庫合併 + 智慧過濾聯網工具)
       // ==========================================
       const keysStr = env.GEMINI_API_KEYS || "";
@@ -939,11 +939,8 @@ export default {
                 systemInstruction: { parts: [{ text: finalStylePrompt }] }
               };
 
-              // ==========================================
-              // 🌐 聯網工具注入 (嚴格對齊 Google REST API 規範)
-              // ==========================================
+              // 🌐 智慧過濾：完全對齊 Google 2026 最新 REST API 標準
               if (!model.startsWith('gemma') && !model.includes('deep-research') && !model.includes('antigravity')) {
-                // ⭕️ 修正：必須包含底線 google_search，才能正確觸發搜尋功能
                 requestBody.tools = [{ google_search: {} }];
               }
 
@@ -955,58 +952,47 @@ export default {
               });
               
               if (!geminiRes.ok) {
-                const errBody = await geminiRes.text(); 
-                console.error(`模型 ${model} 失败原因:`, errBody);
+                const errBody = await geminiRes.text();
+                console.log(`金鑰 ${apiKey.substring(0,6)}... 在模型 ${model} 失敗 (狀態碼: ${geminiRes.status})。原因: ${errBody}`);
                 continue; 
-              }
+              } 
               
               const responseData = await geminiRes.json();
               if (responseData.candidates?.[0]) {
                 
-                // ==========================================
-                // 🔍 聯網狀態監控監聽器
-                // ==========================================
-              const responseData = await geminiRes.json();
-              if (responseData.candidates?.[0]) {
-                // 1. 原本的聯網監控日誌
+                // 🔍 聯網狀態日誌監聽
                 const grounding = responseData.candidates[0].groundingMetadata;
                 if (grounding && grounding.webSearchQueries) {
-                  console.log(`📡 [聯網成功] 模型 [${model}] 成功使用了搜尋！`);
+                  console.log(`📡 [聯網成功] 模型 [${model}] 成功使用了搜尋！關鍵字:`, JSON.stringify(grounding.webSearchQueries));
+                } else {
+                  console.log(`🧠 [內置回覆] 模型 [${model}] 成功回答，使用的是內置記憶。`);
                 }
 
-                // 2. 處理原本的文字
                 let baseText = responseData.candidates[0].content.parts[0].text;
                 baseText = baseText.replace(/[\*#\-\`~>_]/g, '').trim(); 
 
-                // 3. 加上我們剛才提的 reply by 標籤
+                // 🏷️ 格式化輸出：附帶 reply by 標籤
                 replyText = `${baseText}\n\n(reply by ${model})`;
                 
-                // ==========================================
-                // 🔥 【新功能】異步更新統計數據到 KV 中
-                // ==========================================
+                // 📊 異步後台統計更新
                 try {
-                  // 每日累計次數 +1
                   const currentCount = parseInt(await env.QQ_STORE.get("STAT_TOTAL_CALLS") || "0", 10);
                   await env.QQ_STORE.put("STAT_TOTAL_CALLS", (currentCount + 1).toString());
-                  // 記錄最後一次成功的模型
                   await env.QQ_STORE.put("STAT_LAST_MODEL", model);
                 } catch (kvErr) {
                   console.error("更新統計 KV 失敗:", kvErr);
                 }
-                // ==========================================
 
                 success = true;
                 break chatLoop; // 成功取得回覆，直接跳出所有迴圈
               }
             } catch (err) {
-              // 發生超時或網路錯誤，換同個 Key 的下一個模型試試
-              console.error(`模型 ${model} 請求發生異常/超時:`, err.message || err);
+              console.log(`模型 ${model} 請求發生異常或超時，換下一個模型...`);
               continue;
             }
-          }
-          // 當前金鑰把所有模型都撞了一遍都失敗，迴圈自然會推進到下一個金鑰（apiKey）
+          } // 內迴圈結束 (model)
           console.log(`金鑰 ${apiKey.substring(0,6)}... 已嘗試完所有模型皆失敗，切換至下一個 API 金鑰。`);
-        }
+        } // 外迴圈結束 (apiKey)
       }
       
       // ==========================================
@@ -1028,7 +1014,7 @@ export default {
         finalReply = finalReply.replace(/(\[CQ:at,qq=\d+\]\s*)\1+/g, '$1');
         return jsonReply(finalReply);
       } else {
-        return jsonReply(`${atSender}❌ 唔...我的脑子好像宕机了（API 额度耗尽或节点连接失败），请开发者检查一下吧。`);
+        return jsonReply(`${atSender}❌ 请检查 API 是否额度耗尽或节点连接失败。`);
       }
 
     } catch (e) { 
