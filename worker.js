@@ -878,10 +878,12 @@ export default {
               
               // 💡 修正核心：如果當前模型失敗（例如 429 限制或暫時不可用），不要放棄金鑰！
               // 繼續用當前金鑰測試下一個模型（如 flash 或 lite），直到所有模型都失敗才換下一個金鑰。
+              // 找到你代码中的这段请求位置，加入 console.error
               if (!geminiRes.ok) {
-                console.log(`金鑰 ${apiKey.substring(0,6)}... 在模型 ${model} 失敗 (狀態碼: ${geminiRes.status})，嘗試同金鑰的下一個模型...`);
-                continue; // 👈 改回普通 continue，測試下一個 model
-              } 
+                const errBody = await geminiRes.text(); // 👈 读取 Google 返回的原始报错文本
+                console.error(`模型 ${model} 失败原因:`, errBody);
+                continue; 
+              }
               
               const responseData = await geminiRes.json();
               if (responseData.candidates?.[0]) {
