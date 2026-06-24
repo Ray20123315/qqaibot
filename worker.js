@@ -955,9 +955,6 @@ export default {
 
                 let baseText = responseData.candidates[0].content.parts[0].text;
                 baseText = baseText.replace(/[\*#\-\`~>_]/g, '').trim(); 
-
-                // 🏷️ 格式化輸出：附帶 reply by 標籤
-                replyText = `${baseText}\n\n(reply by ${model})`;
                 
                 // 📊 異步後台統計更新
                 try {
