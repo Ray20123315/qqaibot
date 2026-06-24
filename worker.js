@@ -561,7 +561,7 @@ export default {
       // 第二段到此完美結束，準備進入第三段的讀網頁、翻譯與截圖實用工具模組...
 
 // ==========================================
-      // 🎙️ 文字轉語音直連 (調用 Gemini TTS 原生擬真語音模型)
+      // 🎙️ 文字轉語音直連 (終極防漏抓、全欄位地毯式搜索版)
       // ==========================================
       if (/^[!！](?:语音|語音|speak|tts)\s+(.+)/.test(msgLower)) {
         const match = msgLower.match(/^[!！](?:语音|語音|speak|tts)\s+(.+)/);
@@ -573,14 +573,21 @@ export default {
         const apiKeys = keysStr.split(',').map(k => k.trim()).filter(k => k !== "");
         if (apiKeys.length === 0) return jsonReply(`${atSender}⚠️ 尚未配置 API 金钥，无法生成语音。`);
         
-        // 🔥 自動從你的 modelList 裡過濾出包含 tts 的模型
-        const ttsModels = typeof modelList !== 'undefined'
+        // 🚀 智能排序：將目前官方最穩定的 2.5 世代排到最前面
+        let ttsModels = typeof modelList !== 'undefined'
           ? modelList.filter(m => m.includes('-tts'))
-          : ["gemini-2.5-flash-preview-tts"]; // 保底
+          : ["gemini-2.5-flash-preview-tts"];
+        
+        ttsModels.sort((a, b) => {
+          if (a.includes('2.5')) return -1;
+          if (b.includes('2.5')) return 1;
+          return 0;
+        });
         
         let lastError = null;
         let successAudioBase64 = null;
         let usedModelName = "";
+        let rawJsonDebug = ""; // 偵錯用存儲
 
         // 🔄 雙重輪詢：外層輪詢 TTS 模型，內層輪詢金鑰
         ttsModelLoop: for (let m = 0; m < ttsModels.length; m++) {
@@ -597,9 +604,8 @@ export default {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
-                  contents: [{ parts: [{ text: `请朗读以下文字，直接输出语音：${ttsText}` }] }],
+                  contents: [{ parts: [{ text: ttsText }] }], // 簡化 Prompt 讓 AI 專心吐語音
                   generationConfig: {
-                    // 🎯 核心修復：拿掉會報 400 的 responseMimeType，換成官方正確的語音輸出參數
                     responseModalities: ["AUDIO"]
                   }
                 })
@@ -608,36 +614,57 @@ export default {
               if (!response.ok) {
                 const errTxt = await response.text();
                 lastError = `[${currentModel}] ${response.status} - ${errTxt}`;
-                continue; // 👈 失敗了，繼續輪詢下一個金鑰
+                continue;
               }
               
               const resData = await response.json();
+              rawJsonDebug = JSON.stringify(resData); // 備份原始 JSON
               
-              // 📥 擷取 Google 吐回來的音訊 Base64
-              const audioPart = resData.candidates?.[0]?.content?.parts?.[0];
-              if (audioPart?.inlineData?.data) {
-                successAudioBase64 = audioPart.inlineData.data;
+              // 🎯 核心黑科技：地毯式深度搜索 Base64 數據，防範 Google 隨意更動欄位名稱
+              const part = resData.candidates?.[0]?.content?.parts?.[0];
+              
+              if (part) {
+                // 方案 A: 檢查標準 inlineData
+                if (part.inlineData?.data) {
+                  successAudioBase64 = part.inlineData.data;
+                }
+                // 方案 B: 檢查有些語音模型會吐在 fileData 裡
+                else if (part.fileData?.fileUri) {
+                  lastError = `Google 返回了雲端存儲路徑而非 Base64: ${part.fileData.fileUri}`;
+                }
+                // 方案 C: 暴力地尋找 JSON 內任何長度大於 1000 且無空格的純文字（通常就是 Base64 數據）
+                else {
+                  const searchBase64 = rawJsonDebug.match(/"data"\s*:\s*"([A-Za-z0-9+/={},\-_]{500,})"/);
+                  if (searchBase64 && searchBase64[1]) {
+                    successAudioBase64 = searchBase64[1];
+                  }
+                }
+              }
+              
+              if (successAudioBase64) {
                 usedModelName = currentModel;
-                break ttsModelLoop; // 🎯 成功拿到語音，擊穿雙層迴圈！
+                break ttsModelLoop; // 成功抓到，擊穿雙層迴圈！
               } else {
-                lastError = `[${currentModel}] 回傳數據中不包含音訊 inlineData`;
+                lastError = `[${currentModel}] 成功響應但全欄位未識別到音訊 Base64 數據`;
               }
             } catch (e) {
               console.error(`❌ 語音執行異常:`, e);
               lastError = e.message || e;
             }
-          } // 👈 內層金鑰迴圈結束
-        } // 👈 外層模型迴圈結束
+          }
+        }
 
         // 🏁 最終輸出判定
         if (successAudioBase64) {
-          // 🎯 組裝成標準 QQ 框架能識別的語音 CQ 碼 (file=base64://...)
+          // 🎯 組裝成標準 QQ 語音 CQ 碼
           const cqAudio = `[CQ:record,file=base64://${successAudioBase64}]`;
           return jsonReply(cqAudio); 
         } else {
-          return jsonReply(`${atSender}⚠️ 语音生成失败。原因：${lastError}`);
+          // 萬一還是抓不到，直接把 Google 的回傳結構抓出來看，不再瞎猜！
+          const debugSlice = rawJsonDebug ? rawJsonDebug.slice(0, 300) : "無 JSON 回應";
+          return jsonReply(`${atSender}⚠️ 语音抓取失败。\n最后错误: ${lastError}\nGoogle結構快照: ${debugSlice}`);
         }
-      } // 👈 確保整段 if 指令在這邊完美閉合
+      }
       
       // ==========================================
       // 🌐 读网页精炼摘要 (纯抓文字并交由 AI 总结)
