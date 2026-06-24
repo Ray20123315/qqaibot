@@ -268,7 +268,7 @@ export default {
       // 🌐 Puppeteer 無頭瀏覽器截圖功能
       if (['!截图', '!截圖', '!screenshot', '！截图', '！截圖'].some(p => msgLower.startsWith(p))) {
         const match = cleanMessage.match(/https?:\/\/[^\s]+/);
-        if (!match) return jsonReply(`${atSender}⚠️ 请提供完整的网址，例如: !截图 https://google.com`);
+        if (!match) return jsonReply(`${atSender}⚠️ 请提供完整的网址，例如: !截图 https://www.google.com`);
         if (!env.MYBROWSER) return jsonReply(`${atSender}⚠️ 开发者尚未在 Cloudflare 绑定 MYBROWSER 浏览器实例。`);
 
         try {
