@@ -28,15 +28,15 @@
     "BACKGROUND_BROWSER_TIMEOUT": "60",
     "DEVELOPER_ID": "3569028262"
   },
-  "rate_limiting": {
-    "bindings": [
-      {
-        "name": "MY_RATE_LIMITER",
-        "limit": 1,
-        "period": 10
-      }
-    ]
-  },
+  // 🔥 2026 年最新 wrangler v4 唯一認可的設定檔防刷語法：
+  "rate_limiting": [
+    {
+      "binding": "MY_RATE_LIMITER",
+      "namespace_id": "1", // 必須隨便給一個 ID，否則編譯器會漏掉
+      "limit": 1,
+      "period": 10
+    }
+  ],
   "observability": {
     "logs": {
       "enabled": false,
