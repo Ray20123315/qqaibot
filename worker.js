@@ -158,8 +158,19 @@ export default {
       const isGroup = body.message_type === 'group';
       const isPrivate = body.message_type === 'private';
 
-      // 👇 【在這裡手動加入這行防崩潰】
+      // ==========================================
+      // 💬 D1 歷史紀錄讀取 (維持上下文記憶) - ✨已修復 catch 語法
+      // ==========================================
       let history = [];
+      try {
+        const historyData = await dbGet(env, historyKey);
+        if (historyData) {
+          history = JSON.parse(historyData);
+        }
+      } catch (historyError) {
+        console.error("讀取 D1 歷史紀錄失敗，改用空歷史紀錄:", historyError);
+        history = []; // 防崩潰保底
+      }
 
       // 精準提取群組身分
       const senderCard = body.sender?.card || body.sender?.nickname || userId;
