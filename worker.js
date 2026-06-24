@@ -840,7 +840,7 @@ export default {
       let replyText = "";
       let success = false;
 
-// ==========================================
+      // ==========================================
       // 💬 呼叫 Gemini / Gemma AI 核心 (金鑰庫合併 + 智慧過濾聯網工具)
       // ==========================================
       const keysStr = env.GEMINI_API_KEYS || "";
@@ -849,9 +849,6 @@ export default {
         ...keysStr.split(',').map(k => k.trim()).filter(k => k !== ""),
         ...vecKeysStr.split(',').map(k => k.trim()).filter(k => k !== "")
       ];
-
-      let replyText = "";
-      let success = false;
 
       if (apiKeys.length > 0) {
         // 🚀 核心修正：我們逐個測試金鑰
