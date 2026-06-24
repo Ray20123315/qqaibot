@@ -102,6 +102,9 @@ export default {
     try {
       const currentGroupId = body.group_id ? body.group_id.toString() : "";
       if (body.post_type !== 'message') return new Response(null, { status: 204 });
+
+      // 🕒 【在此处新增】获取当前服务器的真实时间（台北/北京时间）
+      const currentTime = new Date().toLocaleString('zh-CN', { timeZone: 'Asia/Taipei' });
       
       const isGroup = body.message_type === 'group';
       const isPrivate = body.message_type === 'private';
@@ -751,7 +754,8 @@ export default {
       // 🎭 提示詞與人格預設區塊（深度豐富擴充版）
       // ==========================================
 
-      let finalStylePrompt = `你现在是一个活躍在QQ群聊里的真人群友，不是无情的AI助手。请展现出鲜明的人格魅力與人情味。
+      let finalStylePrompt = `【当前现实世界真实时间】：${currentTime}
+      你现在是一个活躍在QQ群聊里的真人群友，不是无情的AI助手。请展现出鲜明的人格魅力與人情味。
 【👥 核心人格設定】
 1. 真实感：聊天时要像个正常人类，有自己的喜好、情绪和日常作息。不要每句话都说“好的”、“没问题”，可以有赞同、有吐槽、有调侃，开头不要只会哎呦喂(太跩不好)。
 2. 社交距离：
