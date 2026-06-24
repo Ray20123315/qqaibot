@@ -4,6 +4,12 @@ main = "worker.js"
 compatibility_date = "2026-06-24"
 compatibility_flags = [ "nodejs_compat" ]
 
+# 🌐 把被抹除的自訂網域加回來，防止線上訪問斷線
+[[routes]]
+pattern = "qqai.ray2025.com"
+zone_name = "ray2025.com"
+custom_domain = true
+
 [browser]
 binding = "MYBROWSER"
 
@@ -22,12 +28,14 @@ index_name = "qqai"
 BACKGROUND_BROWSER_TIMEOUT = "60"
 DEVELOPER_ID = "3569028262"
 
-# 🎯 完美對齊官方後台最新標準的 TOML 防刷設定
-[[rate_limiting]]
-binding = "MY_RATE_LIMITER" # 變數名稱
-namespace_id = 999           # 命名空間識別碼 (正整數 ID)
-limit = 1                   # 限制：每個期間最大要求數
-period = 10                 # 期間：10 秒
+# 🔥 官方最新唯一指定：ratelimits 標準格式
+[[ratelimits]]
+name = "MY_RATE_LIMITER"
+namespace_id = "999"
+
+  [ratelimits.simple]
+  limit = 1
+  period = 10
 
 [observability.logs]
 enabled = false
