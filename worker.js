@@ -840,10 +840,9 @@ export default {
       let replyText = "";
       let success = false;
 
-      // ==========================================
+// ==========================================
       // 💬 呼叫 Gemini / Gemma AI 核心 (金鑰庫合併 + 智慧過濾聯網工具)
       // ==========================================
-      // 將普通金鑰與原本給向量函式庫用的金鑰完全合併，在變數名稱不變的情況下實作多模型共享
       const keysStr = env.GEMINI_API_KEYS || "";
       const vecKeysStr = env.VECTORIZE_GEMINI_KEYS || "";
       const apiKeys = [
@@ -851,17 +850,19 @@ export default {
         ...vecKeysStr.split(',').map(k => k.trim()).filter(k => k !== "")
       ];
 
+      let replyText = "";
+      let success = false;
+
       if (apiKeys.length > 0) {
+        // 🚀 核心修正：我們逐個測試金鑰
         chatLoop: for (const apiKey of apiKeys) {
           for (const model of modelList) {
             try {
-              // 1. 先建立基礎的請求內容
               const requestBody = { 
                 contents: contents,
                 systemInstruction: { parts: [{ text: finalStylePrompt }] }
               };
 
-              // 2. 智慧分流：如果模型名稱不是以 gemma 開頭，才加上 Google Search 聯網工具
               if (!model.startsWith('gemma')) {
                 requestBody.tools = [{ googleSearch: {} }];
               }
@@ -869,20 +870,27 @@ export default {
               const geminiRes = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(requestBody), // 傳入動態調整後的請求
-                signal: AbortSignal.timeout(4000) // 建議縮短到4秒，遭遇額度耗盡時能瞬間無縫切換到保底模型
+                body: JSON.stringify(requestBody),
+                signal: AbortSignal.timeout(4000) 
               });
               
-              if (!geminiRes.ok) continue; 
+              // 💡 關鍵修正：如果這個金鑰沒過（例如過載或失效），直接跳過這個金鑰的所有後續模型，換下一個金鑰！
+              if (!geminiRes.ok) {
+                console.log(`金鑰 ${apiKey.substring(0,6)}... 在模型 ${model} 失敗，狀態碼: ${geminiRes.status}。準備切換下一個金鑰。`);
+                continue chatLoop; // 👈 這裡改為 continue 外迴圈！
+              } 
               
               const responseData = await geminiRes.json();
               if (responseData.candidates?.[0]) {
                 replyText = responseData.candidates[0].content.parts[0].text;
                 replyText = replyText.replace(/[\*#\-\`~>_]/g, '').trim(); 
                 success = true;
-                break chatLoop; // 成功取得回复，跳出全部循環
+                break chatLoop; // 成功取得回复，跳出全部金鑰輪詢
               }
-            } catch (err) {}
+            } catch (err) {
+              // 發生超時或網路錯誤，也果斷換下一個金鑰
+              continue chatLoop;
+            }
           }
         }
       }
