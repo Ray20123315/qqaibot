@@ -623,6 +623,51 @@ export default {
         return jsonReply(`${atSender}🧹 缓存与模仿状态已全部重置！`);
       }
 
+      // ==========================================
+      // 📊 【新功能】智慧指令攔截器 (支援繁、簡、英不區分大小寫)
+      // ==========================================
+      const statusRegex = /^!(status|配額|配额)$/i;
+      
+      if (statusRegex.test(userPrompt.trim())) {
+        try {
+          // 1. 從 KV 撈取統計數據 [cite: 1]
+          const totalCalls = await env.QQ_STORE.get("STAT_TOTAL_CALLS") || "0";
+          const lastModel = await env.QQ_STORE.get("STAT_LAST_MODEL") || "無記錄";
+          
+          // 2. 計算目前環境變數中綁定了幾把 API Key
+          const totalKeys = [
+            ...(env.GEMINI_API_KEYS || "").split(',').filter(k => k.trim() !== ""),
+            ...(env.VECTORIZE_GEMINI_KEYS || "").split(',').filter(k => k.trim() !== "")
+          ].length;
+
+          // 3. 組合回覆看板 [cite: 1]
+          const statusReport = [
+            "📊 QQAI 運作狀態報告",
+            "━━━━━━━━━━━━━━━",
+            `🔑 當前負載金鑰數：${totalKeys} 把`,
+            `📈 系統累計對話次數：${totalCalls} 次`,
+            `🤖 最後服務成功模型：${lastModel}`,
+            "━━━━━━━━━━━━━━━",
+            "⚡️ 輪詢內核運作正常，隨時待命！"
+          ].join("\n");
+
+          // 4. 直接建構並回傳符合你原本 QQ 機器人架構的 JSON 響應
+          // 注意：請確認接收端（OneBot / Gocqhttp）格式，並對齊你原來的群組發送邏輯
+          return new Response(JSON.stringify({
+            action: "send_msg",
+            params: {
+              // 這裡會自動代入你在上面解析出來的群號（groupId）或發送者號碼，保持與你原本程式碼一致
+              group_id: groupId, 
+              message: statusReport
+            }
+          }), { headers: { 'Content-Type': 'application/json' } });
+
+        } catch (statusErr) {
+          console.error("執行狀態指令失敗:", statusErr);
+        }
+      }
+      // ==========================================
+      
       if (isPrivate) return new Response(null, { status: 204 });
 
       // ==========================================
@@ -921,17 +966,35 @@ export default {
                 // ==========================================
                 // 🔍 聯網狀態監控監聽器
                 // ==========================================
+              const responseData = await geminiRes.json();
+              if (responseData.candidates?.[0]) {
+                // 1. 原本的聯網監控日誌
                 const grounding = responseData.candidates[0].groundingMetadata;
                 if (grounding && grounding.webSearchQueries) {
-                  // 📡 當模型成功使用 Google 搜尋時，會進入這裡並印出關鍵字
-                  console.log(`📡 [聯網成功] 模型 [${model}] 成功使用了搜尋！搜尋關鍵字為:`, JSON.stringify(grounding.webSearchQueries));
-                } else {
-                  // 🧠 當模型直接用內建知識回答，沒有查網頁時，會進入這裡
-                  console.log(`🧠 [內置回覆] 模型 [${model}] 成功回答，但使用的是內置記憶（未觸發搜尋）。`);
+                  console.log(`📡 [聯網成功] 模型 [${model}] 成功使用了搜尋！`);
                 }
 
-                replyText = responseData.candidates[0].content.parts[0].text;
-                replyText = replyText.replace(/[\*#\-\`~>_]/g, '').trim(); 
+                // 2. 處理原本的文字
+                let baseText = responseData.candidates[0].content.parts[0].text;
+                baseText = baseText.replace(/[\*#\-\`~>_]/g, '').trim(); 
+
+                // 3. 加上我們剛才提的 reply by 標籤
+                replyText = `${baseText}\n\n(reply by ${model})`;
+                
+                // ==========================================
+                // 🔥 【新功能】異步更新統計數據到 KV 中
+                // ==========================================
+                try {
+                  // 每日累計次數 +1
+                  const currentCount = parseInt(await env.QQ_STORE.get("STAT_TOTAL_CALLS") || "0", 10);
+                  await env.QQ_STORE.put("STAT_TOTAL_CALLS", (currentCount + 1).toString());
+                  // 記錄最後一次成功的模型
+                  await env.QQ_STORE.put("STAT_LAST_MODEL", model);
+                } catch (kvErr) {
+                  console.error("更新統計 KV 失敗:", kvErr);
+                }
+                // ==========================================
+
                 success = true;
                 break chatLoop; // 成功取得回覆，直接跳出所有迴圈
               }
