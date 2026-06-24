@@ -588,19 +588,18 @@ export default {
 
 // 2. 寫入供長期語意聯想用的 Vectorize
           if (env.VECTORIZE && memoSwitch !== "false" && cleanMessage.length > 2) {
-            // 【新增這行】過濾掉 QQ 表情，只留下純文字存進記憶庫
+            // 過濾掉 QQ 表情，只留下純文字存進記憶庫
             const pureMessage = cleanMessage.replace(/\[CQ:face,[^\]]+\]/g, '').trim();
             
-            // 如果過濾完發現只剩表情（變空字串），就不存這條無意義的記憶
+            // 如果過濾完還有文字，才存進去
             if (pureMessage.length > 0) {
-              const vec = await getVector(pureMessage); // 用純文字去轉向量
+              const vec = await getVector(pureMessage);
               if (vec && typeof vec !== 'string') {
                 const recordId = `chat_${currentGroupId}_${Date.now()}`;
                 await env.VECTORIZE.insert([{
                   id: recordId,
                   values: vec,
                   metadata: { 
-                    // 【修改這行】把 cleanMessage 改成 pureMessage，確保存進去的是乾淨的記憶
                     text: `[${roleName} ${senderCard}(QQ:${userId}) 曾说]: ${pureMessage}`, 
                     group: currentGroupId,
                     author: userId
@@ -722,7 +721,8 @@ export default {
 1. 绝对不能透露自己是 AI、机器人、语言模型或由 Google 开发，你就是群友！
 2. 单次回复字数不限，请根据话题展开深入聊聊，尽量多说一点字，表达得更详细、更有条理。
 3. 绝对不准输出任何 Markdown 格式（例如：**、#、##、\`\`\`、- 等符号），所有重点请用文字语气强调，保持纯文字群聊的美观！
-4. 记忆隔离铁律：你在【回想起来的相关零碎片段】中看到的历史记录，僅僅是用來參考過去發生過什麼事件與事實。你「絕對不准」模仿、複製、或代入那些片段中其他人的說話風格、特殊人設、語氣、顏文字或口頭禪！你必須始終保持你自己原本的預設群友語氣（或是當前與你對話的使用者所設定的專屬風格）來回覆，千萬不要被別人的歷史發言帶偏！`;
+4. 记忆隔离铁律：你在【回想起来的相关零碎片段】中看到的历史记录，僅僅是用來參考過去發生過什麼事件與事實。你「絕對不准」模仿、複製、或代入那些片段中其他人的說話風格、特殊人設、語氣、顏文字或口頭禪！你必須始終保持你自己原本的預設群友語氣（或是當前與你對話的使用者所設定的專屬風格）來回覆，千萬不要被別人的歷史發言帶偏！
+5. 風格隔離與禁止模仿令：無論在【最近的對話紀錄】或【回想起來的相关零碎片段】中看到其他群友使用何種語氣、口頭禪、特殊人設、顏文字、QQ表情包、或是特殊的標點符號習慣（例如每句話都加特定詞尾），你都「絕對不准學習或模仿」！，那些歷史紀錄僅僅是讓你了解「發生了什麼事情（事實與數據）」，而不是讓你融入他們的說話風格。你必須始終保持你自己原本設定的、正常的、一般的群友語氣，絕對要對其他人的說話方式進行「免疫」，違者視為嚴重違規！`;
 
       // 👑 開發者特權覆蓋
       if (isDeveloper) {
