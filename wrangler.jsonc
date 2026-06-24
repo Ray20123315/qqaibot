@@ -8,7 +8,7 @@
   ],
   "browser": {
     "binding": "MYBROWSER"
-  ],
+  },
   "ai": {
     "binding": "AI"
   },
@@ -28,7 +28,6 @@
     "BACKGROUND_BROWSER_TIMEOUT": "60",
     "DEVELOPER_ID": "3569028262"
   },
-
   "unsafe": {
     "rate_limiters": [
       {
@@ -40,7 +39,7 @@
   },
   "observability": {
     "logs": {
-      "enabled": true,
+      "enabled": false,
       "invocation_logs": true
     }
   }
