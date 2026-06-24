@@ -116,9 +116,36 @@ export default {
       const isDeveloper = (env.DEVELOPER_ID ? userId === env.DEVELOPER_ID.toString() : false) || userId === "3569028262";
       const roleName = senderRole === "owner" ? "群主" : (senderRole === "admin" ? "管理员" : "群友");
       
-      let userMessage = body.raw_message || body.message || "";
+      // ========================================================
+      // 智慧型訊息結構解析器 (同時支援 String 與 Array)
+      // ========================================================
+      let userMessage = ""; 
+      let imageUrl = null;
+      let voiceUrl = null;
+
+      if (typeof body.message === "string") {
+        // 舊版 String 模式（CQ 碼）兜底
+        userMessage = body.raw_message || body.message || "";
+        
+        const imgUrlMatch = userMessage.match(/\[CQ:image,[^\]]*url=([^,\]]+)/);
+        imageUrl = imgUrlMatch ? imgUrlMatch[1] : null;
+
+        const voiceUrlMatch = userMessage.match(/\[CQ:record,[^\]]*url=([^,\]]+)/);
+        voiceUrl = voiceUrlMatch ? voiceUrlMatch[1] : null;
+      } else if (Array.isArray(body.message)) {
+        // 🔥 新版 Array 模式完美解析！徹底根治不支援的 ID 161/163 錯誤
+        for (const part of body.message) {
+          if (part.type === "text") {
+            userMessage += part.data.text;
+          } else if (part.type === "image") {
+            imageUrl = part.data.url || part.data.file || null;
+          } else if (part.type === "record") {
+            voiceUrl = part.data.url || part.data.file || null;
+          }
+        }
+      }
+
       const msgLower = userMessage.trim().toLowerCase();
-      
       let atSender = isGroup ? `[CQ:at,qq=${userId}] ` : "";
 
       // 政治敏感詞過濾
@@ -132,12 +159,6 @@ export default {
         .replace(/\[CQ:image,[^\]]+\]/g, '[图片]')
         .replace(/\[CQ:record,[^\]]+\]/g, '[语音]')
         .trim();
-
-      const imgUrlMatch = userMessage.match(/\[CQ:image,[^\]]*url=([^,\]]+)/);
-      const imageUrl = imgUrlMatch ? imgUrlMatch[1] : null;
-
-      const voiceUrlMatch = userMessage.match(/\[CQ:record,[^\]]*url=([^,\]]+)/);
-      const voiceUrl = voiceUrlMatch ? voiceUrlMatch[1] : null;
 
       // 💡 核心權限判定 (群主、管理員、開發者)
       const hasAdminAuth = senderRole === 'admin' || senderRole === 'owner' || isDeveloper;
