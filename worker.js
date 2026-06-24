@@ -124,7 +124,7 @@ export default {
       let voiceUrl = null;
 
       if (typeof body.message === "string") {
-        // 舊版 String 模式（CQ 碼）兜底
+        // 舊版 String 模式
         userMessage = body.raw_message || body.message || "";
         
         const imgUrlMatch = userMessage.match(/\[CQ:image,[^\]]*url=([^,\]]+)/);
@@ -133,10 +133,13 @@ export default {
         const voiceUrlMatch = userMessage.match(/\[CQ:record,[^\]]*url=([^,\]]+)/);
         voiceUrl = voiceUrlMatch ? voiceUrlMatch[1] : null;
       } else if (Array.isArray(body.message)) {
-        // 🔥 新版 Array 模式完美解析！徹底根治不支援的 ID 161/163 錯誤
+        // 🔥 新版 Array 模式：把所有節點精準還原
         for (const part of body.message) {
           if (part.type === "text") {
             userMessage += part.data.text;
+          } else if (part.type === "at") {
+            // 🎯 關鍵修復：把 [type: at] 還原成 CQ 碼字串，讓下方的 isAtBot 判斷完美復活！
+            userMessage += `[CQ:at,qq=${part.data.qq}]`;
           } else if (part.type === "image") {
             imageUrl = part.data.url || part.data.file || null;
           } else if (part.type === "record") {
