@@ -158,6 +158,9 @@ export default {
       const isGroup = body.message_type === 'group';
       const isPrivate = body.message_type === 'private';
 
+      // 👇 【在這裡手動加入這行防崩潰】
+      let history = [];
+
       // 精準提取群組身分
       const senderCard = body.sender?.card || body.sender?.nickname || userId;
       const senderRole = body.sender?.role || "member"; 
