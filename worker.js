@@ -652,53 +652,7 @@ export default {
         await env.QQ_STORE.delete(`history:group:${currentGroupId}`);
         await env.QQ_STORE.delete(`mimic_target:${currentGroupId}`);
         return jsonReply(`${atSender}🧹 缓存与模仿状态已全部重置！`);
-      }
-
-      // ==========================================
-      // 📊 【新功能】智慧指令攔截器 (支援繁、簡、英不區分大小寫)
-      // ==========================================
-      const statusRegex = /^!(status|配額|配额)$/i;
-      
-      if (statusRegex.test(userPrompt.trim())) {
-        try {
-          // 1. 從 KV 撈取統計數據 [cite: 1]
-          const totalCalls = await env.QQ_STORE.get("STAT_TOTAL_CALLS") || "0";
-          const lastModel = await env.QQ_STORE.get("STAT_LAST_MODEL") || "無記錄";
-          
-          // 2. 計算目前環境變數中綁定了幾把 API Key
-          const totalKeys = [
-            ...(env.GEMINI_API_KEYS || "").split(',').filter(k => k.trim() !== ""),
-            ...(env.VECTORIZE_GEMINI_KEYS || "").split(',').filter(k => k.trim() !== "")
-          ].length;
-
-          // 3. 組合回覆看板 [cite: 1]
-          const statusReport = [
-            "📊 QQAI 運作狀態報告",
-            "━━━━━━━━━━━━━━━",
-            `🔑 當前負載金鑰數：${totalKeys} 把`,
-            `📈 系統累計對話次數：${totalCalls} 次`,
-            `🤖 最後服務成功模型：${lastModel}`,
-            "━━━━━━━━━━━━━━━",
-            "⚡️ 輪詢內核運作正常，隨時待命！"
-          ].join("\n");
-
-          // 4. 直接建構並回傳符合你原本 QQ 機器人架構的 JSON 響應
-          // 注意：請確認接收端（OneBot / Gocqhttp）格式，並對齊你原來的群組發送邏輯
-          return new Response(JSON.stringify({
-            action: "send_msg",
-            params: {
-              // 這裡會自動代入你在上面解析出來的群號（groupId）或發送者號碼，保持與你原本程式碼一致
-              group_id: groupId, 
-              message: statusReport
-            }
-          }), { headers: { 'Content-Type': 'application/json' } });
-
-        } catch (statusErr) {
-          console.error("執行狀態指令失敗:", statusErr);
-        }
-      }
-      // ==========================================
-      
+      }      
       if (isPrivate) return new Response(null, { status: 204 });
 
       // ==========================================
