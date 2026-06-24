@@ -579,68 +579,113 @@ export default {
       
       // 第二段到此完美結束，準備進入第三段的讀網頁、翻譯與截圖實用工具模組...
 
-      // ==========================================
-      // 🎙️ 文字轉語音直連 (安全隔離版：絕不阻斷聊天)
+// ==========================================
+      // 🎙️ 語音智能對答模組 (完全動態帶入 modelList 版)
       // ==========================================
       if (/^[!！](?:语音|語音|speak|tts)\s+(.+)/.test(msgLower)) {
         try {
           const match = msgLower.match(/^[!！](?:语音|語音|speak|tts)\s+(.+)/);
-          const ttsText = match ? match[1].trim() : "";
-          if (!ttsText) return jsonReply(`${atSender}🤷 请告诉我你想让我说什么，例如: !语音 提防那个会画画的机器人`);
+          const userPrompt = match ? match[1].trim() : "";
+          if (!userPrompt) return jsonReply(`${atSender}🤷 想跟我聊什麼？例如: !語音 誇誇我`);
 
           const keysStr = env.GEMINI_API_KEYS || "";
           const apiKeys = keysStr.split(',').map(k => k.trim()).filter(k => k !== "");
-          if (apiKeys.length === 0) return jsonReply(`${atSender}⚠️ 尚未配置 API 金钥，无法生成语音。`);
+          if (apiKeys.length === 0) return jsonReply(`${atSender}⚠️ 尚未配置 API 金钥。`);
 
-          // 🎯 降級核心：拋棄不穩定的 3.1，只用目前唯一能正常吐音訊的 2.5 語音模型
-          const ttsModels = ["gemini-2.5-flash-preview-tts"];
-          let lastError = null;
-          let successAudioBase64 = null;
-          let usedModelName = "";
+          // ----------------------------------------
+          // 🚀 階段一：動態輪詢你的 modelList 獲取文字答案
+          // ----------------------------------------
+          let aiTextResponse = "";
+          let chatSuccess = false;
 
-          ttsModelLoop: for (let m = 0; m < ttsModels.length; m++) {
-            const currentModel = ttsModels[m];
+          chatLoop: for (let m = 0; m < modelList.length; m++) {
+            const currentModel = modelList[m];
+            // 排除生圖和純語音模型，避免聊天階段報錯
+            if (currentModel.includes('imagen') || currentModel.includes('tts')) continue;
+
             for (let k = 0; k < apiKeys.length; k++) {
               const currentKey = apiKeys[k];
-              const ttsApiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${currentModel}:generateContent?key=${currentKey}`;
+              const chatUrl = `https://generativelanguage.googleapis.com/v1beta/models/${currentModel}:generateContent?key=${currentKey}`;
+              
               try {
-                console.log(`🎙️ 嘗試語音配置: 模型 [${currentModel}] | 金鑰 [第 ${k + 1}/${apiKeys.length} 個]`);
-                const response = await fetch(ttsApiUrl, {
+                const chatRes = await fetch(chatUrl, {
                   method: 'POST',
                   headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify({ contents: [{ parts: [{ text: ttsText }] }], generationConfig: { responseModalities: ["AUDIO"] } })
+                  body: JSON.stringify({ contents: [{ parts: [{ text: userPrompt }] }] })
                 });
-
-                const errTxt = await response.text();
-                if (!response.ok) {
-                  lastError = `[${currentModel}] ${response.status} - ${errTxt}`;
-                  continue;
-                }
-                const resData = JSON.parse(errTxt);
-                const audioPart = resData.candidates?.[0]?.content?.parts?.[0];
-                if (audioPart?.inlineData?.data) {
-                  successAudioBase64 = audioPart.inlineData.data;
-                  usedModelName = currentModel;
-                  break ttsModelLoop;
-                } else {
-                  lastError = `[${currentModel}] 成功響應但未包含音訊數據`;
+                
+                if (chatRes.ok) {
+                  const chatData = await chatRes.json();
+                  aiTextResponse = chatData.candidates?.[0]?.content?.parts?.[0]?.text;
+                  if (aiTextResponse) {
+                    chatSuccess = true;
+                    break chatLoop; // 成功拿到答案，跳出輪詢
+                  }
                 }
               } catch (e) {
-                lastError = e.message || e;
+                console.log(`⏳ 語音聊天輪詢中... 模型 ${currentModel} 節點 ${k} 異常，切換下一組`);
+              }
+            }
+          }
+
+          if (!chatSuccess || !aiTextResponse) {
+            return jsonReply(`${atSender}⚠️ 抱歉，我所有的聊天模型節點目前都超載了，無法思考。`);
+          }
+
+          // ----------------------------------------
+          // 🎙️ 階段二：動態從你的 modelList 篩選 TTS 模型來生成聲音
+          // ----------------------------------------
+          // 從你的清單裡動態把帶有 tts 的模型撈出來
+          const ttsAvailableModels = modelList.filter(m => m.includes('tts'));
+          // 萬一你清單裡沒寫，就拿 gemini-2.5-flash-preview-tts 當保底
+          if (ttsAvailableModels.length === 0) ttsAvailableModels.push('gemini-2.5-flash-preview-tts');
+
+          let successAudioBase64 = null;
+
+          ttsLoop: for (let m = 0; m < ttsAvailableModels.length; m++) {
+            const currentTtsModel = ttsAvailableModels[m];
+            
+            for (let k = 0; k < apiKeys.length; k++) {
+              const currentKey = apiKeys[k];
+              const ttsUrl = `https://generativelanguage.googleapis.com/v1beta/models/${currentTtsModel}:generateContent?key=${currentKey}`;
+              
+              try {
+                const ttsRes = await fetch(ttsUrl, {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({
+                    contents: [{ parts: [{ text: aiTextResponse }] }],
+                    systemInstruction: {
+                      parts: [{ text: "You are a pure TTS engine. Just read the input text verbatim into audio." }]
+                    },
+                    generationConfig: { responseModalities: ["AUDIO"] }
+                  })
+                });
+
+                if (ttsRes.ok) {
+                  const ttsData = await ttsRes.json();
+                  const audioData = ttsData.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
+                  if (audioData) {
+                    successAudioBase64 = audioData;
+                    break ttsLoop; // 成功生成聲音，跳出輪詢
+                  }
+                }
+              } catch (e) {
+                console.log(`⏳ 語音合成輪詢中... 模型 ${currentTtsModel} 節點 ${k} 異常`);
               }
             }
           }
 
           if (successAudioBase64) {
-            return jsonReply(`[CQ:record,file=base64://${successAudioBase64}]`);
+            return jsonReply(`[CQ:record,file=base64://${successAudioBase64}]\n(🤖 文本: ${aiTextResponse})`);
           } else {
-            return jsonReply(`${atSender}⚠️ 语音生成失败。原因：${lastError}`);
+            return jsonReply(`${atSender}⚠️ 聲音合成失敗，但我可以打字回答你：\n${aiTextResponse}`);
           }
+
         } catch (globalE) {
-          console.error("語音模組全域崩潰:", globalE);
-          return jsonReply(`${atSender}⚠️ 语音功能異常，但已安全釋放系統。`);
+          return jsonReply(`${atSender}⚠️ 語音對答發生嚴重錯誤: ${globalE.message}`);
         }
-      } // 👈 語音 if 區塊在這裡完美且唯一地結束！
+      } // 👈 語音 if 區塊安全結束
       
       // ==========================================
       // 🌐 读网页精炼摘要 (纯抓文字并交由 AI 总结)
