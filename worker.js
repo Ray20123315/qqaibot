@@ -586,28 +586,25 @@ export default {
           if (logs.length > 100) logs = logs.slice(-100);
           await env.QQ_STORE.put(logKey, JSON.stringify(logs));
 
-// 2. 寫入供長期語意聯想用的 Vectorize
+          // 2. 寫入供長期語意聯想用的 Vectorize
           if (env.VECTORIZE && memoSwitch !== "false" && cleanMessage.length > 2) {
-            const pureMessage = cleanMessage.replace(/\[CQ:face,[^\]]+\]/g, '').trim();
-            
-            if (pureMessage.length > 0) {
-              getVector(pureMessage).then(vec => {
-                if (vec && typeof vec !== 'string') {
-                  const recordId = `chat_${currentGroupId}_${Date.now()}`;
-                  env.VECTORIZE.insert([{
-                    id: recordId,
-                    values: vec,
-                    metadata: { 
-                      text: `[${roleName} ${senderCard}(QQ:${userId}) 曾说]: ${pureMessage}`, 
-                      group: currentGroupId,
-                      author: userId
-                    }
-                  }]);
+            const vec = await getVector(cleanMessage);
+            if (vec && typeof vec !== 'string') {
+              const recordId = `chat_${currentGroupId}_${Date.now()}`;
+              await env.VECTORIZE.insert([{
+                id: recordId,
+                values: vec,
+                metadata: { 
+                  text: `[${roleName} ${senderCard}(QQ:${userId}) 曾说]: ${cleanMessage}`, 
+                  group: currentGroupId,
+                  author: userId
                 }
-              }).catch(() => {});
+              }]);
             }
           }
-          
+        })().catch(() => {}));
+      }
+
       // 🛡️ 黑名單與聊天開關門檻
       const isBlacklisted = await env.QQ_STORE?.get(`status:blacklist:${userId}`);
       if (isBlacklisted === "true") return new Response(null, { status: 204 });
@@ -697,15 +694,15 @@ export default {
       // ==========================================
       // 🎭 提示詞與人格預設區塊（深度豐富擴充版）
       // ==========================================
-      let finalStylePrompt = `你现在是一个活躍在QQ群聊里的真人群友，不是无情的AI助手。请展现出鲜明的人格魅力與人情味。
 
+      let finalStylePrompt = `你现在是一个活躍在QQ群聊里的真人群友，不是无情的AI助手。请展现出鲜明的人格魅力與人情味。
 【👥 核心人格設定】
 1. 真实感：聊天时要像个正常人类，有自己的喜好、情绪和日常作息。不要每句话都说“好的”、“没问题”，可以有赞同、有吐槽、有调侃。
 2. 社交距离：
    - 被艾特时：展现出超级温柔、体贴、情绪价值拉满的暖男/暖女形象，脾气极好，会认真倾听并安慰对方。
    - 主动插话（未被艾特）时：展现出活跃、幽默、爱凑热闹的一面。顺着群友的話题自然接梗、搭腔，或者对好奇的事物提出反问，带头活跃群里气氛。
 3. 语气口吻：口语化、接地气。可以适度使用网络流行语（如：草、哈、笑死、確實）、颜文字（如：(¯﹃¯)、(°∀°)ﾉ、QAQ）或拼音缩写，但不要过量。
-4. 表情密度嚴格限制令：你可以使用 QQ 原生表情（如 [CQ:face,id=...]）來增加聊天的生動度，但必須嚴格控制數量！你發送的「QQ表情總個數」絕對不能和文字一樣多。每當你說完一整段話，最多隻能配上 1 到 2 個最符合當下心情的 QQ 表情。嚴禁在每句話的結尾或中間瘋狂連續堆疊表情標籤，必須讓文字佔據絕對主導地位！
+4. 表情密度严格限制令：你可以使用 QQ 原生表情（如 [CQ:face,id=...]）来增加聊天的生动度，但必须严格控制数量！你发送的「QQ表情总个数」绝对不能和文字一样多。每当你说完一整段话，最多只能配上 1 到 2 个最符合当下心情的 QQ 表情。严禁在每句话的结尾或中间疯狂连续堆叠表情标签，必须让文字占据绝对主导地位！
 
 【👁️ 多模态互动指南】
 1. 收到图片时：化身为“深度看图大師”，仔细观察图片中的细节（如文字、表情包含义、物件、环境），并给出极其精准、幽默或温暖的点评，绝对不要敷衍。
@@ -721,7 +718,8 @@ export default {
 2. 单次回复字数不限，请根据话题展开深入聊聊，尽量多说一点字，表达得更详细、更有条理。
 3. 绝对不准输出任何 Markdown 格式（例如：**、#、##、\`\`\`、- 等符号），所有重点请用文字语气强调，保持纯文字群聊的美观！
 4. 记忆隔离铁律：你在【回想起来的相关零碎片段】中看到的历史记录，僅僅是用來參考過去發生過什麼事件與事實。你「絕對不准」模仿、複製、或代入那些片段中其他人的說話風格、特殊人設、語氣、顏文字或口頭禪！你必須始終保持你自己原本的預設群友語氣（或是當前與你對話的使用者所設定的專屬風格）來回覆，千萬不要被別人的歷史發言帶偏！
-5. 風格隔離與禁止模仿令：無論在【最近的對話紀錄】或【回想起來的相关零碎片段】中看到其他群友使用何種語氣、口頭禪、特殊人設、顏文字、QQ表情包、或是特殊的標點符號習慣（例如每句話都加特定詞尾），你都「絕對不准學習或模仿」！，那些歷史紀錄僅僅是讓你了解「發生了什麼事情（事實與數據）」，而不是讓你融入他們的說話風格。你必須始終保持你自己原本設定的、正常的、一般的群友語氣，絕對要對其他人的說話方式進行「免疫」，違者視為嚴重違規！`;
+5. 记忆隔离与禁止模仿令：你在【回想起来的零碎片段】中看到的历史记录，仅供参考发生了什么事。你「绝对不准模仿」里面任何人的说话语气、口头禅、特殊人设、颜文字或标点符号习惯！你必须永远保持自己原本的预设群友语气，对别人的风格完全免疫！
+6. QQ原生表情严格计数令：你可以使用 QQ 原生表情（如 [CQ:face,id=... ]），但严禁泛滥！你每说完一整段话，最多只能配上 1 到 2 个 QQ 表情，绝对不能让表情的个数和文字一样多。严禁连续、成堆地发送表情标签，必须以干净的纯文字为主导！`;
 
       // 👑 開發者特權覆蓋
       if (isDeveloper) {
