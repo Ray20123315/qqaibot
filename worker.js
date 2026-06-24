@@ -1159,8 +1159,8 @@ export default {
       // 异步将本次对话双向写入 D1 历史纪录 (维持下一次的上下文)
       history.push({ role: 'user', parts: aiInputParts });
       history.push({ role: 'model', parts: [{ text: baseText }] }); 
-      // 保持最近 4 条上下文流，防止 Token 爆炸
-      if (history.length > 4) history = history.slice(-8); 
+      // 保持最近 8 条上下文流，防止 Token 爆炸
+      if (history.length > 8) history = history.slice(-8); 
       ctx.waitUntil(dbPut(env, historyKey, JSON.stringify(history)));
 
       // 组装最终回覆，并进行动态去 @ 处理
