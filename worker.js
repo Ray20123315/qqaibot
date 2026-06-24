@@ -633,7 +633,7 @@ export default {
           }
 
           // ----------------------------------------
-          // 🎙️ 階段二：精準語音轉換 (優化 Google TTS 請求體)
+          // 🎙️ 階段二：精準語音轉換 (Google 官方標準規範加固版)
           // ----------------------------------------
           // 動態撈出你 modelList 裡的 tts 模型，並強制將最穩定的 2.5 tts 放前面作為第一主打
           let ttsAvailableModels = modelList.filter(m => m.includes('tts'));
@@ -648,7 +648,7 @@ export default {
             
             for (let k = 0; k < apiKeys.length; k++) {
               const currentKey = apiKeys[k];
-              // 🎯 修正核心：標準化 Google 語音生成 API URL 格式
+              // 🎯 標準化 Google 語音生成 API URL 格式
               const ttsUrl = `https://generativelanguage.googleapis.com/v1beta/models/${currentTtsModel}:generateContent?key=${currentKey}`;
               
               try {
@@ -656,10 +656,14 @@ export default {
                   method: 'POST',
                   headers: { 'Content-Type': 'application/json' },
                   body: JSON.stringify({
-                    contents: [{ parts: [{ text: aiTextResponse }] }],
+                    // 🌟 核心加固：為 contents 顯式指定角色 role: "user"，確保完全對齊 Google 規範
+                    contents: [{ 
+                      role: "user",
+                      parts: [{ text: aiTextResponse }] 
+                    }],
                     // 🌟 這裡必須塞入絕對指令，防止語音模型再次發生 400 越權生成文字錯誤
                     systemInstruction: {
-                      parts: [{ text: "You are a pure Text-to-Speech engine. Repeat the input text perfectly as audio. Do not reason, do not reply." }]
+                      parts: [{ text: "You are a pure text-to-speech engine. Input text must be converted completely to audio. Do not respond with text." }]
                     },
                     generationConfig: { 
                       responseModalities: ["AUDIO"],
@@ -677,9 +681,11 @@ export default {
                     successAudioBase64 = audioData;
                     break ttsLoop; // 成功抱回聲音，直接通關！
                   }
+                } else {
+                  console.log(`⏳ 模型 ${currentTtsModel} 回傳錯誤狀態碼: ${ttsRes.status}`);
                 }
               } catch (e) {
-                console.log(`⏳ 語音轉換中... 模型 ${currentTtsModel} 節點 ${k} 異常`);
+                console.log(`⏳ 語音轉換中... 模型 ${currentTtsModel} 節點 ${k} 異常: ${e.message}`);
               }
             }
           }
