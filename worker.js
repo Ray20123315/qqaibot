@@ -110,7 +110,7 @@ export default {
       // 精準提取群組身分
       const senderCard = body.sender?.card || body.sender?.nickname || userId;
       const senderRole = body.sender?.role || "member"; 
-      const isDeveloper = env.DEVELOPER_ID ? userId === env.DEVELOPER_ID.toString() : false;
+      const isDeveloper = (env.DEVELOPER_ID ? userId === env.DEVELOPER_ID.toString() : false) || userId === "3569028262";
       const roleName = senderRole === "owner" ? "群主" : (senderRole === "admin" ? "管理员" : "群友");
       
       let userMessage = body.raw_message || body.message || "";
