@@ -157,14 +157,17 @@ export default {
       const currentTime = new Date().toLocaleString('zh-CN', { timeZone: 'Asia/Taipei' });
       const isGroup = body.message_type === 'group';
       const isPrivate = body.message_type === 'private';
+      
+      // 🎯 【就在這裡補上這行宣告！】
+      const sessionKey = isGroup ? `chat:group:${currentGroupId}` : `chat:private:${userId}`;
 
       // ==========================================
       // 💬 D1 歷史紀錄讀取 (維持上下文記憶)
       // ==========================================
-      let history = []; 
+      let history = [];
       try {
-        // 🎯 修正核心：把 historyKey 改成 sessionKey
-        const historyData = await dbGet(env, sessionKey); 
+        // 這裡因為上面已經定義了 sessionKey，所以絕對不會再報 defined 錯誤！
+        const historyData = await dbGet(env, sessionKey);
         if (historyData) {
           history = JSON.parse(historyData);
           console.log(`🧠 成功載入歷史記憶，當前記憶條數: ${history.length}`);
@@ -173,7 +176,7 @@ export default {
         console.error("讀取 D1 歷史紀錄失敗:", historyError);
         history = []; 
       }
-
+      
       // 精準提取群組身分
       const senderCard = body.sender?.card || body.sender?.nickname || userId;
       const senderRole = body.sender?.role || "member"; 
