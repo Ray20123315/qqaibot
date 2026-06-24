@@ -8,7 +8,7 @@
   ],
   "browser": {
     "binding": "MYBROWSER"
-  },
+  ],
   "ai": {
     "binding": "AI"
   },
@@ -24,15 +24,23 @@
       "index_name": "qqai"
     }
   ],
-  // 這裡就是原本的 [vars] 區塊，我們把你的 QQ 號碼加在這裡了！
   "vars": {
     "BACKGROUND_BROWSER_TIMEOUT": "60",
     "DEVELOPER_ID": "3569028262"
   },
-  // 這是你剛剛貼給我的日誌觀察設定
+
+  "unsafe": {
+    "rate_limiters": [
+      {
+        "binding": "MY_RATE_LIMITER",
+        "limit": 1,
+        "period": 10
+      }
+    ]
+  },
   "observability": {
     "logs": {
-      "enabled": false,
+      "enabled": true,
       "invocation_logs": true
     }
   }
