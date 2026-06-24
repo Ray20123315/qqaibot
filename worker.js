@@ -117,14 +117,15 @@ export default {
       const roleName = senderRole === "owner" ? "群主" : (senderRole === "admin" ? "管理员" : "群友");
       
       // ========================================================
-      // 智慧型訊息結構解析器 (同時支援 String 與 Array)
+      // 📦 【智慧型訊息結構解析器】完美兼容還原 AT 節點、圖片、語音、影片
       // ========================================================
       let userMessage = ""; 
       let imageUrl = null;
       let voiceUrl = null;
+      let videoUrl = null; // 🎯 頂層加上影片網址變數宣告
 
       if (typeof body.message === "string") {
-        // 舊版 String 模式
+        // 舊版 String 模式（CQ 碼）兜底
         userMessage = body.raw_message || body.message || "";
         
         const imgUrlMatch = userMessage.match(/\[CQ:image,[^\]]*url=([^,\]]+)/);
@@ -132,16 +133,24 @@ export default {
 
         const voiceUrlMatch = userMessage.match(/\[CQ:record,[^\]]*url=([^,\]]+)/);
         voiceUrl = voiceUrlMatch ? voiceUrlMatch[1] : null;
+
+        // 舊版影片 CQ 碼抓取（做為備用兜底）
+        const videoUrlMatch = userMessage.match(/\[CQ:video,[^\]]*url=([^,\]]+)/);
+        videoUrl = videoUrlMatch ? videoUrlMatch[1] : null;
+
       } else if (Array.isArray(body.message)) {
-        // 🔥 新版 Array 模式：把所有節點精準還原
+        // 🔥 新版 Array 模式：結構化精準還原所有節點，括號已嚴格校對
         for (const part of body.message) {
           if (part.type === "text") {
             userMessage += part.data.text;
           } else if (part.type === "at") {
-            // 🎯 關鍵修復：把 [type: at] 還原成 CQ 碼字串，讓下方的 isAtBot 判斷完美復活！
+            // 還原 [type: at] 成 CQ 碼字串，讓下方的 isAtBot 判斷完美復活！
             userMessage += `[CQ:at,qq=${part.data.qq}]`;
           } else if (part.type === "image") {
             imageUrl = part.data.url || part.data.file || null;
+          } else if (part.type === "video") {
+            // 🎯 捕捉群友發送的影片檔案 URL
+            videoUrl = part.data.url || part.data.file || null;
           } else if (part.type === "record") {
             voiceUrl = part.data.url || part.data.file || null;
           }
