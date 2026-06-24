@@ -345,7 +345,9 @@ export default {
       // 🧠 專屬記憶刻入 (KV 機制：所有人皆可用，一般人限 100 筆，每次調用)
       if (['!记住', '!記住', '!remember', '！记住', '！記住', '！remember'].some(p => msgLower.startsWith(p))) {
         const prefix = ['!记住', '!記住', '!remember', '！记住', '！記住', '！remember'].find(p => msgLower.startsWith(p));
-        let targetMem = cleanMessage.slice(prefix.length).trim();
+        
+        // 💡 關鍵修正：改用原始 userMessage 來提取內容，完整保留 @ 訊息與特殊符號
+        let targetMem = userMessage.slice(userMessage.toLowerCase().indexOf(prefix) + prefix.length).trim();
         if (!targetMem) return jsonReply(`${atSender}🤷 请输入要记住的内容。`);
         
         const kvKey = `user_memo:${currentGroupId}:${userId}`;
@@ -360,9 +362,11 @@ export default {
         
         memos.push(targetMem);
         await env.QQ_STORE.put(kvKey, JSON.stringify(memos));
-        return jsonReply(`${atSender}📝 记住了！这是专属您的死记忆，以后每次对话我都会强制想起来。`);
+        
+        // 💡 關鍵修正：依照要求，動態回應記住的內容，拿掉「死記憶、強制想起來」等生硬贅字
+        return jsonReply(`${atSender}📝 记住了！${targetMem}`);
       }
-
+      
       // 🗑️ 手動刪除個人專屬記憶 (KV 機制)
       if (['!忘记', '!忘記', '!forget', '！忘记', '！忘記', '！forget'].some(p => msgLower.startsWith(p))) {
         const prefix = ['!忘记', '!忘記', '!forget', '！忘记', '！忘記', '！forget'].find(p => msgLower.startsWith(p));
@@ -869,7 +873,7 @@ export default {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(requestBody),
-                signal: AbortSignal.timeout(4000) 
+                signal: AbortSignal.timeout(7000) 
               });
               
               // 💡 修正核心：如果當前模型失敗（例如 429 限制或暫時不可用），不要放棄金鑰！
