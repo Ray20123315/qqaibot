@@ -28,10 +28,10 @@
     "BACKGROUND_BROWSER_TIMEOUT": "60",
     "DEVELOPER_ID": "3569028262"
   },
-  "unsafe": {
-    "rate_limiters": [
+  "rate_limiting": {
+    "bindings": [
       {
-        "binding": "MY_RATE_LIMITER",
+        "name": "MY_RATE_LIMITER",
         "limit": 1,
         "period": 10
       }
