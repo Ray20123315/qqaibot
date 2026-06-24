@@ -95,6 +95,24 @@ export default {
         return { base64: btoa(binary), mimeType };
       } catch (e) { return null; }
     };
+    // 【多模態：看影片專用】將影片 URL 轉換為 Gemini Base64
+    const fetchVideoAsBase64 = async (url) => {
+      try {
+        // 影片檔案通常較大，給 30 秒的超時時間
+        const res = await fetch(url, { signal: AbortSignal.timeout(30000) });
+        if (!res.ok) return null;
+        const buffer = await res.arrayBuffer();
+        let binary = '';
+        const bytes = new Uint8Array(buffer);
+        for (let i = 0; i < bytes.byteLength; i++) { 
+          binary += String.fromCharCode(bytes[i]); 
+        }
+        return btoa(binary);
+      } catch (e) { 
+        console.error("❌ 下載群影片失敗:", e);
+        return null; 
+      }
+    };
 
     // ==========================================
     // 🚀 主邏輯業務區
@@ -843,6 +861,15 @@ export default {
       if (voiceUrl) {
         const audioData = await fetchAudioAsBase64(voiceUrl);
         if (audioData) aiInputParts.push({ inlineData: { mimeType: audioData.mimeType, data: audioData.base64 } });
+      }
+
+      // 🔥 【在這裡全新解鎖影片看懂能力】
+      if (videoUrl) {
+        console.log(`🎬 偵測到群友發送影片，正在下載並傳給 Gemini: ${videoUrl}`);
+        const videoBase64 = await fetchVideoAsBase64(videoUrl); // 呼叫剛才寫好的影片下載助手
+        if (videoBase64) {
+          aiInputParts.push({ inlineData: { mimeType: "video/mp4", data: videoBase64 } });
+        }
       }
 
       // ==========================================
