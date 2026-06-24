@@ -219,6 +219,21 @@ export default {
           return jsonReply(`${atSender}❌ 讀取狀態數據時發生異常。`);
         }
       }
+      
+      // ==========================================
+      // 🚫 【新功能】空訊息 / 純空格攔截器 (防止浪費 API 額度)
+      // ==========================================
+      // 檢查清洗後的 msgDesc 是否為空、或者只包含空白字元
+      if (!msgDesc || msgDesc.trim() === "") {
+        console.log(`⚠️ 偵測到群友 ${userId} 僅 @機器人 但未輸入有效內容，已自動攔截攔退。`);
+        
+        // 選擇一：高冷模式（最省資源）—— 默默回傳 204，完全不理他，也不吐任何字
+        return new Response(null, { status: 204 });
+        
+        // 選擇二：調皮/提示模式 —— 快速回覆他一句話，不走 Gemini API (由 Worker 本地直接吐回覆)
+        // return jsonReply(`${atSender} 唔？你叫星野是有什麼事嗎？後面要打字我才聽得懂喔！`);
+      }
+      
       // 🌐 讀網頁功能 (純抓文字)
       const readMatch = cleanMessage.match(/^[!！](?:读网页|讀網頁)\s+(https?:\/\/[^\s]+)/);
       if (readMatch) {
