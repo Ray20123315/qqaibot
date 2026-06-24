@@ -873,7 +873,7 @@ export default {
       let replyText = "";
       let success = false;
 
-      // ==========================================
+// ==========================================
       // 💬 呼叫 Gemini / Gemma AI 核心 (金鑰庫合併 + 智慧過濾聯網工具)
       // ==========================================
       const keysStr = env.GEMINI_API_KEYS || "";
@@ -898,8 +898,8 @@ export default {
               // 🌐 聯網工具注入 (嚴格對齊 Google REST API 規範)
               // ==========================================
               if (!model.startsWith('gemma') && !model.includes('deep-research') && !model.includes('antigravity')) {
-                // ⭕️ 這裡必須是小寫蛇形命名法 google_search，最新模型才能正確識別
-                requestBody.tools = [{ googlesearch: {} }];
+                // ⭕️ 修正：必須包含底線 google_search，才能正確觸發搜尋功能
+                requestBody.tools = [{ google_search: {} }];
               }
 
               const geminiRes = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`, {
@@ -909,17 +909,27 @@ export default {
                 signal: AbortSignal.timeout(7000) 
               });
               
-              // 💡 修正核心：如果當前模型失敗（例如 429 限制或暫時不可用），不要放棄金鑰！
-              // 繼續用當前金鑰測試下一個模型（如 flash 或 lite），直到所有模型都失敗才換下一個金鑰。
-              // 找到你代码中的这段请求位置，加入 console.error
               if (!geminiRes.ok) {
-                const errBody = await geminiRes.text(); // 👈 读取 Google 返回的原始报错文本
+                const errBody = await geminiRes.text(); 
                 console.error(`模型 ${model} 失败原因:`, errBody);
                 continue; 
               }
               
               const responseData = await geminiRes.json();
               if (responseData.candidates?.[0]) {
+                
+                // ==========================================
+                // 🔍 聯網狀態監控監聽器
+                // ==========================================
+                const grounding = responseData.candidates[0].groundingMetadata;
+                if (grounding && grounding.webSearchQueries) {
+                  // 📡 當模型成功使用 Google 搜尋時，會進入這裡並印出關鍵字
+                  console.log(`📡 [聯網成功] 模型 [${model}] 成功使用了搜尋！搜尋關鍵字為:`, JSON.stringify(grounding.webSearchQueries));
+                } else {
+                  // 🧠 當模型直接用內建知識回答，沒有查網頁時，會進入這裡
+                  console.log(`🧠 [內置回覆] 模型 [${model}] 成功回答，但使用的是內置記憶（未觸發搜尋）。`);
+                }
+
                 replyText = responseData.candidates[0].content.parts[0].text;
                 replyText = replyText.replace(/[\*#\-\`~>_]/g, '').trim(); 
                 success = true;
@@ -927,6 +937,7 @@ export default {
               }
             } catch (err) {
               // 發生超時或網路錯誤，換同個 Key 的下一個模型試試
+              console.error(`模型 ${model} 請求發生異常/超時:`, err.message || err);
               continue;
             }
           }
@@ -934,7 +945,7 @@ export default {
           console.log(`金鑰 ${apiKey.substring(0,6)}... 已嘗試完所有模型皆失敗，切換至下一個 API 金鑰。`);
         }
       }
-
+      
       // ==========================================
       // 🛠 終端發送閘
       // ==========================================
