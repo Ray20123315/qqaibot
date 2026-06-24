@@ -1,5 +1,8 @@
+import puppeteer from "@cloudflare/puppeteer";
+
 export default {
   async fetch(request, env, ctx) {
+    // 1. 確保只處理 POST 請求 (QQ Webhook 標準)
     if (request.method !== 'POST') return new Response('🤖 Worker 运行正常', { status: 200 });
 
     let body;
@@ -9,12 +12,14 @@ export default {
       return new Response("Invalid JSON", { status: 400 });
     }
 
+    // 2. 防死循環核心：絕不回覆自己
     const botId = body.self_id ? body.self_id.toString() : "";
     const userId = body.user_id ? body.user_id.toString() : "";
     if (userId && botId && userId === botId) {
       return new Response("OK (Self Filtered)", { status: 200 });
     }
 
+    // Webhook 被動快速回覆工具 (回覆皆嚴格使用簡體)
     const jsonReply = (text) => {
       return new Response(JSON.stringify({ reply: text, auto_escape: false }), {
         status: 200,
@@ -22,14 +27,20 @@ export default {
       });
     };
 
+    // 【長期記憶專用】改用 Cloudflare 官方原生免 Key 嵌入模型 (維度 1024)
     const getVector = async (text) => {
       if (!env.AI) return "error_no_cf_ai_binding";
       try {
-        const response = await env.AI.run('@cf/baai/bge-m3', { text: [text] });
+        const response = await env.AI.run('@cf/baai/bge-m3', {
+          text: [text]
+        });
         return response.data[0] || null;
-      } catch (e) { return `error_cf_ai_${e.message}`; }
+      } catch (e) {
+        return `error_cf_ai_${e.message}`;
+      }
     };
 
+    // 【多模態：看圖專用】將圖片 URL 轉換為 Gemini Base64
     const fetchImageAsBase64 = async (url) => {
       try {
         const res = await fetch(url, { signal: AbortSignal.timeout(6000) });
@@ -42,6 +53,7 @@ export default {
       } catch (e) { return null; }
     };
 
+    // 【多模態：聽語音專用】獲取語音並判斷格式
     const fetchAudioAsBase64 = async (url) => {
       try {
         const res = await fetch(url, { signal: AbortSignal.timeout(8000) });
@@ -50,6 +62,7 @@ export default {
         let binary = '';
         const bytes = new Uint8Array(buffer);
         for (let i = 0; i < bytes.byteLength; i++) { binary += String.fromCharCode(bytes[i]); }
+        
         let mimeType = "audio/mp3";
         if (url.toLowerCase().includes(".wav")) mimeType = "audio/wav";
         if (url.toLowerCase().includes(".amr")) mimeType = "audio/amr";
@@ -58,6 +71,9 @@ export default {
       } catch (e) { return null; }
     };
 
+    // ==========================================
+    // 🚀 主邏輯業務區
+    // ==========================================
     try {
       const currentGroupId = body.group_id ? body.group_id.toString() : "";
       if (body.post_type !== 'message') return new Response(null, { status: 204 });
@@ -66,6 +82,7 @@ export default {
       const isPrivate = body.message_type === 'private';
       if (!isGroup && !isPrivate) return new Response(null, { status: 204 });
 
+      // 精準提取群組身分
       const senderCard = body.sender?.card || body.sender?.nickname || userId;
       const senderRole = body.sender?.role || "member"; 
       const isDeveloper = env.DEVELOPER_ID ? userId === env.DEVELOPER_ID.toString() : false;
@@ -73,11 +90,14 @@ export default {
       
       let userMessage = body.raw_message || body.message || "";
       const msgLower = userMessage.trim().toLowerCase();
+      
       let atSender = isGroup ? `[CQ:at,qq=${userId}] ` : "";
 
+      // 政治敏感詞過濾
       const sensitiveWords = ['习近平', '六四', '台独', '法轮功'];
       if (sensitiveWords.some(word => userMessage.includes(word))) return new Response(null, { status: 204 });
 
+      // 清洗掉訊息中的 CQ 標籤與圖片標籤 (用於聊天記憶與常規判斷)
       let cleanMessage = userMessage
         .replace(/\[CQ:at,qq=\d+\]/g, '')
         .replace(/\[CQ:at,qq=all\]/g, '')
@@ -91,8 +111,10 @@ export default {
       const voiceUrlMatch = userMessage.match(/\[CQ:record,[^\]]*url=([^,\]]+)/);
       const voiceUrl = voiceUrlMatch ? voiceUrlMatch[1] : null;
 
+      // 💡 核心權限判定 (群主、管理員、開發者)
       const hasAdminAuth = senderRole === 'admin' || senderRole === 'owner' || isDeveloper;
 
+      // 🛠️ 萬用指令參數解析器 (提取目標 QQ 與 剩餘文字，支援純數字與 @CQ碼)
       const parseArgs = (rawMessage, prefix) => {
         const rawArgs = rawMessage.slice(rawMessage.toLowerCase().indexOf(prefix) + prefix.length).trim();
         const match = rawArgs.match(/^(?:\[CQ:at,qq=(\d+)\]|(\d+))?\s*(.*)$/s);
@@ -102,12 +124,15 @@ export default {
         };
       };
 
-      // 指令清單（移除截圖說明）
+      // ==========================================
+      // 📜 基礎系統指令管理模組
+      // ==========================================
       if (['!help', '!帮助', '!幫助', '！help', '！帮助', '！幫助'].includes(msgLower)) {
         let roleTxt = isDeveloper ? "【开发者】" : senderRole === 'owner' ? "【群主】" : senderRole === 'admin' ? "【管理员】" : "【群成员】";
         let helpMsg = `🤖 机器人指令清单 ${roleTxt}\n\n` +
                       `🔹 [群员可用]\n` +
                       `!吃瓜 [数字] (总结最近聊天)\n` +
+                      `!截图 [网址] (获取网页快照)\n` +
                       `!群规 / !rules\n` +
                       `!免打扰 (开启后AI不主动插话)\n` +
                       `!取消免打扰\n` +
@@ -127,13 +152,31 @@ export default {
         return jsonReply(helpMsg);
       }
 
-      // 提示截圖功能未啟用
+      // 🌐 Puppeteer 無頭瀏覽器截圖功能
       if (['!截图', '!截圖', '!screenshot', '！截图', '！截圖'].some(p => msgLower.startsWith(p))) {
-        return jsonReply(`${atSender}⚠️ 网页截图功能未启用（未绑定 Cloudflare Browser 实例）。`);
+        const match = cleanMessage.match(/https?:\/\/[^\s]+/);
+        if (!match) return jsonReply(`${atSender}⚠️ 请提供完整的网址，例如: !截图 https://google.com`);
+        if (!env.MYBROWSER) return jsonReply(`${atSender}⚠️ 开发者尚未在 Cloudflare 绑定 MYBROWSER 浏览器实例。`);
+
+        try {
+          const browser = await puppeteer.launch(env.MYBROWSER);
+          const page = await browser.newPage();
+          await page.setViewport({ width: 1280, height: 800 });
+          await page.goto(match[0], { waitUntil: "domcontentloaded" });
+          const imgBuffer = await page.screenshot();
+          await browser.close();
+
+          let binary = '';
+          const bytes = new Uint8Array(imgBuffer);
+          for (let i = 0; i < bytes.byteLength; i++) binary += String.fromCharCode(bytes[i]);
+          return jsonReply(`${atSender}[CQ:image,file=base64://${btoa(binary)}]`);
+        } catch (err) {
+          return jsonReply(`${atSender}❌ 网页截图失败：${err.message}`);
+        }
       }
 
-      // 吃瓜功能
-      const melonMatch = msgLower.match(/^[!！](?:总结|總結)\s*(\d+)?/);
+      // 📈 吃瓜總結功能 (支援自訂數量，配合迴圈輪詢)
+      const melonMatch = msgLower.match(/^[!！](?:吃瓜|总结|總結)\s*(\d+)?/);
       if (melonMatch) {
         let count = melonMatch[1] ? parseInt(melonMatch[1]) : 60;
         if (count > 100) count = 100; 
@@ -146,7 +189,7 @@ export default {
         if (logs.length < 5) return jsonReply(`${atSender}🍵 刚刚群里都没什么人说话，没有瓜可以吃呀~`);
 
         const targetLogs = logs.slice(-count);
-        const promptText = `请看以下最近群里的聊天记录。请用八卦、轻松的语气，帮我简单总结大家刚刚在聊些什么（重点抓取有趣的内容，字数控制在500字以内，不准用markdown，但可以使用條列式）：\n\n` + targetLogs.join('\n');
+        const promptText = `请看以下最近群里的聊天记录。请用八卦、轻松的语气，帮我简单总结大家刚刚在聊些什么（重点抓取有趣的内容，字数控制在150字以内，不准用markdown）：\n\n` + targetLogs.join('\n');
         
         const keysStr = env.GEMINI_API_KEYS || "";
         const apiKeys = keysStr.split(',').map(k => k.trim()).filter(k => k !== "");
@@ -173,7 +216,7 @@ export default {
         return jsonReply(`${atSender}❌ 总结失败，AI 偷懒了。`);
       }
 
-      // 專屬記憶刻入
+      // 🧠 專屬記憶刻入 (KV 機制：所有人皆可用，一般人限 100 筆，每次調用)
       if (['!记住', '!記住', '!remember', '！记住', '！記住', '！remember'].some(p => msgLower.startsWith(p))) {
         const prefix = ['!记住', '!記住', '!remember', '！记住', '！記住', '！remember'].find(p => msgLower.startsWith(p));
         let targetMem = cleanMessage.slice(prefix.length).trim();
@@ -184,6 +227,7 @@ export default {
         const storedMemos = await env.QQ_STORE.get(kvKey);
         if (storedMemos) try { memos = JSON.parse(storedMemos); } catch(e) {}
         
+        // 權限判定：非管理員且達到 100 筆則擋下
         if (!hasAdminAuth && memos.length >= 100) {
           return jsonReply(`${atSender}⚠️ 您的专属记忆已达 100 条上限，请先使用 !忘记 清除一些回忆。`);
         }
@@ -193,7 +237,7 @@ export default {
         return jsonReply(`${atSender}📝 记住了！这是专属您的死记忆，以后每次对话我都会强制想起来。`);
       }
 
-      // 手動刪除個人專屬記憶
+      // 🗑️ 手動刪除個人專屬記憶 (KV 機制)
       if (['!忘记', '!忘記', '!forget', '！忘记', '！忘記', '！forget'].some(p => msgLower.startsWith(p))) {
         const prefix = ['!忘记', '!忘記', '!forget', '！忘记', '！忘記', '！forget'].find(p => msgLower.startsWith(p));
         let targetForget = cleanMessage.slice(prefix.length).trim();
@@ -206,6 +250,7 @@ export default {
         
         if (memos.length === 0) return jsonReply(`${atSender}🔍 您的专属记忆库目前是空的哦。`);
         
+        // 模糊搜尋刪除
         const matchIndex = memos.findIndex(m => m.includes(targetForget));
         if (matchIndex !== -1) {
           const removedText = memos[matchIndex];
@@ -221,7 +266,7 @@ export default {
         }
       }
 
-      // 自訂風格指令
+      // 🎭 群友自訂風格指令 (支援 @成員)
       if (['!set人格', '!set風格', '!setpersonality', '！set人格', '！set風格', '！setpersonality'].some(p => msgLower.startsWith(p))) {
         const prefix = ['!set人格', '!set風格', '!setpersonality', '！set人格', '！set風格', '！setpersonality'].find(p => msgLower.startsWith(p));
         const { targetQq, restText } = parseArgs(userMessage, prefix);
@@ -245,7 +290,7 @@ export default {
         }
       }
 
-      // 清除風格指令
+      // 🗑️ 清除自訂風格指令 (支援 @成員)
       if (['!del人格', '!del風格', '!clear人格', '！del人格', '！del風格', '！clear人格'].some(p => msgLower.startsWith(p))) {
         const prefix = ['!del人格', '!del風格', '!clear人格', '！del人格', '！del風格', '！clear人格'].find(p => msgLower.startsWith(p));
         const { targetQq } = parseArgs(userMessage, prefix);
@@ -269,7 +314,7 @@ export default {
         }
       }
 
-      // 免打擾指令
+      // 🔇 免打擾指令 (支援 @成員)
       if (['!免打扰', '!免打擾', '!noat', '！免打扰', '！免打擾', '！noat'].some(p => msgLower.startsWith(p))) {
         const prefix = ['!免打扰', '!免打擾', '!noat', '！免打扰', '！免打擾', '！noat'].find(p => msgLower.startsWith(p));
         const { targetQq } = parseArgs(userMessage, prefix);
@@ -316,7 +361,7 @@ export default {
         }
       }
 
-      // 靈魂竊取模仿功能
+      // 🎭 靈魂竊取模仿功能 (支援 @成員 與 獨立解除)
       if (['!使用', '！使用'].some(p => msgLower.startsWith(p)) && msgLower.includes('说话方式')) {
         if (!hasAdminAuth) return jsonReply(`${atSender}⚠️ 权限不足。`);
         const prefix = ['!使用', '！使用'].find(p => msgLower.startsWith(p));
@@ -328,10 +373,11 @@ export default {
         return jsonReply(`${atSender}🎭 成功捕获 QQ:${targetQq} 的语调灵魂！输入 !取消使用 可单独解除。`);
       }
 
+      // 🚫 獨立解除模仿指令
       if (['!取消使用', '！取消使用', '!解除模仿', '！解除模仿'].includes(msgLower)) {
         if (!hasAdminAuth) return jsonReply(`${atSender}⚠️ 权限不足。`);
         await env.QQ_STORE.delete(`mimic_target:${currentGroupId}`);
-        return jsonReply(`${atSender}⭕ 已成功解除说话方式的模仿，恢复默认群友状态。`);
+        return jsonReply(`${atSender}⭕ 已成功解除说话方式的模仿，恢复默认群友状态（聊天记忆未受影响）。`);
       }
 
       // 白名單群組管理
@@ -374,7 +420,7 @@ export default {
         return jsonReply(`📋 群规：\n\n${notice}`);
       }
 
-      // 黑白名單個人管理
+      // 黑白名單個人管理 (支援 @成員)
       if (['!黑名单', '!黑名單', '!blacklist', '！黑名单', '！黑名單', '！blacklist'].some(p => msgLower.startsWith(p))) {
         if (!hasAdminAuth) return jsonReply(`${atSender}⚠️ 权限不足。`);
         const prefix = ['!黑名单', '!黑名單', '!blacklist', '！黑名单', '！黑名單', '！blacklist'].find(p => msgLower.startsWith(p));
@@ -431,16 +477,22 @@ export default {
 
       if (isPrivate) return new Response(null, { status: 204 });
 
+      // ==========================================
+      // 🛡️ 群組白名單攔截器
+      // ==========================================
       const isGroupWhitelisted = await env.QQ_STORE?.get(`whitelist_group:${currentGroupId}`);
       if (isGroupWhitelisted !== "true") return new Response(null, { status: 204 });
 
-      // 萬物皆刻緩存區
+      // ==========================================
+      // 🧠 👁️ 萬物皆刻 (無視黑名單記憶 - 向量庫背景運行 & 近期日誌)
+      // ==========================================
       const memoSwitch = await env.QQ_STORE?.get(`memo:${currentGroupId}`);
       const botIdTag = `[CQ:at,qq=${botId}]`;
       const isAtMe = userMessage.includes(botIdTag);
 
       if (!isAtMe && (cleanMessage.length > 1 || imageUrl || voiceUrl) && !cleanMessage.startsWith('!') && !cleanMessage.startsWith('！')) {
         ctx.waitUntil((async () => {
+          // 1. 寫入供 !吃瓜 用的近期滾動紀錄 (最高保留到 100 條)
           const logKey = `recent_logs:${currentGroupId}`;
           let logs = [];
           const storedLogs = await env.QQ_STORE.get(logKey);
@@ -449,6 +501,7 @@ export default {
           if (logs.length > 100) logs = logs.slice(-100);
           await env.QQ_STORE.put(logKey, JSON.stringify(logs));
 
+          // 2. 寫入供長期語意聯想用的 Vectorize
           if (env.VECTORIZE && memoSwitch !== "false" && cleanMessage.length > 2) {
             const vec = await getVector(cleanMessage);
             if (vec && typeof vec !== 'string') {
@@ -467,6 +520,7 @@ export default {
         })().catch(() => {}));
       }
 
+      // 🛡️ 黑名單與聊天開關門檻
       const isBlacklisted = await env.QQ_STORE?.get(`status:blacklist:${userId}`);
       if (isBlacklisted === "true") return new Response(null, { status: 204 });
 
@@ -476,6 +530,7 @@ export default {
       let shouldReply = isAtMe;
       let isAutoInterject = false;
 
+      // ⚡ 隨機插話機制 (20% 機率)
       if (!isAtMe && (cleanMessage.length > 1 || imageUrl || voiceUrl) && !cleanMessage.startsWith('!') && !cleanMessage.startsWith('！')) {
         const targetDnd = await env.QQ_STORE.get(`dnd:${currentGroupId}:${userId}`);
         if (targetDnd !== "true" && Math.random() < 0.2) { 
@@ -494,12 +549,16 @@ export default {
       let aiInputParts = [];
       let memoryContext = "";
       
+      // ✨ 檢查模仿目標
       const mimicQq = await env.QQ_STORE.get(`mimic_target:${currentGroupId}`);
       if (mimicQq && env.VECTORIZE) {
         try {
           const queryVec = await getVector("发言 语调 习惯");
           if (queryVec && typeof queryVec !== 'string') {
-            const matches = await env.VECTORIZE.query(queryVec, { topK: 3, returnMetadata: "all" });
+            const matches = await env.VECTORIZE.query(queryVec, { 
+              topK: 3, 
+              returnMetadata: "all"
+            });
             const validMatches = matches?.matches?.filter(m => m.metadata?.group === currentGroupId && m.metadata?.author === mimicQq);
             if (validMatches?.length > 0) {
               memoryContext += `\n【⚠️ 复制人特异功能提示：请参考目标 QQ:${mimicQq} 以下的历史发言风格进行高仿】:\n` +
@@ -509,6 +568,7 @@ export default {
         } catch(e){}
       }
 
+      // 🌟 KV 專屬個人記憶調閱 (每次必調，直接塞給 AI)
       const kvMemKey = `user_memo:${currentGroupId}:${userId}`;
       const storedUserMemos = await env.QQ_STORE.get(kvMemKey);
       if (storedUserMemos) {
@@ -521,6 +581,7 @@ export default {
         } catch(e) {}
       }
 
+      // 常規語境記憶調閱 (模糊搜尋輔助)
       if (env.VECTORIZE && cleanMessage) {
         try {
           const queryVec = await getVector(cleanMessage);
@@ -545,7 +606,9 @@ export default {
         if (audioData) aiInputParts.push({ inlineData: { mimeType: audioData.mimeType, data: audioData.base64 } });
       }
 
-      // 提示詞預設
+      // ==========================================
+      // 🎭 提示詞與人格預設區塊（深度豐富擴充版）
+      // ==========================================
       let finalStylePrompt = `你现在是一个活躍在QQ群聊里的真人群友，不是无情的AI助手。请展现出鲜明的人格魅力與人情味。
 
 【👥 核心人格設定】
@@ -553,33 +616,35 @@ export default {
 2. 社交距离：
    - 被艾特时：展现出超级温柔、体贴、情绪价值拉满的暖男/暖女形象，脾气极好，会认真倾听并安慰对方。
    - 主动插话（未被艾特）时：展现出活跃、幽默、爱凑热闹的一面。顺着群友的話题自然接梗、搭腔，或者对好奇的事物提出反问，带头活跃群里气氛。
-3. 语气口吻：口语化、接地气。可以适度使用网络流行语（如：草、哈、笑死、確實）、颜文字（如：(¯﹃¯)、(°∀°)ﾉ、QAQ）或拼音缩写，打字不要过量。
+3. 语气口吻：口语化、接地气。可以适度使用网络流行语（如：草、哈、笑死、確實）、颜文字（如：(¯﹃¯)、(°∀°)ﾉ、QAQ）或拼音缩写，但不要过量。
 
 【👁️ 多模态互动指南】
 1. 收到图片时：化身为“深度看图大師”，仔细观察图片中的细节（如文字、表情包含义、物件、环境），并给出极其精准、幽默或温暖的点评，绝对不要敷衍。
 2. 收到语音时：认真聆听语音内容，像对待文字一样针对里面的话题进行互动。
 
 【💡 联想与检索能力】
-1. 记忆整合：你的大脑中会随时浮现【群聊潜意识联想】或【死记忆】。请自然地把 these 过去发生的事、群友说的话，融入到当下的对话中（例如：“你上次不是说...”、“原来你之前记的那个...”）。
+1. 记忆整合：你的大脑中会随时浮现【群聊潜意识联想】或【死记忆】。请自然地把这些过去发生的事、群友说的话，融入到当下的对话中（例如：“你上次不是说...”、“原来你之前记的那个...”）。
 2. 即时联网：如果群友聊到你不知道的最新时事、八卦、游戏改版、ACG新番或技术问题，你拥有 Google 搜索特权。请直接动用搜索查明真相，像个百事通一样跟大家分享，但不要用死板的百科语气汇报。
 
 【🚨 终极死线（铁律）】
 1. 绝对不能透露自己是 AI、机器人、语言模型或由 Google 开发，你就是群友！
-2. 单次回复字数至多200，请根据话题展开深入聊聊，尽量多说一点字，表达得更详细、更有条理。
+2. 单次回复字数不限，请根据话题展开深入聊聊，尽量多说一点字，表达得更详细、更有条理。
 3. 绝对不准输出任何 Markdown 格式（例如：**、#、##、\`\`\`、- 等符号），所有重点请用文字语气强调，保持纯文字群聊的美观！`;
       
+      // 🔥 核心修正：不論是被艾特還是主動插話，只要觸發對話的群友有專屬人設，就強制全盤覆蓋
       const userCustomStyle = await env.QQ_STORE.get(`custom_style:${currentGroupId}:${userId}`);
       if (userCustomStyle) {
         finalStylePrompt = `【🚨🚨🚨 最高优先级人格覆盖指令 🚨🚨🚨】
 当前触发对话的群友是 [QQ:${userId}]。
-你必须彻底忘掉、并完全无视任何默认的预设！
-现在，唯一的最高指令就是：完全化身为 👉 ${userCustomStyle} 👈。
-你接下来回复的每一个字，都必须100%符合这个专属风格，绝对不准跳戏！
+你必须彻底忘掉、并完全无视任何默认的“温柔治愈”或“平实就事论事”互动预设！
+现在，无论是你回应他的艾特，还是你针对他的发言进行【主动插话】，你唯一的最高指令就是：完全化身为 👉 ${userCustomStyle} 👈。
+你接下来回复的每一个字，都必须100%符合这个专属风格，绝对不准跳戏，不准受到历史普通聊天记录的影响而恢复成默认状态！如果包含图片，也必须用该风格评论图片！
 
 ---
 ` + finalStylePrompt;
       }
 
+      // KV 短暫歷史上下文
       const historyKey = `history:group:${currentGroupId}`;
       let history = [];
       if (env.QQ_STORE) {
@@ -600,7 +665,6 @@ export default {
       aiInputParts.push({ text: `${memoryContext}\n\n${userPrompt}` });
       contents.push({ role: 'user', parts: aiInputParts });
 
-      // 保留你的多模型名單
       const modelList = [
         'gemini-3.1-flash-lite',
         'gemini-3-flash',
@@ -616,6 +680,9 @@ export default {
       let replyText = "";
       let success = false;
 
+      // ==========================================
+      // 💬 呼叫 Gemini AI 核心 (完美保留原始輪詢機制 + 新增 Google Search 工具)
+      // ==========================================
       if (apiKeys.length > 0) {
         chatLoop: for (const apiKey of apiKeys) {
           for (const model of modelList) {
@@ -626,7 +693,7 @@ export default {
                 body: JSON.stringify({ 
                   contents: contents,
                   systemInstruction: { parts: [{ text: finalStylePrompt }] },
-                  tools: [{ googleSearch: {} }] 
+                  tools: [{ googleSearch: {} }] // 🌐 確保在此開啟聯網工具
                 }), 
                 signal: AbortSignal.timeout(15000) 
               });
@@ -645,6 +712,9 @@ export default {
         }
       }
 
+      // ==========================================
+      // 🛠 終端發送閘
+      // ==========================================
       if (success) {
         if (env.QQ_STORE) {
           history.push({ role: 'user', text: `[${roleName} ${senderCard}(QQ:${userId})]: ${msgDesc}` });
@@ -656,7 +726,7 @@ export default {
         const senderDndCheck = await env.QQ_STORE.get(`dnd:${currentGroupId}:${userId}`);
         let finalReply = `${atSender}${replyText}`;
         if (atSender && replyText.trim().startsWith(atSender.trim())) finalReply = replyText;
-        if (senderDndCheck === "true") finalReply = replyText; 
+        if (senderDndCheck === "true") finalReply = replyText; // 免打擾則去頭部 @
 
         finalReply = finalReply.replace(/(\[CQ:at,qq=\d+\]\s*)\1+/g, '$1');
         return jsonReply(finalReply);
