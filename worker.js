@@ -151,6 +151,16 @@ export default {
           restText: match && match[3] ? match[3].replace(/\[CQ:[^\]]+\]/g, '').trim() : ""
         };
       };
+
+      // ==========================================
+      // 1. 【核心解析區】先讓變數安全出生！（請確認這段在最上面）
+      // ==========================================
+      const currentGroupId = body.group_id || "";
+      const userId = body.user_id || "";
+
+      // 🚀 關鍵：必須先讓 msgDesc 和 msgLower 初始化！
+      let msgDesc = (body.message || "").trim();
+      let msgLower = msgDesc.toLowerCase();
       
       // ==========================================
       // 📜 基礎系統指令管理模組
