@@ -1,0 +1,10 @@
+{
+  "name": "qqai",
+  "version": "1.0.0",
+  "description": "QQ Bot Cloudflare Worker",
+  "main": "worker.js",
+  "type": "module",
+  "dependencies": {
+    "@cloudflare/puppeteer": "^0.0.13"
+  }
+}
