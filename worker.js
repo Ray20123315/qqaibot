@@ -561,33 +561,84 @@ export default {
       // 第二段到此完美結束，準備進入第三段的讀網頁、翻譯與截圖實用工具模組...
 
       // ==========================================
-      // 🗣️ 智能语音问答 (已重构：让 AI 思考后用语音回覆问题)
+      // 🎙️ 文字轉語音直連 (調用 Gemini TTS 原生擬真語音模型)
       // ==========================================
-      if (/^[!！](?:语音|語音|tts)\s+(.+)/.test(msgLower)) {
-        const question = cleanMessage.slice(4).trim();
-        if (!question) return jsonReply(`${atSender}🤷 请告诉我你想问什么，例如: !语音 为什么天空是蓝色的？`);
+      if (/^[!！](?:语音|語音|speak|tts)\s+(.+)/.test(msgLower)) {
+        const match = msgLower.match(/^[!！](?:语音|語音|speak|tts)\s+(.+)/);
+        const ttsText = match ? match[1].trim() : "";
+        
+        if (!ttsText) return jsonReply(`${atSender}🤷 请告诉我你想让我说什么，例如: !语音 提防那个会画画的机器人`);
         
         const keysStr = env.GEMINI_API_KEYS || "";
         const apiKeys = keysStr.split(',').map(k => k.trim()).filter(k => k !== "");
-        if (apiKeys.length === 0) return jsonReply(`${atSender}⚠️ 尚未配置 API 金钥，无法生成语音回覆。`);
+        if (apiKeys.length === 0) return jsonReply(`${atSender}⚠️ 尚未配置 API 金钥，无法生成语音。`);
         
-        // 🧠 步骤 A：先调用 Gemini 核心小助手，让 AI 针对该问题生成文本回覆
-        // 提示词加入限制，确保长短适中，适合语音朗读
-        const voicePrompt = `你是一个群聊语音助手。请针对以下用户提出的问题进行简短、生动且口语化的回答，字数严格控制在 60 字以内，适合直接转成语音聆听，绝对不要带任何 Markdown 符号或表情。用户问题：${question}`;
-        const aiAnswer = await callGeminiDirectly(voicePrompt);
+        // 🔥 自動從你的 modelList 裡過濾出包含 tts 的模型
+        const ttsModels = typeof modelList !== 'undefined'
+          ? modelList.filter(m => m.includes('-tts'))
+          : ["gemini-2.5-flash-preview-tts"]; // 保底
         
-        if (!aiAnswer) {
-          return jsonReply(`${atSender}❌ 语音助手思考失败，请稍后再试。`);
-        }
-        
-        // 🚀 步骤 B：将 AI 生成的真实答案进行编码，直连 Gemini 3.1 Flash TTS 模型输出语音
-        const encodedAnswer = encodeURIComponent(aiAnswer);
-        const ttsUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-flash-tts-preview:generateContent?key=${apiKeys[0]}&text=${encodedAnswer}`;
-        
-        // 直接回传语音 CQ 码，完全不占用 KV 存储空间
-        return jsonReply(`${atSender}[CQ:record,file=${ttsUrl}]`);
-      }
+        let lastError = null;
+        let successAudioBase64 = null;
+        let usedModelName = "";
 
+        // 🔄 雙重輪詢：外層輪詢 TTS 模型，內層輪詢金鑰
+        ttsModelLoop: for (let m = 0; m < ttsModels.length; m++) {
+          const currentModel = ttsModels[m];
+          const imgApiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${currentModel}:generateContent?key=${apiKeys[0]}`; // 這裏可套用你的多金鑰循環
+          
+          for (let k = 0; k < apiKeys.length; k++) {
+            const currentKey = apiKeys[k];
+            const ttsApiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${currentModel}:generateContent?key=${currentKey}`;
+            
+            try {
+              console.log(`🎙️ 嘗試語音配置: 模型 [${currentModel}] | 金鑰 [第 ${k + 1} 個]`);
+              
+              const response = await fetch(ttsApiUrl, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  contents: [{ parts: [{ text: `请用自然、好听的语气朗读以下文字：${ttsText}` }] }],
+                  generationConfig: {
+                    // 🎯 核心黑科技：強迫 Google 不要回傳文字，而是直接回傳音訊檔案
+                    responseMimeType: "audio/mp3" 
+                  }
+                })
+              });
+              
+              if (!response.ok) {
+                const errTxt = await response.text();
+                lastError = `[${currentModel}] ${response.status} - ${errTxt}`;
+                continue;
+              }
+              
+              const resData = await response.json();
+              
+              // 📥 擷取 Google 吐回來的音訊 Base64
+              const audioPart = resData.candidates?.[0]?.content?.parts?.[0];
+              if (audioPart?.inlineData?.data) {
+                successAudioBase64 = audioPart.inlineData.data;
+                usedModelName = currentModel;
+                break ttsModelLoop; // 成功拿到語音，擊穿雙層迴圈！
+              } else {
+                lastError = `[${currentModel}] 回傳數據中不包含音訊 inlineData`;
+              }
+            } catch (e) {
+              console.error(`❌ 語音執行異常:`, e);
+              lastError = e.message || e;
+            }
+          }
+        }
+
+        // 🏁 最終輸出
+        if (successAudioBase64) {
+          // 🎯 組裝成標準 QQ 框架能識別的語音 CQ 碼 (file=base64://...)
+          const cqAudio = `[CQ:record,file=base64://${successAudioBase64}]`;
+          return jsonReply(cqAudio); // 丟回群裡，機器人就會直接發送群語音！
+        } else {
+          return jsonReply(`${atSender}⚠️ 语音生成失败。原因：${lastError}`);
+        }
+      }
       // ==========================================
       // 🌐 读网页精炼摘要 (纯抓文字并交由 AI 总结)
       // ==========================================
