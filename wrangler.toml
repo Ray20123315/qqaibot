@@ -1,0 +1,33 @@
+#:schema node_modules/wrangler/config-schema.json
+name = "qqai"
+main = "worker.js"
+compatibility_date = "2026-06-24"
+compatibility_flags = [ "nodejs_compat" ]
+
+[browser]
+binding = "MYBROWSER"
+
+[ai]
+binding = "AI"
+
+[[kv_namespaces]]
+binding = "QQ_STORE"
+id = "bf716105d0f6412fa97daad4e0f544d2"
+
+[[vectorize]]
+binding = "VECTORIZE"
+index_name = "qqai"
+
+[vars]
+BACKGROUND_BROWSER_TIMEOUT = "60"
+DEVELOPER_ID = "3569028262"
+
+# 🔥 這是 TOML 標準的速率限制器綁定語法，Cloudflare 核心最愛的格式！
+[[rate_limiting]]
+binding = "MY_RATE_LIMITER"
+limit = 1
+period = 10
+
+[observability.logs]
+enabled = false
+invocation_logs = true
