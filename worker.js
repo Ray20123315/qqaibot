@@ -574,54 +574,43 @@ export default {
       
       // 第二段到此完美結束，準備進入第三段的讀網頁、翻譯與截圖實用工具模組...
 
-// ==========================================
+      // ==========================================
       // 🎙️ 文字轉語音直連 (安全隔離版：絕不阻斷聊天)
       // ==========================================
       if (/^[!！](?:语音|語音|speak|tts)\s+(.+)/.test(msgLower)) {
         try {
           const match = msgLower.match(/^[!！](?:语音|語音|speak|tts)\s+(.+)/);
           const ttsText = match ? match[1].trim() : "";
-          
           if (!ttsText) return jsonReply(`${atSender}🤷 请告诉我你想让我说什么，例如: !语音 提防那个会画画的机器人`);
-          
+
           const keysStr = env.GEMINI_API_KEYS || "";
           const apiKeys = keysStr.split(',').map(k => k.trim()).filter(k => k !== "");
           if (apiKeys.length === 0) return jsonReply(`${atSender}⚠️ 尚未配置 API 金钥，无法生成语音。`);
-          
+
           // 🎯 降級核心：拋棄不穩定的 3.1，只用目前唯一能正常吐音訊的 2.5 語音模型
           const ttsModels = ["gemini-2.5-flash-preview-tts"];
-          
           let lastError = null;
           let successAudioBase64 = null;
           let usedModelName = "";
 
           ttsModelLoop: for (let m = 0; m < ttsModels.length; m++) {
             const currentModel = ttsModels[m];
-            
             for (let k = 0; k < apiKeys.length; k++) {
               const currentKey = apiKeys[k];
               const ttsApiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${currentModel}:generateContent?key=${currentKey}`;
-              
               try {
                 console.log(`🎙️ 嘗試語音配置: 模型 [${currentModel}] | 金鑰 [第 ${k + 1}/${apiKeys.length} 個]`);
-                
                 const response = await fetch(ttsApiUrl, {
                   method: 'POST',
                   headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify({
-                    contents: [{ parts: [{ text: ttsText }] }],
-                    generationConfig: {
-                      responseModalities: ["AUDIO"]
-                    }
-                  })
+                  body: JSON.stringify({ contents: [{ parts: [{ text: ttsText }] }], generationConfig: { responseModalities: ["AUDIO"] } })
                 });
-                
-                const errTxt = await response.text(); // 先拿文字，防止 JSON 解析崩潰
+
+                const errTxt = await response.text();
                 if (!response.ok) {
                   lastError = `[${currentModel}] ${response.status} - ${errTxt}`;
                   continue;
                 }
-                
                 const resData = JSON.parse(errTxt);
                 const audioPart = resData.candidates?.[0]?.content?.parts?.[0];
                 if (audioPart?.inlineData?.data) {
@@ -638,28 +627,15 @@ export default {
           }
 
           if (successAudioBase64) {
-            return jsonReply(`[CQ:record,file=base64://${successAudioBase64}]`); 
+            return jsonReply(`[CQ:record,file=base64://${successAudioBase64}]`);
           } else {
             return jsonReply(`${atSender}⚠️ 语音生成失败。原因：${lastError}`);
           }
-
         } catch (globalE) {
-          // 🎯 超級保險：萬一整個語音模組發生任何未預期的崩潰，立刻安全退出，釋放執行序
           console.error("語音模組全域崩潰:", globalE);
           return jsonReply(`${atSender}⚠️ 语音功能異常，但已安全釋放系統。`);
         }
-      } // 👈 語音 if 區塊安全結束，後續的 @bot 聊天代碼現在可以暢通無阻地執行了！
-        // 🏁 最終輸出判定
-        if (successAudioBase64) {
-          // 🎯 組裝成標準 QQ 語音 CQ 碼
-          const cqAudio = `[CQ:record,file=base64://${successAudioBase64}]`;
-          return jsonReply(cqAudio); 
-        } else {
-          // 萬一還是抓不到，直接把 Google 的回傳結構抓出來看，不再瞎猜！
-          const debugSlice = rawJsonDebug ? rawJsonDebug.slice(0, 300) : "無 JSON 回應";
-          return jsonReply(`${atSender}⚠️ 语音抓取失败。\n最后错误: ${lastError}\nGoogle結構快照: ${debugSlice}`);
-        }
-      }
+      } // 👈 語音 if 區塊在這裡完美且唯一地結束！
       
       // ==========================================
       // 🌐 读网页精炼摘要 (纯抓文字并交由 AI 总结)
