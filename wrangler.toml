@@ -16,3 +16,6 @@ id = "bf716105d0f6412fa97daad4e0f544d2"
 [[vectorize]]
 binding = "VECTORIZE"
 index_name = "qqai"
+
+[vars]
+BACKGROUND_BROWSER_TIMEOUT = "60"
