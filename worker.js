@@ -831,20 +831,49 @@ export default {
       aiInputParts.push({ text: `${memoryContext}\n\n${userPrompt}` });
       contents.push({ role: 'user', parts: aiInputParts });
 
+      // ==========================================
+      // 🤖 依據 AI Studio 權限清單對齊的完整模型庫
+      // ==========================================
       const modelList = [
-        'gemini-3.1-flash-lite',
-        'gemini-3-flash',
-        'gemini-2.5-flash-lite',
-        'gemini-3.5-flash',
-        'gemini-2.5-flash',
-        'gemma-4-31b',
-        'gemma-4-26b'
-      ];
+      // 🔥 第一梯隊：最強大、最新的 3.5 / 3.1 / 3.0 世代 (優先享有強大推理能力)
+      'gemini-3.5-flash',
+      'gemini-3.1-pro-preview',
+      'gemini-3.1-pro-preview-customtools',
+      'gemini-3.1-flash-lite',
+      'gemini-3.1-flash-lite-preview',
+      'gemini-3-pro-preview',
+      'gemini-3-flash-preview',
+
+      // 💎 第二梯隊：極致穩定的 2.5 世代核心主力
+      'gemini-2.5-pro',
+      'gemini-2.5-flash',
+      'gemini-2.5-flash-lite',
+      'gemini-flash-latest',
+      'gemini-flash-lite-latest',
+      'gemini-pro-latest',
+
+      // 🚀 第三梯隊：高響應速度的 2.0 世代
+      'gemini-2.0-flash',
+      'gemini-2.0-flash-001',
+      'gemini-2.0-flash-lite',
+      'gemini-2.0-flash-lite-001',
+
+      // 🧠 第四梯隊：最新 Gemma 4 官方微調對話版
+      'gemma-4-31b-it',
+      'gemma-4-26b-a4b-it',
+
+      // 🔍 第五梯隊：深度研究與前沿 Agent 系列 (作為強力對話後備)
+      'deep-research-max-preview-04-2026',
+      'deep-research-preview-04-2026',
+      'deep-research-pro-preview-12-2025',
+      'antigravity-preview-05-2026',
+      'gemini-2.5-computer-use-preview-10-2025'
+    ];
 
       let replyText = "";
       let success = false;
 
-// ==========================================
+      // ==========================================
       // 💬 呼叫 Gemini / Gemma AI 核心 (金鑰庫合併 + 智慧過濾聯網工具)
       // ==========================================
       const keysStr = env.GEMINI_API_KEYS || "";
@@ -865,8 +894,12 @@ export default {
                 systemInstruction: { parts: [{ text: finalStylePrompt }] }
               };
 
-              if (!model.startsWith('gemma')) {
-                requestBody.tools = [{ googleSearch: {} }];
+              // ==========================================
+              // 🌐 聯網工具注入 (嚴格對齊 Google REST API 規範)
+              // ==========================================
+              if (!model.startsWith('gemma') && !model.includes('deep-research') && !model.includes('antigravity')) {
+                // ⭕️ 這裡必須是小寫蛇形命名法 google_search，最新模型才能正確識別
+                requestBody.tools = [{ google_search: {} }];
               }
 
               const geminiRes = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`, {
