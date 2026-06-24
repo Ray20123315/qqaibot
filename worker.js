@@ -377,8 +377,8 @@ export default {
               console.error(`❌ 執行異常 [模型: ${currentModel} | 金鑰: ${k+1}]:`, e);
               lastError = e.message || e;
             }
-          }
-        }
+          } // 內層金鑰迴圈結束
+        } // 外層模型迴圈結束
 
         // 🏁 最終輸出判定
         if (successBase64) {
@@ -386,69 +386,10 @@ export default {
           const cqImage = `[CQ:image,file=base64://${successBase64}]`;
           return jsonReply(`${atSender}\n🎨 成功調用 [${usedModelName}] 為你生成圖片：\n${cqImage}`);
         } else {
-          return jsonReply(`${atSender}⚠️ 圖片生成失敗。已歷遍所有模型梯隊 [${imagenModels.join('/')}] 與全部 ${apiKeys.length} 個金鑰，均無法生成。最後錯誤原因：${lastError}`);
-        }
-      }
-
-        // 🔄 核心雙重嵌套輪詢：外層輪詢模型梯隊，內層輪詢可用金鑰
-        // 這樣能確保：即使新模型不給某些舊 Key 用，也能自動降級到舊模型 + 新 Key 組合
-        modelLoop: for (let m = 0; m < imagenModels.length; m++) {
-          const currentModel = imagenModels[m];
-          
-          for (let k = 0; k < apiKeys.length; k++) {
-            const currentKey = apiKeys[k];
-            const imgApiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${currentModel}:generateImages?key=${currentKey}`;
-            
-            try {
-              console.log(`🎨 嘗試生圖配置: 模型 [${currentModel}] | 金鑰 [第 ${k + 1}/${apiKeys.length} 個]`);
-              
-              const response = await fetch(imgApiUrl, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                  numberOfImages: 1,
-                  prompt: prompt,
-                  aspectRatio: "1:1", 
-                  outputMimeType: "image/jpeg"
-                })
-              });
-              
-              // 若此組合失敗 (如 429 超限、404 模型不存在、400 權限不足)，則記錄錯誤並嘗試下一組
-              if (!response.ok) {
-                const errTxt = await response.text();
-                console.warn(`⚠️ 請求失敗 [模型: ${currentModel} | 金鑰: ${k+1}]: ${response.status} - ${errTxt}`);
-                lastError = `[${currentModel}] 狀態碼 ${response.status}`;
-                continue; 
-              }
-              
-              const resData = await response.json();
-              
-              // 檢查回傳結構是否包含有效圖片
-              if (resData.generatedImages && resData.generatedImages[0]?.image?.imageBytes) {
-                successBase64 = resData.generatedImages[0].image.imageBytes;
-                usedModelName = currentModel; // 記錄最終是哪個模型成功的
-                break modelLoop; // 🎯 成功拿到圖片，直接擊穿雙層迴圈，宣告成功！
-              } else {
-                lastError = `[${currentModel}] 回傳數據結構無效`;
-              }
-            } catch (e) {
-              console.error(`❌ 執行異常 [模型: ${currentModel} | 金鑰: ${k+1}]:`, e);
-              lastError = e.message || e;
-            }
-          }
-        }
-
-        // 🏁 最終輸出判定
-        if (successBase64) {
-          // 組裝成標準 QQ 群能識別的 Base64 CQ 碼
-          const cqImage = `[CQ:image,file=base64://${successBase64}]`;
-          // 順便貼心提示目前是用哪個模型繪製的，方便您掌握雲端狀態
-          return jsonReply(`${atSender}\n🎨 成功調用 [${usedModelName}] 為你生成圖片：\n${cqImage}`);
-        } else {
-          // 如果所有的模型搭配所有的金鑰全部失敗
           return jsonReply(`${atSender}⚠️ 圖片生成失敗。已遍歷所有模型梯隊 [${imagenModels.join('/')}] 與全部 ${apiKeys.length} 個金鑰，均無法生成。最後錯誤原因：${lastError}`);
         }
-      }
+      } // 👈 確保整段 if 判斷式在這裡完美閉合
+      
 
       // ==========================================
       // 💖 【高情商情緒微調器】(取代卑微順從，提供情緒價值安慰)
