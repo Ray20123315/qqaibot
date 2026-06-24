@@ -561,99 +561,80 @@ export default {
       // 第二段到此完美結束，準備進入第三段的讀網頁、翻譯與截圖實用工具模組...
 
 // ==========================================
-      // 🎙️ 文字轉語音直連 (終極防漏抓、全欄位地毯式搜索版)
+      // 🎙️ 文字轉語音直連 (安全隔離版：絕不阻斷聊天)
       // ==========================================
       if (/^[!！](?:语音|語音|speak|tts)\s+(.+)/.test(msgLower)) {
-        const match = msgLower.match(/^[!！](?:语音|語音|speak|tts)\s+(.+)/);
-        const ttsText = match ? match[1].trim() : "";
-        
-        if (!ttsText) return jsonReply(`${atSender}🤷 请告诉我你想让我说什么，例如: !语音 提防那个会画画的机器人`);
-        
-        const keysStr = env.GEMINI_API_KEYS || "";
-        const apiKeys = keysStr.split(',').map(k => k.trim()).filter(k => k !== "");
-        if (apiKeys.length === 0) return jsonReply(`${atSender}⚠️ 尚未配置 API 金钥，无法生成语音。`);
-        
-        // 🚀 智能排序：將目前官方最穩定的 2.5 世代排到最前面
-        let ttsModels = typeof modelList !== 'undefined'
-          ? modelList.filter(m => m.includes('-tts'))
-          : ["gemini-2.5-flash-preview-tts"];
-        
-        ttsModels.sort((a, b) => {
-          if (a.includes('2.5')) return -1;
-          if (b.includes('2.5')) return 1;
-          return 0;
-        });
-        
-        let lastError = null;
-        let successAudioBase64 = null;
-        let usedModelName = "";
-        let rawJsonDebug = ""; // 偵錯用存儲
-
-        // 🔄 雙重輪詢：外層輪詢 TTS 模型，內層輪詢金鑰
-        ttsModelLoop: for (let m = 0; m < ttsModels.length; m++) {
-          const currentModel = ttsModels[m];
+        try {
+          const match = msgLower.match(/^[!！](?:语音|語音|speak|tts)\s+(.+)/);
+          const ttsText = match ? match[1].trim() : "";
           
-          for (let k = 0; k < apiKeys.length; k++) {
-            const currentKey = apiKeys[k];
-            const ttsApiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${currentModel}:generateContent?key=${currentKey}`;
+          if (!ttsText) return jsonReply(`${atSender}🤷 请告诉我你想让我说什么，例如: !语音 提防那个会画画的机器人`);
+          
+          const keysStr = env.GEMINI_API_KEYS || "";
+          const apiKeys = keysStr.split(',').map(k => k.trim()).filter(k => k !== "");
+          if (apiKeys.length === 0) return jsonReply(`${atSender}⚠️ 尚未配置 API 金钥，无法生成语音。`);
+          
+          // 🎯 降級核心：拋棄不穩定的 3.1，只用目前唯一能正常吐音訊的 2.5 語音模型
+          const ttsModels = ["gemini-2.5-flash-preview-tts"];
+          
+          let lastError = null;
+          let successAudioBase64 = null;
+          let usedModelName = "";
+
+          ttsModelLoop: for (let m = 0; m < ttsModels.length; m++) {
+            const currentModel = ttsModels[m];
             
-            try {
-              console.log(`🎙️ 嘗試語音配置: 模型 [${currentModel}] | 金鑰 [第 ${k + 1}/${apiKeys.length} 個]`);
+            for (let k = 0; k < apiKeys.length; k++) {
+              const currentKey = apiKeys[k];
+              const ttsApiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${currentModel}:generateContent?key=${currentKey}`;
               
-              const response = await fetch(ttsApiUrl, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                  contents: [{ parts: [{ text: ttsText }] }], // 簡化 Prompt 讓 AI 專心吐語音
-                  generationConfig: {
-                    responseModalities: ["AUDIO"]
-                  }
-                })
-              });
-              
-              if (!response.ok) {
-                const errTxt = await response.text();
-                lastError = `[${currentModel}] ${response.status} - ${errTxt}`;
-                continue;
-              }
-              
-              const resData = await response.json();
-              rawJsonDebug = JSON.stringify(resData); // 備份原始 JSON
-              
-              // 🎯 核心黑科技：地毯式深度搜索 Base64 數據，防範 Google 隨意更動欄位名稱
-              const part = resData.candidates?.[0]?.content?.parts?.[0];
-              
-              if (part) {
-                // 方案 A: 檢查標準 inlineData
-                if (part.inlineData?.data) {
-                  successAudioBase64 = part.inlineData.data;
+              try {
+                console.log(`🎙️ 嘗試語音配置: 模型 [${currentModel}] | 金鑰 [第 ${k + 1}/${apiKeys.length} 個]`);
+                
+                const response = await fetch(ttsApiUrl, {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({
+                    contents: [{ parts: [{ text: ttsText }] }],
+                    generationConfig: {
+                      responseModalities: ["AUDIO"]
+                    }
+                  })
+                });
+                
+                const errTxt = await response.text(); // 先拿文字，防止 JSON 解析崩潰
+                if (!response.ok) {
+                  lastError = `[${currentModel}] ${response.status} - ${errTxt}`;
+                  continue;
                 }
-                // 方案 B: 檢查有些語音模型會吐在 fileData 裡
-                else if (part.fileData?.fileUri) {
-                  lastError = `Google 返回了雲端存儲路徑而非 Base64: ${part.fileData.fileUri}`;
+                
+                const resData = JSON.parse(errTxt);
+                const audioPart = resData.candidates?.[0]?.content?.parts?.[0];
+                if (audioPart?.inlineData?.data) {
+                  successAudioBase64 = audioPart.inlineData.data;
+                  usedModelName = currentModel;
+                  break ttsModelLoop;
+                } else {
+                  lastError = `[${currentModel}] 成功響應但未包含音訊數據`;
                 }
-                // 方案 C: 暴力地尋找 JSON 內任何長度大於 1000 且無空格的純文字（通常就是 Base64 數據）
-                else {
-                  const searchBase64 = rawJsonDebug.match(/"data"\s*:\s*"([A-Za-z0-9+/={},\-_]{500,})"/);
-                  if (searchBase64 && searchBase64[1]) {
-                    successAudioBase64 = searchBase64[1];
-                  }
-                }
+              } catch (e) {
+                lastError = e.message || e;
               }
-              
-              if (successAudioBase64) {
-                usedModelName = currentModel;
-                break ttsModelLoop; // 成功抓到，擊穿雙層迴圈！
-              } else {
-                lastError = `[${currentModel}] 成功響應但全欄位未識別到音訊 Base64 數據`;
-              }
-            } catch (e) {
-              console.error(`❌ 語音執行異常:`, e);
-              lastError = e.message || e;
             }
           }
-        }
 
+          if (successAudioBase64) {
+            return jsonReply(`[CQ:record,file=base64://${successAudioBase64}]`); 
+          } else {
+            return jsonReply(`${atSender}⚠️ 语音生成失败。原因：${lastError}`);
+          }
+
+        } catch (globalE) {
+          // 🎯 超級保險：萬一整個語音模組發生任何未預期的崩潰，立刻安全退出，釋放執行序
+          console.error("語音模組全域崩潰:", globalE);
+          return jsonReply(`${atSender}⚠️ 语音功能異常，但已安全釋放系統。`);
+        }
+      } // 👈 語音 if 區塊安全結束，後續的 @bot 聊天代碼現在可以暢通無阻地執行了！
         // 🏁 最終輸出判定
         if (successAudioBase64) {
           // 🎯 組裝成標準 QQ 語音 CQ 碼
