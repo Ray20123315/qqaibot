@@ -159,7 +159,8 @@ export default {
                       `!读网页 [网址] (提取精华摘要)\n` +
                       `!翻译 [语言] [内容] (专业翻译)\n` +
                       `!会议纪要 [数字] (提取重点结论)\n` +
-                      `!总结 [数字] (八卦轻松吃瓜)\n\n` +
+                      `!总结 [数字] (八卦轻松吃瓜)\n` +
+                      `!查成分 [@成员/QQ号] (AI分析群友属性)\n\n` + // 新增查成分
                       `🔹 [群员可用]\n` +
                       `!截图 [网址] (获取网页快照)\n` +
                       `!群规 / !rules\n` +
@@ -173,6 +174,8 @@ export default {
                       `🔸 [管理专享]\n` +
                       `!ai开 / !ai关 / !重置\n` +
                       `!记忆开 / !记忆关\n` +
+                      `!切换人格 [风格] (改变群组全局语气)\n` + // 新增全局人格
+                      `!恢复人格 (恢复默认群全局语气)\n` + // 新增恢复人格
                       `!使用 [@成员/QQ号] 的说话方式 / !取消使用\n` +
                       `!免打扰 [@成员/QQ号] (帮他人开关)\n` +
                       `!set人格 [@成员/QQ号] [内容]\n` +
@@ -292,6 +295,41 @@ export default {
         return jsonReply(`${atSender}❌ 总结失败，AI 偷懒了。`);
       }
 
+      // 📊 群友成份分析 (User Stats) - 新增功能
+      if (['!查成分', '!查成份', '!stats', '！查成分', '！查成份', '！stats'].some(p => msgLower.startsWith(p))) {
+        const prefix = ['!查成分', '!查成份', '!stats', '！查成分', '！查成份', '！stats'].find(p => msgLower.startsWith(p));
+        const { targetQq } = parseArgs(userMessage, prefix);
+        let targetUserId = targetQq || userId;
+
+        if (!env.VECTORIZE) return jsonReply(`${atSender}⚠️ 向量数据库未绑定，无法进行成分分析。`);
+
+        try {
+          const queryVec = await getVector("经常聊什么 兴趣爱好 性格 习惯 说话方式");
+          if (!queryVec || typeof queryVec === 'string') return jsonReply(`${atSender}❌ 提取特征向量失败。`);
+          
+          const matches = await env.VECTORIZE.query(queryVec, { 
+            topK: 30, 
+            returnMetadata: "all" 
+          });
+          
+          const validMatches = matches?.matches?.filter(m => m.metadata?.group === currentGroupId && m.metadata?.author === targetUserId);
+          
+          if (!validMatches || validMatches.length < 3) {
+             return jsonReply(`${atSender}🔍 数据库中关于 QQ:${targetUserId} 的发言记录太少，无法进行精准分析。多聊聊天吧！`);
+          }
+
+          const targetLogs = validMatches.slice(0, 20).map(m => m.metadata?.text || "").join("\n");
+          const prompt = `你是一个非常有趣的心理与行为分析师。请根据以下这位群友的历史发言记录，帮他生成一份幽默的「成分分析报告」。\n要求包含：1. 他的主要性格特点（如傲娇、乐子人、话痨、技术宅等） 2. 最常关心或讨论的话题 3. 给出一个好玩的饼状图比例（如 50% 吐槽担当、30% 潜水员...）。直接输出精炼的分析结果，字数300以内，绝对禁止使用Markdown格式：\n\n聊天记录：\n${targetLogs}`;
+          
+          const summary = await callGeminiDirectly(prompt);
+          if (summary) return jsonReply(`${atSender}📊 【QQ:${targetUserId} 的成分分析报告】：\n${summary}`);
+          return jsonReply(`${atSender}❌ 分析失败，AI 分析师罢工了。`);
+
+        } catch (err) {
+          return jsonReply(`${atSender}❌ 分析过程出现错误：${err.message}`);
+        }
+      }
+
       // 🧠 專屬記憶盤點
       if (['!你记住了什么', '!你記住了什麼', '！你记住了什么', '！你記住了什麼'].includes(msgLower)) {
         const storedMemos = await env.QQ_STORE.get(`user_memo:${currentGroupId}:${userId}`);
@@ -349,6 +387,24 @@ export default {
         } else {
           return jsonReply(`${atSender}🔍 找不到包含该内容的专属记忆呢...`);
         }
+      }
+
+      // 🎭 群組總體人格切換 (Group Persona) - 新增功能
+      if (['!切换人格', '!切換人格', '!setgrouppersona', '！切换人格', '！切換人格', '！setgrouppersona'].some(p => msgLower.startsWith(p))) {
+        if (!hasAdminAuth) return jsonReply(`${atSender}⚠️ 权限不足。仅限管理员或群主操作全局人格。`);
+        const prefix = ['!切换人格', '!切換人格', '!setgrouppersona', '！切换人格', '！切換人格', '！setgrouppersona'].find(p => msgLower.startsWith(p));
+        let content = cleanMessage.slice(prefix.length).trim();
+        if (!content) return jsonReply(`${atSender}⚠️ 风格内容不能为空哦！格式：!切换人格 暴躁老哥`);
+        
+        await env.QQ_STORE.put(`group_persona:${currentGroupId}`, content);
+        return jsonReply(`${atSender}✨ 群组全局人格已切换为：【${content}】！现在起，所有人都会受到我的这个性格影响。`);
+      }
+
+      // 🗑️ 清除群組總體人格 (Group Persona) - 新增功能
+      if (['!恢复人格', '!恢復人格', '!delgrouppersona', '！恢复人格', '！恢復人格', '！delgrouppersona'].some(p => msgLower.startsWith(p))) {
+        if (!hasAdminAuth) return jsonReply(`${atSender}⚠️ 权限不足。仅限管理员或群主操作。`);
+        await env.QQ_STORE.delete(`group_persona:${currentGroupId}`);
+        return jsonReply(`${atSender}🗑️ 群组全局人格已清除，已恢复默认群友预设。`);
       }
 
       // 🎭 群友自訂風格指令 (支援 @成員)
@@ -721,14 +777,20 @@ export default {
 5. 记忆隔离与禁止模仿令：你在【回想起来的零碎片段】中看到的历史记录，仅供参考发生了什么事。你「绝对不准模仿」里面任何人的说话语气、口头禅、特殊人设、颜文字或标点符号习惯！你必须永远保持自己原本的预设群友语气，对别人的风格完全免疫！
 6. QQ原生表情严格计数令：你可以使用 QQ 原生表情（如 [CQ:face,id=... ]），但严禁泛滥！你每说完一整段话，最多只能配上 1 到 2 个 QQ 表情，绝对不能让表情的个数和文字一样多。严禁连续、成堆地发送表情标签，必须以干净的纯文字为主导！
 7. 禁止剧本式内心戏令：你是一个真实的群友，在任何情况下，你的回覆「绝对禁止」使用括号（包括圆括号 ()、方括号 [] 或中文括号 破折号等）来描写你自己的心理活动、小动作、眼神、语气变化或舞台指导（例如严禁出现：(我故意装出...)、(我顿了顿...) 等行为）。你只能输出你真正要说的话，把所有废话、内心独白与动作描写完全去掉！
-8. 精简回覆与字数死线令：为了保持群聊节奏，你的单次发言必须极其精炼！总字数严格限制在 80 个简体中文字以内。`;
+8. 精简回覆与字数死线令：为了保持群聊节奏，你的单次发言必须极其精炼！总字数严格限制在 250 个字 (中文、全型標點符號為一個字，半形為0.5字) 以内。`;
 
-// 👑 開發者身分識別（不給特權，只做識別）
+      // 👑 開發者身分識別（不給特權，只做識別）
       if (isDeveloper) {
         // 這裡什麼都不用加，或者只加一行純事實的提示
-        finalStylePrompt += `\n\n【提示】：正在對話的群友是你的開發者，請保持你平常跟其他群友聊天的正常風格，像朋友一樣平等自然地對話即可，不需特別奉承或改變語氣。`;
+        finalStylePrompt += `\n\n【提示】：正在對話的群友是你的開發者，請保持你平常跟其他群友聊天的正常風格，像朋友一樣平等自然地對話即可，不需特別奉承或改变语气。`;
       }
       
+      // 🌟 获取群组全局人格 (Group Persona) - 优先级次于单人专属人设
+      const groupPersona = await env.QQ_STORE.get(`group_persona:${currentGroupId}`);
+      if (groupPersona) {
+        finalStylePrompt = `【📢 群组全局人格覆盖指令】\n当前群管理员已将你的总体人格设定为：👉 ${groupPersona} 👈。\n除非群友有自己的专属人设，否则你对待所有人的所有回复都必须严格符合这个风格！\n\n` + finalStylePrompt;
+      }
+
       // 🔥 核心修正：不論是被艾特還是主動插話，只要觸發對話的群友有專屬人設，就強制全盤覆蓋
       const userCustomStyle = await env.QQ_STORE.get(`custom_style:${currentGroupId}:${userId}`);
       if (userCustomStyle) {
