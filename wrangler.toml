@@ -22,11 +22,12 @@ index_name = "qqai"
 BACKGROUND_BROWSER_TIMEOUT = "60"
 DEVELOPER_ID = "3569028262"
 
-# 🔥 這是 TOML 標準的速率限制器綁定語法，Cloudflare 核心最愛的格式！
+# 🎯 完美對齊官方後台最新標準的 TOML 防刷設定
 [[rate_limiting]]
-binding = "MY_RATE_LIMITER"
-limit = 1
-period = 10
+binding = "MY_RATE_LIMITER" # 變數名稱
+namespace_id = 999           # 命名空間識別碼 (正整數 ID)
+limit = 1                   # 限制：每個期間最大要求數
+period = 10                 # 期間：10 秒
 
 [observability.logs]
 enabled = false
