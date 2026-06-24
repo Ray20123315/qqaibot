@@ -580,27 +580,27 @@ export default {
       // 第二段到此完美結束，準備進入第三段的讀網頁、翻譯與截圖實用工具模組...
 
 // ==========================================
-      // 🎙️ 語音智能對答模組 (完全動態帶入 modelList 版)
+      // 🎙️ 語音智能對答模組 (100% 相容自訂 modelList 且音訊加固版)
       // ==========================================
       if (/^[!！](?:语音|語音|speak|tts)\s+(.+)/.test(msgLower)) {
         try {
           const match = msgLower.match(/^[!！](?:语音|語音|speak|tts)\s+(.+)/);
           const userPrompt = match ? match[1].trim() : "";
-          if (!userPrompt) return jsonReply(`${atSender}🤷 想跟我聊什麼？例如: !語音 誇誇我`);
+          if (!userPrompt) return jsonReply(`${atSender}🤷 想跟我聊什麼？例如: !語音 唱首歌給我聽`);
 
           const keysStr = env.GEMINI_API_KEYS || "";
           const apiKeys = keysStr.split(',').map(k => k.trim()).filter(k => k !== "");
           if (apiKeys.length === 0) return jsonReply(`${atSender}⚠️ 尚未配置 API 金钥。`);
 
           // ----------------------------------------
-          // 🚀 階段一：動態輪詢你的 modelList 獲取文字答案
+          // 🚀 階段一：動態輪詢你的 modelList 獲取文字答案（大腦思考）
           // ----------------------------------------
           let aiTextResponse = "";
           let chatSuccess = false;
 
           chatLoop: for (let m = 0; m < modelList.length; m++) {
             const currentModel = modelList[m];
-            // 排除生圖和純語音模型，避免聊天階段報錯
+            // 排除生圖和純語音模型，避免聊天階段爆錯
             if (currentModel.includes('imagen') || currentModel.includes('tts')) continue;
 
             for (let k = 0; k < apiKeys.length; k++) {
@@ -623,21 +623,22 @@ export default {
                   }
                 }
               } catch (e) {
-                console.log(`⏳ 語音聊天輪詢中... 模型 ${currentModel} 節點 ${k} 異常，切換下一組`);
+                console.log(`⏳ 語音大腦輪詢：模型 ${currentModel} 異常，嘗試下一組...`);
               }
             }
           }
 
           if (!chatSuccess || !aiTextResponse) {
-            return jsonReply(`${atSender}⚠️ 抱歉，我所有的聊天模型節點目前都超載了，無法思考。`);
+            return jsonReply(`${atSender}⚠️ 系統大腦超載，一時間無法思考回答。`);
           }
 
           // ----------------------------------------
-          // 🎙️ 階段二：動態從你的 modelList 篩選 TTS 模型來生成聲音
+          // 🎙️ 階段二：精準語音轉換 (優化 Google TTS 請求體)
           // ----------------------------------------
-          // 從你的清單裡動態把帶有 tts 的模型撈出來
-          const ttsAvailableModels = modelList.filter(m => m.includes('tts'));
-          // 萬一你清單裡沒寫，就拿 gemini-2.5-flash-preview-tts 當保底
+          // 動態撈出你 modelList 裡的 tts 模型，並強制將最穩定的 2.5 tts 放前面作為第一主打
+          let ttsAvailableModels = modelList.filter(m => m.includes('tts'));
+          // 調整排序：把公認最穩定的 2.5-tts 挪到最前面，防止 3.1-tts 沒權限卡死
+          ttsAvailableModels.sort((a, b) => b.includes('2.5') ? 1 : -1);
           if (ttsAvailableModels.length === 0) ttsAvailableModels.push('gemini-2.5-flash-preview-tts');
 
           let successAudioBase64 = null;
@@ -647,6 +648,7 @@ export default {
             
             for (let k = 0; k < apiKeys.length; k++) {
               const currentKey = apiKeys[k];
+              // 🎯 修正核心：標準化 Google 語音生成 API URL 格式
               const ttsUrl = `https://generativelanguage.googleapis.com/v1beta/models/${currentTtsModel}:generateContent?key=${currentKey}`;
               
               try {
@@ -655,10 +657,16 @@ export default {
                   headers: { 'Content-Type': 'application/json' },
                   body: JSON.stringify({
                     contents: [{ parts: [{ text: aiTextResponse }] }],
+                    // 🌟 這裡必須塞入絕對指令，防止語音模型再次發生 400 越權生成文字錯誤
                     systemInstruction: {
-                      parts: [{ text: "You are a pure TTS engine. Just read the input text verbatim into audio." }]
+                      parts: [{ text: "You are a pure Text-to-Speech engine. Repeat the input text perfectly as audio. Do not reason, do not reply." }]
                     },
-                    generationConfig: { responseModalities: ["AUDIO"] }
+                    generationConfig: { 
+                      responseModalities: ["AUDIO"],
+                      speechConfig: {
+                        voiceConfig: { prebuiltVoiceConfig: { voiceName: "Aoede" } } // ✨ 鎖定 Google 最好聽的官方中文女聲
+                      }
+                    }
                   })
                 });
 
@@ -667,25 +675,27 @@ export default {
                   const audioData = ttsData.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
                   if (audioData) {
                     successAudioBase64 = audioData;
-                    break ttsLoop; // 成功生成聲音，跳出輪詢
+                    break ttsLoop; // 成功抱回聲音，直接通關！
                   }
                 }
               } catch (e) {
-                console.log(`⏳ 語音合成輪詢中... 模型 ${currentTtsModel} 節點 ${k} 異常`);
+                console.log(`⏳ 語音轉換中... 模型 ${currentTtsModel} 節點 ${k} 異常`);
               }
             }
           }
 
           if (successAudioBase64) {
-            return jsonReply(`[CQ:record,file=base64://${successAudioBase64}]\n(🤖 文本: ${aiTextResponse})`);
+            // 完美輸出：同時發送語音 CQ 碼與文字，體驗拉滿！
+            return jsonReply(`[CQ:record,file=base64://${successAudioBase64}]\n(🤖 語音文本: ${aiTextResponse})`);
           } else {
-            return jsonReply(`${atSender}⚠️ 聲音合成失敗，但我可以打字回答你：\n${aiTextResponse}`);
+            // 萬一 Google 語音伺服器真的大塞車，依然能打字回覆，不讓群組冷場
+            return jsonReply(`${atSender}⚠️ 聲音合成失敗，但我打字回答你：\n${aiTextResponse}`);
           }
 
         } catch (globalE) {
-          return jsonReply(`${atSender}⚠️ 語音對答發生嚴重錯誤: ${globalE.message}`);
+          return jsonReply(`${atSender}⚠️ 語音系統發生全域異常: ${globalE.message}`);
         }
-      } // 👈 語音 if 區塊安全結束
+      } // 👈 語音區塊完美安全結束
       
       // ==========================================
       // 🌐 读网页精炼摘要 (纯抓文字并交由 AI 总结)
