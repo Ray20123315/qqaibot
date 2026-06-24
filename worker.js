@@ -588,24 +588,28 @@ export default {
 
 // 2. 寫入供長期語意聯想用的 Vectorize
           if (env.VECTORIZE && memoSwitch !== "false" && cleanMessage.length > 2) {
-            // 過濾掉 QQ 表情，只留下純文字存進記憶庫
-            const pureMessage = cleanMessage.replace(/\[CQ:face,[^\]]+\]/g, '').trim();
-            
-            // 如果過濾完還有文字，才存進去
-            if (pureMessage.length > 0) {
-              const vec = await getVector(pureMessage);
-              if (vec && typeof vec !== 'string') {
-                const recordId = `chat_${currentGroupId}_${Date.now()}`;
-                await env.VECTORIZE.insert([{
-                  id: recordId,
-                  values: vec,
-                  metadata: { 
-                    text: `[${roleName} ${senderCard}(QQ:${userId}) 曾说]: ${pureMessage}`, 
-                    group: currentGroupId,
-                    author: userId
-                  }
-                }]);
+            try {
+              // 過濾掉 QQ 表情，只留下純文字存進記憶庫
+              const pureMessage = cleanMessage.replace(/\[CQ:face,[^\]]+\]/g, '').trim();
+              
+              // 如果過濾完還有文字，才存進去
+              if (pureMessage.length > 0) {
+                const vec = await getVector(pureMessage);
+                if (vec && typeof vec !== 'string') {
+                  const recordId = `chat_${currentGroupId}_${Date.now()}`;
+                  await env.VECTORIZE.insert([{
+                    id: recordId,
+                    values: vec,
+                    metadata: { 
+                      text: `[${roleName} ${senderCard}(QQ:${userId}) 曾说]: ${pureMessage}`, 
+                      group: currentGroupId,
+                      author: userId
+                    }
+                  }]);
+                }
               }
+            } catch (e) {
+              console.error("Vectorize insert failed:", e);
             }
           }
 
