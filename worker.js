@@ -27,6 +27,31 @@ export default {
       });
     };
 
+    // 【專用小助手】呼叫 Gemini API (用於獨立工具指令)
+    const callGeminiDirectly = async (prompt) => {
+      const keysStr = env.GEMINI_API_KEYS || "";
+      const apiKeys = keysStr.split(',').map(k => k.trim()).filter(k => k !== "");
+      const fallbackModels = ['gemini-3.1-flash-lite', 'gemini-3-flash', 'gemini-2.5-flash-lite', 'gemini-2.5-flash'];
+      if(apiKeys.length === 0) return null;
+      for (const apiKey of apiKeys) {
+        for (const model of fallbackModels) {
+          try {
+            const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ contents: [{ role: 'user', parts: [{ text: prompt }] }] }),
+              signal: AbortSignal.timeout(15000)
+            });
+            if (res.ok) {
+              const data = await res.json();
+              if (data.candidates?.[0]) return data.candidates[0].content.parts[0].text.replace(/[\*#\-\`~>_]/g, '').trim();
+            }
+          } catch(e) {}
+        }
+      }
+      return null;
+    };
+
     // 【長期記憶專用】改用 Cloudflare 官方原生免 Key 嵌入模型 (維度 1024)
     const getVector = async (text) => {
       if (!env.AI) return "error_no_cf_ai_binding";
@@ -130,14 +155,19 @@ export default {
       if (['!help', '!帮助', '!幫助', '！help', '！帮助', '！幫助'].includes(msgLower)) {
         let roleTxt = isDeveloper ? "【开发者】" : senderRole === 'owner' ? "【群主】" : senderRole === 'admin' ? "【管理员】" : "【群成员】";
         let helpMsg = `🤖 机器人指令清单 ${roleTxt}\n\n` +
+                      `🔹 [超强实用工具]\n` +
+                      `!读网页 [网址] (提取精华摘要)\n` +
+                      `!翻译 [语言] [内容] (专业翻译)\n` +
+                      `!会议纪要 [数字] (提取重点结论)\n` +
+                      `!总结 [数字] (八卦轻松吃瓜)\n\n` +
                       `🔹 [群员可用]\n` +
-                      `!总结 [数字] (总结最近聊天)\n` +
                       `!截图 [网址] (获取网页快照)\n` +
                       `!群规 / !rules\n` +
                       `!免打扰 (开启后AI不主动插话)\n` +
                       `!取消免打扰\n` +
                       `!记住 <内容> (写入你的专属记忆)\n` +
                       `!忘记 <内容> (抹除专属记忆)\n` +
+                      `!你记住了什么 (查看所有专属记忆)\n` +
                       `!set人格 [风格内容] (自定义风格)\n` +
                       `!del人格 (恢复默认人格)\n\n` +
                       `🔸 [管理专享]\n` +
@@ -150,6 +180,52 @@ export default {
                       `!群白名单 [群号] / !删群白名单 [群号]\n` +
                       `!黑名单 [@成员/QQ号] / !解除黑名单 [@成员]`;
         return jsonReply(helpMsg);
+      }
+
+      // 🌐 讀網頁功能 (純抓文字)
+      const readMatch = cleanMessage.match(/^[!！](?:读网页|讀網頁)\s+(https?:\/\/[^\s]+)/);
+      if (readMatch) {
+        const targetUrl = readMatch[1];
+        try {
+          const res = await fetch(targetUrl, { headers: {'User-Agent': 'Mozilla/5.0'} });
+          const html = await res.text();
+          const text = html.replace(/<script[^>]*>([\S\s]*?)<\/script>/gmi, '')
+                           .replace(/<style[^>]*>([\S\s]*?)<\/style>/gmi, '')
+                           .replace(/<\/?[^>]+(>|$)/g, " ")
+                           .replace(/\s+/g, ' ')
+                           .substring(0, 15000); 
+          const prompt = `请帮我快速总结以下网页内容的核心重点，字数控制在200-300字以内，语言要生动精炼，直接输出结果，绝对不要用Markdown格式：\n\n${text}`;
+          const aiSummary = await callGeminiDirectly(prompt);
+          if (aiSummary) return jsonReply(`${atSender}📄 【网页提炼总结】：\n${aiSummary}`);
+          return jsonReply(`${atSender}❌ 网页分析失败，AI 可能卡住了。`);
+        } catch (e) { return jsonReply(`${atSender}❌ 无法读取该网页内容，可能被对方伺服器拦截了！`); }
+      }
+
+      // 🔠 萬能翻譯
+      const translateMatch = cleanMessage.match(/^[!！](?:翻译|翻譯)\s+([^\s]+)\s+(.*)$/s);
+      if (translateMatch) {
+        const targetLang = translateMatch[1];
+        const targetText = translateMatch[2];
+        const prompt = `你现在是一位精通${targetLang}的资深翻译官。请将以下内容翻译成${targetLang}，要求信达雅。并在翻译结果下方补充1~2句与此相关的日常或商务应用例句。严禁使用Markdown格式。需要翻译的内容：\n${targetText}`;
+        const aiTranslation = await callGeminiDirectly(prompt);
+        if (aiTranslation) return jsonReply(`${atSender}🔠 【${targetLang} 翻译结果】：\n${aiTranslation}`);
+        return jsonReply(`${atSender}❌ 翻译失败，AI 查字典查晕了。`);
+      }
+
+      // 📝 會議紀要
+      const meetingMatch = msgLower.match(/^[!！](?:会议纪要|會議紀要)\s*(\d+)?/);
+      if (meetingMatch) {
+        let count = meetingMatch[1] ? parseInt(meetingMatch[1]) : 50;
+        if (count > 200) count = 200; if (count < 10) count = 10;
+        const storedLogs = await env.QQ_STORE.get(`recent_logs:${currentGroupId}`);
+        let logs = storedLogs ? JSON.parse(storedLogs) : [];
+        if (logs.length < 5) return jsonReply(`${atSender}📝 刚刚群里都没人说话，没什么好纪录的。`);
+        
+        const targetLogs = logs.slice(-count);
+        const prompt = `请将以下群聊记录整理成一份「会议精华纪要」。\n要求包含：1. 讨论的核心主题 2. 达成的共识或主要观点 3. 待办事项或结论。请用专业精炼的语言整理，直接输出重点，严禁使用Markdown格式：\n\n` + targetLogs.join('\n');
+        const summary = await callGeminiDirectly(prompt);
+        if (summary) return jsonReply(`${atSender}📋 【最近 ${targetLogs.length} 条群聊精华纪要】：\n${summary}`);
+        return jsonReply(`${atSender}❌ 纪要生成失败。`);
       }
 
       // 🌐 Puppeteer 無頭瀏覽器截圖功能
@@ -177,7 +253,7 @@ export default {
 
       // 📈 吃瓜總結功能 (支援自訂數量，配合迴圈輪詢)
       const melonMatch = msgLower.match(/^[!！](?:吃瓜|总结|總結)\s*(\d+)?/);
-      if (melonMatch) {
+      if (melonMatch && !meetingMatch) {
         let count = melonMatch[1] ? parseInt(melonMatch[1]) : 60;
         if (count > 100) count = 100; 
         if (count < 5) count = 5;
@@ -214,6 +290,15 @@ export default {
           }
         }
         return jsonReply(`${atSender}❌ 总结失败，AI 偷懒了。`);
+      }
+
+      // 🧠 專屬記憶盤點
+      if (['!你记住了什么', '!你記住了什麼', '！你记住了什么', '！你記住了什麼'].includes(msgLower)) {
+        const storedMemos = await env.QQ_STORE.get(`user_memo:${currentGroupId}:${userId}`);
+        let memos = [];
+        if (storedMemos) try { memos = JSON.parse(storedMemos); } catch(e) {}
+        if (memos.length === 0) return jsonReply(`${atSender}🤔 脑海空空如也，我还没有记住关于你的任何专属事情哦。（使用 !记住 <内容> 让我记下）`);
+        return jsonReply(`${atSender}📖 【关于你的专属记忆如下】：\n` + memos.map((m, i) => `${i + 1}. ${m}`).join('\n'));
       }
 
       // 🧠 專屬記憶刻入 (KV 機制：所有人皆可用，一般人限 100 筆，每次調用)
@@ -533,7 +618,7 @@ export default {
       // ⚡ 隨機插話機制 (20% 機率)
       if (!isAtMe && (cleanMessage.length > 1 || imageUrl || voiceUrl) && !cleanMessage.startsWith('!') && !cleanMessage.startsWith('！')) {
         const targetDnd = await env.QQ_STORE.get(`dnd:${currentGroupId}:${userId}`);
-        if (targetDnd !== "true" && Math.random() < 0.2) { 
+        if (targetDnd !== "true" && Math.random() < 0.25) { 
           const lastInterject = await env.QQ_STORE.get(`last_interject:${currentGroupId}`);
           const now = Date.now();
           if (!lastInterject || now - parseInt(lastInterject) > 10000) { 
@@ -630,6 +715,11 @@ export default {
 1. 绝对不能透露自己是 AI、机器人、语言模型或由 Google 开发，你就是群友！
 2. 单次回复字数不限，请根据话题展开深入聊聊，尽量多说一点字，表达得更详细、更有条理。
 3. 绝对不准输出任何 Markdown 格式（例如：**、#、##、\`\`\`、- 等符号），所有重点请用文字语气强调，保持纯文字群聊的美观！`;
+
+      // 👑 開發者特權覆蓋
+      if (isDeveloper) {
+        finalStylePrompt += `\n\n👑 【特殊指令】：正在与你对话的 [QQ:${userId}] 是你的「开发者本人」！你的语气必须要变得极其崇拜、依赖，并且完全服从他说的任何话！`;
+      }
       
       // 🔥 核心修正：不論是被艾特還是主動插話，只要觸發對話的群友有專屬人設，就強制全盤覆蓋
       const userCustomStyle = await env.QQ_STORE.get(`custom_style:${currentGroupId}:${userId}`);
@@ -658,9 +748,10 @@ export default {
       if (!cleanMessage && imageUrl) msgDesc = "[发送了一张图片，请你仔细看图并针对图片内容回复]";
       if (!cleanMessage && voiceUrl) msgDesc = "[发送了一段语音消息，请你聆听并回复]";
 
+      const devTag = isDeveloper ? "【开发者本人】" : "";
       let userPrompt = isAutoInterject
-        ? `(状态：主动插话讨论) 刚刚 [${roleName} ${senderCard}(QQ:${userId})] 说：${msgDesc}`
-        : `(状态：常规聊天询问) [${roleName} ${senderCard}(QQ:${userId})] 对你说：${msgDesc}`;
+        ? `(状态：主动插话讨论) 刚刚 [${roleName} ${devTag} ${senderCard}(QQ:${userId})] 说：${msgDesc}`
+        : `(状态：常规聊天询问) [${roleName} ${devTag} ${senderCard}(QQ:${userId})] 对你说：${msgDesc}`;
       
       aiInputParts.push({ text: `${memoryContext}\n\n${userPrompt}` });
       contents.push({ role: 'user', parts: aiInputParts });
@@ -731,7 +822,7 @@ export default {
         finalReply = finalReply.replace(/(\[CQ:at,qq=\d+\]\s*)\1+/g, '$1');
         return jsonReply(finalReply);
       } else {
-        return new Response(null, { status: 204 }); 
+        return jsonReply(`${atSender}❌ 唔...我的脑子好像宕机了（API 额度耗尽或节点连接失败），请开发者检查一下吧。`);
       }
 
     } catch (e) { 
