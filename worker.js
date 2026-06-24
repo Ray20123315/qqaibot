@@ -311,7 +311,7 @@ export default {
 
       // 第一段到此完美結束，準備進入第二段的基礎系統指令與生圖路由控制模組...
 
-// ==========================================
+      // ==========================================
       // 🎨 圖片生成直連 (完全動態化：金鑰陣列 ＋ 模型陣列 雙重自動輪詢)
       // ==========================================
       if (/^[!！](?:画图|畫圖|draw)\s+(.+)/.test(msgLower)) {
@@ -326,13 +326,69 @@ export default {
         const apiKeys = keysStr.split(',').map(k => k.trim()).filter(k => k !== "");
         if (apiKeys.length === 0) return jsonReply(`${atSender}⚠️ 尚未配置 API 金钥，无法生成图片。`);
         
-        // 2. 🚀 動態模型提取：優先讀取環境變數，若無則自動啟用預設模型梯隊 (由新到舊)
-        const modelsStr = env.IMAGEN_MODELS || "imagen-4.0-generate-001,imagen-3.0-generate-002,imagen-3.0-generate-001";
-        const imagenModels = modelsStr.split(',').map(m => m.trim()).filter(m => m !== "");
+        // 2. 🚀 動態模型提取：完全不寫死，直接調用 modelList 並過濾出所有以 imagen- 開頭的模型
+        const imagenModels = typeof modelList !== 'undefined' 
+          ? modelList.filter(m => m.startsWith('imagen-'))
+          : ["imagen-4.0-fast-generate-001", "imagen-4.0-generate-001", "imagen-4.0-ultra-generate-001"]; // 防呆備份
         
         let lastError = null;
         let successBase64 = null;
         let usedModelName = "";
+
+        // 🔄 核心雙重嵌套輪詢：外層輪詢模型梯隊，內層輪詢可用金鑰
+        modelLoop: for (let m = 0; m < imagenModels.length; m++) {
+          const currentModel = imagenModels[m];
+          
+          for (let k = 0; k < apiKeys.length; k++) {
+            const currentKey = apiKeys[k];
+            const imgApiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${currentModel}:generateImages?key=${currentKey}`;
+            
+            try {
+              console.log(`🎨 嘗試生圖配置: 模型 [${currentModel}] | 金鑰 [第 ${k + 1}/${apiKeys.length} 個]`);
+              
+              const response = await fetch(imgApiUrl, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  numberOfImages: 1,
+                  prompt: prompt,
+                  aspectRatio: "1:1", 
+                  outputMimeType: "image/jpeg"
+                })
+              });
+              
+              if (!response.ok) {
+                const errTxt = await response.text();
+                console.warn(`⚠️ 請求失敗 [模型: ${currentModel} | 金鑰: ${k+1}]: ${response.status} - ${errTxt}`);
+                lastError = `[${currentModel}] 狀態碼 ${response.status}`;
+                continue; 
+              }
+              
+              const resData = await response.json();
+              
+              if (resData.generatedImages && resData.generatedImages[0]?.image?.imageBytes) {
+                successBase64 = resData.generatedImages[0].image.imageBytes;
+                usedModelName = currentModel; 
+                break modelLoop; // 🎯 成功拿到圖片，直接擊穿雙層迴圈，宣告成功！
+              } else {
+                lastError = `[${currentModel}] 回傳數據結構無效`;
+              }
+            } catch (e) {
+              console.error(`❌ 執行異常 [模型: ${currentModel} | 金鑰: ${k+1}]:`, e);
+              lastError = e.message || e;
+            }
+          }
+        }
+
+        // 🏁 最終輸出判定
+        if (successBase64) {
+          // 組裝成標準 QQ 群能識別的 Base64 CQ 碼
+          const cqImage = `[CQ:image,file=base64://${successBase64}]`;
+          return jsonReply(`${atSender}\n🎨 成功調用 [${usedModelName}] 為你生成圖片：\n${cqImage}`);
+        } else {
+          return jsonReply(`${atSender}⚠️ 圖片生成失敗。已歷遍所有模型梯隊 [${imagenModels.join('/')}] 與全部 ${apiKeys.length} 個金鑰，均無法生成。最後錯誤原因：${lastError}`);
+        }
+      }
 
         // 🔄 核心雙重嵌套輪詢：外層輪詢模型梯隊，內層輪詢可用金鑰
         // 這樣能確保：即使新模型不給某些舊 Key 用，也能自動降級到舊模型 + 新 Key 組合
