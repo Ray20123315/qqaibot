@@ -153,14 +153,29 @@ export default {
       };
 
       // ==========================================
-      // 1. 【核心解析區】先讓變數安全出生！（請確認這段在最上面）
+      // 🛑 防禦陣線 (直接借用你原本代碼第 103~120 行洗好的變數)
       // ==========================================
-      const currentGroupId = body.group_id || "";
-      const userId = body.user_id || "";
+      
+      // 🚫 【防線一】空訊息 / 純空格攔截器
+      // 這裡直接使用你原本程式碼裡的 userMessage 或 msgLower 來判斷
+      if (!userMessage || userMessage.trim() === "") {
+        console.log(`⚠️ 偵測到群友 ${userId} 僅 @機器人 但未輸入有效內容，已自動快速攔截。`);
+        return new Response(null, { status: 204 });
+      }
 
-      // 🚀 關鍵：必須先讓 msgDesc 和 msgLower 初始化！
-      let msgDesc = (body.message || "").trim();
-      let msgLower = msgDesc.toLowerCase();
+      // ⏳ 【防線二】Cloudflare 原生速率限制器 (10秒冷卻鎖)
+      // 去掉 const/let，直接使用原本在第 103 行就宣告好的 currentGroupId
+      const isBypassCooldown = isDeveloper || senderRole === 'owner' || senderRole === 'admin';
+
+      if (!isBypassCooldown && env.MY_RATE_LIMITER) {
+        const rateLimitKey = `${currentGroupId}:${userId}`;
+        const { success } = await env.MY_RATE_LIMITER.limit({ key: rateLimitKey });
+        
+        if (!success) {
+          console.log(`⏳ 群友 ${userId} 頻繁調用，觸發 10 秒冷卻限制，已自動裝死。`);
+          return new Response(null, { status: 204 }); // 204 高冷裝死模式
+        }
+      }
       
       // ==========================================
       // 📜 基礎系統指令管理模組
