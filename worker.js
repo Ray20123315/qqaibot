@@ -488,7 +488,7 @@ export default {
         // =======================================
         let helpMsg = `🤖 QQAI 机器人指令清单 ${roleTxt}\n\n` +
                       `🔹 [日常与多模态]\n` +
-                      `!画图 [提示词] (高清生图)\n` +
+                      `!语音 [问题] (语音回覆)\n` +
                       `!读网页 [网址] (提取精华摘要)\n` +
                       `!翻译 [语言] [内容]\n` +
                       `!截图 [网址] (获取网页快照)\n\n` +
@@ -585,23 +585,22 @@ export default {
         // 🔄 雙重輪詢：外層輪詢 TTS 模型，內層輪詢金鑰
         ttsModelLoop: for (let m = 0; m < ttsModels.length; m++) {
           const currentModel = ttsModels[m];
-          const imgApiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${currentModel}:generateContent?key=${apiKeys[0]}`; // 這裏可套用你的多金鑰循環
           
           for (let k = 0; k < apiKeys.length; k++) {
             const currentKey = apiKeys[k];
             const ttsApiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${currentModel}:generateContent?key=${currentKey}`;
             
             try {
-              console.log(`🎙️ 嘗試語音配置: 模型 [${currentModel}] | 金鑰 [第 ${k + 1} 個]`);
+              console.log(`🎙️ 嘗試語音配置: 模型 [${currentModel}] | 金鑰 [第 ${k + 1}/${apiKeys.length} 個]`);
               
               const response = await fetch(ttsApiUrl, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
-                  contents: [{ parts: [{ text: `请用自然、好听的语气朗读以下文字：${ttsText}` }] }],
+                  contents: [{ parts: [{ text: `请朗读以下文字，直接输出语音：${ttsText}` }] }],
                   generationConfig: {
-                    // 🎯 核心黑科技：強迫 Google 不要回傳文字，而是直接回傳音訊檔案
-                    responseMimeType: "audio/mp3" 
+                    // 🎯 核心修復：拿掉會報 400 的 responseMimeType，換成官方正確的語音輸出參數
+                    responseModalities: ["AUDIO"]
                   }
                 })
               });
@@ -609,7 +608,7 @@ export default {
               if (!response.ok) {
                 const errTxt = await response.text();
                 lastError = `[${currentModel}] ${response.status} - ${errTxt}`;
-                continue;
+                continue; // 👈 失敗了，繼續輪詢下一個金鑰
               }
               
               const resData = await response.json();
@@ -619,7 +618,7 @@ export default {
               if (audioPart?.inlineData?.data) {
                 successAudioBase64 = audioPart.inlineData.data;
                 usedModelName = currentModel;
-                break ttsModelLoop; // 成功拿到語音，擊穿雙層迴圈！
+                break ttsModelLoop; // 🎯 成功拿到語音，擊穿雙層迴圈！
               } else {
                 lastError = `[${currentModel}] 回傳數據中不包含音訊 inlineData`;
               }
@@ -627,8 +626,18 @@ export default {
               console.error(`❌ 語音執行異常:`, e);
               lastError = e.message || e;
             }
-          }
+          } // 內層金鑰迴圈結束
+        } // 外層模型迴圈結束
+
+        // 🏁 最終輸出
+        if (successAudioBase64) {
+          // 🎯 組裝成標準 QQ 框架能識別的語音 CQ 碼 (file=base64://...)
+          const cqAudio = `[CQ:record,file=base64://${successAudioBase64}]`;
+          return jsonReply(cqAudio); 
+        } else {
+          return jsonReply(`${atSender}⚠️ 语音生成失败。原因：${lastError}`);
         }
+      }
 
         // 🏁 最終輸出
         if (successAudioBase64) {
