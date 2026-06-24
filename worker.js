@@ -153,6 +153,35 @@ export default {
       };
 
       // ==========================================
+      // 🚫 【前置防禦】空訊息 / 純空格攔截器 (放在最頂層，最省資源)
+      // ==========================================
+      if (!msgDesc || msgDesc.trim() === "") {
+        console.log(`⚠️ 偵測到群友 ${userId} 僅 @機器人 但未輸入有效內容，已自動快速攔截。`);
+        return new Response(null, { status: 204 });
+      }
+
+      // ==========================================
+      // ⏳ 【神級優化】Cloudflare 原生速率限制器 (10秒冷卻鎖)
+      // ==========================================
+      // 開發者、群主、管理員豁免冷卻限制，不被卡住
+      const isBypassCooldown = isDeveloper || senderRole === 'owner' || senderRole === 'admin';
+
+      if (!isBypassCooldown && env.MY_RATE_LIMITER) {
+        // 以 「群號:群員QQ」 作為唯一的 Key，這樣他在 A 群冷卻，去 B 群也要乖乖等 10 秒
+        const rateLimitKey = `${currentGroupId}:${userId}`;
+        
+        // 呼叫 Cloudflare 內核進行極速判定
+        const { success } = await env.MY_RATE_LIMITER.limit({ key: rateLimitKey });
+        
+        if (!success) {
+          console.log(`⏳ 群友 ${userId} 頻繁調用，觸發 10 秒冷卻限制，已自動攔截。`);
+
+          // 選擇二：調皮提示模式 (若想提醒普通群員，可改用下面這行)
+          return jsonReply(`${atSender} ⏳ 群友 ${userId} 頻繁調用，觸發 10 秒冷卻限制，已自動攔截。`);
+        }
+      }
+      
+      // ==========================================
       // 📜 基礎系統指令管理模組
       // ==========================================
       if (['!help', '!帮助', '!幫助', '！help', '！帮助', '！幫助'].includes(msgLower)) {
@@ -218,20 +247,6 @@ export default {
           console.error("執行狀態指令失敗:", statusErr);
           return jsonReply(`${atSender}❌ 讀取狀態數據時發生異常。`);
         }
-      }
-      
-      // ==========================================
-      // 🚫 【新功能】空訊息 / 純空格攔截器 (防止浪費 API 額度)
-      // ==========================================
-      // 檢查清洗後的 msgDesc 是否為空、或者只包含空白字元
-      if (!msgDesc || msgDesc.trim() === "") {
-        console.log(`⚠️ 偵測到群友 ${userId} 僅 @機器人 但未輸入有效內容，已自動攔截攔退。`);
-        
-        // 選擇一：高冷模式（最省資源）—— 默默回傳 204，完全不理他，也不吐任何字
-        return new Response(null, { status: 204 });
-        
-        // 選擇二：調皮/提示模式 —— 快速回覆他一句話，不走 Gemini API (由 Worker 本地直接吐回覆)
-        // return jsonReply(`${atSender} 唔？你叫星野是有什麼事嗎？後面要打字我才聽得懂喔！`);
       }
       
       // 🌐 讀網頁功能 (純抓文字)
