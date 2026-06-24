@@ -1,5 +1,40 @@
 import puppeteer from "@cloudflare/puppeteer";
 
+// ==========================================
+// 🗄️ D1 資料庫操作小幫手 (模擬 KV 行為)
+// ==========================================
+async function dbGet(env, key) {
+  if (!env || !env.DB) return null; // 防呆安全鎖
+  try {
+    const stmt = env.DB.prepare("SELECT value FROM kv_store WHERE key = ?").bind(key);
+    const result = await stmt.first();
+    return result ? result.value : null;
+  } catch (e) {
+    console.error(`讀取 DB 失敗 [${key}]:`, e);
+    return null;
+  }
+}
+
+async function dbPut(env, key, value) {
+  if (!env || !env.DB) return; // 防呆安全鎖
+  try {
+    const stmt = env.DB.prepare("INSERT INTO kv_store (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value").bind(key, value);
+    await stmt.run();
+  } catch (e) {
+    console.error(`寫入 DB 失敗 [${key}]:`, e);
+  }
+}
+
+async function dbDel(env, key) {
+  if (!env || !env.DB) return; // 防呆安全鎖
+  try {
+    const stmt = env.DB.prepare("DELETE FROM kv_store WHERE key = ?").bind(key);
+    await stmt.run();
+  } catch (e) {
+    console.error(`刪除 DB 失敗 [${key}]:`, e);
+  }
+}
+
 export default {
   async fetch(request, env, ctx) {
     // 1. 確保只處理 POST 請求 (QQ Webhook 標準)
