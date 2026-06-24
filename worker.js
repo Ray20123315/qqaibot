@@ -588,16 +588,13 @@ export default {
 
 // 2. 寫入供長期語意聯想用的 Vectorize
           if (env.VECTORIZE && memoSwitch !== "false" && cleanMessage.length > 2) {
-            try {
-              // 過濾掉 QQ 表情，只留下純文字存進記憶庫
-              const pureMessage = cleanMessage.replace(/\[CQ:face,[^\]]+\]/g, '').trim();
-              
-              // 如果過濾完還有文字，才存進去
-              if (pureMessage.length > 0) {
-                const vec = await getVector(pureMessage);
+            const pureMessage = cleanMessage.replace(/\[CQ:face,[^\]]+\]/g, '').trim();
+            
+            if (pureMessage.length > 0) {
+              getVector(pureMessage).then(vec => {
                 if (vec && typeof vec !== 'string') {
                   const recordId = `chat_${currentGroupId}_${Date.now()}`;
-                  await env.VECTORIZE.insert([{
+                  env.VECTORIZE.insert([{
                     id: recordId,
                     values: vec,
                     metadata: { 
@@ -607,12 +604,10 @@ export default {
                     }
                   }]);
                 }
-              }
-            } catch (e) {
-              console.error("Vectorize insert failed:", e);
+              }).catch(() => {});
             }
           }
-
+          
       // 🛡️ 黑名單與聊天開關門檻
       const isBlacklisted = await env.QQ_STORE?.get(`status:blacklist:${userId}`);
       if (isBlacklisted === "true") return new Response(null, { status: 204 });
