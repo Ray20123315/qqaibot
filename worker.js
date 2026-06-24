@@ -850,21 +850,36 @@ export default {
       let success = false;
 
       // ==========================================
-      // 💬 呼叫 Gemini AI 核心 (完美保留原始輪詢機制 + 新增 Google Search 工具)
+      // 💬 呼叫 Gemini / Gemma AI 核心 (金鑰庫合併 + 智慧過濾聯網工具)
       // ==========================================
+      // 將普通金鑰與原本給向量函式庫用的金鑰完全合併，在變數名稱不變的情況下實作多模型共享
+      const keysStr = env.GEMINI_API_KEYS || "";
+      const vecKeysStr = env.VECTORIZE_GEMINI_KEYS || "";
+      const apiKeys = [
+        ...keysStr.split(',').map(k => k.trim()).filter(k => k !== ""),
+        ...vecKeysStr.split(',').map(k => k.trim()).filter(k => k !== "")
+      ];
+
       if (apiKeys.length > 0) {
         chatLoop: for (const apiKey of apiKeys) {
           for (const model of modelList) {
             try {
+              // 1. 先建立基礎的請求內容
+              const requestBody = { 
+                contents: contents,
+                systemInstruction: { parts: [{ text: finalStylePrompt }] }
+              };
+
+              // 2. 智慧分流：如果模型名稱不是以 gemma 開頭，才加上 Google Search 聯網工具
+              if (!model.startsWith('gemma')) {
+                requestBody.tools = [{ googleSearch: {} }];
+              }
+
               const geminiRes = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ 
-                  contents: contents,
-                  systemInstruction: { parts: [{ text: finalStylePrompt }] },
-                  tools: [{ googleSearch: {} }] // 🌐 確保在此開啟聯網工具
-                }), 
-                signal: AbortSignal.timeout(15000) 
+                body: JSON.stringify(requestBody), // 傳入動態調整後的請求
+                signal: AbortSignal.timeout(4000) // 建議縮短到4秒，遭遇額度耗盡時能瞬間無縫切換到保底模型
               });
               
               if (!geminiRes.ok) continue; 
@@ -874,7 +889,7 @@ export default {
                 replyText = responseData.candidates[0].content.parts[0].text;
                 replyText = replyText.replace(/[\*#\-\`~>_]/g, '').trim(); 
                 success = true;
-                break chatLoop;
+                break chatLoop; // 成功取得回复，跳出全部循環
               }
             } catch (err) {}
           }
