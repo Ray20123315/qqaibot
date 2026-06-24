@@ -671,10 +671,10 @@ export default {
       let shouldReply = isAtMe;
       let isAutoInterject = false;
 
-      // ⚡ 隨機插話機制 (20% 機率)
+      // ⚡ 隨機插話機制 (10% 機率)
       if (!isAtMe && (cleanMessage.length > 1 || imageUrl || voiceUrl) && !cleanMessage.startsWith('!') && !cleanMessage.startsWith('！')) {
         const targetDnd = await env.QQ_STORE.get(`dnd:${currentGroupId}:${userId}`);
-        if (targetDnd !== "true" && Math.random() < 0.25) { 
+        if (targetDnd !== "true" && Math.random() < 0.1) { 
           const lastInterject = await env.QQ_STORE.get(`last_interject:${currentGroupId}`);
           const now = Date.now();
           if (!lastInterject || now - parseInt(lastInterject) > 10000) { 
