@@ -40,3 +40,8 @@ namespace_id = "999"
 [observability.logs]
 enabled = false
 invocation_logs = true
+
+[[d1_databases]]
+binding = "DB"                # 必須大寫，對齊程式碼中的 env.DB
+database_name = "qqaibot"   # 您在網頁上建立的 D1 資料庫名稱
+database_id = "569a01fe-3297-40e1-832f-09c3793056ed" # 從 Cloudflare D1 後台複製過來的那串長 ID
