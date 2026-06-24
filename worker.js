@@ -924,9 +924,12 @@ export default {
                 systemInstruction: { parts: [{ text: finalStylePrompt }] }
               };
 
-              // 🌐 智慧過濾：完全對齊 Google 2026 最新 REST API 標準
-              if (!model.startsWith('gemma') && !model.includes('deep-research') && !model.includes('antigravity')) {
-                requestBody.tools = [{ google_search: {} }];
+              // ✨ 修正：只有當【模型支援】且【使用者真正需要/觸發了聯網】時，才開啟 Google Search！
+              // 這裡可以換成你程式裡實際用來判斷是否需要聯網的布林值變數（例如你定義的 requiresSearch 之類的）
+              const isUserRequestingSearch = msgLower.includes('!搜尋') || msgLower.includes('!上网') || msgLower.includes('!联网'); 
+
+              if (isUserRequestingSearch && !model.startsWith('gemma') && !model.includes('deep-research') && !model.includes('antigravity')) {
+              requestBody.tools = [{ google_search: {} }];
               }
 
               const geminiRes = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`, {
