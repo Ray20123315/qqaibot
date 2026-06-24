@@ -187,7 +187,38 @@ export default {
                       `!黑名单 [@成员/QQ号] / !解除黑名单 [@成员]`;
         return jsonReply(helpMsg);
       }
+      // 📊 【新功能】智慧狀態指令攔截（支援繁、簡、英、全形驚嘆號且不區分大小寫）
+      if (['!status', '!配额', '!配額', '！status', '！配额', '！配額'].includes(msgLower)) {
+        try {
+          // 1. 從 KV 撈取統計數據
+          const totalCalls = await env.QQ_STORE.get("STAT_TOTAL_CALLS") || "0";
+          const lastModel = await env.QQ_STORE.get("STAT_LAST_MODEL") || "無記錄";
+          
+          // 2. 計算目前環境變數中綁定了幾把 API Key
+          const totalKeys = [
+            ...(env.GEMINI_API_KEYS || "").split(',').filter(k => k.trim() !== ""),
+            ...(env.VECTORIZE_GEMINI_KEYS || "").split(',').filter(k => k.trim() !== "")
+          ].length;
 
+          // 3. 組合回覆看板
+          const statusReport = [
+            "📊 QQAI 運作狀態報告",
+            "━━━━━━━━━━━━━━━",
+            `🔑 當前負載金鑰數：${totalKeys} 把`,
+            `📈 系統累計對話次數：${totalCalls} 次`,
+            `🤖 最後服務成功模型：${lastModel}`,
+            "━━━━━━━━━━━━━━━",
+            "⚡️ 輪詢內核運作正常，隨時待命！"
+          ].join("\n");
+
+          // 4. ✨ 修正：完美對齊你原本的被動快速回覆工具函數，自動帶上 @ 提問者
+          return jsonReply(`${atSender}${statusReport}`);
+
+        } catch (statusErr) {
+          console.error("執行狀態指令失敗:", statusErr);
+          return jsonReply(`${atSender}❌ 讀取狀態數據時發生異常。`);
+        }
+      }
       // 🌐 讀網頁功能 (純抓文字)
       const readMatch = cleanMessage.match(/^[!！](?:读网页|讀網頁)\s+(https?:\/\/[^\s]+)/);
       if (readMatch) {
