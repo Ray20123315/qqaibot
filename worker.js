@@ -560,7 +560,7 @@ export default {
       
       // 第二段到此完美結束，準備進入第三段的讀網頁、翻譯與截圖實用工具模組...
 
-      // ==========================================
+// ==========================================
       // 🎙️ 文字轉語音直連 (調用 Gemini TTS 原生擬真語音模型)
       // ==========================================
       if (/^[!！](?:语音|語音|speak|tts)\s+(.+)/.test(msgLower)) {
@@ -626,10 +626,10 @@ export default {
               console.error(`❌ 語音執行異常:`, e);
               lastError = e.message || e;
             }
-          } // 內層金鑰迴圈結束
-        } // 外層模型迴圈結束
+          } // 👈 內層金鑰迴圈結束
+        } // 👈 外層模型迴圈結束
 
-        // 🏁 最終輸出
+        // 🏁 最終輸出判定
         if (successAudioBase64) {
           // 🎯 組裝成標準 QQ 框架能識別的語音 CQ 碼 (file=base64://...)
           const cqAudio = `[CQ:record,file=base64://${successAudioBase64}]`;
@@ -637,17 +637,8 @@ export default {
         } else {
           return jsonReply(`${atSender}⚠️ 语音生成失败。原因：${lastError}`);
         }
-      }
-
-        // 🏁 最終輸出
-        if (successAudioBase64) {
-          // 🎯 組裝成標準 QQ 框架能識別的語音 CQ 碼 (file=base64://...)
-          const cqAudio = `[CQ:record,file=base64://${successAudioBase64}]`;
-          return jsonReply(cqAudio); // 丟回群裡，機器人就會直接發送群語音！
-        } else {
-          return jsonReply(`${atSender}⚠️ 语音生成失败。原因：${lastError}`);
-        }
-      }
+      } // 👈 確保整段 if 指令在這邊完美閉合
+      
       // ==========================================
       // 🌐 读网页精炼摘要 (纯抓文字并交由 AI 总结)
       // ==========================================
