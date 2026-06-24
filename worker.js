@@ -131,7 +131,7 @@ export default {
         let roleTxt = isDeveloper ? "【开发者】" : senderRole === 'owner' ? "【群主】" : senderRole === 'admin' ? "【管理员】" : "【群成员】";
         let helpMsg = `🤖 机器人指令清单 ${roleTxt}\n\n` +
                       `🔹 [群员可用]\n` +
-                      `!吃瓜 [数字] (总结最近聊天)\n` +
+                      `!总结 [数字] (总结最近聊天)\n` +
                       `!截图 [网址] (获取网页快照)\n` +
                       `!群规 / !rules\n` +
                       `!免打扰 (开启后AI不主动插话)\n` +
@@ -189,7 +189,7 @@ export default {
         if (logs.length < 5) return jsonReply(`${atSender}🍵 刚刚群里都没什么人说话，没有瓜可以吃呀~`);
 
         const targetLogs = logs.slice(-count);
-        const promptText = `请看以下最近群里的聊天记录。请用八卦、轻松的语气，帮我简单总结大家刚刚在聊些什么（重点抓取有趣的内容，字数控制在150字以内，不准用markdown）：\n\n` + targetLogs.join('\n');
+        const promptText = `请看以下最近群里的聊天记录。请用八卦、轻松的语气，帮我简单总结大家刚刚在聊些什么（重点抓取有趣的内容，字数控制在500字以内，不准用markdown，但可以使用条列式）：\n\n` + targetLogs.join('\n');
         
         const keysStr = env.GEMINI_API_KEYS || "";
         const apiKeys = keysStr.split(',').map(k => k.trim()).filter(k => k !== "");
