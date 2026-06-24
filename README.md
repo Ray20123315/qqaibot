@@ -1,8 +1,19 @@
-# 🌌 QQ AI Bot (專案名稱：qqai)
+# 🌌 QQ AI Bot (專案名稱：qqaibot)
 
 一個基於 **Cloudflare Workers** 邊緣運算生態打造的高效能 QQ 群聊 AI 機器人。完美整合了 Google Gemini 大語言模型、Vectorize 向量資料庫（長期語意記憶）以及 Puppeteer 瀏覽器自動化環境，提供極其乾淨、精煉且擬真自然的群聊互動體驗。
 
 本專案特別針對 QQ 群聊生態進行了深度優化，從底層根除了 AI 常見的「戲癮大發（括號內心戲）」、「表情包氾濫（CQ 碼堆疊）」以及「跨語系編碼亂碼（菱形問號 ）」等痛點。
+
+---
+
+## ⚠️ 免責聲明與風險提示 (Disclaimer)
+
+**使用本專案前，請務必詳細閱讀以下聲明：**
+
+1. **違反平台條款風險**：開發與使用未經官方授權的 QQ 第三方機器人（Bot）或客戶端，**可能違反騰訊（Tencent）的服務條款（TOS）與社群規範**。
+2. **帳號封禁風險**：使用本專案的程式碼連接 QQ 帳號，存在導致該 QQ 帳號被「暫時凍結」或「永久封鎖」的風險。**強烈建議使用專門註冊的小號進行測試，切勿使用主力帳號或綁定重要資產的帳號。**
+3. **無商業背書**：本專案僅為程式設計與 AI 技術交流之學術研究用途，與騰訊公司、Google (Gemini)、Cloudflare 等任何商業實體均無任何關聯或合作關係。
+4. **責任歸屬**：本專案以「現狀 (As-is)」提供。**使用者下載、部署、執行本專案代碼所產生的一切後果（包含但不限於帳號被封、群組被解散、資料遺失、法律糾紛等），均由使用者自行承擔。** 專案原作者（ray20123315）不對使用本軟體造成的任何直接或間接損失負責。
 
 ---
 
@@ -136,22 +147,25 @@ npx wrangler deploy worker.js --no-assets
 
 ## 📄 版權與授權條款 (License)
 
-本專案採用 **自訂免費使用但禁止修改條款 (Custom Non-Derivative License)**，由版權所有人 **ray20123315** 制定。
+本專案採用 **自訂限制性授權條款 (Custom Restricted License)**，由版權所有人 **ray20123315** 制定。
 
-### ⚠️ 核心法律約束：你可以免費使用，但絕對不可以修改原始碼！
+### ⚠️ 核心法律約束：您可以免費使用，但修改與公開發布受到嚴格限制！
 
 ```text
 Copyright (c) 2026 ray20123315
 
-Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the "Software"), to use, copy, and distribute the Software, subject to the following strict conditions:
+Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the "Software"), to use, copy, and distribute the Software, subject to the following conditions:
 
-1. MODIFICATION IS STRICTLY PROHIBITED. You may not modify, alter, translate, reverse-engineer, or create derivative works of the Software in any way.
-2. The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
+1. FREE USAGE: You are permitted to download, deploy, and execute the Software for personal or internal use without charge.
+2. MODIFICATION BY REQUEST ONLY: Modification, alteration, translation, or creation of derivative works of the Software is strictly prohibited UNLESS explicit, written consent is granted by the copyright holder (ray20123315) upon your request.
+3. NO PUBLIC DISTRIBUTION OF MODIFICATIONS: Even if modification rights are granted by the copyright holder, any modified version of the Software MUST NOT be published, shared, or distributed publicly in any form (e.g., GitHub, Hugging Face, public forums).
+4. The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
 
 THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 ```
 
 **📜 條款白話文解讀：**
-1. **免費使用與散佈**：你被授權可以免費下載、架設、執行以及原封不動地分享此軟體副本。
-2. **嚴格禁止改作（零容忍）**：**你不得以任何形式修改、閹割、新增、翻譯或對本軟體進行反向工程。** 只要你動了程式碼中的任何一行（包括私自改編後發佈），即視為嚴重違反本授權協議，版權所有者 (ray20123315) 保留所有法律追訴權。
-3. **免責聲明**：本軟體按「現狀」提供，不附帶任何明示或暗示的保證。
+1. **免費使用與部署**：您被授權可以免費下載、架設、執行以及原封不動地分享此軟體副本。
+2. **修改需經原作者同意**：預設情況下，您**無權修改**本專案的任何程式碼。若您有修改需求，必須主動聯繫原作者 (ray20123315) 請求授權。
+3. **禁止公開發布改版（絕對禁令）**：即使您獲得了原作者的同意進行了修改，這些**修改後的程式碼僅限於您私下使用，絕對禁止以任何形式公開發布或散佈**（包含但不限於推送到公開的 GitHub 倉庫、論壇等）。
+4. **免責聲明**：本軟體按「現狀」提供，不附帶任何明示或暗示的保證。
