@@ -1459,8 +1459,9 @@ async function dbDel(env, key) {
       // 3. 正则清洗：防止任何意外产生的连续重复 @ 标签
       finalReply = finalReply.replace(/(\\[CQ:at,qq=\\d+\\]\\s*)\\1+/g, '$1');
       
-      // 🎯 完美收尾：将最终结果吐给 Webhook
-      return jsonReply(finalReply);
+// 🎯 完美收尾：将最终结果吐给 Webhook
+          return jsonReply(finalReply);
+
       } // 结束 fetch 函式
     }; // 结束 export default
 
