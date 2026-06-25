@@ -3,37 +3,9 @@ import puppeteer from "@cloudflare/puppeteer";
 // ==========================================
 // 🗄️ D1 資料庫操作小幫手 (模擬 KV 行為)
 // ==========================================
-async function dbGet(env, key) {
-  if (!env || !env.DB) return null; // 防呆安全鎖
-  try {
-    const stmt = env.DB.prepare("SELECT value FROM kv_store WHERE key = ?").bind(key);
-    const result = await stmt.first();
-    return result ? result.value : null;
-  } catch (e) {
-    console.error(`讀取 DB 失敗 [${key}]:`, e);
-    return null;
-  }
-}
-
-async function dbPut(env, key, value) {
-  if (!env || !env.DB) return; // 防呆安全鎖
-  try {
-    const stmt = env.DB.prepare("INSERT INTO kv_store (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value").bind(key, value);
-    await stmt.run();
-  } catch (e) {
-    console.error(`寫入 DB 失敗 [${key}]:`, e);
-  }
-}
-
-async function dbDel(env, key) {
-  if (!env || !env.DB) return; // 防呆安全鎖
-  try {
-    const stmt = env.DB.prepare("DELETE FROM kv_store WHERE key = ?").bind(key);
-    await stmt.run();
-  } catch (e) {
-    console.error(`刪除 DB 失敗 [${key}]:`, e);
-  }
-}
+async function dbGet(env, key) { ... }
+async function dbPut(env, key, value) { ... }
+async function dbDel(env, key) { ... }
 
 export default {
   async fetch(request, env) {
@@ -81,7 +53,6 @@ export default {
 
         console.log(`[Worker] 📡 Google API 回應狀態碼: ${googleResponse.status}`);
 
-        // 如果 Google 拒絕連線 (狀態碼不是 101 Switching Protocols)
         if (googleResponse.status !== 101) {
           const errText = await googleResponse.text();
           console.error(`[Worker] 💥 Google 拒絕連線！詳細錯誤內容:\n${errText}`);
@@ -96,17 +67,9 @@ export default {
         server.accept();
         googleWs.accept();
 
-        // 接收前端聲音，轉發給 Google
-        server.addEventListener('message', event => {
-          googleWs.send(event.data);
-        });
+        server.addEventListener('message', event => { googleWs.send(event.data); });
+        googleWs.addEventListener('message', event => { server.send(event.data); });
 
-        // 接收 Google 回覆，轉發給前端
-        googleWs.addEventListener('message', event => {
-          server.send(event.data);
-        });
-
-        // 監聽斷線事件，印出真正原因
         server.addEventListener('close', (e) => {
             console.log(`[Worker] 🚪 前端已斷開連線 (代碼: ${e.code}, 原因: ${e.reason})`);
             googleWs.close();
@@ -121,10 +84,7 @@ export default {
             console.error(`[Worker] ❌ Google WebSocket 發生未知錯誤:`, e);
         });
 
-        return new Response(null, {
-          status: 101,
-          webSocket: client,
-        });
+        return new Response(null, { status: 101, webSocket: client });
 
       } catch (err) {
         console.error(`[Worker] 💥 fetch 過程中發生未預期錯誤: ${err.message}\n${err.stack}`);
@@ -132,9 +92,7 @@ export default {
       }
     }
 
-    return new Response('Not Found', { status: 404 });
-  }
-};
+    // 💡【重要修正】：這裡原本是 }; 現在將它與 404 回傳移除，讓邏輯直接順延往下執行
 
     // ==========================================
     // 🤖 確保只處理 POST 請求 (QQ Webhook 標準)
