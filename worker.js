@@ -39,9 +39,6 @@ export default {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
 
-async fetch(request, env, ctx) {
-    const url = new URL(request.url);
-
     // ==========================================
     // 🎙️ 網頁即時語音對話 (Gemini Live 一體化路由)
     // ==========================================
