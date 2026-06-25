@@ -1551,7 +1551,7 @@ export default {
 }; // 结束 export default
 
 // ==========================================
-// 🌐 內嵌 HTML 前端網頁樣板 (修復秒斷 + 完美順暢播放器)
+// 🌐 內嵌 HTML 前端網頁樣板 (終極穩定版：修復 1005 錯誤 + 神經握手連線)
 // ==========================================
 function getLiveHtmlPage(host) {
   return `
@@ -1629,8 +1629,7 @@ function getLiveHtmlPage(host) {
           let playAudioCtx;
           let nextPlayTime = 0;
 
-          // 使用 window.location.host 避免樣板字串注入錯誤
-          const wsUrl = (location.protocol === 'https:' ? 'wss://' : 'ws://') + window.location.host + "/live"; 
+          const wsUrl = (location.protocol === 'https:' ? 'wss://' : 'ws://') + "${host}/live"; 
 
           const statusStr = document.getElementById('statusStr');
           const callBtn = document.getElementById('callBtn');
@@ -1674,72 +1673,84 @@ function getLiveHtmlPage(host) {
                   try {
                       modelSelect.disabled = true;
                       callBtn.disabled = true;
-                      statusStr.innerText = "正在取得麥克風權限與連接雲端...";
+                      statusStr.innerText = "正在取得麥克風權限...";
                       
                       nextPlayTime = 0; 
                       if (playAudioCtx && playAudioCtx.state === 'suspended') playAudioCtx.resume();
 
-                      // 1. 先取得麥克風，確保有聲音可用
+                      // 1. 取得麥克風
                       audioCtx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 16000 });
                       mediaStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                      
+                      statusStr.innerText = "正在連接雲端伺服器...";
                       
                       // 2. 建立 WebSocket 連線
                       ws = new WebSocket(wsUrl);
                       
                       ws.onopen = () => {
                           const chosenModel = modelSelect.value;
+                          statusStr.innerHTML = "🔄 正在與 Google 大腦進行神經握手...";
                           
-                          // 🚨 步驟一：先送出 setup 給 Google 伺服器
+                          // 🚨 步驟一：只送出 setup，然後乖乖等待伺服器回應 (完全遵守 Google 官方規範)
                           ws.send(JSON.stringify({
                               setup: {
                                   model: chosenModel,
                                   generationConfig: { responseModalities: ["AUDIO"] }
                               }
                           }));
-
-                          // 🚨 步驟二：稍微延遲 300 毫秒再送語音，避免 Google 來不及反應直接斷線
-                          setTimeout(() => {
-                              const source = audioCtx.createMediaStreamSource(mediaStream);
-                              processor = audioCtx.createScriptProcessor(2048, 1, 1);
-                              
-                              processor.onaudioprocess = (e) => {
-                                  if (!ws || ws.readyState !== WebSocket.OPEN) return;
-                                  const inputData = e.inputBuffer.getChannelData(0);
-                                  const pcmBuffer = Float32ToInt16(inputData);
-                                  const base64Chunk = btoa(String.fromCharCode(...new Uint8Array(pcmBuffer.buffer)));
-                                  
-                                  // 🎯 致命修復：必須精準加上 ;rate=16000，否則秒踢！
-                                  ws.send(JSON.stringify({
-                                      realtimeInput: { mediaChunks: [{ mimeType: "audio/pcm;rate=16000", data: base64Chunk }] }
-                                  }));
-                              };
-
-                              source.connect(processor);
-                              processor.connect(audioCtx.destination);
-                          }, 300);
-
-                          isCalling = true;
-                          callBtn.disabled = false;
-                          callBtn.innerText = "掛斷電話";
-                          callBtn.classList.add('active');
-                          muteBtn.style.display = "block";
-                          
-                          const modelNameForDisplay = chosenModel.replace("models/", "");
-                          statusStr.innerHTML = "🎙️ 通話中！<br>你現在正在和 <strong>" + modelNameForDisplay + "</strong> 對話，請直接說話...";
                       };
 
                       ws.onmessage = async (event) => {
                           try {
                               const response = JSON.parse(event.data);
+                              
+                              // 🚨 步驟二：收到伺服器確認 (setupComplete) 後，才啟動聲音串流
+                              if (response.setupComplete) {
+                                  const source = audioCtx.createMediaStreamSource(mediaStream);
+                                  processor = audioCtx.createScriptProcessor(2048, 1, 1);
+                                  
+                                  processor.onaudioprocess = (e) => {
+                                      if (!ws || ws.readyState !== WebSocket.OPEN) return;
+                                      const inputData = e.inputBuffer.getChannelData(0);
+                                      const pcmBuffer = Float32ToInt16(inputData);
+                                      const base64Chunk = btoa(String.fromCharCode(...new Uint8Array(pcmBuffer.buffer)));
+                                      
+                                      // 🎯 精準加上 ;rate=16000，否則會被踢！
+                                      ws.send(JSON.stringify({
+                                          realtimeInput: { mediaChunks: [{ mimeType: "audio/pcm;rate=16000", data: base64Chunk }] }
+                                      }));
+                                  };
+
+                                  source.connect(processor);
+                                  processor.connect(audioCtx.destination);
+
+                                  isCalling = true;
+                                  callBtn.disabled = false;
+                                  callBtn.innerText = "掛斷電話";
+                                  callBtn.classList.add('active');
+                                  muteBtn.style.display = "block";
+                                  
+                                  const modelNameForDisplay = modelSelect.value.replace("models/", "");
+                                  statusStr.innerHTML = \`🎙️ 通話中！<br>你現在正在和 <strong>\${modelNameForDisplay}</strong> 對話，請直接說話...\`;
+                              }
+
+                              // 處理 AI 回傳的聲音
                               const base64Audio = response.serverContent?.modelTurn?.parts?.[0]?.inlineData?.data;
                               if (base64Audio) playAudioBase64(base64Audio);
+                              
                           } catch(e){}
                       };
 
-                      // 加入錯誤代碼顯示，方便後續除錯
                       ws.onclose = (event) => {
                           stopCleanup();
-                          statusStr.innerHTML = \`❌ 連線已結束或中斷 (代碼: \${event.code})。<br>你可以切換模型重新連線！\`;
+                          // 如果還是 1005，給出明確的排錯方向
+                          let errorMsg = \`❌ 連線已結束或中斷 (代碼: \${event.code})。\`;
+                          if (event.code === 1005) {
+                              errorMsg += "<br><span style='color: #d93025; font-size: 0.9rem;'>⚠️ 1005 錯誤代表後端崩潰或 Google 拒絕了此模型。請確認你的後端有支援該模型！</span>";
+                          } else {
+                              errorMsg += "<br>你可以切換模型重新連線！";
+                          }
+                          statusStr.innerHTML = errorMsg;
                       };
 
                   } catch (err) {
