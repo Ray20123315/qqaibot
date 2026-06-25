@@ -1541,220 +1541,248 @@ export default {
 }; // 结束 export default
 
 // ==========================================
-// 🌐 網頁即時語音介面 HTML (QQ 群友專用版)
+// 🌐 内嵌 HTML 前端网页样板 (修复连线中断 + 增加静音 + 恢复 Gemini 3/3.5)
 // ==========================================
 function getLiveHtmlPage(host) {
-  return `<!DOCTYPE html>
-<html lang="zh-CN">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>AI 语音通话</title>
-    <style>
-        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; margin: 0; background-color: #f0f2f5; }
-        .card { background: white; padding: 30px; border-radius: 16px; box-shadow: 0 8px 24px rgba(0,0,0,0.1); text-align: center; width: 90%; max-width: 400px; }
-        h2 { margin-top: 0; color: #333; }
-        select { padding: 12px; margin-bottom: 20px; width: 100%; font-size: 16px; border-radius: 8px; border: 1px solid #ccc; outline: none; }
-        .btn-group { display: flex; flex-direction: column; gap: 12px; }
-        button { padding: 14px 20px; font-size: 16px; font-weight: bold; border: none; border-radius: 8px; cursor: pointer; transition: 0.2s; color: white; }
-        #start-btn { background: #4CAF50; }
-        #start-btn:hover { background: #45a049; }
-        #stop-btn { background: #F44336; }
-        #stop-btn:hover { background: #e53935; }
-        #mute-btn { background: #FF9800; }
-        #mute-btn:hover { background: #fb8c00; }
-        button:disabled { background: #cfd8dc !important; cursor: not-allowed; color: #90a4ae; }
-        #status { margin-top: 20px; color: #546e7a; font-size: 15px; font-weight: 500; }
-    </style>
-</head>
-<body>
-    <div class="card">
-        <h2>🎙️ AI 实时语音助手</h2>
-        <select id="model-select">
-            <option value="models/gemini-2.5-flash">Gemini 2.5 Flash (推荐)</option>
-            <option value="models/gemini-2.0-flash-exp">Gemini 2.0 Flash</option>
-        </select>
-        
-        <div class="btn-group">
-            <button id="start-btn">开始通话</button>
-            <button id="mute-btn" disabled>关闭麦克风</button>
-            <button id="stop-btn" disabled>挂断通话</button>
-        </div>
-        
-        <div id="status">准备就绪 🟢</div>
-    </div>
+  return `
+  <!DOCTYPE html>
+  <html lang="zh-CN">
+  <head>
+      <meta charset="UTF-8">
+      <meta name="viewport" content="width=device-width, initial-scale=1.0">
+      <title>QQAI 专属语音电话</title>
+      <style>
+          body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #121212; color: #fff; text-align: center; padding: 40px 20px; margin: 0; }
+          .container { max-width: 500px; margin: 0 auto; background: #1e1e1e; padding: 30px; border-radius: 16px; box-shadow: 0 8px 24px rgba(0,0,0,0.3); }
+          h1 { margin-top: 0; font-size: 1.8rem; color: #1a73e8; }
+          
+          /* 模型选择器 */
+          .model-selector { margin: 20px 0; text-align: left; }
+          .model-selector label { display: block; margin-bottom: 8px; color: #aaa; font-size: 0.95rem; font-weight: bold; }
+          .model-selector select { width: 100%; padding: 12px; background: #2a2a2a; color: #fff; border: 1px solid #444; border-radius: 8px; font-size: 1rem; outline: none; cursor: pointer; }
+          .model-selector select:disabled { opacity: 0.5; cursor: not-allowed; }
 
-    <script>
-        let ws;
-        let audioContext;
-        let mediaStream;
-        let processor;
-        let isMuted = false;
+          /* 免责声明区块 */
+          .disclaimer { background: #2a2a2a; border-left: 4px solid #e6a23c; padding: 12px; text-align: left; font-size: 0.85rem; color: #e6a23c; margin-bottom: 20px; border-radius: 4px; line-height: 1.5; }
+          .status { margin: 20px 0; font-size: 1.1rem; color: #aaa; min-height: 50px; line-height: 1.5; }
+          
+          /* 按钮群组 */
+          .btn-group { display: flex; flex-direction: column; gap: 15px; }
+          .btn { padding: 16px; font-size: 1.1rem; font-weight: bold; border: none; border-radius: 40px; cursor: pointer; transition: all 0.3s ease; width: 100%; color: white; }
+          .btn:disabled { background: #444 !important; color: #888 !important; cursor: not-allowed; box-shadow: none !important; transform: none !important; }
+          .btn:hover:not(:disabled) { transform: translateY(-2px); }
+          
+          #callBtn { background: #1a73e8; box-shadow: 0 4px 12px rgba(26,115,232,0.3); }
+          #callBtn.active { background: #d93025; box-shadow: 0 4px 12px rgba(217,48,37,0.4); animation: pulse 1.5s infinite; }
+          
+          #muteBtn { background: #f39c12; box-shadow: 0 4px 12px rgba(243,156,18,0.3); display: none; }
+          #muteBtn.muted { background: #9b59b6; box-shadow: 0 4px 12px rgba(155,89,182,0.3); }
+          
+          @keyframes pulse { 0% { transform: scale(1); } 50% { transform: scale(1.03); opacity: 0.9; } 100% { transform: scale(1); } }
+      </style>
+  </head>
+  <body>
 
-        const startBtn = document.getElementById('start-btn');
-        const stopBtn = document.getElementById('stop-btn');
-        const muteBtn = document.getElementById('mute-btn');
-        const statusDiv = document.getElementById('status');
-        const modelSelect = document.getElementById('model-select');
+      <div class="container">
+          <h1>🎙️ QQAI 语音通话大脑</h1>
+          
+          <div class="model-selector">
+              <label for="modelSelect">请选择通话 AI 模型：</label>
+              <select id="modelSelect">
+                  <option value="models/gemini-2.5-flash">🗣️ Gemini 2.5 Native Audio (极富感情、有灵魂)</option>
+                  <option value="models/gemini-3-flash-live">⚡ Gemini 3 Flash Live (超高速、零延迟接话)</option>
+                  <option value="models/gemini-3.5-live-translate">🌐 Gemini 3.5 Live Translate (同声传译、跨语翻译)</option>
+              </select>
+          </div>
 
-        // 1. 開始通話 (連線 WebSocket 與開啟麥克風)
-        startBtn.onclick = async () => {
-            try {
-                statusDiv.innerText = "正在连接大模型...";
-                startBtn.disabled = true;
+          <div class="disclaimer">
+              <strong>⚠️ 隐私与免责声明：</strong><br>
+              本服务基于 Google AI Studio 免费版运行。您的对话语音将会被 Google 收集用于模型优化，且可能经过人工抽样审查。<strong>请绝对不要透露任何个人隐私、账号密码或金融卡等敏感信息！</strong>继续使用即代表您已知悉并同意此机制。
+          </div>
 
-                // 建立 WebSocket 連線
-                const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-                ws = new WebSocket(protocol + '//' + window.location.host + '/live');
+          <div class="status" id="statusStr">准备就绪，挑选模型后即可开聊！</div>
+          
+          <div class="btn-group">
+              <button class="btn" id="callBtn" onclick="toggleCall()">开始通话</button>
+              <button class="btn" id="muteBtn" onclick="toggleMute()">关闭麦克风</button>
+          </div>
+      </div>
 
-                ws.onopen = () => {
-                    statusDiv.innerText = "连接成功，正在初始化...";
-                    // 發送 Gemini 要求的 setup 訊息
-                    const setupMsg = { setup: { model: modelSelect.value } };
-                    ws.send(JSON.stringify(setupMsg));
-                    
-                    // 啟動錄音
-                    startAudioCapture();
-                };
+      <script>
+          let ws;
+          let audioCtx;
+          let mediaStream;
+          let processor;
+          let isCalling = false;
+          let isMuted = false;
 
-                ws.onmessage = async (event) => {
-                    // 解析 Gemini 回傳的聲音資料並播放
-                    const data = JSON.parse(event.data);
-                    if (data.serverContent && data.serverContent.modelTurn) {
-                         const parts = data.serverContent.modelTurn.parts;
-                         for (const part of parts) {
-                             if (part.inlineData && part.inlineData.data) {
-                                 playAudio(part.inlineData.data);
-                             }
-                         }
-                    }
-                };
+          let playAudioCtx;
+          let nextPlayTime = 0;
 
-                ws.onclose = () => {
-                    stopCall();
-                    statusDiv.innerText = "连接已断开 🔴";
-                };
+          const wsUrl = (location.protocol === 'https:' ? 'wss://' : 'ws://') + "${host}/live"; 
 
-            } catch (e) {
-                statusDiv.innerText = "连接失败: " + e.message;
-                stopCall();
-            }
-        };
+          const statusStr = document.getElementById('statusStr');
+          const callBtn = document.getElementById('callBtn');
+          const muteBtn = document.getElementById('muteBtn');
+          const modelSelect = document.getElementById('modelSelect');
 
-        // 2. 掛斷通話
-        stopBtn.onclick = () => {
-            stopCall();
-            statusDiv.innerText = "已挂断 🔴";
-        };
+          // 🎶 核心：接收 Base64 并连续顺滑播放的 PCM 解码器
+          function playAudioBase64(base64Str) {
+              if (!playAudioCtx) {
+                  playAudioCtx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 24000 });
+              }
+              if (playAudioCtx.state === 'suspended') playAudioCtx.resume();
+              
+              const binary = atob(base64Str);
+              const bytes = new Uint8Array(binary.length);
+              for (let i = 0; i < binary.length; i++) {
+                  bytes[i] = binary.charCodeAt(i);
+              }
+              
+              const int16Array = new Int16Array(bytes.buffer);
+              const float32Array = new Float32Array(int16Array.length);
+              for (let i = 0; i < int16Array.length; i++) {
+                  float32Array[i] = int16Array[i] / 32768.0;
+              }
+              
+              const audioBuffer = playAudioCtx.createBuffer(1, float32Array.length, 24000);
+              audioBuffer.getChannelData(0).set(float32Array);
+              
+              const source = playAudioCtx.createBufferSource();
+              source.buffer = audioBuffer;
+              source.connect(playAudioCtx.destination);
+              
+              const currentTime = playAudioCtx.currentTime;
+              if (nextPlayTime < currentTime) nextPlayTime = currentTime;
+              source.start(nextPlayTime);
+              nextPlayTime += audioBuffer.duration;
+          }
 
-        // 3. 開關麥克風 (靜音功能)
-        muteBtn.onclick = () => {
-            if (mediaStream) {
-                // 取得第一條音訊軌道
-                const audioTrack = mediaStream.getAudioTracks()[0];
-                isMuted = !isMuted;
-                audioTrack.enabled = !isMuted; // true = 收音, false = 靜音
-                
-                // 更新按鈕介面 (簡體)
-                if (isMuted) {
-                    muteBtn.innerText = "打开麦克风";
-                    muteBtn.style.background = "#9C27B0"; // 靜音時變成紫色提示
-                    statusDiv.innerText = "麦克风已静音 🔇";
-                } else {
-                    muteBtn.innerText = "关闭麦克风";
-                    muteBtn.style.background = "#FF9800"; // 恢復橘色
-                    statusDiv.innerText = "通话中 🟢";
-                }
-            }
-        };
+          async function toggleCall() {
+              if (!isCalling) {
+                  try {
+                      modelSelect.disabled = true;
+                      callBtn.disabled = true;
+                      statusStr.innerText = "正在获取麦克风权限与连接云端...";
+                      
+                      nextPlayTime = 0; 
+                      if (playAudioCtx && playAudioCtx.state === 'suspended') playAudioCtx.resume();
 
-        // 🎤 擷取麥克風聲音並轉換為 Base64 傳送
-        async function startAudioCapture() {
-            try {
-                // Gemini 規定輸入端取樣率為 16kHz
-                audioContext = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 16000 });
-                mediaStream = await navigator.mediaDevices.getUserMedia({ audio: true });
-                
-                stopBtn.disabled = false;
-                muteBtn.disabled = false;
-                statusDiv.innerText = "通话中 🟢";
+                      // 1. 获取麦克风 (必须先获取，确保连接上 WS 后马上有声音可送)
+                      audioCtx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 16000 });
+                      mediaStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                      
+                      // 2. 建立 WebSocket 连接 (延迟连线避免被系统秒踢)
+                      ws = new WebSocket(wsUrl);
+                      
+                      ws.onopen = () => {
+                          const chosenModel = modelSelect.value;
+                          
+                          // 连线成功，立刻送出 setup
+                          ws.send(JSON.stringify({
+                              setup: {
+                                  model: chosenModel,
+                                  generationConfig: { responseModalities: ["AUDIO"] }
+                              }
+                          }));
 
-                const source = audioContext.createMediaStreamSource(mediaStream);
-                // 使用 ScriptProcessor 即時處理音訊 (相容性最佳)
-                processor = audioContext.createScriptProcessor(4096, 1, 1);
+                          // 开始处理录音
+                          const source = audioCtx.createMediaStreamSource(mediaStream);
+                          processor = audioCtx.createScriptProcessor(2048, 1, 1);
+                          
+                          processor.onaudioprocess = (e) => {
+                              if (ws.readyState !== WebSocket.OPEN) return;
+                              const inputData = e.inputBuffer.getChannelData(0);
+                              const pcmBuffer = Float32ToInt16(inputData);
+                              const base64Chunk = btoa(String.fromCharCode(...new Uint8Array(pcmBuffer.buffer)));
+                              
+                              ws.send(JSON.stringify({
+                                  realtimeInput: { mediaChunks: [{ mimeType: "audio/pcm", data: base64Chunk }] }
+                              }));
+                          };
 
-                processor.onaudioprocess = (e) => {
-                    if (!ws || ws.readyState !== WebSocket.OPEN) return;
-                    
-                    const inputData = e.inputBuffer.getChannelData(0);
-                    const pcm16 = new Int16Array(inputData.length);
-                    for (let i = 0; i < inputData.length; i++) {
-                        // 轉換為 16-bit PCM
-                        pcm16[i] = Math.max(-1, Math.min(1, inputData[i])) * 0x7FFF;
-                    }
-                    
-                    // 轉成 Base64
-                    const base64 = btoa(String.fromCharCode(...new Uint8Array(pcm16.buffer)));
-                    
-                    // 傳送給 Worker 中轉
-                    const msg = {
-                        realtimeInput: {
-                            mediaChunks: [{ mimeType: "audio/pcm;rate=16000", data: base64 }]
-                        }
-                    };
-                    ws.send(JSON.stringify(msg));
-                };
+                          source.connect(processor);
+                          processor.connect(audioCtx.destination);
 
-                source.connect(processor);
-                processor.connect(audioContext.destination);
+                          // 更新 UI 状态
+                          isCalling = true;
+                          callBtn.disabled = false;
+                          callBtn.innerText = "挂断电话";
+                          callBtn.classList.add('active');
+                          muteBtn.style.display = "block";
+                          
+                          const modelNameForDisplay = chosenModel.replace("models/", "");
+                          statusStr.innerHTML = "🎙️ 通话中！<br>你现在正在和 <strong>" + modelNameForDisplay + "</strong> 对话，请直接说话...";
+                      };
 
-            } catch (err) {
-                statusDiv.innerText = "无法获取麦克风权限！请检查浏览器设置。";
-                stopCall();
-            }
-        }
+                      ws.onmessage = async (event) => {
+                          try {
+                              const response = JSON.parse(event.data);
+                              const base64Audio = response.serverContent?.modelTurn?.parts?.[0]?.inlineData?.data;
+                              if (base64Audio) playAudioBase64(base64Audio);
+                          } catch(e){}
+                      };
 
-        // 🔊 播放 Gemini 傳回來的 Base64 音訊
-        function playAudio(base64Data) {
-            if (!audioContext) return;
-            const binaryString = window.atob(base64Data);
-            const bytes = new Uint8Array(binaryString.length);
-            for (let i = 0; i < binaryString.length; i++) {
-                bytes[i] = binaryString.charCodeAt(i);
-            }
-            const audioData = new Int16Array(bytes.buffer);
-            // Gemini 預設回傳 24kHz
-            const audioBuffer = audioContext.createBuffer(1, audioData.length, 24000); 
-            const channelData = audioBuffer.getChannelData(0);
-            for (let i = 0; i < audioData.length; i++) {
-                channelData[i] = audioData[i] / 0x7FFF;
-            }
-            const source = audioContext.createBufferSource();
-            source.buffer = audioBuffer;
-            source.connect(audioContext.destination);
-            source.start();
-        }
+                      ws.onclose = () => {
+                          stopCleanup();
+                          statusStr.innerText = "❌ 连线已结束或中断。你可以切换模型重新连线！";
+                      };
 
-        // 🛑 徹底停止通話並清理資源
-        function stopCall() {
-            // 1. 斷開 WebSocket
-            if (ws && ws.readyState === WebSocket.OPEN) ws.close();
-            // 2. 停止音訊處理
-            if (processor) processor.disconnect();
-            // 3. 關閉麥克風硬體權限
-            if (mediaStream) mediaStream.getTracks().forEach(track => track.stop());
-            // 4. 關閉音訊引擎
-            if (audioContext && audioContext.state !== 'closed') audioContext.close();
-            
-            // 恢復 UI 初始狀態
-            startBtn.disabled = false;
-            stopBtn.disabled = true;
-            muteBtn.disabled = true;
-            isMuted = false;
-            muteBtn.innerText = "关闭麦克风";
-            muteBtn.style.background = "#FF9800";
-        }
-    </script>
-</body>
-</html>`;
+                  } catch (err) {
+                      statusStr.innerText = "开启麦克风失败: " + err.message;
+                      modelSelect.disabled = false;
+                      callBtn.disabled = false;
+                  }
+              } else {
+                  // 点击挂断
+                  stopCleanup();
+                  statusStr.innerText = "通话已挂断。你可以切换模型重新连线！";
+              }
+          }
+
+          function toggleMute() {
+              if (mediaStream) {
+                  const audioTrack = mediaStream.getAudioTracks()[0];
+                  isMuted = !isMuted;
+                  audioTrack.enabled = !isMuted;
+                  
+                  if (isMuted) {
+                      muteBtn.innerText = "打开麦克风";
+                      muteBtn.classList.add('muted');
+                      statusStr.innerHTML = "🔇 <strong>已静音</strong>。对方听不到你的声音。";
+                  } else {
+                      muteBtn.innerText = "关闭麦克风";
+                      muteBtn.classList.remove('muted');
+                      statusStr.innerHTML = "🎙️ 通话中！请直接说话...";
+                  }
+              }
+          }
+
+          function stopCleanup() {
+              if (ws && ws.readyState === WebSocket.OPEN) ws.close();
+              if (processor) processor.disconnect();
+              if (mediaStream) mediaStream.getTracks().forEach(t => t.stop());
+              if (audioCtx && audioCtx.state !== 'closed') audioCtx.close();
+              
+              isCalling = false;
+              isMuted = false;
+              callBtn.innerText = "开始通话";
+              callBtn.classList.remove('active');
+              callBtn.disabled = false;
+              muteBtn.style.display = "none";
+              muteBtn.innerText = "关闭麦克风";
+              muteBtn.classList.remove('muted');
+              modelSelect.disabled = false;
+          }
+
+          function Float32ToInt16(buffer) {
+              let l = buffer.length;
+              let buf = new Int16Array(l);
+              while (l--) { buf[l] = Math.max(-1, Math.min(1, buffer[l])) * 0x7FFF; }
+              return buf;
+          }
+      </script>
+  </body>
+  </html>
+  `;
 }
