@@ -1461,11 +1461,13 @@ async function dbDel(env, key) {
       
       // 🎯 完美收尾：将最终结果吐给 Webhook
       return jsonReply(finalReply);
+      } // 结束 fetch 函式
+    }; // 结束 export default
 
-    } catch (err) {
+/**    } catch (err) {
       // 兜底全域崩溃防护，确保 Worker 绝对不会死机
       console.error("全局严重错误:", err);
       return new Response("OK (Handled Error)", { status: 200 });
     }
   } // 结束 fetch 函式
-}; // 结束 export default
+}; // 结束 export default**//
