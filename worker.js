@@ -97,13 +97,14 @@ export default {
     // ==========================================
     // 📢 新增：QQ 群內輸入 !live 噴出網頁語音通話網址
     // ==========================================
-    const rawMessage = body.message || body.raw_message || "";
+    
+    // 💡 修正點：優先讀取 raw_message，並強制確保它絕對是「字串 (String)」
+    const rawMessage = String(body.raw_message || (typeof body.message === 'string' ? body.message : ""));
     
     if (rawMessage.trim() === "!live") {
       const userId = body.user_id;
       const atSender = userId ? `[CQ:at,qq=${userId}] ` : ""; 
       
-      // 注意：確保你的 jsonReply 函式在你原本代碼的更下方有定義！
       return jsonReply(
         `${atSender}\n🎙️ 專屬 AI 語音通話平台已就緒！\n` +
         `請點擊下方網址，自選大腦即可開始與我「即時語音通話」：\n` +
