@@ -1554,248 +1554,208 @@ export default {
 // 🌐 內嵌 HTML 前端網頁樣板 (終極穩定版：修復 1005 錯誤 + 神經握手連線)
 // ==========================================
 function getLiveHtmlPage(host) {
-  return `<!DOCTYPE html>
-<html lang="zh-TW">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>QQAI 專屬語音電話</title>
-    <style>
-        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #121212; color: #fff; text-align: center; padding: 40px 20px; margin: 0; }
-        .container { max-width: 500px; margin: 0 auto; background: #1e1e1e; padding: 30px; border-radius: 16px; box-shadow: 0 8px 24px rgba(0,0,0,0.3); }
-        h1 { margin-top: 0; font-size: 1.8rem; color: #1a73e8; }
-        
-        /* 模型選擇器 */
-        .model-selector { margin: 20px 0; text-align: left; }
-        .model-selector label { display: block; margin-bottom: 8px; color: #aaa; font-size: 0.95rem; font-weight: bold; }
-        .model-selector select { width: 100%; padding: 12px; background: #2a2a2a; color: #fff; border: 1px solid #444; border-radius: 8px; font-size: 1rem; outline: none; cursor: pointer; }
-        .model-selector select:disabled { opacity: 0.5; cursor: not-allowed; }
+  return `
+  <!DOCTYPE html>
+  <html lang="zh-TW">
+  <head>
+      <meta charset="UTF-8">
+      <meta name="viewport" content="width=device-width, initial-scale=1.0">
+      <title>QQAI Bot 雲端核心控制台</title>
+      <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;600&family=Noto+Sans+TC:wght@400;700&display=swap" rel="stylesheet">
+      <style>
+          :root {
+              --bg: #0a0f1d;
+              --card: #141d33;
+              --primary: #00f2fe;
+              --secondary: #4facfe;
+              --text: #ffffff;
+              --text-muted: #8fa0c4;
+              --success: #00e676;
+          }
+          * { box-sizing: border-box; margin: 0; padding: 0; }
+          body {
+              font-family: 'Space Grotesk', 'Noto Sans TC', sans-serif;
+              background-color: var(--bg);
+              color: var(--text);
+              display: flex;
+              justify-content: center;
+              align-items: center;
+              min-height: 100vh;
+              padding: 20px;
+          }
+          .container {
+              width: 100%;
+              max-width: 650px;
+              background: var(--card);
+              border-radius: 24px;
+              padding: 35px;
+              box-shadow: 0 20px 50px rgba(0,0,0,0.5);
+              border: 1px solid rgba(255,255,255,0.05);
+              position: relative;
+              overflow: hidden;
+          }
+          .container::before {
+              content: '';
+              position: absolute;
+              top: -50%;
+              left: -50%;
+              width: 200%;
+              height: 200%;
+              background: radial-gradient(circle, rgba(0,242,254,0.05) 0%, transparent 70%);
+              pointer-events: none;
+          }
+          h1 {
+              font-size: 28px;
+              font-weight: 700;
+              background: linear-gradient(45deg, var(--primary), var(--secondary));
+              -webkit-background-clip: text;
+              -webkit-text-fill-color: transparent;
+              margin-bottom: 8px;
+              display: flex;
+              align-items: center;
+              gap: 10px;
+          }
+          .subtitle {
+              color: var(--text-muted);
+              font-size: 14px;
+              margin-bottom: 30px;
+          }
+          .status-badge {
+              display: inline-flex;
+              align-items: center;
+              gap: 8px;
+              background: rgba(0, 230, 118, 0.1);
+              color: var(--success);
+              padding: 6px 14px;
+              border-radius: 50px;
+              font-size: 13px;
+              font-weight: 600;
+              margin-bottom: 25px;
+              border: 1px solid rgba(0, 230, 118, 0.2);
+          }
+          .status-dot {
+              width: 8px;
+              height: 8px;
+              background-color: var(--success);
+              border-radius: 50%;
+              box-shadow: 0 0 10px var(--success);
+              animation: pulse 2s infinite;
+          }
+          @keyframes pulse {
+              0% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(0, 230, 118, 0.7); }
+              70% { transform: scale(1); box-shadow: 0 0 0 10px rgba(0, 230, 118, 0); }
+              100% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(0, 230, 118, 0); }
+          }
+          .webhook-box {
+              background: rgba(0,0,0,0.2);
+              border-radius: 12px;
+              padding: 15px;
+              margin-bottom: 30px;
+              border: 1px solid rgba(255,255,255,0.05);
+          }
+          .webhook-title {
+              font-size: 12px;
+              color: var(--text-muted);
+              text-transform: uppercase;
+              margin-bottom: 8px;
+              letter-spacing: 1px;
+          }
+          .webhook-url {
+              font-family: monospace;
+              color: var(--primary);
+              word-break: break-all;
+              font-size: 14px;
+              display: flex;
+              justify-content: space-between;
+              align-items: center;
+              gap: 10px;
+          }
+          .copy-btn {
+              background: rgba(255,255,255,0.05);
+              border: none;
+              color: #fff;
+              padding: 5px 10px;
+              border-radius: 6px;
+              cursor: pointer;
+              font-size: 12px;
+              transition: all 0.2s;
+          }
+          .copy-btn:hover { background: var(--primary); color: #000; }
+          .features {
+              display: grid;
+              grid-template-columns: 1fr 1fr;
+              gap: 15px;
+              margin-top: 20px;
+          }
+          .card {
+              background: rgba(255,255,255,0.02);
+              border: 1px solid rgba(255,255,255,0.05);
+              border-radius: 16px;
+              padding: 20px;
+              text-align: left;
+          }
+          .card-title { color: var(--text-muted); font-size: 13px; margin-bottom: 5px; }
+          .card-value { font-size: 22px; font-weight: 600; color: #fff; }
+          
+          .footer {
+              text-align: center;
+              margin-top: 35px;
+              font-size: 12px;
+              color: var(--text-muted);
+          }
+      </style>
+  </head>
+  <body>
+      <div class="container">
+          <h1>🤖 QQAI 智慧機器人控制台</h1>
+          <p class="subtitle">Cloudflare Workers 邊緣運算驅動後台</p>
+          
+          <div class="status-badge">
+              <span class="status-dot"></span> 系統網域維護中 / 邊緣節點正常監聽
+          </div>
 
-        /* 免責聲明區塊 */
-        .disclaimer { background: #2a2a2a; border-left: 4px solid #e6a23c; padding: 12px; text-align: left; font-size: 0.85rem; color: #e6a23c; margin-bottom: 20px; border-radius: 4px; line-height: 1.5; }
-        .status { margin: 20px 0; font-size: 1.1rem; color: #aaa; min-height: 50px; line-height: 1.5; }
-        
-        /* 按鈕群組 */
-        .btn-group { display: flex; flex-direction: column; gap: 15px; }
-        .btn { padding: 16px; font-size: 1.1rem; font-weight: bold; border: none; border-radius: 40px; cursor: pointer; transition: all 0.3s ease; width: 100%; color: white; }
-        .btn:disabled { background: #444 !important; color: #888 !important; cursor: not-allowed; box-shadow: none !important; transform: none !important; }
-        .btn:hover:not(:disabled) { transform: translateY(-2px); }
-        
-        #callBtn { background: #1a73e8; box-shadow: 0 4px 12px rgba(26,115,232,0.3); }
-        #callBtn.active { background: #d93025; box-shadow: 0 4px 12px rgba(217,48,37,0.4); animation: pulse 1.5s infinite; }
-        
-        #muteBtn { background: #f39c12; box-shadow: 0 4px 12px rgba(243,156,18,0.3); display: none; }
-        #muteBtn.muted { background: #9b59b6; box-shadow: 0 4px 12px rgba(155,89,182,0.3); }
-        
-        @keyframes pulse { 0% { transform: scale(1); } 50% { transform: scale(1.03); opacity: 0.9; } 100% { transform: scale(1); } }
-    </style>
-</head>
-<body>
+          <div class="webhook-box">
+              <div class="webhook-title">QQ Webhook 填入網址</div>
+              <div class="webhook-url">
+                  <span id="urlText">https://${host}/</span>
+                  <button class="copy-btn" onclick="copyUrl()">複製</button>
+              </div>
+          </div>
 
-    <div class="container">
-        <h1>🎙️ QQAI 語音通話大腦</h1>
-        
-        <div class="model-selector">
-            <label for="modelSelect">請選擇通話 AI 模型：</label>
-            <select id="modelSelect">
-                <option value="models/gemini-2.0-flash-exp">⚡ Gemini 2.0 Flash (最新官方推薦模型)</option>
-                <option value="models/gemini-2.5-flash">🗣️ Gemini 2.5 Native Audio (極富感情、有靈魂)</option>
-            </select>
-        </div>
+          <h3 style="margin-bottom: 15px; font-size: 16px; color: var(--text-muted);">📊 系統即時指標 (群組動態整合)</h3>
+          <div class="features">
+              <div class="card">
+                  <div class="card-title">機器人狀態</div>
+                  <div class="card-value" style="color: var(--success);">🟢 線上守護中</div>
+              </div>
+              <div class="card">
+                  <div class="card-title">邊緣路由速度</div>
+                  <div class="card-value">~12ms</div>
+              </div>
+              <div class="card">
+                  <div class="card-title">核心架構</div>
+                  <div class="card-value" style="font-size: 16px; color: var(--secondary);">Gemini 2.5 Flash</div>
+              </div>
+              <div class="card">
+                  <div class="card-title">自動插話隨機率</div>
+                  <div class="card-value">15%</div>
+              </div>
+          </div>
 
-        <div class="disclaimer">
-            <strong>⚠️ 隱私與免責聲明：</strong><br>
-            本服務基於 Google AI 運行。您的對話語音將會被收集用於模型優化。<strong>請絕對不要透露任何個人隱私、帳號密碼等敏感資訊！</strong>繼續使用即代表您已知悉並同意此機制。
-        </div>
+          <div class="footer">
+              Powered by Cloudflare Workers & Gemini Core API © 2026
+          </div>
+      </div>
 
-        <div class="status" id="statusStr">準備就緒，挑選模型後即可開聊！</div>
-        
-        <div class="btn-group">
-            <button class="btn" id="callBtn" onclick="toggleCall()">開始通話</button>
-            <button class="btn" id="muteBtn" onclick="toggleMute()">關閉麥克風</button>
-        </div>
-    </div>
-
-    <script>
-        let ws;
-        let audioCtx;
-        let mediaStream;
-        let processor;
-        let isCalling = false;
-        let isMuted = false;
-
-        let playAudioCtx;
-        let nextPlayTime = 0;
-
-        const wsUrl = (location.protocol === 'https:' ? 'wss://' : 'ws://') + "${host}/live"; 
-
-        const statusStr = document.getElementById('statusStr');
-        const callBtn = document.getElementById('callBtn');
-        const muteBtn = document.getElementById('muteBtn');
-        const modelSelect = document.getElementById('modelSelect');
-
-        function playAudioBase64(base64Str) {
-            if (!playAudioCtx) {
-                playAudioCtx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 24000 });
-            }
-            if (playAudioCtx.state === 'suspended') playAudioCtx.resume();
-            
-            const binary = atob(base64Str);
-            const bytes = new Uint8Array(binary.length);
-            for (let i = 0; i < binary.length; i++) {
-                bytes[i] = binary.charCodeAt(i);
-            }
-            
-            const int16Array = new Int16Array(bytes.buffer);
-            const float32Array = new Float32Array(int16Array.length);
-            for (let i = 0; i < int16Array.length; i++) {
-                float32Array[i] = int16Array[i] / 32768.0;
-            }
-            
-            const audioBuffer = playAudioCtx.createBuffer(1, float32Array.length, 24000);
-            audioBuffer.getChannelData(0).set(float32Array);
-            
-            const source = playAudioCtx.createBufferSource();
-            source.buffer = audioBuffer;
-            source.connect(playAudioCtx.destination);
-            
-            const currentTime = playAudioCtx.currentTime;
-            if (nextPlayTime < currentTime) nextPlayTime = currentTime;
-            source.start(nextPlayTime);
-            nextPlayTime += audioBuffer.duration;
-        }
-
-        async function toggleCall() {
-            if (!isCalling) {
-                try {
-                    modelSelect.disabled = true;
-                    callBtn.disabled = true;
-                    statusStr.innerText = "正在取得麥克風權限...";
-                    
-                    nextPlayTime = 0; 
-                    if (playAudioCtx && playAudioCtx.state === 'suspended') playAudioCtx.resume();
-
-                    audioCtx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 16000 });
-                    mediaStream = await navigator.mediaDevices.getUserMedia({ audio: true });
-                    
-                    statusStr.innerText = "正在連接雲端伺服器...";
-                    ws = new WebSocket(wsUrl);
-                    
-                    ws.onopen = () => {
-                        const chosenModel = modelSelect.value;
-                        statusStr.innerHTML = "🔄 正在與 Google 大腦進行神經握手...";
-                        
-                        // 1. 先送 setup
-                        ws.send(JSON.stringify({
-                            setup: {
-                                model: chosenModel,
-                                generationConfig: { responseModalities: ["AUDIO"] }
-                            }
-                        }));
-                    };
-
-                    ws.onmessage = async (event) => {
-                        try {
-                            const response = JSON.parse(event.data);
-                            
-                            // 2. 收到確認後才送錄音資料
-                            if (response.setupComplete) {
-                                const source = audioCtx.createMediaStreamSource(mediaStream);
-                                processor = audioCtx.createScriptProcessor(2048, 1, 1);
-                                
-                                processor.onaudioprocess = (e) => {
-                                    if (!ws || ws.readyState !== WebSocket.OPEN) return;
-                                    const inputData = e.inputBuffer.getChannelData(0);
-                                    const pcmBuffer = Float32ToInt16(inputData);
-                                    const base64Chunk = btoa(String.fromCharCode(...new Uint8Array(pcmBuffer.buffer)));
-                                    
-                                    // 精準的 rate=16000 設定
-                                    ws.send(JSON.stringify({
-                                        realtimeInput: { mediaChunks: [{ mimeType: "audio/pcm;rate=16000", data: base64Chunk }] }
-                                    }));
-                                };
-
-                                source.connect(processor);
-                                processor.connect(audioCtx.destination);
-
-                                isCalling = true;
-                                callBtn.disabled = false;
-                                callBtn.innerText = "掛斷電話";
-                                callBtn.classList.add('active');
-                                muteBtn.style.display = "block";
-                                
-                                const modelNameForDisplay = modelSelect.value.replace("models/", "");
-                                statusStr.innerHTML = \`🎙️ 通話中！<br>你現在正在和 <strong>\${modelNameForDisplay}</strong> 對話，請直接說話...\`;
-                            }
-
-                            const base64Audio = response.serverContent?.modelTurn?.parts?.[0]?.inlineData?.data;
-                            if (base64Audio) playAudioBase64(base64Audio);
-                            
-                        } catch(e){}
-                    };
-
-                    ws.onclose = (event) => {
-                        stopCleanup();
-                        let errorMsg = \`❌ 連線已結束或中斷 (代碼: \${event.code})。\`;
-                        if (event.code === 1005) {
-                            errorMsg += "<br><span style='color: #d93025; font-size: 0.9rem;'>⚠️ 1005 錯誤代表 Google 拒絕了連線，請確認 Cloudflare Worker 的 GEMINI_API_KEY 已正確設定！</span>";
-                        }
-                        statusStr.innerHTML = errorMsg;
-                    };
-
-                } catch (err) {
-                    statusStr.innerText = "開啟麥克風失敗: " + err.message;
-                    modelSelect.disabled = false;
-                    callBtn.disabled = false;
-                }
-            } else {
-                stopCleanup();
-                statusStr.innerText = "通話已掛斷。你可以切換模型重新連線！";
-            }
-        }
-
-        function toggleMute() {
-            if (mediaStream) {
-                const audioTrack = mediaStream.getAudioTracks()[0];
-                isMuted = !isMuted;
-                audioTrack.enabled = !isMuted;
-                
-                if (isMuted) {
-                    muteBtn.innerText = "打開麥克風";
-                    muteBtn.classList.add('muted');
-                    statusStr.innerHTML = "🔇 <strong>已靜音</strong>。對方聽不到你的聲音。";
-                } else {
-                    muteBtn.innerText = "關閉麥克風";
-                    muteBtn.classList.remove('muted');
-                    statusStr.innerHTML = "🎙️ 通話中！請直接說話...";
-                }
-            }
-        }
-
-        function stopCleanup() {
-            if (ws && ws.readyState === WebSocket.OPEN) ws.close();
-            if (processor) processor.disconnect();
-            if (mediaStream) mediaStream.getTracks().forEach(t => t.stop());
-            if (audioCtx && audioCtx.state !== 'closed') audioCtx.close();
-            
-            isCalling = false;
-            isMuted = false;
-            callBtn.innerText = "開始通話";
-            callBtn.classList.remove('active');
-            callBtn.disabled = false;
-            muteBtn.style.display = "none";
-            muteBtn.innerText = "關閉麥克風";
-            muteBtn.classList.remove('muted');
-            modelSelect.disabled = false;
-        }
-
-        function Float32ToInt16(buffer) {
-            let l = buffer.length;
-            let buf = new Int16Array(l);
-            while (l--) { buf[l] = Math.max(-1, Math.min(1, buffer[l])) * 0x7FFF; }
-            return buf;
-        }
-    </script>
-</body>
-</html>`;
+      <script>
+          function copyUrl() {
+              const text = document.getElementById('urlText').innerText;
+              navigator.clipboard.writeText(text).then(() => {
+                  alert('Webhook 網址已成功複製到剪貼簿！快去填入你的 QQ 機器人後台吧！');
+              });
+          }
+      </script>
+  </body>
+  </html>
+  `;
 }
