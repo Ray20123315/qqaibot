@@ -333,27 +333,31 @@ export default {
       // ==========================================
       // 🎨 圖片生成直連 (完全動態化：金鑰陣列 ＋ 模型陣列 雙重自動輪詢)
       // ==========================================
-      if (/^[!！](?:画图|畫圖|draw)\s+(.+)/.test(msgLower)) {
+      // 💡 修改點 1：使用原始 msg 匹配（保留提示詞大小寫），但用 i 旗標忽略指令大小寫
+      if (/^[!！](?:画图|畫圖|draw)\s+(.+)/i.test(msg)) {
         // 精準提取提示詞 (相容 ! 畫圖 與 !畫圖)
-        const match = msgLower.match(/^[!！](?:画图|畫圖|draw)\s+(.+)/);
+        const match = msg.match(/^[!！](?:画图|畫圖|draw)\s+(.+)/i);
         const prompt = match ? match[1].trim() : "";
         
         if (!prompt) return jsonReply(`${atSender}🤷 请告诉我你想画什么，例如: !画图 一只在赛博朋克城市里的柴犬`);
         
-        // 1. 提取並解析多金鑰陣列
-        const keysStr = env.GEMINI_API_KEYS || "";
-        const apiKeys = keysStr.split(',').map(k => k.trim()).filter(k => k !== "");
-        if (apiKeys.length === 0) return jsonReply(`${atSender}⚠️ 尚未配置 API 金钥，无法生成图片。`);
+        // 🔑 1. 提取並解析兩組多金鑰陣列，並進行合體去重（共享全部額度分攤429壓力）
+        const apiKeys1 = (env.GEMINI_API_KEYS || "").split(',').map(k => k.trim()).filter(k => k !== "");
+        const apiKeys2 = (env.VECTORIZE_GEMINI_KEYS || "").split(',').map(k => k.trim()).filter(k => k !== "");
+        
+        // 使用 Set 自動過濾掉兩組變數中可能不小心重複填寫的 Key
+        const apiKeys = [...new Set([...apiKeys1, ...apiKeys2])];
+        if (apiKeys.length === 0) return jsonReply(`${atSender}⚠️ 尚未配置任何 Gemini API 金钥，无法执行此操作。`);
         
         // 2. 🚀 動態模型提取：完全不寫死，直接調用 modelList 並過濾出所有以 imagen- 開頭的模型
         const imagenModels = typeof modelList !== 'undefined' 
           ? modelList.filter(m => m.startsWith('imagen-'))
-          : ["imagen-4.0-fast-generate-001", "imagen-4.0-generate-001", "imagen-4.0-ultra-generate-001"]; // 防呆備份
+          : ["imagen-3.0-generate-002", "imagen-4.0-fast-generate-001"]; // 防呆備份
         
         let lastError = null;
         let successBase64 = null;
         let usedModelName = "";
-
+      
         // 🔄 核心雙重嵌套輪詢：外層輪詢模型梯隊，內層輪詢可用金鑰
         modelLoop: for (let m = 0; m < imagenModels.length; m++) {
           const currentModel = imagenModels[m];
@@ -368,18 +372,21 @@ export default {
               const response = await fetch(imgApiUrl, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
+                // 💡 修改點 2：修正 JSON 結構，將參數移入 config 中，並移除不支援的 outputMimeType
                 body: JSON.stringify({
-                  numberOfImages: 1,
                   prompt: prompt,
-                  aspectRatio: "1:1", 
-                  outputMimeType: "image/jpeg"
+                  config: {
+                    numberOfImages: 1,
+                    aspectRatio: "1:1",
+                    imageSize: "1K" // 可選：指定解析度
+                  }
                 })
               });
               
               if (!response.ok) {
                 const errTxt = await response.text();
                 console.warn(`⚠️ 請求失敗 [模型: ${currentModel} | 金鑰: ${k+1}]: ${response.status} - ${errTxt}`);
-                lastError = `[${currentModel}] 狀態碼 ${response.status}`;
+                lastError = `[${currentModel}] 狀態碼 ${response.status} - ${errTxt.substring(0, 50)}`;
                 continue; 
               }
               
@@ -398,7 +405,7 @@ export default {
             }
           } // 內層金鑰迴圈結束
         } // 外層模型迴圈結束
-
+      
         // 🏁 最終輸出判定
         if (successBase64) {
           // 組裝成標準 QQ 群能識別的 Base64 CQ 碼
@@ -408,7 +415,6 @@ export default {
           return jsonReply(`${atSender}⚠️ 圖片生成失敗。已遍歷所有模型梯隊 [${imagenModels.join('/')}] 與全部 ${apiKeys.length} 個金鑰，均無法生成。最後錯誤原因：${lastError}`);
         }
       } // 👈 確保整段 if 判斷式在這裡完美閉合
-      
 
       // ==========================================
       // 💖 【高情商情緒微調器】(取代卑微順從，提供情緒價值安慰)
@@ -579,7 +585,7 @@ export default {
       
       // 第二段到此完美結束，準備進入第三段的讀網頁、翻譯與截圖實用工具模組...
 
-// ==========================================
+      // ==========================================
       // 🎙️ 語音智能對答模組 (100% 相容自訂 modelList 且音訊加固版)
       // ==========================================
       if (/^[!！](?:语音|語音|speak|tts)\s+(.+)/.test(msgLower)) {
@@ -588,9 +594,13 @@ export default {
           const userPrompt = match ? match[1].trim() : "";
           if (!userPrompt) return jsonReply(`${atSender}🤷 想跟我聊什麼？例如: !語音 唱首歌給我聽`);
 
-          const keysStr = env.GEMINI_API_KEYS || "";
-          const apiKeys = keysStr.split(',').map(k => k.trim()).filter(k => k !== "");
-          if (apiKeys.length === 0) return jsonReply(`${atSender}⚠️ 尚未配置 API 金钥。`);
+          // 🔑 同時獲取兩組金鑰並合體，全面分攤語音 429 頻率限制壓力！
+          const apiKeys1 = (env.GEMINI_API_KEYS || "").split(',').map(k => k.trim()).filter(k => k !== "");
+          const apiKeys2 = (env.VECTORIZE_GEMINI_KEYS || "").split(',').map(k => k.trim()).filter(k => k !== "");
+          
+          // [...new Set(...)] 可以自動幫你刪除萬一兩組變數裡有重複填寫的 Key
+          const apiKeys = [...new Set([...apiKeys1, ...apiKeys2])];
+          if (apiKeys.length === 0) return jsonReply(`${atSender}⚠️ 尚未配置任何 Gemini API 金钥。`);
 
           // ----------------------------------------
           // 🚀 階段一：動態輪詢你的 modelList 獲取文字答案（大腦思考）
@@ -1326,16 +1336,18 @@ export default {
 
       // 第八段到此完美结束，准备进入第九段的多模型轮询请求与响应处理...
 
-    // ==========================================
+      // ==========================================
       // 🔄 终极无敌轮询：多金钥 x 多模型交叉调用
       // ==========================================
       // 提取全域配置的金钥清单 (供主力对话使用)
-      const keysStr = env.GEMINI_API_KEYS || "";
-      const apiKeys = keysStr.split(',').map(k => k.trim()).filter(k => k !== "");
-      if (apiKeys.length === 0) {
-          if (isAutoInterject) return new Response(null, { status: 204 });
-          return jsonReply(`${atSender}⚠️ 系统尚未配置任何主力 API 金钥，无法进行对话。`);
-      }
+      // 🔑 同時獲取兩組金鑰並合體，全面分攤語音 429 頻率限制壓力！
+          const apiKeys1 = (env.GEMINI_API_KEYS || "").split(',').map(k => k.trim()).filter(k => k !== "");
+          const apiKeys2 = (env.VECTORIZE_GEMINI_KEYS || "").split(',').map(k => k.trim()).filter(k => k !== "");
+          
+          // [...new Set(...)] 可以自動幫你刪除萬一兩組變數裡有重複填寫的 Key
+          const apiKeys = [...new Set([...apiKeys1, ...apiKeys2])];
+          
+          if (apiKeys.length === 0) return jsonReply(`${atSender}⚠️ 尚未配置任何 Gemini API 金钥。`);
 
       let finalReply = "";
       let success = false;
