@@ -1162,10 +1162,20 @@ export default {
         return jsonReply(`${atSender}✅ 赦免成功：已将 QQ:${targetQq} 移出黑名单。`);
       }
 
-      // ==========================================
+// ==========================================
       // 🎭 灵魂窃取 (动态全域模仿模块)
       // ==========================================
       if (['!模仿', '!imitate', '！模仿'].some(p => msgLower.startsWith(p))) {
+        // 🛡️ 权限检查：只有管理员、群主或核心开发者可用
+        // 注意：这里的 \`reqData.sender.role\` 请根据你实际接收 QQ 讯息的 JSON 变数名称做微调
+        // 如果你的大变数叫 payload 或 body，请换成对应的名字 (例如 payload.sender.role)
+        const role = reqData.sender?.role || 'member'; 
+        const isAdminOrOwner = role === 'admin' || role === 'owner' || isOnlyMe;
+        
+        if (!isAdminOrOwner) {
+            return jsonReply(`${atSender}⛔ 权限不足！「灵魂窃取」属于禁忌魔法，仅限管理员或群主使用。`);
+        }
+
         const prefix = ['!模仿', '!imitate', '！模仿'].find(p => msgLower.startsWith(p));
         const { targetQq } = parseArgs(userMessage, prefix);
         
@@ -1541,32 +1551,32 @@ export default {
 }; // 结束 export default
 
 // ==========================================
-// 🌐 内嵌 HTML 前端网页样板 (修复连线中断 + 增加静音 + 恢复 Gemini 3/3.5)
+// 🌐 內嵌 HTML 前端網頁樣板 (修復秒斷 + 完美順暢播放器)
 // ==========================================
 function getLiveHtmlPage(host) {
   return `
   <!DOCTYPE html>
-  <html lang="zh-CN">
+  <html lang="zh-TW">
   <head>
       <meta charset="UTF-8">
       <meta name="viewport" content="width=device-width, initial-scale=1.0">
-      <title>QQAI 专属语音电话</title>
+      <title>QQAI 專屬語音電話</title>
       <style>
           body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #121212; color: #fff; text-align: center; padding: 40px 20px; margin: 0; }
           .container { max-width: 500px; margin: 0 auto; background: #1e1e1e; padding: 30px; border-radius: 16px; box-shadow: 0 8px 24px rgba(0,0,0,0.3); }
           h1 { margin-top: 0; font-size: 1.8rem; color: #1a73e8; }
           
-          /* 模型选择器 */
+          /* 模型選擇器 */
           .model-selector { margin: 20px 0; text-align: left; }
           .model-selector label { display: block; margin-bottom: 8px; color: #aaa; font-size: 0.95rem; font-weight: bold; }
           .model-selector select { width: 100%; padding: 12px; background: #2a2a2a; color: #fff; border: 1px solid #444; border-radius: 8px; font-size: 1rem; outline: none; cursor: pointer; }
           .model-selector select:disabled { opacity: 0.5; cursor: not-allowed; }
 
-          /* 免责声明区块 */
+          /* 免責聲明區塊 */
           .disclaimer { background: #2a2a2a; border-left: 4px solid #e6a23c; padding: 12px; text-align: left; font-size: 0.85rem; color: #e6a23c; margin-bottom: 20px; border-radius: 4px; line-height: 1.5; }
           .status { margin: 20px 0; font-size: 1.1rem; color: #aaa; min-height: 50px; line-height: 1.5; }
           
-          /* 按钮群组 */
+          /* 按鈕群組 */
           .btn-group { display: flex; flex-direction: column; gap: 15px; }
           .btn { padding: 16px; font-size: 1.1rem; font-weight: bold; border: none; border-radius: 40px; cursor: pointer; transition: all 0.3s ease; width: 100%; color: white; }
           .btn:disabled { background: #444 !important; color: #888 !important; cursor: not-allowed; box-shadow: none !important; transform: none !important; }
@@ -1584,27 +1594,27 @@ function getLiveHtmlPage(host) {
   <body>
 
       <div class="container">
-          <h1>🎙️ QQAI 语音通话大脑</h1>
+          <h1>🎙️ QQAI 語音通話大腦</h1>
           
           <div class="model-selector">
-              <label for="modelSelect">请选择通话 AI 模型：</label>
+              <label for="modelSelect">請選擇通話 AI 模型：</label>
               <select id="modelSelect">
-                  <option value="models/gemini-2.5-flash">🗣️ Gemini 2.5 Native Audio (极富感情、有灵魂)</option>
-                  <option value="models/gemini-3-flash-live">⚡ Gemini 3 Flash Live (超高速、零延迟接话)</option>
-                  <option value="models/gemini-3.5-live-translate">🌐 Gemini 3.5 Live Translate (同声传译、跨语翻译)</option>
+                  <option value="models/gemini-2.5-flash">🗣️ Gemini 2.5 Native Audio (極富感情、有靈魂)</option>
+                  <option value="models/gemini-3-flash-live">⚡ Gemini 3 Flash Live (超高速、零延遲接話)</option>
+                  <option value="models/gemini-3.5-live-translate">🌐 Gemini 3.5 Live Translate (同聲傳譯、跨語翻譯)</option>
               </select>
           </div>
 
           <div class="disclaimer">
-              <strong>⚠️ 隐私与免责声明：</strong><br>
-              本服务基于 Google AI Studio 免费版运行。您的对话语音将会被 Google 收集用于模型优化，且可能经过人工抽样审查。<strong>请绝对不要透露任何个人隐私、账号密码或金融卡等敏感信息！</strong>继续使用即代表您已知悉并同意此机制。
+              <strong>⚠️ 隱私與免責聲明：</strong><br>
+              本服務基於 Google AI Studio 免費版運行。您的對話語音將會被 Google 收集用於模型優化，且可能經過人工抽樣審查。<strong>請絕對不要透露任何個人隱私、帳號密碼或金融卡等敏感資訊！</strong>繼續使用即代表您已知悉並同意此機制。
           </div>
 
-          <div class="status" id="statusStr">准备就绪，挑选模型后即可开聊！</div>
+          <div class="status" id="statusStr">準備就緒，挑選模型後即可開聊！</div>
           
           <div class="btn-group">
-              <button class="btn" id="callBtn" onclick="toggleCall()">开始通话</button>
-              <button class="btn" id="muteBtn" onclick="toggleMute()">关闭麦克风</button>
+              <button class="btn" id="callBtn" onclick="toggleCall()">開始通話</button>
+              <button class="btn" id="muteBtn" onclick="toggleMute()">關閉麥克風</button>
           </div>
       </div>
 
@@ -1619,14 +1629,15 @@ function getLiveHtmlPage(host) {
           let playAudioCtx;
           let nextPlayTime = 0;
 
-          const wsUrl = (location.protocol === 'https:' ? 'wss://' : 'ws://') + "${host}/live"; 
+          // 使用 window.location.host 避免樣板字串注入錯誤
+          const wsUrl = (location.protocol === 'https:' ? 'wss://' : 'ws://') + window.location.host + "/live"; 
 
           const statusStr = document.getElementById('statusStr');
           const callBtn = document.getElementById('callBtn');
           const muteBtn = document.getElementById('muteBtn');
           const modelSelect = document.getElementById('modelSelect');
 
-          // 🎶 核心：接收 Base64 并连续顺滑播放的 PCM 解码器
+          // 🎶 核心：接收 Base64 並連續順滑播放的 PCM 解碼器
           function playAudioBase64(base64Str) {
               if (!playAudioCtx) {
                   playAudioCtx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 24000 });
@@ -1663,22 +1674,22 @@ function getLiveHtmlPage(host) {
                   try {
                       modelSelect.disabled = true;
                       callBtn.disabled = true;
-                      statusStr.innerText = "正在获取麦克风权限与连接云端...";
+                      statusStr.innerText = "正在取得麥克風權限與連接雲端...";
                       
                       nextPlayTime = 0; 
                       if (playAudioCtx && playAudioCtx.state === 'suspended') playAudioCtx.resume();
 
-                      // 1. 获取麦克风 (必须先获取，确保连接上 WS 后马上有声音可送)
+                      // 1. 先取得麥克風，確保有聲音可用
                       audioCtx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 16000 });
                       mediaStream = await navigator.mediaDevices.getUserMedia({ audio: true });
                       
-                      // 2. 建立 WebSocket 连接 (延迟连线避免被系统秒踢)
+                      // 2. 建立 WebSocket 連線
                       ws = new WebSocket(wsUrl);
                       
                       ws.onopen = () => {
                           const chosenModel = modelSelect.value;
                           
-                          // 连线成功，立刻送出 setup
+                          // 🚨 步驟一：先送出 setup 給 Google 伺服器
                           ws.send(JSON.stringify({
                               setup: {
                                   model: chosenModel,
@@ -1686,33 +1697,35 @@ function getLiveHtmlPage(host) {
                               }
                           }));
 
-                          // 开始处理录音
-                          const source = audioCtx.createMediaStreamSource(mediaStream);
-                          processor = audioCtx.createScriptProcessor(2048, 1, 1);
-                          
-                          processor.onaudioprocess = (e) => {
-                              if (ws.readyState !== WebSocket.OPEN) return;
-                              const inputData = e.inputBuffer.getChannelData(0);
-                              const pcmBuffer = Float32ToInt16(inputData);
-                              const base64Chunk = btoa(String.fromCharCode(...new Uint8Array(pcmBuffer.buffer)));
+                          // 🚨 步驟二：稍微延遲 300 毫秒再送語音，避免 Google 來不及反應直接斷線
+                          setTimeout(() => {
+                              const source = audioCtx.createMediaStreamSource(mediaStream);
+                              processor = audioCtx.createScriptProcessor(2048, 1, 1);
                               
-                              ws.send(JSON.stringify({
-                                  realtimeInput: { mediaChunks: [{ mimeType: "audio/pcm", data: base64Chunk }] }
-                              }));
-                          };
+                              processor.onaudioprocess = (e) => {
+                                  if (!ws || ws.readyState !== WebSocket.OPEN) return;
+                                  const inputData = e.inputBuffer.getChannelData(0);
+                                  const pcmBuffer = Float32ToInt16(inputData);
+                                  const base64Chunk = btoa(String.fromCharCode(...new Uint8Array(pcmBuffer.buffer)));
+                                  
+                                  // 🎯 致命修復：必須精準加上 ;rate=16000，否則秒踢！
+                                  ws.send(JSON.stringify({
+                                      realtimeInput: { mediaChunks: [{ mimeType: "audio/pcm;rate=16000", data: base64Chunk }] }
+                                  }));
+                              };
 
-                          source.connect(processor);
-                          processor.connect(audioCtx.destination);
+                              source.connect(processor);
+                              processor.connect(audioCtx.destination);
+                          }, 300);
 
-                          // 更新 UI 状态
                           isCalling = true;
                           callBtn.disabled = false;
-                          callBtn.innerText = "挂断电话";
+                          callBtn.innerText = "掛斷電話";
                           callBtn.classList.add('active');
                           muteBtn.style.display = "block";
                           
                           const modelNameForDisplay = chosenModel.replace("models/", "");
-                          statusStr.innerHTML = "🎙️ 通话中！<br>你现在正在和 <strong>" + modelNameForDisplay + "</strong> 对话，请直接说话...";
+                          statusStr.innerHTML = "🎙️ 通話中！<br>你現在正在和 <strong>" + modelNameForDisplay + "</strong> 對話，請直接說話...";
                       };
 
                       ws.onmessage = async (event) => {
@@ -1723,20 +1736,20 @@ function getLiveHtmlPage(host) {
                           } catch(e){}
                       };
 
-                      ws.onclose = () => {
+                      // 加入錯誤代碼顯示，方便後續除錯
+                      ws.onclose = (event) => {
                           stopCleanup();
-                          statusStr.innerText = "❌ 连线已结束或中断。你可以切换模型重新连线！";
+                          statusStr.innerHTML = \`❌ 連線已結束或中斷 (代碼: \${event.code})。<br>你可以切換模型重新連線！\`;
                       };
 
                   } catch (err) {
-                      statusStr.innerText = "开启麦克风失败: " + err.message;
+                      statusStr.innerText = "開啟麥克風失敗: " + err.message;
                       modelSelect.disabled = false;
                       callBtn.disabled = false;
                   }
               } else {
-                  // 点击挂断
                   stopCleanup();
-                  statusStr.innerText = "通话已挂断。你可以切换模型重新连线！";
+                  statusStr.innerText = "通話已掛斷。你可以切換模型重新連線！";
               }
           }
 
@@ -1747,13 +1760,13 @@ function getLiveHtmlPage(host) {
                   audioTrack.enabled = !isMuted;
                   
                   if (isMuted) {
-                      muteBtn.innerText = "打开麦克风";
+                      muteBtn.innerText = "打開麥克風";
                       muteBtn.classList.add('muted');
-                      statusStr.innerHTML = "🔇 <strong>已静音</strong>。对方听不到你的声音。";
+                      statusStr.innerHTML = "🔇 <strong>已靜音</strong>。對方聽不到你的聲音。";
                   } else {
-                      muteBtn.innerText = "关闭麦克风";
+                      muteBtn.innerText = "關閉麥克風";
                       muteBtn.classList.remove('muted');
-                      statusStr.innerHTML = "🎙️ 通话中！请直接说话...";
+                      statusStr.innerHTML = "🎙️ 通話中！請直接說話...";
                   }
               }
           }
@@ -1766,11 +1779,11 @@ function getLiveHtmlPage(host) {
               
               isCalling = false;
               isMuted = false;
-              callBtn.innerText = "开始通话";
+              callBtn.innerText = "開始通話";
               callBtn.classList.remove('active');
               callBtn.disabled = false;
               muteBtn.style.display = "none";
-              muteBtn.innerText = "关闭麦克风";
+              muteBtn.innerText = "關閉麥克風";
               muteBtn.classList.remove('muted');
               modelSelect.disabled = false;
           }
