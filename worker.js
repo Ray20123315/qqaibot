@@ -37,9 +37,56 @@ async function dbDel(env, key) {
 
 export default {
   async fetch(request, env, ctx) {
-    // 1. 確保只處理 POST 請求 (QQ Webhook 標準)
-    if (request.method !== 'POST') return new Response('🤖 Worker 运行正常', { status: 200 });
+    const url = new URL(request.url);
 
+    // ==========================================
+    // 🎙️ 網頁即時語音對話 (Gemini Live 一體化路由)
+    // ==========================================
+    if (url.pathname === "/live") {
+      const upgradeHeader = request.headers.get('Upgrade');
+      
+      // 💡 1. 如果瀏覽器直接訪問網址，吐出我們寫好的 HTML 網頁
+      if (!upgradeHeader || upgradeHeader.toLowerCase() !== 'websocket') {
+        return new Response(getLiveHtmlPage(url.host), {
+          headers: { "Content-Type": "text/html; charset=utf-8" }
+        });
+      }
+
+      // 💡 2. 處理 WebSocket 連線中轉
+      const apiKeys1 = (env.GEMINI_API_KEYS || "").split(',').map(k => k.trim()).filter(k => k !== "");
+      const apiKeys2 = (env.VECTORIZE_GEMINI_KEYS || "").split(',').map(k => k.trim()).filter(k => k !== "");
+      const allKeys = [...new Set([...apiKeys1, ...apiKeys2])];
+      
+      if (allKeys.length === 0) {
+        return new Response('未配置任何可用的 Gemini API 金鑰', { status: 500 });
+      }
+      
+      const selectedKey = allKeys[Math.floor(Math.random() * allKeys.length)];
+      const webSocketPair = new WebSocketPair();
+      const [clientWebSocket, serverWebSocket] = Object.values(webSocketPair);
+
+      const geminiLiveUrl = `wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1alpha.GenerativeService.BidiGenerateContent?key=${selectedKey}`;
+      const geminiSocket = new WebSocket(geminiLiveUrl);
+
+      serverWebSocket.accept();
+      serverWebSocket.addEventListener('message', event => {
+        if (geminiSocket.readyState === WebSocket.OPEN) geminiSocket.send(event.data);
+      });
+      geminiSocket.addEventListener('message', event => {
+        if (serverWebSocket.readyState === WebSocket.OPEN) serverWebSocket.send(event.data);
+      });
+      serverWebSocket.addEventListener('close', () => geminiSocket.close());
+      geminiSocket.addEventListener('close', () => serverWebSocket.close());
+
+      return new Response(null, { status: 101, webSocket: clientWebSocket });
+    }
+
+    // ==========================================
+    // 🤖 確保只處理 POST 請求 (QQ Webhook 標準)
+    // ==========================================
+    if (request.method !== 'POST') return new Response('🤖 QQAI Worker 运行正常', { status: 200 });
+
+    // 👇 關鍵！必須先解析 body，才能知道 QQ 群裡說了什麼
     let body;
     try {
       body = await request.json();
@@ -47,6 +94,26 @@ export default {
       return new Response("Invalid JSON", { status: 400 });
     }
 
+    // ==========================================
+    // 📢 新增：QQ 群內輸入 !live 噴出網頁語音通話網址
+    // ==========================================
+    const rawMessage = body.message || body.raw_message || "";
+    
+    if (rawMessage.trim() === "!live") {
+      const userId = body.user_id;
+      const atSender = userId ? `[CQ:at,qq=${userId}] ` : ""; 
+      
+      // 注意：確保你的 jsonReply 函式在你原本代碼的更下方有定義！
+      return jsonReply(
+        `${atSender}\n🎙️ 專屬 AI 語音通話平台已就緒！\n` +
+        `請點擊下方網址，自選大腦即可開始與我「即時語音通話」：\n` +
+        `https://qqai.ray2025.com/live\n\n` +
+        `⚠️ 注意：免費版 API 語音將被 Google 收集優化，請勿透露個資與帳密。`
+      );
+    }
+    
+    // ==========================================
+    
     // 2. 防死循環核心：絕不回覆自己
     const botId = body.self_id ? body.self_id.toString() : "";
     const userId = body.user_id ? body.user_id.toString() : "";
@@ -1452,3 +1519,210 @@ export default {
     }
   } // 结束 fetch 函式
 }; // 结束 export default
+
+// ==========================================
+// 🌐 內嵌 HTML 前端網頁樣板 (自選模型 + 免責聲明 + 完美順暢播放器)
+// ==========================================
+function getLiveHtmlPage(host) {
+  return `
+  <!DOCTYPE html>
+  <html lang="zh-TW">
+  <head>
+      <meta charset="UTF-8">
+      <meta name="viewport" content="width=device-width, initial-scale=1.0">
+      <title>QQAI 專屬語音電話</title>
+      <style>
+          body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #121212; color: #fff; text-align: center; padding: 40px 20px; margin: 0; }
+          .container { max-width: 500px; margin: 0 auto; background: #1e1e1e; padding: 30px; border-radius: 16px; box-shadow: 0 8px 24px rgba(0,0,0,0.3); }
+          h1 { margin-top: 0; font-size: 1.8rem; color: #1a73e8; }
+          
+          /* 模型選擇器 */
+          .model-selector { margin: 20px 0; text-align: left; }
+          .model-selector label { display: block; margin-bottom: 8px; color: #aaa; font-size: 0.95rem; font-weight: bold; }
+          .model-selector select { width: 100%; padding: 12px; background: #2a2a2a; color: #fff; border: 1px solid #444; border-radius: 8px; font-size: 1rem; outline: none; cursor: pointer; }
+          .model-selector select:disabled { opacity: 0.5; cursor: not-allowed; }
+
+          /* 免責聲明區塊 */
+          .disclaimer { background: #2a2a2a; border-left: 4px solid #e6a23c; padding: 12px; text-align: left; font-size: 0.85rem; color: #e6a23c; margin-bottom: 20px; border-radius: 4px; line-height: 1.5; }
+
+          .status { margin: 25px 0; font-size: 1.1rem; color: #aaa; min-height: 50px; line-height: 1.5; }
+          .btn { padding: 16px 40px; font-size: 1.1rem; font-weight: bold; border: none; border-radius: 40px; cursor: pointer; background: #1a73e8; color: #fff; transition: all 0.3s ease; box-shadow: 0 4px 12px rgba(26,115,232,0.3); width: 100%; }
+          .btn:disabled { background: #444; color: #888; cursor: not-allowed; box-shadow: none; }
+          .btn:hover:not(:disabled) { background: #1557b0; transform: translateY(-2px); }
+          .active { background: #d93025; box-shadow: 0 4px 12px rgba(217,48,37,0.4); animation: pulse 1.5s infinite; }
+          @keyframes pulse { 0% { transform: scale(1); } 50% { transform: scale(1.03); opacity: 0.9; } 100% { transform: scale(1); } }
+      </style>
+  </head>
+  <body>
+
+      <div class="container">
+          <h1>🎙️ QQAI 語音通話大腦</h1>
+          
+          <div class="model-selector">
+              <label for="modelSelect">請選擇通話 AI 模型：</label>
+              <select id="modelSelect">
+                  <option value="models/gemini-2.5-flash">🗣️ Gemini 2.5 Native Audio (極富感情、有靈魂)</option>
+                  <option value="models/gemini-3-flash-live">⚡ Gemini 3 Flash Live (超高速、零延遲接話)</option>
+                  <option value="models/gemini-3.5-live-translate">🌐 Gemini 3.5 Live Translate (同聲傳譯、跨語翻譯)</option>
+              </select>
+          </div>
+
+          <div class="disclaimer">
+              <strong>⚠️ 隱私與免責聲明：</strong><br>
+              本服務基於 Google AI Studio 免費版運行。您的對話語音將會被 Google 收集用於模型優化，且可能經過人工抽樣審查。<strong>請絕對不要透露任何個人隱私、帳號密碼或金融卡等敏感資訊！</strong>繼續使用即代表您已知悉並同意此機制。
+          </div>
+
+          <div class="status" id="statusStr">等待連線中...</div>
+          <button class="btn" id="callBtn" onclick="toggleCall()">開始通話</button>
+      </div>
+
+      <script>
+          let ws;
+          let audioCtx;
+          let mediaStream;
+          let processor;
+          let isCalling = false;
+
+          // 🔊 音訊播放器全域變數 (完美無縫播放 Queue)
+          let playAudioCtx;
+          let nextPlayTime = 0;
+
+          // 自動對接當前 Worker 網址
+          const wsUrl = (location.protocol === 'https:' ? 'wss://' : 'ws://') + "${host}/live"; 
+
+          const statusStr = document.getElementById('statusStr');
+          const callBtn = document.getElementById('callBtn');
+          const modelSelect = document.getElementById('modelSelect');
+
+          // 🎶 核心：接收 Base64 並連續順滑播放的 PCM 解碼器
+          function playAudioBase64(base64Str) {
+              if (!playAudioCtx) {
+                  // Gemini 官方語音輸出預設為 24kHz
+                  playAudioCtx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 24000 });
+              }
+              if (playAudioCtx.state === 'suspended') playAudioCtx.resume();
+              
+              const binary = atob(base64Str);
+              const bytes = new Uint8Array(binary.length);
+              for (let i = 0; i < binary.length; i++) {
+                  bytes[i] = binary.charCodeAt(i);
+              }
+              
+              // 轉換為 Float32 音軌數據
+              const int16Array = new Int16Array(bytes.buffer);
+              const float32Array = new Float32Array(int16Array.length);
+              for (let i = 0; i < int16Array.length; i++) {
+                  float32Array[i] = int16Array[i] / 32768.0;
+              }
+              
+              const audioBuffer = playAudioCtx.createBuffer(1, float32Array.length, 24000);
+              audioBuffer.getChannelData(0).set(float32Array);
+              
+              const source = playAudioCtx.createBufferSource();
+              source.buffer = audioBuffer;
+              source.connect(playAudioCtx.destination);
+              
+              const currentTime = playAudioCtx.currentTime;
+              if (nextPlayTime < currentTime) nextPlayTime = currentTime;
+              source.start(nextPlayTime);
+              nextPlayTime += audioBuffer.duration;
+          }
+
+          function connect() {
+              ws = new WebSocket(wsUrl);
+              ws.onopen = () => {
+                  statusStr.innerHTML = "✅ 已連線至雲端！<br>挑選你想體驗的模型後，按下按鈕即可開聊。";
+                  callBtn.disabled = false;
+              };
+              ws.onmessage = async (event) => {
+                  try {
+                      const response = JSON.parse(event.data);
+                      // 攔截並播放 AI 吐回來的即時 PCM 聲音字節
+                      const base64Audio = response.serverContent?.modelTurn?.parts?.[0]?.inlineData?.data;
+                      if (base64Audio) {
+                          playAudioBase64(base64Audio);
+                      }
+                  } catch(e){}
+              };
+              ws.onclose = () => {
+                  statusStr.innerText = "❌ 連線已中斷，請重新整理網頁。";
+                  callBtn.disabled = true;
+                  modelSelect.disabled = true;
+              };
+          }
+
+          async function toggleCall() {
+              if (!isCalling) {
+                  try {
+                      modelSelect.disabled = true;
+                      statusStr.innerText = "正在初始化麥克風與語音通道...";
+                      
+                      // 如果之前有播放進度，清空並重置
+                      nextPlayTime = 0; 
+                      if (playAudioCtx && playAudioCtx.state === 'suspended') playAudioCtx.resume();
+
+                      const chosenModel = modelSelect.value;
+
+                      // 1. 發送 Live 初始化配置指令
+                      ws.send(JSON.stringify({
+                          setup: {
+                              model: chosenModel,
+                              generationConfig: { responseModalities: ["AUDIO"] }
+                          }
+                      }));
+
+                      // 2. 獲取瀏覽器麥克風 (Gemini 官方輸入要求 16kHz)
+                      audioCtx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 16000 });
+                      mediaStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                      const source = audioCtx.createMediaStreamSource(mediaStream);
+                      
+                      processor = audioCtx.createScriptProcessor(2048, 1, 1);
+                      source.connect(processor);
+                      processor.connect(audioCtx.destination);
+                      
+                      // 3. 麥克風即時錄音並轉成 PCM 送出
+                      processor.onaudioprocess = (e) => {
+                          if (ws.readyState !== WebSocket.OPEN) return;
+                          const inputData = e.inputBuffer.getChannelData(0);
+                          const pcmBuffer = Float32ToInt16(inputData);
+                          const base64Chunk = btoa(String.fromCharCode(...new Uint8Array(pcmBuffer.buffer)));
+                          
+                          ws.send(JSON.stringify({
+                              realtimeInput: { mediaChunks: [{ mimeType: "audio/pcm", data: base64Chunk }] }
+                          }));
+                      };
+
+                      callBtn.innerText = "掛斷電話";
+                      callBtn.classList.add('active');
+                      const modelNameForDisplay = chosenModel.replace("models/", "");
+                      statusStr.innerHTML = "🎙️ 通話中！<br>你現在正在和 <strong>" + modelNameForDisplay + "</strong> 對話，請直接說話...";
+                      isCalling = true;
+                  } catch (err) {
+                      statusStr.innerText = "開啟麥克風失敗: " + err.message;
+                      modelSelect.disabled = false;
+                  }
+              } else {
+                  if(processor) processor.disconnect();
+                  if(mediaStream) mediaStream.getTracks().forEach(t => t.stop());
+                  callBtn.innerText = "開始通話";
+                  callBtn.classList.remove('active');
+                  statusStr.innerText = "通話已掛斷。你可以切換模型重新連線！";
+                  modelSelect.disabled = false;
+                  isCalling = false;
+              }
+          }
+
+          function Float32ToInt16(buffer) {
+              let l = buffer.length;
+              let buf = new Int16Array(l);
+              while (l--) { buf[l] = Math.min(1, buffer[l]) * 0x7FFF; }
+              return buf;
+          }
+
+          // 開啟網頁即建立底層連線
+          connect();
+      </script>
+  </body>
+  </html>
+  `;
+}
