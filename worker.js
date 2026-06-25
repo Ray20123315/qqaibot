@@ -1571,16 +1571,13 @@ function getLiveHtmlPage(host) {
           * { box-sizing: border-box; margin: 0; padding: 0; font-family: 'Space Grotesk', 'Noto Sans TC', sans-serif; }
           body { background-color: var(--bg); color: var(--text); overflow: hidden; height: 100vh; display: flex; flex-direction: column; align-items: center; justify-content: center; }
           
-          /* 背景星雲畫布 */
           #vectorCanvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; z-index: -1; }
           
-          /* 公告列 */
           .announcement {
               position: absolute; top: 0; width: 100%; background: rgba(0, 242, 254, 0.1); border-bottom: 1px solid rgba(0, 242, 254, 0.2);
               padding: 10px; text-align: center; font-size: 13px; color: var(--primary); letter-spacing: 1px; z-index: 10;
           }
 
-          /* 登入面板 (玻璃擬物化) */
           .glass-panel {
               background: rgba(10, 15, 29, 0.6); backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px);
               border: 1px solid rgba(255, 255, 255, 0.1); border-radius: 24px; padding: 40px; width: 100%; max-width: 420px;
@@ -1590,7 +1587,6 @@ function getLiveHtmlPage(host) {
           h1 { font-size: 26px; font-weight: 700; background: linear-gradient(45deg, var(--primary), var(--secondary)); -webkit-background-clip: text; -webkit-text-fill-color: transparent; margin-bottom: 10px; }
           .subtitle { color: var(--text-muted); font-size: 14px; margin-bottom: 30px; }
 
-          /* 表單元素 */
           .input-group { margin-bottom: 20px; text-align: left; }
           .input-group label { display: block; font-size: 12px; color: var(--text-muted); margin-bottom: 8px; text-transform: uppercase; letter-spacing: 1px; }
           
@@ -1608,7 +1604,6 @@ function getLiveHtmlPage(host) {
           }
           .btn:hover { transform: translateY(-2px); box-shadow: 0 10px 20px rgba(0, 242, 254, 0.3); }
 
-          /* 底部版權 */
           .footer { position: absolute; bottom: 20px; font-size: 12px; color: rgba(255,255,255,0.3); z-index: 10; }
       </style>
   </head>
@@ -1655,7 +1650,7 @@ function getLiveHtmlPage(host) {
               width = canvas.width = window.innerWidth;
               height = canvas.height = window.innerHeight;
               particles = [];
-              const particleCount = Math.floor((width * height) / 10000); // 根據螢幕大小決定粒子數量
+              const particleCount = Math.floor((width * height) / 10000);
 
               for (let i = 0; i < particleCount; i++) {
                   particles.push({
@@ -1677,16 +1672,13 @@ function getLiveHtmlPage(host) {
                   p.x += p.vx;
                   p.y += p.vy;
 
-                  // 邊界反彈
                   if (p.x < 0 || p.x > width) p.vx *= -1;
                   if (p.y < 0 || p.y > height) p.vy *= -1;
 
-                  // 畫點
                   ctx.beginPath();
                   ctx.arc(p.x, p.y, p.radius, 0, Math.PI * 2);
                   ctx.fill();
 
-                  // 畫連線 (向量聚類效果)
                   for (let j = index + 1; j < particles.length; j++) {
                       const p2 = particles[j];
                       const dx = p.x - p2.x;
@@ -1695,7 +1687,8 @@ function getLiveHtmlPage(host) {
 
                       if (distance < 120) {
                           ctx.beginPath();
-                          ctx.strokeStyle = \`rgba(0, 242, 254, \${1 - distance / 120})\`;
+                          // 這裡改用傳統字串拼接，避免跟外層的模板字串衝突
+                          ctx.strokeStyle = 'rgba(0, 242, 254, ' + (1 - distance / 120) + ')';
                           ctx.lineWidth = 0.5;
                           ctx.moveTo(p.x, p.y);
                           ctx.lineTo(p2.x, p2.y);
@@ -1711,5 +1704,5 @@ function getLiveHtmlPage(host) {
       </script>
   </body>
   </html>
-  \`;
+  `; // 這裡確保只有純粹的反引號和分號
 }
