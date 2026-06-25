@@ -1550,9 +1550,6 @@ export default {
   } // 结束 fetch 函式
 }; // 结束 export default
 
-// ==========================================
-// 🌐 內嵌 HTML 前端網頁樣板 (終極穩定版：修復 1005 錯誤 + 神經握手連線)
-// ==========================================
 function getLiveHtmlPage(host) {
   return `
   <!DOCTYPE html>
@@ -1560,202 +1557,159 @@ function getLiveHtmlPage(host) {
   <head>
       <meta charset="UTF-8">
       <meta name="viewport" content="width=device-width, initial-scale=1.0">
-      <title>QQAI Bot 雲端核心控制台</title>
+      <title>QQAIbot | 向量記憶母體</title>
       <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;600&family=Noto+Sans+TC:wght@400;700&display=swap" rel="stylesheet">
       <style>
           :root {
-              --bg: #0a0f1d;
-              --card: #141d33;
+              --bg: #050914;
               --primary: #00f2fe;
               --secondary: #4facfe;
+              --accent: #ff007f;
               --text: #ffffff;
               --text-muted: #8fa0c4;
-              --success: #00e676;
           }
-          * { box-sizing: border-box; margin: 0; padding: 0; }
-          body {
-              font-family: 'Space Grotesk', 'Noto Sans TC', sans-serif;
-              background-color: var(--bg);
-              color: var(--text);
-              display: flex;
-              justify-content: center;
-              align-items: center;
-              min-height: 100vh;
-              padding: 20px;
-          }
-          .container {
-              width: 100%;
-              max-width: 650px;
-              background: var(--card);
-              border-radius: 24px;
-              padding: 35px;
-              box-shadow: 0 20px 50px rgba(0,0,0,0.5);
-              border: 1px solid rgba(255,255,255,0.05);
-              position: relative;
-              overflow: hidden;
-          }
-          .container::before {
-              content: '';
-              position: absolute;
-              top: -50%;
-              left: -50%;
-              width: 200%;
-              height: 200%;
-              background: radial-gradient(circle, rgba(0,242,254,0.05) 0%, transparent 70%);
-              pointer-events: none;
-          }
-          h1 {
-              font-size: 28px;
-              font-weight: 700;
-              background: linear-gradient(45deg, var(--primary), var(--secondary));
-              -webkit-background-clip: text;
-              -webkit-text-fill-color: transparent;
-              margin-bottom: 8px;
-              display: flex;
-              align-items: center;
-              gap: 10px;
-          }
-          .subtitle {
-              color: var(--text-muted);
-              font-size: 14px;
-              margin-bottom: 30px;
-          }
-          .status-badge {
-              display: inline-flex;
-              align-items: center;
-              gap: 8px;
-              background: rgba(0, 230, 118, 0.1);
-              color: var(--success);
-              padding: 6px 14px;
-              border-radius: 50px;
-              font-size: 13px;
-              font-weight: 600;
-              margin-bottom: 25px;
-              border: 1px solid rgba(0, 230, 118, 0.2);
-          }
-          .status-dot {
-              width: 8px;
-              height: 8px;
-              background-color: var(--success);
-              border-radius: 50%;
-              box-shadow: 0 0 10px var(--success);
-              animation: pulse 2s infinite;
-          }
-          @keyframes pulse {
-              0% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(0, 230, 118, 0.7); }
-              70% { transform: scale(1); box-shadow: 0 0 0 10px rgba(0, 230, 118, 0); }
-              100% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(0, 230, 118, 0); }
-          }
-          .webhook-box {
-              background: rgba(0,0,0,0.2);
-              border-radius: 12px;
-              padding: 15px;
-              margin-bottom: 30px;
-              border: 1px solid rgba(255,255,255,0.05);
-          }
-          .webhook-title {
-              font-size: 12px;
-              color: var(--text-muted);
-              text-transform: uppercase;
-              margin-bottom: 8px;
-              letter-spacing: 1px;
-          }
-          .webhook-url {
-              font-family: monospace;
-              color: var(--primary);
-              word-break: break-all;
-              font-size: 14px;
-              display: flex;
-              justify-content: space-between;
-              align-items: center;
-              gap: 10px;
-          }
-          .copy-btn {
-              background: rgba(255,255,255,0.05);
-              border: none;
-              color: #fff;
-              padding: 5px 10px;
-              border-radius: 6px;
-              cursor: pointer;
-              font-size: 12px;
-              transition: all 0.2s;
-          }
-          .copy-btn:hover { background: var(--primary); color: #000; }
-          .features {
-              display: grid;
-              grid-template-columns: 1fr 1fr;
-              gap: 15px;
-              margin-top: 20px;
-          }
-          .card {
-              background: rgba(255,255,255,0.02);
-              border: 1px solid rgba(255,255,255,0.05);
-              border-radius: 16px;
-              padding: 20px;
-              text-align: left;
-          }
-          .card-title { color: var(--text-muted); font-size: 13px; margin-bottom: 5px; }
-          .card-value { font-size: 22px; font-weight: 600; color: #fff; }
+          * { box-sizing: border-box; margin: 0; padding: 0; font-family: 'Space Grotesk', 'Noto Sans TC', sans-serif; }
+          body { background-color: var(--bg); color: var(--text); overflow: hidden; height: 100vh; display: flex; flex-direction: column; align-items: center; justify-content: center; }
           
-          .footer {
-              text-align: center;
-              margin-top: 35px;
-              font-size: 12px;
-              color: var(--text-muted);
+          /* 背景星雲畫布 */
+          #vectorCanvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; z-index: -1; }
+          
+          /* 公告列 */
+          .announcement {
+              position: absolute; top: 0; width: 100%; background: rgba(0, 242, 254, 0.1); border-bottom: 1px solid rgba(0, 242, 254, 0.2);
+              padding: 10px; text-align: center; font-size: 13px; color: var(--primary); letter-spacing: 1px; z-index: 10;
           }
+
+          /* 登入面板 (玻璃擬物化) */
+          .glass-panel {
+              background: rgba(10, 15, 29, 0.6); backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px);
+              border: 1px solid rgba(255, 255, 255, 0.1); border-radius: 24px; padding: 40px; width: 100%; max-width: 420px;
+              box-shadow: 0 20px 50px rgba(0,0,0,0.5), inset 0 0 0 1px rgba(255,255,255,0.05); z-index: 10; text-align: center;
+          }
+          
+          h1 { font-size: 26px; font-weight: 700; background: linear-gradient(45deg, var(--primary), var(--secondary)); -webkit-background-clip: text; -webkit-text-fill-color: transparent; margin-bottom: 10px; }
+          .subtitle { color: var(--text-muted); font-size: 14px; margin-bottom: 30px; }
+
+          /* 表單元素 */
+          .input-group { margin-bottom: 20px; text-align: left; }
+          .input-group label { display: block; font-size: 12px; color: var(--text-muted); margin-bottom: 8px; text-transform: uppercase; letter-spacing: 1px; }
+          
+          select, input {
+              width: 100%; padding: 14px 16px; background: rgba(0, 0, 0, 0.3); border: 1px solid rgba(255, 255, 255, 0.1);
+              border-radius: 12px; color: #fff; font-size: 15px; outline: none; transition: all 0.3s ease;
+          }
+          select:focus, input:focus { border-color: var(--primary); box-shadow: 0 0 15px rgba(0, 242, 254, 0.2); }
+          select option { background: var(--bg); color: #fff; }
+
+          .btn {
+              width: 100%; padding: 16px; background: linear-gradient(45deg, var(--primary), var(--secondary));
+              border: none; border-radius: 12px; color: #000; font-size: 16px; font-weight: 700; cursor: pointer;
+              transition: transform 0.2s, box-shadow 0.2s; margin-top: 10px;
+          }
+          .btn:hover { transform: translateY(-2px); box-shadow: 0 10px 20px rgba(0, 242, 254, 0.3); }
+
+          /* 底部版權 */
+          .footer { position: absolute; bottom: 20px; font-size: 12px; color: rgba(255,255,255,0.3); z-index: 10; }
       </style>
   </head>
   <body>
-      <div class="container">
-          <h1>🤖 QQAI 智慧機器人控制台</h1>
-          <p class="subtitle">Cloudflare Workers 邊緣運算驅動後台</p>
-          
-          <div class="status-badge">
-              <span class="status-dot"></span> 系統網域維護中 / 邊緣節點正常監聽
-          </div>
+      <canvas id="vectorCanvas"></canvas>
 
-          <div class="webhook-box">
-              <div class="webhook-title">QQ Webhook 填入網址</div>
-              <div class="webhook-url">
-                  <span id="urlText">https://${host}/</span>
-                  <button class="copy-btn" onclick="copyUrl()">複製</button>
-              </div>
-          </div>
+      <div class="announcement">
+          <span>🟢 系統公告：全域發散式向量記憶庫已上線，請先驗證身分以存取群組數據。</span>
+      </div>
 
-          <h3 style="margin-bottom: 15px; font-size: 16px; color: var(--text-muted);">📊 系統即時指標 (群組動態整合)</h3>
-          <div class="features">
-              <div class="card">
-                  <div class="card-title">機器人狀態</div>
-                  <div class="card-value" style="color: var(--success);">🟢 線上守護中</div>
-              </div>
-              <div class="card">
-                  <div class="card-title">邊緣路由速度</div>
-                  <div class="card-value">~12ms</div>
-              </div>
-              <div class="card">
-                  <div class="card-title">核心架構</div>
-                  <div class="card-value" style="font-size: 16px; color: var(--secondary);">Gemini 2.5 Flash</div>
-              </div>
-              <div class="card">
-                  <div class="card-title">自動插話隨機率</div>
-                  <div class="card-value">15%</div>
-              </div>
-          </div>
+      <div class="glass-panel">
+          <h1>QQAI Vector Matrix</h1>
+          <p class="subtitle">邊緣運算智慧大腦控制台</p>
 
-          <div class="footer">
-              Powered by Cloudflare Workers & Gemini Core API © 2026
-          </div>
+          <form id="loginForm" onsubmit="event.preventDefault(); alert('登入邏輯尚未串接，這只是前端預覽！');">
+              <div class="input-group">
+                  <label>1. 選擇隸屬群組 (Select Group)</label>
+                  <select id="groupSelect" required>
+                      <option value="" disabled selected>-- 請選擇你所在的 QQ 群 --</option>
+                      <option value="group1">測試交流群 (123456789)</option>
+                      <option value="group2">AI 開發核心群 (987654321)</option>
+                  </select>
+              </div>
+
+              <div class="input-group">
+                  <label>2. 驗證身分 (QQ Number)</label>
+                  <input type="number" id="qqNumber" placeholder="請輸入你的 QQ 號碼" required>
+              </div>
+
+              <button type="submit" class="btn">獲取驗證碼並登入</button>
+          </form>
+      </div>
+
+      <div class="footer">
+          © 2026 Powered by Cloudflare Workers & Gemini Core API.
       </div>
 
       <script>
-          function copyUrl() {
-              const text = document.getElementById('urlText').innerText;
-              navigator.clipboard.writeText(text).then(() => {
-                  alert('Webhook 網址已成功複製到剪貼簿！快去填入你的 QQ 機器人後台吧！');
+          const canvas = document.getElementById('vectorCanvas');
+          const ctx = canvas.getContext('2d');
+          let width, height, particles;
+
+          function init() {
+              width = canvas.width = window.innerWidth;
+              height = canvas.height = window.innerHeight;
+              particles = [];
+              const particleCount = Math.floor((width * height) / 10000); // 根據螢幕大小決定粒子數量
+
+              for (let i = 0; i < particleCount; i++) {
+                  particles.push({
+                      x: Math.random() * width,
+                      y: Math.random() * height,
+                      vx: (Math.random() - 0.5) * 1,
+                      vy: (Math.random() - 0.5) * 1,
+                      radius: Math.random() * 2 + 1
+                  });
+              }
+          }
+
+          function animate() {
+              requestAnimationFrame(animate);
+              ctx.clearRect(0, 0, width, height);
+              ctx.fillStyle = 'rgba(0, 242, 254, 0.8)';
+
+              particles.forEach((p, index) => {
+                  p.x += p.vx;
+                  p.y += p.vy;
+
+                  // 邊界反彈
+                  if (p.x < 0 || p.x > width) p.vx *= -1;
+                  if (p.y < 0 || p.y > height) p.vy *= -1;
+
+                  // 畫點
+                  ctx.beginPath();
+                  ctx.arc(p.x, p.y, p.radius, 0, Math.PI * 2);
+                  ctx.fill();
+
+                  // 畫連線 (向量聚類效果)
+                  for (let j = index + 1; j < particles.length; j++) {
+                      const p2 = particles[j];
+                      const dx = p.x - p2.x;
+                      const dy = p.y - p2.y;
+                      const distance = Math.sqrt(dx * dx + dy * dy);
+
+                      if (distance < 120) {
+                          ctx.beginPath();
+                          ctx.strokeStyle = \`rgba(0, 242, 254, \${1 - distance / 120})\`;
+                          ctx.lineWidth = 0.5;
+                          ctx.moveTo(p.x, p.y);
+                          ctx.lineTo(p2.x, p2.y);
+                          ctx.stroke();
+                      }
+                  }
               });
           }
+
+          window.addEventListener('resize', init);
+          init();
+          animate();
       </script>
   </body>
   </html>
-  `;
+  \`;
 }
