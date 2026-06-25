@@ -1553,156 +1553,623 @@ export default {
 function getLiveHtmlPage(host) {
   return `
   <!DOCTYPE html>
-  <html lang="zh-TW">
+  <html lang="zh-CN">
   <head>
       <meta charset="UTF-8">
       <meta name="viewport" content="width=device-width, initial-scale=1.0">
-      <title>QQAIbot | 向量記憶母體</title>
-      <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;600&family=Noto+Sans+TC:wght@400;700&display=swap" rel="stylesheet">
+      <title>QQAIbot | 向量记忆母体控制台</title>
+      <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;600&family=Noto+Sans+SC:wght@400;700&display=swap" rel="stylesheet">
       <style>
           :root {
-              --bg: #050914;
+              --bg: #030712;
+              --panel: rgba(11, 19, 43, 0.65);
+              --border: rgba(0, 242, 254, 0.15);
               --primary: #00f2fe;
-              --secondary: #4facfe;
+              --secondary: #7000ff;
               --accent: #ff007f;
-              --text: #ffffff;
-              --text-muted: #8fa0c4;
+              --success: #00e676;
+              --text: #f3f4f6;
+              --text-muted: #6b7280;
           }
-          * { box-sizing: border-box; margin: 0; padding: 0; font-family: 'Space Grotesk', 'Noto Sans TC', sans-serif; }
-          body { background-color: var(--bg); color: var(--text); overflow: hidden; height: 100vh; display: flex; flex-direction: column; align-items: center; justify-content: center; }
+          * { box-sizing: border-box; margin: 0; padding: 0; font-family: 'Space Grotesk', 'Noto Sans SC', sans-serif; }
+          body { background-color: var(--bg); color: var(--text); overflow: hidden; height: 100vh; display: flex; position: relative; }
           
-          #vectorCanvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; z-index: -1; }
+          /* 全局画布 */
+          #vectorCanvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; z-index: 1; pointer-events: auto; }
           
-          .announcement {
-              position: absolute; top: 0; width: 100%; background: rgba(0, 242, 254, 0.1); border-bottom: 1px solid rgba(0, 242, 254, 0.2);
-              padding: 10px; text-align: center; font-size: 13px; color: var(--primary); letter-spacing: 1px; z-index: 10;
+          /* 顶部状态条 */
+          .top-bar {
+              position: absolute; top: 0; left: 0; width: 100%; background: rgba(3, 7, 18, 0.8);
+              backdrop-filter: blur(12px); border-bottom: 1px solid var(--border); padding: 12px 24px;
+              display: flex; justify-content: space-between; align-items: center; z-index: 100;
           }
-
-          .glass-panel {
-              background: rgba(10, 15, 29, 0.6); backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px);
-              border: 1px solid rgba(255, 255, 255, 0.1); border-radius: 24px; padding: 40px; width: 100%; max-width: 420px;
-              box-shadow: 0 20px 50px rgba(0,0,0,0.5), inset 0 0 0 1px rgba(255,255,255,0.05); z-index: 10; text-align: center;
-          }
+          .logo { font-size: 18px; font-weight: 700; background: linear-gradient(45deg, var(--primary), var(--accent)); -webkit-background-clip: text; -webkit-text-fill-color: transparent; display: flex; align-items: center; gap: 8px; }
+          .sys-status { display: flex; align-items: center; gap: 16px; font-size: 13px; }
+          .badge { background: rgba(0, 242, 254, 0.1); border: 1px solid rgba(0, 242, 254, 0.3); color: var(--primary); padding: 4px 10px; border-radius: 50px; font-size: 12px; }
           
-          h1 { font-size: 26px; font-weight: 700; background: linear-gradient(45deg, var(--primary), var(--secondary)); -webkit-background-clip: text; -webkit-text-fill-color: transparent; margin-bottom: 10px; }
-          .subtitle { color: var(--text-muted); font-size: 14px; margin-bottom: 30px; }
-
+          /* 主容器：左侧导航 + 右侧主面板 */
+          .main-container { position: relative; width: 100%; height: 100%; padding-top: 60px; display: flex; z-index: 10; pointer-events: none; }
+          
+          /* 侧边导航栏 */
+          .sidebar { width: 260px; background: rgba(4, 9, 24, 0.75); backdrop-filter: blur(20px); border-right: 1px solid var(--border); padding: 24px 16px; display: flex; flex-direction: column; gap: 8px; pointer-events: auto; z-index: 50; }
+          .nav-btn { width: 100%; padding: 14px 16px; background: transparent; border: 1px solid transparent; border-radius: 12px; color: #9ca3af; font-size: 14px; text-align: left; cursor: pointer; transition: all 0.3s; display: flex; align-items: center; gap: 12px; }
+          .nav-btn:hover { background: rgba(255,255,255,0.02); color: #fff; }
+          .nav-btn.active { background: rgba(0, 242, 254, 0.08); border-color: rgba(0, 242, 254, 0.3); color: var(--primary); font-weight: 600; box-shadow: 0 0 15px rgba(0, 242, 254, 0.1); }
+          .nav-btn.locked { color: #4b5563; cursor: not-allowed; }
+          
+          /* 右侧内容视窗 */
+          .content-viewport { flex: 1; padding: 30px; overflow-y: auto; display: flex; justify-content: center; align-items: flex-start; pointer-events: auto; }
+          .view-section { width: 100%; max-width: 900px; display: none; background: var(--panel); backdrop-filter: blur(16px); border: 1px solid var(--border); border-radius: 24px; padding: 35px; box-shadow: 0 20px 50px rgba(0,0,0,0.3); }
+          .view-section.active { display: block; animation: fadeIn 0.4s ease forwards; }
+          @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+          
+          h2 { font-size: 22px; margin-bottom: 20px; color: #fff; display: flex; align-items: center; gap: 10px; border-left: 4px solid var(--primary); padding-left: 12px; }
+          p.desc { color: #9ca3af; font-size: 14px; margin-bottom: 25px; line-height: 1.6; }
+          
+          /* 登录玻璃面板 */
+          .login-panel { width: 100%; max-width: 400px; margin: 60px auto; background: rgba(10, 15, 30, 0.7); backdrop-filter: blur(24px); border: 1px solid rgba(255,255,255,0.1); border-radius: 24px; padding: 35px; text-align: center; box-shadow: 0 30px 60px rgba(0,0,0,0.6); }
           .input-group { margin-bottom: 20px; text-align: left; }
-          .input-group label { display: block; font-size: 12px; color: var(--text-muted); margin-bottom: 8px; text-transform: uppercase; letter-spacing: 1px; }
+          .input-group label { display: block; font-size: 12px; color: #9ca3af; margin-bottom: 8px; text-transform: uppercase; letter-spacing: 1px; }
+          select, input, textarea { width: 100%; padding: 14px 16px; background: rgba(0, 0, 0, 0.4); border: 1px solid rgba(255, 255, 255, 0.1); border-radius: 12px; color: #fff; font-size: 14px; outline: none; transition: all 0.3s; }
+          select:focus, input:focus, textarea:focus { border-color: var(--primary); box-shadow: 0 0 15px rgba(0, 242, 254, 0.15); }
           
-          select, input {
-              width: 100%; padding: 14px 16px; background: rgba(0, 0, 0, 0.3); border: 1px solid rgba(255, 255, 255, 0.1);
-              border-radius: 12px; color: #fff; font-size: 15px; outline: none; transition: all 0.3s ease;
-          }
-          select:focus, input:focus { border-color: var(--primary); box-shadow: 0 0 15px rgba(0, 242, 254, 0.2); }
-          select option { background: var(--bg); color: #fff; }
-
-          .btn {
-              width: 100%; padding: 16px; background: linear-gradient(45deg, var(--primary), var(--secondary));
-              border: none; border-radius: 12px; color: #000; font-size: 16px; font-weight: 700; cursor: pointer;
-              transition: transform 0.2s, box-shadow 0.2s; margin-top: 10px;
-          }
-          .btn:hover { transform: translateY(-2px); box-shadow: 0 10px 20px rgba(0, 242, 254, 0.3); }
-
-          .footer { position: absolute; bottom: 20px; font-size: 12px; color: rgba(255,255,255,0.3); z-index: 10; }
+          .btn { width: 100%; padding: 15px; background: linear-gradient(45deg, var(--primary), var(--secondary)); border: none; border-radius: 12px; color: #000; font-size: 15px; font-weight: 700; cursor: pointer; transition: all 0.3s; }
+          .btn:hover { transform: translateY(-2px); box-shadow: 0 10px 25px rgba(0, 242, 254, 0.3); }
+          .btn-sm { width: auto; padding: 8px 16px; font-size: 13px; border-radius: 8px; margin-left: 8px; }
+          .btn-danger { background: linear-gradient(45deg, #ff0055, #ff007f); color: #fff; }
+          
+          /* 功能卡片布局 */
+          .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 25px; }
+          .card { background: rgba(255,255,255,0.02); border: 1px solid rgba(255,255,255,0.05); border-radius: 16px; padding: 20px; position: relative; }
+          .card-title { font-size: 13px; color: #9ca3af; margin-bottom: 6px; text-transform: uppercase; }
+          .card-value { font-size: 24px; font-weight: 600; color: #fff; }
+          
+          /* 简易开关与滑动条 */
+          .switch-group { display: flex; justify-content: space-between; align-items: center; padding: 12px 0; border-bottom: 1px solid rgba(255,255,255,0.05); }
+          .toggle-switch { position: relative; display: inline-block; width: 44px; height: 24px; }
+          .toggle-switch input { opacity: 0; width: 0; height: 0; }
+          .slider { position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0; background-color: #374151; transition: .3s; border-radius: 24px; }
+          .slider:before { position: absolute; content: ""; height: 18px; width: 18px; left: 3px; bottom: 3px; background-color: white; transition: .3s; border-radius: 50%; }
+          input:checked + .slider { background-color: var(--primary); }
+          input:checked + .slider:before { transform: translateX(20px); }
+          
+          /* 提示弹窗 & 403 错误拦截 */
+          .toast { position: absolute; bottom: 30px; right: 30px; background: rgba(11, 19, 43, 0.9); border: 1px solid var(--accent); padding: 16px 24px; border-radius: 12px; z-index: 1000; box-shadow: 0 10px 30px rgba(0,0,0,0.5); display: none; color: #fff; font-size: 14px; animation: slideIn 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275); }
+          @keyframes slideIn { from { transform: translateX(120%); } to { transform: translateX(0); } }
+          
+          .lock-overlay { position: absolute; top: 0; left: 0; width: 100%; height: 100%; background: rgba(4, 7, 16, 0.92); border-radius: 24px; display: flex; flex-direction: column; align-items: center; justify-content: center; z-index: 90; text-align: center; padding: 40px; }
+          .lock-title { font-size: 48px; font-weight: 700; color: var(--accent); letter-spacing: 2px; margin-bottom: 10px; }
+          
+          /* 表格与日志样式 */
+          table { width: 100%; border-collapse: collapse; margin-top: 15px; }
+          th, td { text-align: left; padding: 12px; border-bottom: 1px solid rgba(255,255,255,0.05); font-size: 13px; }
+          th { color: #9ca3af; font-weight: 600; }
+          .terminal-box { background: rgba(0,0,0,0.5); font-family: monospace; padding: 15px; border-radius: 12px; border: 1px solid rgba(255,255,255,0.05); max-height: 200px; overflow-y: auto; color: #34d399; font-size: 12px; line-height: 1.5; }
+          
+          /* 粒子悬浮提示框 */
+          #canvasTooltip { position: absolute; background: rgba(5, 10, 25, 0.85); backdrop-filter: blur(8px); border: 1px solid var(--primary); padding: 10px 14px; border-radius: 8px; font-size: 12px; color: #fff; pointer-events: none; display: none; z-index: 200; box-shadow: 0 5px 15px rgba(0,242,254,0.3); }
+          
+          /* 身分快速切换器悬浮窗 (方便测试预览) */
+          .role-selector-widget { position: absolute; bottom: 15px; left: 15px; background: rgba(0,0,0,0.8); border: 1px solid rgba(255,255,255,0.1); padding: 10px; border-radius: 8px; z-index: 1000; font-size: 11px; color: #8fa0c4; }
+          .role-selector-widget select { padding: 4px; font-size: 11px; margin-top: 5px; background: #111; border: 1px solid #333; }
       </style>
   </head>
   <body>
       <canvas id="vectorCanvas"></canvas>
+      <div id="canvasTooltip"></div>
 
-      <div class="announcement">
-          <span>🟢 系統公告：全域發散式向量記憶庫已上線，請先驗證身分以存取群組數據。</span>
+      <div class="role-selector-widget">
+          <div>💡 调试向：快捷模拟身份</div>
+          <select id="debugRoleSelector" onchange="simulateRoleChange(this.value)">
+              <option value="unlogged">未登录游客状态</option>
+              <option value="member">普通群员 (QQ: 123456)</option>
+              <option value="admin">群管理员 (QQ: 888888)</option>
+              <option value="root">最高开发者 (QQ: 999999)</option>
+          </select>
       </div>
 
-      <div class="glass-panel">
-          <h1>QQAI Vector Matrix</h1>
-          <p class="subtitle">邊緣運算智慧大腦控制台</p>
+      <div class="top-bar">
+          <div class="logo">🧬 QQAI Vector Matrix <span style="font-size:11px; font-weight:normal; border: 1px solid rgba(255,255,255,0.2); padding: 1px 5px; border-radius:4px; color:#fff;">v2.5</span></div>
+          <div class="sys-status">
+              <div>节点延迟: <span id="pingDelay" style="color:var(--primary);">~12ms</span></div>
+              <div>白名单验证: <span style="color:var(--success);">🟢 已激活</span></div>
+              <div id="userBadgeArea"></div>
+          </div>
+      </div>
 
-          <form id="loginForm" onsubmit="event.preventDefault(); alert('登入邏輯尚未串接，這只是前端預覽！');">
-              <div class="input-group">
-                  <label>1. 選擇隸屬群組 (Select Group)</label>
-                  <select id="groupSelect" required>
-                      <option value="" disabled selected>-- 請選擇你所在的 QQ 群 --</option>
-                      <option value="group1">測試交流群 (123456789)</option>
-                      <option value="group2">AI 開發核心群 (987654321)</option>
-                  </select>
+      <div class="main-container">
+          <div class="sidebar">
+              <button class="nav-btn active" onclick="switchTab('mod0')">🧱 门户外页</button>
+              <button class="nav-btn" onclick="switchTab('mod1')">📊 通用数据中心</button>
+              <button class="nav-btn" onclick="switchTab('mod2')">⚙️ 个人设置自助区</button>
+              <button class="nav-btn" onclick="switchTab('mod3')">🛡️ 群务秩序管理面板</button>
+              <button class="nav-btn" onclick="switchTab('mod4')">👑 核心系统维运后台</button>
+          </div>
+
+          <div class="content-viewport">
+              
+              <div id="section_mod0" class="view-section active">
+                  <h2>系统门面门户入口</h2>
+                  <p class="desc">欢迎来到 QQAIbot 边缘计算控制矩阵。当前全域发散式向量空间已开放公开投影，后台已绑定群白名单安全校验机制。非白名单群组将拒绝下发会话服务。</p>
+                  
+                  <div class="login-panel" id="loginFormBlock">
+                      <h3 style="margin-bottom:15px; font-size:18px;">安全身分验证</h3>
+                      <div class="input-group">
+                          <label>1. 选择隶属群组 (群白名单)</label>
+                          <select id="loginGroup" onchange="checkGroupWhitelist(this.value)">
+                              <option value="" disabled selected>-- 请选择你所在的白名单群 --</option>
+                              <option value="769128334">官方技术交流群 (769128334)</option>
+                              <option value="882194056">核心AI进化圈 (882194056)</option>
+                              <option value="554192039">极客深夜聊天室 (554192039)</option>
+                              <option value="999999999">【非白名单测试群】 (999999999)</option>
+                          </select>
+                      </div>
+                      <div class="input-group">
+                          <label>2. 验证身分 (QQ Number)</label>
+                          <input type="number" id="loginQQ" placeholder="输入QQ号 (提示: 123456/888888/999999)">
+                      </div>
+                      <div class="input-group" id="verifyCodeGroup" style="display:none;">
+                          <label>3. 私信验证码 (6位数字)</label>
+                          <div style="display:flex;">
+                              <input type="text" id="loginCode" placeholder="输入私信验证码" style="flex:1;">
+                              <button class="btn btn-sm" style="width:110px;" onclick="triggerToast('验证码已重发，请查收QQ私信')">重发</button>
+                          </div>
+                      </div>
+                      <button class="btn" id="loginBtn" onclick="handleLoginAction()">获取验证码验证</button>
+                  </div>
+
+                  <div id="alreadyLoggedInBlock" style="display:none; text-align:center; padding: 40px 0;">
+                      <div style="font-size:48px; margin-bottom:15px;">🔓</div>
+                      <h3 style="color:var(--primary); margin-bottom:10px;">身分认证已通过</h3>
+                      <p style="color:#9ca3af; font-size:14px; margin-bottom:20px;">您已成功接入当前集群网络，请通过侧边栏浏览对应权限的控制模块。</p>
+                      <button class="btn btn-danger btn-sm" onclick="logoutCurrentSession()">登出当前账户</button>
+                  </div>
               </div>
 
-              <div class="input-group">
-                  <label>2. 驗證身分 (QQ Number)</label>
-                  <input type="number" id="qqNumber" placeholder="請輸入你的 QQ 號碼" required>
+              <div id="section_mod1" class="view-section">
+                  <div id="lock_mod1"></div>
+                  <h2>通用数据中心 (General Dashboard)</h2>
+                  <p class="desc">展示当前集群网络基础运行指标与群组公开脱敏数据视图。</p>
+                  <div class="grid-2">
+                      <div class="card"><div class="card-title">AI 服务状态</div><div class="card-value" style="color:var(--success);">🟢 线上守护中</div></div>
+                      <div class="card"><div class="card-title">当前核心大脑模型</div><div class="card-value" style="font-size:16px; padding-top:8px;">Gemini 2.5 Flash</div></div>
+                      <div class="card"><div class="card-title">累计核心调用计次</div><div class="card-value" id="totalCallsVal">2,481 次</div></div>
+                      <div class="card"><div class="card-title">边缘网关路由延迟</div><div class="card-value">12 ms</div></div>
+                  </div>
+                  <h3 style="margin-bottom:12px; font-size:15px;">📊 今日群组互动活跃榜 (Top 5)</h3>
+                  <table>
+                      <thead><tr><th>排名</th><th>群员QQ</th><th>调用AI计次</th><th>活跃权重</th></tr></thead>
+                      <tbody>
+                          <tr><td>1</td><td>2841***92</td><td>142 次</td><td><span style="color:var(--accent);">🔥 极高</span></td></tr>
+                          <tr><td>2</td><td>9152***11</td><td>98 次</td><td><span style="color:var(--primary);">💡 高</span></td></tr>
+                          <tr><td>3</td><td>1049***54</td><td>43 次</td><td><span>正常</span></td></tr>
+                      </tbody>
+                  </table>
+                  <h3 style="margin-bottom:12px; font-size:15px; margin-top:25px;">📰 本群今日瓜田八卦日报 (!总结)</h3>
+                  <div class="terminal-box" style="color:#e5e7eb; background:rgba(255,255,255,0.02);">
+                      【今日提要】本群今日聊天的核心点聚焦于“括弧错位引发的部署惨案”，群主在14:02进行了高强度报错，随后在AI的协助下闭合了代码，全群欢呼。今日最惨群员为小明，因狂刷无意义指令被AI冷嘲热讽了3次。
+                  </div>
+                  <button class="btn btn-sm" style="margin-top:15px;" onclick="triggerToast('功能未开放，敬请期待后端同步')">手动重新生成日报</button>
               </div>
 
-              <button type="submit" class="btn">獲取驗證碼並登入</button>
-          </form>
+              <div id="section_mod2" class="view-section">
+                  <div id="lock_mod2"></div>
+                  <h2>个人设置自助区 (User Self-Service)</h2>
+                  <p class="desc">维护你个人的偏好设置、专属人格大腦以及增删属于你的个人私有/公开记忆。</p>
+                  <div class="grid-2">
+                      <div class="card"><div class="card-title">今日个人剩余可用配额</div><div class="card-value" style="color:var(--primary);">无限</div></div>
+                      <div class="card"><div class="card-title">记忆使用权限状态</div><div class="card-value" style="color:var(--success);" id="memStatusText">🟢 正常授权</div></div>
+                  </div>
+                  <div class="switch-group">
+                      <div>
+                          <div style="font-weight:600;">个人专属免打扰开关 (!免打扰)</div>
+                          <div style="font-size:12px; color:#9ca3af;">开启后，AI在触发群组互动时不会主动 @ 你</div>
+                      </div>
+                      <label class="toggle-switch">
+                          <input type="checkbox" onchange="triggerToast('个人免打扰状态已同步更新')">
+                          <span class="slider"></span>
+                      </label>
+                  </div>
+                  <div style="margin-top:20px;">
+                      <label style="font-size:13px; color:#9ca3af; display:block; margin-bottom:8px;">自定个人专属人格定义 (!set人格)</label>
+                      <textarea placeholder="例如：输入“请用傲娇毒舌的女仆语气称呼我为主人”" rows="2"></textarea>
+                      <button class="btn btn-sm" style="margin-top:8px;" onclick="triggerToast('个人专属人格已成功写入分布式缓存')">保存人格定义</button>
+                  </div>
+                  
+                  <h3 style="margin-bottom:12px; font-size:15px; margin-top:30px;">🧠 分布式长短期记忆编辑器 (CRUD)</h3>
+                  <div style="background:rgba(0,0,0,0.2); padding:15px; border-radius:12px; border:1px solid var(--border); margin-bottom:15px;">
+                      <div style="display:grid; grid-template-columns: 1fr 120px 100px; gap:10px;">
+                          <input type="text" id="newMemText" placeholder="输入想让AI记住的内容（例如：我喜欢在深夜喝冰美式）">
+                          <select id="newMemType">
+                              <option value="private">🔒 私人记忆</option>
+                              <option value="public">🌐 群公开记忆</option>
+                          </select>
+                          <button class="btn" style="padding:0;" onclick="handleNewMemory()">[新增记住]</button>
+                      </div>
+                  </div>
+                  <table>
+                      <thead><tr><th>记忆快照内容</th><th>归属属性</th><th>安全审计码</th><th>操作项</th></tr></thead>
+                      <tbody id="memoryTableBody">
+                          <tr><td>喜欢在下雨天写JavaScript代码</td><td>🔒 私人专属</td><td><span style="font-family:monospace; color:#9ca3af;">mem_u_01</span></td><td><a href="#" style="color:var(--primary); margin-right:8px;" onclick="triggerToast('编辑功能暂未开放')">修改</a><a href="#" style="color:var(--accent);" onclick="deleteMemoryRow(this)">[删除/忘记]</a></td></tr>
+                          <tr><td>本群的常规黑历史是买云服务器忘记关导致扣费200元</td><td>🌐 全群公开</td><td><span style="font-family:monospace; color:#9ca3af;">mem_g_09</span></td><td><a href="#" style="color:var(--primary); margin-right:8px;" onclick="triggerToast('编辑功能暂未开放')">修改</a><a href="#" style="color:var(--accent);" onclick="deleteMemoryRow(this)">[删除/忘记]</a></td></tr>
+                      </tbody>
+                  </table>
+              </div>
+
+              <div id="section_mod3" class="view-section">
+                  <div id="lock_mod3"></div>
+                  <h2>群务秩序管理面板 (Group Administration Panel)</h2>
+                  <p class="desc">群主及管理员专用控制台，用以动态约束AI发话频率、拉黑恶意刷屏群员及审计公开记忆变动日志。</p>
+                  
+                  <div class="grid-2">
+                      <div class="card">
+                          <div class="card-title">AI 全局互动开关</div>
+                          <div class="switch-group" style="border:none; padding:5px 0 0 0;">
+                              <span style="font-size:13px; color:#f3f4f6;">允许AI在群组内响应回复</span>
+                              <label class="toggle-switch"><input type="checkbox" checked onchange="triggerToast('全局AI响应开关已同步')"><span class="slider"></span></label>
+                          </div>
+                      </div>
+                      <div class="card">
+                          <div class="card-title">群公用记忆功能</div>
+                          <div class="switch-group" style="border:none; padding:5px 0 0 0;">
+                              <span style="font-size:13px; color:#f3f4f6;">允许AI调用本群公开知识库</span>
+                              <label class="toggle-switch"><input type="checkbox" checked onchange="triggerToast('全局群记忆池检索开关已同步')"><span class="slider"></span></label>
+                          </div>
+                      </div>
+                  </div>
+
+                  <div class="card" style="margin-bottom:25px;">
+                      <div class="card-title">🤖 动态自动插话率随机度控制桿 (!插话率)</div>
+                      <div style="display:flex; align-items:center; gap:15px; margin-top:10px;">
+                          <input type="range" min="0" max="100" value="15" style="flex:1;" id="interjectRange" oninput="document.getElementById('rangeLabel').innerText = this.value + '%'">
+                          <span id="rangeLabel" style="width:40px; font-weight:700; color:var(--primary);">15%</span>
+                      </div>
+                      <div style="font-size:12px; color:#9ca3af; margin-top:6px;">插话率越高，AI在群友聊天时越容易频繁主动跳出来插话反驳。</div>
+                  </div>
+
+                  <h3 style="margin-bottom:12px; font-size:15px;">🛡️ 核心黑名单防风控关键盾过滤</h3>
+                  <textarea placeholder="每行输入一个群组敏感词，触发时AI将断开服务并拒绝响应..." rows="2"></textarea>
+                  <button class="btn btn-sm" style="margin-top:8px; margin-bottom:25px;" onclick="triggerToast('违规词白名单拦截字典已刷新')">更新风控屏蔽盾</button>
+
+                  <h3 style="margin-bottom:12px; font-size:15px;">📜 群长短期记忆网端编辑审计日志</h3>
+                  <div class="terminal-box">
+                      [14:12:05] 管理员(888888) 执行了 [新增记忆] -> 全群公开 -> "本群禁止发送任何违法违规链接";<br>
+                      [14:15:22] 普通群员(123456) 执行了 [删除记忆] -> 个人专属 -> "mem_u_04";<br>
+                      [14:16:01] 普通群员(775192) 尝试修改群公开记忆遭遇拦截原因：[权限不足]。
+                  </div>
+              </div>
+
+              <div id="section_mod4" class="view-section">
+                  <div id="lock_mod4"></div>
+                  <h2>核心系统维运后台 (Root Maintenance Terminal)</h2>
+                  <p class="desc">面向最高开发者（你本人）的上帝模式控制中心，接管最底层的数据库、密钥轮询机制及全局跨群通知调度。</p>
+                  
+                  <h3 style="margin-bottom:12px; font-size:15px;">🔑 全局 Gemini API Key 负载轮询监控池</h3>
+                  <table>
+                      <thead><tr><th>密钥索引标识</th><th>当前配额状态</th><th>健康度评分</th><th>安全操作</th></tr></thead>
+                      <tbody>
+                          <tr><td>Gemini_Key_Pool_#1</td><td><span style="color:var(--success);">🟢 充足 (正常下发)</span></td><td>100%</td><td><button class="btn btn-sm btn-danger" style="padding:4px 8px; font-size:11px;" onclick="triggerToast('主密钥锁定状态中')">注销</button></td></tr>
+                          <tr><td>Gemini_Key_Pool_#2</td><td><span style="color:var(--accent);">🔴 触发频率限流限制 (RPM-Limit)</span></td><td>45%</td><td><button class="btn btn-sm" style="padding:4px 8px; font-size:11px;" onclick="triggerToast('已重置密钥下发频率')">重置</button></td></tr>
+                      </tbody>
+                  </table>
+
+                  <h3 style="margin-bottom:12px; font-size:15px; margin-top:25px;">📢 跨群组一键全域广播下发通知</h3>
+                  <input type="text" id="broadcastMsg" placeholder="输入公告内容，将由AI立刻在当前绑定的所有QQ群组中同步推送通报...">
+                  <button class="btn btn-sm" style="margin-top:8px; margin-bottom:25px;" onclick="triggerToast('广播下发任务由于尚未连接 HuggingFace 服务器端而拦截')">执行全域广播下发</button>
+
+                  <h3 style="margin-bottom:12px; font-size:15px;">⚠️ 底层高危全局控制</h3>
+                  <div style="background:rgba(255, 0, 85, 0.05); border:1px solid rgba(255, 0, 85, 0.3); padding:20px; border-radius:16px; display:flex; justify-content:space-between; align-items:center;">
+                      <div>
+                          <div style="font-weight:700; color:#fff;">系统核心硬重启与全量分布式快取重置</div>
+                          <div style="font-size:12px; color:#9ca3af; margin-top:4px;">这将会清空D1数据库中所有群组的上下文、对话流快取，使Worker彻底重置回初始态。</div>
+                      </div>
+                      <button class="btn btn-danger btn-sm" style="padding:12px 20px;" onclick="handleHardReboot()">[彻底重置快取]</button>
+                  </div>
+              </div>
+
+          </div>
       </div>
 
-      <div class="footer">
-          © 2026 Powered by Cloudflare Workers & Gemini Core API.
-      </div>
+      <div id="globalToast" class="toast">提示弹窗消息内容</div>
 
       <script>
+          // 模拟全动态身份系统状态机
+          let currentUserRole = 'unlogged'; // unlogged, member, admin, root
+          let selectedGroupNum = '';
+          let userQQNumber = '';
+
+          // 核心画布配置
           const canvas = document.getElementById('vectorCanvas');
           const ctx = canvas.getContext('2d');
+          const tooltip = document.getElementById('canvasTooltip');
           let width, height, particles;
 
-          function init() {
+          // 模拟高维向量语义聚类中心引力锚点
+          const clusters = {
+              jokes: { x: 0, y: 0, name: "群梗/搞笑语料簇", color: "0, 242, 254" },
+              facts: { x: 0, y: 0, name: "知识百科/严肃语义簇", color: "112, 0, 255" },
+              chatter: { x: 0, y: 0, name: "群员日常闲聊垃圾碎屑", color: "255, 0, 127" }
+          };
+
+          function initCanvas() {
               width = canvas.width = window.innerWidth;
               height = canvas.height = window.innerHeight;
               particles = [];
-              const particleCount = Math.floor((width * height) / 10000);
+              
+              // 动态更新语义聚类星云的中心锚点引力点
+              clusters.jokes.x = width * 0.3;     clusters.jokes.y = height * 0.4;
+              clusters.facts.x = width * 0.65;    clusters.facts.y = height * 0.35;
+              clusters.chatter.x = width * 0.5;  clusters.chatter.y = height * 0.7;
 
-              for (let i = 0; i < particleCount; i++) {
+              const count = Math.floor((width * height) / 12000);
+              const keys = Object.keys(clusters);
+
+              for (let i = 0; i < count; i++) {
+                  const targetCluster = clusters[keys[Math.floor(Math.random() * keys.length)]];
                   particles.push({
                       x: Math.random() * width,
                       y: Math.random() * height,
-                      vx: (Math.random() - 0.5) * 1,
-                      vy: (Math.random() - 0.5) * 1,
-                      radius: Math.random() * 2 + 1
+                      vx: (Math.random() - 0.5) * 0.6,
+                      vy: (Math.random() - 0.5) * 0.6,
+                      radius: Math.random() * 2 + 1,
+                      cluster: targetCluster,
+                      // 模拟具体的嵌入记忆片段中文字幕
+                      snippet: targetCluster.name === "群梗/搞笑语料簇" ? "记忆片段: 括弧错位引发的深夜血案" : (targetCluster.name === "知识百科/严肃语义簇" ? "知识点: Cloudflare Workers 边缘计算高并发架构" : "群员闲聊: 昨晚吃了老坛酸菜牛肉面")
                   });
               }
           }
 
-          function animate() {
-              requestAnimationFrame(animate);
-              ctx.clearRect(0, 0, width, height);
-              ctx.fillStyle = 'rgba(0, 242, 254, 0.8)';
+          let mouseX = -1000, mouseY = -1000;
+          window.addEventListener('mousemove', function(e) {
+              mouseX = e.clientX;
+              mouseY = e.clientY;
+          });
 
-              particles.forEach((p, index) => {
+          function animateCanvas() {
+              requestAnimationFrame(animateCanvas);
+              ctx.fillStyle = 'rgba(3, 7, 18, 0.2)'; // 形成拖尾效应
+              ctx.fillRect(0, 0, width, height);
+
+              let nearestParticle = null;
+              let minDist = 60;
+
+              particles.forEach(p => {
+                  // 如果已登录状态，粒子会受到高维空间语义聚类中心点的强引力拉扯约束，发生坍缩内聚现象
+                  if (currentUserRole !== 'unlogged') {
+                      p.x += (p.cluster.x - p.x) * 0.015;
+                      p.y += (p.cluster.y - p.y) * 0.015;
+                  }
+
                   p.x += p.vx;
                   p.y += p.vy;
 
                   if (p.x < 0 || p.x > width) p.vx *= -1;
                   if (p.y < 0 || p.y > height) p.vy *= -1;
 
+                  // 绘制向量粒子核心
                   ctx.beginPath();
                   ctx.arc(p.x, p.y, p.radius, 0, Math.PI * 2);
+                  ctx.fillStyle = 'rgba(' + p.cluster.color + ', 0.8)';
                   ctx.fill();
 
-                  for (let j = index + 1; j < particles.length; j++) {
-                      const p2 = particles[j];
-                      const dx = p.x - p2.x;
-                      const dy = p.y - p2.y;
-                      const distance = Math.sqrt(dx * dx + dy * dy);
+                  // 计算鼠标交互测算
+                  const dx = mouseX - p.x;
+                  const dy = mouseY - p.y;
+                  const dist = Math.sqrt(dx * dx + dy * dy);
 
-                      if (distance < 120) {
-                          ctx.beginPath();
-                          // 這裡改用傳統字串拼接，避免跟外層的模板字串衝突
-                          ctx.strokeStyle = 'rgba(0, 242, 254, ' + (1 - distance / 120) + ')';
-                          ctx.lineWidth = 0.5;
-                          ctx.moveTo(p.x, p.y);
-                          ctx.lineTo(p2.x, p2.y);
-                          ctx.stroke();
-                      }
+                  if (dist < minDist) {
+                      nearestParticle = p;
+                  }
+
+                  // 渲染未登录大融合拓扑网或登录后的局部拉网连线
+                  if (dist < 100) {
+                      ctx.beginPath();
+                      ctx.strokeStyle = 'rgba(' + p.cluster.color + ', ' + (1 - dist / 100) * 0.4 + ')';
+                      ctx.lineWidth = 0.5;
+                      ctx.moveTo(p.x, p.y);
+                      ctx.lineTo(mouseX, mouseY);
+                      ctx.stroke();
+                  }
+              });
+
+              // 处理悬停动态解锁雷射光线与中文字幕提示
+              if (nearestParticle) {
+                  tooltip.style.left = (mouseX + 15) + 'px';
+                  tooltip.style.top = (mouseY + 15) + 'px';
+                  tooltip.style.display = 'block';
+                  
+                  if (currentUserRole === 'unlogged') {
+                      tooltip.innerHTML = '<span style="color:var(--accent);">🔒 身份未验证</span><br>高维特征矩阵已脱敏，请先登录群网络';
+                  } else {
+                      tooltip.innerHTML = '<span style="color:var(--primary); font-weight:bold;">📍 ' + nearestParticle.cluster.name + '</span><br>' + nearestParticle.snippet;
+                      
+                      // 炫酷拉出一条雷射至引力中心
+                      ctx.beginPath();
+                      ctx.strokeStyle = 'rgba(' + nearestParticle.cluster.color + ', 0.8)';
+                      ctx.lineWidth = 1.5;
+                      ctx.moveTo(nearestParticle.x, nearestParticle.y);
+                      ctx.lineTo(nearestParticle.cluster.x, nearestParticle.cluster.y);
+                      ctx.stroke();
+                  }
+              } else {
+                  tooltip.style.display = 'none';
+              }
+          }
+
+          // 核心控制台标签页无缝切换控制
+          function switchTab(tabId) {
+              // 1. 移除导航激活高亮
+              document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
+              // 2. 隐藏所有的控制窗面板
+              document.querySelectorAll('.view-section').forEach(s => s.classList.remove('active'));
+              
+              // 激活对应的分包
+              const index = ['mod0', 'mod1', 'mod2', 'mod3', 'mod4'].indexOf(tabId);
+              document.querySelectorAll('.nav-btn')[index].classList.add('active');
+              document.getElementById('section_' + tabId).classList.add('active');
+          }
+
+          // 拦截与防护鉴权器遮罩生成核心逻辑
+          function evaluateRoleLocks() {
+              const modules = ['mod1', 'mod2', 'mod3', 'mod4'];
+              
+              modules.forEach(m => {
+                  const lockContainer = document.getElementById('lock_' + m);
+                  lockContainer.innerHTML = ''; // 清空
+                  
+                  let needsLock = false;
+                  let message = '';
+                  
+                  if (currentUserRole === 'unlogged') {
+                      needsLock = true;
+                      message = '请先在 [门户外页] 完成群身分绑定安全认证';
+                  } else if (m === 'mod3' && currentUserRole === 'member') {
+                      needsLock = true;
+                      message = '【Error 403: 权限不足】<br><span style="font-size:14px;color:var(--text-muted)">该模块仅对群主或群系统管理员(Admin)开放</span>';
+                  } else if (m === 'mod4' && currentUserRole !== 'root') {
+                      needsLock = true;
+                      message = '【Error 403: 拒绝访问】<br><span style="font-size:14px;color:var(--text-muted)">此区域为最高开发者(Root Terminal)底层维运高危核心</span>';
+                  }
+                  
+                  if (needsLock) {
+                      const overlay = document.createElement('div');
+                      overlay.className = 'lock-overlay';
+                      overlay.innerHTML = '<div class="lock-title">ACCESS DENIED</div><p style="color:#f3f4f6; margin-bottom:20px;">' + message + '</p>';
+                      lockContainer.appendChild(overlay);
                   }
               });
           }
 
-          window.addEventListener('resize', init);
-          init();
-          animate();
+          // 群白名单校验判定
+          function checkGroupWhitelist(groupId) {
+              if (groupId === '999999999') {
+                  triggerToast('⚠️ 拦截：该群组不在当前后端的集群白名单中，拒绝服务。');
+                  document.getElementById('loginBtn').disabled = true;
+                  document.getElementById('loginBtn').style.opacity = '0.3';
+              } else {
+                  triggerToast('🟢 白名单安全组匹配成功：允许连接该群。');
+                  document.getElementById('loginBtn').disabled = false;
+                  document.getElementById('loginBtn').style.opacity = '1';
+              }
+          }
+
+          // 处理登录交互流程步进器
+          let loginStep = 1;
+          function handleLoginAction() {
+              const group = document.getElementById('loginGroup').value;
+              const qq = document.getElementById('loginQQ').value;
+              
+              if (!group || !qq) {
+                  triggerToast('请输入完整的群组号与个人QQ号！');
+                  return;
+              }
+              
+              if (loginStep === 1) {
+                  document.getElementById('verifyCodeGroup').style.display = 'block';
+                  triggerToast('🔒 安全验证机制：已成功向 QQ私信 下发6位临时验证码，请查收');
+                  document.getElementById('loginBtn').innerText = '确 认 登 录';
+                  loginStep = 2;
+              } else {
+                  // 快捷匹配硬编码账号逻辑进行演示
+                  if (qq === '123456') {
+                      executeUserLogin('member', qq, group);
+                  } else if (qq === '888888') {
+                      executeUserLogin('admin', qq, group);
+                  } else if (qq === '999999') {
+                      executeUserLogin('root', qq, group);
+                  } else {
+                      executeUserLogin('member', qq, group); // 默认当作普通群员登录
+                  }
+              }
+          }
+
+          function executeUserLogin(role, qq, group) {
+              currentUserRole = role;
+              userQQNumber = qq;
+              selectedGroupNum = group;
+              
+              document.getElementById('debugRoleSelector').value = role;
+              triggerToast('🎉 欢迎回来，身分认证成功！级别: ' + role);
+              
+              // 界面视图更新转换
+              document.getElementById('loginFormBlock').style.display = 'none';
+              document.getElementById('alreadyLoggedInBlock').style.display = 'block';
+              
+              document.getElementById('userBadgeArea').innerHTML = '<span class="badge" style="background:rgba(112,0,255,0.2); border-color:var(--secondary); color:#fff;">QQ: ' + qq + ' [' + role.toUpperCase() + ']</span>';
+              
+              evaluateRoleLocks();
+          }
+
+          function logoutCurrentSession() {
+              currentUserRole = 'unlogged';
+              loginStep = 1;
+              document.getElementById('debugRoleSelector').value = 'unlogged';
+              document.getElementById('loginFormBlock').style.display = 'block';
+              document.getElementById('alreadyLoggedInBlock').style.display = 'none';
+              document.getElementById('verifyCodeGroup').style.display = 'none';
+              document.getElementById('loginBtn').innerText = '获取验证码验证';
+              document.getElementById('userBadgeArea').innerHTML = '';
+              triggerToast('会话已断开，您已安全登出控制矩阵');
+              evaluateRoleLocks();
+          }
+
+          // 供调试小挂件进行无缝联动切换的方法
+          function simulateRoleChange(role) {
+              if (role === 'unlogged') {
+                  logoutCurrentSession();
+              } else {
+                  const qqMap = { member: '123456', admin: '888888', root: '999999' };
+                  executeUserLogin(role, qqMap[role], '769128334');
+              }
+          }
+
+          // 全局动效提示框浮窗机制
+          function triggerToast(msg) {
+              const toast = document.getElementById('globalToast');
+              toast.innerHTML = msg;
+              toast.style.display = 'block';
+              setTimeout(() => { toast.style.display = 'none'; }, 3500);
+          }
+
+          // 模组二增删查改逻辑的前端闭环
+          function handleNewMemory() {
+              const text = document.getElementById('newMemText').value;
+              const type = document.getElementById('newMemType').value;
+              
+              if (!text) {
+                  triggerToast('不能写入空的记忆载荷');
+                  return;
+              }
+              
+              const tbody = document.getElementById('memoryTableBody');
+              const tr = document.createElement('tr');
+              tr.innerHTML = '<td>' + text + '</td><td>' + (type === 'private' ? '🔒 私人专属' : '🌐 全群公开') + '</td><td><span style="font-family:monospace; color:#34d399;">log_auto_set</span></td><td><a href="#" style="color:var(--primary); margin-right:8px;" onclick="triggerToast(\\'编辑功能暂未开放\\')">修改</a><a href="#" style="color:var(--accent);" onclick="deleteMemoryRow(this)">[删除/忘记]</a></td>';
+              tbody.appendChild(tr);
+              
+              document.getElementById('newMemText').value = '';
+              triggerToast('✍️ 变更日志已归档：操作记录已强行写入全局只读持久日志快照中！');
+          }
+
+          function deleteMemoryRow(btn) {
+              const row = btn.parentNode.parentNode;
+              row.parentNode.removeChild(row);
+              triggerToast('❌ [忘记] 指令执行成功：关联向量特征点已从本地拓扑星云中抹除并记入Logs。');
+          }
+
+          function handleHardReboot() {
+              if (confirm('⚠️ 高危警告！此操作将彻底洗刷当前D1集群数据库缓存及所有上下文流！确认执行吗？')) {
+                  triggerToast('💥 核心矩阵彻底重置！Worker正在强制清洗所有缓存上下文区段并重新冷启动...');
+                  document.getElementById('totalCallsVal').innerText = '0 次';
+              }
+          }
+
+          // 核心引擎启动
+          window.addEventListener('resize', initCanvas);
+          initCanvas();
+          animateCanvas();
+          evaluateRoleLocks();
       </script>
   </body>
   </html>
-  `; // 這裡確保只有純粹的反引號和分號
+  `;
 }
