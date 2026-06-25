@@ -36,65 +36,105 @@ async function dbDel(env, key) {
 }
 
 export default {
-  async fetch(request, env, ctx) {
+  async fetch(request, env) {
     const url = new URL(request.url);
 
     // ==========================================
-    // 🎙️ 網頁即時語音對話 (Gemini Live 一體化路由)
+    // 🌐 1. 處理前端首頁
     // ==========================================
-    if (url.pathname === "/live") {
-      const upgradeHeader = request.headers.get('Upgrade');
-      
-      if (!upgradeHeader || upgradeHeader.toLowerCase() !== 'websocket') {
-        return new Response(getLiveHtmlPage(url.host), {
-          headers: { "Content-Type": "text/html; charset=utf-8" }
-        });
-      }
-
-      const apiKeys1 = (env.GEMINI_API_KEYS || "").split(',').map(k => k.trim()).filter(k => k !== "");
-      const apiKeys2 = (env.VECTORIZE_GEMINI_KEYS || "").split(',').map(k => k.trim()).filter(k => k !== "");
-      const allKeys = [...new Set([...apiKeys1, ...apiKeys2])];
-      
-      if (allKeys.length === 0) {
-        return new Response('未配置任何可用的 Gemini API 金鑰', { status: 500 });
-      }
-      
-      const selectedKey = allKeys[Math.floor(Math.random() * allKeys.length)];
-      const webSocketPair = new WebSocketPair();
-      const [clientWebSocket, serverWebSocket] = Object.values(webSocketPair);
-
-      const geminiLiveUrl = `wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1alpha.GenerativeService.BidiGenerateContent?key=${selectedKey}`;
-      const geminiSocket = new WebSocket(geminiLiveUrl);
-
-      serverWebSocket.accept();
-      
-      // 💡 修正 2：新增訊息緩衝區，解決「連線已中斷」問題
-      const messageQueue = [];
-
-      // 當 Google 終於接通時，把剛才排隊的訊息一口氣發出去
-      geminiSocket.addEventListener('open', () => {
-        while (messageQueue.length > 0) {
-          geminiSocket.send(messageQueue.shift());
-        }
+    if (url.pathname === '/') {
+      return new Response(getLiveHtmlPage(url.host), {
+        headers: { 'Content-Type': 'text/html;charset=UTF-8' },
       });
-
-      serverWebSocket.addEventListener('message', event => {
-        if (geminiSocket.readyState === WebSocket.OPEN) {
-          geminiSocket.send(event.data);
-        } else {
-          // 如果 Google 還沒準備好，先存進緩衝區排隊
-          messageQueue.push(event.data);
-        }
-      });
-
-      geminiSocket.addEventListener('message', event => {
-        if (serverWebSocket.readyState === WebSocket.OPEN) serverWebSocket.send(event.data);
-      });
-      serverWebSocket.addEventListener('close', () => geminiSocket.close());
-      geminiSocket.addEventListener('close', () => serverWebSocket.close());
-
-      return new Response(null, { status: 101, webSocket: clientWebSocket });
     }
+
+    // ==========================================
+    // 🔌 2. 處理 WebSocket 連線橋接 (/live)
+    // ==========================================
+    if (url.pathname === '/live') {
+      console.log("[Worker] 🟢 收到來自前端的 WebSocket 連線請求");
+
+      const upgradeHeader = request.headers.get('Upgrade');
+      if (!upgradeHeader || upgradeHeader !== 'websocket') {
+        console.error("[Worker] ❌ 錯誤: 缺少 Upgrade header");
+        return new Response('Expected Upgrade: websocket', { status: 426 });
+      }
+
+      const apiKey = env.GEMINI_API_KEY; 
+      if (!apiKey) {
+        console.error("[Worker] ❌ 致命錯誤: 找不到 GEMINI_API_KEY 環境變數！");
+        return new Response('Missing GEMINI_API_KEY', { status: 500 });
+      }
+      console.log(`[Worker] 🔑 API Key 已讀取 (長度: ${apiKey.length})`);
+
+      const geminiWssUrl = `wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent?key=${apiKey}`;
+      console.log("[Worker] 🚀 準備向 Google API 發起 WebSocket 握手...");
+
+      try {
+        const googleResponse = await fetch(geminiWssUrl, {
+          headers: {
+            'Upgrade': 'websocket',
+            'Connection': 'Upgrade',
+            'Sec-WebSocket-Version': '13'
+          }
+        });
+
+        console.log(`[Worker] 📡 Google API 回應狀態碼: ${googleResponse.status}`);
+
+        // 如果 Google 拒絕連線 (狀態碼不是 101 Switching Protocols)
+        if (googleResponse.status !== 101) {
+          const errText = await googleResponse.text();
+          console.error(`[Worker] 💥 Google 拒絕連線！詳細錯誤內容:\n${errText}`);
+          return new Response(`Google API 拒絕連線`, { status: 502 });
+        }
+
+        console.log("[Worker] ✅ 成功與 Google 建立連線！準備橋接雙向資料...");
+
+        const [client, server] = Object.values(new WebSocketPair());
+        const googleWs = googleResponse.webSocket;
+
+        server.accept();
+        googleWs.accept();
+
+        // 接收前端聲音，轉發給 Google
+        server.addEventListener('message', event => {
+          googleWs.send(event.data);
+        });
+
+        // 接收 Google 回覆，轉發給前端
+        googleWs.addEventListener('message', event => {
+          server.send(event.data);
+        });
+
+        // 監聽斷線事件，印出真正原因
+        server.addEventListener('close', (e) => {
+            console.log(`[Worker] 🚪 前端已斷開連線 (代碼: ${e.code}, 原因: ${e.reason})`);
+            googleWs.close();
+        });
+        
+        googleWs.addEventListener('close', (e) => {
+            console.error(`[Worker] ⚠️ Google 主動斷開連線 (代碼: ${e.code}, 原因: ${e.reason})`);
+            server.close();
+        });
+
+        googleWs.addEventListener('error', (e) => {
+            console.error(`[Worker] ❌ Google WebSocket 發生未知錯誤:`, e);
+        });
+
+        return new Response(null, {
+          status: 101,
+          webSocket: client,
+        });
+
+      } catch (err) {
+        console.error(`[Worker] 💥 fetch 過程中發生未預期錯誤: ${err.message}\n${err.stack}`);
+        return new Response(`連線失敗: ${err.message}`, { status: 500 });
+      }
+    }
+
+    return new Response('Not Found', { status: 404 });
+  }
+};
 
     // ==========================================
     // 🤖 確保只處理 POST 請求 (QQ Webhook 標準)
