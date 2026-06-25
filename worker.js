@@ -1339,15 +1339,20 @@ export default {
       // ==========================================
       // 🔄 终极无敌轮询：多金钥 x 多模型交叉调用
       // ==========================================
-      // 提取全域配置的金钥清单 (供主力对话使用)
-      // 🔑 同時獲取兩組金鑰並合體，全面分攤語音 429 頻率限制壓力！
-          const apiKeys1 = (env.GEMINI_API_KEYS || "").split(',').map(k => k.trim()).filter(k => k !== "");
-          const apiKeys2 = (env.VECTORIZE_GEMINI_KEYS || "").split(',').map(k => k.trim()).filter(k => k !== "");
-          
-          // [...new Set(...)] 可以自動幫你刪除萬一兩組變數裡有重複填寫的 Key
-          const apiKeys = [...new Set([...apiKeys1, ...apiKeys2])];
-          
-          if (apiKeys.length === 0) return jsonReply(`${atSender}⚠️ 尚未配置任何 Gemini API 金钥。`);
+      // 🔑 提取主要金鑰與 Vectorize 金鑰並進行合體去重，全域共享額度
+      const apiKeys1 = (env.GEMINI_API_KEYS || "").split(',').map(k => k.trim()).filter(k => k !== "");
+      const apiKeys2 = (env.VECTORIZE_GEMINI_KEYS || "").split(',').map(k => k.trim()).filter(k => k !== "");
+      
+      // 使用 Set 自動過濾重複金鑰
+      const apiKeys = [...new Set([...apiKeys1, ...apiKeys2])];
+
+      if (apiKeys.length === 0) {
+          if (typeof isAutoInterject !== 'undefined' && isAutoInterject) {
+              return new Response(null, { status: 204 });
+          }
+          // 💡 修正關鍵：移除可能未定義的 atSender 或 msg，改用最安全直接的回覆方式
+          return jsonReply("⚠️ 系统尚未配置任何可用 Gemini API 金钥，无法进行对话。");
+      }
 
       let finalReply = "";
       let success = false;
