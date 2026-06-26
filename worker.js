@@ -1240,6 +1240,44 @@ export default {
 
       // 第六段到此完美结束，准备进入第七段的核心对话逻辑与前置拦截...
 
+// ==========================================
+      // 👑 最高權限：白名單管理指令 (必須放在裝死過濾的前面！)
+      // ==========================================
+      if (isGroup && ['!加入白名單', '!加入白名单'].some(p => msgLower.startsWith(p))) {
+          // 只有核心開發者 (isOnlyMe) 可以操作，防止群友亂開通
+          if (!isOnlyMe) return jsonReply(`${atSender}⛔ 權限不足！只有核心開發者可以管理系統白名單。`);
+          
+          // 支援 `!加入白名單 123456` 跨群開通，如果沒填群號，預設為當下這個群
+          const targetGroup = cleanMessage.replace(/^[!！]加入白名單\s*/, '').replace(/^[!！]加入白名单\s*/, '').trim() || currentGroupId;
+          
+          await dbPut(env, `whitelist_group:${targetGroup}`, "true");
+          return jsonReply(`✅ 授權成功！已將群組 ${targetGroup} 加入系統白名單，我現在可以開始回應了。`);
+      }
+
+      if (isGroup && ['!移除白名單', '!移除白名单', '!解除白名單'].some(p => msgLower.startsWith(p))) {
+          if (!isOnlyMe) return jsonReply(`${atSender}⛔ 權限不足！`);
+          
+          const targetGroup = cleanMessage.replace(/^[!！](移除|解除)白名[單单]\s*/, '').trim() || currentGroupId;
+          
+          await dbPut(env, `whitelist_group:${targetGroup}`, "false");
+          return jsonReply(`❌ 授權撤銷！已將群組 ${targetGroup} 移除白名單，我將進入強制裝死模式。`);
+      }
+
+      // ==========================================
+      // 🛡️ 核心黑白名單與開關過濾（裝死防禦網）
+      // ==========================================
+      if (isGroup) {
+         // 1. 🎯 鐵律檢查：如果沒有被授權，且不是核心開發者在下達指令，一律裝死
+         const isWhiteListed = await dbGet(env, `whitelist_group:${currentGroupId}`);
+         
+         // 🚨 注意：如果是你本人 (isOnlyMe) 講話，我們可以稍微通融不強制裝死，或者你希望嚴格一點，連你講話它都不理（這裡設定為嚴格模式）
+         if (isWhiteListed !== "true") {
+             console.log(`⚠️ 未授權群組 ${currentGroupId} 嘗試對話，已自動裝死無視。`);
+             return new Response("OK");
+         }
+
+         // ... 下面接續你原本的 黑名單檢查 與 chatMode 檢查 ...
+    
       // ==========================================
       // 🛑 核心前置拦截：全局开关与黑名单判定
       // ==========================================
