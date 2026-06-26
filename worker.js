@@ -1240,50 +1240,6 @@ export default {
 
       // 第六段到此完美结束，准备进入第七段的核心对话逻辑与前置拦截...
 
-// ==========================================
-      // 👑 最高權限：白名單管理指令 (必須放在裝死過濾的前面！)
-      // ==========================================
-      if (isGroup && ['!加入白名單', '!加入白名单'].some(p => msgLower.startsWith(p))) {
-          if (!isOnlyMe) return jsonReply(`${atSender}⛔ 權限不足！只有核心開發者可以管理系統白名單。`);
-          const targetGroup = cleanMessage.replace(/^[!！]加入白名單\s*/, '').replace(/^[!！]加入白名单\s*/, '').trim() || currentGroupId;
-          await dbPut(env, `whitelist_group:${targetGroup}`, "true");
-          return jsonReply(`✅ 授權成功！已將群組 ${targetGroup} 加入系統白名單，我現在可以開始回應了。`);
-      }
-
-      if (isGroup && ['!移除白名單', '!移除白名单', '!解除白名單'].some(p => msgLower.startsWith(p))) {
-          if (!isOnlyMe) return jsonReply(`${atSender}⛔ 權限不足！`);
-          const targetGroup = cleanMessage.replace(/^[!！](移除|解除)白名[單单]\s*/, '').trim() || currentGroupId;
-          await dbPut(env, `whitelist_group:${targetGroup}`, "false");
-          return jsonReply(`❌ 授權撤銷！已將群組 ${targetGroup} 移除白名單，我將進入強制裝死模式。`);
-      }
-
-      // ==========================================
-      // 🛡️ 核心黑白名單與開關過濾（嚴格白名單完全體）
-      // ==========================================
-      if (isGroup) {
-         // 1. 🎯 鐵律：先檢查這個群組有沒有被開通白名單
-         const isWhiteListed = await dbGet(env, `whitelist_group:${currentGroupId}`);
-         
-         if (isWhiteListed !== "true") {
-             console.log(`⚠️ 未授權群組 ${currentGroupId} 嘗試對話，因不在白名單內已自動裝死無視。`);
-             return new Response("OK");
-         }
-
-         // 2. 檢查這個群組有沒有被彻底黑名單（封鎖）
-         const isBanned = await dbGet(env, `banned_group:${currentGroupId}`);
-         if (isBanned === "true") {
-             console.log(`🚫 群组 ${currentGroupId} 在黑名单中，拒绝响应。`);
-             return new Response("OK");
-         }
-
-         // 3. 檢查群組的聊天模式（預設艾特模式）
-         const chatMode = await dbGet(env, `chat_mode:${currentGroupId}`) || "at_only";
-         
-         if (chatMode === "at_only" && !isAtMe && !isReplyMe) {
-             console.log(`🤫 當前群組為艾特模式，且未被艾特，交給後續隨機插話模組判定。`);
-         }
-      }
-    
       // ==========================================
       // 🛑 核心前置拦截：全局开关与黑名单判定
       // ==========================================
