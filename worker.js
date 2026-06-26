@@ -1186,19 +1186,49 @@ export default {
             if (!isOnlyMe) return jsonReply(`${atSender}❌ 警告：核心开发者的灵魂过于强大，精神防护网已拦截本次窃取尝试！`);
         }
 
-        // 尝试从 D1 的滚屏日志中抓取该用户的近期语料
+// ==========================================
+        // 🔮 升級：利用向量空間 (getVector) 提取目標用戶與當前話題最相關的靈魂碎片
+        // ==========================================
         let logs = [];
-        const storedLogs = await dbGet(env, `recent_logs:${currentGroupId}`);
-        if (storedLogs) {
-            try {
-                const parsed = JSON.parse(storedLogs);
-                // 筛选包含目标 QQ 号的对话纪录
-                logs = parsed.filter(l => l.includes(`QQ:${targetQq}`));
-            } catch(e) {}
+        try {
+            // 1. 調用 getVector 函數，將當前的 userMessage 轉成高維度向量
+            const userVector = await getVector(userMessage);
+
+            if (userVector && Array.isArray(userVector)) {
+                // 2. 拿著向量去你的 Cloudflare Vectorize 資料庫查詢
+                // 🎯 這裡使用 filter 鐵律過濾：只准抓這個目標 QQ 號說過的話！
+                const vectorMatches = await env.VECTOR_INDEX.query(userVector, {
+                    topK: 12,                    // 撈出最相關的 12 條語風範本
+                    filter: { qq: targetQq.toString() }, // 確保與寫入時的字串型態一致
+                    returnValues: true
+                });
+
+                if (vectorMatches && vectorMatches.matches) {
+                    // 3. 將當初存入的帶有 [暱稱(QQ:xxx)]: 內容的 text 完整提取出來
+                    logs = vectorMatches.matches.map(match => match.metadata?.text).filter(Boolean);
+                }
+            }
+        } catch (vectorError) {
+            console.error("🚨 向量空間抽樣失敗，啟動 D1 滾屏日誌降級備援:", vectorError);
         }
 
+        // 🛡️ 備援降級防線：
+        // 因為新功能剛上線時向量庫是空的，萬一向量空間找不到資料（logs 長度低於 3 條），
+        // 會自動退回原本的 D1 滾屏日誌過濾，確保機器人絕對不會死機或回話失敗！
         if (logs.length < 3) {
-            return jsonReply(`${atSender}🔍 目标用户近期发言太少（低于3条记录），我抓取不到足够的灵魂碎片来进行完美模仿。`);
+            console.log("⚠️ 向量空間碎片不足，啟動 D1 滾屏日誌備援撈取...");
+            const storedLogs = await dbGet(env, `recent_logs:${currentGroupId}`);
+            if (storedLogs) {
+                try {
+                    const parsed = JSON.parse(storedLogs);
+                    logs = parsed.filter(l => l.includes(`QQ:${targetQq}`));
+                } catch(e) {}
+            }
+        }
+
+        // 🛡️ 最終判定門檻：不管是向量庫還是 D1 備援，最少都要拼湊出 3 條語料才能模仿
+        if (logs.length < 3) {
+            return jsonReply(`${atSender}🔍 記憶庫中該用戶的相關發言太少（低於3條記錄），我抓取不到足夠的話題碎片來進行精準模仿。`);
         }
 
         // 构建深层模仿 Prompt，并将其写入群组全域人格
@@ -1227,23 +1257,58 @@ export default {
         return new Response(null, { status: 204 }); // 黑名单用户直接装死
       }
 
-      // ==========================================
-      // 📝 动态群组语料收集 (用于会议纪要、吃瓜、模仿等)
+// ==========================================
+      // 📝 动态群组语料收集 (整合 D1 滾屏與向量空間長期記憶)
       // ==========================================
       // 只有群聊且「非指令」的普通对话，才纳入系统语料库
       if (isGroup && !msgLower.startsWith('!') && !msgLower.startsWith('！')) {
          const logKey = `recent_logs:${currentGroupId}`;
          let recentLogs = [];
+
          const storedLogs = await dbGet(env, logKey);
          if (storedLogs) {
              try { recentLogs = JSON.parse(storedLogs); } catch(e) {}
          }
-         // 加入新消息，格式：[昵称(QQ号)]: 内容 (若无文字则标注发送了图片/语音/视频)
-         recentLogs.push(`[${senderCard || '群友'}(QQ:${userId})]: ${cleanMessage || (imageUrl?"发了张图":voiceUrl?"发了语音":"发了视频")}`);
+         
+         // 1. 建立標準歷史格式：[昵称(QQ号)]: 内容
+         const logEntry = `[${senderCard || '群友'}(QQ:${userId})]: ${cleanMessage || (imageUrl?"发了张图":voiceUrl?"发了语音":"发了视频")}`;
+         recentLogs.push(logEntry);
+         
          // 保持最多 200 条记录防止撑爆空间
          if (recentLogs.length > 200) recentLogs = recentLogs.slice(-200);
+         
          // 💡 使用 ctx.waitUntil 异步存入 D1，绝不阻塞当前回覆流程！
          ctx.waitUntil(dbPut(env, logKey, JSON.stringify(recentLogs)));
+
+         // ==========================================
+         // 🔮 【新加入】利用 ctx.waitUntil 在背景偷偷將靈魂碎片寫入向量資料庫
+         // ==========================================
+         if (cleanMessage && cleanMessage.length > 1) {
+            ctx.waitUntil((async () => {
+               try {
+                  // 調用你的翻譯官將當前訊息轉成向量
+                  const msgVector = await getVector(cleanMessage);
+                  
+                  if (msgVector && Array.isArray(msgVector)) {
+                     // 真正執行寫入 Cloudflare Vectorize 資料庫
+                     await env.VECTOR_INDEX.upsert([
+                        {
+                           id: `msg_${currentGroupId}_${userId}_${Date.now()}`,
+                           values: msgVector,
+                           metadata: {
+                              text: logEntry,             // 🎯 存入帶有 QQ 號的完整對話格式
+                              qq: userId.toString(),      // 🎯 打上發言者 QQ 標籤，未來 !模仿 過濾的依據
+                              group_id: currentGroupId.toString()
+                           }
+                        }
+                     ]);
+                     console.log(`💾 [向量空間] 成功將 QQ:${userId} 的靈魂語料歸檔入庫`);
+                  }
+               } catch (vectorError) {
+                  console.error("🚨 [向量空間] 寫入失敗:", vectorError);
+               }
+            })());
+         }
       }
 
       // ==========================================
@@ -1282,9 +1347,43 @@ export default {
 2. 如果群友的发言中“没有”明确询问时间（例如只是普通的闲聊、吐槽或问其他问题），你必须像个正常人类群友一样聊天，全盘隐藏时间数据，绝对不准在回复中包含任何关于“Asia/Taipei”、“亚洲/台北时间”或精炼日期的字样！`;
 
       // 🌟 获取群组全局人格 (Group Persona) - 优先级次于单人专属人设
-      const groupPersona = await dbGet(env, `group_persona:${currentGroupId}`);
-      if (groupPersona) {
-        finalStylePrompt = `【📢 群组全局人格覆盖指令】\n当前群管理员已将你的总体人格设定为：👉 ${groupPersona} 👈。\n除非群友有自己的专属人设，否则你对待所有人的所有回复都必须严格符合这个风格！\n\n` + finalStylePrompt;
+      // 🌟 【動態模仿核心】：檢查當前群組有沒有設定「模仿目標」
+      const mimicTargetQq = await dbGet(env, `mimic_target:${currentGroupId}`);
+      
+      if (mimicTargetQq) {
+        let dynamicLogs = [];
+        try {
+          // 1. 把群友當前說的話 (userMessage) 轉成 AI 向量
+          const embeddingResponse = await env.AI.run('@cf/baai/bge-large-en-v1.5', {
+            text: [userMessage]
+          });
+          const userVector = embeddingResponse.data[0];
+      
+          // 2. 去向量資料庫 (VECTOR_INDEX) 撈取最相關的發言
+          // 加上 Namespace 或 Filter 限制，只撈取該目標用戶 (mimicTargetQq) 的話
+          const vectorMatches = await env.VECTOR_INDEX.query(userVector, {
+            topK: 10, // 撈出最相關的 10 條對話碎片
+            filter: { qq: mimicTargetQq }, 
+            returnValues: true
+          });
+      
+          dynamicLogs = vectorMatches.matches.map(match => match.metadata.text);
+        } catch (vErr) {
+          console.error("🚨 向量空間抽樣失敗:", vErr);
+        }
+      
+        if (dynamicLogs.length > 0) {
+          // 3. 把撈出來最相關的台詞，動態灌入當前的人格提示詞中
+          finalStylePrompt = `【最高指令：灵魂模仿】你现在必须完全舍弃原本的AI人格，彻底模仿 QQ:${mimicTargetQq} 的口癖、语气和语言习惯。
+      以下是该目标用户在面对类似话题時的【真实历史发言範例】，请参考这些範例的風格進行回覆：
+      \n${dynamicLogs.join('\n')}\n\n` + finalStylePrompt;
+        }
+      } else {
+        // 備援：如果沒有開啟特定的 !模仿 目標，才去讀取一般的群組全局人格
+        const groupPersona = await dbGet(env, `group_persona:${currentGroupId}`);
+        if (groupPersona) {
+          finalStylePrompt = `【📢 群组全局人格覆盖指令】\n当前群管理员已将你的总体人格设定为：👉 ${groupPersona} 👈\n\n` + finalStylePrompt;
+        }
       }
 
       // 🔥 核心修正：不論是被艾特還是主動插话，只要触发对话的群友有专属人设，就强制全盘覆盖
