@@ -379,7 +379,7 @@ export default {
         'gemini-3.1-pro-preview-customtools',
         'gemini-3.1-flash-lite',
         'gemini-3.1-flash-lite-preview',
-        'gemini-3.1-flash-tts-preview',          // ✨ 從模型.txt精準加入：Gemini 3.1 Flash TTS
+        'gemini-3.1-flash-tts',          // ✨ 從模型.txt精準加入：Gemini 3.1 Flash TTS
         'gemini-3-pro-preview',
         'gemini-3-flash-preview',
 
@@ -387,7 +387,7 @@ export default {
         'gemini-2.5-pro',
         'gemini-2.5-flash',
         'gemini-2.5-flash-lite',
-        'gemini-2.5-flash-preview-tts',          // ✨ 從模型.txt精準加入：Gemini 2.5 Flash TTS
+        'gemini-2.5-flash-tts',          // ✨ 從模型.txt精準加入：Gemini 2.5 Flash TTS
         'gemini-flash-latest',
         'gemini-flash-lite-latest',
         'gemini-pro-latest',
@@ -729,33 +729,34 @@ export default {
             return jsonReply(`${atSender}⚠️ 系統大腦超載，一時間無法思考回答。`);
           }
 
+// ----------------------------------------
+          // 🎙️ 階段二：精準語音轉換 (完全動態化：從自訂 modelList 過濾)
           // ----------------------------------------
-          // 🎙️ 階段二：精準語音轉換 (Google 官方標準規範加固版)
-          // ----------------------------------------
-          // 動態撈出你 modelList 裡的 tts 模型，並強制將最穩定的 2.5 tts 放前面作為第一主打
+          // 🎯 這裡完全滿足你的需求，直接動態撈出你 modelList 裡的 tts 模型！
           let ttsAvailableModels = modelList.filter(m => m.includes('tts'));
-          // 調整排序：把公認最穩定的 2.5-tts 挪到最前面，防止 3.1-tts 沒權限卡死
-          ttsAvailableModels.sort((a, b) => b.includes('2.5') ? 1 : -1);
-          if (ttsAvailableModels.length === 0) ttsAvailableModels.push('gemini-2.5-flash-preview-tts');
+          if (ttsAvailableModels.length === 0) ttsAvailableModels.push('gemini-2.0-flash'); // 防呆機制
 
-          // ... 前面程式碼保持不變 ...
-          
           let successAudioBase64 = null;
           const MAX_TTS_RETRIES = 3; // 🎯 最多只允許換 3 次 Key，防止衝爆 Cloudflare 上限
           
           ttsLoop: for (let m = 0; m < ttsAvailableModels.length; m++) {
             const currentTtsModel = ttsAvailableModels[m];
+            
+            // 🌟【核心修正點】：動態將你的管理標籤還原為 Google 認得的原生多模態模型名稱
+            // 例如：'gemini-2.0-flash-tts' 會被還原成官方純淨名稱 'gemini-2.0-flash'
+            const realGoogleModel = currentTtsModel.replace('-tts', '');
+            
             let attemptedKeysCount = 0; // 記錄當前模型已經試了幾組 Key
           
             for (let k = 0; k < apiKeys.length; k++) {
-              // 🎯 如果這個模型已經試過 3 組 Key 都失敗，直接換下一個模型，不再浪費 fetch 次數
               if (attemptedKeysCount >= MAX_TTS_RETRIES) {
                 console.log(`⚠️ 模型 ${currentTtsModel} 已達到最大重試金鑰次數，跳過剩餘金鑰。`);
                 break; 
               }
           
               const currentKey = apiKeys[k];
-              const ttsUrl = `https://generativelanguage.googleapis.com/v1beta/models/${currentTtsModel}:generateContent?key=${currentKey}`;
+              // 🌟 這裡網址帶入的是還原後的 realGoogleModel，確保 Google 認得、絕對不噴 400/500
+              const ttsUrl = `https://generativelanguage.googleapis.com/v1beta/models/${realGoogleModel}:generateContent?key=${currentKey}`;
               
               attemptedKeysCount++; // 增加嘗試計數
           
@@ -765,7 +766,8 @@ export default {
                   headers: { 'Content-Type': 'application/json' },
                   body: JSON.stringify({
                     contents: [{ role: "user", parts: [{ text: aiTextResponse }] }],
-                    systemInstruction: { parts: [{ text: "You are a pure text-to-speech engine..." }] },
+                    systemInstruction: { parts: [{ text: "You are a pure text-to-speech engine. Read the user text clearly and naturally." }] },
+                    // 🌟 告訴標準模型開啟語音輸出模式
                     generationConfig: { 
                       responseModalities: ["AUDIO"],
                       speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: "Aoede" } } }
@@ -781,10 +783,8 @@ export default {
                     break ttsLoop; // 成功，全盤通關！
                   }
                 } else {
-                  console.log(`⏳ 模型 ${currentTtsModel} 金鑰索引 ${k} 失敗，狀態碼: ${ttsRes.status}`);
+                  console.log(`⏳ 模型 [${currentTtsModel} -> 實際: ${realGoogleModel}] 金鑰索引 ${k} 失敗，狀態碼: ${ttsRes.status}`);
                   
-                  // 🎯 如果 Google 回傳 429 (Too Many Requests)，代表這個 IP 或專案短時間內爆了
-                  // 繼續瘋狂試下一個 Key 通常也沒用，建議直接 break 換下一種模型，或者直接停損
                   if (ttsRes.status === 429) {
                     console.log(`🛑 偵測到頻率限制 (429)，放棄當前模型其餘金鑰。`);
                     break; 
@@ -793,7 +793,6 @@ export default {
               } catch (e) {
                 console.log(`⏳ 語音轉換中... 模型 ${currentTtsModel} 節點 ${k} 異常: ${e.message}`);
                 
-                // 🎯 如果抓到的錯誤訊息包含 Cloudflare 的限制，直接中斷所有防禦，避免無謂空轉
                 if (e.message.includes("subrequests")) {
                   console.log(`🚨 已觸發 Cloudflare Subrequest 上限！緊急停止所有輪詢。`);
                   break ttsLoop;
