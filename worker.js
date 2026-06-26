@@ -738,67 +738,69 @@ export default {
           ttsAvailableModels.sort((a, b) => b.includes('2.5') ? 1 : -1);
           if (ttsAvailableModels.length === 0) ttsAvailableModels.push('gemini-2.5-flash-preview-tts');
 
+          // ... 前面程式碼保持不變 ...
+          
           let successAudioBase64 = null;
-
+          const MAX_TTS_RETRIES = 3; // 🎯 最多只允許換 3 次 Key，防止衝爆 Cloudflare 上限
+          
           ttsLoop: for (let m = 0; m < ttsAvailableModels.length; m++) {
             const currentTtsModel = ttsAvailableModels[m];
-            
+            let attemptedKeysCount = 0; // 記錄當前模型已經試了幾組 Key
+          
             for (let k = 0; k < apiKeys.length; k++) {
+              // 🎯 如果這個模型已經試過 3 組 Key 都失敗，直接換下一個模型，不再浪費 fetch 次數
+              if (attemptedKeysCount >= MAX_TTS_RETRIES) {
+                console.log(`⚠️ 模型 ${currentTtsModel} 已達到最大重試金鑰次數，跳過剩餘金鑰。`);
+                break; 
+              }
+          
               const currentKey = apiKeys[k];
-              // 🎯 標準化 Google 語音生成 API URL 格式
               const ttsUrl = `https://generativelanguage.googleapis.com/v1beta/models/${currentTtsModel}:generateContent?key=${currentKey}`;
               
+              attemptedKeysCount++; // 增加嘗試計數
+          
               try {
                 const ttsRes = await fetch(ttsUrl, {
                   method: 'POST',
                   headers: { 'Content-Type': 'application/json' },
                   body: JSON.stringify({
-                    // 🌟 核心加固：為 contents 顯式指定角色 role: "user"，確保完全對齊 Google 規範
-                    contents: [{ 
-                      role: "user",
-                      parts: [{ text: aiTextResponse }] 
-                    }],
-                    // 🌟 這裡必須塞入絕對指令，防止語音模型再次發生 400 越權生成文字錯誤
-                    systemInstruction: {
-                      parts: [{ text: "You are a pure text-to-speech engine. Input text must be converted completely to audio. Do not respond with text." }]
-                    },
+                    contents: [{ role: "user", parts: [{ text: aiTextResponse }] }],
+                    systemInstruction: { parts: [{ text: "You are a pure text-to-speech engine..." }] },
                     generationConfig: { 
                       responseModalities: ["AUDIO"],
-                      speechConfig: {
-                        voiceConfig: { prebuiltVoiceConfig: { voiceName: "Aoede" } } // ✨ 鎖定 Google 最好聽的官方中文女聲
-                      }
+                      speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: "Aoede" } } }
                     }
                   })
                 });
-
+          
                 if (ttsRes.ok) {
                   const ttsData = await ttsRes.json();
                   const audioData = ttsData.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
                   if (audioData) {
                     successAudioBase64 = audioData;
-                    break ttsLoop; // 成功抱回聲音，直接通關！
+                    break ttsLoop; // 成功，全盤通關！
                   }
                 } else {
-                  console.log(`⏳ 模型 ${currentTtsModel} 回傳錯誤狀態碼: ${ttsRes.status}`);
+                  console.log(`⏳ 模型 ${currentTtsModel} 金鑰索引 ${k} 失敗，狀態碼: ${ttsRes.status}`);
+                  
+                  // 🎯 如果 Google 回傳 429 (Too Many Requests)，代表這個 IP 或專案短時間內爆了
+                  // 繼續瘋狂試下一個 Key 通常也沒用，建議直接 break 換下一種模型，或者直接停損
+                  if (ttsRes.status === 429) {
+                    console.log(`🛑 偵測到頻率限制 (429)，放棄當前模型其餘金鑰。`);
+                    break; 
+                  }
                 }
               } catch (e) {
                 console.log(`⏳ 語音轉換中... 模型 ${currentTtsModel} 節點 ${k} 異常: ${e.message}`);
+                
+                // 🎯 如果抓到的錯誤訊息包含 Cloudflare 的限制，直接中斷所有防禦，避免無謂空轉
+                if (e.message.includes("subrequests")) {
+                  console.log(`🚨 已觸發 Cloudflare Subrequest 上限！緊急停止所有輪詢。`);
+                  break ttsLoop;
+                }
               }
             }
           }
-
-          if (successAudioBase64) {
-            // 完美輸出：同時發送語音 CQ 碼與文字，體驗拉滿！
-            return jsonReply(`[CQ:record,file=base64://${successAudioBase64}]\n(🤖 語音文本: ${aiTextResponse})`);
-          } else {
-            // 萬一 Google 語音伺服器真的大塞車，依然能打字回覆，不讓群組冷場
-            return jsonReply(`${atSender}⚠️ 聲音合成失敗，但我打字回答你：\n${aiTextResponse}`);
-          }
-
-        } catch (globalE) {
-          return jsonReply(`${atSender}⚠️ 語音系統發生全域異常: ${globalE.message}`);
-        }
-      } // 👈 語音區塊完美安全結束
       
       // ==========================================
       // 🌐 读网页精炼摘要 (纯抓文字并交由 AI 总结)
