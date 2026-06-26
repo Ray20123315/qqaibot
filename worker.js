@@ -1169,7 +1169,7 @@ export default {
         // 🛡️ 权限检查：只有管理员、群主或核心开发者可用
         // 注意：这里的 \`reqData.sender.role\` 请根据你实际接收 QQ 讯息的 JSON 变数名称做微调
         // 如果你的大变数叫 payload 或 body，请换成对应的名字 (例如 payload.sender.role)
-        const role = reqData.sender?.role || 'member'; 
+        const role = body.sender?.role || 'member'; 
         const isAdminOrOwner = role === 'admin' || role === 'owner' || isOnlyMe;
         
         if (!isAdminOrOwner) {
