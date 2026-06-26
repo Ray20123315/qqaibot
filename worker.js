@@ -1197,7 +1197,7 @@ export default {
             if (userVector && Array.isArray(userVector)) {
                 // 2. 拿著向量去你的 Cloudflare Vectorize 資料庫查詢
                 // 🎯 這裡使用 filter 鐵律過濾：只准抓這個目標 QQ 號說過的話！
-                const vectorMatches = await env.VECTOR_INDEX.query(userVector, {
+                const vectorMatches = await env.VECTORIZE.query(userVector, {
                     topK: 12,                    // 撈出最相關的 12 條語風範本
                     filter: { qq: targetQq.toString() }, // 確保與寫入時的字串型態一致
                     returnValues: true
@@ -1291,7 +1291,7 @@ export default {
                   
                   if (msgVector && Array.isArray(msgVector)) {
                      // 真正執行寫入 Cloudflare Vectorize 資料庫
-                     await env.VECTOR_INDEX.upsert([
+                     await env.VECTORIZE.upsert([
                         {
                            id: `msg_${currentGroupId}_${userId}_${Date.now()}`,
                            values: msgVector,
@@ -1359,9 +1359,9 @@ export default {
           });
           const userVector = embeddingResponse.data[0];
       
-          // 2. 去向量資料庫 (VECTOR_INDEX) 撈取最相關的發言
+          // 2. 去向量資料庫 (VECTORIZE) 撈取最相關的發言
           // 加上 Namespace 或 Filter 限制，只撈取該目標用戶 (mimicTargetQq) 的話
-          const vectorMatches = await env.VECTOR_INDEX.query(userVector, {
+          const vectorMatches = await env.VECTORIZE.query(userVector, {
             topK: 10, // 撈出最相關的 10 條對話碎片
             filter: { qq: mimicTargetQq }, 
             returnValues: true
