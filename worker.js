@@ -800,6 +800,26 @@ export default {
                 }
               }
             }
+          }
+
+          // ==========================================
+          // 🏁 最終語音輸出判定與 CQ 碼組裝
+          // ==========================================
+          if (successAudioBase64) {
+            // 組裝成標準 QQ 群能識別的 Base64 語音 CQ 碼
+            const cqRecord = `[CQ:record,file=base64://${successAudioBase64}]`;
+            
+            // 完美回傳語音訊息給群友
+            return jsonReply(`${atSender}${cqRecord}`);
+          } else {
+            return jsonReply(`${atSender}⚠️ 語音轉換失敗。已遍歷所有 TTS 模型梯隊與全部 ${apiKeys.length} 個金鑰，均無法生成音訊。`);
+          }
+
+        } catch (err) {
+          console.error("❌ 語音智能對答模組執行異常:", err);
+          return jsonReply(`${atSender}❌ 語音模組觸發未知系統錯誤: ${err.message}`);
+        }
+      } // 👈 確保整段語音對答 if 判斷式在這裡完美閉合
       
       // ==========================================
       // 🌐 读网页精炼摘要 (纯抓文字并交由 AI 总结)
