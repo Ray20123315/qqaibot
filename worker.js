@@ -117,6 +117,10 @@ export default {
       return jsonResponse(getPublicNebulaSeed());
     }
 
+    if (request.method === 'GET' && url.pathname === '/api/onebot/status') {
+      return jsonResponse(await getOneBotStatus(env));
+    }
+
     if (url.pathname.startsWith('/api/portal/')) {
       return handlePortalApi(request, env, url);
     }
@@ -140,17 +144,48 @@ export default {
         attempts: 0
       }));
 
-      const sent = await sendOneBotAction(env, {
+      const codeMessageText = `【QQAIbot 门户登录验证码】\n验证码：${code}\n有效期：5 分钟。\n若非本人操作，请忽略。`;
+
+      let sendResult = await sendOneBotActionResult(env, {
         action: "send_private_msg",
         params: {
           user_id: Number(qq),
           message: [
-            { type: "text", data: { text: `【QQAIbot 门户登录验证码】\n验证码：${code}\n有效期：5 分钟。\n若非本人操作，请忽略。` } }
+            { type: "text", data: { text: codeMessageText } }
           ],
           auto_escape: false
         },
         echo: `qqai:portal-code:${Date.now()}:${crypto.randomUUID()}`
       });
+
+      if (!sendResult.sent) {
+        sendResult = await sendOneBotActionResult(env, {
+          action: "send_private_msg",
+          params: {
+            user_id: Number(qq),
+            message: codeMessageText,
+            auto_escape: false
+          },
+          echo: `qqai:portal-code-string:${Date.now()}:${crypto.randomUUID()}`
+        });
+      }
+
+      if (!sendResult.sent) {
+        sendResult = await sendOneBotActionResult(env, {
+          action: "send_msg",
+          params: {
+            message_type: "private",
+            user_id: Number(qq),
+            message: [
+              { type: "text", data: { text: codeMessageText } }
+            ],
+            auto_escape: false
+          },
+          echo: `qqai:portal-code-send-msg:${Date.now()}:${crypto.randomUUID()}`
+        });
+      }
+
+      const sent = sendResult.sent;
 
       const groupIdForNotice = extractGroupId(group);
       if (sent && groupIdForNotice && groupIdForNotice !== "default") {
@@ -172,7 +207,7 @@ export default {
         const status = await getOneBotStatus(env);
         return jsonResponse({
           ok: false,
-          message: `验证码已生成，但发送失败。当前 NapCat WebSocket 连接数：${status.sockets || 0}。请确认 WebSocket Client 已连接到 wss://qqai.ray2025.com/onebot，且机器人允许私聊该 QQ。`
+          message: `验证码已生成，但发送失败。当前 NapCat WebSocket 连接数：${status.sockets || 0}。最后发送结果：${JSON.stringify(sendResult)}。请确认 WebSocket Client 已连接到 wss://qqai.ray2025.com/onebot，且机器人允许私聊该 QQ。`
         }, 503);
       }
 
@@ -1971,15 +2006,20 @@ function getOneBotHub(env) {
 }
 
 async function sendOneBotAction(env, actionPayload) {
-  if (!env.ONEBOT_HUB) return false;
+  const result = await sendOneBotActionResult(env, actionPayload);
+  return result.sent === true;
+}
+
+async function sendOneBotActionResult(env, actionPayload) {
+  if (!env.ONEBOT_HUB) return { sent: false, error: "missing_ONEBOT_HUB" };
   const res = await getOneBotHub(env).fetch("https://onebot-hub/send", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(actionPayload)
   });
-  if (!res.ok) return false;
+  if (!res.ok) return { sent: false, status: res.status };
   const data = await res.json().catch(() => null);
-  return data?.sent === true;
+  return { sent: data?.sent === true, ...(data || {}) };
 }
 
 async function getOneBotStatus(env) {
