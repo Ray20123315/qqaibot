@@ -16,6 +16,15 @@ binding = "MYBROWSER"
 [ai]
 binding = "AI"
 
+[durable_objects]
+bindings = [
+  { name = "ONEBOT_HUB", class_name = "OneBotHub" }
+]
+
+[[migrations]]
+tag = "v1_onebot_hub"
+new_sqlite_classes = [ "OneBotHub" ]
+
 [[kv_namespaces]]
 binding = "QQ_STORE"
 id = "bf716105d0f6412fa97daad4e0f544d2"
