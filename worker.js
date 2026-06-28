@@ -494,7 +494,7 @@ export default {
 
       if (/^[!！]指令(开|開|关|關)\b/.test(msgLower)) {
         if (!hasAdminAuth) return jsonReply(`${atSender}❌ 只有群主、管理员或开发者可以切换网页设定指令权限。`);
-        const enable = /^[!！]指令(开|開)\b?/.test(msgLower);
+        const enable = /^[!！]指令(开|開)\b/.test(msgLower);
         if (enable) await dbDel(env, `web_command_off:${currentGroupId}`);
         else await dbPut(env, `web_command_off:${currentGroupId}`, "true");
         return jsonReply(`${atSender}${enable ? "✅ 已开启" : "⛔ 已关闭"}可修改网页设定的 ! 指令。`);
