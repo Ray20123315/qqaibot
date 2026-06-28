@@ -37,7 +37,48 @@ async function dbDel(env, key) {
 
 export default {
   async fetch(request, env, ctx) {
-    const url = new URL(request.url);
+    const url = new URL(request.url); // 👈 保留此行，避免後續代碼崩潰！
+
+    // ==========================================
+    // 🛠️ 【新增核心升級】：檢查是否為通用 WebSocket 握手請求
+    // ==========================================
+    const upgradeHeader = request.headers.get("Upgrade");
+    if (upgradeHeader && upgradeHeader.toLowerCase() === "websocket" && url.pathname !== "/live") {
+      
+      // 1. 建立一對 WebSocket 通道 (Client 端 與 Server 端)
+      const webSocketPair = new WebSocketPair();
+      const [client, server] = Object.values(webSocketPair);
+
+      // 2. 讓 Worker 的 Server 端開始監聽、接受這個連接
+      server.accept();
+
+      // 3. 處理前端傳進來的 WebSocket 訊息
+      server.addEventListener("message", async (event) => {
+        try {
+          const messageData = event.data; // 前端傳進來的資料
+          console.log("收到 WebSocket 訊息:", messageData);
+          
+          // 💡 您可以在這裡呼叫您下方定義的 callGeminiDirectly(messageData) 或是操作 D1
+          // const aiReply = await callGeminiDirectly(messageData);
+          
+          // 回傳訊息給前端
+          server.send(JSON.stringify({ status: "success", reply: "成功透過 WebSocket 連線回應" }));
+        } catch (error) {
+          server.send(JSON.stringify({ error: error.message }));
+        }
+      });
+
+      // 4. 監聽關閉事件
+      server.addEventListener("close", (event) => {
+        console.log(`WebSocket 斷開連接: ${event.code}`);
+      });
+
+      // 5. 回傳 101 Switching Protocols 狀態碼完成握手
+      return new Response(null, {
+        status: 101,
+        webSocket: client,
+      });
+    }
 
     // ==========================================
     // 🎙️ 網頁即時語音對話 (Gemini Live 一體化路由)
@@ -97,6 +138,34 @@ export default {
     }
 
     // ==========================================
+    // 🌌 公共首頁與記憶矩陣中心
+    // ==========================================
+    if (request.method === 'GET' && ['/', '/portal', '/matrix'].includes(url.pathname)) {
+      return new Response(getPortalHomePage(url.host), {
+        headers: { "Content-Type": "text/html; charset=utf-8" }
+      });
+    }
+
+    if (request.method === 'GET' && url.pathname === '/api/public/nebula') {
+      return jsonResponse(getPublicNebulaSeed());
+    }
+
+    if (request.method === 'POST' && url.pathname === '/api/auth/request-code') {
+      return jsonResponse({
+        ok: true,
+        message: "验证码流程已接入预留接口；请在生产环境绑定 QQ 私讯发送器后启用真实发送。",
+        ttl_seconds: 300
+      });
+    }
+
+    if (request.method === 'POST' && url.pathname === '/api/auth/verify-code') {
+      return jsonResponse({
+        ok: false,
+        message: "验证码验证尚未启用。Worker 端已保留接口，需接入 QQ 私讯回调与会话签发。"
+      }, 501);
+    }
+
+    // ==========================================
     // 🤖 確保只處理 POST 請求 (QQ Webhook 標準)
     // ==========================================
     if (request.method !== 'POST') return new Response('🤖 QQAI Worker 运行正常', { status: 200 });
@@ -119,7 +188,7 @@ export default {
 
     const rawMessage = String(body.raw_message || (typeof body.message === 'string' ? body.message : ""));
     
-    if (rawMessage.trim() === "!live") {
+    if (/^[!！]live$/i.test(rawMessage.trim())) {
       const userId = body.user_id;
       const atSender = userId ? `[CQ:at,qq=${userId}] ` : ""; 
       
@@ -577,6 +646,27 @@ export default {
         return jsonReply(`${atSender}🗑️ 成功撤销 QQ:${targetQq} 的系统管理特权。`);
       }
 
+      // !禁记忆 / !解禁记忆
+      if (['!禁记忆', '!禁記憶', '!banmemory', '！禁记忆', '！禁記憶'].some(p => msgLower.startsWith(p))) {
+        if (!isOnlyMe) return jsonReply(`${atSender}❌ 只有最高开发者可以冻结网页端记忆编辑权。`);
+        const prefix = ['!禁记忆', '!禁記憶', '!banmemory', '！禁记忆', '！禁記憶'].find(p => msgLower.startsWith(p));
+        const { targetQq } = parseArgs(userMessage, prefix);
+        if (!targetQq) return jsonReply(`${atSender}🤷 请指定要冻结的 QQ，例如: !禁记忆 @某人`);
+        await dbPut(env, `memory_banned:${targetQq}`, "true");
+        await writeMemoryAudit(env, { groupId: currentGroupId, userId, action: "冻结记忆编辑权", before: targetQq, after: "memory_banned=true" });
+        return jsonReply(`${atSender}🧊 已冻结 QQ:${targetQq} 的记忆编辑权限。`);
+      }
+
+      if (['!解禁记忆', '!解禁記憶', '!unbanmemory', '！解禁记忆', '！解禁記憶'].some(p => msgLower.startsWith(p))) {
+        if (!isOnlyMe) return jsonReply(`${atSender}❌ 只有最高开发者可以恢复网页端记忆编辑权。`);
+        const prefix = ['!解禁记忆', '!解禁記憶', '!unbanmemory', '！解禁记忆', '！解禁記憶'].find(p => msgLower.startsWith(p));
+        const { targetQq } = parseArgs(userMessage, prefix);
+        if (!targetQq) return jsonReply(`${atSender}🤷 请指定要解冻的 QQ，例如: !解禁记忆 @某人`);
+        await dbDel(env, `memory_banned:${targetQq}`);
+        await writeMemoryAudit(env, { groupId: currentGroupId, userId, action: "恢复记忆编辑权", before: targetQq, after: "memory_banned=false" });
+        return jsonReply(`${atSender}✅ 已恢复 QQ:${targetQq} 的记忆编辑权限。`);
+      }
+
       // ==========================================
       // 📜 基础系统帮助与状态模组 (权限阶梯动态版)
       // ==========================================
@@ -598,9 +688,14 @@ export default {
         // =======================================
         // 🟢 Tier 1: 所有人皆可见 (基础功能)
         // =======================================
-        let helpMsg = `🤖 QQAI 机器人指令清单 ${roleTxt}\n\n` +
+        let helpMsg = `🤖 QQAI 机器人指令清单 ${roleTxt}\n` +
+                      `🌐 门户首页：https://qqai.ray2025.com/\n` +
+                      `🎙️ Live：https://qqai.ray2025.com/live\n\n` +
                       `🔹 [日常与多模态]\n` +
+                      `!live (取得即时语音网页)\n` +
+                      `!status / !配额 (系统状态)\n` +
                       `!语音 [问题] (语音回覆)\n` +
+                      `!画图 [提示词] (生成图片)\n` +
                       `!读网页 [网址] (提取精华摘要)\n` +
                       `!翻译 [语言] [内容]\n` +
                       `!截图 [网址] (获取网页快照)\n\n` +
@@ -610,6 +705,7 @@ export default {
                       `!查成分 [@成员] (AI属性分析)\n` +
                       `!模仿 [@成员] (全群灵魂窃取)\n\n` +
                       `🔹 [专属记忆与个人设置]\n` +
+                      `!群规 / !rules\n` +
                       `!免打扰 / !取消免打扰\n` +
                       `!记住 <内容> / !忘记 <内容>\n` +
                       `!你记住了什么\n` +
@@ -621,7 +717,9 @@ export default {
         if (currentAdminStatus || isSuperAuth || isOnlyMe) {
           helpMsg += `\n🛡️ [管理员 秩序管控区]\n` +
                      `!关闭ai / !开启ai (当前群休眠/唤醒)\n` +
+                     `!ai关 / !ai开 (同上)\n` +
                      `!拉黑 [@成员] / !洗白 [@成员]\n` +
+                     `!set群规 [内容]\n` +
                      `!免打扰 [@成员] / !取消免打扰 [@成员]\n` +
                      `!set人格 [@成员] [风格] / !del人格 [@成员]\n`;
         }
@@ -632,9 +730,8 @@ export default {
         if (isSuperAuth || isOnlyMe) {
           helpMsg += `\n💠 [群主/共开 核心设定期]\n` +
                      `!切换人格 [风格] (修改本群全局AI性格)\n` +
-                     `!恢复人格 (删除全局性格设定)\n` +
-
-                     `!群白名单 [群号] / !删群白名单\n` +
+                     `!恢复人格 / !取消使用 (删除全局性格或模仿)\n` +
+                     `!群白名单 [群号] / !删群白名单 [群号]\n` +
                      `!记忆开 / !记忆关 (全局记忆状态)\n`;
         }
 
@@ -643,8 +740,10 @@ export default {
         // =======================================
         if (isOnlyMe) {
           helpMsg += `\n👑 [最高主宰 专属上帝指令]\n` +
-                     `!重置 (硬重启与强制清空全域缓存)\n` +
+                     `!自我调整 / !自我修正\n` +
+                     `!重置 或 !clear (硬重启与强制清空缓存)\n` +
                      `!给权限 [@成员] / !删权限 [@成员]\n` +
+                     `!禁记忆 [@成员] / !解禁记忆 [@成员]\n` +
                      `(注: 任何人均无法拉黑开发者或修改其免打扰与人格)\n`;
         }
 
@@ -868,15 +967,15 @@ export default {
         if (!match) return jsonReply(`${atSender}⚠️ 请提供完整的网址，例如: !截图 https://www.google.com`);
         if (!env.MYBROWSER) return jsonReply(`${atSender}⚠️ 开发者尚未在 Cloudflare 绑定 MYBROWSER 浏览器实例，无法进行截图。`);
         
+        let browser;
         try {
-          const browser = await puppeteer.launch(env.MYBROWSER);
+          browser = await puppeteer.launch(env.MYBROWSER);
           const page = await browser.newPage(); 
           // 设定高清视窗大小
           await page.setViewport({ width: 1280, height: 800 });
           // 等待 DOM 加载完成即截图，避免无穷无尽的 AJAX 卡死
-          await page.goto(match[0], { waitUntil: "domcontentloaded" });
-          const imgBuffer = page.screenshot ? await page.screenshot() : null; 
-          await browser.close();
+          await page.goto(match[0], { waitUntil: "domcontentloaded", timeout: 20000 });
+          const imgBuffer = page.screenshot ? await page.screenshot({ type: "png", fullPage: false }) : null; 
           
           if (!imgBuffer) return jsonReply(`${atSender}❌ 截图失败：未能正确捕获网页画面。`);
           
@@ -889,6 +988,10 @@ export default {
           return jsonReply(`${atSender}[CQ:image,file=base64://${btoa(binary)}]`);
         } catch (err) { 
           return jsonReply(`${atSender}❌ 网页截图失败：${err.message}`); 
+        } finally {
+          if (browser) {
+            try { await browser.close(); } catch (closeErr) { console.error("关闭截图浏览器失败:", closeErr); }
+          }
         }
       }
       
@@ -983,6 +1086,7 @@ export default {
         const prefix = ['!记住', '!記住', '!remember', '！记住', '！記住', '！remember'].find(p => msgLower.startsWith(p));
         let targetMem = cleanMessage.slice(prefix.length).trim();
         if (!targetMem) return jsonReply(`${atSender}🤷 请输入要记住的内容。`);
+        if (await isMemoryBanned(env, userId)) return jsonReply(`${atSender}【操作失败：您的记忆编辑权限已被管理员冻结】`);
 
         const kvKey = `user_memo:${currentGroupId}:${userId}`;
         let memos = [];
@@ -995,6 +1099,7 @@ export default {
 
         memos.push(targetMem);
         await dbPut(env, kvKey, JSON.stringify(memos));
+        await writeMemoryAudit(env, { groupId: currentGroupId, userId, action: "新增记忆", before: null, after: targetMem });
         return jsonReply(`${atSender}📝 记住了！${targetMem}`);
       }
 
@@ -1003,6 +1108,7 @@ export default {
         const prefix = ['!忘记', '!忘記', '!forget', '！忘记', '！忘記', '！forget'].find(p => msgLower.startsWith(p));
         let targetForget = cleanMessage.slice(prefix.length).trim();
         if (!targetForget) return jsonReply(`${atSender}🤷 要我忘记什么？格式：!忘记 内容`);
+        if (await isMemoryBanned(env, userId)) return jsonReply(`${atSender}【操作失败：您的记忆编辑权限已被管理员冻结】`);
 
         const kvKey = `user_memo:${currentGroupId}:${userId}`;
         let memos = [];
@@ -1012,6 +1118,7 @@ export default {
         if (memos.length === 0) return jsonReply(`${atSender}🔍 您的专属记忆库目前是空的哦。`);
 
         const initialLength = memos.length;
+        const removedMemos = memos.filter(m => m.includes(targetForget));
         memos = memos.filter(m => !m.includes(targetForget));
 
         if (memos.length === initialLength) return jsonReply(`${atSender}🤔 没找到包含「${targetForget}」的记忆。`);
@@ -1021,6 +1128,7 @@ export default {
         } else {
           await dbPut(env, kvKey, JSON.stringify(memos));
         }
+        await writeMemoryAudit(env, { groupId: currentGroupId, userId, action: "删除记忆", before: removedMemos.join(" | "), after: null });
         return jsonReply(`${atSender}🗑️ 已成功抹除相关记忆。`);
       }
 
@@ -1033,6 +1141,21 @@ export default {
 
         if (memos.length === 0) return jsonReply(`${atSender}🤔 脑海空空如也，我还没有记住关于你的任何专属事情哦。（使用 !记住 <内容> 让我记下）`);
         return jsonReply(`${atSender}📖 【关于你的专属记忆如下】：\n` + memos.map((m, i) => `${i + 1}. ${m}`).join('\n'));
+      }
+
+      if (['!群规', '!群規', '!rules', '！群规', '！群規'].includes(msgLower)) {
+        const rules = await dbGet(env, `group_rules:${currentGroupId}`);
+        if (!rules) return jsonReply(`${atSender}📌 本群尚未设置群规。管理员可使用 !set群规 [内容] 设置。`);
+        return jsonReply(`${atSender}📌 【本群群规】\n${rules}`);
+      }
+
+      if (['!set群规', '!set群規', '!setrules', '！set群规', '！set群規'].some(p => msgLower.startsWith(p))) {
+        if (!hasAdminAuth) return jsonReply(`${atSender}⚠️ 权限不足。仅限管理员、群主或开发者设置群规。`);
+        const prefix = ['!set群规', '!set群規', '!setrules', '！set群规', '！set群規'].find(p => msgLower.startsWith(p));
+        const rules = cleanMessage.slice(prefix.length).trim();
+        if (!rules) return jsonReply(`${atSender}⚠️ 群规内容不能为空。格式：!set群规 禁止刷屏，友善交流`);
+        await dbPut(env, `group_rules:${currentGroupId}`, rules);
+        return jsonReply(`${atSender}✅ 本群群规已更新。`);
       }
 
       // ==========================================
@@ -1054,6 +1177,13 @@ export default {
         if (!hasAdminAuth) return jsonReply(`${atSender}⚠️ 权限不足。`);
         await dbDel(env, `group_persona:${currentGroupId}`);
         return jsonReply(`${atSender}🗑️ 已清除本群全局人格，恢复默认设定。`);
+      }
+
+      if (['!取消使用', '!cancelimitate', '！取消使用'].some(p => msgLower === p)) {
+        if (!hasAdminAuth) return jsonReply(`${atSender}⚠️ 权限不足。仅限管理员、群主或开发者解除全群模仿状态。`);
+        await dbDel(env, `group_persona:${currentGroupId}`);
+        await dbDel(env, `mimic:${currentGroupId}`);
+        return jsonReply(`${atSender}♻️ 已解除全群模仿状态。`);
       }
 
       // !set人格 [@成员/QQ号] [风格]
@@ -1150,6 +1280,55 @@ export default {
         
         await dbDel(env, `ai_off:${currentGroupId}`);
         return jsonReply(`${atSender}✨ AI 助手已重新唤醒！很高兴继续为大家服务。`);
+      }
+
+      if (['!ai关', '!ai關', '！ai关', '！ai關'].some(p => msgLower === p)) {
+        if (!hasAdminAuth) return jsonReply(`${atSender}⚠️ 权限不足。仅限管理员、群主或开发者操作。`);
+        await dbPut(env, `ai_off:${currentGroupId}`, "true");
+        return jsonReply(`${atSender}💤 AI 助手已在此群进入休眠模式。`);
+      }
+
+      if (['!ai开', '!ai開', '！ai开', '！ai開'].some(p => msgLower === p)) {
+        if (!hasAdminAuth) return jsonReply(`${atSender}⚠️ 权限不足。仅限管理员、群主或开发者操作。`);
+        await dbDel(env, `ai_off:${currentGroupId}`);
+        return jsonReply(`${atSender}✨ AI 助手已重新唤醒。`);
+      }
+
+      if (['!记忆开', '!記憶開', '!memoryon', '！记忆开', '！記憶開'].some(p => msgLower === p)) {
+        if (!hasAdminAuth) return jsonReply(`${atSender}⚠️ 权限不足。仅限管理员、群主或开发者操作。`);
+        await dbPut(env, `memo:${currentGroupId}`, "true");
+        return jsonReply(`${atSender}🧠 本群 Vectorize 自动记忆已开启。`);
+      }
+
+      if (['!记忆关', '!記憶關', '!memoryoff', '！记忆关', '！記憶關'].some(p => msgLower === p)) {
+        if (!hasAdminAuth) return jsonReply(`${atSender}⚠️ 权限不足。仅限管理员、群主或开发者操作。`);
+        await dbPut(env, `memo:${currentGroupId}`, "false");
+        return jsonReply(`${atSender}🧠 本群 Vectorize 自动记忆已关闭。`);
+      }
+
+      if (['!群白名单', '!群白名單', '!allowgroup', '！群白名单', '！群白名單'].some(p => msgLower.startsWith(p))) {
+        if (!(senderRole === 'owner' || isDeveloper)) return jsonReply(`${atSender}⚠️ 权限不足。仅限群主或开发者操作群白名单。`);
+        const prefix = ['!群白名单', '!群白名單', '!allowgroup', '！群白名单', '！群白名單'].find(p => msgLower.startsWith(p));
+        const groupToAllow = cleanMessage.slice(prefix.length).trim() || currentGroupId;
+        if (!groupToAllow) return jsonReply(`${atSender}⚠️ 请提供群号，例如: !群白名单 123456`);
+        await dbPut(env, `group_whitelist:${groupToAllow}`, "true");
+        return jsonReply(`${atSender}✅ 已将群 ${groupToAllow} 加入白名单。`);
+      }
+
+      if (['!删群白名单', '!刪群白名單', '!removegroup', '！删群白名单', '！刪群白名單'].some(p => msgLower.startsWith(p))) {
+        if (!(senderRole === 'owner' || isDeveloper)) return jsonReply(`${atSender}⚠️ 权限不足。仅限群主或开发者操作群白名单。`);
+        const prefix = ['!删群白名单', '!刪群白名單', '!removegroup', '！删群白名单', '！刪群白名單'].find(p => msgLower.startsWith(p));
+        const groupToRemove = cleanMessage.slice(prefix.length).trim() || currentGroupId;
+        if (!groupToRemove) return jsonReply(`${atSender}⚠️ 请提供群号，例如: !删群白名单 123456`);
+        await dbDel(env, `group_whitelist:${groupToRemove}`);
+        return jsonReply(`${atSender}🗑️ 已将群 ${groupToRemove} 移出白名单。`);
+      }
+
+      if (['!clear', '!重置', '！clear', '！重置'].some(p => msgLower === p)) {
+        if (!hasAdminAuth) return jsonReply(`${atSender}⚠️ 权限不足。仅限管理员、群主或开发者操作。`);
+        await dbDel(env, sessionKey);
+        await dbDel(env, `mimic:${currentGroupId}`);
+        return jsonReply(`${atSender}♻️ 已清空当前会话上下文与模仿状态。`);
       }
 
       // ==========================================
@@ -1668,3 +1847,148 @@ export default {
     }
   } // 结束 fetch 函式
 }; // 结束 export default
+
+function jsonResponse(data, status = 200) {
+  return new Response(JSON.stringify(data), {
+    status,
+    headers: {
+      "Content-Type": "application/json; charset=utf-8",
+      "Cache-Control": "no-store"
+    }
+  });
+}
+
+function getPublicNebulaSeed() {
+  return {
+    mode: "anonymous_public_mix",
+    text_visible: false,
+    clusters: ["humor", "knowledge", "daily", "events", "members"],
+    particles: 1600
+  };
+}
+
+async function isMemoryBanned(env, userId) {
+  return await dbGet(env, `memory_banned:${userId}`) === "true";
+}
+
+async function writeMemoryAudit(env, entry) {
+  const auditEntry = {
+    id: crypto.randomUUID(),
+    groupId: entry.groupId || "",
+    userId: entry.userId || "",
+    action: entry.action,
+    before: entry.before,
+    after: entry.after,
+    at: new Date().toISOString()
+  };
+  const globalKey = "audit:memory:global";
+  const groupKey = `audit:memory:group:${auditEntry.groupId || "private"}`;
+  for (const key of [globalKey, groupKey]) {
+    let logs = [];
+    const raw = await dbGet(env, key);
+    if (raw) {
+      try { logs = JSON.parse(raw); } catch (e) { logs = []; }
+    }
+    logs.push(auditEntry);
+    if (logs.length > 500) logs = logs.slice(-500);
+    await dbPut(env, key, JSON.stringify(logs));
+  }
+}
+
+function getLiveHtmlPage(host) {
+  return `<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>QQAI Live</title>
+  <style>
+    html,body{margin:0;height:100%;font-family:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;background:#05070d;color:#eef3ff}
+    main{min-height:100%;display:grid;place-items:center;padding:24px;background:radial-gradient(circle at 50% 30%,#21476c 0,#0b1424 38%,#05070d 72%)}
+    section{width:min(680px,100%);border:1px solid rgba(255,255,255,.14);background:rgba(7,11,20,.72);border-radius:8px;padding:24px}
+    h1{font-size:28px;margin:0 0 12px}
+    p{line-height:1.7;color:#b9c6dc}
+    button{height:42px;border:0;border-radius:6px;padding:0 16px;background:#49d6ff;color:#031018;font-weight:700;cursor:pointer}
+    #log{margin-top:16px;min-height:80px;white-space:pre-wrap;color:#9ff2c7}
+  </style>
+</head>
+<body>
+  <main>
+    <section>
+      <h1>QQAI Live</h1>
+      <p>此頁會以 WebSocket 連線到 Worker 的 <code>/live</code>，再由 Worker 轉接 Gemini Live。請先確認 Worker Secrets 內已配置 <code>GEMINI_API_KEYS</code> 或 <code>VECTORIZE_GEMINI_KEYS</code>。</p>
+      <button id="connect">連線測試</button>
+      <div id="log"></div>
+    </section>
+  </main>
+  <script>
+    const log = document.getElementById('log');
+    document.getElementById('connect').onclick = () => {
+      const ws = new WebSocket((location.protocol === 'https:' ? 'wss://' : 'ws://') + '${host}/live');
+      ws.onopen = () => { log.textContent = 'WebSocket 已連線。'; ws.send(JSON.stringify({setup:{model:'models/gemini-2.0-flash-live-001'}})); };
+      ws.onmessage = e => { log.textContent += '\\n收到資料：' + String(e.data).slice(0, 240); };
+      ws.onerror = () => { log.textContent += '\\nWebSocket 發生錯誤。'; };
+      ws.onclose = e => { log.textContent += '\\n連線已關閉：' + e.code; };
+    };
+  </script>
+</body>
+</html>`;
+}
+
+function getPortalHomePage(host) {
+  return `<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>QQAIbot Portal</title>
+  <style>
+    *{box-sizing:border-box}html,body{margin:0;min-height:100%;font-family:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;background:#03050a;color:#edf6ff}
+    canvas{position:fixed;inset:0;width:100%;height:100%;display:block}
+    .shell{position:relative;z-index:1;min-height:100vh;display:grid;grid-template-columns:minmax(0,1fr) 360px;gap:28px;align-items:end;padding:40px}
+    .hero{max-width:760px;padding-bottom:24px}.brand{font-size:14px;letter-spacing:0;color:#71e7ff}.hero h1{font-size:clamp(36px,6vw,78px);line-height:1;margin:10px 0 16px;letter-spacing:0}
+    .hero p{font-size:18px;line-height:1.7;color:#b8c7d9;max-width:680px}.panel{border:1px solid rgba(255,255,255,.14);background:rgba(5,10,18,.78);backdrop-filter:blur(16px);border-radius:8px;padding:20px}
+    label{display:block;font-size:13px;color:#9fb1c7;margin:14px 0 6px}input,select{width:100%;height:40px;border:1px solid rgba(255,255,255,.18);border-radius:6px;background:#09111f;color:#eef6ff;padding:0 10px}
+    button,a.btn{display:inline-flex;align-items:center;justify-content:center;height:40px;border:0;border-radius:6px;background:#57d7ff;color:#031018;font-weight:700;text-decoration:none;padding:0 14px;cursor:pointer}
+    .row{display:flex;gap:10px;margin-top:16px}.notice{margin-top:16px;color:#a9b8ca;font-size:14px;line-height:1.6}.links{display:flex;gap:10px;flex-wrap:wrap;margin-top:18px}
+    @media(max-width:860px){.shell{grid-template-columns:1fr;padding:22px;align-items:start}.hero{padding-top:54px}.panel{width:100%}}
+  </style>
+</head>
+<body>
+  <canvas id="nebula" aria-hidden="true"></canvas>
+  <main class="shell">
+    <section class="hero">
+      <div class="brand">QQAIbot Memory Matrix</div>
+      <h1>全站記憶星雲母體</h1>
+      <p>未登入前僅展示匿名化的群組混合粒子。登入後，記憶矩陣會坍縮為所屬群組的語義星團，並解鎖可檢視的中文字幕摘要。</p>
+      <div class="links">
+        <a class="btn" href="/live">Live</a>
+        <a class="btn" href="/matrix">Vector Matrix</a>
+      </div>
+    </section>
+    <aside class="panel">
+      <strong>快捷登入</strong>
+      <label>步驟一：選擇群組</label>
+      <input id="group" placeholder="群組名稱 (群QQ號)">
+      <label>步驟二：個人 QQ 號</label>
+      <input id="qq" inputmode="numeric" placeholder="請輸入 QQ 號">
+      <div class="row"><button id="send">發送驗證碼</button></div>
+      <label>步驟三：安全驗證</label>
+      <input id="code" inputmode="numeric" maxlength="6" placeholder="6 位數驗證碼">
+      <div class="row"><button id="verify">登入</button></div>
+      <div class="notice" id="notice">系統公告：Portal、Live、Vector Matrix 路由已啟用。驗證碼接口需接入 QQ 私訊發送器後才會簽發正式登入。</div>
+    </aside>
+  </main>
+  <script>
+    const c=document.getElementById('nebula'),x=c.getContext('2d');let w,h,p=[];
+    function resize(){w=c.width=innerWidth*devicePixelRatio;h=c.height=innerHeight*devicePixelRatio;p=Array.from({length:1500},()=>({x:Math.random()*w,y:Math.random()*h,vx:(Math.random()-.5)*.45,vy:(Math.random()-.5)*.45,r:Math.random()*1.6+.25,h:Math.random()*80+185}))}
+    addEventListener('resize',resize);resize();
+    let mx=-9999,my=-9999;addEventListener('pointermove',e=>{mx=e.clientX*devicePixelRatio;my=e.clientY*devicePixelRatio});
+    function frame(){x.fillStyle='rgba(3,5,10,.24)';x.fillRect(0,0,w,h);for(const a of p){const dx=a.x-mx,dy=a.y-my,d=Math.hypot(dx,dy);if(d<120){a.vx+=dx/d*.025;a.vy+=dy/d*.025;x.strokeStyle='rgba(120,230,255,.16)';x.beginPath();x.moveTo(mx,my);x.lineTo(a.x,a.y);x.stroke()}a.x=(a.x+a.vx+w)%w;a.y=(a.y+a.vy+h)%h;a.vx*=.995;a.vy*=.995;x.fillStyle='hsla('+a.h+',95%,70%,.85)';x.beginPath();x.arc(a.x,a.y,a.r*devicePixelRatio,0,Math.PI*2);x.fill()}requestAnimationFrame(frame)}frame();
+    async function post(path,data){const r=await fetch(path,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(data)});return r.json()}
+    send.onclick=async()=>{notice.textContent=(await post('/api/auth/request-code',{group:group.value,qq:qq.value})).message}
+    verify.onclick=async()=>{notice.textContent=(await post('/api/auth/verify-code',{group:group.value,qq:qq.value,code:code.value})).message}
+  </script>
+</body>
+</html>`;
+}
