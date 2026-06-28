@@ -1,7 +1,5 @@
 import puppeteer from "@cloudflare/puppeteer";
 
-const activeOneBotSockets = new Set();
-
 // ==========================================
 // 🗄️ D1 資料庫操作小幫手 (模擬 KV 行為)
 // ==========================================
@@ -46,68 +44,7 @@ export default {
     // ==========================================
     const upgradeHeader = request.headers.get("Upgrade");
     if (upgradeHeader && upgradeHeader.toLowerCase() === "websocket" && ["/onebot", "/ws", "/ws/onebot"].includes(url.pathname)) {
-      const webSocketPair = new WebSocketPair();
-      const [client, server] = Object.values(webSocketPair);
-
-      server.accept();
-      activeOneBotSockets.add(server);
-
-      server.addEventListener("message", async (event) => {
-        try {
-          const body = JSON.parse(typeof event.data === "string" ? event.data : new TextDecoder().decode(event.data));
-
-          // NapCat 心跳、API 回應與非事件封包不需要交給聊天主流程。
-          if (!body || body.post_type === "meta_event" || body.echo || body.status === "ok") return;
-
-          const internalRequest = new Request(`${url.protocol}//${url.host}/`, {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-              "X-QQAI-Transport": "websocket"
-            },
-            body: JSON.stringify(body)
-          });
-
-          const internalResponse = await this.fetch(internalRequest, env, ctx);
-          if (!internalResponse || internalResponse.status === 204) return;
-
-          const payload = await internalResponse.json().catch(() => null);
-          const reply = payload?.reply;
-          if (!reply) return;
-
-          const action = body.message_type === "private" ? "send_private_msg" : "send_group_msg";
-          const params = body.message_type === "private"
-            ? { user_id: body.user_id, message: reply, auto_escape: false }
-            : { group_id: body.group_id, message: reply, auto_escape: false };
-
-          server.send(JSON.stringify({
-            action,
-            params,
-            echo: `qqai:${Date.now()}:${crypto.randomUUID()}`
-          }));
-        } catch (error) {
-          console.error("OneBot WebSocket 處理失敗:", error);
-          server.send(JSON.stringify({
-            action: "send_msg",
-            params: { message: `QQAI WebSocket 处理失败：${error.message}` },
-            echo: `qqai:error:${Date.now()}`
-          }));
-        }
-      });
-
-      server.addEventListener("close", (event) => {
-        activeOneBotSockets.delete(server);
-        console.log(`OneBot WebSocket 斷開連接: ${event.code}`);
-      });
-
-      server.addEventListener("error", () => {
-        activeOneBotSockets.delete(server);
-      });
-
-      return new Response(null, {
-        status: 101,
-        webSocket: client,
-      });
+      return getOneBotHub(env).fetch(request);
     }
 
     // ==========================================
@@ -199,7 +136,7 @@ export default {
         attempts: 0
       }));
 
-      const sent = sendOneBotAction({
+      const sent = await sendOneBotAction(env, {
         action: "send_private_msg",
         params: {
           user_id: qq,
@@ -1953,19 +1890,21 @@ function generateSixDigitCode() {
   return String(bytes[0] % 1000000).padStart(6, "0");
 }
 
-function sendOneBotAction(actionPayload) {
-  let sent = false;
-  for (const socket of activeOneBotSockets) {
-    try {
-      if (socket.readyState === WebSocket.OPEN) {
-        socket.send(JSON.stringify(actionPayload));
-        sent = true;
-      }
-    } catch (e) {
-      activeOneBotSockets.delete(socket);
-    }
-  }
-  return sent;
+function getOneBotHub(env) {
+  if (!env.ONEBOT_HUB) throw new Error("Missing Durable Object binding: ONEBOT_HUB");
+  return env.ONEBOT_HUB.get(env.ONEBOT_HUB.idFromName("default"));
+}
+
+async function sendOneBotAction(env, actionPayload) {
+  if (!env.ONEBOT_HUB) return false;
+  const res = await getOneBotHub(env).fetch("https://onebot-hub/send", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(actionPayload)
+  });
+  if (!res.ok) return false;
+  const data = await res.json().catch(() => null);
+  return data?.sent === true;
 }
 
 function getPublicNebulaSeed() {
@@ -2101,4 +2040,99 @@ function getPortalHomePage(host) {
   </script>
 </body>
 </html>`;
+}
+
+export class OneBotHub {
+  constructor(state, env) {
+    this.state = state;
+    this.env = env;
+    this.sockets = new Set();
+  }
+
+  async fetch(request) {
+    const url = new URL(request.url);
+    const upgradeHeader = request.headers.get("Upgrade");
+
+    if (upgradeHeader && upgradeHeader.toLowerCase() === "websocket") {
+      const pair = new WebSocketPair();
+      const [client, server] = Object.values(pair);
+      server.accept();
+      this.sockets.add(server);
+
+      server.addEventListener("message", event => {
+        this.handleMessage(server, request, event).catch(error => {
+          console.error("OneBotHub async handler failed:", error);
+        });
+      });
+      server.addEventListener("close", () => this.sockets.delete(server));
+      server.addEventListener("error", () => this.sockets.delete(server));
+
+      return new Response(null, { status: 101, webSocket: client });
+    }
+
+    if (request.method === "POST" && url.pathname === "/send") {
+      const payload = await request.json().catch(() => null);
+      if (!payload) return Response.json({ sent: false, error: "invalid_payload" }, { status: 400 });
+      const sent = this.broadcast(payload);
+      return Response.json({ sent, sockets: this.sockets.size });
+    }
+
+    if (url.pathname === "/status") {
+      return Response.json({ sockets: this.sockets.size });
+    }
+
+    return new Response("OneBotHub OK", { status: 200 });
+  }
+
+  async handleMessage(socket, request, event) {
+    try {
+      const body = JSON.parse(typeof event.data === "string" ? event.data : new TextDecoder().decode(event.data));
+      if (!body || body.post_type === "meta_event" || body.echo || body.status === "ok") return;
+
+      const sourceUrl = new URL(request.url);
+      const internalResponse = await fetch(`${sourceUrl.protocol}//${sourceUrl.host}/__onebot_event`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-QQAI-Transport": "websocket-do"
+        },
+        body: JSON.stringify(body)
+      });
+
+      if (!internalResponse || internalResponse.status === 204) return;
+      const payload = await internalResponse.json().catch(() => null);
+      const reply = payload?.reply;
+      if (!reply) return;
+
+      const action = body.message_type === "private" ? "send_private_msg" : "send_group_msg";
+      const params = body.message_type === "private"
+        ? { user_id: body.user_id, message: reply, auto_escape: false }
+        : { group_id: body.group_id, message: reply, auto_escape: false };
+
+      socket.send(JSON.stringify({
+        action,
+        params,
+        echo: `qqai:${Date.now()}:${crypto.randomUUID()}`
+      }));
+    } catch (error) {
+      console.error("OneBotHub message failed:", error);
+    }
+  }
+
+  broadcast(payload) {
+    let sent = false;
+    for (const socket of this.sockets) {
+      try {
+        if (socket.readyState === WebSocket.OPEN) {
+          socket.send(JSON.stringify(payload));
+          sent = true;
+        } else {
+          this.sockets.delete(socket);
+        }
+      } catch (error) {
+        this.sockets.delete(socket);
+      }
+    }
+    return sent;
+  }
 }
