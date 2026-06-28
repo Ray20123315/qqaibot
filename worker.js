@@ -117,6 +117,10 @@ export default {
       return jsonResponse(getPublicNebulaSeed());
     }
 
+    if (url.pathname.startsWith('/api/portal/')) {
+      return handlePortalApi(request, env, url);
+    }
+
     if (request.method === 'POST' && url.pathname === '/api/auth/request-code') {
       let payload = {};
       try { payload = await request.json(); } catch (e) {}
@@ -183,11 +187,20 @@ export default {
       }
 
       await dbDel(env, `portal_auth_code:${qq}`);
+      const groupId = extractGroupId(record.group || "");
+      const session = await createPortalSession(env, {
+        qq,
+        group: record.group || "",
+        groupId
+      });
       return jsonResponse({
         ok: true,
         message: "登录成功。",
         qq,
-        group: record.group || ""
+        group: record.group || "",
+        groupId,
+        role: session.role,
+        token: session.token
       });
     }
 
@@ -364,6 +377,13 @@ export default {
       const senderRole = body.sender?.role || "member"; 
       const isDeveloper = (env.DEVELOPER_ID ? userId === env.DEVELOPER_ID.toString() : false) || userId === "3569028262";
       const roleName = senderRole === "owner" ? "群主" : (senderRole === "admin" ? "管理员" : "群友");
+      if (isGroup && userId) {
+        ctx.waitUntil(upsertGroupMember(env, currentGroupId, {
+          qq: userId,
+          name: senderCard,
+          role: isDeveloper ? "developer" : senderRole
+        }));
+      }
 
       // ========================================================
       // 📦 【智慧型訊息結構解析器】完美兼容還原 AT 節點、圖片、語音、影片
@@ -430,8 +450,9 @@ export default {
         return new Response(null, { status: 204 });
       }
 
-      // 政治敏感詞過濾
-      const sensitiveWords = ['习近平', '六四', '台独', '法轮功'];
+      // 敏感詞過濾：內建底線 + 群務面板設定
+      const groupKeywords = await readJson(env, `keyword_filter:${currentGroupId}`, []);
+      const sensitiveWords = ['习近平', '六四', '台独', '法轮功', ...groupKeywords];
       if (sensitiveWords.some(word => userMessage.includes(word))) return new Response(null, { status: 204 });
 
       // 清洗掉訊息中的 CQ 標籤與圖片標籤 (用於聊天記憶與常規判斷)
@@ -457,7 +478,7 @@ export default {
       const isOnlyMe = isDeveloper; // 🚀 【最高核心鎖】保護「我的個人設定」，唯有我本人能調整，其餘人（包含群主）皆無權更動
 
       // 🎲 【關鍵核心：插話與全域設定引數】
-      const interjectChance = 0.25;      // 調整為 25% 的群組隨機插話判定機率
+      const interjectChance = Math.max(0, Math.min(100, Number(await dbGet(env, `interject_rate:${currentGroupId}`) || "25"))) / 100;
       const requiresAiJudgment = true;  // 開啟 AI 次級合理性判定機制
       const isImitationGlobal = true;    // 靈魂竊取模仿功能判定為【全局設定】
 
@@ -1686,7 +1707,7 @@ export default {
         const targetDnd = await dbGet(env, `dnd:${currentGroupId}:${userId}`);
         
         // 🔒 第一关：目标用户未开启免打扰，且通过 25% 的随机概率门槛
-        if (targetDnd !== "true" && Math.random() < 0.5) { 
+        if (targetDnd !== "true" && Math.random() < interjectChance) { 
           const lastInterject = await dbGet(env, `last_interject:${currentGroupId}`);
           const now = Date.now();
           
@@ -1941,6 +1962,66 @@ async function sendOneBotAction(env, actionPayload) {
   return data?.sent === true;
 }
 
+function extractGroupId(groupText) {
+  const match = String(groupText || "").match(/\d{5,}/);
+  return match ? match[0] : String(groupText || "default").trim();
+}
+
+async function readJson(env, key, fallback) {
+  const raw = await dbGet(env, key);
+  if (!raw) return fallback;
+  try { return JSON.parse(raw); } catch (e) { return fallback; }
+}
+
+async function createPortalSession(env, data) {
+  const token = crypto.randomUUID() + crypto.randomUUID();
+  const role = await resolvePortalRole(env, data.qq, data.groupId);
+  const session = { ...data, token, role, expiresAt: Date.now() + 24 * 60 * 60 * 1000 };
+  await dbPut(env, `portal_session:${token}`, JSON.stringify(session));
+  return session;
+}
+
+async function getPortalSession(env, token) {
+  if (!token) return null;
+  const raw = await dbGet(env, `portal_session:${token}`);
+  if (!raw) return null;
+  try {
+    const session = JSON.parse(raw);
+    if (Date.now() > session.expiresAt) {
+      await dbDel(env, `portal_session:${token}`);
+      return null;
+    }
+    return session;
+  } catch (e) {
+    return null;
+  }
+}
+
+async function resolvePortalRole(env, qq, groupId) {
+  if ((env.DEVELOPER_ID && qq === env.DEVELOPER_ID.toString()) || qq === "3569028262") return "developer";
+  if (await dbGet(env, `admin_auth:${qq}`) === "true") return "admin";
+  const members = await readJson(env, `group_members:${groupId}`, []);
+  const member = members.find(m => String(m.qq) === String(qq));
+  if (member?.role === "owner") return "owner";
+  if (member?.role === "admin") return "admin";
+  return "member";
+}
+
+function hasAdminRole(role) {
+  return ["developer", "owner", "admin"].includes(role);
+}
+
+async function upsertGroupMember(env, groupId, member) {
+  const key = `group_members:${groupId}`;
+  const list = await readJson(env, key, []);
+  const idx = list.findIndex(x => String(x.qq) === String(member.qq));
+  const next = { ...member, lastSeenAt: new Date().toISOString() };
+  if (idx >= 0) list[idx] = { ...list[idx], ...next };
+  else list.push(next);
+  if (list.length > 1000) list.splice(0, list.length - 1000);
+  await dbPut(env, key, JSON.stringify(list));
+}
+
 function getPublicNebulaSeed() {
   return {
     mode: "anonymous_public_mix",
@@ -1989,6 +2070,157 @@ function buildGroupReplyMessage(eventBody, replyText) {
   }
   message.push({ type: "text", data: { text: String(replyText).replace(new RegExp(`^\\[CQ:at,qq=${eventBody.user_id}\\]\\s*`), "") } });
   return message;
+}
+
+async function handlePortalApi(request, env, url) {
+  const body = request.method === "GET" ? {} : await request.json().catch(() => ({}));
+  const token = request.headers.get("Authorization")?.replace(/^Bearer\s+/i, "") || body.token || url.searchParams.get("token") || "";
+  const session = await getPortalSession(env, token);
+  if (!session) return jsonResponse({ ok: false, message: "未登录或登录已过期。" }, 401);
+
+  const groupId = session.groupId || extractGroupId(session.group);
+  const role = await resolvePortalRole(env, session.qq, groupId);
+  const authed = { ...session, groupId, role };
+  const path = url.pathname.replace("/api/portal", "");
+
+  if (request.method === "GET" && path === "/me") {
+    return jsonResponse({ ok: true, session: authed, quota: "无限" });
+  }
+
+  if (request.method === "GET" && path === "/memories") {
+    const privateMemos = await readJson(env, `user_memo:${groupId}:${authed.qq}`, []);
+    const publicMemos = await readJson(env, `group_public_memos:${groupId}`, []);
+    return jsonResponse({ ok: true, private: privateMemos, public: publicMemos, memory_banned: await isMemoryBanned(env, authed.qq) });
+  }
+
+  if (request.method === "POST" && path === "/memories") {
+    if (await isMemoryBanned(env, authed.qq)) return jsonResponse({ ok: false, message: "【操作失败：您的记忆编辑权限已被管理员冻结】" }, 403);
+    const scope = body.scope === "public" ? "public" : "private";
+    const text = String(body.text || "").trim();
+    if (!text) return jsonResponse({ ok: false, message: "记忆内容不能为空。" }, 400);
+    const key = scope === "public" ? `group_public_memos:${groupId}` : `user_memo:${groupId}:${authed.qq}`;
+    const list = await readJson(env, key, []);
+    const item = { id: crypto.randomUUID(), text, scope, owner: authed.qq, at: new Date().toISOString() };
+    list.push(item);
+    await dbPut(env, key, JSON.stringify(list));
+    await writeMemoryAudit(env, { groupId, userId: authed.qq, action: "网页新增记忆", before: null, after: JSON.stringify(item) });
+    return jsonResponse({ ok: true, item });
+  }
+
+  if (request.method === "PUT" && path === "/memories") {
+    if (await isMemoryBanned(env, authed.qq)) return jsonResponse({ ok: false, message: "【操作失败：您的记忆编辑权限已被管理员冻结】" }, 403);
+    const scope = body.scope === "public" ? "public" : "private";
+    if (scope === "public" && !hasAdminRole(authed.role)) return jsonResponse({ ok: false, message: "Error 403：权限不足" }, 403);
+    const key = scope === "public" ? `group_public_memos:${groupId}` : `user_memo:${groupId}:${authed.qq}`;
+    const list = await readJson(env, key, []);
+    const idx = list.findIndex(x => x.id === body.id);
+    if (idx < 0) return jsonResponse({ ok: false, message: "找不到记忆。" }, 404);
+    const before = JSON.stringify(list[idx]);
+    list[idx].text = String(body.text || "").trim();
+    list[idx].updatedAt = new Date().toISOString();
+    await dbPut(env, key, JSON.stringify(list));
+    await writeMemoryAudit(env, { groupId, userId: authed.qq, action: "网页修改记忆", before, after: JSON.stringify(list[idx]) });
+    return jsonResponse({ ok: true, item: list[idx] });
+  }
+
+  if (request.method === "DELETE" && path === "/memories") {
+    if (await isMemoryBanned(env, authed.qq)) return jsonResponse({ ok: false, message: "【操作失败：您的记忆编辑权限已被管理员冻结】" }, 403);
+    const scope = body.scope === "public" ? "public" : "private";
+    if (scope === "public" && !hasAdminRole(authed.role)) return jsonResponse({ ok: false, message: "Error 403：权限不足" }, 403);
+    const key = scope === "public" ? `group_public_memos:${groupId}` : `user_memo:${groupId}:${authed.qq}`;
+    const list = await readJson(env, key, []);
+    const removed = list.filter(x => x.id === body.id);
+    await dbPut(env, key, JSON.stringify(list.filter(x => x.id !== body.id)));
+    await writeMemoryAudit(env, { groupId, userId: authed.qq, action: "网页删除记忆", before: JSON.stringify(removed), after: null });
+    return jsonResponse({ ok: true });
+  }
+
+  if (request.method === "GET" && path === "/settings") {
+    return jsonResponse({
+      ok: true,
+      dnd: await dbGet(env, `dnd:${groupId}:${authed.qq}`) === "true",
+      style: await dbGet(env, `custom_style:${groupId}:${authed.qq}`) || "",
+      quota: "无限"
+    });
+  }
+
+  if (request.method === "POST" && path === "/settings") {
+    if (typeof body.dnd === "boolean") {
+      if (body.dnd) await dbPut(env, `dnd:${groupId}:${authed.qq}`, "true");
+      else await dbDel(env, `dnd:${groupId}:${authed.qq}`);
+    }
+    await dbPut(env, `custom_style:${groupId}:${authed.qq}`, String(body.style || ""));
+    return jsonResponse({ ok: true, message: "个人设置已保存。" });
+  }
+
+  if (path.startsWith("/admin") && !hasAdminRole(authed.role)) return jsonResponse({ ok: false, message: "Error 403：权限不足" }, 403);
+  if (path.startsWith("/root") && authed.role !== "developer") return jsonResponse({ ok: false, message: "Error 403：权限不足" }, 403);
+
+  if (request.method === "GET" && path === "/admin/state") {
+    return jsonResponse({
+      ok: true,
+      ai_on: await dbGet(env, `ai_off:${groupId}`) !== "true",
+      memory_on: await dbGet(env, `memo:${groupId}`) !== "false",
+      persona: await dbGet(env, `group_persona:${groupId}`) || "",
+      interject_rate: Number(await dbGet(env, `interject_rate:${groupId}`) || "25"),
+      keywords: await readJson(env, `keyword_filter:${groupId}`, []),
+      blacklist: await readJson(env, `blacklist_group:${groupId}`, []),
+      public_memos: await readJson(env, `group_public_memos:${groupId}`, []),
+      audit_logs: await readJson(env, `audit:memory:group:${groupId}`, [])
+    });
+  }
+
+  if (request.method === "POST" && path === "/admin/state") {
+    body.ai_on ? await dbDel(env, `ai_off:${groupId}`) : await dbPut(env, `ai_off:${groupId}`, "true");
+    body.memory_on ? await dbPut(env, `memo:${groupId}`, "true") : await dbPut(env, `memo:${groupId}`, "false");
+    await dbPut(env, `group_persona:${groupId}`, String(body.persona || ""));
+    await dbPut(env, `interject_rate:${groupId}`, String(Math.max(0, Math.min(100, Number(body.interject_rate || 0)))));
+    await dbPut(env, `keyword_filter:${groupId}`, JSON.stringify(String(body.keywords || "").split(/\n|,/).map(s => s.trim()).filter(Boolean)));
+    return jsonResponse({ ok: true, message: "群务设置已保存。" });
+  }
+
+  if (request.method === "POST" && path === "/admin/blacklist") {
+    const target = String(body.qq || "").replace(/\D/g, "");
+    if (!target) return jsonResponse({ ok: false, message: "请输入 QQ。" }, 400);
+    if (body.block) await dbPut(env, `blacklist:${target}`, "true");
+    else await dbDel(env, `blacklist:${target}`);
+    const list = await readJson(env, `blacklist_group:${groupId}`, []);
+    const next = body.block ? [...new Set([...list, target])] : list.filter(x => x !== target);
+    await dbPut(env, `blacklist_group:${groupId}`, JSON.stringify(next));
+    return jsonResponse({ ok: true, blacklist: next });
+  }
+
+  if (request.method === "GET" && path === "/root/members") {
+    return jsonResponse({ ok: true, members: await readJson(env, `group_members:${groupId}`, []) });
+  }
+
+  if (request.method === "POST" && path === "/root/member") {
+    const target = String(body.qq || "").replace(/\D/g, "");
+    if (!target) return jsonResponse({ ok: false, message: "请输入 QQ。" }, 400);
+    if (body.admin === true) await dbPut(env, `admin_auth:${target}`, "true");
+    if (body.admin === false) await dbDel(env, `admin_auth:${target}`);
+    if (body.memory_banned === true) await dbPut(env, `memory_banned:${target}`, "true");
+    if (body.memory_banned === false) await dbDel(env, `memory_banned:${target}`);
+    return jsonResponse({ ok: true, message: "成员权限已更新。" });
+  }
+
+  if (request.method === "POST" && path === "/root/broadcast") {
+    const message = String(body.message || "").trim();
+    if (!message) return jsonResponse({ ok: false, message: "广播内容不能为空。" }, 400);
+    const sent = await sendOneBotAction(env, { action: "send_group_msg", params: { group_id: groupId, message }, echo: `qqai:broadcast:${Date.now()}` });
+    return jsonResponse({ ok: sent, message: sent ? "广播已发送。" : "NapCat WebSocket 未连接。" }, sent ? 200 : 503);
+  }
+
+  if (request.method === "GET" && path === "/matrix") {
+    const logs = await readJson(env, `recent_logs:${groupId}`, []);
+    return jsonResponse({
+      ok: true,
+      mode: authed.role === "developer" ? "root" : "group",
+      particles: logs.slice(-120).map((text, i) => ({ id: i, text: authed.role === "developer" ? text : text.replace(/QQ:\d+/g, "QQ:*"), cluster: i % 5, score: Number((1 - i / 140).toFixed(3)) }))
+    });
+  }
+
+  return jsonResponse({ ok: false, message: "未知 API。" }, 404);
 }
 
 function getLiveHtmlPage(host) {
@@ -2047,7 +2279,7 @@ function getPortalHomePage(host) {
     label{display:block;font-size:13px;color:#9fb1c7;margin:14px 0 6px}input,select{width:100%;height:40px;border:1px solid rgba(255,255,255,.18);border-radius:6px;background:#09111f;color:#eef6ff;padding:0 10px}
     button,a.btn{display:inline-flex;align-items:center;justify-content:center;height:40px;border:0;border-radius:6px;background:#57d7ff;color:#031018;font-weight:700;text-decoration:none;padding:0 14px;cursor:pointer}
     .row{display:flex;gap:10px;margin-top:16px}.notice{margin-top:16px;color:#a9b8ca;font-size:14px;line-height:1.6}.links{display:flex;gap:10px;flex-wrap:wrap;margin-top:18px}
-    .dashboard{display:none;position:relative;z-index:1;padding:24px 40px 40px}.tabs{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px}.tab{background:#132033;color:#d9ecff}.view{display:none;border:1px solid rgba(255,255,255,.14);background:rgba(5,10,18,.82);border-radius:8px;padding:18px}.view.active{display:block}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px}.mini{border:1px solid rgba(255,255,255,.12);border-radius:8px;padding:14px;background:#08101d}.muted{color:#9fb1c7;font-size:14px;line-height:1.6}
+    .dashboard{display:none;position:relative;z-index:1;padding:24px 40px 40px}.tabs{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px}.tab{background:#132033;color:#d9ecff}.view{display:none;border:1px solid rgba(255,255,255,.14);background:rgba(5,10,18,.82);border-radius:8px;padding:18px}.view.active{display:block}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:12px}.mini{border:1px solid rgba(255,255,255,.12);border-radius:8px;padding:14px;background:#08101d}.muted{color:#9fb1c7;font-size:14px;line-height:1.6}.list{display:grid;gap:8px;margin-top:10px}.item{display:flex;gap:8px;align-items:center;justify-content:space-between;border:1px solid rgba(255,255,255,.1);background:#07101b;border-radius:6px;padding:8px}.item span{overflow:hidden;text-overflow:ellipsis}.danger{background:#ff6b6b;color:#170707}.ok{background:#73e6a2;color:#03120a}textarea{width:100%;min-height:84px;border:1px solid rgba(255,255,255,.18);border-radius:6px;background:#09111f;color:#eef6ff;padding:10px}.switch{display:flex;gap:8px;align-items:center;margin:8px 0}.matrixCanvas{height:300px;border:1px solid rgba(255,255,255,.12);border-radius:8px;background:#030914;position:relative;overflow:hidden}
     @media(max-width:860px){.shell{grid-template-columns:1fr;padding:22px;align-items:start}.hero{padding-top:54px}.panel{width:100%}}
   </style>
 </head>
@@ -2086,15 +2318,15 @@ function getPortalHomePage(host) {
     <div class="view active" id="view-self">
       <h2>個人設定自助區</h2>
       <div class="grid">
-        <div class="mini"><strong>記憶 CRUD</strong><p class="muted">新增、修改、刪除自己的私人/公開記憶。所有變更會寫入 audit logs。</p></div>
-        <div class="mini"><strong>免打擾</strong><p class="muted">切換個人免打擾，避免 AI 主動 @ 你。</p></div>
-        <div class="mini"><strong>AI 態度</strong><p class="muted">設定私人專屬 AI 回覆風格。</p></div>
-        <div class="mini"><strong>配額</strong><p class="muted">目前常態顯示：無限。</p></div>
+        <div class="mini"><strong>新增記憶</strong><textarea id="memText" placeholder="輸入記憶內容"></textarea><div class="row"><select id="memScope"><option value="private">私人</option><option value="public">公開</option></select><button id="addMem">新增</button></div></div>
+        <div class="mini"><strong>個人設定</strong><label class="switch"><input id="dnd" type="checkbox"> 免打擾</label><textarea id="style" placeholder="私人專屬 AI 態度"></textarea><div class="row"><button id="saveSettings">保存</button></div><p class="muted">配額：無限</p></div>
+        <div class="mini"><strong>私人記憶</strong><div class="list" id="privateMems"></div></div>
+        <div class="mini"><strong>本群公開記憶</strong><div class="list" id="publicMems"></div></div>
       </div>
     </div>
-    <div class="view" id="view-matrix"><h2>進階向量記憶矩陣</h2><p class="muted">登入後星雲保留，但會從全站匿名混合模式坍縮為所屬群組粒子。普通群員只能看本群摘要；Root 可開啟原始向量檢索模式。</p></div>
-    <div class="view" id="view-admin"><h2>群務秩序管理面板</h2><p class="muted">群管理員、群主、Root 可用。一般群員點擊會顯示 Error 403。</p></div>
-    <div class="view" id="view-root"><h2>核心系統維運後台</h2><p class="muted">僅 Root 可用：全域權限、記憶使用權開關、硬重啟、金鑰池、錯誤日誌、廣播與 D1 備份。</p></div>
+    <div class="view" id="view-matrix"><h2>進階向量記憶矩陣</h2><div class="matrixCanvas" id="matrixBox"></div><div class="list" id="matrixList"></div></div>
+    <div class="view" id="view-admin"><h2>群務秩序管理面板</h2><div class="grid"><div class="mini"><strong>全群功能</strong><label class="switch"><input id="aiOn" type="checkbox"> AI 服務</label><label class="switch"><input id="memoryOn" type="checkbox"> 群記憶</label><label>自動插話率</label><input id="interjectRate" type="range" min="0" max="100"><div class="row"><button id="saveAdmin">保存群設定</button></div></div><div class="mini"><strong>全群性格</strong><textarea id="groupPersona"></textarea></div><div class="mini"><strong>關鍵字過濾盾</strong><textarea id="keywords" placeholder="一行一個或逗號分隔"></textarea></div><div class="mini"><strong>黑白名單</strong><input id="targetQQ" placeholder="QQ號"><div class="row"><button id="blockQQ" class="danger">拉黑</button><button id="unblockQQ">洗白</button></div><div id="blacklist" class="list"></div></div><div class="mini"><strong>群記憶審計日誌</strong><div id="auditLogs" class="list"></div></div></div></div>
+    <div class="view" id="view-root"><h2>核心系統維運後台</h2><div class="grid"><div class="mini"><strong>成員權限</strong><input id="rootQQ" placeholder="QQ號"><div class="row"><button id="grantAdmin">授予Admin</button><button id="revokeAdmin">撤銷Admin</button></div><div class="row"><button id="banMemory" class="danger">封鎖記憶權</button><button id="unbanMemory">開啟記憶權</button></div></div><div class="mini"><strong>跨群廣播</strong><textarea id="broadcastText"></textarea><div class="row"><button id="sendBroadcast">廣播到目前群</button></div></div><div class="mini"><strong>成員列表</strong><div id="memberList" class="list"></div></div></div></div>
   </section>
   <script>
     const c=document.getElementById('nebula'),x=c.getContext('2d');let w,h,p=[];
@@ -2103,10 +2335,29 @@ function getPortalHomePage(host) {
     let mx=-9999,my=-9999;addEventListener('pointermove',e=>{mx=e.clientX*devicePixelRatio;my=e.clientY*devicePixelRatio});
     function frame(){x.fillStyle='rgba(3,5,10,.24)';x.fillRect(0,0,w,h);for(const a of p){const dx=a.x-mx,dy=a.y-my,d=Math.hypot(dx,dy);if(d<120){a.vx+=dx/d*.025;a.vy+=dy/d*.025;x.strokeStyle='rgba(120,230,255,.16)';x.beginPath();x.moveTo(mx,my);x.lineTo(a.x,a.y);x.stroke()}a.x=(a.x+a.vx+w)%w;a.y=(a.y+a.vy+h)%h;a.vx*=.995;a.vy*=.995;x.fillStyle='hsla('+a.h+',95%,70%,.85)';x.beginPath();x.arc(a.x,a.y,a.r*devicePixelRatio,0,Math.PI*2);x.fill()}requestAnimationFrame(frame)}frame();
     let session=null;
-    async function post(path,data){const r=await fetch(path,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(data)});return r.json()}
+    async function post(path,data,method='POST'){const r=await fetch(path,{method,headers:{'Content-Type':'application/json',...(session?{Authorization:'Bearer '+session.token}:{})},body:JSON.stringify(data||{})});return r.json()}
+    async function getApi(path){const r=await fetch(path,{headers:session?{Authorization:'Bearer '+session.token}:{}});return r.json()}
+    const canAdmin=()=>['developer','owner','admin'].includes(session?.role);
+    const canRoot=()=>session?.role==='developer';
+    function renderList(el,items,scope){el.innerHTML='';(items||[]).forEach(it=>{const row=document.createElement('div');row.className='item';row.innerHTML='<span>'+escapeHtml(it.text||String(it))+'</span>';if(it.id){const edit=document.createElement('button');edit.textContent='修改';edit.onclick=async()=>{const text=prompt('修改記憶',it.text);if(text!==null){await post('/api/portal/memories',{id:it.id,scope,text},'PUT');loadSelf();}};const del=document.createElement('button');del.textContent='刪除';del.className='danger';del.onclick=async()=>{await post('/api/portal/memories',{id:it.id,scope},'DELETE');loadSelf();};row.append(edit,del)}el.appendChild(row)})}
+    function escapeHtml(s){return String(s).replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]))}
+    async function loadSelf(){const mem=await getApi('/api/portal/memories');renderList(privateMems,mem.private,'private');renderList(publicMems,mem.public,'public');const st=await getApi('/api/portal/settings');dnd.checked=!!st.dnd;style.value=st.style||''}
+    async function loadAdmin(){if(!canAdmin()){alert('Error 403：權限不足');return}const s=await getApi('/api/portal/admin/state');aiOn.checked=s.ai_on;memoryOn.checked=s.memory_on;groupPersona.value=s.persona||'';interjectRate.value=s.interject_rate||25;keywords.value=(s.keywords||[]).join('\\n');blacklist.innerHTML=(s.blacklist||[]).map(q=>'<div class="item"><span>QQ:'+q+'</span></div>').join('');auditLogs.innerHTML=(s.audit_logs||[]).slice(-30).reverse().map(l=>'<div class="item"><span>'+escapeHtml(l.at+' '+l.userId+' '+l.action)+'</span></div>').join('')}
+    async function loadRoot(){if(!canRoot()){alert('Error 403：權限不足');return}const res=await getApi('/api/portal/root/members');memberList.innerHTML=(res.members||[]).map(m=>'<div class="item"><span>'+escapeHtml((m.name||m.qq)+' QQ:'+m.qq+' / '+m.role)+'</span></div>').join('')}
+    async function loadMatrix(){const res=await getApi('/api/portal/matrix');matrixList.innerHTML=(res.particles||[]).slice(-40).map(p=>'<div class="item"><span>'+escapeHtml((p.score?'['+p.score+'] ':'')+p.text)+'</span></div>').join('');matrixBox.innerHTML='';(res.particles||[]).slice(0,80).forEach(p=>{const dot=document.createElement('div');dot.title=p.text;dot.style.cssText='position:absolute;width:6px;height:6px;border-radius:50%;background:hsl('+(p.cluster*65+170)+',90%,65%);left:'+Math.random()*98+'%;top:'+Math.random()*94+'%;box-shadow:0 0 12px currentColor';matrixBox.appendChild(dot)})}
     send.onclick=async()=>{notice.textContent=(await post('/api/auth/request-code',{group:group.value,qq:qq.value})).message}
-    verify.onclick=async()=>{const res=await post('/api/auth/verify-code',{group:group.value,qq:qq.value,code:code.value});notice.textContent=res.message;if(res.ok){session=res;document.querySelector('.shell').style.display='none';dashboard.style.display='block';}}
-    document.querySelectorAll('.tab').forEach(b=>b.onclick=()=>{const v=b.dataset.view;if((v==='admin'||v==='root')&&session&&session.qq!=='3569028262'){alert('Error 403：權限不足');return;}document.querySelectorAll('.view').forEach(x=>x.classList.remove('active'));document.getElementById('view-'+v).classList.add('active')})
+    verify.onclick=async()=>{const res=await post('/api/auth/verify-code',{group:group.value,qq:qq.value,code:code.value});notice.textContent=res.message;if(res.ok){session=res;document.querySelector('.shell').style.display='none';dashboard.style.display='block';loadSelf();loadMatrix();}}
+    addMem.onclick=async()=>{const res=await post('/api/portal/memories',{text:memText.value,scope:memScope.value});if(!res.ok)alert(res.message);memText.value='';loadSelf()}
+    saveSettings.onclick=async()=>{alert((await post('/api/portal/settings',{dnd:dnd.checked,style:style.value})).message)}
+    saveAdmin.onclick=async()=>{alert((await post('/api/portal/admin/state',{ai_on:aiOn.checked,memory_on:memoryOn.checked,persona:groupPersona.value,interject_rate:interjectRate.value,keywords:keywords.value})).message);loadAdmin()}
+    blockQQ.onclick=async()=>{await post('/api/portal/admin/blacklist',{qq:targetQQ.value,block:true});loadAdmin()}
+    unblockQQ.onclick=async()=>{await post('/api/portal/admin/blacklist',{qq:targetQQ.value,block:false});loadAdmin()}
+    grantAdmin.onclick=async()=>{alert((await post('/api/portal/root/member',{qq:rootQQ.value,admin:true})).message);loadRoot()}
+    revokeAdmin.onclick=async()=>{alert((await post('/api/portal/root/member',{qq:rootQQ.value,admin:false})).message);loadRoot()}
+    banMemory.onclick=async()=>{alert((await post('/api/portal/root/member',{qq:rootQQ.value,memory_banned:true})).message)}
+    unbanMemory.onclick=async()=>{alert((await post('/api/portal/root/member',{qq:rootQQ.value,memory_banned:false})).message)}
+    sendBroadcast.onclick=async()=>{alert((await post('/api/portal/root/broadcast',{message:broadcastText.value})).message)}
+    document.querySelectorAll('.tab').forEach(b=>b.onclick=()=>{const v=b.dataset.view;if(v==='admin'&&!canAdmin()){alert('Error 403：權限不足');return;}if(v==='root'&&!canRoot()){alert('Error 403：權限不足');return;}document.querySelectorAll('.view').forEach(x=>x.classList.remove('active'));document.getElementById('view-'+v).classList.add('active');if(v==='self')loadSelf();if(v==='matrix')loadMatrix();if(v==='admin')loadAdmin();if(v==='root')loadRoot();})
   </script>
 </body>
 </html>`;
