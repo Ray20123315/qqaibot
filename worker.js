@@ -143,17 +143,36 @@ export default {
       const sent = await sendOneBotAction(env, {
         action: "send_private_msg",
         params: {
-          user_id: qq,
-          message: `【QQAIbot 门户登录验证码】\n验证码：${code}\n有效期：5 分钟。\n若非本人操作，请忽略。`,
+          user_id: Number(qq),
+          message: [
+            { type: "text", data: { text: `【QQAIbot 门户登录验证码】\n验证码：${code}\n有效期：5 分钟。\n若非本人操作，请忽略。` } }
+          ],
           auto_escape: false
         },
         echo: `qqai:portal-code:${Date.now()}:${crypto.randomUUID()}`
       });
 
+      const groupIdForNotice = extractGroupId(group);
+      if (sent && groupIdForNotice && groupIdForNotice !== "default") {
+        await sendOneBotAction(env, {
+          action: "send_group_msg",
+          params: {
+            group_id: Number(groupIdForNotice),
+            message: [
+              { type: "at", data: { qq: Number(qq) } },
+              { type: "text", data: { text: " 登录验证码已发送到你的 QQ 私讯，请查看私聊窗口。" } }
+            ],
+            auto_escape: false
+          },
+          echo: `qqai:portal-code-notice:${Date.now()}:${crypto.randomUUID()}`
+        });
+      }
+
       if (!sent) {
+        const status = await getOneBotStatus(env);
         return jsonResponse({
           ok: false,
-          message: "验证码已生成，但当前没有可用的 NapCat WebSocket 连接。请确认 NapCat WebSocket Client 已连接到 wss://qqai.ray2025.com/onebot 后再试。"
+          message: `验证码已生成，但发送失败。当前 NapCat WebSocket 连接数：${status.sockets || 0}。请确认 WebSocket Client 已连接到 wss://qqai.ray2025.com/onebot，且机器人允许私聊该 QQ。`
         }, 503);
       }
 
@@ -1963,6 +1982,12 @@ async function sendOneBotAction(env, actionPayload) {
   return data?.sent === true;
 }
 
+async function getOneBotStatus(env) {
+  if (!env.ONEBOT_HUB) return { sockets: 0 };
+  const res = await getOneBotHub(env).fetch("https://onebot-hub/status");
+  return await res.json().catch(() => ({ sockets: 0 }));
+}
+
 function extractGroupId(groupText) {
   const match = String(groupText || "").match(/\d{5,}/);
   return match ? match[0] : String(groupText || "default").trim();
@@ -2357,7 +2382,7 @@ function getPortalHomePage(host) {
   <title>QQAIbot Portal</title>
   <style>
     *{box-sizing:border-box}html,body{margin:0;min-height:100%;font-family:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;background:#03050a;color:#edf6ff}
-    canvas{position:fixed;inset:0;width:100%;height:100%;display:block}
+    canvas{position:fixed;inset:0;width:100%;height:100%;display:block;background:radial-gradient(circle at 25% 40%,rgba(26,73,102,.24),transparent 35%),#03050a}
     .shell{position:relative;z-index:1;min-height:100vh;display:grid;grid-template-columns:minmax(0,1fr) 360px;gap:28px;align-items:end;padding:40px}
     .hero{max-width:760px;padding-bottom:24px}.brand{font-size:14px;letter-spacing:0;color:#71e7ff}.hero h1{font-size:clamp(36px,6vw,78px);line-height:1;margin:10px 0 16px;letter-spacing:0}
     .hero p{font-size:18px;line-height:1.7;color:#b8c7d9;max-width:680px}.panel{border:1px solid rgba(255,255,255,.14);background:rgba(5,10,18,.78);backdrop-filter:blur(16px);border-radius:8px;padding:20px}
@@ -2392,7 +2417,7 @@ function getPortalHomePage(host) {
       <label>步驟三：安全驗證</label>
       <input id="code" inputmode="numeric" maxlength="6" placeholder="6 位數驗證碼">
       <div class="row"><button id="verify">登入</button></div>
-      <div class="notice" id="notice">系統公告：Portal、Live、Vector Matrix 路由已啟用。驗證碼接口需接入 QQ 私訊發送器後才會簽發正式登入。</div>
+      <div class="notice" id="notice">系統公告：Portal、Live、Vector Matrix 已啟用。驗證碼會透過 NapCat WebSocket 發送到 QQ 私訊；若未收到，請確認機器人可私聊該 QQ。</div>
     </aside>
   </main>
   <section class="dashboard" id="dashboard">
@@ -2421,10 +2446,10 @@ function getPortalHomePage(host) {
   </section>
   <script>
     const c=document.getElementById('nebula'),x=c.getContext('2d');let w,h,p=[],nebulaMessages=[];
-    function resize(){w=c.width=innerWidth*devicePixelRatio;h=c.height=innerHeight*devicePixelRatio;p=Array.from({length:1500},()=>({x:Math.random()*w,y:Math.random()*h,vx:(Math.random()-.5)*.45,vy:(Math.random()-.5)*.45,r:Math.random()*1.6+.25,h:Math.random()*80+185}))}
+    function resize(){w=c.width=innerWidth*devicePixelRatio;h=c.height=innerHeight*devicePixelRatio;const count=Math.min(3200,Math.max(1700,Math.floor(innerWidth*innerHeight/420)));p=Array.from({length:count},()=>({x:Math.random()*w,y:Math.random()*h,vx:(Math.random()-.5)*.55,vy:(Math.random()-.5)*.55,r:Math.random()*2.2+.7,h:[180,205,235,275,305,62][Math.floor(Math.random()*6)]}))}
     addEventListener('resize',resize);resize();
     let mx=-9999,my=-9999,clientX=0,clientY=0;addEventListener('pointermove',e=>{clientX=e.clientX;clientY=e.clientY;mx=e.clientX*devicePixelRatio;my=e.clientY*devicePixelRatio});
-    function frame(){x.fillStyle='rgba(3,5,10,.24)';x.fillRect(0,0,w,h);let near=null,nearD=1e9;for(let i=0;i<p.length;i++){const a=p[i];const dx=a.x-mx,dy=a.y-my,d=Math.hypot(dx,dy);if(d<120){a.vx+=dx/d*.025;a.vy+=dy/d*.025;x.strokeStyle='rgba(120,230,255,.16)';x.beginPath();x.moveTo(mx,my);x.lineTo(a.x,a.y);x.stroke()}if(session&&a.text&&d<nearD&&d<70){near=a;nearD=d}a.x=(a.x+a.vx+w)%w;a.y=(a.y+a.vy+h)%h;a.vx*=.995;a.vy*=.995;x.fillStyle='hsla('+a.h+',95%,70%,.85)';x.beginPath();x.arc(a.x,a.y,a.r*devicePixelRatio,0,Math.PI*2);x.fill()}if(session&&near){hoverTip.style.display='block';hoverTip.style.left=Math.min(clientX+14,innerWidth-430)+'px';hoverTip.style.top=Math.min(clientY+14,innerHeight-120)+'px';hoverTip.textContent=near.text}else{hoverTip.style.display='none'}requestAnimationFrame(frame)}frame();
+    function frame(){x.fillStyle='rgba(3,5,10,.16)';x.fillRect(0,0,w,h);let near=null,nearD=1e9;for(let i=0;i<p.length;i++){const a=p[i];const dx=a.x-mx,dy=a.y-my,d=Math.hypot(dx,dy);if(d<150){a.vx+=dx/Math.max(d,1)*.03;a.vy+=dy/Math.max(d,1)*.03;x.strokeStyle='rgba(120,230,255,.24)';x.beginPath();x.moveTo(mx,my);x.lineTo(a.x,a.y);x.stroke()}if(session&&a.text&&d<nearD&&d<82){near=a;nearD=d}a.x=(a.x+a.vx+w)%w;a.y=(a.y+a.vy+h)%h;a.vx*=.996;a.vy*=.996;const rr=a.r*devicePixelRatio;x.shadowBlur=16*devicePixelRatio;x.shadowColor='hsla('+a.h+',95%,68%,.95)';x.fillStyle='hsla('+a.h+',98%,68%,.95)';x.beginPath();x.arc(a.x,a.y,rr,0,Math.PI*2);x.fill();x.shadowBlur=0}if(session&&near){hoverTip.style.display='block';hoverTip.style.left=Math.min(clientX+14,innerWidth-430)+'px';hoverTip.style.top=Math.min(clientY+14,innerHeight-120)+'px';hoverTip.textContent=near.text}else{hoverTip.style.display='none'}requestAnimationFrame(frame)}frame();
     let session=null;
     async function post(path,data,method='POST'){const r=await fetch(path,{method,headers:{'Content-Type':'application/json',...(session?{Authorization:'Bearer '+session.token}:{})},body:JSON.stringify(data||{})});return r.json()}
     async function getApi(path){const r=await fetch(path,{headers:session?{Authorization:'Bearer '+session.token}:{}});return r.json()}
