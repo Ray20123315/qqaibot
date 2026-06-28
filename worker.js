@@ -144,67 +144,20 @@ export default {
         attempts: 0
       }));
 
-      const codeMessageText = `【QQAIbot 门户登录验证码】\n验证码：${code}\n有效期：5 分钟。\n若非本人操作，请忽略。`;
-
-      let sendResult = await sendOneBotActionResult(env, {
+      const sent = await sendOneBotAction(env, {
         action: "send_private_msg",
         params: {
           user_id: qq,
-          message: codeMessageText,
+          message: `【QQAIbot 门户登录验证码】\n验证码：${code}\n有效期：5 分钟。\n若非本人操作，请忽略。`,
           auto_escape: false
         },
         echo: `qqai:portal-code:${Date.now()}:${crypto.randomUUID()}`
       });
 
-      if (!sendResult.sent) {
-        sendResult = await sendOneBotActionResult(env, {
-          action: "send_private_msg",
-          params: {
-            user_id: Number(qq),
-            message: [
-              { type: "text", data: { text: codeMessageText } }
-            ],
-            auto_escape: false
-          },
-          echo: `qqai:portal-code-string:${Date.now()}:${crypto.randomUUID()}`
-        });
-      }
-
-      if (!sendResult.sent) {
-        sendResult = await sendOneBotActionResult(env, {
-          action: "send_msg",
-          params: {
-            message_type: "private",
-            user_id: Number(qq),
-            message: [
-              { type: "text", data: { text: codeMessageText } }
-            ],
-            auto_escape: false
-          },
-          echo: `qqai:portal-code-send-msg:${Date.now()}:${crypto.randomUUID()}`
-        });
-      }
-
-      const sent = sendResult.sent;
-
-      const groupIdForNotice = extractGroupId(group);
-      if (sent && groupIdForNotice && groupIdForNotice !== "default") {
-        await sendOneBotAction(env, {
-          action: "send_group_msg",
-          params: {
-            group_id: groupIdForNotice,
-            message: `[CQ:at,qq=${qq}] 登录验证码已发送到你的 QQ 私讯，请查看私聊窗口。`,
-            auto_escape: false
-          },
-          echo: `qqai:portal-code-notice:${Date.now()}:${crypto.randomUUID()}`
-        });
-      }
-
       if (!sent) {
-        const status = await getOneBotStatus(env);
         return jsonResponse({
           ok: false,
-          message: `验证码已生成，但发送失败。当前 NapCat WebSocket 连接数：${status.sockets || 0}。最后发送结果：${JSON.stringify(sendResult)}。请确认 WebSocket Client 已连接到 wss://qqai.ray2025.com/onebot，且机器人允许私聊该 QQ。`
+          message: "验证码已生成，但当前没有可用的 NapCat WebSocket 连接。请确认 NapCat WebSocket Client 已连接到 wss://qqai.ray2025.com/onebot 后再试。"
         }, 503);
       }
 
@@ -2003,20 +1956,15 @@ function getOneBotHub(env) {
 }
 
 async function sendOneBotAction(env, actionPayload) {
-  const result = await sendOneBotActionResult(env, actionPayload);
-  return result.sent === true;
-}
-
-async function sendOneBotActionResult(env, actionPayload) {
-  if (!env.ONEBOT_HUB) return { sent: false, error: "missing_ONEBOT_HUB" };
+  if (!env.ONEBOT_HUB) return false;
   const res = await getOneBotHub(env).fetch("https://onebot-hub/send", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(actionPayload)
   });
-  if (!res.ok) return { sent: false, status: res.status };
+  if (!res.ok) return false;
   const data = await res.json().catch(() => null);
-  return { sent: data?.sent === true, ...(data || {}) };
+  return data?.sent === true;
 }
 
 async function getOneBotStatus(env) {
@@ -2531,6 +2479,9 @@ export class OneBotHub {
     this.state = state;
     this.env = env;
     this.sockets = new Set();
+    this.pending = new Map();
+    this.lastAction = null;
+    this.lastAck = null;
   }
 
   async fetch(request) {
@@ -2557,12 +2508,26 @@ export class OneBotHub {
     if (request.method === "POST" && url.pathname === "/send") {
       const payload = await request.json().catch(() => null);
       if (!payload) return Response.json({ sent: false, error: "invalid_payload" }, { status: 400 });
+      if (!payload.echo) payload.echo = `qqai:${Date.now()}:${crypto.randomUUID()}`;
       const sent = this.broadcast(payload);
-      return Response.json({ sent, sockets: this.sockets.size });
+      this.lastAction = {
+        at: new Date().toISOString(),
+        echo: payload.echo,
+        action: payload.action,
+        params: payload.params,
+        sockets: this.sockets.size,
+        sent
+      };
+      const ack = sent ? await this.waitForAck(payload.echo, 2500) : null;
+      return Response.json({ sent, acknowledged: !!ack, ack, sockets: this.sockets.size });
     }
 
     if (url.pathname === "/status") {
-      return Response.json({ sockets: this.sockets.size });
+      return Response.json({
+        sockets: this.sockets.size,
+        last_action: this.lastAction,
+        last_ack: this.lastAck
+      });
     }
 
     return new Response("OneBotHub OK", { status: 200 });
@@ -2571,7 +2536,16 @@ export class OneBotHub {
   async handleMessage(socket, request, event) {
     try {
       const body = JSON.parse(typeof event.data === "string" ? event.data : new TextDecoder().decode(event.data));
-      if (!body || body.post_type === "meta_event" || body.echo || body.status === "ok") return;
+      if (!body) return;
+
+      if (body.echo && this.pending.has(body.echo)) {
+        this.lastAck = { at: new Date().toISOString(), ...body };
+        this.pending.get(body.echo)(body);
+        this.pending.delete(body.echo);
+        return;
+      }
+
+      if (body.post_type === "meta_event" || body.echo || body.status === "ok") return;
 
       const sourceUrl = new URL(request.url);
       const internalResponse = await fetch(`${sourceUrl.protocol}//${sourceUrl.host}/__onebot_event`, {
@@ -2622,5 +2596,18 @@ export class OneBotHub {
       }
     }
     return sent;
+  }
+
+  waitForAck(echo, timeoutMs) {
+    return new Promise(resolve => {
+      const timer = setTimeout(() => {
+        this.pending.delete(echo);
+        resolve(null);
+      }, timeoutMs);
+      this.pending.set(echo, body => {
+        clearTimeout(timer);
+        resolve(body);
+      });
+    });
   }
 }
