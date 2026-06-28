@@ -4,7 +4,15 @@
   "description": "QQ Bot Cloudflare Worker",
   "main": "worker.js",
   "type": "module",
+  "scripts": {
+    "check": "node --check worker.js",
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy"
+  },
   "dependencies": {
     "@cloudflare/puppeteer": "^0.0.13"
+  },
+  "devDependencies": {
+    "wrangler": "^4.0.0"
   }
 }
