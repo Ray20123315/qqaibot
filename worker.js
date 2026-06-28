@@ -1,5 +1,7 @@
 import puppeteer from "@cloudflare/puppeteer";
 
+const activeOneBotSockets = new Set();
+
 // ==========================================
 // 🗄️ D1 資料庫操作小幫手 (模擬 KV 行為)
 // ==========================================
@@ -48,6 +50,7 @@ export default {
       const [client, server] = Object.values(webSocketPair);
 
       server.accept();
+      activeOneBotSockets.add(server);
 
       server.addEventListener("message", async (event) => {
         try {
@@ -93,7 +96,12 @@ export default {
       });
 
       server.addEventListener("close", (event) => {
+        activeOneBotSockets.delete(server);
         console.log(`OneBot WebSocket 斷開連接: ${event.code}`);
+      });
+
+      server.addEventListener("error", () => {
+        activeOneBotSockets.delete(server);
       });
 
       return new Response(null, {
@@ -173,18 +181,77 @@ export default {
     }
 
     if (request.method === 'POST' && url.pathname === '/api/auth/request-code') {
+      let payload = {};
+      try { payload = await request.json(); } catch (e) {}
+      const qq = String(payload.qq || "").replace(/\D/g, "");
+      const group = String(payload.group || "").trim();
+      if (!qq) {
+        return jsonResponse({ ok: false, message: "请先输入 QQ 号。" }, 400);
+      }
+
+      const code = generateSixDigitCode();
+      const authKey = `portal_auth_code:${qq}`;
+      await dbPut(env, authKey, JSON.stringify({
+        code,
+        group,
+        qq,
+        expiresAt: Date.now() + 5 * 60 * 1000,
+        attempts: 0
+      }));
+
+      const sent = sendOneBotAction({
+        action: "send_private_msg",
+        params: {
+          user_id: qq,
+          message: `【QQAIbot 门户登录验证码】\n验证码：${code}\n有效期：5 分钟。\n若非本人操作，请忽略。`,
+          auto_escape: false
+        },
+        echo: `qqai:portal-code:${Date.now()}:${crypto.randomUUID()}`
+      });
+
+      if (!sent) {
+        return jsonResponse({
+          ok: false,
+          message: "验证码已生成，但当前没有可用的 NapCat WebSocket 连接。请确认 NapCat WebSocket Client 已连接到 wss://qqai.ray2025.com/onebot 后再试。"
+        }, 503);
+      }
+
       return jsonResponse({
         ok: true,
-        message: "验证码流程已接入预留接口；请在生产环境绑定 QQ 私讯发送器后启用真实发送。",
+        message: "验证码已发送至该 QQ 私讯，请在 5 分钟内输入。",
         ttl_seconds: 300
       });
     }
 
     if (request.method === 'POST' && url.pathname === '/api/auth/verify-code') {
+      let payload = {};
+      try { payload = await request.json(); } catch (e) {}
+      const qq = String(payload.qq || "").replace(/\D/g, "");
+      const code = String(payload.code || "").replace(/\D/g, "");
+      const raw = await dbGet(env, `portal_auth_code:${qq}`);
+      if (!raw) return jsonResponse({ ok: false, message: "验证码不存在或已过期，请重新发送。" }, 400);
+
+      let record;
+      try { record = JSON.parse(raw); } catch (e) { record = null; }
+      if (!record || Date.now() > record.expiresAt) {
+        await dbDel(env, `portal_auth_code:${qq}`);
+        return jsonResponse({ ok: false, message: "验证码已过期，请重新发送。" }, 400);
+      }
+
+      if (record.code !== code) {
+        record.attempts = (record.attempts || 0) + 1;
+        if (record.attempts >= 5) await dbDel(env, `portal_auth_code:${qq}`);
+        else await dbPut(env, `portal_auth_code:${qq}`, JSON.stringify(record));
+        return jsonResponse({ ok: false, message: "验证码错误。" }, 400);
+      }
+
+      await dbDel(env, `portal_auth_code:${qq}`);
       return jsonResponse({
-        ok: false,
-        message: "验证码验证尚未启用。Worker 端已保留接口，需接入 QQ 私讯回调与会话签发。"
-      }, 501);
+        ok: true,
+        message: "登录成功。",
+        qq,
+        group: record.group || ""
+      });
     }
 
     // ==========================================
@@ -1878,6 +1945,27 @@ function jsonResponse(data, status = 200) {
       "Cache-Control": "no-store"
     }
   });
+}
+
+function generateSixDigitCode() {
+  const bytes = new Uint32Array(1);
+  crypto.getRandomValues(bytes);
+  return String(bytes[0] % 1000000).padStart(6, "0");
+}
+
+function sendOneBotAction(actionPayload) {
+  let sent = false;
+  for (const socket of activeOneBotSockets) {
+    try {
+      if (socket.readyState === WebSocket.OPEN) {
+        socket.send(JSON.stringify(actionPayload));
+        sent = true;
+      }
+    } catch (e) {
+      activeOneBotSockets.delete(socket);
+    }
+  }
+  return sent;
 }
 
 function getPublicNebulaSeed() {
