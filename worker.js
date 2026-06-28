@@ -372,9 +372,16 @@ export default {
       let imageUrl = null;
       let voiceUrl = null;
       let videoUrl = null;
+      let mentionedQqs = [];
+      let replyMessageId = body.message_id ? body.message_id.toString() : "";
+      let quotedMessageId = "";
+      let quotedMessageText = "";
 
       if (typeof body.message === "string") {
         userMessage = body.raw_message || body.message || "";
+        mentionedQqs = [...userMessage.matchAll(/\[CQ:at,qq=(\d+|all)\]/g)].map(m => m[1]);
+        const replyMatch = userMessage.match(/\[CQ:reply,[^\]]*id=([^,\]]+)/);
+        quotedMessageId = replyMatch ? replyMatch[1] : "";
         const imgUrlMatch = userMessage.match(/\[CQ:image,[^\]]*url=([^,\]]+)/);
         imageUrl = imgUrlMatch ? imgUrlMatch[1] : null;
         const voiceUrlMatch = userMessage.match(/\[CQ:record,[^\]]*url=([^,\]]+)/);
@@ -387,6 +394,11 @@ export default {
             userMessage += part.data.text;
           } else if (part.type === "at") {
             userMessage += `[CQ:at,qq=${part.data.qq}]`;
+            mentionedQqs.push(String(part.data.qq));
+          } else if (part.type === "reply") {
+            quotedMessageId = String(part.data.id || part.data.message_id || "");
+            userMessage += quotedMessageId ? `[CQ:reply,id=${quotedMessageId}]` : "";
+            quotedMessageText = part.data.text || part.data.message || "";
           } else if (part.type === "image") {
             imageUrl = part.data.url || part.data.file || null;
           } else if (part.type === "video") {
@@ -396,8 +408,12 @@ export default {
           }
         }
       }
+      mentionedQqs = [...new Set(mentionedQqs.filter(Boolean))];
+      if (quotedMessageId && !quotedMessageText) {
+        quotedMessageText = await dbGet(env, `message:${currentGroupId}:${quotedMessageId}`) || "";
+      }
 
-      const msgLower = userMessage.trim().toLowerCase();
+      let msgLower = userMessage.trim().toLowerCase();
       let atSender = isGroup ? `[CQ:at,qq=${userId}] ` : "";
 
       // 🔐 【關鍵核心：私聊過濾防線】
@@ -420,11 +436,21 @@ export default {
 
       // 清洗掉訊息中的 CQ 標籤與圖片標籤 (用於聊天記憶與常規判斷)
       let cleanMessage = userMessage
+        .replace(/\[CQ:reply,[^\]]+\]/g, '')
         .replace(/\[CQ:at,qq=\d+\]/g, '')
         .replace(/\[CQ:at,qq=all\]/g, '')
         .replace(/\[CQ:image,[^\]]+\]/g, '[图片]')
         .replace(/\[CQ:record,[^\]]+\]/g, '[语音]')
         .trim();
+
+      const mentionContext = mentionedQqs.length > 0
+        ? `本消息明确 @ 了：${mentionedQqs.map(q => q === "all" ? "全体成员" : `QQ:${q}`).join("、")}`
+        : "";
+      const quoteContext = quotedMessageId
+        ? `本消息是在回复 message_id=${quotedMessageId}${quotedMessageText ? `，被回复内容：「${quotedMessageText}」` : "，但本地暂未缓存到原文"}`
+        : "";
+      const relationContext = [quoteContext, mentionContext].filter(Boolean).join("\n");
+      msgLower = cleanMessage.trim().toLowerCase();
 
       // 💡 【關鍵核心：核心權限判定】
       const hasAdminAuth = senderRole === 'admin' || senderRole === 'owner' || isDeveloper; // 群主、管理員、開發者可動用 AI 核心開關與全域人設
@@ -1496,7 +1522,8 @@ export default {
          }
          
          // 1. 建立標準歷史格式：[昵称(QQ号)]: 内容
-         const logEntry = `[${senderCard || '群友'}(QQ:${userId})]: ${cleanMessage || (imageUrl?"发了张图":voiceUrl?"发了语音":"发了视频")}`;
+         const relationForLog = relationContext ? ` ${relationContext.replace(/\n/g, " ")}` : "";
+         const logEntry = `[${senderCard || '群友'}(QQ:${userId})]: ${cleanMessage || (imageUrl?"发了张图":voiceUrl?"发了语音":"发了视频")}${relationForLog}`;
          recentLogs.push(logEntry);
          
          // 保持最多 200 条记录防止撑爆空间
@@ -1504,6 +1531,9 @@ export default {
          
          // 💡 使用 ctx.waitUntil 异步存入 D1，绝不阻塞当前回覆流程！
          ctx.waitUntil(dbPut(env, logKey, JSON.stringify(recentLogs)));
+         if (replyMessageId) {
+           ctx.waitUntil(dbPut(env, `message:${currentGroupId}:${replyMessageId}`, cleanMessage || (imageUrl?"[图片]":voiceUrl?"[语音]":videoUrl?"[视频]":"")));
+         }
 
          // ==========================================
          // 🔮 【新加入】利用 ctx.waitUntil 在背景偷偷將靈魂碎片寫入向量資料庫
@@ -1716,6 +1746,10 @@ export default {
           finalStylePrompt += `\n\n${memoryContext}`;
       }
 
+      if (relationContext) {
+          finalStylePrompt += `\n\n【当前消息关系上下文】\n${relationContext}\n如果用户是在回复某条消息，你必须优先围绕被回复内容理解语境；如果用户 @ 了别人，你必须知道该 QQ 是被点名对象，不要误判成发言者。`;
+      }
+
       // ==========================================
       // 📦 上下文与多模态数据最终封装
       // ==========================================
@@ -1723,8 +1757,8 @@ export default {
       
       // 1. 如果是主动插话状态，微调行为模式
       let userPrompt = isAutoInterject
-        ? `(你现在是主动凑热闹插话状态，请自然地接梗或搭腔，极度精简！不要像回答问题一样，只需1~2句话)\n[${roleName} ${senderCard}(QQ:${userId})]: ${cleanMessage}`
-        : `[${roleName} ${senderCard}(QQ:${userId})]: ${cleanMessage}`;
+        ? `(你现在是主动凑热闹插话状态，请自然地接梗或搭腔，极度精简！不要像回答问题一样，只需1~2句话)\n${relationContext ? relationContext + "\n" : ""}[${roleName} ${senderCard}(QQ:${userId})]: ${cleanMessage}`
+        : `${relationContext ? relationContext + "\n" : ""}[${roleName} ${senderCard}(QQ:${userId})]: ${cleanMessage}`;
 
       aiInputParts.push({ text: userPrompt });
 
@@ -1944,6 +1978,19 @@ async function writeMemoryAudit(env, entry) {
   }
 }
 
+function buildGroupReplyMessage(eventBody, replyText) {
+  const message = [];
+  if (eventBody.message_id !== undefined && eventBody.message_id !== null) {
+    message.push({ type: "reply", data: { id: String(eventBody.message_id) } });
+  }
+  if (eventBody.user_id !== undefined && eventBody.user_id !== null) {
+    message.push({ type: "at", data: { qq: String(eventBody.user_id) } });
+    message.push({ type: "text", data: { text: " " } });
+  }
+  message.push({ type: "text", data: { text: String(replyText).replace(new RegExp(`^\\[CQ:at,qq=${eventBody.user_id}\\]\\s*`), "") } });
+  return message;
+}
+
 function getLiveHtmlPage(host) {
   return `<!doctype html>
 <html lang="zh-Hant">
@@ -2000,6 +2047,7 @@ function getPortalHomePage(host) {
     label{display:block;font-size:13px;color:#9fb1c7;margin:14px 0 6px}input,select{width:100%;height:40px;border:1px solid rgba(255,255,255,.18);border-radius:6px;background:#09111f;color:#eef6ff;padding:0 10px}
     button,a.btn{display:inline-flex;align-items:center;justify-content:center;height:40px;border:0;border-radius:6px;background:#57d7ff;color:#031018;font-weight:700;text-decoration:none;padding:0 14px;cursor:pointer}
     .row{display:flex;gap:10px;margin-top:16px}.notice{margin-top:16px;color:#a9b8ca;font-size:14px;line-height:1.6}.links{display:flex;gap:10px;flex-wrap:wrap;margin-top:18px}
+    .dashboard{display:none;position:relative;z-index:1;padding:24px 40px 40px}.tabs{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px}.tab{background:#132033;color:#d9ecff}.view{display:none;border:1px solid rgba(255,255,255,.14);background:rgba(5,10,18,.82);border-radius:8px;padding:18px}.view.active{display:block}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px}.mini{border:1px solid rgba(255,255,255,.12);border-radius:8px;padding:14px;background:#08101d}.muted{color:#9fb1c7;font-size:14px;line-height:1.6}
     @media(max-width:860px){.shell{grid-template-columns:1fr;padding:22px;align-items:start}.hero{padding-top:54px}.panel{width:100%}}
   </style>
 </head>
@@ -2028,15 +2076,37 @@ function getPortalHomePage(host) {
       <div class="notice" id="notice">系統公告：Portal、Live、Vector Matrix 路由已啟用。驗證碼接口需接入 QQ 私訊發送器後才會簽發正式登入。</div>
     </aside>
   </main>
+  <section class="dashboard" id="dashboard">
+    <div class="tabs">
+      <button class="tab" data-view="self">個人設定</button>
+      <button class="tab" data-view="matrix">記憶矩陣</button>
+      <button class="tab" data-view="admin">群務面板</button>
+      <button class="tab" data-view="root">Root 維運</button>
+    </div>
+    <div class="view active" id="view-self">
+      <h2>個人設定自助區</h2>
+      <div class="grid">
+        <div class="mini"><strong>記憶 CRUD</strong><p class="muted">新增、修改、刪除自己的私人/公開記憶。所有變更會寫入 audit logs。</p></div>
+        <div class="mini"><strong>免打擾</strong><p class="muted">切換個人免打擾，避免 AI 主動 @ 你。</p></div>
+        <div class="mini"><strong>AI 態度</strong><p class="muted">設定私人專屬 AI 回覆風格。</p></div>
+        <div class="mini"><strong>配額</strong><p class="muted">目前常態顯示：無限。</p></div>
+      </div>
+    </div>
+    <div class="view" id="view-matrix"><h2>進階向量記憶矩陣</h2><p class="muted">登入後星雲保留，但會從全站匿名混合模式坍縮為所屬群組粒子。普通群員只能看本群摘要；Root 可開啟原始向量檢索模式。</p></div>
+    <div class="view" id="view-admin"><h2>群務秩序管理面板</h2><p class="muted">群管理員、群主、Root 可用。一般群員點擊會顯示 Error 403。</p></div>
+    <div class="view" id="view-root"><h2>核心系統維運後台</h2><p class="muted">僅 Root 可用：全域權限、記憶使用權開關、硬重啟、金鑰池、錯誤日誌、廣播與 D1 備份。</p></div>
+  </section>
   <script>
     const c=document.getElementById('nebula'),x=c.getContext('2d');let w,h,p=[];
     function resize(){w=c.width=innerWidth*devicePixelRatio;h=c.height=innerHeight*devicePixelRatio;p=Array.from({length:1500},()=>({x:Math.random()*w,y:Math.random()*h,vx:(Math.random()-.5)*.45,vy:(Math.random()-.5)*.45,r:Math.random()*1.6+.25,h:Math.random()*80+185}))}
     addEventListener('resize',resize);resize();
     let mx=-9999,my=-9999;addEventListener('pointermove',e=>{mx=e.clientX*devicePixelRatio;my=e.clientY*devicePixelRatio});
     function frame(){x.fillStyle='rgba(3,5,10,.24)';x.fillRect(0,0,w,h);for(const a of p){const dx=a.x-mx,dy=a.y-my,d=Math.hypot(dx,dy);if(d<120){a.vx+=dx/d*.025;a.vy+=dy/d*.025;x.strokeStyle='rgba(120,230,255,.16)';x.beginPath();x.moveTo(mx,my);x.lineTo(a.x,a.y);x.stroke()}a.x=(a.x+a.vx+w)%w;a.y=(a.y+a.vy+h)%h;a.vx*=.995;a.vy*=.995;x.fillStyle='hsla('+a.h+',95%,70%,.85)';x.beginPath();x.arc(a.x,a.y,a.r*devicePixelRatio,0,Math.PI*2);x.fill()}requestAnimationFrame(frame)}frame();
+    let session=null;
     async function post(path,data){const r=await fetch(path,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(data)});return r.json()}
     send.onclick=async()=>{notice.textContent=(await post('/api/auth/request-code',{group:group.value,qq:qq.value})).message}
-    verify.onclick=async()=>{notice.textContent=(await post('/api/auth/verify-code',{group:group.value,qq:qq.value,code:code.value})).message}
+    verify.onclick=async()=>{const res=await post('/api/auth/verify-code',{group:group.value,qq:qq.value,code:code.value});notice.textContent=res.message;if(res.ok){session=res;document.querySelector('.shell').style.display='none';dashboard.style.display='block';}}
+    document.querySelectorAll('.tab').forEach(b=>b.onclick=()=>{const v=b.dataset.view;if((v==='admin'||v==='root')&&session&&session.qq!=='3569028262'){alert('Error 403：權限不足');return;}document.querySelectorAll('.view').forEach(x=>x.classList.remove('active'));document.getElementById('view-'+v).classList.add('active')})
   </script>
 </body>
 </html>`;
@@ -2107,7 +2177,11 @@ export class OneBotHub {
       const action = body.message_type === "private" ? "send_private_msg" : "send_group_msg";
       const params = body.message_type === "private"
         ? { user_id: body.user_id, message: reply, auto_escape: false }
-        : { group_id: body.group_id, message: reply, auto_escape: false };
+        : {
+            group_id: body.group_id,
+            message: buildGroupReplyMessage(body, reply),
+            auto_escape: false
+          };
 
       socket.send(JSON.stringify({
         action,
