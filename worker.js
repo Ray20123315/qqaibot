@@ -2055,7 +2055,7 @@ async function getUserQuota(env, groupId, userId) {
 function commandChangesWebSettings(message) {
   const text = String(message || "").trim().toLowerCase();
   if (!/^[!！]/.test(text)) return false;
-  if (/^[!！]指令(开|開|关|關)\b?/.test(text)) return false;
+  if (/^[!！]指令(开|開|关|關)\b/.test(text)) return false;
   return [
     "关闭ai", "關閉ai", "开启ai", "開啟ai", "ai关", "ai關", "ai开", "ai開",
     "记忆开", "記憶開", "记忆关", "記憶關",
