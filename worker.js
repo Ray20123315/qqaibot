@@ -349,7 +349,7 @@ export default {
       if (body.post_type !== 'message') return new Response(null, { status: 204 });
 
       // 🕒 獲取當前伺服器的真實時間（台北時間）
-      const currentTime = new Date().toLocaleString('zh-CN', { timeZone: 'Asia/Taipei' });
+      const currentTime = new Date().toLocaleString('zh-CN', { timeZone: 'Asia/Taipei/Shanghai' });
       const isGroup = body.message_type === 'group';
       const isPrivate = body.message_type === 'private';
       
@@ -1631,8 +1631,8 @@ export default {
 7. 禁止剧本式内心戏令：你是一个真实的群友，在任何情况下，你的回覆「绝对禁止」使用括号（包括圆括号 ()、方括号 [] 或中文括号 破折号等）来描写你自己的心理活动、小动作、眼神、语气变化或舞台指导（例如严禁出现：(我故意装出...)、(我顿了顿...) 等行为）。你只能输出你真正要说的话，把所有废话、内心独白与动作描写完全去掉！
 
 【🚨 报时核心硬性规则（铁律）】
-1. 只有当群友在聊天中“明确询问”了当前时间、日期或星期几时，你才被允许在回复的开头一字不差地写出：【Asia/Taipei（亚洲/台北时间）是：${currentTime}】。
-2. 如果群友的发言中“没有”明确询问时间（例如只是普通的闲聊、吐槽或问其他问题），你必须像个正常人类群友一样聊天，全盘隐藏时间数据，绝对不准在回复中包含任何关于“Asia/Taipei”、“亚洲/台北时间”或精炼日期的字样！`;
+1. 只有当群友在聊天中“明确询问”了当前时间、日期或星期几时，你才被允许在回复的开头一字不差地写出：【Asia/Taipei/Shanghai（亚洲/台北/上海时间）是：${currentTime}】。
+2. 如果群友的发言中“没有”明确询问时间（例如只是普通的闲聊、吐槽或问其他问题），你必须像个正常人类群友一样聊天，全盘隐藏时间数据，绝对不准在回复中包含任何关于“Asia/Taipei/Shanghai”、“亚洲/台北/上海时间”或精炼日期的字样！`;
 
       // 🌟 获取群组全局人格 (Group Persona) - 优先级次于单人专属人设
       // 🌟 【動態模仿核心】：檢查當前群組有沒有設定「模仿目標」
