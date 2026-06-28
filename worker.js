@@ -2479,9 +2479,6 @@ export class OneBotHub {
     this.state = state;
     this.env = env;
     this.sockets = new Set();
-    this.pending = new Map();
-    this.lastAction = null;
-    this.lastAck = null;
   }
 
   async fetch(request) {
@@ -2508,26 +2505,12 @@ export class OneBotHub {
     if (request.method === "POST" && url.pathname === "/send") {
       const payload = await request.json().catch(() => null);
       if (!payload) return Response.json({ sent: false, error: "invalid_payload" }, { status: 400 });
-      if (!payload.echo) payload.echo = `qqai:${Date.now()}:${crypto.randomUUID()}`;
       const sent = this.broadcast(payload);
-      this.lastAction = {
-        at: new Date().toISOString(),
-        echo: payload.echo,
-        action: payload.action,
-        params: payload.params,
-        sockets: this.sockets.size,
-        sent
-      };
-      const ack = sent ? await this.waitForAck(payload.echo, 2500) : null;
-      return Response.json({ sent, acknowledged: !!ack, ack, sockets: this.sockets.size });
+      return Response.json({ sent, sockets: this.sockets.size });
     }
 
     if (url.pathname === "/status") {
-      return Response.json({
-        sockets: this.sockets.size,
-        last_action: this.lastAction,
-        last_ack: this.lastAck
-      });
+      return Response.json({ sockets: this.sockets.size });
     }
 
     return new Response("OneBotHub OK", { status: 200 });
@@ -2536,16 +2519,7 @@ export class OneBotHub {
   async handleMessage(socket, request, event) {
     try {
       const body = JSON.parse(typeof event.data === "string" ? event.data : new TextDecoder().decode(event.data));
-      if (!body) return;
-
-      if (body.echo && this.pending.has(body.echo)) {
-        this.lastAck = { at: new Date().toISOString(), ...body };
-        this.pending.get(body.echo)(body);
-        this.pending.delete(body.echo);
-        return;
-      }
-
-      if (body.post_type === "meta_event" || body.echo || body.status === "ok") return;
+      if (!body || body.post_type === "meta_event" || body.echo || body.status === "ok") return;
 
       const sourceUrl = new URL(request.url);
       const internalResponse = await fetch(`${sourceUrl.protocol}//${sourceUrl.host}/__onebot_event`, {
@@ -2596,18 +2570,5 @@ export class OneBotHub {
       }
     }
     return sent;
-  }
-
-  waitForAck(echo, timeoutMs) {
-    return new Promise(resolve => {
-      const timer = setTimeout(() => {
-        this.pending.delete(echo);
-        resolve(null);
-      }, timeoutMs);
-      this.pending.set(echo, body => {
-        clearTimeout(timer);
-        resolve(body);
-      });
-    });
   }
 }
