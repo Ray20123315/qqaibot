@@ -492,6 +492,18 @@ export default {
         };
       };
 
+      if (/^[!！]指令(开|開|关|關)\b?/.test(msgLower)) {
+        if (!hasAdminAuth) return jsonReply(`${atSender}❌ 只有群主、管理员或开发者可以切换网页设定指令权限。`);
+        const enable = /^[!！]指令(开|開)\b?/.test(msgLower);
+        if (enable) await dbDel(env, `web_command_off:${currentGroupId}`);
+        else await dbPut(env, `web_command_off:${currentGroupId}`, "true");
+        return jsonReply(`${atSender}${enable ? "✅ 已开启" : "⛔ 已关闭"}可修改网页设定的 ! 指令。`);
+      }
+
+      if (await dbGet(env, `web_command_off:${currentGroupId}`) === "true" && commandChangesWebSettings(userMessage)) {
+        return jsonReply(`${atSender}⛔ 本群已关闭可修改网页设定的 ! 指令，请改到门户网页调整，或由管理员使用 !指令开 重新开启。`);
+      }
+
       // ==========================================
       // 🛑 防禦陣線
       // ==========================================
@@ -2036,6 +2048,28 @@ async function isMemoryBanned(env, userId) {
   return await dbGet(env, `memory_banned:${userId}`) === "true";
 }
 
+async function getUserQuota(env, groupId, userId) {
+  return await dbGet(env, `quota:${groupId}:${userId}`) || "无限";
+}
+
+function commandChangesWebSettings(message) {
+  const text = String(message || "").trim().toLowerCase();
+  if (!/^[!！]/.test(text)) return false;
+  if (/^[!！]指令(开|開|关|關)\b?/.test(text)) return false;
+  return [
+    "关闭ai", "關閉ai", "开启ai", "開啟ai", "ai关", "ai關", "ai开", "ai開",
+    "记忆开", "記憶開", "记忆关", "記憶關",
+    "切换人格", "切換人格", "恢复人格", "恢復人格", "取消使用",
+    "set群规", "set群規", "群规设置", "群規設定",
+    "拉黑", "洗白",
+    "免打扰", "免打擾", "取消免打扰", "取消免打擾",
+    "set人格", "del人格",
+    "记住", "記住", "忘记", "忘記",
+    "禁记忆", "禁記憶", "解禁记忆", "解禁記憶",
+    "banmemory", "unbanmemory"
+  ].some(cmd => text.startsWith("!" + cmd) || text.startsWith("！" + cmd));
+}
+
 async function writeMemoryAudit(env, entry) {
   const auditEntry = {
     id: crypto.randomUUID(),
@@ -2097,7 +2131,7 @@ async function handlePortalApi(request, env, url) {
   const path = url.pathname.replace("/api/portal", "");
 
   if (request.method === "GET" && path === "/me") {
-    return jsonResponse({ ok: true, session: authed, quota: "无限" });
+    return jsonResponse({ ok: true, session: authed, quota: await getUserQuota(env, groupId, authed.qq) });
   }
 
   if (request.method === "GET" && path === "/memories") {
@@ -2153,7 +2187,7 @@ async function handlePortalApi(request, env, url) {
       ok: true,
       dnd: await dbGet(env, `dnd:${groupId}:${authed.qq}`) === "true",
       style: await dbGet(env, `custom_style:${groupId}:${authed.qq}`) || "",
-      quota: "无限"
+      quota: await getUserQuota(env, groupId, authed.qq)
     });
   }
 
@@ -2176,6 +2210,7 @@ async function handlePortalApi(request, env, url) {
       memory_on: await dbGet(env, `memo:${groupId}`) !== "false",
       persona: await dbGet(env, `group_persona:${groupId}`) || "",
       interject_rate: Number(await dbGet(env, `interject_rate:${groupId}`) || "25"),
+      commands_enabled: await dbGet(env, `web_command_off:${groupId}`) !== "true",
       keywords: await readJson(env, `keyword_filter:${groupId}`, []),
       blacklist: await readJson(env, `blacklist_group:${groupId}`, []),
       public_memos: await readJson(env, `group_public_memos:${groupId}`, []),
@@ -2188,6 +2223,7 @@ async function handlePortalApi(request, env, url) {
     body.memory_on ? await dbPut(env, `memo:${groupId}`, "true") : await dbPut(env, `memo:${groupId}`, "false");
     await dbPut(env, `group_persona:${groupId}`, String(body.persona || ""));
     await dbPut(env, `interject_rate:${groupId}`, String(Math.max(0, Math.min(100, Number(body.interject_rate || 0)))));
+    body.commands_enabled ? await dbDel(env, `web_command_off:${groupId}`) : await dbPut(env, `web_command_off:${groupId}`, "true");
     await dbPut(env, `keyword_filter:${groupId}`, JSON.stringify(String(body.keywords || "").split(/\n|,/).map(s => s.trim()).filter(Boolean)));
     return jsonResponse({ ok: true, message: "群务设置已保存。" });
   }
@@ -2204,7 +2240,11 @@ async function handlePortalApi(request, env, url) {
   }
 
   if (request.method === "GET" && path === "/root/members") {
-    return jsonResponse({ ok: true, members: await readJson(env, `group_members:${groupId}`, []) });
+    const members = await readJson(env, `group_members:${groupId}`, []);
+    for (const member of members) {
+      member.quota = await getUserQuota(env, groupId, member.qq);
+    }
+    return jsonResponse({ ok: true, members });
   }
 
   if (request.method === "POST" && path === "/root/member") {
@@ -2214,6 +2254,11 @@ async function handlePortalApi(request, env, url) {
     if (body.admin === false) await dbDel(env, `admin_auth:${target}`);
     if (body.memory_banned === true) await dbPut(env, `memory_banned:${target}`, "true");
     if (body.memory_banned === false) await dbDel(env, `memory_banned:${target}`);
+    if (Object.prototype.hasOwnProperty.call(body, "quota")) {
+      const quota = String(body.quota || "").trim();
+      if (!quota || quota === "无限" || quota.toLowerCase() === "unlimited") await dbDel(env, `quota:${groupId}:${target}`);
+      else await dbPut(env, `quota:${groupId}:${target}`, quota);
+    }
     return jsonResponse({ ok: true, message: "成员权限已更新。" });
   }
 
@@ -2352,7 +2397,7 @@ function getPortalHomePage(host) {
     label{display:block;font-size:13px;color:#9fb1c7;margin:14px 0 6px}input,select{width:100%;height:40px;border:1px solid rgba(255,255,255,.18);border-radius:6px;background:#09111f;color:#eef6ff;padding:0 10px}
     button,a.btn{display:inline-flex;align-items:center;justify-content:center;height:40px;border:0;border-radius:6px;background:#57d7ff;color:#031018;font-weight:700;text-decoration:none;padding:0 14px;cursor:pointer}
     .row{display:flex;gap:10px;margin-top:16px}.notice{margin-top:16px;color:#a9b8ca;font-size:14px;line-height:1.6}.links{display:flex;gap:10px;flex-wrap:wrap;margin-top:18px}
-    .dashboard{display:none;position:relative;z-index:1;min-height:100vh;padding:24px clamp(14px,3vw,36px) 36px;background:linear-gradient(180deg,rgba(9,16,29,.72),rgba(3,5,10,.92))}.dashTop{display:flex;justify-content:space-between;gap:16px;align-items:center;margin:0 auto 16px;max-width:1480px}.dashTop h1{margin:0;font-size:clamp(24px,3vw,36px);letter-spacing:0}.role{color:#8be9ff;font-weight:800}.tabs{display:flex;gap:8px;flex-wrap:wrap;margin:0 auto 16px;max-width:1480px;padding:6px;border:1px solid rgba(255,255,255,.1);border-radius:8px;background:rgba(5,10,18,.72)}.tab{background:transparent;color:#d9ecff;border:1px solid transparent}.tab:hover{border-color:rgba(87,215,255,.5);background:rgba(87,215,255,.08)}.view{display:none;max-width:1480px;margin:0 auto}.view.active{display:block}.grid{display:grid;grid-template-columns:repeat(12,minmax(0,1fr));gap:14px}.mini{grid-column:span 3;border:1px solid rgba(139,233,255,.16);border-radius:8px;padding:16px;background:linear-gradient(180deg,rgba(10,19,34,.94),rgba(6,12,22,.9));box-shadow:0 14px 42px rgba(0,0,0,.24);min-width:0}.mini strong{display:block;margin-bottom:12px;font-size:17px}.wide{grid-column:span 6}.full{grid-column:1/-1}.muted{color:#9fb1c7;font-size:14px;line-height:1.6}.list{display:grid;gap:8px;margin-top:10px;max-height:340px;overflow:auto;scrollbar-color:#57d7ff rgba(255,255,255,.08)}.item{display:flex;gap:8px;align-items:center;justify-content:space-between;border:1px solid rgba(255,255,255,.1);background:rgba(4,10,18,.82);border-radius:7px;padding:9px;min-height:40px}.item span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.danger{background:#ff6b6b;color:#170707}.ok{background:#73e6a2;color:#03120a}textarea{width:100%;min-height:96px;border:1px solid rgba(255,255,255,.18);border-radius:7px;background:#09111f;color:#eef6ff;padding:10px;resize:vertical}input[type=range]{width:100%;accent-color:#57d7ff}input[type=checkbox]{width:18px;height:18px;padding:0;accent-color:#57d7ff;flex:0 0 auto}.switch{display:flex;gap:9px;align-items:center;margin:8px 0}.matrixCanvas{height:360px;border:1px solid rgba(139,233,255,.18);border-radius:8px;background:radial-gradient(circle at 30% 30%,rgba(87,215,255,.12),transparent 32%),#030914;position:relative;overflow:hidden}.toolbar{display:flex;gap:8px;flex-wrap:wrap;align-items:center}.toolbar input{max-width:320px}.stat{font-size:26px;font-weight:800;color:#8be9ff}.smallBtn{height:34px;padding:0 10px}.sectionTitle{margin:0 0 12px;font-size:22px}.rangeWrap{display:grid;grid-template-columns:1fr 52px;gap:10px;align-items:center}.percent{color:#8be9ff;font-weight:800;font-variant-numeric:tabular-nums}
+    .dashboard{display:none;position:relative;z-index:1;min-height:100vh;padding:24px clamp(14px,3vw,36px) 36px;background:linear-gradient(180deg,rgba(9,16,29,.72),rgba(3,5,10,.92))}.dashTop{display:flex;justify-content:space-between;gap:16px;align-items:center;margin:0 auto 16px;max-width:1480px}.dashTop h1{margin:0;font-size:clamp(24px,3vw,36px);letter-spacing:0}.role{color:#8be9ff;font-weight:800}.tabs{display:flex;gap:8px;flex-wrap:wrap;margin:0 auto 16px;max-width:1480px;padding:6px;border:1px solid rgba(255,255,255,.1);border-radius:8px;background:rgba(5,10,18,.72)}.tab{background:transparent;color:#d9ecff;border:1px solid transparent}.tab:hover{border-color:rgba(87,215,255,.5);background:rgba(87,215,255,.08)}.view{display:none;max-width:1480px;margin:0 auto}.view.active{display:block}.grid{display:grid;grid-template-columns:repeat(12,minmax(0,1fr));gap:14px}.mini{grid-column:span 3;border:1px solid rgba(139,233,255,.16);border-radius:8px;padding:16px;background:linear-gradient(180deg,rgba(10,19,34,.94),rgba(6,12,22,.9));box-shadow:0 14px 42px rgba(0,0,0,.24);min-width:0}.mini strong{display:block;margin-bottom:12px;font-size:17px}.wide{grid-column:span 6}.full{grid-column:1/-1}.muted{color:#9fb1c7;font-size:14px;line-height:1.6}.list{display:grid;gap:8px;margin-top:10px;max-height:340px;overflow:auto;scrollbar-color:#57d7ff rgba(255,255,255,.08)}.item{display:flex;gap:8px;align-items:center;justify-content:space-between;border:1px solid rgba(255,255,255,.1);background:rgba(4,10,18,.82);border-radius:7px;padding:9px;min-height:40px}.item span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.audit{display:block}.audit small{display:block;color:#9fb1c7;margin-top:5px;white-space:normal}.danger{background:#ff6b6b;color:#170707}.ok{background:#73e6a2;color:#03120a}textarea{width:100%;min-height:96px;border:1px solid rgba(255,255,255,.18);border-radius:7px;background:#09111f;color:#eef6ff;padding:10px;resize:vertical}input[type=range]{width:100%;accent-color:#57d7ff}input[type=checkbox]{width:18px;height:18px;padding:0;accent-color:#57d7ff;flex:0 0 auto}.switch{display:flex;gap:9px;align-items:center;margin:8px 0}.matrixCanvas{height:360px;border:1px solid rgba(139,233,255,.18);border-radius:8px;background:radial-gradient(circle at 30% 30%,rgba(87,215,255,.12),transparent 32%),#030914;position:relative;overflow:hidden}.toolbar{display:flex;gap:8px;flex-wrap:wrap;align-items:center}.toolbar input{max-width:320px}.stat{font-size:26px;font-weight:800;color:#8be9ff}.smallBtn{height:34px;padding:0 10px}.sectionTitle{margin:0 0 12px;font-size:22px}.rangeWrap{display:grid;grid-template-columns:1fr 52px;gap:10px;align-items:center}.percent{color:#8be9ff;font-weight:800;font-variant-numeric:tabular-nums}.tip{display:none;position:fixed;z-index:10;max-width:min(460px,88vw);border:1px solid rgba(139,233,255,.45);border-radius:8px;background:rgba(3,8,15,.96);box-shadow:0 18px 48px rgba(0,0,0,.42);padding:10px;color:#edf6ff;line-height:1.5;pointer-events:none}
     @media(max-width:1180px){.mini{grid-column:span 6}.wide{grid-column:span 12}.dashboard{padding:20px}}
     @media(max-width:860px){.shell{grid-template-columns:1fr;padding:18px;align-items:start}.hero{padding-top:46px}.panel{width:100%}.dashboard{padding:14px}.dashTop{display:block}.dashTop h1{font-size:24px}.tabs{position:sticky;top:0;background:rgba(3,5,10,.94);padding:8px;z-index:2}.tab{flex:1 1 calc(50% - 8px)}.mini,.wide{grid-column:1/-1}.item{align-items:flex-start}.item span{white-space:normal}.toolbar input{max-width:none}.matrixCanvas{height:260px}}
     @media(max-width:520px){.row,.toolbar{display:grid;grid-template-columns:1fr}.tab{flex-basis:100%}button,a.btn,input,select{width:100%}.hero h1{font-size:34px}.mini{padding:12px}}
