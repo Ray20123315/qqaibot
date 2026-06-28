@@ -349,7 +349,7 @@ export default {
       if (body.post_type !== 'message') return new Response(null, { status: 204 });
 
       // 🕒 獲取當前伺服器的真實時間（台北時間）
-      const currentTime = new Date().toLocaleString('zh-CN', { timeZone: 'Asia/Taipei/Shanghai' });
+      const currentTime = new Date().toLocaleString('zh-CN', { timeZone: 'Asia/Taipei' });
       const isGroup = body.message_type === 'group';
       const isPrivate = body.message_type === 'private';
       
