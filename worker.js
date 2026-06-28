@@ -753,9 +753,9 @@ export default {
         const currentAdminStatus = (isGrantedAdmin || hasAdminAuth); 
         
         // 2. 动态生成专属头衔
-        let roleTxt = isOnlyMe ? "【👑 最高主宰: 开发者】" : 
-                      isSuperAuth ? "【💠 最高权限: 群主/共开】" : 
-                      currentAdminStatus ? "【🛡️ 管理权限: 系统管理员】" : 
+        let roleTxt = isOnlyMe ? "【👑开发者】" : 
+                      isSuperAuth ? "【💠群主/共开】" : 
+                      currentAdminStatus ? "【🛡️系统管理员】" : 
                       "【👤 群成员】";
         
         // =======================================
