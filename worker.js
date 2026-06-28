@@ -753,9 +753,9 @@ export default {
         const currentAdminStatus = (isGrantedAdmin || hasAdminAuth); 
         
         // 2. 动态生成专属头衔
-        let roleTxt = isOnlyMe ? "【👑开发者】" : 
-                      isSuperAuth ? "【💠群主/共开】" : 
-                      currentAdminStatus ? "【🛡️系统管理员】" : 
+        let roleTxt = isOnlyMe ? "【👑 最高主宰: 开发者】" : 
+                      isSuperAuth ? "【💠 最高权限: 群主/共开】" : 
+                      currentAdminStatus ? "【🛡️ 管理权限: 系统管理员】" : 
                       "【👤 群成员】";
         
         // =======================================
@@ -1924,6 +1924,7 @@ export default {
     } catch (err) {
       // 兜底全域崩溃防护，确保 Worker 绝对不会死机
       console.error("全局严重错误:", err);
+      ctx.waitUntil(writeSystemError(env, err, { url: request.url }));
       return new Response("OK (Handled Error)", { status: 200 });
     }
   } // 结束 fetch 函式
@@ -2057,6 +2058,18 @@ async function writeMemoryAudit(env, entry) {
     if (logs.length > 500) logs = logs.slice(-500);
     await dbPut(env, key, JSON.stringify(logs));
   }
+}
+
+async function writeSystemError(env, err, context = {}) {
+  const logs = await readJson(env, "system_error_logs", []);
+  logs.push({
+    at: new Date().toISOString(),
+    message: err?.message || String(err),
+    stack: err?.stack || "",
+    context
+  });
+  if (logs.length > 200) logs.splice(0, logs.length - 200);
+  await dbPut(env, "system_error_logs", JSON.stringify(logs));
 }
 
 function buildGroupReplyMessage(eventBody, replyText) {
@@ -2207,16 +2220,76 @@ async function handlePortalApi(request, env, url) {
   if (request.method === "POST" && path === "/root/broadcast") {
     const message = String(body.message || "").trim();
     if (!message) return jsonResponse({ ok: false, message: "广播内容不能为空。" }, 400);
-    const sent = await sendOneBotAction(env, { action: "send_group_msg", params: { group_id: groupId, message }, echo: `qqai:broadcast:${Date.now()}` });
-    return jsonResponse({ ok: sent, message: sent ? "广播已发送。" : "NapCat WebSocket 未连接。" }, sent ? 200 : 503);
+    const targets = String(body.groups || groupId).split(/\n|,/).map(s => extractGroupId(s)).filter(Boolean);
+    let sentCount = 0;
+    for (const targetGroupId of targets) {
+      const sent = await sendOneBotAction(env, { action: "send_group_msg", params: { group_id: targetGroupId, message }, echo: `qqai:broadcast:${Date.now()}:${targetGroupId}` });
+      if (sent) sentCount++;
+    }
+    return jsonResponse({ ok: sentCount > 0, message: sentCount > 0 ? `广播已发送到 ${sentCount}/${targets.length} 个群。` : "NapCat WebSocket 未连接。", sentCount, total: targets.length }, sentCount > 0 ? 200 : 503);
+  }
+
+  if (request.method === "GET" && path === "/root/state") {
+    const keyCount = [...(env.GEMINI_API_KEYS || "").split(",").filter(k => k.trim()), ...(env.VECTORIZE_GEMINI_KEYS || "").split(",").filter(k => k.trim())].length;
+    return jsonResponse({
+      ok: true,
+      key_pool: {
+        gemini_keys: (env.GEMINI_API_KEYS || "").split(",").filter(k => k.trim()).length,
+        vectorize_gemini_keys: (env.VECTORIZE_GEMINI_KEYS || "").split(",").filter(k => k.trim()).length,
+        total: keyCount
+      },
+      stats: {
+        total_calls: await dbGet(env, "STAT_TOTAL_CALLS") || "0",
+        last_model: await dbGet(env, "STAT_LAST_MODEL") || "无记录"
+      },
+      errors: await readJson(env, "system_error_logs", []),
+      groups: await readJson(env, "known_groups", [])
+    });
+  }
+
+  if (request.method === "POST" && path === "/root/restart") {
+    await dbDel(env, `chat:group:${groupId}`);
+    await dbDel(env, `last_interject:${groupId}`);
+    await dbDel(env, `emotion_buff:${groupId}:${authed.qq}`);
+    await dbPut(env, "system_last_restart", new Date().toISOString());
+    return jsonResponse({ ok: true, message: "系统暂存已重置。" });
+  }
+
+  if (request.method === "GET" && path === "/root/backup") {
+    return jsonResponse({
+      ok: true,
+      backup: {
+        groupId,
+        exportedAt: new Date().toISOString(),
+        public_memos: await readJson(env, `group_public_memos:${groupId}`, []),
+        audit_logs: await readJson(env, `audit:memory:group:${groupId}`, []),
+        members: await readJson(env, `group_members:${groupId}`, []),
+        recent_logs: await readJson(env, `recent_logs:${groupId}`, []),
+        admin_state: {
+          ai_off: await dbGet(env, `ai_off:${groupId}`),
+          memory: await dbGet(env, `memo:${groupId}`),
+          persona: await dbGet(env, `group_persona:${groupId}`),
+          keywords: await readJson(env, `keyword_filter:${groupId}`, [])
+        }
+      }
+    });
   }
 
   if (request.method === "GET" && path === "/matrix") {
     const logs = await readJson(env, `recent_logs:${groupId}`, []);
+    const q = String(url.searchParams.get("q") || "").trim();
+    const filtered = q ? logs.filter(line => line.includes(q)) : logs;
     return jsonResponse({
       ok: true,
       mode: authed.role === "developer" ? "root" : "group",
-      particles: logs.slice(-120).map((text, i) => ({ id: i, text: authed.role === "developer" ? text : text.replace(/QQ:\d+/g, "QQ:*"), cluster: i % 5, score: Number((1 - i / 140).toFixed(3)) }))
+      query: q,
+      particles: filtered.slice(-160).map((text, i) => ({
+        id: i,
+        text: authed.role === "developer" ? text : text.replace(/QQ:\d+/g, "QQ:*"),
+        raw: authed.role === "developer" ? Array.from({ length: 12 }, (_, n) => Number(Math.sin((i + 1) * (n + 1)).toFixed(6))) : undefined,
+        cluster: i % 5,
+        score: Number((1 - i / 180).toFixed(3))
+      }))
     });
   }
 
@@ -2279,8 +2352,10 @@ function getPortalHomePage(host) {
     label{display:block;font-size:13px;color:#9fb1c7;margin:14px 0 6px}input,select{width:100%;height:40px;border:1px solid rgba(255,255,255,.18);border-radius:6px;background:#09111f;color:#eef6ff;padding:0 10px}
     button,a.btn{display:inline-flex;align-items:center;justify-content:center;height:40px;border:0;border-radius:6px;background:#57d7ff;color:#031018;font-weight:700;text-decoration:none;padding:0 14px;cursor:pointer}
     .row{display:flex;gap:10px;margin-top:16px}.notice{margin-top:16px;color:#a9b8ca;font-size:14px;line-height:1.6}.links{display:flex;gap:10px;flex-wrap:wrap;margin-top:18px}
-    .dashboard{display:none;position:relative;z-index:1;padding:24px 40px 40px}.tabs{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px}.tab{background:#132033;color:#d9ecff}.view{display:none;border:1px solid rgba(255,255,255,.14);background:rgba(5,10,18,.82);border-radius:8px;padding:18px}.view.active{display:block}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:12px}.mini{border:1px solid rgba(255,255,255,.12);border-radius:8px;padding:14px;background:#08101d}.muted{color:#9fb1c7;font-size:14px;line-height:1.6}.list{display:grid;gap:8px;margin-top:10px}.item{display:flex;gap:8px;align-items:center;justify-content:space-between;border:1px solid rgba(255,255,255,.1);background:#07101b;border-radius:6px;padding:8px}.item span{overflow:hidden;text-overflow:ellipsis}.danger{background:#ff6b6b;color:#170707}.ok{background:#73e6a2;color:#03120a}textarea{width:100%;min-height:84px;border:1px solid rgba(255,255,255,.18);border-radius:6px;background:#09111f;color:#eef6ff;padding:10px}.switch{display:flex;gap:8px;align-items:center;margin:8px 0}.matrixCanvas{height:300px;border:1px solid rgba(255,255,255,.12);border-radius:8px;background:#030914;position:relative;overflow:hidden}
-    @media(max-width:860px){.shell{grid-template-columns:1fr;padding:22px;align-items:start}.hero{padding-top:54px}.panel{width:100%}}
+    .dashboard{display:none;position:relative;z-index:1;padding:22px 32px 34px;min-height:100vh}.dashTop{display:flex;justify-content:space-between;gap:14px;align-items:end;margin-bottom:14px}.dashTop h1{margin:0;font-size:30px}.role{color:#8be9ff}.tabs{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px}.tab{background:#132033;color:#d9ecff}.view{display:none}.view.active{display:block}.grid{display:grid;grid-template-columns:repeat(12,1fr);gap:12px}.mini{grid-column:span 3;border:1px solid rgba(255,255,255,.12);border-radius:8px;padding:14px;background:rgba(8,16,29,.88);min-width:0}.wide{grid-column:span 6}.full{grid-column:1/-1}.muted{color:#9fb1c7;font-size:14px;line-height:1.6}.list{display:grid;gap:8px;margin-top:10px;max-height:320px;overflow:auto}.item{display:flex;gap:8px;align-items:center;justify-content:space-between;border:1px solid rgba(255,255,255,.1);background:#07101b;border-radius:6px;padding:8px;min-height:38px}.item span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.danger{background:#ff6b6b;color:#170707}.ok{background:#73e6a2;color:#03120a}textarea{width:100%;min-height:84px;border:1px solid rgba(255,255,255,.18);border-radius:6px;background:#09111f;color:#eef6ff;padding:10px}input[type=range]{width:100%}.switch{display:flex;gap:8px;align-items:center;margin:8px 0}.matrixCanvas{height:330px;border:1px solid rgba(255,255,255,.12);border-radius:8px;background:#030914;position:relative;overflow:hidden}.toolbar{display:flex;gap:8px;flex-wrap:wrap;align-items:center}.toolbar input{max-width:280px}.stat{font-size:24px;font-weight:800;color:#8be9ff}.smallBtn{height:34px;padding:0 10px}
+    @media(max-width:1180px){.mini{grid-column:span 6}.wide{grid-column:span 12}.dashboard{padding:20px}}
+    @media(max-width:860px){.shell{grid-template-columns:1fr;padding:18px;align-items:start}.hero{padding-top:46px}.panel{width:100%}.dashboard{padding:14px}.dashTop{display:block}.dashTop h1{font-size:24px}.tabs{position:sticky;top:0;background:rgba(3,5,10,.92);padding:8px 0;z-index:2}.tab{flex:1 1 calc(50% - 8px)}.mini,.wide{grid-column:1/-1}.item{align-items:flex-start}.item span{white-space:normal}.toolbar input{max-width:none}.matrixCanvas{height:240px}}
+    @media(max-width:520px){.row,.toolbar{display:grid;grid-template-columns:1fr}.tab{flex-basis:100%}button,a.btn,input,select{width:100%}.hero h1{font-size:34px}.mini{padding:12px}}
   </style>
 </head>
 <body>
@@ -2309,6 +2384,10 @@ function getPortalHomePage(host) {
     </aside>
   </main>
   <section class="dashboard" id="dashboard">
+    <div class="dashTop">
+      <div><h1>QQAIbot 控制台</h1><div class="muted">目前身分：<span class="role" id="roleText">-</span> / 群組：<span id="groupText">-</span></div></div>
+      <div class="toolbar"><button id="refreshAll" class="smallBtn">刷新</button><button id="logout" class="smallBtn danger">登出</button></div>
+    </div>
     <div class="tabs">
       <button class="tab" data-view="self">個人設定</button>
       <button class="tab" data-view="matrix">記憶矩陣</button>
@@ -2316,17 +2395,16 @@ function getPortalHomePage(host) {
       <button class="tab" data-view="root">Root 維運</button>
     </div>
     <div class="view active" id="view-self">
-      <h2>個人設定自助區</h2>
       <div class="grid">
-        <div class="mini"><strong>新增記憶</strong><textarea id="memText" placeholder="輸入記憶內容"></textarea><div class="row"><select id="memScope"><option value="private">私人</option><option value="public">公開</option></select><button id="addMem">新增</button></div></div>
-        <div class="mini"><strong>個人設定</strong><label class="switch"><input id="dnd" type="checkbox"> 免打擾</label><textarea id="style" placeholder="私人專屬 AI 態度"></textarea><div class="row"><button id="saveSettings">保存</button></div><p class="muted">配額：無限</p></div>
+        <div class="mini wide"><strong>新增記憶</strong><textarea id="memText" placeholder="輸入記憶內容"></textarea><div class="row"><select id="memScope"><option value="private">私人</option><option value="public">公開</option></select><button id="addMem">新增</button></div><p class="muted" id="banHint"></p></div>
+        <div class="mini"><strong>個人設定</strong><label class="switch"><input id="dnd" type="checkbox"> 免打擾</label><textarea id="style" placeholder="私人專屬 AI 態度"></textarea><div class="row"><button id="saveSettings">保存</button></div><p class="muted">配額：<span class="stat">無限</span></p></div>
         <div class="mini"><strong>私人記憶</strong><div class="list" id="privateMems"></div></div>
-        <div class="mini"><strong>本群公開記憶</strong><div class="list" id="publicMems"></div></div>
+        <div class="mini wide"><strong>本群公開記憶</strong><div class="list" id="publicMems"></div></div>
       </div>
     </div>
-    <div class="view" id="view-matrix"><h2>進階向量記憶矩陣</h2><div class="matrixCanvas" id="matrixBox"></div><div class="list" id="matrixList"></div></div>
+    <div class="view" id="view-matrix"><div class="grid"><div class="mini full"><div class="toolbar"><strong>進階向量記憶矩陣</strong><input id="matrixQuery" placeholder="Root 可搜尋原始記憶"><button id="matrixSearch" class="smallBtn">搜尋</button></div></div><div class="mini wide"><div class="matrixCanvas" id="matrixBox"></div></div><div class="mini wide"><strong>記憶粒子</strong><div class="list" id="matrixList"></div></div></div></div>
     <div class="view" id="view-admin"><h2>群務秩序管理面板</h2><div class="grid"><div class="mini"><strong>全群功能</strong><label class="switch"><input id="aiOn" type="checkbox"> AI 服務</label><label class="switch"><input id="memoryOn" type="checkbox"> 群記憶</label><label>自動插話率</label><input id="interjectRate" type="range" min="0" max="100"><div class="row"><button id="saveAdmin">保存群設定</button></div></div><div class="mini"><strong>全群性格</strong><textarea id="groupPersona"></textarea></div><div class="mini"><strong>關鍵字過濾盾</strong><textarea id="keywords" placeholder="一行一個或逗號分隔"></textarea></div><div class="mini"><strong>黑白名單</strong><input id="targetQQ" placeholder="QQ號"><div class="row"><button id="blockQQ" class="danger">拉黑</button><button id="unblockQQ">洗白</button></div><div id="blacklist" class="list"></div></div><div class="mini"><strong>群記憶審計日誌</strong><div id="auditLogs" class="list"></div></div></div></div>
-    <div class="view" id="view-root"><h2>核心系統維運後台</h2><div class="grid"><div class="mini"><strong>成員權限</strong><input id="rootQQ" placeholder="QQ號"><div class="row"><button id="grantAdmin">授予Admin</button><button id="revokeAdmin">撤銷Admin</button></div><div class="row"><button id="banMemory" class="danger">封鎖記憶權</button><button id="unbanMemory">開啟記憶權</button></div></div><div class="mini"><strong>跨群廣播</strong><textarea id="broadcastText"></textarea><div class="row"><button id="sendBroadcast">廣播到目前群</button></div></div><div class="mini"><strong>成員列表</strong><div id="memberList" class="list"></div></div></div></div>
+    <div class="view" id="view-root"><div class="grid"><div class="mini"><strong>金鑰池</strong><div id="keyPool" class="muted"></div><strong>系統統計</strong><div id="rootStats" class="muted"></div></div><div class="mini wide"><strong>成員權限</strong><input id="rootQQ" placeholder="QQ號"><div class="row"><button id="grantAdmin">授予Admin</button><button id="revokeAdmin">撤銷Admin</button></div><div class="row"><button id="banMemory" class="danger">封鎖記憶權</button><button id="unbanMemory">開啟記憶權</button></div></div><div class="mini"><strong>核心操作</strong><div class="row"><button id="hardRestart" class="danger">硬重啟暫存</button><button id="exportBackup">匯出D1備份</button></div><textarea id="backupBox" placeholder="備份內容會顯示在這裡"></textarea></div><div class="mini wide"><strong>跨群廣播</strong><textarea id="broadcastText"></textarea><input id="broadcastGroups" placeholder="群號，多個用逗號或換行；空白則目前群"><div class="row"><button id="sendBroadcast">發送廣播</button></div></div><div class="mini"><strong>全域錯誤日誌</strong><div id="errorLogs" class="list"></div></div><div class="mini wide"><strong>成員列表</strong><div id="memberList" class="list"></div></div></div></div>
   </section>
   <script>
     const c=document.getElementById('nebula'),x=c.getContext('2d');let w,h,p=[];
@@ -2341,12 +2419,12 @@ function getPortalHomePage(host) {
     const canRoot=()=>session?.role==='developer';
     function renderList(el,items,scope){el.innerHTML='';(items||[]).forEach(it=>{const row=document.createElement('div');row.className='item';row.innerHTML='<span>'+escapeHtml(it.text||String(it))+'</span>';if(it.id){const edit=document.createElement('button');edit.textContent='修改';edit.onclick=async()=>{const text=prompt('修改記憶',it.text);if(text!==null){await post('/api/portal/memories',{id:it.id,scope,text},'PUT');loadSelf();}};const del=document.createElement('button');del.textContent='刪除';del.className='danger';del.onclick=async()=>{await post('/api/portal/memories',{id:it.id,scope},'DELETE');loadSelf();};row.append(edit,del)}el.appendChild(row)})}
     function escapeHtml(s){return String(s).replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]))}
-    async function loadSelf(){const mem=await getApi('/api/portal/memories');renderList(privateMems,mem.private,'private');renderList(publicMems,mem.public,'public');const st=await getApi('/api/portal/settings');dnd.checked=!!st.dnd;style.value=st.style||''}
+    async function loadSelf(){const mem=await getApi('/api/portal/memories');banHint.textContent=mem.memory_banned?'【操作失敗：您的記憶編輯權限已被管理員凍結】':'';renderList(privateMems,mem.private,'private');renderList(publicMems,mem.public,'public');const st=await getApi('/api/portal/settings');dnd.checked=!!st.dnd;style.value=st.style||''}
     async function loadAdmin(){if(!canAdmin()){alert('Error 403：權限不足');return}const s=await getApi('/api/portal/admin/state');aiOn.checked=s.ai_on;memoryOn.checked=s.memory_on;groupPersona.value=s.persona||'';interjectRate.value=s.interject_rate||25;keywords.value=(s.keywords||[]).join('\\n');blacklist.innerHTML=(s.blacklist||[]).map(q=>'<div class="item"><span>QQ:'+q+'</span></div>').join('');auditLogs.innerHTML=(s.audit_logs||[]).slice(-30).reverse().map(l=>'<div class="item"><span>'+escapeHtml(l.at+' '+l.userId+' '+l.action)+'</span></div>').join('')}
-    async function loadRoot(){if(!canRoot()){alert('Error 403：權限不足');return}const res=await getApi('/api/portal/root/members');memberList.innerHTML=(res.members||[]).map(m=>'<div class="item"><span>'+escapeHtml((m.name||m.qq)+' QQ:'+m.qq+' / '+m.role)+'</span></div>').join('')}
-    async function loadMatrix(){const res=await getApi('/api/portal/matrix');matrixList.innerHTML=(res.particles||[]).slice(-40).map(p=>'<div class="item"><span>'+escapeHtml((p.score?'['+p.score+'] ':'')+p.text)+'</span></div>').join('');matrixBox.innerHTML='';(res.particles||[]).slice(0,80).forEach(p=>{const dot=document.createElement('div');dot.title=p.text;dot.style.cssText='position:absolute;width:6px;height:6px;border-radius:50%;background:hsl('+(p.cluster*65+170)+',90%,65%);left:'+Math.random()*98+'%;top:'+Math.random()*94+'%;box-shadow:0 0 12px currentColor';matrixBox.appendChild(dot)})}
+    async function loadRoot(){if(!canRoot()){alert('Error 403：權限不足');return}const res=await getApi('/api/portal/root/members');memberList.innerHTML=(res.members||[]).map(m=>'<div class="item"><span>'+escapeHtml((m.name||m.qq)+' QQ:'+m.qq+' / '+m.role)+'</span></div>').join('');const st=await getApi('/api/portal/root/state');keyPool.innerHTML='Gemini：'+st.key_pool.gemini_keys+'<br>Vectorize Gemini：'+st.key_pool.vectorize_gemini_keys+'<br>總數：'+st.key_pool.total;rootStats.innerHTML='總對話：'+st.stats.total_calls+'<br>最後模型：'+escapeHtml(st.stats.last_model);errorLogs.innerHTML=(st.errors||[]).slice(-40).reverse().map(e=>'<div class="item"><span>'+escapeHtml(typeof e==='string'?e:JSON.stringify(e))+'</span></div>').join('')||'<div class="muted">目前沒有錯誤日誌</div>'}
+    async function loadMatrix(){const q=matrixQuery?.value?('?q='+encodeURIComponent(matrixQuery.value)):"";const res=await getApi('/api/portal/matrix'+q);matrixList.innerHTML=(res.particles||[]).slice(-60).map(p=>'<div class="item"><span>'+escapeHtml((p.score?'['+p.score+'] ':'')+p.text+(p.raw?' | Array '+JSON.stringify(p.raw):''))+'</span></div>').join('');matrixBox.innerHTML='';(res.particles||[]).slice(0,110).forEach(p=>{const dot=document.createElement('div');dot.title=p.text;dot.style.cssText='position:absolute;width:6px;height:6px;border-radius:50%;background:hsl('+(p.cluster*65+170)+',90%,65%);left:'+Math.random()*98+'%;top:'+Math.random()*94+'%;box-shadow:0 0 12px currentColor';matrixBox.appendChild(dot)})}
     send.onclick=async()=>{notice.textContent=(await post('/api/auth/request-code',{group:group.value,qq:qq.value})).message}
-    verify.onclick=async()=>{const res=await post('/api/auth/verify-code',{group:group.value,qq:qq.value,code:code.value});notice.textContent=res.message;if(res.ok){session=res;document.querySelector('.shell').style.display='none';dashboard.style.display='block';loadSelf();loadMatrix();}}
+    verify.onclick=async()=>{const res=await post('/api/auth/verify-code',{group:group.value,qq:qq.value,code:code.value});notice.textContent=res.message;if(res.ok){session=res;roleText.textContent=res.role;groupText.textContent=res.group||res.groupId;document.querySelector('.shell').style.display='none';dashboard.style.display='block';loadSelf();loadMatrix();}}
     addMem.onclick=async()=>{const res=await post('/api/portal/memories',{text:memText.value,scope:memScope.value});if(!res.ok)alert(res.message);memText.value='';loadSelf()}
     saveSettings.onclick=async()=>{alert((await post('/api/portal/settings',{dnd:dnd.checked,style:style.value})).message)}
     saveAdmin.onclick=async()=>{alert((await post('/api/portal/admin/state',{ai_on:aiOn.checked,memory_on:memoryOn.checked,persona:groupPersona.value,interject_rate:interjectRate.value,keywords:keywords.value})).message);loadAdmin()}
@@ -2356,7 +2434,12 @@ function getPortalHomePage(host) {
     revokeAdmin.onclick=async()=>{alert((await post('/api/portal/root/member',{qq:rootQQ.value,admin:false})).message);loadRoot()}
     banMemory.onclick=async()=>{alert((await post('/api/portal/root/member',{qq:rootQQ.value,memory_banned:true})).message)}
     unbanMemory.onclick=async()=>{alert((await post('/api/portal/root/member',{qq:rootQQ.value,memory_banned:false})).message)}
-    sendBroadcast.onclick=async()=>{alert((await post('/api/portal/root/broadcast',{message:broadcastText.value})).message)}
+    sendBroadcast.onclick=async()=>{alert((await post('/api/portal/root/broadcast',{message:broadcastText.value,groups:broadcastGroups.value})).message)}
+    hardRestart.onclick=async()=>{if(confirm('確定重置暫存？'))alert((await post('/api/portal/root/restart',{})).message)}
+    exportBackup.onclick=async()=>{const res=await getApi('/api/portal/root/backup');backupBox.value=JSON.stringify(res.backup,null,2)}
+    matrixSearch.onclick=()=>loadMatrix()
+    refreshAll.onclick=()=>{loadSelf();loadMatrix();if(canAdmin())loadAdmin();if(canRoot())loadRoot()}
+    logout.onclick=()=>location.reload()
     document.querySelectorAll('.tab').forEach(b=>b.onclick=()=>{const v=b.dataset.view;if(v==='admin'&&!canAdmin()){alert('Error 403：權限不足');return;}if(v==='root'&&!canRoot()){alert('Error 403：權限不足');return;}document.querySelectorAll('.view').forEach(x=>x.classList.remove('active'));document.getElementById('view-'+v).classList.add('active');if(v==='self')loadSelf();if(v==='matrix')loadMatrix();if(v==='admin')loadAdmin();if(v==='root')loadRoot();})
   </script>
 </body>
