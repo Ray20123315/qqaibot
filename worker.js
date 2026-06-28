@@ -40,40 +40,62 @@ export default {
     const url = new URL(request.url); // 👈 保留此行，避免後續代碼崩潰！
 
     // ==========================================
-    // 🛠️ 【新增核心升級】：檢查是否為通用 WebSocket 握手請求
+    // 🔌 NapCat / OneBot WebSocket Client 主動回覆入口
     // ==========================================
     const upgradeHeader = request.headers.get("Upgrade");
-    if (upgradeHeader && upgradeHeader.toLowerCase() === "websocket" && url.pathname !== "/live") {
-      
-      // 1. 建立一對 WebSocket 通道 (Client 端 與 Server 端)
+    if (upgradeHeader && upgradeHeader.toLowerCase() === "websocket" && ["/onebot", "/ws", "/ws/onebot"].includes(url.pathname)) {
       const webSocketPair = new WebSocketPair();
       const [client, server] = Object.values(webSocketPair);
 
-      // 2. 讓 Worker 的 Server 端開始監聽、接受這個連接
       server.accept();
 
-      // 3. 處理前端傳進來的 WebSocket 訊息
       server.addEventListener("message", async (event) => {
         try {
-          const messageData = event.data; // 前端傳進來的資料
-          console.log("收到 WebSocket 訊息:", messageData);
-          
-          // 💡 您可以在這裡呼叫您下方定義的 callGeminiDirectly(messageData) 或是操作 D1
-          // const aiReply = await callGeminiDirectly(messageData);
-          
-          // 回傳訊息給前端
-          server.send(JSON.stringify({ status: "success", reply: "成功透過 WebSocket 連線回應" }));
+          const body = JSON.parse(typeof event.data === "string" ? event.data : new TextDecoder().decode(event.data));
+
+          // NapCat 心跳、API 回應與非事件封包不需要交給聊天主流程。
+          if (!body || body.post_type === "meta_event" || body.echo || body.status === "ok") return;
+
+          const internalRequest = new Request(`${url.protocol}//${url.host}/`, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              "X-QQAI-Transport": "websocket"
+            },
+            body: JSON.stringify(body)
+          });
+
+          const internalResponse = await this.fetch(internalRequest, env, ctx);
+          if (!internalResponse || internalResponse.status === 204) return;
+
+          const payload = await internalResponse.json().catch(() => null);
+          const reply = payload?.reply;
+          if (!reply) return;
+
+          const action = body.message_type === "private" ? "send_private_msg" : "send_group_msg";
+          const params = body.message_type === "private"
+            ? { user_id: body.user_id, message: reply, auto_escape: false }
+            : { group_id: body.group_id, message: reply, auto_escape: false };
+
+          server.send(JSON.stringify({
+            action,
+            params,
+            echo: `qqai:${Date.now()}:${crypto.randomUUID()}`
+          }));
         } catch (error) {
-          server.send(JSON.stringify({ error: error.message }));
+          console.error("OneBot WebSocket 處理失敗:", error);
+          server.send(JSON.stringify({
+            action: "send_msg",
+            params: { message: `QQAI WebSocket 处理失败：${error.message}` },
+            echo: `qqai:error:${Date.now()}`
+          }));
         }
       });
 
-      // 4. 監聽關閉事件
       server.addEventListener("close", (event) => {
-        console.log(`WebSocket 斷開連接: ${event.code}`);
+        console.log(`OneBot WebSocket 斷開連接: ${event.code}`);
       });
 
-      // 5. 回傳 101 Switching Protocols 狀態碼完成握手
       return new Response(null, {
         status: 101,
         webSocket: client,
