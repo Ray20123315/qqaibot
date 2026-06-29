@@ -1934,6 +1934,10 @@ chatLoop:
       // ==========================================
       let replyText = baseText;
       if (replyText) {
+        // 🛑【終極安全網】：哪怕 AI 真的產生幻覺又吐出 [CQ:face]，這裡直接強行抹除！
+        // 你也可以把它換成某個預設 Emoji，例如：replace(/\[CQ:face,[^\]]+\]/g, '✨')
+        replyText = replyText.replace(/\[CQ:face,[^\]]+\]/g, ''); 
+
         // 1. 把 AI 说的 @123456789 转换成真实的 [CQ:at,qq=123456789]
         replyText = replyText.replace(/@(\d+)/g, '[CQ:at,qq=$1]');
         
