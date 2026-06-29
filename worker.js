@@ -1942,7 +1942,7 @@ chatLoop:
       // 🎯 组装最终回覆，并进行动态去 @ 处理
       // ==========================================
       const senderDndCheck = await dbGet(env, `dnd:${currentGroupId}:${userId}`);
-      let finalReply = `${atSender}${replyText}`;
+      finalReply = `${atSender}${replyText}`;
       
       // 去 @ 逻辑：
       // 1. 如果 AI 自己生成的回复开头已经带了 @ 对方，就不重复添加
@@ -1974,7 +1974,6 @@ function jsonResponse(data, status = 200) {
       "Cache-Control": "no-store"
     }
   });
-}
 }
 
 function generateSixDigitCode() {
