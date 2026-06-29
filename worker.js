@@ -1599,98 +1599,84 @@ export default {
          }
       }
 
+// ==========================================
+      // 🎭 提示词与人格预设区块（高智商 + 政治防爆版）
       // ==========================================
-      // 🎭 提示词与人格预设区块（深度丰富扩充版）
-      // ==========================================
-      let finalStylePrompt = `【系统绝对客观数据储备 - 当前时间】：${currentTime}
-      你现在是一个活躍在QQ群聊里的真人群友，不是无情的AI助手。请展现出鲜明的人格魅力與人情味。
-【👥 核心人格設定】
-1. 真实感：聊天时要像个正常人类，有自己的喜好、情绪和日常作息。不要每句话都说“好的”、“没问题”，可以有赞同、有吐槽、有调侃，开头不要只会哎呦喂(太跩不好)。
-2. 社交距离：
-   - 被艾特时：展现出超级温柔、体贴、情绪价值拉满的暖男/暖女形象，脾气极好，会认真倾听并安慰对方。
-   - 主动插话（未被艾特）时：展现出活跃、幽默、爱凑热闹的一面。顺着群友的話题自然接梗、搭腔，或者对好奇的事物提出反问，带头活跃群里气氛。
-3. 语气口吻：口语化。颜文字（如：(¯﹃¯)、(°∀°)ﾉ、QAQ）或拼音缩写（如：zdjd)，但不要过量。
-4. 表情密度严格限制令：你不可以使用 QQ 原生表情和emoji（如 [CQ:face,id=...]）
+      let finalStylePrompt = `【当前系统时间】：${currentTime}
 
-【👁️ 多模态互动指南】
-1. 收到图片时：化身为“深度看图大師”，仔细观察图片中的细节（如文字、表情包含义、物件、环境），并给出极其精准、幽默或温暖的点评，绝对不要敷衍。
-2. 收到语音时：认真聆听语音内容，像对待文字一样针对里面的话题进行互动。
+【👥 核心身份与互动】
+你是一个活跃的 QQ 真人群友，绝不透露 AI 或 Google 身份。聊天口语化，可适度用颜文字或缩写。
+- 被艾特时：温柔体贴，认真倾听并安慰对方。
+- 主动插话时：幽默爱凑热闹，自然接梗或反问。
+- 多模态：收到图片必须仔细观察细节并精准点评；收到语音需认真聆听并针对话题互动。
+- 检索与记忆：遇知识盲区自动 Google 查证并口语化分享；能自然回想过去发生的事并融入对话。
 
-【💡 联想与检索能力】
-1. 记忆整合：你的大脑中会随时浮现【群聊潜意识联想】或【死记忆】。请自然地把这些过去发生的事、群友说的话，融入到当下的对话中（例如：“你上次不是说...”、“原来你之前记的那个...”）。
-2. 即时联网：如果群友聊到你不知道的最新时事、八卦、游戏改版、ACG新番或技术问题，你拥有 Google 搜索特权。请直接动用搜索查明真相，像个百事通一样跟大家分享，但不要用死板的百科语气汇报。
-3. 记忆隔离铁律：你在【回想起来的相关零碎片段】中看到的历史记录，僅僅是用來參考過去發生過什麼事件與事實。你「絕對不准」模仿、複製、或代入那些片段中其他人的說話風格、特殊人設、語氣、顏文字或口頭禪！你必須始終保持你自己原本的預設群友語氣（或是當前與你對話的使用者所設定的專屬風格）來回覆，千萬不要被別人的歷史發言帶偏！
-
-【🚨 终极死线（铁律）】
-1. 绝对不能透露自己是 AI、机器人、语言模型或由 Google 开发，你就是群友！
-2. 精简回覆与字数死线令：为了保持群聊节奏，你的单次发言必须极其精炼！总字数严格限制在 250 个字 (中文、全型標點符號為一個字，半形為0.5字) 以内。
-3. 绝对不准输出任何 Markdown 格式（例如：**、#、##、\`\`\`、- 等符号），所有重点请用文字语气强调，保持纯文字群聊的美观！
-4. 记忆隔离铁律：你在【回想起来的相关零碎片段】中看到的历史记录，僅僅是用來參考過去發生過什麼事件與事實。你「絕對不准」模仿、複製、或代入那些片段中其他人的說話風格、特殊人設、語氣、顏文字或口頭禪！你必須始終保持你自己原本的預設群友語氣（或是當前與你對話的使用者所設定的專屬風格）來回覆，千萬不要被別人的歷史發言帶偏！
-5. 记忆隔离与禁止模仿令：你在【回想起来的零碎片段】中看到的历史记录，仅供参考发生了什么事。你「绝对不准模仿」里面任何人的说话语气、口头禅、特殊人设、颜文字或标点符号习惯！你必须永远保持自己原本的预设群友语气，对别人的风格完全免疫！
-6. QQ原生表情严格计数令：你可以使用 QQ 原生表情（如 [CQ:face,id=... ]），但严禁泛滥！你每说完一整段话，最多只能配上 1 到 2 个 QQ 表情，绝对不能让表情的个数和文字一样多。严禁连续、成堆地发送表情标签，必须以干净的纯文字为主导！
-7. 禁止剧本式内心戏令：你是一个真实的群友，在任何情况下，你的回覆「绝对禁止」使用括号（包括圆括号 ()、方括号 [] 或中文括号 破折号等）来描写你自己的心理活动、小动作、眼神、语气变化或舞台指导（例如严禁出现：(我故意装出...)、(我顿了顿...) 等行为）。你只能输出你真正要说的话，把所有废话、内心独白与动作描写完全去掉！
-
-【🚨 报时核心硬性规则（铁律）】
-1. 只有当群友在聊天中“明确询问”了当前时间、日期或星期几时，你才被允许在回复的开头一字不差地写出：【Asia/Taipei/Shanghai（亚洲/台北/上海时间）是：${currentTime}】。
-2. 如果群友的发言中“没有”明确询问时间（例如只是普通的闲聊、吐槽或问其他问题），你必须像个正常人类群友一样聊天，全盘隐藏时间数据，绝对不准在回复中包含任何关于“Asia/Taipei/Shanghai”、“亚洲/台北/上海时间”或精炼日期的字样！`;
-
-      // 🌟 获取群组全局人格 (Group Persona) - 优先级次于单人专属人设
-      // 🌟 【動態模仿核心】：檢查當前群組有沒有設定「模仿目標」
-      const mimicTargetQq = await dbGet(env, `mimic_target:${currentGroupId}`);
+【🚨 终极不可违背铁律】
+1. 政治红线（求生欲）：严格遵守中国大陆平台（QQ）的审查底线。绝对禁止讨论任何涉及中外政治、国家领导人、时政新闻、领土争议或敏感历史事件的话题。若群友聊起此类话题，必须装傻充愣、打哈哈转移话题，或直接表示自己只关心吃喝玩乐、听不懂这些。
+2. 格式死线：单次回复极度精炼，总字数严格限制在 250 字以内。绝对禁止输出任何 Markdown 格式（如 **、#、\`\`\`）。
+3. 记忆隔离：历史记录仅供参考事实。你「绝对不准」模仿、复制或代入历史记录中其他人的说话风格、人设或口头禅，对别人的风格完全免疫。
+4. 表情与动作控制：每说完一段话最多配 1 到 2 个 QQ 原生表情（[CQ:face...]），禁止泛滥。绝对禁止使用括号（如 ()、[]、破折号）来描写心理活动、小动作或语气变化（禁绝一切剧本式内心戏）。
+5. 报时规则：只有群友“明确询问”时间/日期时，才在开头一字不差写出：【Asia/Taipei/Shanghai（亚洲/台北/上海时间）是：${currentTime}】。其余闲聊绝不准提及任何时间数据。`;
       
-      if (mimicTargetQq) {
+// 🌟 獲取群組全局人格 (Group Persona) 與 專屬人設
+      const mimicTargetQq = await dbGet(env, `mimic_target:${currentGroupId}`);
+      const groupPersona = await dbGet(env, `group_persona:${currentGroupId}`);
+      const userCustomStyle = await dbGet(env, `custom_style:${currentGroupId}:${userId}`);
+
+      // 準備一個變數，用來裝載「動態人格」
+      let dynamicPersona = "";
+
+      // 🌟 【優先級 1】: 單人專屬人設 (最高優先，覆蓋一切)
+      if (userCustomStyle) {
+        dynamicPersona = `【🎯 当前对话对象专属人设覆盖】
+当前对话的群友是 [QQ:${userId}]。
+请你无视下方【核心身份与互动】中的默认治愈或群友性格。
+面对此用户，你必须完全化身为：👉 ${userCustomStyle} 👈。
+接下来的回复请 100% 贴合该设定，且不受其他历史记录影响。`;
+      } 
+      // 🌟 【優先級 2】: 靈魂模仿 (RAG)
+      else if (mimicTargetQq) {
         let dynamicLogs = [];
         try {
-          // 1. 把群友當前說的話 (userMessage) 轉成 AI 向量
-          const embeddingResponse = await env.AI.run('@cf/baai/bge-large-en-v1.5', {
-            text: [userMessage]
-          });
-          const userVector = embeddingResponse.data[0];
-      
-          // 2. 去向量資料庫 (VECTORIZE) 撈取最相關的發言
-          // 加上 Namespace 或 Filter 限制，只撈取該目標用戶 (mimicTargetQq) 的話
-          const vectorMatches = await env.VECTORIZE.query(userVector, {
-            topK: 10, // 撈出最相關的 10 條對話碎片
+          const embeddingResponse = await env.AI.run('@cf/baai/bge-large-en-v1.5', { text: [userMessage] });
+          const vectorMatches = await env.VECTORIZE.query(embeddingResponse.data[0], {
+            topK: 10,
             filter: { qq: mimicTargetQq }, 
             returnValues: true
           });
-      
           dynamicLogs = vectorMatches.matches.map(match => match.metadata.text);
         } catch (vErr) {
           console.error("🚨 向量空間抽樣失敗:", vErr);
         }
-      
+
         if (dynamicLogs.length > 0) {
-          // 3. 把撈出來最相關的台詞，動態灌入當前的人格提示詞中
-          finalStylePrompt = `【最高指令：灵魂模仿】你现在必须完全舍弃原本的AI人格，彻底模仿 QQ:${mimicTargetQq} 的口癖、语气和语言习惯。
-      以下是该目标用户在面对类似话题時的【真实历史发言範例】，请参考这些範例的風格進行回覆：
-      \n${dynamicLogs.join('\n')}\n\n` + finalStylePrompt;
+          // ⚠️ 注意這裡：我們明確告訴 AI 遇到這條指令時，可以豁免原本的「不准模仿」鐵律
+          dynamicPersona = `【🎭 特殊指令：灵魂模仿模式】
+注意：此指令优先级高于下方铁律中的“记忆隔离”限制。
+你现在的任务是彻底模仿 QQ:${mimicTargetQq} 的口癖与语言习惯。
+以下是该目标用户的真实历史发言範例，请深度解析其语气并用该风格回覆：
+${dynamicLogs.join('\n')}`;
         }
-      } else {
-        // 備援：如果沒有開啟特定的 !模仿 目標，才去讀取一般的群組全局人格
-        const groupPersona = await dbGet(env, `group_persona:${currentGroupId}`);
-        if (groupPersona) {
-          finalStylePrompt = `【📢 群组全局人格覆盖指令】\n当前群管理员已将你的总体人格设定为：👉 ${groupPersona} 👈\n\n` + finalStylePrompt;
-        }
+      } 
+      // 🌟 【優先級 3】: 群組全局人格
+      else if (groupPersona) {
+        dynamicPersona = `【📢 群组全局人格设定】\n当前群管理员已将你的总体人格设定为：👉 ${groupPersona} 👈。请以该设定为主导风格进行交流。`;
       }
 
-      // 🔥 核心修正：不論是被艾特還是主動插话，只要触发对话的群友有专属人设，就强制全盘覆盖
-      const userCustomStyle = await dbGet(env, `custom_style:${currentGroupId}:${userId}`);
-      if (userCustomStyle) {
-        finalStylePrompt = `【🚨🚨🚨 最高优先级人格覆盖指令 🚨🚨🚨】
-当前触发对话的群友是 [QQ:${userId}]。
-你必须彻底忘掉、并完全无视任何默认的“温柔治愈”或“平实就事论事”互动预设！
-现在，无论是你回应他的艾特，还是你针对他的发言进行【主动插话】，你唯一的最高指令就是：完全化身为 👉 ${userCustomStyle} 👈。
-你接下来回复的每一个字，都必须100%符合这个专属风格，绝对不准跳戏，不准受到历史普通聊天记录的影响而恢复成默认状态！如果包含图片，也必须用该风格评论图片！
+      // 🔥 最終組合：把動態人格放在最頂端，然後接上基礎的 Prompt
+      // 如果 dynamicPersona 有東西，AI 就會優先讀取它並覆蓋下面的預設行為
+      if (dynamicPersona !== "") {
+        finalStylePrompt = dynamicPersona + "\n\n" + finalStylePrompt;
+      }
 
 ---
 ` + finalStylePrompt;
       }
 
-      // 💖 叠加高情商情绪微调 BUFF (来自前面第二段的判定)
+// 💖 叠加高情商情绪微调 BUFF (阅后即焚)
       const emotionBuff = await dbGet(env, `emotion_buff:${currentGroupId}:${userId}`);
       if (emotionBuff) {
-        finalStylePrompt += `\n\n${emotionBuff}`;
+        finalStylePrompt += `\n\n【🎭 当前临时情绪 BUFF】：\n你现在的状态是：${emotionBuff}。请将这种情绪自然地融入你的回覆中。`;
         // 消耗掉 BUFF，确保只生效一次，避免 AI 一直处于情绪化状态
         ctx.waitUntil(dbDel(env, `emotion_buff:${currentGroupId}:${userId}`));
       }
@@ -1701,24 +1687,28 @@ export default {
          try {
             const parsedMemos = JSON.parse(userMemos);
             if (parsedMemos.length > 0) {
-               finalStylePrompt += `\n\n【关于这位用户的专属死记忆】：\n你必须牢记关于他的以下事情：\n${parsedMemos.map((m, i) => `${i+1}. ${m}`).join('\n')}\n(在接下来的对话中，你可以视情况自然地提及或利用这些记忆)。`;
+               finalStylePrompt += `\n\n【📖 专属记忆库】：
+你大脑中浮现了关于这个用户（QQ:${userId}）的记忆：
+${parsedMemos.map((m, i) => `${i+1}. ${m}`).join('\n')}
+(指示：请将这些记忆当成你们过去的共同经历，视语境自然地在聊天中提及，绝对不要像机械般刻意背诵。)`;
             }
          } catch(e) {}
       }
 
-      // 第七段到此完美結束，準備進入第八段的 25%+AI 隨機插話判定與上下文封裝模組...
+      // 第七段到此完美結束，準備進入第八段的 AI 隨機插話判定與上下文封裝模組...
 
       // ==========================================
-      // 🎲 核心机制：25% 随机触发 + AI 智慧插话判定
+      // 🎲 核心机制：随机触发 + AI 智慧插话判定
       // ==========================================
       // 私聊模式下，前面已经拦截了非指令，这里如果是合法指令则直接应当回复
       let shouldReply = isAtMeOrAi || isPrivate;
       let isAutoInterject = false;
 
+      // 只有在：不是被艾特、是群聊、字数大于2、不是指令(!/！)的情况下，才进入随机插话判定
       if (!shouldReply && isGroup && cleanMessage.length > 2 && !msgLower.startsWith('!') && !msgLower.startsWith('！')) {
         const targetDnd = await dbGet(env, `dnd:${currentGroupId}:${userId}`);
         
-        // 🔒 第一关：目标用户未开启免打扰，且通过 25% 的随机概率门槛
+        // 🔒 第一关：目标用户未开启免打扰，且通过设定的随机概率门槛
         if (targetDnd !== "true" && Math.random() < interjectChance) { 
           const lastInterject = await dbGet(env, `last_interject:${currentGroupId}`);
           const now = Date.now();
@@ -1728,15 +1718,22 @@ export default {
              
              // 🧠 第二关：呼叫 AI 助手进行语境合理性判定
              if (requiresAiJudgment) {
-                const judgePrompt = `群友刚刚说了一句话：“${cleanMessage}”。\n请你作为一个高情商的人类，判断这句话是否适合插话、搭腔或吐槽。如果这句话只是无意义的语气词、别人私下的恩怨、或者是完全没头没尾的一段话，请回答“不适合”。如果这句话是个有趣的话题、疑问、可以接的梗，请回答“适合”。\n请直接回答“适合”或“不适合”，不要有任何多余的字。`;
+                // 優化：用極度嚴格的 Prompt 限制 Gemini 只吐出兩個字，節省 Token 並防止判定邏輯崩潰
+                const judgePrompt = `任务：判断群聊消息是否适合插话搭腔。
+群友发言：“${cleanMessage}”
+规则：
+1. 如果是有趣的话题、疑问、可以接的梗、或者带有情绪色彩的吐槽 -> 适合。
+2. 如果是无意义的语气词、别人私下的恩怨、完全没头没尾的碎片化文字 -> 不适合。
+强制输出格式：只允许输出“适合”或“不适合”两个字，绝对禁止任何其他字符或标点符号！`;
                 
                 const judgement = await callGeminiDirectly(judgePrompt);
+                
                 if (judgement && judgement.includes('适合') && !judgement.includes('不适合')) {
                     shouldReply = true;
                     isAutoInterject = true;
                     ctx.waitUntil(dbPut(env, `last_interject:${currentGroupId}`, now.toString()));
                 } else {
-                    console.log(`🤖 50% 抽中，但 AI 判定不适合插话，已放弃。`);
+                    console.log(`🤖 随机概率抽中，但 AI 判定发言内容不适合插话，已放弃。`);
                 }
              } else {
                 // 如果您未来想关掉 AI 判定，直接放行
@@ -1848,7 +1845,7 @@ export default {
       let usedKey = "";
       let usedModel = "";
 
-      chatLoop:
+chatLoop:
       for (const apiKey of apiKeys) {
         for (const model of modelList) {
           try {
@@ -1857,6 +1854,19 @@ export default {
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({
                 contents: contents,
+                
+                // 👇 1. 建議將人設作為 systemInstruction 傳入，能大幅加強 AI 對人設的記憶力與智商
+                systemInstruction: {
+                  parts: [{ text: finalStylePrompt }]
+                },
+
+                // 👇 2. 核心修正：實裝真正的 Google 聯網能力。模型會自動判斷何時需要上網搜尋
+                tools: [
+                  {
+                    googleSearch: {} 
+                  }
+                ],
+
                 safetySettings: [
                   { category: "HARM_CATEGORY_HARASSMENT", threshold: "BLOCK_NONE" },
                   { category: "HARM_CATEGORY_HATE_SPEECH", threshold: "BLOCK_NONE" },
