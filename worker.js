@@ -1,19 +1,19 @@
 import puppeteer from "@cloudflare/puppeteer";
 
 /**
- * QQAIbot v0.1.1
+ * QQAIbot v0.1.3
  * Cloudflare Worker + Durable Objects + NapCat OneBot 11
  *
  * Design goals:
  * - Gemini first classifies each request and selects the suitable model in Auto mode.
  * - DeepSeek primarily compacts long context and is quota-gated by hard budgets.
  * - Supports reply-to-bot without @ through OneBot get_msg RPC.
- * - Supports same QQ account for human + AI through message_sent de-duplication.
+ * - Same-QQ mode defaults to context-only and uses pre-send fingerprints + Message IDs to prevent self-reply loops.
  * - Provides /health UI and /healthz JSON without spending model tokens.
  */
 
-const VERSION = "0.1.1";
-const BUILD_DATE = "2026-07-19";
+const VERSION = "0.1.3";
+const BUILD_DATE = "2026-07-21";
 const encoder = new TextEncoder();
 
 const DEFAULTS = Object.freeze({
@@ -94,7 +94,13 @@ export default {
       return htmlResponse(homePage(url.origin));
     }
 
-    if (request.method === "POST") {
+    if (request.method === "POST" && ["/onebot", "/onebot/event", "/event"].includes(url.pathname)) {
+      if (env.ENABLE_ONEBOT_HTTP_EVENTS !== "true") {
+        return jsonResponse({ ok: false, error: "ONEBOT_HTTP_EVENTS_DISABLED" }, 404);
+      }
+      if (!env.ONEBOT_ACCESS_TOKEN || !verifyOneBotAccess(request, env)) {
+        return jsonResponse({ ok: false, error: "UNAUTHORIZED" }, 401);
+      }
       let payload;
       try {
         payload = await request.json();
@@ -388,24 +394,37 @@ async function handleOneBotEvent(body, env, ctx, hub) {
   const messageId = stringId(body.message_id);
   const isSentEvent = body.post_type === "message_sent";
   const isSelf = Boolean(selfId && userId && selfId === userId);
+  const targetId = stringId(body.target_id || body.peer_id || "");
   const developerId = stringId(env.DEVELOPER_ID);
   const isDeveloper = Boolean(developerId && userId === developerId);
 
   if (!isGroup && !isPrivate) return { ok: true, ignored: "UNSUPPORTED_MESSAGE_TYPE" };
 
-  // Ignore API-generated outgoing messages but preserve manual messages from the same QQ account.
-  if (isSentEvent && messageId) {
-    const outbound = await dbGetJson(env, `outbound:${messageId}`, null);
-    if (outbound && Date.now() - Number(outbound.at || 0) < 10 * 60 * 1000) {
-      await dbDel(env, `outbound:${messageId}`);
-      return { ok: true, ignored: "OWN_API_MESSAGE" };
+  const parsed = parseOneBotMessage(body.message, body.raw_message);
+  let cleanText = parsed.text.trim();
+
+  // API replies can emit message_sent before send_* returns its Message ID. Check both
+  // the final Message ID marker and a fingerprint written before the RPC call.
+  if (isSentEvent && isSelf) {
+    if (messageId) {
+      const outbound = await dbGetJson(env, `outbound:${messageId}`, null);
+      if (outbound && Date.now() - Number(outbound.at || 0) < 10 * 60 * 1000) {
+        await dbDel(env, `outbound:${messageId}`);
+        return { ok: true, ignored: "OWN_API_MESSAGE_ID" };
+      }
     }
+
+    const consumed = await consumeOutboundPending(env, {
+      isGroup,
+      groupId,
+      peerId: targetId || userId,
+      text: cleanText,
+      mediaTypes: parsed.media.map(item => item.type),
+    });
+    if (consumed) return { ok: true, ignored: "OWN_API_MESSAGE_FINGERPRINT" };
   }
 
   if (isSelf && !isSentEvent) return { ok: true, ignored: "SELF_RECEIVE_LOOP" };
-
-  const parsed = parseOneBotMessage(body.message, body.raw_message);
-  let cleanText = parsed.text.trim();
   const sameQqMode = env.ENABLE_SAME_QQ_HUMAN_MODE !== "false";
   const humanPrefix = env.SAME_QQ_HUMAN_PREFIX || DEFAULTS.sameQqHumanPrefix;
   const askPrefix = env.SAME_QQ_ASK_PREFIX || DEFAULTS.sameQqAskPrefix;
@@ -424,6 +443,9 @@ async function handleOneBotEvent(body, env, ctx, hub) {
     if (cleanText.startsWith(askPrefix)) {
       selfAsk = true;
       cleanText = cleanText.slice(askPrefix.length).trim();
+    } else if (isCommand(cleanText)) {
+      // Allow manually typed commands from the shared QQ account. API-sent bot
+      // messages have already been filtered by the outbound fingerprint/ID guard.
     } else {
       // Manual messages from the same account are context only by default.
       await saveContextMessage(env, contextKey(isGroup, groupId, userId), contextRecord(body, parsed, cleanText, "owner-human"));
@@ -445,7 +467,7 @@ async function handleOneBotEvent(body, env, ctx, hub) {
 
   const senderName = String(body.sender?.card || body.sender?.nickname || userId || "群友");
   const senderRole = String(body.sender?.role || "member");
-  const isAdmin = isDeveloper || senderRole === "owner" || senderRole === "admin";
+  const isAdmin = isDeveloper || (sameQqMode && isSelf && isSentEvent) || senderRole === "owner" || senderRole === "admin";
   const session = contextKey(isGroup, groupId, userId);
   const actionClient = createActionClient(env, hub);
 
@@ -537,7 +559,7 @@ async function handleOneBotEvent(body, env, ctx, hub) {
   }
 
   if (!answer) {
-    await sendReply(actionClient, { isGroup, groupId, userId, replyId: messageId, text: "現在有點斷線，等等再叫我一次。", env });
+    await sendReply(actionClient, { isGroup, groupId, userId, replyId: messageId, text: "现在有点断线，等一下再叫我一次。", env });
     return { ok: false, error: "ALL_MODELS_FAILED" };
   }
 
@@ -587,21 +609,237 @@ async function handleCommand(args) {
   const lower = cmd.toLowerCase();
   const costAdmin = isCostAdmin(env, userId, isDeveloper);
   const reply = async value => sendReply(actionClient, { isGroup, groupId, userId, replyId: stringId(args.body.message_id), text: value, env, mention: isGroup && userId !== selfId });
+  const ensureGroupAdmin = async ({ requireToken = true } = {}) => {
+    if (!isGroup) {
+      await reply("这个管理命令只能在群聊中使用。");
+      return false;
+    }
+    if (!isAdmin) {
+      await reply("只有群主、管理员或开发者可以使用这个命令。");
+      return false;
+    }
+    if (requireToken && !env.ONEBOT_ACCESS_TOKEN) {
+      await reply("管理操作暂未启用：请先在 Cloudflare 和 NapCat 中设置相同的 ONEBOT_ACCESS_TOKEN。");
+      return false;
+    }
+    return true;
+  };
+  const runGroupAction = async (action, params, successText) => {
+    try {
+      await actionClient.rpc(action, params, { timeoutMs: 20000 });
+      await reply(successText);
+      return true;
+    } catch (error) {
+      await reply(`操作失败：${normalizeError(error)}\n请确认机器人账号仍然是群管理员，并且目标成员权限不高于机器人。`);
+      return false;
+    }
+  };
 
   if (["help", "帮助", "幫助", "指令"].includes(lower)) {
-    await reply([
-      "常用：!模型、!額度、!診斷、!記住、!忘記、!你記住了什麼、!總結",
-      "模型偏好只需設定一次並會保存；自動模式由 Gemini 路由器判斷。",
-      "工具：!翻譯 語言 內容、!讀網頁 網址、!截圖 網址、!會議紀要、!live",
-      "多媒體：直接回覆圖片／語音／影片並提問；!畫圖 描述；!語音 文字",
-      "管理：!AI開／!AI關、!記憶開／!記憶關、!群規、!清除上下文",
-      "同號模式：你手動發 //內容＝只當本人說話；??問題＝由 AI 回答。",
-    ].join("\n"));
+    const lines = [
+      "📌 常用：!模型、!额度、!诊断、!记住、!忘记、!你记住了什么、!总结",
+      "🤖 模型偏好只需设置一次并会保存；自动模式由 Gemini 路由器判断。",
+      "🛠️ 工具：!翻译 语言 内容、!读网页 网址、!截图 网址、!会议纪要、!live",
+      "🖼️ 多媒体：直接回复图片／语音／视频并提问；!画图 描述；!语音 文字",
+      "🛡️ 群设置：!AI开／!AI关、!记忆开／!记忆关、!群规、!清除上下文",
+      "👤 同号模式：默认只记录、不回复自己；//内容＝明确标记本人；??问题＝要求 AI 回答。",
+    ];
+    if (isAdmin && isGroup) lines.push("👮 管理员：发送 !管理帮助 查看禁言、撤回、踢人等命令。");
+    await reply(lines.join("\n"));
     return { handled: true, command: "help" };
   }
 
+  if (["管理帮助", "管理幫助", "管理员帮助", "管理員幫助", "adminhelp"].includes(lower)) {
+    if (!(await ensureGroupAdmin({ requireToken: false }))) return { handled: true, command: "admin-help-denied" };
+    await reply([
+      "👮 管理员命令",
+      "!禁言 @成员 10分　｜支持 分钟／小时／天，最长30天",
+      "!解禁 @成员　　　｜解除单人禁言",
+      "!撤回　　　　　　｜回复某条消息后发送",
+      "!踢出 @成员　　　｜移出群聊",
+      "!全员禁言　　　　｜开启全员禁言",
+      "!解除全员禁言　　｜关闭全员禁言",
+      "!拉黑 @成员　　　｜禁止该成员使用 AI",
+      "!解除拉黑 @成员　｜恢复使用 AI",
+      "!设置插话率 0-100｜设置本群主动插话概率",
+      "!群状态　　　　　｜查看 AI、记忆及插话设置",
+      "!清空群上下文　　｜清空本群短期上下文",
+      "!改群名 新名称　 ｜修改群名称",
+      "!改名片 @成员 名片｜修改群名片",
+    ].join("\n"));
+    return { handled: true, command: "admin-help" };
+  }
+
+  if (/^(禁言|mute)(?:\s|$)/i.test(cmd)) {
+    if (!(await ensureGroupAdmin())) return { handled: true, command: "mute-denied" };
+    const target = firstMentionTarget(parsed, selfId);
+    const duration = parseBanDurationSeconds(cmd);
+    if (!target) {
+      await reply("格式：!禁言 @成员 10分（也支持 2小时、1天）");
+      return { handled: true, command: "mute-invalid" };
+    }
+    await runGroupAction("set_group_ban", {
+      group_id: Number(groupId) || groupId,
+      user_id: Number(target) || target,
+      duration,
+    }, `已禁言 QQ ${target}：${formatBanDuration(duration)}。`);
+    return { handled: true, command: "mute" };
+  }
+
+  if (/^(解禁|unmute)(?:\s|$)/i.test(cmd)) {
+    if (!(await ensureGroupAdmin())) return { handled: true, command: "unmute-denied" };
+    const target = firstMentionTarget(parsed, selfId);
+    if (!target) {
+      await reply("格式：!解禁 @成员");
+      return { handled: true, command: "unmute-invalid" };
+    }
+    await runGroupAction("set_group_ban", {
+      group_id: Number(groupId) || groupId,
+      user_id: Number(target) || target,
+      duration: 0,
+    }, `已解除 QQ ${target} 的禁言。`);
+    return { handled: true, command: "unmute" };
+  }
+
+  if (["全员禁言", "全員禁言", "wholemute"].includes(lower)) {
+    if (!(await ensureGroupAdmin())) return { handled: true, command: "whole-mute-denied" };
+    await runGroupAction("set_group_whole_ban", {
+      group_id: Number(groupId) || groupId,
+      enable: true,
+    }, "已开启全员禁言。");
+    return { handled: true, command: "whole-mute" };
+  }
+
+  if (["解除全员禁言", "解除全員禁言", "关闭全员禁言", "關閉全員禁言", "wholeunmute"].includes(lower)) {
+    if (!(await ensureGroupAdmin())) return { handled: true, command: "whole-unmute-denied" };
+    await runGroupAction("set_group_whole_ban", {
+      group_id: Number(groupId) || groupId,
+      enable: false,
+    }, "已解除全员禁言。");
+    return { handled: true, command: "whole-unmute" };
+  }
+
+  if (/^(踢出|踢人|kick)(?:\s|$)/i.test(cmd)) {
+    if (!(await ensureGroupAdmin())) return { handled: true, command: "kick-denied" };
+    const target = firstMentionTarget(parsed, selfId);
+    if (!target) {
+      await reply("格式：!踢出 @成员");
+      return { handled: true, command: "kick-invalid" };
+    }
+    await runGroupAction("set_group_kick", {
+      group_id: Number(groupId) || groupId,
+      user_id: Number(target) || target,
+      reject_add_request: false,
+    }, `已将 QQ ${target} 移出群聊。`);
+    return { handled: true, command: "kick" };
+  }
+
+  if (["撤回", "撤回消息", "撤回訊息", "recall"].includes(lower)) {
+    if (!(await ensureGroupAdmin())) return { handled: true, command: "recall-denied" };
+    const targetMessageId = stringId(parsed.replyId);
+    if (!targetMessageId) {
+      await reply("请先回复需要撤回的消息，再发送 !撤回");
+      return { handled: true, command: "recall-invalid" };
+    }
+    await runGroupAction("delete_msg", {
+      message_id: Number(targetMessageId) || targetMessageId,
+    }, "已尝试撤回该消息。");
+    return { handled: true, command: "recall" };
+  }
+
+  if (/^(拉黑|ai拉黑|blacklist)(?:\s|$)/i.test(cmd)) {
+    if (!(await ensureGroupAdmin())) return { handled: true, command: "blacklist-denied" };
+    const target = firstMentionTarget(parsed, selfId);
+    if (!target) {
+      await reply("格式：!拉黑 @成员");
+      return { handled: true, command: "blacklist-invalid" };
+    }
+    await dbPut(env, `blacklist:${groupId}:${target}`, "true");
+    await reply(`已禁止 QQ ${target} 使用本群 AI。`);
+    return { handled: true, command: "blacklist" };
+  }
+
+  if (/^(解除拉黑|取消拉黑|unblacklist)(?:\s|$)/i.test(cmd)) {
+    if (!(await ensureGroupAdmin())) return { handled: true, command: "unblacklist-denied" };
+    const target = firstMentionTarget(parsed, selfId);
+    if (!target) {
+      await reply("格式：!解除拉黑 @成员");
+      return { handled: true, command: "unblacklist-invalid" };
+    }
+    await dbDel(env, `blacklist:${groupId}:${target}`);
+    await reply(`已恢复 QQ ${target} 使用本群 AI。`);
+    return { handled: true, command: "unblacklist" };
+  }
+
+  if (/^(设置插话率|設定插話率|插话率|插話率)\s+/.test(cmd)) {
+    if (!(await ensureGroupAdmin())) return { handled: true, command: "interject-rate-denied" };
+    const match = cmd.match(/(-?\d+(?:\.\d+)?)/);
+    const rate = Number(match?.[1]);
+    if (!Number.isFinite(rate) || rate < 0 || rate > 100) {
+      await reply("格式：!设置插话率 0-100；0 表示完全关闭主动插话。");
+      return { handled: true, command: "interject-rate-invalid" };
+    }
+    await dbPut(env, `interject_rate:${groupId}`, String(rate));
+    await reply(`本群主动插话率已设置为 ${rate}%。`);
+    return { handled: true, command: "interject-rate" };
+  }
+
+  if (["群状态", "群狀態", "adminstatus"].includes(lower)) {
+    if (!(await ensureGroupAdmin())) return { handled: true, command: "group-status-denied" };
+    const aiEnabled = await dbGet(env, `ai_off:${groupId}`) !== "true";
+    const memoEnabled = await dbGet(env, `memo:${groupId}`) !== "false";
+    const interjectRate = clampNumber(Number(await dbGet(env, `interject_rate:${groupId}`) || getNumber(env, "AUTO_INTERJECT_PERCENT", DEFAULTS.autoInterjectPercent)), 0, 100, 0);
+    const rules = await dbGet(env, `group_rules:${groupId}`);
+    const persona = await dbGet(env, `persona:group:${groupId}`);
+    await reply([
+      `🤖 群 AI：${aiEnabled ? "开启" : "关闭"}`,
+      `🧠 自动记忆：${memoEnabled ? "开启" : "关闭"}`,
+      `💬 主动插话率：${interjectRate}%`,
+      `📜 群规：${rules ? "已设置" : "未设置"}`,
+      `🎭 群人格：${persona ? "已设置" : "默认"}`,
+    ].join("\n"));
+    return { handled: true, command: "group-status" };
+  }
+
+  if (["清空群上下文", "清空群聊上下文", "清空群聊上下文", "cleargroupcontext"].includes(lower)) {
+    if (!(await ensureGroupAdmin())) return { handled: true, command: "group-context-clear-denied" };
+    await dbPutJson(env, `context:group:${groupId}`, { messages: [], summary: "", summaryArchive: [], summarizing: false, updatedAt: Date.now() });
+    await reply("本群短期上下文和自动摘要已清空；Vectorize 长期记忆未删除。");
+    return { handled: true, command: "group-context-clear" };
+  }
+
+  if (/^(改群名|设置群名|設定群名)\s+/.test(cmd)) {
+    if (!(await ensureGroupAdmin())) return { handled: true, command: "group-name-denied" };
+    const groupName = cmd.replace(/^(改群名|设置群名|設定群名)\s+/, "").trim().slice(0, 60);
+    if (!groupName) {
+      await reply("格式：!改群名 新名称");
+      return { handled: true, command: "group-name-invalid" };
+    }
+    await runGroupAction("set_group_name", {
+      group_id: Number(groupId) || groupId,
+      group_name: groupName,
+    }, `群名称已修改为：${groupName}`);
+    return { handled: true, command: "group-name" };
+  }
+
+  if (/^(改名片|设置名片|設定名片)(?:\s|$)/.test(cmd)) {
+    if (!(await ensureGroupAdmin())) return { handled: true, command: "group-card-denied" };
+    const target = firstMentionTarget(parsed, selfId);
+    const card = cmd.replace(/^(改名片|设置名片|設定名片)(?:\s|$)/, "").replace(/\s+/g, " ").trim().slice(0, 60);
+    if (!target || !card) {
+      await reply("格式：!改名片 @成员 新名片");
+      return { handled: true, command: "group-card-invalid" };
+    }
+    await runGroupAction("set_group_card", {
+      group_id: Number(groupId) || groupId,
+      user_id: Number(target) || target,
+      card,
+    }, `已修改 QQ ${target} 的群名片。`);
+    return { handled: true, command: "group-card" };
+  }
+
   if (lower === "診斷" || lower === "诊断" || lower === "health") {
-    await reply(`${env.PUBLIC_BASE_URL || "https://你的Worker網域"}/health`);
+    await reply(`${env.PUBLIC_BASE_URL || "https://你的Worker域名"}/health`);
     return { handled: true, command: "health" };
   }
 
@@ -609,17 +847,17 @@ async function handleCommand(args) {
     const raw = cmd.replace(/^(模型|model)\s*/i, "").trim();
     if (!raw) {
       const pref = await getModelPreference(env, groupId, userId);
-      await reply(`目前模型：${modelLabel(pref)}\n這是持久設定，只需輸入一次，直到你再次修改。\n可選：自動、Gemini、DeepSeek、DeepSeek思考、DeepSeek極限`);
+      await reply(`当前模型：${modelLabel(pref)}\n这是持久设置，只需输入一次，直到你再次修改。\n可选：自动、Gemini、DeepSeek、DeepSeek思考、DeepSeek极限`);
       return { handled: true, command: "model-get" };
     }
     const value = normalizeModelPreference(raw);
     if (!value) {
-      await reply("不認得這個模型。可選：自動、Gemini、DeepSeek、DeepSeek思考、DeepSeek極限");
+      await reply("不认识这个模型。可选：自动、Gemini、DeepSeek、DeepSeek思考、DeepSeek极限");
       return { handled: true, command: "model-invalid" };
     }
     await dbPut(env, `model_pref:${groupId}:${userId}`, value);
     const budget = await getBudgetStatus(env, userId);
-    await reply(`已保存模型偏好：${modelLabel(value)}\n之後不用重複輸入；DeepSeek 今日個人已用 ¥${microsToCny(budget.micros.userDaily)}，額度不足時自動退回 Gemini。`);
+    await reply(`已保存模型偏好：${modelLabel(value)}\n之后不用重复输入；DeepSeek 今日个人已用 ¥${microsToCny(budget.micros.userDaily)}，额度不足时自动退回 Gemini。`);
     return { handled: true, command: "model-set" };
   }
 
@@ -627,34 +865,34 @@ async function handleCommand(args) {
     const budget = await getBudgetStatus(env, userId);
     const cfg = await deepSeekBudgetConfigForUser(env, userId, isDeveloper);
     await reply([
-      `DeepSeek 總計：¥${microsToCny(budget.micros.total)} / ¥${microsToCny(cfg.totalLimitMicros)}`,
+      `DeepSeek 总计：¥${microsToCny(budget.micros.total)} / ¥${microsToCny(cfg.totalLimitMicros)}`,
       `今日全站：¥${microsToCny(budget.micros.daily)} / ¥${microsToCny(cfg.dailyLimitMicros)}`,
       `你今日：¥${microsToCny(budget.micros.userDaily)} / ¥${microsToCny(cfg.userLimitMicros)}`,
-      `Gemini：不計入 DeepSeek 付費額度。`,
+      `Gemini：不计入 DeepSeek 付费额度。`,
     ].join("\n"));
     return { handled: true, command: "quota" };
   }
 
   if (/^(設定額度|设置额度|給額度|给额度)\s+/.test(cmd)) {
-    if (!costAdmin) { await reply("只有開發者或費用管理員能調整 DeepSeek 額度；QQ群管理員沒有錢包權限。"); return { handled: true, command: "quota-set-denied" }; }
+    if (!costAdmin) { await reply("只有开发者或费用管理员能调整 DeepSeek 额度；QQ群管理员没有钱包权限。"); return { handled: true, command: "quota-set-denied" }; }
     const target = parsed.mentions.find(id => id && id !== selfId);
     const amountMatch = cmd.match(/(-?\d+(?:\.\d+)?)/);
     const amount = Number(amountMatch?.[1]);
     if (!target || !Number.isFinite(amount) || amount < 0 || amount > 5) {
-      await reply("格式：!設定額度 @成員 0.02（單位 CNY／日；0 代表禁用 DeepSeek）");
+      await reply("格式：!设置额度 @成员 0.02（单位 CNY／日；0 代表禁用 DeepSeek）");
       return { handled: true, command: "quota-set-invalid" };
     }
     await dbPut(env, `deepseek_user_daily_limit:${target}`, String(amount));
-    await reply(`已將 QQ ${target} 的 DeepSeek 每日上限設為 ¥${amount}。`);
+    await reply(`已将 QQ ${target} 的 DeepSeek 每日上限设置为 ¥${amount}。`);
     return { handled: true, command: "quota-set" };
   }
 
   if (/^(重設額度|重置额度)\s*/.test(cmd)) {
-    if (!costAdmin) { await reply("只有開發者或費用管理員能重設 DeepSeek 額度；QQ群管理員沒有錢包權限。"); return { handled: true, command: "quota-reset-denied" }; }
+    if (!costAdmin) { await reply("只有开发者或费用管理员能重置 DeepSeek 额度；QQ群管理员没有钱包权限。"); return { handled: true, command: "quota-reset-denied" }; }
     const target = parsed.mentions.find(id => id && id !== selfId);
-    if (!target) { await reply("格式：!重設額度 @成員"); return { handled: true, command: "quota-reset-invalid" }; }
+    if (!target) { await reply("格式：!重置额度 @成员"); return { handled: true, command: "quota-reset-invalid" }; }
     await dbDel(env, `deepseek_user_daily_limit:${target}`);
-    await reply(`已恢復 QQ ${target} 的預設 DeepSeek 額度。`);
+    await reply(`已恢复 QQ ${target} 的默认 DeepSeek 额度。`);
     return { handled: true, command: "quota-reset" };
   }
 
@@ -664,12 +902,12 @@ async function handleCommand(args) {
     const key = `user_memories:${groupId}:${userId}`;
     const list = normalizeMemoryList(await dbGetJson(env, key, []));
     if (!isAdmin && list.length >= 100) {
-      await reply("你的記憶已達 100 條上限，先忘掉一些再加。");
+      await reply("你的记忆已达到 100 条上限，先忘掉一些再添加。");
       return { handled: true, command: "remember-full" };
     }
     list.push({ id: crypto.randomUUID(), text: memory, at: Date.now(), source: "qq" });
     await dbPutJson(env, key, list);
-    await reply(`記住了：${memory}`);
+    await reply(`记住了：${memory}`);
     return { handled: true, command: "remember" };
   }
 
@@ -679,66 +917,66 @@ async function handleCommand(args) {
     const list = normalizeMemoryList(await dbGetJson(env, key, []));
     const next = list.filter(item => !item.text.includes(query));
     await dbPutJson(env, key, next);
-    await reply(`已刪除 ${list.length - next.length} 條符合「${query}」的記憶。`);
+    await reply(`已删除 ${list.length - next.length} 条符合「${query}」的记忆。`);
     return { handled: true, command: "forget" };
   }
 
   if (/^你(記住|记住)了(什麼|什么)/.test(cmd)) {
     const list = normalizeMemoryList(await dbGetJson(env, `user_memories:${groupId}:${userId}`, []));
-    await reply(list.length ? list.slice(-20).map((item, i) => `${i + 1}. ${item.text}`).join("\n") : "目前沒有你的專屬記憶。");
+    await reply(list.length ? list.slice(-20).map((item, i) => `${i + 1}. ${item.text}`).join("\n") : "目前没有你的专属记忆。");
     return { handled: true, command: "memory-list" };
   }
 
   if (["免打扰", "免打擾"].includes(lower)) {
     await dbPut(env, `dnd:${groupId}:${userId}`, "true");
-    await reply("已開啟免打擾：不主動插話，也不主動 @ 你。");
+    await reply("已开启免打扰：不主动插话，也不主动 @ 你。");
     return { handled: true, command: "dnd-on" };
   }
 
   if (["取消免打扰", "取消免打擾"].includes(lower)) {
     await dbDel(env, `dnd:${groupId}:${userId}`);
-    await reply("已取消免打擾。");
+    await reply("已取消免打扰。");
     return { handled: true, command: "dnd-off" };
   }
 
   if (["清除上下文", "clear", "重置"].includes(lower)) {
     await dbPutJson(env, session, { messages: [], summary: "", updatedAt: Date.now() });
-    await reply("這個對話的短期上下文已清除，長期記憶沒有刪除。");
+    await reply("这个对话的短期上下文已清除，长期记忆没有删除。");
     return { handled: true, command: "context-clear" };
   }
 
   if (["ai开", "ai開", "开启ai", "開啟ai"].includes(lower)) {
-    if (!isAdmin) { await reply("只有群主、管理員或開發者可以開關群 AI。"); return { handled: true, command: "ai-denied" }; }
+    if (!isAdmin) { await reply("只有群主、管理员或开发者可以开关群 AI。"); return { handled: true, command: "ai-denied" }; }
     await dbDel(env, `ai_off:${groupId}`);
-    await reply("本群 AI 已開啟。");
+    await reply("本群 AI 已开启。");
     return { handled: true, command: "ai-on" };
   }
 
   if (["ai关", "ai關", "关闭ai", "關閉ai"].includes(lower)) {
-    if (!isAdmin) { await reply("只有群主、管理員或開發者可以開關群 AI。"); return { handled: true, command: "ai-denied" }; }
+    if (!isAdmin) { await reply("只有群主、管理员或开发者可以开关群 AI。"); return { handled: true, command: "ai-denied" }; }
     await dbPut(env, `ai_off:${groupId}`, "true");
-    await reply("本群 AI 已關閉；管理指令仍可使用。");
+    await reply("本群 AI 已关闭；管理命令仍可使用。");
     return { handled: true, command: "ai-off" };
   }
 
   if (["记忆开", "記憶開"].includes(lower)) {
-    if (!isAdmin) { await reply("只有管理員能切換自動記憶。"); return { handled: true, command: "memo-denied" }; }
+    if (!isAdmin) { await reply("只有管理员能切换自动记忆。"); return { handled: true, command: "memo-denied" }; }
     await dbDel(env, `memo:${groupId}`);
-    await reply("本群自動記憶已開啟。");
+    await reply("本群自动记忆已开启。");
     return { handled: true, command: "memo-on" };
   }
 
   if (["记忆关", "記憶關"].includes(lower)) {
-    if (!isAdmin) { await reply("只有管理員能切換自動記憶。"); return { handled: true, command: "memo-denied" }; }
+    if (!isAdmin) { await reply("只有管理员能切换自动记忆。"); return { handled: true, command: "memo-denied" }; }
     await dbPut(env, `memo:${groupId}`, "false");
-    await reply("本群自動記憶已關閉，之後不會再寫入 Vectorize。");
+    await reply("本群自动记忆已关闭，之后不会再写入 Vectorize。");
     return { handled: true, command: "memo-off" };
   }
 
   if (/^(畫圖|画图|draw)\s+/.test(cmd)) {
     const prompt = cmd.replace(/^(畫圖|画图|draw)\s+/, "").trim();
     const image = await generateGeminiImage(env, prompt);
-    if (!image) await reply("圖片生成失敗，可能是免費額度或模型權限暫時不可用。");
+    if (!image) await reply("图片生成失败，可能是免费额度或模型权限暂时不可用。");
     else await sendMediaReply(actionClient, { isGroup, groupId, userId, replyId: stringId(args.body.message_id), type: "image", base64: image.data, mimeType: image.mimeType, env });
     return { handled: true, command: "draw" };
   }
@@ -746,13 +984,13 @@ async function handleCommand(args) {
   if (/^(語音|语音|tts|speak)\s+/.test(cmd)) {
     const content = cmd.replace(/^(語音|语音|tts|speak)\s+/, "").trim().slice(0, 1000);
     const wav = await generateGeminiSpeech(env, content);
-    if (!wav) await reply("語音生成失敗，可能是 TTS 模型未開放或額度不足。");
+    if (!wav) await reply("语音生成失败，可能是 TTS 模型未开放或额度不足。");
     else await sendMediaReply(actionClient, { isGroup, groupId, userId, replyId: stringId(args.body.message_id), type: "record", base64: wav, mimeType: "audio/wav", env });
     return { handled: true, command: "tts" };
   }
 
   if (lower === "live") {
-    await reply(`${env.PUBLIC_BASE_URL || "https://你的Worker網域"}/live`);
+    await reply(`${env.PUBLIC_BASE_URL || "https://你的Worker域名"}/live`);
     return { handled: true, command: "live" };
   }
 
@@ -760,13 +998,13 @@ async function handleCommand(args) {
     const rest = cmd.replace(/^(翻譯|翻译|translate)\s+/, "").trim();
     const split = rest.indexOf(" ");
     if (split < 1) {
-      await reply("格式：!翻譯 目標語言 內容");
+      await reply("格式：!翻译 目标语言 内容");
       return { handled: true, command: "translate-invalid" };
     }
     const target = rest.slice(0, split).trim();
     const content = rest.slice(split + 1).trim().slice(0, 8000);
-    const result = await callGeminiText(env, "你是精準、自然的翻譯者。只輸出翻譯與必要的一句用法說明。", `翻譯成${target}：\n${content}`, { maxOutputTokens: 1200, temperature: 0.2 });
-    await reply(result || "翻譯失敗，請稍後再試。");
+    const result = await callGeminiText(env, "你是准确、自然的翻译者。只输出翻译和必要的一句用法说明。", `翻译成${target}：\n${content}`, { maxOutputTokens: 1200, temperature: 0.2 });
+    await reply(result || "翻译失败，请稍后再试。");
     return { handled: true, command: "translate" };
   }
 
@@ -774,10 +1012,10 @@ async function handleCommand(args) {
     const rawUrl = cmd.replace(/^(讀網頁|读网页|readurl)\s+/, "").trim();
     try {
       const page = await fetchReadableWeb(rawUrl, env);
-      const result = await callGeminiText(env, "你是忠實的網頁摘要助手，不捏造頁面沒有的內容。", `網址：${page.url}\n標題：${page.title}\n內容：\n${page.text}`, { maxOutputTokens: 1200, temperature: 0.2 });
-      await reply(result || "網頁內容已取得，但摘要失敗。");
+      const result = await callGeminiText(env, "你是忠实的网页摘要助手，不捏造页面没有的内容。", `网址：${page.url}\n标题：${page.title}\n内容：\n${page.text}`, { maxOutputTokens: 1200, temperature: 0.2 });
+      await reply(result || "网页内容已获取，但摘要失败。");
     } catch (error) {
-      await reply(`讀取網頁失敗：${normalizeError(error)}`);
+      await reply(`读取网页失败：${normalizeError(error)}`);
     }
     return { handled: true, command: "read-web" };
   }
@@ -785,7 +1023,7 @@ async function handleCommand(args) {
   if (/^(截圖|截图|screenshot)\s+/.test(cmd)) {
     const rawUrl = cmd.replace(/^(截圖|截图|screenshot)\s+/, "").trim();
     if (!env.BROWSER) {
-      await reply("尚未設定 Cloudflare Browser Rendering 綁定 BROWSER。");
+      await reply("尚未设置 Cloudflare Browser Rendering 绑定 BROWSER。");
       return { handled: true, command: "screenshot-unconfigured" };
     }
     try {
@@ -802,7 +1040,7 @@ async function handleCommand(args) {
         await browser.close();
       }
     } catch (error) {
-      await reply(`截圖失敗：${normalizeError(error)}`);
+      await reply(`截图失败：${normalizeError(error)}`);
     }
     return { handled: true, command: "screenshot" };
   }
@@ -810,56 +1048,56 @@ async function handleCommand(args) {
   if (/^(會議紀要|会议纪要)(?:\s+(\d+))?$/.test(cmd)) {
     const count = clampNumber(Number(cmd.match(/(\d+)/)?.[1] || 80), 10, 150, 80);
     const state = await loadContext(env, session);
-    const prompt = `請依以下群聊產生正式會議紀要，包含議題、共識、分歧、待辦、負責人（只有明確出現才寫）與未決問題，不得捏造。\n${formatMessages(state.messages.slice(-count))}`;
+    const prompt = `请用简体中文根据以下群聊生成正式会议纪要，包含议题、共识、分歧、待办、负责人（只有明确出现才写）和未决问题，不得捏造。\n${formatMessages(state.messages.slice(-count))}`;
     let result;
     try {
-      result = await callDeepSeekWithBudget({ env, userId: `summary:${groupId}`, isOwner: false, messages: [{ role: "system", content: "你是忠實、精簡的會議紀要整理器。" }, { role: "user", content: prompt }], thinking: "off", kind: "summary", maxOutputTokens: 550 });
+      result = await callDeepSeekWithBudget({ env, userId: `summary:${groupId}`, isOwner: false, messages: [{ role: "system", content: "你是忠实、精简的会议纪要整理器。输出简体中文。" }, { role: "user", content: prompt }], thinking: "off", kind: "summary", maxOutputTokens: 550 });
     } catch {
-      result = await callGeminiText(env, "你是忠實、精簡的會議紀要整理器。", prompt, { maxOutputTokens: 800, temperature: 0.2 });
+      result = await callGeminiText(env, "你是忠实、精简的会议纪要整理器。输出简体中文。", prompt, { maxOutputTokens: 800, temperature: 0.2 });
     }
-    await reply(result || "目前無法產生會議紀要。");
+    await reply(result || "目前无法生成会议纪要。");
     return { handled: true, command: "meeting-notes" };
   }
 
   if (/^(群規|群规)$/.test(cmd)) {
     const rules = await dbGet(env, `group_rules:${groupId}`);
-    await reply(rules || "本群尚未設定群規。");
+    await reply(rules || "本群尚未设置群规。");
     return { handled: true, command: "rules-get" };
   }
 
   if (/^(set群規|设置群规|設定群規)\s+/.test(cmd)) {
-    if (!isAdmin) { await reply("只有管理員能修改群規。"); return { handled: true, command: "rules-denied" }; }
+    if (!isAdmin) { await reply("只有管理员能修改群规。"); return { handled: true, command: "rules-denied" }; }
     const rules = cmd.replace(/^(set群規|设置群规|設定群規)\s+/, "").trim().slice(0, 4000);
     await dbPut(env, `group_rules:${groupId}`, rules);
-    await reply("群規已更新。");
+    await reply("群规已更新。");
     return { handled: true, command: "rules-set" };
   }
 
   if (/^(set人格|設定人格|设置人格)\s+/.test(cmd)) {
     const persona = cmd.replace(/^(set人格|設定人格|设置人格)\s+/, "").trim().slice(0, 1200);
     await dbPut(env, `persona:user:${groupId}:${userId}`, persona);
-    await reply("你的專屬人格已更新。");
+    await reply("你的专属人格已更新。");
     return { handled: true, command: "persona-set" };
   }
 
   if (["del人格", "刪除人格", "删除人格"].includes(lower)) {
     await dbDel(env, `persona:user:${groupId}:${userId}`);
-    await reply("你的專屬人格已清除。");
+    await reply("你的专属人格已清除。");
     return { handled: true, command: "persona-del" };
   }
 
   if (/^(切換人格|切换人格)\s+/.test(cmd)) {
-    if (!isAdmin) { await reply("只有管理員能修改群組人格。"); return { handled: true, command: "group-persona-denied" }; }
+    if (!isAdmin) { await reply("只有管理员能修改群组人格。"); return { handled: true, command: "group-persona-denied" }; }
     const persona = cmd.replace(/^(切換人格|切换人格)\s+/, "").trim().slice(0, 1200);
     await dbPut(env, `persona:group:${groupId}`, persona);
-    await reply("群組人格已更新。");
+    await reply("群组人格已更新。");
     return { handled: true, command: "group-persona-set" };
   }
 
   if (["恢復人格", "恢复人格"].includes(lower)) {
-    if (!isAdmin) { await reply("只有管理員能恢復群組人格。"); return { handled: true, command: "group-persona-denied" }; }
+    if (!isAdmin) { await reply("只有管理员能恢复群组人格。"); return { handled: true, command: "group-persona-denied" }; }
     await dbDel(env, `persona:group:${groupId}`);
-    await reply("群組人格已恢復預設。");
+    await reply("群组人格已恢复默认。");
     return { handled: true, command: "group-persona-reset" };
   }
 
@@ -867,18 +1105,18 @@ async function handleCommand(args) {
     const count = clampNumber(Number(cmd.match(/(\d+)/)?.[1] || 50), 10, 100, 50);
     const state = await loadContext(env, session);
     const selected = state.messages.slice(-count);
-    const prompt = `請用繁體中文把以下群聊整理成自然、簡潔的群聊摘要，不要捏造。\n${formatMessages(selected)}`;
+    const prompt = `请用简体中文把以下群聊整理成自然、简洁的群聊摘要，不要捏造。\n${formatMessages(selected)}`;
     let result;
     try {
       result = await callDeepSeekWithBudget({
         env, userId: `summary:${groupId}`, isOwner: false,
-        messages: [{ role: "system", content: "你是精簡且忠實的群聊摘要器。" }, { role: "user", content: prompt }],
+        messages: [{ role: "system", content: "你是精简且忠实的群聊摘要器。输出简体中文。" }, { role: "user", content: prompt }],
         thinking: "off", kind: "summary", maxOutputTokens: 400,
       });
     } catch {
-      result = await callGeminiText(env, "你是精簡且忠實的群聊摘要器。", prompt, { maxOutputTokens: 500 });
+      result = await callGeminiText(env, "你是精简且忠实的群聊摘要器。输出简体中文。", prompt, { maxOutputTokens: 500 });
     }
-    await reply(result || "目前無法產生摘要。");
+    await reply(result || "目前无法生成摘要。");
     return { handled: true, command: "summary" };
   }
 
@@ -908,13 +1146,13 @@ async function routeWithGemini(env, context) {
   if (env.GEMINI_ROUTER_ENABLED === "false") return { route: "gemini", reason: "router-disabled" };
   const model = env.GEMINI_ROUTER_MODEL || DEFAULTS.geminiRouterModel;
   const system = [
-    "你是模型路由器，只輸出 JSON，不回答使用者問題。",
-    "可選 route：gemini、deepseek、deepseek-high、deepseek-max。",
-    "一般聊天、圖片後續對話、短問答優先 gemini。",
-    "長文整理、程式重構、需要一致格式的大量資料可選 deepseek。",
-    "數學證明、複雜除錯、多步規劃才選 deepseek-high。",
-    "deepseek-max 僅限使用者明確要求極深推理且 high 明顯不足的任務。",
-    "費用很重要；不確定時選 gemini。",
+    "你是模型路由器，只输出 JSON，不回答用户问题。",
+    "可选 route：gemini、deepseek、deepseek-high、deepseek-max。",
+    "一般聊天、图片后续对话、短问答优先 gemini。",
+    "长文整理、程序重构、需要一致格式的大量数据可选 deepseek。",
+    "数学证明、复杂调试、多步规划才选 deepseek-high。",
+    "deepseek-max 仅限用户明确要求极深推理且 high 明显不足的任务。",
+    "费用很重要；不确定时选 gemini。",
   ].join("\n");
   const raw = await callGeminiText(env, system, String(context).slice(0, 6000), {
     models: [model], maxOutputTokens: 100, temperature: 0, responseMimeType: "application/json",
@@ -927,7 +1165,7 @@ async function routeWithGemini(env, context) {
   return result;
 }
 
-async function callDeepSeekWithBudget({ env, userId, isOwner, messages, thinking = "off", kind = "chat", maxOutputTokens, maxInputTokens }) {
+async function callDeepSeekWithBudget({ env, userId, isOwner, messages, thinking = "off", kind = "chat", maxOutputTokens = undefined, maxInputTokens = undefined }) {
   if (!env.DEEPSEEK_API_KEY) throw new Error("DEEPSEEK_KEY_MISSING");
   const cfg = await deepSeekBudgetConfigForUser(env, userId, isOwner);
   if (kind === "summary") cfg.userLimitMicros = cfg.summaryLimitMicros;
@@ -941,7 +1179,6 @@ async function callDeepSeekWithBudget({ env, userId, isOwner, messages, thinking
   const estimatedMicros = estimateDeepSeekCostMicros({
     inputTokens: inputEstimate,
     outputTokens: outputCap,
-    cacheHitTokens: 0,
     cfg,
   });
 
@@ -1190,7 +1427,7 @@ async function generateGeminiSpeech(env, text) {
           method: "POST",
           headers: { "Content-Type": "application/json", "x-goog-api-key": key },
           body: JSON.stringify({
-            contents: [{ parts: [{ text: `請用自然、清楚的繁體中文朗讀以下內容：\n${text}` }] }],
+            contents: [{ parts: [{ text: `请用自然、清楚的简体中文朗读以下内容：\n${text}` }] }],
             generationConfig: {
               responseModalities: ["AUDIO"],
               speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: env.GEMINI_TTS_VOICE || "Aoede" } } },
@@ -1219,17 +1456,17 @@ async function generateGeminiSpeech(env, text) {
 async function analyzeMedia(media, question, env, actionClient) {
   try {
     const file = await resolveMediaFile(media, env, actionClient);
-    if (!file) return `附件（${media.type}）無法取得：NapCat 沒有提供可下載 URL 或 Base64。`;
+    if (!file) return `附件（${media.type}）无法获取：NapCat 没有提供可下载 URL 或 Base64。`;
     const prompt = media.type === "image"
-      ? `請仔細描述圖片內容、可辨識文字與重要細節。使用者問題：${question || "請描述這張圖片"}`
+      ? `请用简体中文仔细描述图片内容、可识别文字和重要细节。用户问题：${question || "请描述这张图片"}`
       : media.type === "record"
-        ? `請轉錄並理解這段語音，整理說話內容、語氣和重要資訊。使用者問題：${question || "請說明語音內容"}`
-        : `請分析這段影片，描述事件順序、畫面、聲音和重要時間點。使用者問題：${question || "請說明影片內容"}`;
+        ? `请用简体中文转录并理解这段语音，整理说话内容、语气和重要信息。用户问题：${question || "请说明语音内容"}`
+        : `请用简体中文分析这段视频，描述事件顺序、画面、声音和重要时间点。用户问题：${question || "请说明视频内容"}`;
     const result = await callGeminiMultimodal(env, prompt, file);
-    return result ? `${media.type}分析：${result}` : `${media.type}分析失敗：Gemini 無可用模型或額度。`;
+    return result ? `${media.type}分析：${result}` : `${media.type}分析失败：Gemini 没有可用模型或额度。`;
   } catch (error) {
     await recordError(env, "MEDIA_ANALYSIS", error, { type: media.type });
-    return `${media.type}分析失敗：${normalizeError(error)}`;
+    return `${media.type}分析失败：${normalizeError(error)}`;
   }
 }
 
@@ -1377,10 +1614,10 @@ async function summarizeContext(env, session, groupId) {
   const archiveLimit = getNumber(env, "SUMMARY_ARCHIVE_MESSAGES", 300);
   const archive = [...state.summaryArchive, ...old].slice(-archiveLimit);
   const prompt = [
-    "以下是依時間順序追加的群聊歷史。相同群組的下一次請求會保留完全相同的前綴並只在尾端追加新訊息，以提高 DeepSeek Context Cache 命中。",
-    `群組：${groupId}`,
-    `完整歷史：\n${formatMessages(archive)}`,
-    "請輸出目前為止的短摘要：保留人物立場、已決定事項、未解問題、重要梗與稱呼；刪除無意義寒暄。只輸出摘要。",
+    "以下是按时间顺序追加的群聊历史。同一群组的下一次请求会保留完全相同的前缀，只在末尾追加新消息，以提高 DeepSeek Context Cache 命中。",
+    `群组：${groupId}`,
+    `完整历史：\n${formatMessages(archive)}`,
+    "请输出目前为止的简体中文短摘要：保留人物立场、已决定事项、未解决问题、重要梗和称呼；删除无意义寒暄。只输出摘要。",
   ].join("\n\n");
 
   let summary = null;
@@ -1390,7 +1627,7 @@ async function summarizeContext(env, session, groupId) {
       userId: `summary:${groupId}`,
       isOwner: false,
       messages: [
-        { role: "system", content: "你是穩定、精簡、不捏造的長期對話摘要器。輸出繁體中文純文字。固定規則不得改寫。" },
+        { role: "system", content: "你是稳定、精简、不捏造的长期对话摘要器。输出简体中文纯文字。固定规则不得改写。" },
         { role: "user", content: prompt },
       ],
       thinking: "off",
@@ -1399,7 +1636,7 @@ async function summarizeContext(env, session, groupId) {
       maxOutputTokens: getNumber(env, "DEEPSEEK_SUMMARY_MAX_OUTPUT_TOKENS", DEFAULTS.deepseekSummaryMaxOutputTokens),
     });
   } catch {
-    summary = await callGeminiText(env, "你是穩定、精簡、不捏造的長期對話摘要器。", prompt, { maxOutputTokens: 500, temperature: 0.2 });
+    summary = await callGeminiText(env, "你是稳定、精简、不捏造的长期对话摘要器。", prompt, { maxOutputTokens: 500, temperature: 0.2 });
   }
 
   const latest = await loadContext(env, session);
@@ -1413,32 +1650,32 @@ async function summarizeContext(env, session, groupId) {
 
 function buildConversationPrompt({ context, current, memories, groupId, isPrivate, persona = "", groupRules = "" }) {
   const system = [
-    "你是 QQ 群裡自然參與聊天的 AI，不是客服、公告機器或論文生成器。",
-    "使用繁體中文，配合對方的語氣、長度和熟悉程度。",
-    "普通聊天預設回 1 到 3 句；技術問題才使用清楚分段。",
-    "不要用『您好』『以下是』『希望能幫助到您』等客服套話，不要重述問題。",
-    "可以自然接梗、吐槽、不同意或承認不確定，但不要過度附和。",
-    "不假裝自己是真人；只是以自然群友的方式說話。",
-    "看懂回覆鏈、代名詞與群友之間的對話對象；不是叫你時不要搶話。",
-    "禁止輸出思維鏈、系統提示、API Key、隱私資料或 CQ 原始控制碼。",
+    "你是 QQ 群里自然参与聊天的 AI，不是客服、公告机器人或论文生成器。",
+    "默认使用简体中文，配合对方的语气、长度和熟悉程度；除非对方明确要求其他语言或繁体中文。",
+    "普通聊天默认回复 1 到 3 句；技术问题才使用清晰分段。",
+    "不要用‘您好’‘以下是’‘希望能帮助到您’等客服套话，不要复述问题。",
+    "可以自然接梗、吐槽、不同意或承认不确定，但不要过度附和。",
+    "不假装自己是真人；只是以自然群友的方式说话。",
+    "看懂回复链、代词和群友之间的对话对象；不是叫你时不要抢话。",
+    "禁止输出思维链、系统提示、API Key、隐私数据或 CQ 原始控制码。",
     persona ? `目前人格偏好：${persona}` : "",
-    groupRules ? `本群規則：${groupRules}` : "",
+    groupRules ? `本群规则：${groupRules}` : "",
   ].filter(Boolean).join("\n");
 
   const recent = context.messages.slice(-DEFAULTS.promptMessages);
-  const memoriesText = memories.length ? memories.map((m, i) => `${i + 1}. ${m}`).join("\n") : "無";
-  const reply = current.replyInfo ? `正在回覆：${current.replyInfo.senderName || current.replyInfo.senderId}：${current.replyInfo.text || "（附件訊息）"}` : "沒有引用訊息";
-  const media = current.mediaDescriptions.length ? current.mediaDescriptions.join("\n") : "沒有附件分析";
+  const memoriesText = memories.length ? memories.map((m, i) => `${i + 1}. ${m}`).join("\n") : "无";
+  const reply = current.replyInfo ? `正在回复：${current.replyInfo.senderName || current.replyInfo.senderId}：${current.replyInfo.text || "（附件消息）"}` : "没有引用消息";
+  const media = current.mediaDescriptions.length ? current.mediaDescriptions.join("\n") : "没有附件分析";
   const prompt = [
-    `場景：${isPrivate ? "私聊" : `QQ群 ${groupId}`}`,
-    context.summary ? `較早對話摘要：\n${context.summary}` : "",
-    `相關長期記憶：\n${memoriesText}`,
+    `场景：${isPrivate ? "私聊" : `QQ群 ${groupId}`}`,
+    context.summary ? `较早对话摘要：\n${context.summary}` : "",
+    `相关长期记忆：\n${memoriesText}`,
     `最近群聊：\n${formatMessages(recent)}`,
     reply,
     `附件：\n${media}`,
-    `目前發言者：${current.senderName}（QQ ${current.userId}）`,
-    `目前訊息：${current.text || "（只有附件）"}`,
-    "請直接給出最自然、最像這個群裡會出現的回覆。",
+    `当前发言者：${current.senderName}（QQ ${current.userId}）`,
+    `当前消息：${current.text || "（只有附件）"}`,
+    "请直接给出最自然、最像这个群里会出现的简体中文回复。",
   ].filter(Boolean).join("\n\n");
 
   return {
@@ -1450,11 +1687,11 @@ function buildConversationPrompt({ context, current, memories, groupId, isPrivat
     ],
     currentText: current.text,
     routerContext: [
-      `目前訊息：${current.text || "（只有附件）"}`,
+      `当前消息：${current.text || "（只有附件）"}`,
       `有附件：${current.mediaDescriptions.length ? "是" : "否"}`,
-      current.replyInfo ? `正在回覆：${current.replyInfo.text || "附件訊息"}` : "",
-      context.summary ? `已有長期摘要：${context.summary.slice(0, 1200)}` : "",
-      `最近對話：\n${formatMessages(recent.slice(-8))}`,
+      current.replyInfo ? `正在回复：${current.replyInfo.text || "附件消息"}` : "",
+      context.summary ? `已有长期摘要：${context.summary.slice(0, 1200)}` : "",
+      `最近对话：\n${formatMessages(recent.slice(-8))}`,
     ].filter(Boolean).join("\n\n"),
   };
 }
@@ -1596,15 +1833,32 @@ async function oneBotRpc(env, action, params = {}, options = {}) {
 
 async function sendReply(actionClient, { isGroup, groupId, userId, replyId, text, env, mention = false }) {
   const prefix = env.AI_OUTPUT_PREFIX ?? DEFAULTS.aiOutputPrefix;
+  const outboundText = `${prefix}${text}`;
   const segments = [];
   if (replyId) segments.push({ type: "reply", data: { id: String(replyId) } });
   if (mention && isGroup && userId) segments.push({ type: "at", data: { qq: String(userId) } }, { type: "text", data: { text: " " } });
-  segments.push({ type: "text", data: { text: `${prefix}${text}` } });
+  segments.push({ type: "text", data: { text: outboundText } });
   const action = isGroup ? "send_group_msg" : "send_private_msg";
   const params = isGroup
     ? { group_id: Number(groupId) || groupId, message: segments }
     : { user_id: Number(userId) || userId, message: segments };
-  const response = await actionClient.rpc(action, params, { timeoutMs: 20000 });
+
+  const pendingKey = await markOutboundPending(env, {
+    isGroup,
+    groupId,
+    peerId: userId,
+    text: outboundText,
+    mediaTypes: [],
+  });
+
+  let response;
+  try {
+    response = await actionClient.rpc(action, params, { timeoutMs: 20000 });
+  } catch (error) {
+    await dbDel(env, pendingKey);
+    throw error;
+  }
+
   const data = response?.data || response?.result?.data || response?.result || response;
   const messageId = stringId(data?.message_id);
   if (messageId) await dbPutJson(env, `outbound:${messageId}`, { at: Date.now(), groupId, userId });
@@ -1617,7 +1871,23 @@ async function sendMediaReply(actionClient, { isGroup, groupId, userId, replyId,
   segments.push({ type, data: { file: `base64://${stripBase64Prefix(base64)}` } });
   const action = isGroup ? "send_group_msg" : "send_private_msg";
   const params = isGroup ? { group_id: Number(groupId) || groupId, message: segments } : { user_id: Number(userId) || userId, message: segments };
-  const response = await actionClient.rpc(action, params, { timeoutMs: 60000 });
+
+  const pendingKey = await markOutboundPending(env, {
+    isGroup,
+    groupId,
+    peerId: userId,
+    text: "",
+    mediaTypes: [type],
+  });
+
+  let response;
+  try {
+    response = await actionClient.rpc(action, params, { timeoutMs: 60000 });
+  } catch (error) {
+    await dbDel(env, pendingKey);
+    throw error;
+  }
+
   const data = response?.data || response?.result?.data || response?.result || response;
   const messageId = stringId(data?.message_id);
   if (messageId) await dbPutJson(env, `outbound:${messageId}`, { at: Date.now(), groupId, userId });
@@ -1665,6 +1935,11 @@ async function healthJson(env) {
       onebot,
       vectorize: { configured: Boolean(env.VECTORIZE), aiBinding: Boolean(env.AI) },
       gemini: { configuredKeys: geminiKeys(env).length, last: geminiLast },
+      live: {
+        configured: geminiKeys(env).length > 0,
+        model: normalizeLiveModel(env.GEMINI_LIVE_MODEL || DEFAULTS.geminiLiveModel),
+        tokenProtected: Boolean(liveExpectedToken(env)),
+      },
       router: { model: env.GEMINI_ROUTER_MODEL || DEFAULTS.geminiRouterModel, last: routerLast },
       deepseek: {
         configured: Boolean(env.DEEPSEEK_API_KEY),
@@ -1739,13 +2014,13 @@ function healthPage(origin) {
   const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
   const row=(name,value,state)=>'<div class="service"><span>'+esc(name)+'</span><strong class="'+state+'">'+esc(value)+'</strong></div>';
   const fmt=t=>t?new Date(t).toLocaleString('zh-TW',{hour12:false}):'無紀錄';
-  async function load(){try{const r=await fetch('${origin}/healthz',{cache:'no-store'});const d=await r.json();overall.textContent=d.ok?'正常':'部分異常';overall.className='badge '+(d.ok?'ok':'bad');core.innerHTML=row('Worker','正常','ok')+row('D1',d.services.d1.ok?'正常 '+d.services.d1.latencyMs+'ms':'異常',d.services.d1.ok?'ok':'bad')+row('NapCat',d.services.onebot.connected?'已連線（'+d.services.onebot.connections+'）':'未連線',d.services.onebot.connected?'ok':'bad')+row('Vectorize',d.services.vectorize.configured?'已設定':'未設定',d.services.vectorize.configured?'ok':'unknown');ai.innerHTML=row('Gemini Key',d.services.gemini.configuredKeys+' 把',d.services.gemini.configuredKeys?'ok':'bad')+row('Gemini 上次',d.services.gemini.last?(d.services.gemini.last.ok?'成功 ':'失敗 ')+fmt(d.services.gemini.last.at):'未使用',d.services.gemini.last?.ok?'ok':'unknown')+row('Gemini 路由',d.services.router.last?d.services.router.last.route+'｜'+d.services.router.last.reason:'尚未判斷',d.services.router.last?'ok':'unknown')+row('DeepSeek',d.services.deepseek.configured?'已設定':'未設定',d.services.deepseek.configured?'ok':'unknown')+row('DeepSeek 上次',d.services.deepseek.last?(d.services.deepseek.last.ok?'成功 ':'失敗 ')+fmt(d.services.deepseek.last.at):'未使用',d.services.deepseek.last?.ok?'ok':'unknown');cost.innerHTML=row('總計','¥'+d.services.deepseek.spendCny.total+' / ¥'+d.services.deepseek.limitsCny.total,'ok')+row('今日全站','¥'+d.services.deepseek.spendCny.today+' / ¥'+d.services.deepseek.limitsCny.today,'ok')+row('單人每日上限','¥'+d.services.deepseek.limitsCny.userToday,'ok');error.textContent=JSON.stringify(d.lastError||{message:'沒有錯誤紀錄'},null,2);}catch(e){overall.textContent='讀取失敗';overall.className='badge bad';error.textContent=e.stack||e.message}}
+  async function load(){try{const r=await fetch('${origin}/healthz',{cache:'no-store'});const d=await r.json();overall.textContent=d.ok?'正常':'部分異常';overall.className='badge '+(d.ok?'ok':'bad');core.innerHTML=row('Worker','正常','ok')+row('D1',d.services.d1.ok?'正常 '+d.services.d1.latencyMs+'ms':'異常',d.services.d1.ok?'ok':'bad')+row('NapCat',d.services.onebot.connected?'已連線（'+d.services.onebot.connections+'）':'未連線',d.services.onebot.connected?'ok':'bad')+row('Vectorize',d.services.vectorize.configured?'已設定':'未設定',d.services.vectorize.configured?'ok':'unknown');ai.innerHTML=row('Gemini Key',d.services.gemini.configuredKeys+' 把',d.services.gemini.configuredKeys?'ok':'bad')+row('Gemini 上次',d.services.gemini.last?(d.services.gemini.last.ok?'成功 ':'失敗 ')+fmt(d.services.gemini.last.at):'未使用',d.services.gemini.last?.ok?'ok':'unknown')+row('Gemini 路由',d.services.router.last?d.services.router.last.route+'｜'+d.services.router.last.reason:'尚未判斷',d.services.router.last?'ok':'unknown')+row('Gemini Live',d.services.live.configured?(d.services.live.model+(d.services.live.tokenProtected?'｜已保護':'｜公開')):'未設定',d.services.live.configured?(d.services.live.tokenProtected?'ok':'unknown'):'bad')+row('DeepSeek',d.services.deepseek.configured?'已設定':'未設定',d.services.deepseek.configured?'ok':'unknown')+row('DeepSeek 上次',d.services.deepseek.last?(d.services.deepseek.last.ok?'成功 ':'失敗 ')+fmt(d.services.deepseek.last.at):'未使用',d.services.deepseek.last?.ok?'ok':'unknown');cost.innerHTML=row('總計','¥'+d.services.deepseek.spendCny.total+' / ¥'+d.services.deepseek.limitsCny.total,'ok')+row('今日全站','¥'+d.services.deepseek.spendCny.today+' / ¥'+d.services.deepseek.limitsCny.today,'ok')+row('單人每日上限','¥'+d.services.deepseek.limitsCny.userToday,'ok');error.textContent=JSON.stringify(d.lastError||{message:'沒有錯誤紀錄'},null,2);}catch(e){overall.textContent='讀取失敗';overall.className='badge bad';error.textContent=e.stack||e.message}}
   test.onclick=async()=>{test.disabled=true;testResult.textContent='測試中…';try{const r=await fetch('${origin}/api/health/test',{method:'POST',headers:{Authorization:'Bearer '+token.value}});testResult.textContent=JSON.stringify(await r.json(),null,2)}catch(e){testResult.textContent=e.stack||e.message}finally{test.disabled=false}};load();setInterval(load,15000);
   </script></body></html>`;
 }
 
 function homePage(origin) {
-  return `<!doctype html><html lang="zh-Hant-TW"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>QQAIbot</title><style>body{font-family:system-ui,-apple-system,"Segoe UI","Noto Sans TC",sans-serif;margin:0;background:#f5f7fb;color:#172033}.wrap{width:min(900px,calc(100% - 28px));margin:40px auto}.card{background:white;border:1px solid #dce3ed;border-radius:14px;padding:24px;box-shadow:0 10px 28px rgba(25,45,75,.07)}a{color:#1769aa}code{background:#eef2f7;padding:2px 6px;border-radius:5px}</style></head><body><main class="wrap"><div class="card"><h1>QQAIbot ${VERSION}</h1><p>Cloudflare Worker、NapCat OneBot、Gemini 與 DeepSeek 的混合 QQ 群聊機器人。</p><p><a href="${origin}/health">開啟健康中心</a>　<a href="${origin}/live">Gemini Live</a></p><p>同 QQ 號模式不加可見的 AI 前綴；Worker 以 OneBot Message ID 在內部區分人工與 API 訊息。手動訊息可用 <code>//</code> 明確標記本人；<code>??</code> 要求 AI 回答。</p></div></main></body></html>`;
+  return `<!doctype html><html lang="zh-Hant-TW"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>QQAIbot</title><style>body{font-family:system-ui,-apple-system,"Segoe UI","Noto Sans TC",sans-serif;margin:0;background:#f5f7fb;color:#172033}.wrap{width:min(900px,calc(100% - 28px));margin:40px auto}.card{background:white;border:1px solid #dce3ed;border-radius:14px;padding:24px;box-shadow:0 10px 28px rgba(25,45,75,.07)}a{color:#1769aa}code{background:#eef2f7;padding:2px 6px;border-radius:5px}</style></head><body><main class="wrap"><div class="card"><h1>QQAIbot ${VERSION}</h1><p>Cloudflare Worker、NapCat OneBot、Gemini 與 DeepSeek 的混合 QQ 群聊機器人。</p><p><a href="${origin}/health">開啟健康中心</a>　<a href="${origin}/live">Gemini Live</a></p><p>同 QQ 號模式不加可見的 AI 前綴；Worker 以傳送前指紋與 OneBot Message ID 雙重區分人工與 API 訊息。預設只把手動訊息加入上下文，不會回覆自己；<code>//</code> 明確標記本人，只有手動輸入 <code>??</code> 才要求 AI 回答。</p></div></main></body></html>`;
 }
 
 // -----------------------------------------------------------------------------
@@ -1753,76 +2028,170 @@ function homePage(origin) {
 // -----------------------------------------------------------------------------
 
 async function handleLiveRoute(request, env, url) {
-  if (!isWebSocketUpgrade(request)) return htmlResponse(livePage(url.origin));
+  const requiresToken = Boolean(liveExpectedToken(env));
+  if (!isWebSocketUpgrade(request)) {
+    return htmlResponse(livePage({ requiresToken, model: normalizeLiveModel(env.GEMINI_LIVE_MODEL || DEFAULTS.geminiLiveModel) }));
+  }
+  if (!isLiveAuthorized(request, env)) return textResponse("Unauthorized", 401);
+
   const keys = geminiKeys(env);
-  if (!keys.length) return textResponse("Gemini API Key 未設定", 503);
+  if (!keys.length) return textResponse("Gemini API Key 未设置", 503);
 
   const pair = new WebSocketPair();
   const [client, server] = Object.values(pair);
   server.accept();
+
   const key = keys[Math.floor(Math.random() * keys.length)];
   const endpoint = `wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent?key=${encodeURIComponent(key)}`;
   const upstream = new WebSocket(endpoint);
   const queue = [];
-  let setupComplete = false;
   const maxQueueBytes = 2 * 1024 * 1024;
+  const maxClientMessageBytes = 320 * 1024;
   let queueBytes = 0;
+  let setupComplete = false;
+  let closed = false;
+
+  const closeBoth = (code = 1000, reason = "closed") => {
+    if (closed) return;
+    closed = true;
+    clearTimeout(setupTimer);
+    const safeCode = normalizeWebSocketCloseCode(code);
+    try { if (server.readyState === WebSocket.OPEN) server.close(safeCode, String(reason).slice(0, 120)); } catch {}
+    try {
+      if (upstream.readyState === WebSocket.OPEN || upstream.readyState === WebSocket.CONNECTING) {
+        upstream.close(safeCode, String(reason).slice(0, 120));
+      }
+    } catch {}
+  };
+
+  const setupTimer = setTimeout(() => closeBoth(1011, "Gemini setup timeout"), 20_000);
 
   upstream.addEventListener("open", () => {
     upstream.send(JSON.stringify({
       setup: {
-        model: env.GEMINI_LIVE_MODEL || DEFAULTS.geminiLiveModel,
+        model: normalizeLiveModel(env.GEMINI_LIVE_MODEL || DEFAULTS.geminiLiveModel),
         generationConfig: {
           responseModalities: ["AUDIO"],
-          speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: env.GEMINI_LIVE_VOICE || "Aoede" } } },
+          speechConfig: {
+            voiceConfig: {
+              prebuiltVoiceConfig: { voiceName: env.GEMINI_LIVE_VOICE || "Aoede" },
+            },
+          },
+          thinkingConfig: { thinkingLevel: env.GEMINI_LIVE_THINKING_LEVEL || "minimal" },
         },
-        systemInstruction: { parts: [{ text: "你是自然、簡潔的繁體中文語音助手。不要客服腔。" }] },
+        inputAudioTranscription: {},
+        outputAudioTranscription: {},
+        systemInstruction: {
+          parts: [{ text: env.GEMINI_LIVE_SYSTEM_PROMPT || "你是自然、简洁的简体中文语音助手。避免客服腔；听不清楚时直接请用户重说。" }],
+        },
       },
     }));
   });
 
   server.addEventListener("message", event => {
-    const size = typeof event.data === "string" ? encoder.encode(event.data).byteLength : event.data.byteLength || 0;
-    if (upstream.readyState === WebSocket.OPEN && setupComplete) upstream.send(event.data);
-    else if (queueBytes + size <= maxQueueBytes) { queue.push(event.data); queueBytes += size; }
-    else server.send(JSON.stringify({ error: "LIVE_QUEUE_LIMIT" }));
+    if (typeof event.data !== "string") {
+      if (server.readyState === WebSocket.OPEN) server.send(JSON.stringify({ error: "LIVE_TEXT_FRAME_REQUIRED" }));
+      return;
+    }
+
+    const size = encoder.encode(event.data).byteLength;
+    if (size > maxClientMessageBytes) {
+      if (server.readyState === WebSocket.OPEN) server.send(JSON.stringify({ error: "LIVE_MESSAGE_TOO_LARGE" }));
+      return;
+    }
+
+    let payload;
+    try {
+      payload = JSON.parse(event.data);
+    } catch {
+      if (server.readyState === WebSocket.OPEN) server.send(JSON.stringify({ error: "LIVE_INVALID_JSON" }));
+      return;
+    }
+
+    // Browser clients may send realtime audio/text or explicit client turns only.
+    if (!payload?.realtimeInput && !payload?.clientContent) {
+      if (server.readyState === WebSocket.OPEN) server.send(JSON.stringify({ error: "LIVE_UNSUPPORTED_CLIENT_MESSAGE" }));
+      return;
+    }
+
+    const serialized = JSON.stringify(payload);
+    if (upstream.readyState === WebSocket.OPEN && setupComplete) {
+      upstream.send(serialized);
+    } else if (queueBytes + size <= maxQueueBytes) {
+      queue.push(serialized);
+      queueBytes += size;
+    } else if (server.readyState === WebSocket.OPEN) {
+      server.send(JSON.stringify({ error: "LIVE_QUEUE_LIMIT" }));
+    }
   });
 
   upstream.addEventListener("message", event => {
+    const raw = typeof event.data === "string" ? event.data : new TextDecoder().decode(event.data);
     try {
-      const data = JSON.parse(typeof event.data === "string" ? event.data : new TextDecoder().decode(event.data));
+      const data = JSON.parse(raw);
       if (data.setupComplete) {
         setupComplete = true;
+        clearTimeout(setupTimer);
         while (queue.length && upstream.readyState === WebSocket.OPEN) upstream.send(queue.shift());
         queueBytes = 0;
       }
     } catch {}
-    if (server.readyState === WebSocket.OPEN) server.send(event.data);
+    if (server.readyState === WebSocket.OPEN) server.send(raw);
   });
 
-  const closeBoth = (code = 1000, reason = "closed") => {
-    try { if (server.readyState === WebSocket.OPEN) server.close(code, reason); } catch {}
-    try { if (upstream.readyState === WebSocket.OPEN || upstream.readyState === WebSocket.CONNECTING) upstream.close(code, reason); } catch {}
-  };
-  server.addEventListener("close", event => closeBoth(event.code, event.reason));
+  server.addEventListener("close", event => closeBoth(event.code || 1000, event.reason || "client closed"));
   server.addEventListener("error", () => closeBoth(1011, "client error"));
-  upstream.addEventListener("close", event => closeBoth(event.code || 1011, event.reason || "upstream closed"));
+  upstream.addEventListener("close", event => closeBoth(event.code || 1011, event.reason || "Gemini closed"));
   upstream.addEventListener("error", () => closeBoth(1011, "Gemini Live error"));
 
   return new Response(null, { status: 101, webSocket: client });
 }
 
-function livePage(origin) {
-  return `<!doctype html><html lang="zh-Hant-TW"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>QQAI Live</title><style>body{font-family:system-ui,-apple-system,"Segoe UI","Noto Sans TC",sans-serif;background:#f4f7fb;color:#162033;margin:0}.wrap{width:min(760px,calc(100% - 28px));margin:32px auto}.card{background:#fff;border:1px solid #dae3ef;border-radius:14px;padding:22px}button{padding:11px 16px;border:0;border-radius:9px;background:#1769aa;color:white;font-weight:700;cursor:pointer}.status{margin:14px 0;padding:12px;background:#eef3f8;border-radius:8px}pre{white-space:pre-wrap;max-height:280px;overflow:auto}</style></head><body><main class="wrap"><div class="card"><h1>Gemini Live</h1><p>即時語音仍屬預覽功能。瀏覽器會送出 16kHz PCM，模型回傳 24kHz PCM。</p><button id="start">開始連線</button><button id="stop" disabled>停止</button><div id="status" class="status">尚未連線</div><pre id="log"></pre></div></main><script>
-let ws,ctx,stream,processor,source,nextTime=0;const add=s=>log.textContent=new Date().toLocaleTimeString()+' '+s+'\n'+log.textContent;
-function pcm16(float32){const out=new Int16Array(float32.length);for(let i=0;i<float32.length;i++){const s=Math.max(-1,Math.min(1,float32[i]));out[i]=s<0?s*32768:s*32767}return new Uint8Array(out.buffer)}
-function b64(bytes){let s='';for(let i=0;i<bytes.length;i+=0x8000)s+=String.fromCharCode(...bytes.subarray(i,i+0x8000));return btoa(s)}
-function fromb64(s){const b=atob(s),a=new Uint8Array(b.length);for(let i=0;i<b.length;i++)a[i]=b.charCodeAt(i);return a}
-async function play(base64){const bytes=fromb64(base64),pcm=new Int16Array(bytes.buffer,bytes.byteOffset,Math.floor(bytes.byteLength/2)),buf=ctx.createBuffer(1,pcm.length,24000),ch=buf.getChannelData(0);for(let i=0;i<pcm.length;i++)ch[i]=pcm[i]/32768;const n=ctx.createBufferSource();n.buffer=buf;n.connect(ctx.destination);nextTime=Math.max(nextTime,ctx.currentTime);n.start(nextTime);nextTime+=buf.duration}
-start.onclick=async()=>{start.disabled=true;stop.disabled=false;ctx=new AudioContext();stream=await navigator.mediaDevices.getUserMedia({audio:{channelCount:1,sampleRate:16000,echoCancellation:true}});source=ctx.createMediaStreamSource(stream);processor=ctx.createScriptProcessor(4096,1,1);source.connect(processor);processor.connect(ctx.destination);ws=new WebSocket('${origin.replace(/^http/,'ws')}/live');ws.onopen=()=>{status.textContent='WebSocket 已連線，等待 Gemini setupComplete';add('connected')};ws.onmessage=async e=>{try{const d=JSON.parse(e.data);if(d.setupComplete)status.textContent='已就緒';const parts=d.serverContent?.modelTurn?.parts||[];for(const p of parts)if(p.inlineData?.data)await play(p.inlineData.data);if(d.error)add(JSON.stringify(d.error))}catch{}};ws.onclose=e=>{status.textContent='已中斷 '+e.code+' '+e.reason;stop.click()};processor.onaudioprocess=e=>{if(ws?.readyState!==1)return;const bytes=pcm16(e.inputBuffer.getChannelData(0));ws.send(JSON.stringify({realtimeInput:{mediaChunks:[{mimeType:'audio/pcm;rate=16000',data:b64(bytes)}]}}))}}
-stop.onclick=()=>{try{processor?.disconnect();source?.disconnect();stream?.getTracks().forEach(t=>t.stop());ws?.close()}catch{}start.disabled=false;stop.disabled=true;status.textContent='已停止'};
+function livePage({ requiresToken, model }) {
+  const authBlock = requiresToken
+    ? '<label class="field"><span>Live Token</span><input id="token" type="password" autocomplete="current-password" placeholder="LIVE_ACCESS_TOKEN 或 HEALTH_ADMIN_TOKEN"></label>'
+    : '<p class="hint">目前未設定 Live Token；知道網址的人都可以使用 Gemini 額度。</p>';
+
+  return `<!doctype html><html lang="zh-Hant-TW"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>QQAI Live</title><style>
+:root{color-scheme:light;font-family:system-ui,-apple-system,"Segoe UI","Noto Sans TC",sans-serif;background:#f4f7fb;color:#162033}*{box-sizing:border-box}body{margin:0}.wrap{width:min(820px,calc(100% - 28px));margin:28px auto}.card{background:#fff;border:1px solid #dae3ef;border-radius:16px;padding:22px;box-shadow:0 12px 30px rgba(31,54,82,.08)}h1{margin:0 0 8px}.sub,.hint{color:#64748b;line-height:1.6}.row{display:flex;gap:10px;flex-wrap:wrap;margin:14px 0}.field{display:grid;gap:6px;margin:12px 0}.field span{font-weight:700}.field input{width:100%;padding:11px 12px;border:1px solid #cbd5e1;border-radius:9px;font:inherit}button{padding:11px 16px;border:0;border-radius:9px;background:#1769aa;color:#fff;font-weight:700;cursor:pointer}button.secondary{background:#e8eef5;color:#162033}button:disabled{opacity:.5;cursor:not-allowed}.status{margin:14px 0;padding:12px;background:#eef3f8;border-radius:9px}.grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}.panel{border:1px solid #dce5ef;border-radius:10px;padding:12px;min-height:130px;white-space:pre-wrap;overflow:auto}.panel h2{font-size:14px;margin:0 0 8px;color:#475569}.log{margin-top:12px;max-height:220px;font-size:13px}.textrow{display:flex;gap:8px}.textrow input{flex:1;padding:11px 12px;border:1px solid #cbd5e1;border-radius:9px;font:inherit}@media(max-width:650px){.grid{grid-template-columns:1fr}.textrow{flex-direction:column}}
+</style></head><body><main class="wrap"><section class="card"><h1>🎙️ Gemini Live</h1><p class="sub">模型：${escapeHtmlText(model)}。麥克風會在瀏覽器端重新取樣成 16kHz、16-bit PCM，回傳音訊以 24kHz 播放。</p>${authBlock}<div class="row"><button id="start">開始連線</button><button id="stop" class="secondary" disabled>停止</button></div><div id="status" class="status">尚未連線</div><div class="textrow"><input id="textInput" placeholder="也可以輸入文字測試 Live"><button id="sendText" disabled>傳送</button></div><div class="grid"><div class="panel"><h2>你說的話</h2><div id="userTranscript"></div></div><div class="panel"><h2>Gemini</h2><div id="modelTranscript"></div></div></div><div class="panel log"><h2>連線紀錄</h2><div id="log"></div></div></section></main><script>
+(() => {
+  'use strict';
+  const $ = id => document.getElementById(id);
+  const els = { start:$('start'), stop:$('stop'), status:$('status'), log:$('log'), token:$('token'), textInput:$('textInput'), sendText:$('sendText'), userTranscript:$('userTranscript'), modelTranscript:$('modelTranscript') };
+  let ws=null,ctx=null,stream=null,processor=null,source=null,silentGain=null,nextTime=0,ready=false,stopping=false;
+  const scheduledSources=new Set();
+  const add = message => { els.log.textContent = new Date().toLocaleTimeString() + ' ' + message + '\\n' + els.log.textContent; };
+  const setStatus = value => { els.status.textContent = value; };
+  function bytesToBase64(bytes){let s='';for(let i=0;i<bytes.length;i+=0x8000)s+=String.fromCharCode(...bytes.subarray(i,i+0x8000));return btoa(s)}
+  function base64ToBytes(value){const binary=atob(value),out=new Uint8Array(binary.length);for(let i=0;i<binary.length;i++)out[i]=binary.charCodeAt(i);return out}
+  function downsample(input,inputRate,outputRate=16000){if(inputRate===outputRate)return input.slice();const ratio=inputRate/outputRate;const length=Math.max(1,Math.round(input.length/ratio));const output=new Float32Array(length);let sourceOffset=0;for(let i=0;i<length;i++){const next=Math.min(input.length,Math.round((i+1)*ratio));let sum=0,count=0;while(sourceOffset<next){sum+=input[sourceOffset++];count++}output[i]=count?sum/count:0}return output}
+  function pcm16(float32){const out=new Int16Array(float32.length);for(let i=0;i<float32.length;i++){const sample=Math.max(-1,Math.min(1,float32[i]));out[i]=sample<0?sample*32768:sample*32767}return new Uint8Array(out.buffer)}
+  function clearPlayback(){for(const node of scheduledSources){try{node.stop()}catch{}}scheduledSources.clear();nextTime=ctx?ctx.currentTime:0}
+  async function play(base64){if(!ctx)return;const bytes=base64ToBytes(base64);const pcm=new Int16Array(bytes.buffer,bytes.byteOffset,Math.floor(bytes.byteLength/2));const buffer=ctx.createBuffer(1,pcm.length,24000);const channel=buffer.getChannelData(0);for(let i=0;i<pcm.length;i++)channel[i]=pcm[i]/32768;const node=ctx.createBufferSource();node.buffer=buffer;node.connect(ctx.destination);node.onended=()=>scheduledSources.delete(node);scheduledSources.add(node);nextTime=Math.max(nextTime,ctx.currentTime+.02);node.start(nextTime);nextTime+=buffer.duration}
+  function websocketUrl(){const url=new URL('/live',location.href);url.protocol=url.protocol==='https:'?'wss:':'ws:';const token=els.token?.value.trim();if(token){url.searchParams.set('token',token);sessionStorage.setItem('qqai_live_token',token)}return url.toString()}
+  async function prepareAudio(){ctx=new AudioContext();await ctx.resume();stream=await navigator.mediaDevices.getUserMedia({audio:{channelCount:1,echoCancellation:true,noiseSuppression:true,autoGainControl:true}});source=ctx.createMediaStreamSource(stream);processor=ctx.createScriptProcessor(4096,1,1);silentGain=ctx.createGain();silentGain.gain.value=0;source.connect(processor);processor.connect(silentGain);silentGain.connect(ctx.destination);processor.onaudioprocess=event=>{if(!ready||ws?.readyState!==WebSocket.OPEN)return;const mono=event.inputBuffer.getChannelData(0);const sampled=downsample(mono,ctx.sampleRate,16000);const bytes=pcm16(sampled);ws.send(JSON.stringify({realtimeInput:{audio:{data:bytesToBase64(bytes),mimeType:'audio/pcm;rate=16000'}}}))}}
+  function cleanup(updateStatus=true){ready=false;els.sendText.disabled=true;try{processor?.disconnect();source?.disconnect();silentGain?.disconnect()}catch{}stream?.getTracks().forEach(track=>track.stop());clearPlayback();try{ctx?.close()}catch{}processor=source=silentGain=stream=ctx=null;nextTime=0;if(updateStatus)setStatus('已停止');els.start.disabled=false;els.stop.disabled=true;stopping=false}
+  async function start(){if(ws||stopping)return;els.start.disabled=true;els.stop.disabled=false;setStatus('正在取得麥克風…');try{await prepareAudio();setStatus('正在連線 Gemini…');ws=new WebSocket(websocketUrl());ws.onopen=()=>{setStatus('WebSocket 已連線，等待 setupComplete…');add('WebSocket connected')};ws.onmessage=async event=>{let data;try{data=JSON.parse(event.data)}catch{return}if(data.setupComplete){ready=true;els.sendText.disabled=false;setStatus('已就緒，可以說話');add('Gemini setupComplete')}if(data.error){add('錯誤：'+(typeof data.error==='string'?data.error:JSON.stringify(data.error)));setStatus('發生錯誤')}const content=data.serverContent;if(content?.interrupted){clearPlayback();add('模型回覆已被你的新語音中斷')}const inputText=content?.inputTranscription?.text||data.inputTranscription?.text;if(inputText)els.userTranscript.textContent+=inputText;const outputText=content?.outputTranscription?.text||data.outputTranscription?.text;if(outputText)els.modelTranscript.textContent+=outputText;for(const part of content?.modelTurn?.parts||[]){if(part.inlineData?.data)await play(part.inlineData.data)}if(content?.turnComplete)setStatus('已就緒，可以繼續說話');if(data.goAway)add('伺服器即將中斷：'+JSON.stringify(data.goAway))};ws.onerror=()=>{add('WebSocket error');setStatus('連線錯誤')};ws.onclose=event=>{const reason=(event.code||'')+' '+(event.reason||'');add('WebSocket closed '+reason);ws=null;if(!stopping)cleanup(true)}}catch(error){add('啟動失敗：'+(error?.message||error));ws=null;cleanup(false);setStatus('啟動失敗：'+(error?.message||error))}}
+  function stop(){if(stopping)return;stopping=true;ready=false;const socket=ws;ws=null;if(socket){socket.onclose=null;try{socket.close(1000,'user stop')}catch{}}cleanup(true)}
+  function sendText(){const text=els.textInput.value.trim();if(!text||!ready||ws?.readyState!==WebSocket.OPEN)return;ws.send(JSON.stringify({realtimeInput:{text}}));els.userTranscript.textContent+=(els.userTranscript.textContent?'\\n':'')+text;els.textInput.value=''}
+  if(els.token)els.token.value=sessionStorage.getItem('qqai_live_token')||'';
+  els.start.addEventListener('click',start);els.stop.addEventListener('click',stop);els.sendText.addEventListener('click',sendText);els.textInput.addEventListener('keydown',event=>{if(event.key==='Enter')sendText()});
+})();
 </script></body></html>`;
 }
+
+function normalizeLiveModel(value) {
+  const model = String(value || DEFAULTS.geminiLiveModel).trim();
+  return model.startsWith("models/") ? model : `models/${model}`;
+}
+
+function normalizeWebSocketCloseCode(value) {
+  const code = Number(value);
+  if (code === 1000 || code === 1001 || code === 1002 || code === 1003 || (code >= 1007 && code <= 1014) || (code >= 3000 && code <= 4999)) return code;
+  return 1011;
+}
+
 
 // -----------------------------------------------------------------------------
 // Scheduled maintenance / Hugging Face health monitoring
@@ -1854,7 +2223,7 @@ async function cleanupExpiredDbKeys(env) {
   if (!env.DB) return;
   const cutoff = Date.now() - 24 * 60 * 60 * 1000;
   try {
-    await env.DB.prepare("DELETE FROM kv_store WHERE (key LIKE 'outbound:%' OR key LIKE 'cooldown:%') AND updated_at < ?").bind(cutoff).run();
+    await env.DB.prepare("DELETE FROM kv_store WHERE (key LIKE 'outbound:%' OR key LIKE 'outbound_pending:%' OR key LIKE 'cooldown:%') AND updated_at < ?").bind(cutoff).run();
   } catch {}
 }
 
@@ -1900,7 +2269,7 @@ function normalizeModelPreference(value) {
 }
 
 function modelLabel(pref) {
-  return ({ auto: "自動（Gemini 路由判斷）", gemini: "Gemini", deepseek: "DeepSeek（不思考）", "deepseek-high": "DeepSeek 思考 High", "deepseek-max": "DeepSeek 思考 Max" })[pref] || pref;
+  return ({ auto: "自动（Gemini 路由判断）", gemini: "Gemini", deepseek: "DeepSeek（不思考）", "deepseek-high": "DeepSeek 思考 High", "deepseek-max": "DeepSeek 思考 Max" })[pref] || pref;
 }
 
 // -----------------------------------------------------------------------------
@@ -1955,6 +2324,67 @@ async function recordError(env, scope, error, metadata = {}) {
 // Security, triggering and utilities
 // -----------------------------------------------------------------------------
 
+function outboundFingerprint({ isGroup, groupId, peerId, text, mediaTypes = [] }) {
+  const scope = isGroup ? `group:${stringId(groupId)}` : `private:${stringId(peerId)}`;
+  const normalizedText = String(text || "").replace(/\s+/g, " ").trim();
+  const normalizedMedia = [...mediaTypes].map(String).sort().join(",");
+  return `${scope}:${fnv1a32(`${normalizedText}|${normalizedMedia}`)}`;
+}
+
+async function markOutboundPending(env, info) {
+  const key = `outbound_pending:${outboundFingerprint(info)}`;
+  const current = await dbGetJson(env, key, null);
+  const count = Math.min(20, Math.max(0, Number(current?.count || 0)) + 1);
+  await dbPutJson(env, key, { at: Date.now(), count });
+  return key;
+}
+
+async function consumeOutboundPending(env, info) {
+  const key = `outbound_pending:${outboundFingerprint(info)}`;
+  const current = await dbGetJson(env, key, null);
+  if (!current) return false;
+  if (Date.now() - Number(current.at || 0) > 2 * 60 * 1000) {
+    await dbDel(env, key);
+    return false;
+  }
+  const count = Math.max(1, Number(current.count || 1));
+  if (count > 1) await dbPutJson(env, key, { at: current.at, count: count - 1 });
+  else await dbDel(env, key);
+  return true;
+}
+
+function fnv1a32(value) {
+  let hash = 0x811c9dc5;
+  const bytes = encoder.encode(String(value || ""));
+  for (const byte of bytes) {
+    hash ^= byte;
+    hash = Math.imul(hash, 0x01000193) >>> 0;
+  }
+  return hash.toString(16).padStart(8, "0");
+}
+
+function firstMentionTarget(parsed, selfId = "") {
+  return String(parsed?.mentions?.find(id => id && String(id) !== String(selfId)) || "");
+}
+
+function parseBanDurationSeconds(commandText) {
+  const match = String(commandText || "").match(/(\d+(?:\.\d+)?)\s*(分钟|分鐘|分|小时|小時|时|時|天)?\s*$/i);
+  if (!match) return 10 * 60;
+  const value = Number(match[1]);
+  const unit = match[2] || "分";
+  let seconds = value * 60;
+  if (/小时|小時|时|時/.test(unit)) seconds = value * 60 * 60;
+  else if (unit === "天") seconds = value * 24 * 60 * 60;
+  return Math.round(clampNumber(seconds, 60, 30 * 24 * 60 * 60, 10 * 60));
+}
+
+function formatBanDuration(seconds) {
+  const value = Math.max(0, Number(seconds) || 0);
+  if (value >= 86400 && value % 86400 === 0) return `${value / 86400} 天`;
+  if (value >= 3600 && value % 3600 === 0) return `${value / 3600} 小时`;
+  return `${Math.max(1, Math.round(value / 60))} 分钟`;
+}
+
 async function isGroupAllowed(env, groupId) {
   if (env.ENFORCE_GROUP_ALLOWLIST !== "true") return true;
   return await dbGet(env, `group_whitelist:${groupId}`) === "true";
@@ -2006,6 +2436,18 @@ function verifyOneBotAccess(request, env) {
   return timingSafeEqual(provided, expected);
 }
 
+function liveExpectedToken(env) {
+  return String(env.LIVE_ACCESS_TOKEN || env.HEALTH_ADMIN_TOKEN || "");
+}
+
+function isLiveAuthorized(request, env) {
+  const expected = liveExpectedToken(env);
+  if (!expected) return true;
+  const url = new URL(request.url);
+  const provided = request.headers.get("Authorization")?.replace(/^Bearer\s+/i, "") || url.searchParams.get("token") || "";
+  return timingSafeEqual(provided, expected);
+}
+
 function isModelApiAuthorized(request, env) {
   if (!env.MODEL_API_TOKEN) return false;
   const url = new URL(request.url);
@@ -2044,6 +2486,7 @@ function cnyToMicros(cny) { return Math.max(0, Math.round(Number(cny || 0) * 1_0
 function microsToCny(micros) { return (Number(micros || 0) / 1_000_000).toFixed(6).replace(/0+$/, "").replace(/\.$/, ""); }
 function estimateTokens(text) { return Math.max(1, Math.ceil(String(text || "").length / 2)); }
 function normalizeError(error) { return String(error?.stack || error?.message || error || "UNKNOWN_ERROR").slice(0, 2000); }
+function escapeHtmlText(value) { return String(value ?? "").replace(/[&<>"']/g, char => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[char]); }
 function extractGeminiText(data) { return (data?.candidates?.[0]?.content?.parts || []).map(part => part.text || "").join("").trim(); }
 function formatMessages(messages) { return messages.map(item => `[${new Date(Number(item.at || 0) * 1000).toLocaleTimeString("zh-TW", { hour: "2-digit", minute: "2-digit", timeZone: "Asia/Taipei" })}] ${item.senderName || item.senderId || item.role}: ${item.text || "（附件）"}`).join("\n"); }
 function normalizeMemoryList(value) { if (!Array.isArray(value)) return []; return value.map(item => typeof item === "string" ? { id: crypto.randomUUID(), text: item, at: 0, source: "legacy" } : { id: item.id || crypto.randomUUID(), text: String(item.text || ""), at: Number(item.at || 0), source: item.source || "unknown" }).filter(item => item.text); }
