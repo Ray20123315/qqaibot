@@ -1,16 +1,17 @@
 {
-  "name": "qqai",
-  "version": "1.0.0",
-  "description": "QQ Bot Cloudflare Worker",
-  "main": "worker.js",
+  "name": "qqaibot",
+  "version": "0.1.1",
+  "private": true,
   "type": "module",
+  "description": "QQAIbot Cloudflare Worker with Gemini, Gemini-routed, quota-gated DeepSeek, NapCat OneBot RPC and health UI",
   "scripts": {
     "check": "node --check worker.js",
     "dev": "wrangler dev",
-    "deploy": "wrangler deploy"
+    "deploy": "wrangler deploy",
+    "d1:init": "wrangler d1 execute qqaibot-db --remote --file=schema_v0.1.1.sql"
   },
   "dependencies": {
-    "@cloudflare/puppeteer": "^0.0.13"
+    "@cloudflare/puppeteer": "^1.0.2"
   },
   "devDependencies": {
     "wrangler": "^4.0.0"
