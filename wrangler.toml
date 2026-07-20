@@ -1,17 +1,26 @@
-name = "qqaibot"
+"$schema" = "./node_modules/wrangler/config-schema.json"
+
+name = "qqai"
 main = "worker.js"
 compatibility_date = "2026-07-19"
 compatibility_flags = ["nodejs_compat"]
 workers_dev = true
 
-[observability]
-enabled = true
+# 自訂網域
+[[routes]]
+pattern = "qqai.ray2025.com"
+zone_name = "ray2025.com"
+custom_domain = true
 
-[[d1_databases]]
-binding = "DB"
-database_name = "qqaibot-db"
-database_id = "請替換成你的_D1_DATABASE_ID"
+# Browser Rendering：v0.1.1 worker 使用 env.BROWSER
+[browser]
+binding = "BROWSER"
 
+# Workers AI
+[ai]
+binding = "AI"
+
+# Durable Objects
 [[durable_objects.bindings]]
 name = "ONEBOT_HUB"
 class_name = "OneBotHub"
@@ -20,25 +29,36 @@ class_name = "OneBotHub"
 name = "BUDGET_GUARD"
 class_name = "BudgetGuard"
 
+# 不要修改已部署過的舊 migration；新增 BudgetGuard 用新 tag
 [[migrations]]
-tag = "v0.1.0"
-new_sqlite_classes = ["OneBotHub", "BudgetGuard"]
+tag = "v1_onebot_hub"
+new_sqlite_classes = ["OneBotHub"]
 
-[ai]
-binding = "AI"
+[[migrations]]
+tag = "v2_budget_guard"
+new_sqlite_classes = ["BudgetGuard"]
 
+# 保留你原本的 KV；v0.1.1 主要資料改用 D1
+[[kv_namespaces]]
+binding = "QQ_STORE"
+id = "bf716105d0f6412fa97daad4e0f544d2"
+
+# 既有 Vectorize Index
 [[vectorize]]
 binding = "VECTORIZE"
-index_name = "qqaibot-memory"
+index_name = "qqai"
 
-[browser]
-binding = "BROWSER"
-
+# 每小時清理 D1 過期暫存；Hugging Face 喚醒已關閉
 [triggers]
 crons = ["0 * * * *"]
 
+# 公開 Variables：可提交 GitHub
 [vars]
-PUBLIC_BASE_URL = "https://請替換成你的Worker網域"
+PUBLIC_BASE_URL = "https://qqai.ray2025.com"
+BACKGROUND_BROWSER_TIMEOUT = "60"
+DEVELOPER_ID = "3569028262"
+
+# DeepSeek 模型與硬預算
 DEEPSEEK_MODEL = "deepseek-v4-flash"
 DEEPSEEK_TOTAL_BUDGET_CNY = "20"
 DEEPSEEK_DAILY_BUDGET_CNY = "0.35"
@@ -50,32 +70,63 @@ DEEPSEEK_SUMMARY_MAX_INPUT_TOKENS = "50000"
 DEEPSEEK_MAX_OUTPUT_TOKENS = "600"
 DEEPSEEK_SUMMARY_MAX_OUTPUT_TOKENS = "300"
 SUMMARY_ARCHIVE_MESSAGES = "300"
+
+# Gemini 路由與功能模型
 GEMINI_ROUTER_ENABLED = "true"
 GEMINI_ROUTER_MODEL = "gemini-2.5-flash-lite"
 GEMINI_CHAT_MODELS = "gemini-2.5-flash,gemini-2.5-flash-lite"
 GEMINI_MEDIA_MODELS = "gemini-2.5-flash,gemini-2.5-flash-lite"
 GEMINI_IMAGE_MODELS = "gemini-3.1-flash-image,gemini-2.5-flash-image"
-GEMINI_TTS_MODELS = "gemini-2.5-flash-preview-tts"
+GEMINI_TTS_MODELS = "gemini-3.1-flash-tts-preview,gemini-2.5-flash-preview-tts"
 GEMINI_LIVE_MODEL = "models/gemini-3.1-flash-live-preview"
+
+# 上下文與群聊行為
 CONTEXT_MESSAGES = "60"
 SUMMARY_TRIGGER_MESSAGES = "55"
 SUMMARY_KEEP_MESSAGES = "24"
 AUTO_INTERJECT_PERCENT = "0"
 USER_COOLDOWN_MS = "6000"
 MAX_CHAT_OUTPUT_CHARS = "1600"
+
+# 媒體與網頁大小上限
 MAX_IMAGE_BYTES = "12582912"
 MAX_AUDIO_BYTES = "16777216"
 MAX_VIDEO_BYTES = "29360128"
 MAX_WEB_BYTES = "2097152"
+
+# 同 QQ 號模式
 AI_OUTPUT_PREFIX = ""
 ENABLE_SAME_QQ_HUMAN_MODE = "true"
 SAME_QQ_HUMAN_PREFIX = "//"
 SAME_QQ_ASK_PREFIX = "??"
+
+# 權限
 ENFORCE_GROUP_ALLOWLIST = "false"
 COST_ADMIN_IDS = ""
-HF_KEEPALIVE_ENABLED = "true"
+
+# 不碰 Hugging Face
+HF_KEEPALIVE_ENABLED = "false"
 HF_SPACE_URL = ""
 HF_HEALTH_PATH = "/healthz"
 
+# 你原本的 Rate Limiter；目前 v0.1.1 worker 未直接使用，保留不會影響部署
+[[ratelimits]]
+name = "MY_RATE_LIMITER"
+namespace_id = "999"
+
+  [ratelimits.simple]
+  limit = 1
+  period = 10
+
+# 關閉持久化 Workers Logs；要除錯時改成 true
+[observability]
+enabled = false
+
+# 只宣告必要 Secret 名稱，不會把值寫進 GitHub
 [secrets]
-required = ["DEVELOPER_ID", "ONEBOT_ACCESS_TOKEN", "HEALTH_ADMIN_TOKEN", "GEMINI_API_KEYS", "DEEPSEEK_API_KEY"]
+required = [
+  "ONEBOT_ACCESS_TOKEN",
+  "HEALTH_ADMIN_TOKEN",
+  "GEMINI_API_KEYS",
+  "DEEPSEEK_API_KEY"
+]
