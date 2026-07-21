@@ -1,6 +1,6 @@
 import puppeteer from "@cloudflare/puppeteer";
 
-const VERSION = "0.2.2";
+const VERSION = "0.2.5";
 const BUILD_DATE = "2026-07-21";
 const DEFAULT_DEVELOPER_ID = "3569028262";
 const DEFAULTS = Object.freeze({
@@ -230,7 +230,7 @@ export default {
     const callGeminiDirectly = async (prompt) => {
       const keysStr = env.GEMINI_API_KEYS || "";
       const apiKeys = keysStr.split(',').map(k => k.trim()).filter(k => k !== "");
-      const fallbackModels = ['gemini-3.1-flash-lite', 'gemini-3-flash', 'gemini-2.5-flash-lite', 'gemini-2.5-flash'];
+      const fallbackModels = ['gemini-3.5-flash', 'gemini-3.1-flash-lite', 'gemini-3-flash-preview', 'gemini-2.5-flash', 'gemini-2.5-flash-lite'];
       if(apiKeys.length === 0) return null;
       for (const apiKey of apiKeys) {
         for (const model of fallbackModels) {
@@ -403,12 +403,25 @@ export default {
       const isAppealCommand = /^(申诉|申訴|appeal)(?:\s|$)/i.test(commandBody);
       const isScheduleCommand = /^(排程|定时|定時|schedule)(?:\s|$)/i.test(commandBody);
 
+      // 先解析明确触发关系。非白名单群的普通聊天必须完全静默，不能见人就提示。
+      let quotedMessage = null;
+      if (quotedMessageId) {
+        quotedMessage = await getQuotedMessage(env, currentGroupId, quotedMessageId);
+        quotedMessageText = quotedMessage?.text || quotedMessageText || "";
+      }
+      const botMentioned = mentionedQqs.includes(botId);
+      const repliedToBot = Boolean(quotedMessage && (quotedMessage.source === 'ai' || String(quotedMessage.senderId || '') === botId));
+      const explicitlyTriggered = botMentioned || repliedToBot || sameQqSelfAsk || isCommandMessage;
+
       // 白名單是群 AI 的硬入口；非白名單群不呼叫模型、不寫入記憶。
       if (isGroup && !(await isGroupWhitelisted(env, currentGroupId))) {
         const whitelistAdminCommand = isDeveloper && /^(群白名单|群白名單|删群白名单|刪群白名單|allowgroup|removegroup)(?:\s|$)/i.test(commandBody);
         const applicationCommand = /^(申请白名单|申請白名單)(?:\s|$)/i.test(commandBody);
         const helpCommand = /^(help|帮助|幫助)$/.test(commandBody.toLowerCase());
-        if (!whitelistAdminCommand && !applicationCommand && !helpCommand) {
+        const allowedEntryCommand = whitelistAdminCommand || applicationCommand || helpCommand;
+        if (!allowedEntryCommand) {
+          // 没有 @、没有回复机器人、不是同号 ?? 提问，也不是命令：直接忽略。
+          if (!explicitlyTriggered) return new Response(null, { status: 204 });
           const onceKey = `notice:not_whitelisted:${currentGroupId}:${userId}`;
           if (!(await dbGet(env, onceKey))) {
             await dbPut(env, onceKey, String(Date.now()));
@@ -437,14 +450,7 @@ export default {
         return new Response(null, { status: 204 });
       }
 
-      // 引用訊息先查 D1，缺少時透過 OneBot get_msg 取得原作者與正文。
-      let quotedMessage = null;
-      if (quotedMessageId) {
-        quotedMessage = await getQuotedMessage(env, currentGroupId, quotedMessageId);
-        quotedMessageText = quotedMessage?.text || quotedMessageText || "";
-      }
-
-      const botMentioned = mentionedQqs.includes(botId);
+      // 引用訊息已在白名单入口前解析，确保普通群消息不会误触发提示。
       const targetMentionQqs = mentionedQqs.filter(q => q !== botId && q !== 'all');
       const mentionContext = mentionedQqs.length > 0
         ? `当前消息明确提及：${mentionedQqs.map(q => q === botId ? `机器人账号 QQ:${q}` : q === 'all' ? '全体成员' : `成员 QQ:${q}`).join('、')}`
@@ -532,11 +538,14 @@ export default {
         'gemini-3.5-flash',
         'gemini-3.1-flash-lite',
         'gemini-3-flash-preview',
-        'gemini-2.5-flash'
+        'gemini-2.5-flash',
+        'gemini-2.5-flash-lite'
       ]);
-      const imageModels = parseList(env.GEMINI_IMAGE_MODELS, [
-        'gemini-3.1-flash-image',
-        'gemini-3-pro-image'
+      const imageModels = parseList(env.GEMINI_IMAGE_MODELS, []);
+      const imagenModels = parseList(env.IMAGEN_MODELS, [
+        'imagen-4.0-fast-generate-001',
+        'imagen-4.0-generate-001',
+        'imagen-4.0-ultra-generate-001'
       ]);
       const ttsModels = parseList(env.GEMINI_TTS_MODELS, [
         'gemini-3.1-flash-tts-preview',
@@ -573,13 +582,44 @@ export default {
             } catch (error) { lastError = error.message || String(error); }
           }
         }
+        // 当前项目的 Nano Banana 免费额度可能为 0；继续使用 Imagen 4 的独立免费 RPD。
+        let imagenPrompt = prompt;
+        try {
+          const translated = await callGemmaDecision(env, {
+            system: "将用户的绘图提示准确翻译成英文。保留人物、场景、风格、构图、文字内容与限制；只输出英文提示词，不要解释。",
+            prompt,
+            maxOutputTokens: 300
+          });
+          if (translated.text) imagenPrompt = translated.text;
+        } catch {}
+        for (const model of imagenModels) {
+          for (const key of keys) {
+            try {
+              const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:predict`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json", "x-goog-api-key": key },
+                body: JSON.stringify({
+                  instances: [{ prompt: imagenPrompt }],
+                  parameters: { sampleCount: 1, aspectRatio: "1:1", personGeneration: "allow_adult" }
+                }),
+                signal: AbortSignal.timeout(60000)
+              });
+              const data = await res.json().catch(() => ({}));
+              if (!res.ok) { lastError = `${model}: ${res.status} ${data?.error?.message || ""}`.trim(); continue; }
+              const prediction = data.predictions?.[0] || data.generatedImages?.[0] || {};
+              const base64 = prediction.bytesBase64Encoded || prediction.bytes_base64_encoded || prediction.image?.imageBytes || prediction.image?.image_bytes;
+              if (base64) return jsonReply(`${atSender}[CQ:image,file=base64://${base64}]`);
+              lastError = `${model}: 未返回图片`;
+            } catch (error) { lastError = `${model}: ${error.message || String(error)}`; }
+          }
+        }
         return jsonReply(`${atSender}图片生成失败：${lastError}`);
       }
 
       // 💖 【高情商情緒微調器】(取代卑微順從，提供情緒價值安慰)
       // ==========================================
       const botAtTag = `[CQ:at,qq=${botId}]`;
-      const isAtMeOrAi = botMentioned || sameQqSelfAsk || Boolean(quotedMessage && (quotedMessage.source === 'ai' || String(quotedMessage.senderId || '') === botId));
+      const isAtMeOrAi = botMentioned || sameQqSelfAsk || repliedToBot;
       
       // 私聊必定是對機器人說，群聊則看是否有提及
       if (isAtMeOrAi || isPrivate) {
@@ -734,7 +774,7 @@ export default {
         const activeCount = await countActiveSchedulesForUser(env, userId);
         if (!isDeveloper && DEFAULTS.scheduleMaxActivePerUser > 0 && activeCount >= DEFAULTS.scheduleMaxActivePerUser) return jsonReply(`有效排程数量已达上限。`);
         activeThinkingMessageId = await sendThinkingIndicator(env, { isGroup, groupId: currentGroupId, userId, text: '正在审查排程...' }).catch(() => null);
-        const review = await reviewScheduleWithGemini(env, JSON.stringify(parsedSchedule));
+        const review = await reviewScheduleWithGemma(env, JSON.stringify(parsedSchedule));
         if (review.decision === 'reject') return jsonReply(`排程已拒绝：${review.reason || '内容疑似违规或滥用。'}`);
         const managementAction = parseManagementScheduleAction(parsedSchedule.content);
         const mayDirectManage = permissionSet.groupOps;
@@ -1700,17 +1740,21 @@ ${parsedMemos.slice(-30).map((m, i) => `${i + 1}. ${m.text}`).join('\n')}
           // 防止连续插话洗频，设定 10 秒冷却
           if (!lastInterject || now - parseInt(lastInterject) > 10000) { 
              
-             // 🧠 第二关：呼叫 AI 助手进行语境合理性判定
+             // 🧠 第二关：只用 Gemma 进行语境合理性判定，不消耗 Gemini / DeepSeek 聊天额度。
              if (requiresAiJudgment) {
-                // 優化：用極度嚴格的 Prompt 限制 Gemini 只吐出兩個字，節省 Token 並防止判定邏輯崩潰
-                const judgePrompt = `任务：判断群聊消息是否适合插话搭腔。
-群友发言：“${cleanMessage}”
-规则：
-1. 如果是有趣的话题、疑问、可以接的梗、或者带有情绪色彩的吐槽 -> 适合。
-2. 如果是无意义的语气词、别人私下的恩怨、完全没头没尾的碎片化文字 -> 不适合。
-强制输出格式：只允许输出“适合”或“不适合”两个字，绝对禁止任何其他字符或标点符号！`;
-                
-                const judgement = await callGeminiDirectly(judgePrompt);
+                const judgePrompt = `群友发言：“${cleanMessage}”
+判断它是否适合机器人自然插话。`;
+                let judgement = "";
+                try {
+                  const judged = await callGemmaDecision(env, {
+                    system: "你是群聊插话分类器。疑问、有趣话题、可接的梗或情绪吐槽输出适合；无意义语气词、私人恩怨、无上下文碎片输出不适合。只能输出适合或不适合。",
+                    prompt: judgePrompt,
+                    maxOutputTokens: 12
+                  });
+                  judgement = judged.text;
+                } catch (error) {
+                  console.warn("Gemma interject judgement unavailable:", error);
+                }
                 
                 if (judgement && judgement.includes('适合') && !judgement.includes('不适合')) {
                     shouldReply = true;
@@ -2375,6 +2419,43 @@ async function callDeepSeek(env, { messages, userId, groupId, thinking = "disabl
   return { text, model: selectedModel, usage: data.usage || {} };
 }
 
+async function callGemmaDecision(env, { system, prompt, maxOutputTokens = 64 }) {
+  const keys = [...new Set([...parseList(env.GEMINI_API_KEYS), ...parseList(env.VECTORIZE_GEMINI_KEYS)])];
+  if (!keys.length) throw new Error("GEMMA_API_KEYS_MISSING");
+  const models = parseList(env.GEMMA_DECISION_MODELS, ["gemma-4-26b-a4b-it", "gemma-4-31b-it"]);
+  let lastError = "GEMMA_DECISION_FAILED";
+  for (const model of models) {
+    for (const key of keys) {
+      try {
+        const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(key)}`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            contents: [{ role: "user", parts: [{ text: String(prompt || "") }] }],
+            systemInstruction: { parts: [{ text: String(system || "只输出分类结果。") }] },
+            generationConfig: {
+              maxOutputTokens,
+              temperature: 0,
+              thinkingConfig: { thinkingLevel: "minimal" }
+            }
+          }),
+          signal: AbortSignal.timeout(15000)
+        });
+        const data = await response.json().catch(() => ({}));
+        if (response.ok) {
+          const parts = data.candidates?.[0]?.content?.parts || [];
+          const text = parts.filter(part => !part.thought).map(part => part.text || "").join("").trim();
+          if (text) return { text, model, usage: data.usageMetadata || {} };
+        }
+        lastError = `GEMMA_${response.status}:${data?.error?.message || "UNKNOWN"}`;
+      } catch (error) {
+        lastError = String(error?.message || error);
+      }
+    }
+  }
+  throw new Error(lastError);
+}
+
 async function callGeminiGenerate(env, { models, system, contents, maxOutputTokens = 1000, temperature = 0.7, useSearch = true }) {
   const keys = [...new Set([...parseList(env.GEMINI_API_KEYS), ...parseList(env.VECTORIZE_GEMINI_KEYS)])];
   if (!keys.length) throw new Error("GEMINI_API_KEYS_MISSING");
@@ -2407,26 +2488,31 @@ async function callGeminiGenerate(env, { models, system, contents, maxOutputToke
   throw new Error(lastError);
 }
 
-async function routeProviderWithGemini(env, text) {
+async function routeProviderWithGemma(env, text) {
   try {
-    const result = await callGeminiGenerate(env, {
-      models: parseList(env.GEMINI_ROUTER_MODELS, ["gemini-3.1-flash-lite", "gemini-2.5-flash-lite"]),
-      system: "你是模型路由器。只输出 GEMINI、DEEPSEEK_HIGH 或 DEEPSEEK_MAX。图片语音视频和需要Google搜索的任务选GEMINI；复杂代码、严谨推理、长分析选DEEPSEEK。",
-      contents: [{ role: "user", parts: [{ text: String(text).slice(0, 3000) }] }], maxOutputTokens: 16, temperature: 0, useSearch: false
+    const result = await callGemmaDecision(env, {
+      system: "你是模型路由分类器。只能输出 GEMINI、DEEPSEEK_HIGH 或 DEEPSEEK_MAX。需要图片、语音、视频、多模态或 Google 搜索的任务选 GEMINI；复杂代码、严谨推理、长分析选 DEEPSEEK_HIGH；极高难度、多阶段证明或大型架构分析选 DEEPSEEK_MAX。普通聊天、简单问答选 GEMINI。",
+      prompt: String(text).slice(0, 3000),
+      maxOutputTokens: 20
     });
     const upper = result.text.toUpperCase();
     if (upper.includes("MAX")) return "deepseek_max";
     if (upper.includes("DEEPSEEK")) return "deepseek_high";
     return "gemini";
-  } catch {
-    return /代码|程式|证明|推理|分析|规划|規劃|debug|架构|架構/i.test(text) && text.length > 80 ? "deepseek_high" : "gemini";
+  } catch (error) {
+    console.warn("Gemma provider routing unavailable, using local rules:", error);
+    return /大型|完整架构|完整架構|严格证明|嚴格證明|深度研究|全面分析/i.test(text) && text.length > 800
+      ? "deepseek_max"
+      : /代码|程式|证明|證明|推理|分析|规划|規劃|debug|架构|架構/i.test(text) && text.length > 80
+        ? "deepseek_high"
+        : "gemini";
   }
 }
 
 async function generateHybridReply(env, args) {
   let pref = args.modelPref || "auto";
   if (args.hasMedia) pref = "gemini";
-  if (pref === "auto") pref = await routeProviderWithGemini(env, args.cleanText);
+  if (pref === "auto") pref = await routeProviderWithGemma(env, args.cleanText);
   const deepseekEnabled = await getFeatureFlag(env, "deepseek_enabled", true);
   if (pref.startsWith("deepseek") && deepseekEnabled && env.DEEPSEEK_API_KEY && !args.hasMedia) {
     const thinking = pref === "deepseek" ? "disabled" : "enabled";
@@ -2601,16 +2687,17 @@ function nextTaipeiMonthly(day, time, now = Date.now()) {
   return target;
 }
 
-async function reviewScheduleWithGemini(env, content) {
+async function reviewScheduleWithGemma(env, content) {
   try {
-    const result = await callGeminiGenerate(env, {
-      models: parseList(env.GEMINI_REVIEW_MODELS, ["gemini-3.1-flash-lite", "gemini-2.5-flash-lite"]),
+    const result = await callGemmaDecision(env, {
       system: "你是排程安全审查器。判断是否明显违法、骚扰、洗版、冒充、泄露隐私、恶意群管理或其他滥用。只输出JSON：{\"decision\":\"allow|uncertain|reject\",\"reason\":\"简短原因\"}。不确定就uncertain。",
-      contents: [{ role: "user", parts: [{ text: String(content).slice(0, 4000) }] }], maxOutputTokens: 120, temperature: 0, useSearch: false
+      prompt: String(content).slice(0, 4000),
+      maxOutputTokens: 120
     });
     const json = JSON.parse(result.text.match(/\{[\s\S]*\}/)?.[0] || "{}");
     return ["allow", "uncertain", "reject"].includes(json.decision) ? json : { decision: "uncertain", reason: "无法稳定判断" };
-  } catch {
+  } catch (error) {
+    console.warn("Gemma schedule review unavailable:", error);
     return { decision: "uncertain", reason: "审查服务暂时不可用" };
   }
 }
@@ -2808,7 +2895,11 @@ async function processConflictSignal(env, { groupId, userId, senderName, text, b
   let conflict = rough;
   try {
     const logs = (await readJson(env, `recent_logs:${groupId}`, [])).slice(-12).join("\n");
-    const result = await callGeminiGenerate(env, { models: parseList(env.GEMINI_REVIEW_MODELS, ["gemini-3.1-flash-lite", "gemini-2.5-flash-lite"]), system: "判断QQ群最近对话是否正在发生真实持续争吵或人身攻击。只输出JSON：{\"conflict\":true/false,\"severity\":0-3}。玩笑互呛应为false。", contents: [{ role: "user", parts: [{ text: logs }] }], maxOutputTokens: 80, temperature: 0, useSearch: false });
+    const result = await callGemmaDecision(env, {
+      system: "判断QQ群最近对话是否正在发生真实持续争吵或人身攻击。只输出JSON：{\"conflict\":true/false,\"severity\":0-3}。玩笑互呛应为false。",
+      prompt: logs,
+      maxOutputTokens: 80
+    });
     const obj = JSON.parse(result.text.match(/\{[\s\S]*\}/)?.[0] || "{}"); conflict = Boolean(obj.conflict);
   } catch {}
   if (!conflict) { if (state.stage) await dbDel(env, `conflict:${groupId}`); return null; }
@@ -2831,7 +2922,7 @@ async function buildHealthState(env) {
   return {
     ok: true, version: VERSION, buildDate: BUILD_DATE, at: new Date().toISOString(),
     bindings: { db: Boolean(env.DB), vectorize: Boolean(env.VECTORIZE), ai: Boolean(env.AI), browser: Boolean(env.BROWSER || env.MYBROWSER), onebotHub: Boolean(env.ONEBOT_HUB) },
-    providers: { gemini: Boolean(env.GEMINI_API_KEYS || env.VECTORIZE_GEMINI_KEYS), deepseek: Boolean(env.DEEPSEEK_API_KEY), liveModel: env.GEMINI_LIVE_MODEL || "gemini-3.1-flash-live-preview" },
+    providers: { gemini: Boolean(env.GEMINI_API_KEYS || env.VECTORIZE_GEMINI_KEYS), gemmaDecisionModels: parseList(env.GEMMA_DECISION_MODELS, ["gemma-4-26b-a4b-it", "gemma-4-31b-it"]), deepseek: Boolean(env.DEEPSEEK_API_KEY), liveModel: env.GEMINI_LIVE_MODEL || "gemini-3.1-flash-live-preview" },
     onebot, privateChat: await getFeatureFlag(env, "private_chat_enabled", false), privateSchedule: await getFeatureFlag(env, "private_schedule_enabled", false), privateAppeal: await getFeatureFlag(env, "private_appeal_enabled", true)
   };
 }
@@ -3148,7 +3239,7 @@ async function handlePortalApi(request, env, url) {
     const parsed = parseScheduleRequest(String(body.schedule || ""));
     if (!parsed.ok) return jsonResponse(parsed, 400);
     if (DEFAULTS.scheduleMaxActivePerUser > 0 && await countActiveSchedulesForUser(env, authed.qq) >= DEFAULTS.scheduleMaxActivePerUser && !permissions.developer) return jsonResponse({ ok: false, message: `有效排程数量已达上限。` }, 429);
-    const review = await reviewScheduleWithGemini(env, JSON.stringify(parsed));
+    const review = await reviewScheduleWithGemma(env, JSON.stringify(parsed));
     if (review.decision === "reject") return jsonResponse({ ok: false, message: `排程已拒绝：${review.reason}` }, 400);
     const managementAction = parseManagementScheduleAction(parsed.content);
     const directManagement = Boolean(managementAction && (permissions.nativeAdmin || permissions.groupOps || permissions.developer));
