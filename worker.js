@@ -1,6 +1,6 @@
 import puppeteer from "@cloudflare/puppeteer";
 
-const VERSION = "0.2.0";
+const VERSION = "0.2.1";
 const BUILD_DATE = "2026-07-21";
 const DEFAULT_DEVELOPER_ID = "3569028262";
 const DEFAULTS = Object.freeze({
