@@ -25,10 +25,22 @@ binding = "AI"
 name = "ONEBOT_HUB"
 class_name = "OneBotHub"
 
-# 保留已成功建立 OneBotHub 的 migration tag。
+# Durable Object migration 歷史不可刪除或改名。
+# Cloudflare 已部署到 v2_budget_guard；即使目前不再綁定 BudgetGuard，
+# 仍必須保留 v1、v2，否則 Wrangler 會嘗試從 v1 重新套用並失敗。
 [[migrations]]
 tag = "v1_onebot_hub"
 new_sqlite_classes = ["OneBotHub"]
+
+[[migrations]]
+tag = "v2_budget_guard"
+new_sqlite_classes = ["BudgetGuard"]
+
+# Cloudflare 遠端目前已部署至 v2_budget_guard。
+# 新部署只會執行此 v3，移除已不再由 worker.js 匯出或綁定的 BudgetGuard。
+[[migrations]]
+tag = "v3_remove_budget_guard"
+deleted_classes = ["BudgetGuard"]
 
 # D1
 [[d1_databases]]
