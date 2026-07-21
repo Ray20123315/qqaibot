@@ -1,10 +1,10 @@
 {
   "name": "qqai-bot-worker",
-  "version": "0.2.2",
+  "version": "0.2.5",
   "private": true,
   "type": "module",
   "scripts": {
-    "check": "node verify-config.mjs && node --check worker.js",
+    "check": "node verify-config.mjs && node verify-migration.mjs && node verify-model-routing.mjs && node --check worker.js",
     "deploy": "wrangler deploy --config wrangler.toml --no-assets"
   },
   "dependencies": {
