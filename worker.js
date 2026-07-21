@@ -1,6 +1,6 @@
 import puppeteer from "@cloudflare/puppeteer";
 
-const VERSION = "0.2.5";
+const VERSION = "0.2.7";
 const BUILD_DATE = "2026-07-21";
 const DEFAULT_DEVELOPER_ID = "3569028262";
 const DEFAULTS = Object.freeze({
@@ -201,12 +201,14 @@ export default {
     }
 
     const rawMessage = String(body.raw_message || (typeof body.message === 'string' ? body.message : ""));
-    const botId = body.self_id ? body.self_id.toString() : "";
+    const eventSelfId = body.self_id ? body.self_id.toString() : "";
+    // 使用 OneBot 事件实际 self_id 判断 @；随机插话仍由插话率独立决定。
+    const botId = eventSelfId;
     const rawUserId = body.user_id ? body.user_id.toString() : "";
     const isSentEvent = body.post_type === "message_sent";
-    // message_sent 的 user_id 在不同 OneBot 实现中可能代表收件人；发送者固定视为 self_id。
-    const userId = isSentEvent && botId ? botId : rawUserId;
-    const isSelfAccount = Boolean(userId && botId && userId === botId);
+    // message_sent 的 user_id 在不同 OneBot 实现中可能代表收件人；发送者固定视为事件 self_id。
+    const userId = isSentEvent && eventSelfId ? eventSelfId : rawUserId;
+    const isSelfAccount = Boolean(userId && eventSelfId && userId === eventSelfId);
     let sameQqSelfAsk = false;
     let sameQqHumanOnly = false;
 
@@ -220,7 +222,7 @@ export default {
     const jsonReply = (text) => {
       const thinkingMessageId = activeThinkingMessageId;
       activeThinkingMessageId = null;
-      return new Response(JSON.stringify({ reply: text, auto_escape: false, thinking_message_id: thinkingMessageId || null }), {
+      return new Response(JSON.stringify({ reply: text, auto_escape: false, thinking_message_id: thinkingMessageId || null, record_reply: false, reply_kind: "command_or_system" }), {
         status: 200,
         headers: { 'Content-Type': 'application/json; charset=utf-8' }
       });
@@ -265,12 +267,12 @@ export default {
     };
 
     // 【多模态附件】限制大小、类型与私有地址，避免耗尽 Worker 资源。
-    const fetchImageAsBase64 = async (targetUrl) => {
-      const item = await fetchMediaAsBase64(targetUrl, 8 * 1024 * 1024, ["image/"]);
+    const fetchImageAsBase64 = async (descriptor) => {
+      const item = await resolveOneBotMediaAsBase64(env, descriptor, "image", 8 * 1024 * 1024, ["image/"]);
       return item ? { base64: item.base64, mimeType: item.mimeType } : null;
     };
-    const fetchAudioAsBase64 = async (targetUrl) => fetchMediaAsBase64(targetUrl, 12 * 1024 * 1024, ["audio/", "application/octet-stream"]);
-    const fetchVideoAsBase64 = async (targetUrl) => fetchMediaAsBase64(targetUrl, 25 * 1024 * 1024, ["video/", "application/octet-stream"]);
+    const fetchAudioAsBase64 = async (descriptor) => resolveOneBotMediaAsBase64(env, descriptor, "record", 12 * 1024 * 1024, ["audio/", "application/octet-stream"]);
+    const fetchVideoAsBase64 = async (descriptor) => resolveOneBotMediaAsBase64(env, descriptor, "video", 25 * 1024 * 1024, ["video/", "application/octet-stream"]);
 
     // ==========================================
     // 🚀 主邏輯業務區
@@ -322,8 +324,11 @@ export default {
       // ========================================================
       let userMessage = "";
       let imageUrl = null;
+      let imageFile = null;
       let voiceUrl = null;
+      let voiceFile = null;
       let videoUrl = null;
+      let videoFile = null;
       let mentionedQqs = [];
       let replyMessageId = body.message_id ? body.message_id.toString() : "";
       let quotedMessageId = "";
@@ -334,12 +339,15 @@ export default {
         mentionedQqs = [...userMessage.matchAll(/\[CQ:at,qq=(\d+|all)\]/g)].map(m => m[1]);
         const replyMatch = userMessage.match(/\[CQ:reply,[^\]]*id=([^,\]]+)/);
         quotedMessageId = replyMatch ? replyMatch[1] : "";
-        const imgUrlMatch = userMessage.match(/\[CQ:image,[^\]]*url=([^,\]]+)/);
-        imageUrl = imgUrlMatch ? imgUrlMatch[1] : null;
-        const voiceUrlMatch = userMessage.match(/\[CQ:record,[^\]]*url=([^,\]]+)/);
-        voiceUrl = voiceUrlMatch ? voiceUrlMatch[1] : null;
-        const videoUrlMatch = userMessage.match(/\[CQ:video,[^\]]*url=([^,\]]+)/);
-        videoUrl = videoUrlMatch ? videoUrlMatch[1] : null;
+        const imageMedia = extractMediaDescriptor(userMessage, "image");
+        imageUrl = imageMedia.url;
+        imageFile = imageMedia.file;
+        const voiceMedia = extractMediaDescriptor(userMessage, "record");
+        voiceUrl = voiceMedia.url;
+        voiceFile = voiceMedia.file;
+        const videoMedia = extractMediaDescriptor(userMessage, "video");
+        videoUrl = videoMedia.url;
+        videoFile = videoMedia.file;
       } else if (Array.isArray(body.message)) {
         for (const part of body.message) {
           if (part.type === "text") {
@@ -352,11 +360,14 @@ export default {
             userMessage += quotedMessageId ? `[CQ:reply,id=${quotedMessageId}]` : "";
             quotedMessageText = part.data.text || part.data.message || "";
           } else if (part.type === "image") {
-            imageUrl = part.data.url || part.data.file || null;
+            imageUrl = part.data?.url || null;
+            imageFile = part.data?.file || null;
           } else if (part.type === "video") {
-            videoUrl = part.data.url || part.data.file || null;
+            videoUrl = part.data?.url || null;
+            videoFile = part.data?.file || null;
           } else if (part.type === "record") {
-            voiceUrl = part.data.url || part.data.file || null;
+            voiceUrl = part.data?.url || null;
+            voiceFile = part.data?.file || null;
           }
         }
       }
@@ -381,7 +392,7 @@ export default {
           groupId: currentGroupId,
           peerId: String(body.target_id || body.peer_id || rawUserId || userId),
           text: cleanMessage,
-          mediaTypes: [imageUrl ? 'image' : '', voiceUrl ? 'record' : '', videoUrl ? 'video' : ''].filter(Boolean)
+          mediaTypes: [(imageUrl || imageFile) ? 'image' : '', (voiceUrl || voiceFile) ? 'record' : '', (videoUrl || videoFile) ? 'video' : ''].filter(Boolean)
         });
         if (apiMessage) return new Response(null, { status: 204 });
 
@@ -408,8 +419,19 @@ export default {
       if (quotedMessageId) {
         quotedMessage = await getQuotedMessage(env, currentGroupId, quotedMessageId);
         quotedMessageText = quotedMessage?.text || quotedMessageText || "";
+        // 允许“回复图片并 @机器人”读图；只从被引用消息取媒体，不猜测上一条群消息。
+        if (!imageUrl && !imageFile && quotedMessage?.message) {
+          const quotedImage = extractMediaDescriptor(quotedMessage.message, "image");
+          imageUrl = quotedImage.url;
+          imageFile = quotedImage.file;
+        }
+        if (!voiceUrl && !voiceFile && quotedMessage?.message) {
+          const quotedVoice = extractMediaDescriptor(quotedMessage.message, "record");
+          voiceUrl = quotedVoice.url;
+          voiceFile = quotedVoice.file;
+        }
       }
-      const botMentioned = mentionedQqs.includes(botId);
+      const botMentioned = Boolean(botId && mentionedQqs.includes(botId));
       const repliedToBot = Boolean(quotedMessage && (quotedMessage.source === 'ai' || String(quotedMessage.senderId || '') === botId));
       const explicitlyTriggered = botMentioned || repliedToBot || sameQqSelfAsk || isCommandMessage;
 
@@ -429,6 +451,16 @@ export default {
           }
           return new Response(null, { status: 204 });
         }
+      }
+
+      // v0.2.6 以前無法區分聊天回覆與系統回覆；一次性移除舊 recent_logs 中全部機器人條目，
+      // 避免歷史白名單提示、權限提示或指令結果繼續污染摘要、模仿與判斷語料。
+      if (isGroup && botId) await purgeLegacyBotRepliesFromRecentLogs(env, currentGroupId, botId);
+
+      // 用户问“看到图片了吗”但当前消息既未附图、也未回复图片时，不允许模型假装看见。
+      const hasImageReference = Boolean(imageUrl || imageFile);
+      if (explicitlyTriggered && /(?:看|讀|读|识别|識別|看到|看见|看見).{0,10}(?:图片|圖片|照片|图|圖)|(?:图片|圖片|照片|图|圖).{0,10}(?:看到|看见|看見|看得到|看得見)/i.test(cleanMessage) && !hasImageReference) {
+        return jsonReply(`${atSender}我这则消息没有收到可读取的图片。请直接“回复那张图片”再 @我，或把图片和问题放在同一则消息发送。`);
       }
 
       // 私聊聊天、私聊排程、匿名申訴各自使用獨立開關。
@@ -480,7 +512,7 @@ export default {
       const sensitiveWords = ['习近平', '六四', '台独', '法轮功', ...groupKeywords];
       if (sensitiveWords.some(word => cleanMessage.includes(word))) return new Response(null, { status: 204 });
 
-      // 🎲 插話每日上限不設限，只保留概率、冷卻與免打擾。
+      // 🎲 插話每日上限不設限，只保留概率、冷卻與免打擾；插話率本身就是開關，0% 代表關閉。
       const interjectChance = Math.max(0, Math.min(100, Number(await dbGet(env, `interject_rate:${currentGroupId}`) || String(DEFAULTS.interjectRate)))) / 100;
       const requiresAiJudgment = true;
       const isImitationGlobal = true;
@@ -515,7 +547,8 @@ export default {
       // ==========================================
       // 🛑 防禦陣線
       // ==========================================
-      if (!userMessage || userMessage.trim() === "") {
+      const hasAnyMediaAttachment = Boolean(imageUrl || imageFile || voiceUrl || voiceFile || videoUrl || videoFile);
+      if ((!userMessage || userMessage.trim() === "") && !hasAnyMediaAttachment) {
         console.log(`⚠️ 偵測到群友 ${userId} 僅 @機器人 但未輸入有效內容，自動快速攔截。`);
         return new Response(null, { status: 204 });
       }
@@ -1567,7 +1600,7 @@ export default {
          
          // 1. 建立標準歷史格式：[昵称(QQ号)]: 内容
          const relationForLog = relationContext ? ` ${relationContext.replace(/\n/g, " ")}` : "";
-         const logEntry = `[${senderCard || '群友'}(QQ:${userId})]: ${cleanMessage || (imageUrl?"发了张图":voiceUrl?"发了语音":"发了视频")}${relationForLog}`;
+         const logEntry = `[${senderCard || '群友'}(QQ:${userId})]: ${cleanMessage || ((imageUrl || imageFile)?"发了张图":(voiceUrl || voiceFile)?"发了语音":"发了视频")}${relationForLog}`;
          recentLogs.push(logEntry);
          
          // 保持最多 200 条记录防止撑爆空间
@@ -1577,7 +1610,7 @@ export default {
          ctx.waitUntil(dbPut(env, logKey, JSON.stringify(recentLogs)));
          ctx.waitUntil(dbPut(env, `group_last_message:${currentGroupId}`, String(Date.now())));
          if (replyMessageId) {
-           ctx.waitUntil(dbPut(env, `message:${currentGroupId}:${replyMessageId}`, JSON.stringify({ messageId: replyMessageId, groupId: currentGroupId, senderId: userId, senderName: senderCard, text: cleanMessage || (imageUrl?'[图片]':voiceUrl?'[语音]':videoUrl?'[视频]':''), mentions: mentionedQqs, replyId: quotedMessageId, source: isSelfAccount ? 'owner-human' : 'human', createdAt: Date.now() })));
+           ctx.waitUntil(dbPut(env, `message:${currentGroupId}:${replyMessageId}`, JSON.stringify({ messageId: replyMessageId, groupId: currentGroupId, senderId: userId, senderName: senderCard, text: cleanMessage || ((imageUrl || imageFile)?'[图片]':(voiceUrl || voiceFile)?'[语音]':(videoUrl || videoFile)?'[视频]':''), mentions: mentionedQqs, replyId: quotedMessageId, source: isSelfAccount ? 'owner-human' : 'human', createdAt: Date.now() })));
          }
 
          // ==========================================
@@ -1729,7 +1762,7 @@ ${parsedMemos.slice(-30).map((m, i) => `${i + 1}. ${m.text}`).join('\n')}
       let isAutoInterject = false;
 
       // 只有在：不是被艾特、是群聊、字数大于2、不是指令(!/！)的情况下，才进入随机插话判定
-      if (!shouldReply && isGroup && cleanMessage.length > 2 && !msgLower.startsWith('!') && !msgLower.startsWith('！')) {
+      if (!shouldReply && isGroup && interjectChance > 0 && cleanMessage.length > 2 && !msgLower.startsWith('!') && !msgLower.startsWith('！')) {
         const targetDnd = await dbGet(env, `dnd:${currentGroupId}:${userId}`);
         
         // 🔒 第一关：目标用户未开启免打扰，且通过设定的随机概率门槛
@@ -1808,9 +1841,9 @@ ${parsedMemos.slice(-30).map((m, i) => `${i + 1}. ${m.text}`).join('\n')}
           finalStylePrompt += `\n\n【当前消息关系上下文】\n${relationContext}\n如果用户是在回复某条消息，必须把引用原文与用户当前正文分开理解；如果用户 @ 了别人，该 QQ 是被点名对象，不是发言者。`;
       }
 
-      // AI 任务开始时先发送临时状态，再整理上下文。
-      if (!activeThinkingMessageId) {
-        activeThinkingMessageId = await sendThinkingIndicator(env, { isGroup, groupId: currentGroupId, userId, text: imageUrl ? '正在读图...' : voiceUrl ? '正在听语音...' : videoUrl ? '正在分析视频...' : '正在思考...' }).catch(() => null);
+      // 只有明确 @ 机器人时显示临时状态；随机插话、回复触发与普通私聊均不显示“正在思考”。
+      if (botMentioned && !isAutoInterject && !activeThinkingMessageId) {
+        activeThinkingMessageId = await sendThinkingIndicator(env, { isGroup, groupId: currentGroupId, userId, text: (imageUrl || imageFile) ? '正在读图...' : (voiceUrl || voiceFile) ? '正在听语音...' : (videoUrl || videoFile) ? '正在分析视频...' : '正在思考...' }).catch(() => null);
       }
 
       // DeepSeek 先做增量上下文整理，再把结构化摘要交给 Gemini 或 DeepSeek 最终回答。
@@ -1834,17 +1867,38 @@ ${parsedMemos.slice(-30).map((m, i) => `${i + 1}. ${m.text}`).join('\n')}
       aiInputParts.push({ text: userPrompt });
 
       // 2. 注入多模态媒体 (图片/语音/视频)
-      if (imageUrl) {
-        const imageData = await fetchImageAsBase64(imageUrl);
-        if (imageData) aiInputParts.push({ inlineData: { mimeType: imageData.mimeType, data: imageData.base64 } });
+      let loadedImage = false;
+      if (imageUrl || imageFile) {
+        try {
+          const imageData = await fetchImageAsBase64({ url: imageUrl, file: imageFile });
+          if (imageData) {
+            loadedImage = true;
+            aiInputParts.push({ inlineData: { mimeType: imageData.mimeType, data: imageData.base64 } });
+          }
+        } catch (error) {
+          console.warn("NapCat image download failed:", error);
+          await clearThinkingIndicator();
+          return jsonReply(`${atSender}我收到了图片消息，但 NapCat 没有提供 Cloudflare 可下载的图片网址。请更新 NapCat 后重试，或重新发送图片并 @我。`);
+        }
       }
-      if (voiceUrl) {
-        const audioData = await fetchAudioAsBase64(voiceUrl);
-        if (audioData) aiInputParts.push({ inlineData: { mimeType: audioData.mimeType, data: audioData.base64 } });
+      if (voiceUrl || voiceFile) {
+        try {
+          const audioData = await fetchAudioAsBase64({ url: voiceUrl, file: voiceFile });
+          if (audioData) aiInputParts.push({ inlineData: { mimeType: audioData.mimeType, data: audioData.base64 } });
+        } catch (error) {
+          console.warn("NapCat audio download failed:", error);
+        }
       }
-      if (videoUrl) {
-        const videoData = await fetchVideoAsBase64(videoUrl);
-        if (videoData) aiInputParts.push({ inlineData: { mimeType: videoData.mimeType, data: videoData.base64 } });
+      if (videoUrl || videoFile) {
+        try {
+          const videoData = await fetchVideoAsBase64({ url: videoUrl, file: videoFile });
+          if (videoData) aiInputParts.push({ inlineData: { mimeType: videoData.mimeType, data: videoData.base64 } });
+        } catch (error) {
+          console.warn("NapCat video download failed:", error);
+        }
+      }
+      if (!loadedImage) {
+        finalStylePrompt += "\n\n【视觉真实性规则】当前请求没有成功载入任何图片像素。绝对禁止声称看到了图片、描述图片内容或假装能读取上一条未引用的图片；若用户询问图片，应明确要求他回复该图片或重新发送。";
       }
 
       // 3. 将 System Prompt 转化为 Model 指令层
@@ -1874,7 +1928,7 @@ ${parsedMemos.slice(-30).map((m, i) => `${i + 1}. ${m.text}`).join('\n')}
       try {
         const generated = await generateHybridReply(env, {
           modelPref, chatModels, finalStylePrompt, contents, cleanText: cleanMessage,
-          hasMedia: Boolean(imageUrl || voiceUrl || videoUrl), userId, groupId: currentGroupId, isDeveloper
+          hasMedia: Boolean(imageUrl || imageFile || voiceUrl || voiceFile || videoUrl || videoFile), userId, groupId: currentGroupId, isDeveloper
         });
         baseText = String(generated?.text || '').trim();
         usedModel = generated?.model || 'unknown';
@@ -1920,7 +1974,7 @@ ${parsedMemos.slice(-30).map((m, i) => `${i + 1}. ${m.text}`).join('\n')}
       });
       const thinkingMessageIdForReply = activeThinkingMessageId;
       activeThinkingMessageId = null;
-      return new Response(JSON.stringify({ reply: visibleReplyText, reply_plan: replyPlan, thinking_message_id: thinkingMessageIdForReply || null }), {
+      return new Response(JSON.stringify({ reply: visibleReplyText, reply_plan: replyPlan, thinking_message_id: thinkingMessageIdForReply || null, record_reply: true, reply_kind: "conversation" }), {
         status: 200, headers: { 'Content-Type': 'application/json; charset=utf-8' }
       });
 
@@ -2152,7 +2206,8 @@ function outboundFingerprint(info) {
 
 async function markOutboundPending(env, info) {
   const key = `outbound_pending:${outboundFingerprint(info)}`;
-  await dbPut(env, key, JSON.stringify({ at: Date.now(), ...info }));
+  // 僅保存短期去重時間戳；不保存任何指令或回覆正文。
+  await dbPut(env, key, JSON.stringify({ at: Date.now() }));
   return key;
 }
 
@@ -2199,6 +2254,22 @@ async function runOneBotGroupOperation(env, action, params, audit) {
   }
 }
 
+async function purgeLegacyBotRepliesFromRecentLogs(env, groupId, botId) {
+  const gid = String(groupId || "");
+  const bid = String(botId || "");
+  if (!gid || !bid) return;
+  const doneKey = `cleanup:v027:recent_logs_bot_replies:${gid}`;
+  if (await dbGet(env, doneKey)) return;
+  const key = `recent_logs:${gid}`;
+  const logs = await readJson(env, key, []);
+  if (Array.isArray(logs) && logs.length) {
+    const marker = `(QQ:${bid})]:`;
+    const cleaned = logs.filter(line => !String(line || "").includes(marker));
+    if (cleaned.length !== logs.length) await dbPut(env, key, JSON.stringify(cleaned.slice(-200)));
+  }
+  await dbPut(env, doneKey, String(Date.now()));
+}
+
 async function recordStructuredMessage(env, item) {
   const record = {
     messageId: String(item.messageId || ""), groupId: String(item.groupId || ""),
@@ -2207,7 +2278,9 @@ async function recordStructuredMessage(env, item) {
     source: item.source || "human", createdAt: Date.now()
   };
   if (record.messageId) await dbPut(env, `message:${record.groupId}:${record.messageId}`, JSON.stringify(record));
-  if (record.groupId) {
+  // 指令回覆、白名單提示、權限提示與其他系統訊息只保留引用辨識所需的 message metadata，
+  // 不加入 recent_logs，也不成為模仿、摘要、衝突判斷或後續 AI 聊天的語料。
+  if (record.groupId && item.includeInRecentLogs !== false) {
     const key = `recent_logs:${record.groupId}`;
     const logs = await readJson(env, key, []);
     logs.push(`[${record.senderName}(QQ:${record.senderId})]: ${record.text}`);
@@ -2230,6 +2303,77 @@ function extractOutboundMediaTypes(message) {
     if (part?.type === "text") scan(part.data?.text);
   }
   return [...types].sort();
+}
+
+function decodeCqValue(value) {
+  return String(value || "")
+    .replace(/&#44;/g, ",")
+    .replace(/&#91;/g, "[")
+    .replace(/&#93;/g, "]")
+    .replace(/&amp;/g, "&");
+}
+
+function parseCqAttributes(raw) {
+  const attrs = {};
+  for (const item of String(raw || "").split(",")) {
+    const index = item.indexOf("=");
+    if (index <= 0) continue;
+    attrs[item.slice(0, index).trim()] = decodeCqValue(item.slice(index + 1));
+  }
+  return attrs;
+}
+
+function extractMediaDescriptor(message, type) {
+  if (Array.isArray(message)) {
+    const part = message.find(item => item?.type === type);
+    return { url: String(part?.data?.url || "") || null, file: String(part?.data?.file || "") || null };
+  }
+  const match = String(message || "").match(new RegExp(`\\[CQ:${type},([^\\]]+)\\]`, "i"));
+  if (!match) return { url: null, file: null };
+  const attrs = parseCqAttributes(match[1]);
+  return { url: attrs.url || null, file: attrs.file || null };
+}
+
+async function decodeInlineMedia(value, maxBytes, allowedPrefixes) {
+  const text = String(value || "");
+  let mimeType = "application/octet-stream";
+  let base64 = "";
+  if (text.startsWith("base64://")) {
+    base64 = text.slice(9);
+  } else {
+    const match = text.match(/^data:([^;,]+);base64,(.+)$/s);
+    if (!match) return null;
+    mimeType = match[1].toLowerCase();
+    base64 = match[2];
+  }
+  if (!allowedPrefixes.some(prefix => mimeType.startsWith(prefix)) && mimeType !== "application/octet-stream") throw new Error(`不支持的媒体类型：${mimeType}`);
+  const estimated = Math.floor(base64.length * 3 / 4);
+  if (estimated > maxBytes) throw new Error("媒体文件过大");
+  return { base64, mimeType, size: estimated };
+}
+
+async function resolveOneBotMediaAsBase64(env, descriptor, kind, maxBytes, allowedPrefixes) {
+  const url = String(descriptor?.url || "").trim();
+  const file = String(descriptor?.file || "").trim();
+  for (const value of [url, file]) {
+    if (!value) continue;
+    const inline = await decodeInlineMedia(value, maxBytes, allowedPrefixes);
+    if (inline) return inline;
+    if (/^https?:\/\//i.test(value)) return fetchMediaAsBase64(value, maxBytes, allowedPrefixes);
+  }
+  if (file && kind === "image") {
+    const data = await callOneBotAction(env, { action: "get_image", params: { file } }, 15000);
+    const remoteUrl = String(data?.url || "").trim();
+    if (/^https?:\/\//i.test(remoteUrl)) return fetchMediaAsBase64(remoteUrl, maxBytes, allowedPrefixes);
+    throw new Error("get_image 未返回公网 URL");
+  }
+  if (file && kind === "record") {
+    const data = await callOneBotAction(env, { action: "get_record", params: { file, out_format: "mp3" } }, 15000);
+    const remoteUrl = String(data?.url || "").trim();
+    if (/^https?:\/\//i.test(remoteUrl)) return fetchMediaAsBase64(remoteUrl, maxBytes, allowedPrefixes);
+    throw new Error("get_record 未返回公网 URL");
+  }
+  throw new Error("媒体只有 NapCat 本机路径，Cloudflare 无法直接读取");
 }
 
 function extractMessageText(message) {
@@ -3552,17 +3696,17 @@ function getAppealPage(host) {
 
 function getPortalHomePage(host) {
   return `<!doctype html><html lang="zh-Hant"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>QQAIbot Portal</title><style>
-*{box-sizing:border-box}html,body{margin:0;min-height:100%;font-family:system-ui,-apple-system,"Segoe UI",sans-serif;background:#03050a;color:#edf6ff}canvas{position:fixed;inset:0;width:100%;height:100%;display:block}.shell{position:relative;z-index:1;min-height:100vh;display:grid;grid-template-columns:minmax(0,1fr) 390px;gap:28px;align-items:end;padding:40px}.hero{max-width:780px;padding-bottom:24px}.brand{color:#71e7ff}.hero h1{font-size:clamp(38px,6vw,78px);line-height:1;margin:10px 0 16px}.hero p,.muted{color:#a9b9cc;line-height:1.7}.panel,.card{border:1px solid #ffffff22;background:#06101ddd;backdrop-filter:blur(16px);border-radius:14px;padding:18px}.dashboard{display:none;position:relative;z-index:1;min-height:100vh;padding:22px;background:#03050ae8}.top{max-width:1480px;margin:auto;display:flex;justify-content:space-between;gap:12px;align-items:center}.tabs{max-width:1480px;margin:15px auto;display:flex;gap:8px;flex-wrap:wrap}.tab,button,.btn{border:0;border-radius:9px;height:40px;padding:0 14px;background:#63dcff;color:#03111a;font-weight:800;cursor:pointer;text-decoration:none;display:inline-flex;align-items:center;justify-content:center}.tab{background:#0c1a2b;color:#dff7ff;border:1px solid #ffffff1c}.view{display:none;max-width:1480px;margin:auto}.view.active{display:block}.grid{display:grid;grid-template-columns:repeat(12,minmax(0,1fr));gap:14px}.card{grid-column:span 4;min-width:0}.wide{grid-column:span 8}.full{grid-column:1/-1}label{display:block;margin:11px 0 5px;color:#aebfd2}input,select,textarea{width:100%;border:1px solid #ffffff24;background:#081525;color:#fff;border-radius:8px;padding:10px}textarea{min-height:96px;resize:vertical}.row{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}.list{max-height:380px;overflow:auto}.item{border-top:1px solid #ffffff17;padding:10px 0;white-space:normal}.danger{background:#ff7474;color:#200404}.ok{color:#8ff0c0;white-space:pre-wrap}.hidden{display:none!important}.stat{font-size:24px;color:#82eaff;font-weight:900}.matrix{height:340px;position:relative;overflow:hidden;background:#020813;border-radius:12px;border:1px solid #ffffff1c}@media(max-width:900px){.shell{grid-template-columns:1fr;padding:18px}.card,.wide{grid-column:1/-1}.top{display:block}.dashboard{padding:13px}}@media(max-width:520px){button,.btn,.tab,input,select{width:100%}.row{display:grid}}
+*{box-sizing:border-box}html,body{margin:0;min-height:100%;font-family:system-ui,-apple-system,"Segoe UI",sans-serif;background:#03050a;color:#edf6ff}canvas{position:fixed;inset:0;width:100%;height:100%;display:block}.shell{position:relative;z-index:1;min-height:100vh;display:grid;grid-template-columns:minmax(0,1fr) 390px;gap:28px;align-items:end;padding:40px}.hero{max-width:780px;padding-bottom:24px}.brand{color:#71e7ff}.hero h1{font-size:clamp(38px,6vw,78px);line-height:1;margin:10px 0 16px}.hero p,.muted{color:#a9b9cc;line-height:1.7;overflow-wrap:anywhere;word-break:break-word}.panel,.card{border:1px solid #ffffff22;background:#06101ddd;backdrop-filter:blur(16px);border-radius:14px;padding:18px}.dashboard{display:none;position:relative;z-index:1;min-height:100vh;padding:22px;background:#03050ae8}.top{max-width:1480px;margin:auto;display:flex;justify-content:space-between;gap:12px;align-items:center}.tabs{max-width:1480px;margin:15px auto;display:flex;gap:8px;flex-wrap:wrap}.tab,button,.btn{border:0;border-radius:9px;height:40px;padding:0 14px;background:#63dcff;color:#03111a;font-weight:800;cursor:pointer;text-decoration:none;display:inline-flex;align-items:center;justify-content:center}.tab{background:#0c1a2b;color:#dff7ff;border:1px solid #ffffff1c}.view{display:none;max-width:1480px;margin:auto}.view.active{display:block}.grid{display:grid;grid-template-columns:repeat(12,minmax(0,1fr));gap:14px}.card{grid-column:span 4;min-width:0}.wide{grid-column:span 8}.full{grid-column:1/-1}label{display:block;margin:11px 0 5px;color:#aebfd2}input,select,textarea{width:100%;border:1px solid #ffffff24;background:#081525;color:#fff;border-radius:8px;padding:10px}textarea{min-height:96px;resize:vertical}.row{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}.list{max-height:380px;overflow:auto}.item{border-top:1px solid #ffffff17;padding:10px 0;white-space:normal;overflow-wrap:anywhere;word-break:break-word}.danger{background:#ff7474;color:#200404}.ok{color:#8ff0c0;white-space:pre-wrap}.hidden{display:none!important}.stat{font-size:24px;color:#82eaff;font-weight:900}.status-lines{line-height:1.75;overflow-wrap:anywhere;word-break:break-word}.hint{font-size:12px;color:#8fa5bd;line-height:1.55;margin:4px 0 10px}.matrix{height:340px;position:relative;overflow:hidden;background:#020813;border-radius:12px;border:1px solid #ffffff1c}@media(max-width:900px){.shell{grid-template-columns:1fr;padding:18px}.card,.wide{grid-column:1/-1}.top{display:block}.dashboard{padding:13px}}@media(max-width:520px){button,.btn,.tab,input,select{width:100%}.row{display:grid}}
 </style></head><body><canvas id="nebula"></canvas><main class="shell" id="loginShell"><section class="hero"><div class="brand">QQAIbot Memory Matrix</div><h1>全站記憶星雲母體</h1><p>登入後可管理個人記憶、模型偏好、排程及所屬白名單群。群組不再手動輸入，驗證 QQ 後由下拉選單載入可用群。</p><div class="row"><a class="btn" href="/live">Live</a><a class="btn" href="/appeal">匿名申訴</a><a class="btn" href="/health">Health</a></div></section><aside class="panel"><b>QQ 驗證登入</b><label>QQ 號</label><input id="qq" inputmode="numeric" placeholder="請輸入 QQ 號"><button id="sendCode">發送驗證碼</button><label>6 位數驗證碼</label><input id="code" maxlength="6" inputmode="numeric"><button id="verifyCode">登入</button><div class="ok" id="loginNotice">請先取得私訊驗證碼。</div></aside></main>
 <section class="dashboard" id="dashboard"><div class="top"><div><h1 style="margin:0">QQAIbot 控制台</h1><div class="muted">QQ：<span id="who"></span>｜身分：<span id="role"></span>｜群組：<select id="groupSelect" style="display:inline-block;width:auto;min-width:240px"></select></div></div><div class="row"><button id="reload">刷新</button><button id="logout" class="danger">登出</button></div></div><div class="tabs"><button class="tab" data-v="self">個人設定</button><button class="tab" data-v="matrix">記憶矩陣</button><button class="tab" data-v="schedules">排程中心</button><button class="tab perm-ai" data-v="admin">AI 管理</button><button class="tab perm-ops" data-v="ops">群操作</button><button class="tab perm-review" data-v="review">審核中心</button><button class="tab perm-root" data-v="root">Root 維運</button></div>
 <div class="view active" id="v-self"><div class="grid"><div class="card wide"><h3>新增記憶</h3><textarea id="memText" placeholder="輸入記憶內容"></textarea><div class="row"><select id="memScope"><option value="private">私人</option><option value="public">群公開</option></select><button id="addMem">新增</button></div><div class="muted">刪除 D1 記憶不會刪除 Vectorize 歷史向量。</div></div><div class="card"><h3>個人設定</h3><label><input id="dnd" type="checkbox" style="width:auto"> 免打擾</label><label>專屬語氣</label><textarea id="style"></textarea><label>模型偏好</label><select id="modelPref"><option value="auto">自動</option><option value="gemini">Gemini</option><option value="deepseek">DeepSeek</option><option value="deepseek_high">DeepSeek High</option><option value="deepseek_max">DeepSeek Max</option></select><button id="saveSelf">保存</button><p>額度：<span class="stat" id="quota">-</span></p></div><div class="card wide"><h3>私人記憶</h3><div class="list" id="privateMems"></div></div><div class="card"><h3>群公開記憶</h3><div class="list" id="publicMems"></div></div></div></div>
 <div class="view" id="v-matrix"><div class="grid"><div class="card full"><div class="row"><input id="matrixQ" placeholder="搜尋記憶"><button id="matrixSearch">搜尋</button></div></div><div class="card wide"><div class="matrix" id="matrixBox"></div></div><div class="card"><div class="list" id="matrixList"></div></div></div></div>
 <div class="view" id="v-schedules"><div class="grid"><div class="card wide"><h3>建立排程</h3><div class="muted">例：2026-07-22 18:00 提醒交作業｜每天 18:00 發送晚安｜每周一 08:00 AI生成：本週開場話題</div><textarea id="scheduleText"></textarea><button id="createSchedule">建立並交由 Gemini 審查</button><div class="ok" id="scheduleMsg"></div></div><div class="card"><h3>我的排程</h3><div class="list" id="scheduleList"></div></div></div></div>
-<div class="view" id="v-admin"><div class="grid"><div class="card"><h3>功能</h3><label><input id="aiOn" type="checkbox" style="width:auto"> AI 開啟</label><label><input id="memoryOn" type="checkbox" style="width:auto"> 長期記憶</label><label>插話率 0–100（每日上限無限）</label><input id="interject" type="number" min="0" max="100"><label class="perm-root"><input id="activeSpeaking" type="checkbox" style="width:auto"> 主動發話（預設關閉）</label><button id="saveAdmin">保存</button></div><div class="card"><h3>群人格</h3><textarea id="persona"></textarea></div><div class="card"><h3>關鍵字過濾</h3><textarea id="keywords"></textarea></div><div class="card"><h3>AI 黑名單</h3><input id="blackQQ" placeholder="QQ"><div class="row"><button id="block">拉黑</button><button id="unblock">解除</button></div><div id="blacklist" class="list"></div></div><div class="card wide"><h3>操作日誌</h3><div id="audit" class="list"></div></div></div></div>
+<div class="view" id="v-admin"><div class="grid"><div class="card"><h3>功能</h3><label><input id="aiOn" type="checkbox" style="width:auto"> AI 開啟</label><label><input id="memoryOn" type="checkbox" style="width:auto"> 長期記憶</label><label>插話率 0–100（0 為關閉，預設 25）</label><input id="interject" type="number" min="0" max="100"><label class="perm-root"><input id="activeSpeaking" type="checkbox" style="width:auto"> 主動發話（預設關閉）</label><button id="saveAdmin">保存</button></div><div class="card"><h3>群人格</h3><textarea id="persona"></textarea></div><div class="card"><h3>關鍵字過濾</h3><textarea id="keywords"></textarea></div><div class="card"><h3>AI 黑名單</h3><input id="blackQQ" placeholder="QQ"><div class="row"><button id="block">拉黑</button><button id="unblock">解除</button></div><div id="blacklist" class="list"></div></div><div class="card wide"><h3>操作日誌</h3><div id="audit" class="list"></div></div></div></div>
 
 <div class="view" id="v-ops"><div class="grid"><div class="card wide"><h3>群操作</h3><label>目標 QQ</label><input id="opsQQ" placeholder="QQ號"><label>禁言時長</label><input id="opsDuration" value="10分"><label>群名／名片內容</label><input id="opsValue"><div class="row"><button id="opsMute">禁言</button><button id="opsUnmute">解禁</button><button id="opsKick" class="danger">踢出</button><button id="opsWholeMute" class="danger">全員禁言</button><button id="opsWholeUnmute">解除全員禁言</button><button id="opsRename">修改群名</button><button id="opsCard">修改名片</button></div><div class="ok" id="opsMsg"></div></div><div class="card"><h3>權限說明</h3><div class="muted">只有 QQ 原生群主／管理員、開發者或被授予群操作權的 QQ 可以使用。機器人帳號本身仍需具備相應群管理權。</div></div></div></div>
 <div class="view" id="v-review"><div class="grid"><div class="card wide"><h3>我被指派的排程</h3><div id="reviewSchedules" class="list"></div></div><div class="card wide"><h3>我被指派的匿名申訴</h3><div id="reviewAppeals" class="list"></div></div><div class="card"><h3>審核說明</h3><div class="muted">只有開發者能看到申訴人的 QQ。你只會看到開發者指派給你的匿名案件。</div></div></div></div>
-<div class="view" id="v-root"><div class="grid"><div class="card"><h3>系統狀態</h3><div id="rootState" class="muted"></div></div><div class="card"><h3>DeepSeek 額度</h3><label>全站每日 CNY</label><input id="globalQuota" placeholder="空白＝無限"><label>目前群每日 CNY</label><input id="groupQuota" placeholder="空白＝無限"><button id="saveQuotas">保存額度</button></div><div class="card"><h3>功能開關</h3><label><input id="flagPrivateChat" type="checkbox" style="width:auto"> 私聊聊天</label><label><input id="flagPrivateSchedule" type="checkbox" style="width:auto"> 私聊排程</label><label><input id="flagPrivateAppeal" type="checkbox" style="width:auto"> 私聊申訴</label><label><input id="flagDeepseek" type="checkbox" style="width:auto"> DeepSeek</label><button id="saveFlags">保存</button></div><div class="card"><h3>群白名單</h3><input id="wlGroup" placeholder="群號"><div class="row"><button id="wlAdd">加入</button><button id="wlDel">移除</button></div></div><div class="card wide"><h3>成員權限與額度</h3><input id="rootQQ" placeholder="QQ"><div class="row"><select id="permission"><option value="ai_admin">AI管理</option><option value="group_ops">群操作</option><option value="schedule_reviewer">排程審核</option><option value="appeal_reviewer">申訴審核</option></select><button id="grant">授予</button><button id="revoke">撤銷</button></div><label>私聊權限</label><select id="privateAccess"><option value="none">關閉</option><option value="commands">僅指令</option><option value="full">完整AI</option></select><label>額度（只有你能設定）</label><input id="quotaInput" placeholder="無限或數值"><button id="saveMember">保存成員設定</button></div><div class="card full"><h3>待處理排程</h3><div id="rootSchedules" class="list"></div></div><div class="card full"><h3>匿名申訴（開發者可見真實 QQ）</h3><div id="rootAppeals" class="list"></div></div><div class="card wide"><h3>跨群廣播</h3><textarea id="broadcast"></textarea><input id="broadcastGroups" placeholder="群號，逗號分隔"><button id="sendBroadcast">發送</button></div><div class="card"><h3>備份與暫存</h3><button id="restart" class="danger">清除目前群暫存</button><button id="backup">匯出備份</button><textarea id="backupBox"></textarea></div></div></div></section>
+<div class="view" id="v-root"><div class="grid"><div class="card"><h3>系統狀態</h3><div id="rootState" class="muted status-lines"></div></div><div class="card"><h3>DeepSeek 額度</h3><div class="hint">留空＝不限制；0＝禁止使用 DeepSeek。此處只限制 DeepSeek，不影響 Gemini／Gemma。</div><label>全站每日上限（CNY）</label><input id="globalQuota" inputmode="decimal" placeholder="留空＝不限制"><label>目前所選群每日上限（CNY）</label><input id="groupQuota" inputmode="decimal" placeholder="留空＝不限制"><div id="quotaState" class="hint"></div><button id="saveQuotas">保存額度</button></div><div class="card"><h3>功能開關</h3><label><input id="flagPrivateChat" type="checkbox" style="width:auto"> 私聊聊天</label><label><input id="flagPrivateSchedule" type="checkbox" style="width:auto"> 私聊排程</label><label><input id="flagPrivateAppeal" type="checkbox" style="width:auto"> 私聊申訴</label><label><input id="flagDeepseek" type="checkbox" style="width:auto"> DeepSeek</label><button id="saveFlags">保存</button></div><div class="card"><h3>群白名單</h3><input id="wlGroup" placeholder="群號"><div class="row"><button id="wlAdd">加入</button><button id="wlDel">移除</button></div></div><div class="card wide"><h3>成員權限與額度</h3><input id="rootQQ" placeholder="QQ"><div class="row"><select id="permission"><option value="ai_admin">AI管理</option><option value="group_ops">群操作</option><option value="schedule_reviewer">排程審核</option><option value="appeal_reviewer">申訴審核</option></select><button id="grant">授予</button><button id="revoke">撤銷</button></div><label>私聊權限</label><select id="privateAccess"><option value="none">關閉</option><option value="commands">僅指令</option><option value="full">完整AI</option></select><label>額度（只有你能設定）</label><input id="quotaInput" placeholder="無限或數值"><button id="saveMember">保存成員設定</button></div><div class="card full"><h3>待處理排程</h3><div id="rootSchedules" class="list"></div></div><div class="card full"><h3>匿名申訴（開發者可見真實 QQ）</h3><div id="rootAppeals" class="list"></div></div><div class="card wide"><h3>跨群廣播</h3><textarea id="broadcast"></textarea><input id="broadcastGroups" placeholder="群號，逗號分隔"><button id="sendBroadcast">發送</button></div><div class="card"><h3>備份與暫存</h3><button id="restart" class="danger">清除目前群暫存</button><button id="backup">匯出備份</button><textarea id="backupBox"></textarea></div></div></div></section>
 <script>
 const c=document.getElementById('nebula'),x=c.getContext('2d');let w,h,stars=[];
 function resizeStars(){w=c.width=innerWidth*devicePixelRatio;h=c.height=innerHeight*devicePixelRatio;stars=Array.from({length:900},function(){return{x:Math.random()*w,y:Math.random()*h,vx:(Math.random()-.5)*.3,vy:(Math.random()-.5)*.3,r:Math.random()*1.4+.2,h:Math.random()*70+185}})}
@@ -3586,8 +3730,8 @@ async function loadReview(){
   const sr=await api('/review/schedules');reviewSchedules.innerHTML='';const schedules=sr.schedules||[];if(!schedules.length)reviewSchedules.innerHTML='<div class="muted">沒有被指派的排程</div>';schedules.forEach(function(item){const row=document.createElement('div');row.className='item';row.innerHTML='<b>'+esc(item.id)+'</b>｜群 '+esc(item.groupId)+'<br>'+esc(item.content);const actions=document.createElement('div');actions.className='row';['approve','reject'].forEach(function(v){const b=document.createElement('button');b.textContent=v==='approve'?'同意':'拒絕';if(v==='reject')b.className='danger';b.onclick=async function(){await api('/review/schedule','POST',{id:item.id,vote:v});loadReview()};actions.appendChild(b)});row.appendChild(actions);reviewSchedules.appendChild(row)});
   const r=await api('/review/appeals');reviewAppeals.innerHTML='';const items=r.appeals||[];if(!items.length){reviewAppeals.innerHTML='<div class="muted">沒有被指派的案件</div>';return}items.forEach(function(a){const row=document.createElement('div');row.className='item';row.innerHTML='<b>'+esc(a.id)+'</b>｜群 '+esc(a.groupId)+'｜'+esc(a.type)+'<br>'+esc(a.content);const actions=document.createElement('div');actions.className='row';['approve','reject'].forEach(function(v){const b=document.createElement('button');b.textContent=v==='approve'?'同意':'拒絕';if(v==='reject')b.className='danger';b.onclick=async function(){const note=prompt('審核意見','')||'';await api('/review/appeal','POST',{id:a.id,vote:v,note:note});loadReview()};actions.appendChild(b)});row.appendChild(actions);reviewAppeals.appendChild(row)})}
 function makeAssignBlock(container,item,type){const row=document.createElement('div');row.className='item';const identity=type==='appeal'?'｜申訴人 '+esc(item.applicantId||'匿名'):'｜申請人 '+esc(item.creatorId||'');row.innerHTML='<b>'+esc(item.id)+'</b>'+identity+'｜群 '+esc(item.groupId)+'<br>'+esc(item.content||item.type||'');const reviewers=document.createElement('input');reviewers.placeholder='審核 QQ，多個用逗號';const rule=document.createElement('select');[['single','任一同意'],['majority','過半同意'],['all','全數同意']].forEach(function(o){const op=document.createElement('option');op.value=o[0];op.textContent=o[1];rule.appendChild(op)});const actions=document.createElement('div');actions.className='row';const assign=document.createElement('button');assign.textContent='指派';assign.onclick=async function(){const path=type==='appeal'?'/root/appeal-assign':'/root/schedule-assign';await api(path,'POST',{id:item.id,reviewerIds:reviewers.value,approvalRule:rule.value});loadRoot()};const approve=document.createElement('button');approve.textContent='我同意';approve.onclick=async function(){const path=type==='appeal'?'/root/appeal-assign':'/root/schedule-assign';await api(path,'POST',{id:item.id,developerDecision:'approve'});loadRoot()};const reject=document.createElement('button');reject.textContent='我拒絕';reject.className='danger';reject.onclick=async function(){const path=type==='appeal'?'/root/appeal-assign':'/root/schedule-assign';await api(path,'POST',{id:item.id,developerDecision:'reject'});loadRoot()};actions.append(assign,approve,reject);row.append(reviewers,rule,actions);container.appendChild(row)}
-async function loadRoot(){const r=await api('/root/state');if(!r.ok)return;rootState.innerHTML='Gemini Keys：'+r.key_pool.total+'<br>DeepSeek：'+(r.key_pool.deepseek?'已配置':'未配置')+'<br>最後模型：'+esc(r.stats.last_model)+'<br>NapCat：'+esc(JSON.stringify(r.health.onebot||{}));flagPrivateChat.checked=!!r.flags.private_chat_enabled;flagPrivateSchedule.checked=!!r.flags.private_schedule_enabled;flagPrivateAppeal.checked=!!r.flags.private_appeal_enabled;flagDeepseek.checked=!!r.flags.deepseek_enabled;const qr=await api('/root/quotas');globalQuota.value=qr.globalDailyCny||'';groupQuota.value=qr.groupDailyCny||'';const schedules=await api('/root/schedules');rootSchedules.innerHTML='';(schedules.schedules||[]).filter(function(i){return String(i.status).indexOf('pending')===0}).forEach(function(i){makeAssignBlock(rootSchedules,i,'schedule')});if(!rootSchedules.children.length)rootSchedules.innerHTML='<div class="muted">沒有待處理排程</div>';const appeals=await api('/root/appeals');rootAppeals.innerHTML='';(appeals.appeals||[]).filter(function(i){return String(i.status).indexOf('pending')===0}).forEach(function(i){makeAssignBlock(rootAppeals,i,'appeal')});if(!rootAppeals.children.length)rootAppeals.innerHTML='<div class="muted">沒有待處理申訴</div>'}
-sendCode.onclick=async function(){loginNotice.textContent=(await auth('/api/auth/request-code',{qq:qq.value})).message};verifyCode.onclick=async function(){const r=await auth('/api/auth/verify-code',{qq:qq.value,code:code.value});loginNotice.textContent=r.message;if(r.ok){session=r;who.textContent=r.qq;if(await loadGroups()){loginShell.style.display='none';dashboard.style.display='block'}}};groupSelect.onchange=function(){selectGroup(groupSelect.value)};reload.onclick=refreshAll;logout.onclick=function(){location.reload()};addMem.onclick=async function(){const r=await api('/memories','POST',{scope:memScope.value,text:memText.value});if(!r.ok)showMessage(r.message);else{memText.value='';loadSelf()}};saveSelf.onclick=async function(){showMessage((await api('/settings','POST',{dnd:dnd.checked,style:style.value,modelPreference:modelPref.value})).message)};createSchedule.onclick=async function(){const r=await api('/schedules','POST',{schedule:scheduleText.value});scheduleMsg.textContent=r.message;if(r.ok)scheduleText.value='';loadSchedules()};saveAdmin.onclick=async function(){showMessage((await api('/admin/state','POST',{ai_on:aiOn.checked,memory_on:memoryOn.checked,interject_rate:interject.value,persona:persona.value,keywords:keywords.value,active_speaking:activeSpeaking.checked})).message)};block.onclick=async function(){await api('/admin/blacklist','POST',{qq:blackQQ.value,block:true});loadAdmin()};unblock.onclick=async function(){await api('/admin/blacklist','POST',{qq:blackQQ.value,block:false});loadAdmin()};matrixSearch.onclick=loadMatrix;saveFlags.onclick=async function(){showMessage((await api('/root/flags','POST',{private_chat_enabled:flagPrivateChat.checked,private_schedule_enabled:flagPrivateSchedule.checked,private_appeal_enabled:flagPrivateAppeal.checked,deepseek_enabled:flagDeepseek.checked})).message)};wlAdd.onclick=async function(){await api('/root/whitelist','POST',{groupId:wlGroup.value,enabled:true});showMessage('已加入')};wlDel.onclick=async function(){await api('/root/whitelist','POST',{groupId:wlGroup.value,enabled:false});showMessage('已移除')};grant.onclick=async function(){showMessage((await api('/root/member','POST',{qq:rootQQ.value,permission:permission.value,enabled:true})).message)};revoke.onclick=async function(){showMessage((await api('/root/member','POST',{qq:rootQQ.value,permission:permission.value,enabled:false})).message)};saveMember.onclick=async function(){showMessage((await api('/root/member','POST',{qq:rootQQ.value,privateAccess:privateAccess.value,quota:quotaInput.value})).message)};sendBroadcast.onclick=async function(){showMessage((await api('/root/broadcast','POST',{message:broadcast.value,groups:broadcastGroups.value})).message)};restart.onclick=async function(){if(confirm('清除目前群暫存？'))showMessage((await api('/root/restart','POST',{})).message)};backup.onclick=async function(){const r=await api('/root/backup');backupBox.value=JSON.stringify(r.backup,null,2)};async function runOps(action){const r=await api('/ops/action','POST',{action:action,qq:opsQQ.value,duration:opsDuration.value,value:opsValue.value});opsMsg.textContent=r.message}opsMute.onclick=function(){runOps('mute')};opsUnmute.onclick=function(){runOps('unmute')};opsKick.onclick=function(){if(confirm('確定踢出？'))runOps('kick')};opsWholeMute.onclick=function(){if(confirm('確定全員禁言？'))runOps('whole_mute')};opsWholeUnmute.onclick=function(){runOps('whole_unmute')};opsRename.onclick=function(){runOps('rename_group')};opsCard.onclick=function(){runOps('set_card')};saveQuotas.onclick=async function(){showMessage((await api('/root/quotas','POST',{globalDailyCny:globalQuota.value,groupDailyCny:groupQuota.value})).message)};document.querySelectorAll('.tab').forEach(function(b){b.onclick=function(){document.querySelectorAll('.view').forEach(function(v){v.classList.remove('active')});document.getElementById('v-'+b.dataset.v).classList.add('active')}});
+async function loadRoot(){const r=await api('/root/state');if(!r.ok)return;const ob=r.health.onebot||{};rootState.innerHTML='Gemini Keys：'+esc(r.key_pool.total)+'<br>DeepSeek：'+(r.key_pool.deepseek?'已配置':'未配置')+'<br>最後模型：'+esc(r.stats.last_model||'尚無')+'<br>NapCat：'+(ob.connected?'已連線':'未連線')+'<br>Socket：'+esc(ob.sockets||0)+'<br>待處理 RPC：'+esc(ob.pendingRpc||0)+'<br>最後心跳：'+esc(ob.lastHeartbeatAt?new Date(ob.lastHeartbeatAt).toLocaleString():'尚無');flagPrivateChat.checked=!!r.flags.private_chat_enabled;flagPrivateSchedule.checked=!!r.flags.private_schedule_enabled;flagPrivateAppeal.checked=!!r.flags.private_appeal_enabled;flagDeepseek.checked=!!r.flags.deepseek_enabled;const qr=await api('/root/quotas');globalQuota.value=qr.globalDailyCny||'';groupQuota.value=qr.groupDailyCny||'';quotaState.textContent='全站：'+(qr.globalDailyCny||'不限制')+' CNY／日；目前群：'+(qr.groupDailyCny||'不限制')+' CNY／日';const schedules=await api('/root/schedules');rootSchedules.innerHTML='';(schedules.schedules||[]).filter(function(i){return String(i.status).indexOf('pending')===0}).forEach(function(i){makeAssignBlock(rootSchedules,i,'schedule')});if(!rootSchedules.children.length)rootSchedules.innerHTML='<div class="muted">沒有待處理排程</div>';const appeals=await api('/root/appeals');rootAppeals.innerHTML='';(appeals.appeals||[]).filter(function(i){return String(i.status).indexOf('pending')===0}).forEach(function(i){makeAssignBlock(rootAppeals,i,'appeal')});if(!rootAppeals.children.length)rootAppeals.innerHTML='<div class="muted">沒有待處理申訴</div>'}
+sendCode.onclick=async function(){loginNotice.textContent=(await auth('/api/auth/request-code',{qq:qq.value})).message};verifyCode.onclick=async function(){const r=await auth('/api/auth/verify-code',{qq:qq.value,code:code.value});loginNotice.textContent=r.message;if(r.ok){session=r;who.textContent=r.qq;if(await loadGroups()){loginShell.style.display='none';dashboard.style.display='block'}}};groupSelect.onchange=function(){selectGroup(groupSelect.value)};reload.onclick=refreshAll;logout.onclick=function(){location.reload()};addMem.onclick=async function(){const r=await api('/memories','POST',{scope:memScope.value,text:memText.value});if(!r.ok)showMessage(r.message);else{memText.value='';loadSelf()}};saveSelf.onclick=async function(){showMessage((await api('/settings','POST',{dnd:dnd.checked,style:style.value,modelPreference:modelPref.value})).message)};createSchedule.onclick=async function(){const r=await api('/schedules','POST',{schedule:scheduleText.value});scheduleMsg.textContent=r.message;if(r.ok)scheduleText.value='';loadSchedules()};saveAdmin.onclick=async function(){showMessage((await api('/admin/state','POST',{ai_on:aiOn.checked,memory_on:memoryOn.checked,interject_rate:interject.value,persona:persona.value,keywords:keywords.value,active_speaking:activeSpeaking.checked})).message)};block.onclick=async function(){await api('/admin/blacklist','POST',{qq:blackQQ.value,block:true});loadAdmin()};unblock.onclick=async function(){await api('/admin/blacklist','POST',{qq:blackQQ.value,block:false});loadAdmin()};matrixSearch.onclick=loadMatrix;saveFlags.onclick=async function(){showMessage((await api('/root/flags','POST',{private_chat_enabled:flagPrivateChat.checked,private_schedule_enabled:flagPrivateSchedule.checked,private_appeal_enabled:flagPrivateAppeal.checked,deepseek_enabled:flagDeepseek.checked})).message)};wlAdd.onclick=async function(){await api('/root/whitelist','POST',{groupId:wlGroup.value,enabled:true});showMessage('已加入')};wlDel.onclick=async function(){await api('/root/whitelist','POST',{groupId:wlGroup.value,enabled:false});showMessage('已移除')};grant.onclick=async function(){showMessage((await api('/root/member','POST',{qq:rootQQ.value,permission:permission.value,enabled:true})).message)};revoke.onclick=async function(){showMessage((await api('/root/member','POST',{qq:rootQQ.value,permission:permission.value,enabled:false})).message)};saveMember.onclick=async function(){showMessage((await api('/root/member','POST',{qq:rootQQ.value,privateAccess:privateAccess.value,quota:quotaInput.value})).message)};sendBroadcast.onclick=async function(){showMessage((await api('/root/broadcast','POST',{message:broadcast.value,groups:broadcastGroups.value})).message)};restart.onclick=async function(){if(confirm('清除目前群暫存？'))showMessage((await api('/root/restart','POST',{})).message)};backup.onclick=async function(){const r=await api('/root/backup');backupBox.value=JSON.stringify(r.backup,null,2)};async function runOps(action){const r=await api('/ops/action','POST',{action:action,qq:opsQQ.value,duration:opsDuration.value,value:opsValue.value});opsMsg.textContent=r.message}opsMute.onclick=function(){runOps('mute')};opsUnmute.onclick=function(){runOps('unmute')};opsKick.onclick=function(){if(confirm('確定踢出？'))runOps('kick')};opsWholeMute.onclick=function(){if(confirm('確定全員禁言？'))runOps('whole_mute')};opsWholeUnmute.onclick=function(){runOps('whole_unmute')};opsRename.onclick=function(){runOps('rename_group')};opsCard.onclick=function(){runOps('set_card')};saveQuotas.onclick=async function(){const r=await api('/root/quotas','POST',{globalDailyCny:globalQuota.value,groupDailyCny:groupQuota.value});showMessage(r.message);if(r.ok)loadRoot()};document.querySelectorAll('.tab').forEach(function(b){b.onclick=function(){document.querySelectorAll('.view').forEach(function(v){v.classList.remove('active')});document.getElementById('v-'+b.dataset.v).classList.add('active')}});
 </script></body></html>`;
 }
 
@@ -3679,7 +3823,15 @@ export class OneBotHub {
     try {
       const response = await this.sendAction({ action, params }, 15000);
       const messageId = response?.data?.message_id;
-      if (messageId) await recordStructuredMessage(this.env, { messageId: String(messageId), groupId: String(body.group_id || ""), senderId: String(body.self_id || ""), senderName: "QQAI", text: extractMessageText(message), mentions: plan.mentionIds || [], replyId: plan.quoteMessageId || plan.replyId || "", media: [], source: "ai", createdAt: Date.now() });
+      // 只有真正的 AI 對話回覆才寫入 message cache／recent_logs。
+      // 指令回覆、白名單提示、權限提示與系統錯誤完全不記錄其內容。
+      if (messageId && payload.record_reply === true) {
+        await recordStructuredMessage(this.env, {
+          messageId: String(messageId), groupId: String(body.group_id || ""), senderId: String(body.self_id || ""), senderName: "QQAI",
+          text: extractMessageText(message), mentions: plan.mentionIds || [], replyId: plan.quoteMessageId || plan.replyId || "", media: [],
+          source: "ai", createdAt: Date.now()
+        });
+      }
     } catch (error) { console.error("send reply failed", error); }
     finally {
       if (payload.thinking_message_id) {
