@@ -1,1 +1,0 @@
-/mnt/data/QQAIbot_v1.1.0_complete/worker.js
