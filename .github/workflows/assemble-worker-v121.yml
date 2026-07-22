@@ -43,10 +43,7 @@ jobs:
           rmdir .tmp 2>/dev/null || true
           git config user.name "QQAI Build Bot"
           git config user.email "actions@users.noreply.github.com"
-          git add worker.js .tmp .github/workflows/assemble-worker-v121.yml || true
-          if git diff --cached --quiet; then
-            echo "No changes to commit"
-            exit 0
-          fi
+          git add -A
+          git diff --cached --stat
           git commit -m "Update worker to v1.2.1"
           git push origin "HEAD:${BRANCH}"
