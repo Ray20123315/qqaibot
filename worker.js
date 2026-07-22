@@ -1,4 +1,4 @@
-const VERSION = "1.2.4";
+const VERSION = "1.2.6";
 const QQAI_V1_COMPLETE_MARKER = "QQAI_V1_COMPLETE_MARKER";
 const QQAI_V1_R3_MARKER = "QQAI_V1_R3_MARKER";
 const BUILD_DATE = "2026-07-23";
@@ -309,7 +309,7 @@ const PLATFORM_FEATURE_NAMES = Object.freeze([
   "網頁內容中的惡意提示隔離",
   "圖片 OCR 中的惡意提示隔離",
   "搜索結果只能作為資料，不能變更系統規則",
-  "QQ 號遮罩",
+  "QQ 号遮罩",
   "電話、身分證、銀行資料遮罩",
   "AI 回覆密鑰格式掃描",
   "私人訊息禁止進公開群記憶",
@@ -527,7 +527,7 @@ export default {
     }
 
     if (url.pathname.startsWith('/api/appeal/')) {
-      return handleAppealApi(request, env, url);
+      return jsonResponse({ ok: false, message: "独立申诉接口已停用，请登录 Control Center 使用匿名申诉。" }, 410);
     }
 
     if (request.method === 'POST' && url.pathname.startsWith('/api/integrations/bilibili/webhook/')) {
@@ -1024,7 +1024,7 @@ export default {
       const requiresAiJudgment = true;
       const isImitationGlobal = true;
 
-      // 🛠️ 萬用指令參數解析器：優先使用非機器人的 @，亦支援直接 QQ 號。
+      // 🛠️ 萬用指令參數解析器：優先使用非機器人的 @，亦支援直接 QQ 号。
       const parseArgs = (rawMessage, prefix) => {
         const lowerRaw = String(rawMessage || '').toLowerCase();
         const index = lowerRaw.indexOf(String(prefix || '').toLowerCase());
@@ -1058,17 +1058,18 @@ export default {
 
       const proxySetting = cleanMessage.match(/^[!！](?:AI群规代理|AI群規代理|群规代理|群規代理)\s*(关闭|關閉|记录|記錄|警告|禁言|自动|自動|状态|狀態)$/i);
       if (proxySetting) {
-        if (!(await isVerifiedGroupOwner(env, currentGroupId, userId))) return jsonReply(`${atSender}只有 NapCat 即時確認的目前群主可以設定 AI 群規代理。`);
         const rawMode = proxySetting[1];
+        if (!hasAdminAuth) return jsonReply(`${atSender}⚠️ 权限不足\n当前权限等级：${isDeveloper ? "开发者" : senderRole === "owner" ? "群主" : senderRole === "admin" ? "QQ 管理员" : "普通成员"}\n需要权限等级：QQ 管理员或以上`);
         if (/状态|狀態/.test(rawMode)) {
           const currentMode = normalizeRuleProxyMode(await dbGet(env, `rule_proxy_mode:${currentGroupId}`) || DEFAULTS.ruleProxyMode);
           const kick = await dbGet(env, `rule_proxy_kick_authorized:${currentGroupId}`) === "true";
           return jsonReply(`${atSender}AI 群规代理模式：${currentMode}；AI 踢出授权：${kick ? "已授权" : "未授权"}。`);
         }
         const nextMode = /关闭|關閉|记录|記錄/.test(rawMode) ? "record" : /警告/.test(rawMode) ? "warn" : /禁言/.test(rawMode) ? "mute" : "auto";
+        if (nextMode === "auto" && !(await isVerifiedGroupOwner(env, currentGroupId, userId))) return jsonReply(`${atSender}只有 NapCat 即时确认的当前群主可以启用 auto 模式；QQ 管理员可使用 record、warn 或 mute。`);
         await dbPut(env, `rule_proxy_mode:${currentGroupId}`, nextMode);
         await writeSystemAudit(env, { type: "rule_proxy_setting", groupId: currentGroupId, actorId: userId, action: nextMode });
-        return jsonReply(`${atSender}AI 群规代理已设为 ${nextMode}。record 只记录；warn 警告；mute 禁言；auto 依 AI 分类在授权范围内处理。`);
+        return jsonReply(`${atSender}AI 群规代理已设为 ${nextMode}。record 只记录；warn 警告；mute 禁言；auto 由 AI 按分类处理（仅群主可启用）。`);
       }
 
       if (/^[!！](?:授权AI踢出|授權AI踢出)$/i.test(cleanMessage)) {
@@ -2128,7 +2129,7 @@ export default {
 
             if (userVector && Array.isArray(userVector)) {
                 // 2. 拿著向量去你的 Cloudflare Vectorize 資料庫查詢
-                // 🎯 這裡使用 filter 鐵律過濾：只准抓這個目標 QQ 號說過的話！
+                // 🎯 這裡使用 filter 鐵律過濾：只准抓這個目標 QQ 号說過的話！
                 const vectorMatches = await env.VECTORIZE.query(userVector, {
                     topK: 12,                    // 撈出最相關的 12 條語風範本
                     filter: { qq: targetQq.toString() }, // 確保與寫入時的字串型態一致
@@ -2702,6 +2703,7 @@ ${deepseekContextSummary}`;
     ctx.waitUntil(cleanupExpiredModerationProposals(env));
     ctx.waitUntil(runAutomaticGroupCheckins(env, Number(controller?.scheduledTime || Date.now())));
     ctx.waitUntil(processPlatformJobs(env, Number(controller?.scheduledTime || Date.now())));
+    ctx.waitUntil(pollAutomaticBilibiliConnectors(env, Number(controller?.scheduledTime || Date.now())));
   }
 }; // 结束 export default
 
@@ -3013,6 +3015,37 @@ async function writeSystemAudit(env, entry) {
     await dbPut(env, key, JSON.stringify(list.slice(-1000)));
   }
   return item;
+}
+
+async function enrichAuditLogsForPortal(env, logs) {
+  const proposalCache = new Map();
+  const output = [];
+  for (const item of Array.isArray(logs) ? logs : []) {
+    let next = { ...item };
+    const proposalId = String(item?.proposalId || "");
+    if (proposalId) {
+      let proposal = proposalCache.get(proposalId);
+      if (proposal === undefined) {
+        proposal = await readJson(env, `moderation:proposal:${proposalId}`, null);
+        proposalCache.set(proposalId, proposal || null);
+      }
+      if (proposal) {
+        next = {
+          ...next,
+          action: next.action || proposal.action,
+          targetId: next.targetId || proposal.targetId,
+          targetName: next.targetName || proposal.targetName,
+          actorName: next.actorName || proposal.actorName,
+          durationSeconds: Number(next.durationSeconds || proposal.durationSeconds || 0),
+          classifierReason: next.classifierReason || proposal.classifierReason,
+          proposalStatus: proposal.status || "",
+          proposalResult: proposal.result || ""
+        };
+      }
+    }
+    output.push(next);
+  }
+  return output;
 }
 
 async function writeAiDecisionLog(env, data) {
@@ -4939,7 +4972,18 @@ async function createModerationProposal(env, data) {
   await dbPut(env, `moderation:last:${proposal.groupId}:${proposal.actorId}`, id);
   await dbPut(env, `moderation:last:${proposal.groupId}`, id);
   await appendIndex(env, `moderation:proposal:index:${proposal.groupId}`, id, 500);
-  await writeSystemAudit(env, { type: "moderation_proposed", groupId: proposal.groupId, actorId: proposal.actorId, targetId: proposal.targetId, action: proposal.action, proposalId: id });
+  await writeSystemAudit(env, {
+    type: "moderation_proposed",
+    groupId: proposal.groupId,
+    actorId: proposal.actorId,
+    actorName: proposal.actorName,
+    targetId: proposal.targetId,
+    targetName: proposal.targetName,
+    action: proposal.action,
+    durationSeconds: proposal.durationSeconds,
+    classifierReason: proposal.classifierReason,
+    proposalId: id
+  });
   return proposal;
 }
 
@@ -5071,7 +5115,17 @@ async function handleModerationConfirmation(env, { groupId, actorId, actorRole, 
     proposal.cancelledBy = String(actorId);
     const retractResult = await retractModerationProposalMessage(env, proposal, "cancelled");
     await dbPut(env, `moderation:proposal:${id}`, JSON.stringify(proposal));
-    await writeSystemAudit(env, { type: "moderation_cancelled", groupId, actorId, proposalId: id });
+    await writeSystemAudit(env, {
+      type: "moderation_cancelled",
+      groupId,
+      actorId,
+      action: proposal.action,
+      targetId: proposal.targetId,
+      targetName: proposal.targetName,
+      durationSeconds: proposal.durationSeconds,
+      proposalId: id,
+      result: "cancelled"
+    });
     return { handled: true, ok: true, message: `已取消操作 ${id}，未执行任何群管理动作。${retractResult.ok || retractResult.skipped ? "\n原待确认提示已撤回。" : "\n原待确认提示撤回失败，请由管理员手动撤回。"}` };
   }
   if (adminRoleChange && (!botIsOwner || actorRole !== "owner")) {
@@ -5084,6 +5138,17 @@ async function handleModerationConfirmation(env, { groupId, actorId, actorRole, 
   proposal.result = result.message;
   const retractResult = await retractModerationProposalMessage(env, proposal, result.ok ? "confirmed" : "confirmation_failed");
   await dbPut(env, `moderation:proposal:${id}`, JSON.stringify(proposal));
+  await writeSystemAudit(env, {
+    type: result.ok ? "moderation_confirmed" : "moderation_failed",
+    groupId,
+    actorId,
+    action: proposal.action,
+    targetId: proposal.targetId,
+    targetName: proposal.targetName,
+    durationSeconds: proposal.durationSeconds,
+    proposalId: id,
+    result: result.message
+  });
   return { handled: true, ok: result.ok, message: `${result.message}\n操作编号：${id}${retractResult.ok || retractResult.skipped ? "\n原待确认提示已撤回。" : "\n原待确认提示撤回失败，请由管理员手动撤回。"}` };
 }
 
@@ -5661,8 +5726,8 @@ const PORTAL_SETTING_DEFINITIONS = Object.freeze([
   { key: "welcome_enabled", label: "自动欢迎", command: "!自动欢迎 开/关", minRole: "owner", scope: "group", type: "boolean", defaultValue: false },
   { key: "welcome_text", label: "欢迎词", command: "!欢迎词", minRole: "owner", scope: "group", type: "textarea", defaultValue: DEFAULTS.welcomeText },
   { key: "rule_monitor_enabled", label: "群规持续监控", command: "!群规监控", minRole: "owner", scope: "group", type: "boolean", defaultValue: true },
-  { key: "rule_proxy_mode", label: "AI 群规代理模式", command: "!AI群规代理", minRole: "owner", scope: "group", type: "select", options: ["record", "warn", "mute", "auto"], defaultValue: "record" },
-  { key: "rule_proxy_mute_seconds", label: "AI 代理禁言秒数", command: "网页 / AI代理设置", minRole: "owner", scope: "group", type: "number", min: 0, defaultValue: 600 },
+  { key: "rule_proxy_mode", label: "AI 群规代理模式", command: "!AI群规代理（auto 仅群主）", minRole: "admin", scope: "group", type: "select", options: ["record", "warn", "mute", "auto"], defaultValue: "record" },
+  { key: "rule_proxy_mute_seconds", label: "AI 代理禁言秒数", command: "网页 / AI代理设置", minRole: "admin", scope: "group", type: "number", min: 0, defaultValue: 600 },
   { key: "rule_proxy_kick_authorized", label: "AI 踢出授权", command: "!授权AI踢出 / !撤回AI踢出授权", minRole: "owner", scope: "group", type: "boolean", defaultValue: false },
   { key: "join_reject_authorized", label: "AI 拒绝入群授权", command: "!授权AI拒绝入群 / !撤回AI拒绝入群", minRole: "owner", scope: "group", type: "boolean", defaultValue: false },
   { key: "moderation_cooldown_seconds", label: "同对象处置冷却秒数", command: "!设置处置冷却", minRole: "owner", scope: "group", type: "number", min: 0, defaultValue: 0 },
@@ -5803,13 +5868,229 @@ async function listBilibiliConnectors(env, groupId) {
   return result;
 }
 
+const BILIBILI_POLL_MIN_SECONDS = 60;
+const BILIBILI_POLL_DEFAULT_SECONDS = 120;
+const BILIBILI_POLL_MAX_SECONDS = 3600;
+
+function normalizeBilibiliUid(value) {
+  return String(value || "").replace(/\D/g, "").slice(0, 24);
+}
+
+function bilibiliPollIntervalSeconds(value) {
+  const n = Number(value || BILIBILI_POLL_DEFAULT_SECONDS);
+  return Math.max(BILIBILI_POLL_MIN_SECONDS, Math.min(BILIBILI_POLL_MAX_SECONDS, Number.isFinite(n) ? Math.floor(n) : BILIBILI_POLL_DEFAULT_SECONDS));
+}
+
+async function fetchBilibiliJson(url, timeoutMs = 12000) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort("timeout"), timeoutMs);
+  try {
+    const response = await fetch(url, {
+      headers: {
+        "Accept": "application/json, text/plain, */*",
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/124 Safari/537.36 QQAIbot/1.2.5",
+        "Referer": "https://www.bilibili.com/"
+      },
+      signal: controller.signal
+    });
+    const raw = await response.text();
+    if (!response.ok) throw new Error(`HTTP ${response.status}: ${raw.slice(0, 180)}`);
+    let payload;
+    try { payload = JSON.parse(raw); } catch { throw new Error(`B站返回的不是 JSON：${raw.slice(0, 180)}`); }
+    if (payload && Object.prototype.hasOwnProperty.call(payload, "code") && Number(payload.code) !== 0) {
+      throw new Error(`B站接口错误 ${payload.code}：${payload.message || payload.msg || "未知错误"}`);
+    }
+    return payload;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function fetchBilibiliLiveSnapshot(uid) {
+  const payload = await fetchBilibiliJson(`https://api.live.bilibili.com/room/v1/Room/getRoomInfoOld?mid=${encodeURIComponent(uid)}`);
+  const data = payload?.data || {};
+  const roomId = String(data.roomid || data.room_id || "");
+  return {
+    available: Boolean(roomId || data.title || data.uname),
+    live: Number(data.liveStatus ?? data.live_status ?? 0) === 1,
+    liveStatus: Number(data.liveStatus ?? data.live_status ?? 0),
+    roomId,
+    title: String(data.title || data.room_title || ""),
+    creatorName: String(data.uname || data.name || ""),
+    url: roomId ? `https://live.bilibili.com/${roomId}` : `https://space.bilibili.com/${uid}`
+  };
+}
+
+function extractBilibiliVideoFromDynamic(payload, uid) {
+  const items = payload?.data?.items || payload?.data?.list || [];
+  for (const item of items) {
+    const major = item?.modules?.module_dynamic?.major || item?.module_dynamic?.major || {};
+    const archive = major?.archive || major?.ugc_season || item?.archive || {};
+    const bvid = String(archive.bvid || archive.bv_id || item?.bvid || "");
+    if (!bvid) continue;
+    const author = item?.modules?.module_author || item?.module_author || {};
+    return {
+      bvid,
+      title: String(archive.title || item?.title || ""),
+      creatorName: String(author.name || author.uname || ""),
+      publishedAt: Number(author.pub_ts || item?.pub_ts || archive.pub_ts || 0),
+      url: `https://www.bilibili.com/video/${bvid}`
+    };
+  }
+  return null;
+}
+
+function extractBilibiliVideoFromArchiveSearch(payload) {
+  const list = payload?.data?.list?.vlist || payload?.data?.list || [];
+  const item = Array.isArray(list) ? list[0] : null;
+  if (!item) return null;
+  const bvid = String(item.bvid || item.bv_id || "");
+  if (!bvid) return null;
+  return {
+    bvid,
+    title: String(item.title || ""),
+    creatorName: String(item.author || item.uname || ""),
+    publishedAt: Number(item.created || item.pubdate || 0),
+    url: `https://www.bilibili.com/video/${bvid}`
+  };
+}
+
+async function fetchBilibiliVideoSnapshot(uid) {
+  const errors = [];
+  try {
+    const payload = await fetchBilibiliJson(`https://api.bilibili.com/x/polymer/web-dynamic/v1/feed/space?host_mid=${encodeURIComponent(uid)}`);
+    const video = extractBilibiliVideoFromDynamic(payload, uid);
+    if (video) return video;
+    errors.push("动态接口没有找到视频稿件");
+  } catch (error) { errors.push(String(error?.message || error)); }
+  try {
+    const payload = await fetchBilibiliJson(`https://api.bilibili.com/x/space/arc/search?mid=${encodeURIComponent(uid)}&pn=1&ps=1&order=pubdate`);
+    const video = extractBilibiliVideoFromArchiveSearch(payload);
+    if (video) return video;
+    errors.push("投稿接口没有返回视频");
+  } catch (error) { errors.push(String(error?.message || error)); }
+  throw new Error(errors.join("；").slice(0, 800) || "无法取得最新视频");
+}
+
+async function fetchBilibiliAutomaticSnapshot(uid) {
+  const [liveResult, videoResult] = await Promise.allSettled([
+    fetchBilibiliLiveSnapshot(uid),
+    fetchBilibiliVideoSnapshot(uid)
+  ]);
+  const errors = [];
+  const live = liveResult.status === "fulfilled" ? liveResult.value : null;
+  const video = videoResult.status === "fulfilled" ? videoResult.value : null;
+  if (liveResult.status === "rejected") errors.push(`直播：${String(liveResult.reason?.message || liveResult.reason)}`);
+  if (videoResult.status === "rejected") errors.push(`视频：${String(videoResult.reason?.message || videoResult.reason)}`);
+  if (!live && !video) throw new Error(errors.join("；") || "B站检查失败");
+  return { checkedAt: Date.now(), live, video, errors };
+}
+
+async function listAllBilibiliConnectorIds(env) {
+  const ids = new Set(await readJson(env, "bili:connector:index:all", []));
+  // 向后兼容旧版本：旧连接只有群索引，自动补进全局索引。
+  const groups = await readJson(env, "group_whitelist:index", []);
+  for (const groupId of groups.slice(0, 2000)) {
+    for (const id of await readJson(env, `bili:connector:index:${groupId}`, [])) ids.add(id);
+  }
+  const result = [...ids].slice(0, 5000);
+  await dbPut(env, "bili:connector:index:all", JSON.stringify(result));
+  return result;
+}
+
+async function pollOneAutomaticBilibiliConnector(env, connector, now = Date.now(), { force = false } = {}) {
+  if (!connector || connector.enabled === false) return { ok: true, skipped: "disabled" };
+  const uid = normalizeBilibiliUid(connector.creatorId);
+  if (!uid) return { ok: false, skipped: "missing_uid", message: "自动监控必须填写数字 UID。" };
+  const intervalSeconds = bilibiliPollIntervalSeconds(connector.pollIntervalSeconds);
+  if (!force && Number(connector.nextPollAt || 0) > now) return { ok: true, skipped: "not_due" };
+  connector.mode = "automatic_polling";
+  connector.pollIntervalSeconds = intervalSeconds;
+  connector.lastCheckAt = now;
+  try {
+    const snapshot = await fetchBilibiliAutomaticSnapshot(uid);
+    const previous = connector.pollState || {};
+    const initialized = Boolean(previous.initialized);
+    const events = [];
+    if (initialized && snapshot.live && snapshot.live.live && !previous.live) {
+      events.push({
+        type: "live_start", creatorId: uid,
+        creatorName: snapshot.live.creatorName || connector.creatorName,
+        title: snapshot.live.title || "直播已开始",
+        roomId: snapshot.live.roomId || "", url: snapshot.live.url || `https://space.bilibili.com/${uid}`,
+        eventId: `auto:live:${uid}:${snapshot.live.roomId || "room"}:${now}`
+      });
+    }
+    if (initialized && snapshot.video?.bvid && previous.latestVideoBvid && snapshot.video.bvid !== previous.latestVideoBvid) {
+      events.push({
+        type: "video_publish", creatorId: uid,
+        creatorName: snapshot.video.creatorName || connector.creatorName,
+        title: snapshot.video.title || "已发布新视频", bvid: snapshot.video.bvid,
+        url: snapshot.video.url, eventId: `auto:video:${uid}:${snapshot.video.bvid}`
+      });
+    }
+    const results = [];
+    for (const event of events) results.push(await sendBilibiliConnectorNotification(env, connector, event));
+    connector.pollState = {
+      initialized: true,
+      live: snapshot.live ? Boolean(snapshot.live.live) : Boolean(previous.live),
+      liveStatus: snapshot.live ? snapshot.live.liveStatus : previous.liveStatus,
+      roomId: snapshot.live?.roomId || previous.roomId || "",
+      liveTitle: snapshot.live?.title || previous.liveTitle || "",
+      latestVideoBvid: snapshot.video?.bvid || previous.latestVideoBvid || "",
+      latestVideoTitle: snapshot.video?.title || previous.latestVideoTitle || "",
+      latestVideoPublishedAt: snapshot.video?.publishedAt || previous.latestVideoPublishedAt || 0,
+      checkedAt: snapshot.checkedAt
+    };
+    if (!connector.creatorName) connector.creatorName = snapshot.live?.creatorName || snapshot.video?.creatorName || connector.creatorName;
+    connector.lastCheckStatus = snapshot.errors.length ? "partial" : "ok";
+    connector.lastCheckError = snapshot.errors.join("；").slice(0, 1000);
+    connector.consecutiveFailures = 0;
+    connector.nextPollAt = now + intervalSeconds * 1000;
+    connector.updatedAt = Date.now();
+    await dbPut(env, `bili:connector:${connector.id}`, JSON.stringify(connector));
+    await writeSystemAudit(env, { type: "bilibili_auto_poll", groupId: connector.groupId, actorId: "system", action: initialized ? "checked" : "baseline_created", connectorId: connector.id, events: events.map(x => x.type), partialErrors: snapshot.errors });
+    return { ok: true, baseline: !initialized, events, results, connector };
+  } catch (error) {
+    connector.consecutiveFailures = Number(connector.consecutiveFailures || 0) + 1;
+    const backoffSeconds = Math.min(1800, Math.max(intervalSeconds, 60 * (2 ** Math.min(5, connector.consecutiveFailures - 1))));
+    connector.lastCheckStatus = "failed";
+    connector.lastCheckError = String(error?.message || error).slice(0, 1200);
+    connector.nextPollAt = now + backoffSeconds * 1000;
+    connector.updatedAt = Date.now();
+    await dbPut(env, `bili:connector:${connector.id}`, JSON.stringify(connector));
+    await writeSystemAudit(env, { type: "bilibili_auto_poll", groupId: connector.groupId, actorId: "system", action: "failed", connectorId: connector.id, error: connector.lastCheckError, nextPollAt: connector.nextPollAt });
+    return { ok: false, message: connector.lastCheckError, connector };
+  }
+}
+
+async function pollAutomaticBilibiliConnectors(env, now = Date.now()) {
+  const lockAt = Number(await dbGet(env, "bili:auto_poll:lock") || 0);
+  if (lockAt && now - lockAt < 50000) return;
+  await dbPut(env, "bili:auto_poll:lock", String(now));
+  try {
+    const ids = await listAllBilibiliConnectorIds(env);
+    const due = [];
+    for (const id of ids) {
+      if (due.length >= 20) break;
+      const connector = await readJson(env, `bili:connector:${id}`, null);
+      if (!connector || connector.enabled === false || connector.mode === "generic_webhook") continue;
+      if (Number(connector.nextPollAt || 0) > now) continue;
+      due.push(connector);
+    }
+    await Promise.allSettled(due.map(connector => pollOneAutomaticBilibiliConnector(env, connector, now)));
+  } finally {
+    await dbDel(env, "bili:auto_poll:lock");
+  }
+}
+
 
 function platformRoleRank(role){return({member:0,admin:1,owner:2,developer:3})[String(role||'member')]??0}
 function platformFeatureById(id){return PLATFORM_FEATURES.find(x=>x.id===String(id||'').toUpperCase())||null}
 function platformFeatureKey(feature,groupId){return feature.scope==='global'?`platform:feature:${feature.id}:global`:`platform:feature:${feature.id}:group:${String(groupId||'')}`}
 async function platformFeatureEnabled(env,feature,groupId){const v=await dbGet(env,platformFeatureKey(feature,groupId));return v==null?feature.defaultEnabled:v==='true'}
 async function listPlatformFeatures(env,{groupId='',role='member',query='',includeHidden=false}={}){const q=String(query||'').trim().toLowerCase(),rank=platformRoleRank(role),rows=[];for(const f of PLATFORM_FEATURES){if(!includeHidden&&platformRoleRank(f.minRole)>rank)continue;if(q&&!`${f.id} ${f.name} ${f.category} ${f.mode}`.toLowerCase().includes(q))continue;rows.push({...f,enabled:await platformFeatureEnabled(env,f,groupId)})}return rows}
-async function setPlatformFeature(env,{feature,groupId,enabled,actorId,actorRole,auditMode='log'}){if(!feature)return{ok:false,message:'找不到功能。'};if(platformRoleRank(actorRole)<platformRoleRank(feature.minRole))return{ok:false,message:'你的角色無權修改此功能。'};if(feature.scope==='group'&&!groupId)return{ok:false,message:'請先選擇群組。'};await dbPut(env,platformFeatureKey(feature,groupId),enabled?'true':'false');if(auditMode!=='silent')await writeSystemAudit(env,{type:'platform_feature',groupId,actorId,action:feature.id,featureName:feature.name,enabled:Boolean(enabled)});return{ok:true,message:`${feature.id} ${feature.name} 已${enabled?'開啟':'關閉'}。`}}
+async function setPlatformFeature(env,{feature,groupId,enabled,actorId,actorRole,auditMode='log'}){if(!feature)return{ok:false,message:'找不到功能。'};if(platformRoleRank(actorRole)<platformRoleRank(feature.minRole))return{ok:false,message:'你的权限等级无法修改此功能。'};if(feature.scope==='group'&&!groupId)return{ok:false,message:'请先选择群组。'};await dbPut(env,platformFeatureKey(feature,groupId),enabled?'true':'false');if(auditMode!=='silent')await writeSystemAudit(env,{type:'platform_feature',groupId,actorId,action:feature.id,featureName:feature.name,enabled:Boolean(enabled)});return{ok:true,message:`${feature.id} ${feature.name} 已${enabled?'開啟':'關閉'}。`}}
 async function appendPlatformTrace(env,data){const id=`tr_${Date.now().toString(36)}_${crypto.randomUUID().slice(0,8)}`,item={id,at:Date.now(),...data};await dbPut(env,`platform:trace:${id}`,JSON.stringify(item));await appendIndex(env,'platform:trace:index',id,5000);if(item.groupId)await appendIndex(env,`platform:trace:index:${item.groupId}`,id,2000);return item}
 async function listPlatformTraces(env,{groupId='',query='',limit=200}={}){const ids=await readJson(env,groupId?`platform:trace:index:${groupId}`:'platform:trace:index',[]),q=String(query||'').toLowerCase(),rows=[];for(const id of ids.slice(-Math.max(1,Math.min(1000,Number(limit||200)))).reverse()){const x=await readJson(env,`platform:trace:${id}`,null);if(x&&(!q||JSON.stringify(x).toLowerCase().includes(q)))rows.push(x)}return rows}
 async function enqueuePlatformJob(env,data){const id=`job_${Date.now().toString(36)}_${crypto.randomUUID().slice(0,8)}`,job={id,status:'queued',attempts:0,maxAttempts:Math.max(1,Math.min(10,Number(data.maxAttempts||3))),createdAt:Date.now(),nextRunAt:Number(data.nextRunAt||Date.now()),...data};await dbPut(env,`platform:job:${id}`,JSON.stringify(job));await appendIndex(env,'platform:job:index',id,5000);return job}
@@ -5923,74 +6204,110 @@ async function handlePortalApi(request, env, url) {
 
   if (request.method === "GET" && path === "/settings-center") {
     const targetQq = portalIsDeveloper ? String(url.searchParams.get("targetQq") || authed.qq).replace(/\D/g, "") : authed.qq;
-    const targetRoleRequested = String(url.searchParams.get("targetRole") || "");
-    const targetRole = portalIsDeveloper && ["member", "admin", "owner", "developer"].includes(targetRoleRequested) ? targetRoleRequested : await resolvePortalRole(env, targetQq, groupId);
+    if (!targetQq) return jsonResponse({ ok: false, message: "请输入有效的目标 QQ。" }, 400);
+    const targetRole = await resolvePortalRole(env, targetQq, groupId);
     const visibleRank = portalIsDeveloper ? 3 : portalRoleRank(role);
     const settings = [];
     for (const definition of PORTAL_SETTING_DEFINITIONS) {
       if (portalRoleRank(definition.minRole) > visibleRank) continue;
       settings.push({ ...definition, value: await readPortalSettingValue(env, definition, groupId, targetQq) });
     }
-    return jsonResponse({ ok: true, targetQq, targetRole, viewerRole: portalIsDeveloper ? "developer" : role, settings, developerAuditModes: portalIsDeveloper ? ["log", "silent"] : ["log"] });
+    return jsonResponse({ ok: true, targetQq, targetRole, viewerRole: portalIsDeveloper ? "developer" : role, settings, canDisableAuditLog: portalIsDeveloper });
   }
   if (request.method === "POST" && path === "/settings-center") {
-    const definition = PORTAL_SETTING_DEFINITIONS.find(item => item.key === String(body.key || ""));
-    if (!definition) return jsonResponse({ ok: false, message: "未知设置项目。" }, 400);
     const targetQq = portalIsDeveloper ? String(body.targetQq || authed.qq).replace(/\D/g, "") : authed.qq;
-    const targetRole = portalIsDeveloper && ["member", "admin", "owner", "developer"].includes(String(body.targetRole || "")) ? String(body.targetRole) : await resolvePortalRole(env, targetQq, groupId);
+    if (!targetQq) return jsonResponse({ ok: false, message: "请输入有效的目标 QQ。" }, 400);
+    const targetRole = await resolvePortalRole(env, targetQq, groupId);
     const actorRank = portalIsDeveloper ? 3 : portalRoleRank(role);
-    if (portalRoleRank(definition.minRole) > actorRank) return jsonResponse({ ok: false, message: "你的角色无权修改该设置。" }, 403);
-    if (!portalIsDeveloper && definition.scope === "user" && targetQq !== authed.qq) return jsonResponse({ ok: false, message: "只能修改自己的个人设置。" }, 403);
-    if (["rule_monitor_enabled","rule_proxy_mode","rule_proxy_mute_seconds","rule_proxy_kick_authorized","join_reject_authorized"].includes(definition.key) && !(await isVerifiedGroupOwner(env, groupId, authed.qq))) return jsonResponse({ ok: false, message: "此高風險群級設定只能由 NapCat 即時確認的目前群主修改。" }, 403);
-    await writePortalSettingValue(env, definition, groupId, targetQq, body.value);
+    const requested = Array.isArray(body.settings)
+      ? body.settings
+      : [{ key: String(body.key || ""), value: body.value }];
+    if (!requested.length) return jsonResponse({ ok: false, message: "没有需要保存的设置。" }, 400);
+    const definitions = [];
+    for (const update of requested) {
+      const definition = PORTAL_SETTING_DEFINITIONS.find(item => item.key === String(update?.key || ""));
+      if (!definition) return jsonResponse({ ok: false, message: `未知设置项目：${String(update?.key || "")}` }, 400);
+      if (portalRoleRank(definition.minRole) > actorRank) return jsonResponse({ ok: false, message: `你的权限等级无法修改“${definition.label}”。` }, 403);
+      if (!portalIsDeveloper && definition.scope === "user" && targetQq !== authed.qq) return jsonResponse({ ok: false, message: "只能修改自己的个人设置。" }, 403);
+      const normalizedProxyMode = definition.key === "rule_proxy_mode" ? normalizeRuleProxyMode(update.value) : "";
+      if (["rule_monitor_enabled", "rule_proxy_kick_authorized", "join_reject_authorized"].includes(definition.key) && !(await isVerifiedGroupOwner(env, groupId, authed.qq))) {
+        return jsonResponse({ ok: false, message: `“${definition.label}”只能由 NapCat 即时确认的当前群主修改。` }, 403);
+      }
+      if (definition.key === "rule_proxy_mode" && normalizedProxyMode === "auto" && !(await isVerifiedGroupOwner(env, groupId, authed.qq))) {
+        return jsonResponse({ ok: false, message: "AI 群规代理的 auto 模式只能由当前真实群主启用；管理员可使用 record、warn 或 mute。" }, 403);
+      }
+      definitions.push({ definition, value: update.value });
+    }
+    for (const entry of definitions) await writePortalSettingValue(env, entry.definition, groupId, targetQq, entry.value);
     const auditMode = portalIsDeveloper && body.auditMode === "silent" ? "silent" : "log";
-    if (auditMode === "log") await writeSystemAudit(env, { type: "settings_center", groupId, actorId: authed.qq, targetId: targetQq, targetRole, action: definition.key, value: body.value });
-    return jsonResponse({ ok: true, message: auditMode === "silent" ? "设置已保存（不记录操作日志）。" : "设置已保存并记录操作日志。" });
+    if (auditMode === "log") await writeSystemAudit(env, {
+      type: "settings_center", groupId, actorId: authed.qq, targetId: targetQq, targetRole,
+      action: "bulk_update", keys: definitions.map(entry => entry.definition.key)
+    });
+    return jsonResponse({ ok: true, message: auditMode === "silent" ? `已保存 ${definitions.length} 项设置（未记录操作日志）。` : `已保存 ${definitions.length} 项设置并记录操作日志。`, targetRole });
   }
 
   if (request.method === "GET" && path === "/integrations/bilibili") {
-    if (!(permissions.aiAdmin || permissions.groupOps || permissions.nativeAdmin || portalIsDeveloper)) return jsonResponse({ ok: false, message: "缺少串接管理权限。" }, 403);
+    if (!(permissions.aiAdmin || permissions.groupOps || permissions.nativeAdmin || portalIsDeveloper)) return jsonResponse({ ok: false, message: "缺少 B站监控管理权限。" }, 403);
     const connectors = await listBilibiliConnectors(env, groupId);
-    return jsonResponse({ ok: true, connectors: connectors.map(item => ({ ...item, webhookUrl: `https://${url.host}/api/integrations/bilibili/webhook/${item.webhookSecret}` })), note: "不固定任何创作者。请填写实际要串接的创作者，并让其授权你的 Bilibili 开放平台应用，或由你信任的事件桥接器向专属 Webhook 发送事件。" });
+    return jsonResponse({
+      ok: true,
+      connectors: connectors.map(item => { const { webhookSecret, ...safe } = item; return { ...safe, mode: item.mode === "generic_webhook" ? "generic_webhook" : "automatic_polling" }; }),
+      note: "填写 B站用户 UID 后，Worker 会按设定间隔自动检查开播状态与最新视频。首次检查只建立基准，不发送旧内容。"
+    });
   }
   if (request.method === "POST" && path === "/integrations/bilibili") {
-    if (!(permissions.aiAdmin || permissions.groupOps || permissions.nativeAdmin || portalIsDeveloper)) return jsonResponse({ ok: false, message: "缺少串接管理权限。" }, 403);
+    if (!(permissions.aiAdmin || permissions.groupOps || permissions.nativeAdmin || portalIsDeveloper)) return jsonResponse({ ok: false, message: "缺少 B站监控管理权限。" }, 403);
     const action = String(body.action || "save");
     if (action === "delete") {
       const item = await readJson(env, `bili:connector:${body.id}`, null);
-      if (!item || item.groupId !== groupId) return jsonResponse({ ok: false, message: "找不到串接。" }, 404);
-      await dbDel(env, `bili:webhook_secret:${item.webhookSecret}`);
+      if (!item || item.groupId !== groupId) return jsonResponse({ ok: false, message: "找不到监控项目。" }, 404);
+      if (item.webhookSecret) await dbDel(env, `bili:webhook_secret:${item.webhookSecret}`);
       await dbDel(env, `bili:connector:${item.id}`);
       const ids = await readJson(env, `bili:connector:index:${groupId}`, []);
       await dbPut(env, `bili:connector:index:${groupId}`, JSON.stringify(ids.filter(id => id !== item.id)));
-      return jsonResponse({ ok: true, message: "B站串接已删除。" });
+      await removeFromIndex(env, "bili:connector:index:all", item.id);
+      return jsonResponse({ ok: true, message: "B站自动监控已删除。" });
     }
     if (action === "test") {
       const item = await readJson(env, `bili:connector:${body.id}`, null);
-      if (!item || item.groupId !== groupId) return jsonResponse({ ok: false, message: "找不到串接。" }, 404);
+      if (!item || item.groupId !== groupId) return jsonResponse({ ok: false, message: "找不到监控项目。" }, 404);
       const eventType = body.eventType === "video_publish" ? "video_publish" : "live_start";
-      const result = await sendBilibiliConnectorNotification(env, item, { type: eventType, creatorId: item.creatorId, creatorName: item.creatorName, title: eventType === "live_start" ? "测试直播通知" : "测试新视频通知", url: "https://www.bilibili.com/", eventId: `test:${Date.now()}` });
-      return jsonResponse({ ok: result.ok, message: result.ok ? "测试事件已处理。" : result.error }, result.ok ? 200 : 502);
+      const result = await sendBilibiliConnectorNotification(env, item, { type: eventType, creatorId: item.creatorId, creatorName: item.creatorName, title: eventType === "live_start" ? "测试直播通知" : "测试新视频通知", url: `https://space.bilibili.com/${item.creatorId}`, eventId: `test:${Date.now()}` });
+      return jsonResponse({ ok: result.ok, message: result.ok ? "测试通知已处理。" : result.error }, result.ok ? 200 : 502);
+    }
+    if (action === "check_now") {
+      const item = await readJson(env, `bili:connector:${body.id}`, null);
+      if (!item || item.groupId !== groupId) return jsonResponse({ ok: false, message: "找不到监控项目。" }, 404);
+      const result = await pollOneAutomaticBilibiliConnector(env, item, Date.now(), { force: true });
+      const { webhookSecret, ...safeConnector } = result.connector || item;
+      return jsonResponse({ ok: result.ok, message: result.ok ? (result.baseline ? "检查成功，已建立当前状态基准。" : `检查成功，发现 ${result.events?.length || 0} 个新事件。`) : `检查失败：${result.message}`, connector: safeConnector }, result.ok ? 200 : 502);
     }
     const id = String(body.id || `bili_${Date.now().toString(36)}_${crypto.randomUUID().slice(0, 8)}`);
     const existing = await readJson(env, `bili:connector:${id}`, null);
-    const webhookSecret = existing?.webhookSecret || crypto.randomUUID().replaceAll("-", "") + crypto.randomUUID().replaceAll("-", "");
+    const creatorId = normalizeBilibiliUid(body.creatorId || existing?.creatorId || "");
+    if (!creatorId) return jsonResponse({ ok: false, message: "自动监控必须填写 B站用户的数字 UID。" }, 400);
     const item = {
-      id, groupId, webhookSecret,
-      creatorId: String(body.creatorId || existing?.creatorId || "").trim(),
+      ...existing,
+      id, groupId,
+      creatorId,
       creatorName: String(body.creatorName || existing?.creatorName || "").trim().slice(0, 120),
-      mode: ["official_webhook", "generic_webhook"].includes(body.mode) ? body.mode : "official_webhook",
+      mode: "automatic_polling",
       enabled: body.enabled !== false,
+      pollIntervalSeconds: bilibiliPollIntervalSeconds(body.pollIntervalSeconds || existing?.pollIntervalSeconds),
       liveNotify: Boolean(body.liveNotify), liveAtAll: Boolean(body.liveAtAll),
       videoNotify: Boolean(body.videoNotify), videoAtAll: Boolean(body.videoAtAll),
-      createdBy: existing?.createdBy || authed.qq, createdAt: existing?.createdAt || Date.now(), updatedAt: Date.now()
+      createdBy: existing?.createdBy || authed.qq,
+      createdAt: existing?.createdAt || Date.now(), updatedAt: Date.now(),
+      nextPollAt: 0
     };
-    if (!item.creatorId && !item.creatorName) return jsonResponse({ ok: false, message: "请填写创作者名称或开放平台创作者 ID。" }, 400);
+    if (existing?.webhookSecret) await dbDel(env, `bili:webhook_secret:${existing.webhookSecret}`);
+    delete item.webhookSecret;
     await dbPut(env, `bili:connector:${id}`, JSON.stringify(item));
-    await dbPut(env, `bili:webhook_secret:${webhookSecret}`, id);
     await appendIndex(env, `bili:connector:index:${groupId}`, id, 500);
-    await writeSystemAudit(env, { type: "bilibili_connector", groupId, actorId: authed.qq, action: existing ? "update" : "create", connectorId: id });
-    return jsonResponse({ ok: true, message: "B站串接已保存。", connector: { ...item, webhookUrl: `https://${url.host}/api/integrations/bilibili/webhook/${webhookSecret}` } });
+    await appendIndex(env, "bili:connector:index:all", id, 5000);
+    await writeSystemAudit(env, { type: "bilibili_auto_monitor", groupId, actorId: authed.qq, action: existing ? "update" : "create", connectorId: id, creatorId, pollIntervalSeconds: item.pollIntervalSeconds });
+    return jsonResponse({ ok: true, message: "B站自动监控已保存，将在下一次定时任务检查；也可以立即检查。", connector: item });
   }
 
   if (request.method === "GET" && path === "/health") {
@@ -6102,13 +6419,24 @@ async function handlePortalApi(request, env, url) {
     } });
   }
   if (request.method === "POST" && path === "/rule-violations/settings") {
-    if (!(await isVerifiedGroupOwner(env, groupId, authed.qq))) return jsonResponse({ ok: false, message: "只有 NapCat 即時確認的目前群主可以修改群規監控與 AI 代理設定。" }, 403);
-    if (Object.prototype.hasOwnProperty.call(body, "monitorEnabled")) await dbPut(env, `rule_monitor_enabled:${groupId}`, body.monitorEnabled ? "true" : "false");
-    if (Object.prototype.hasOwnProperty.call(body, "proxyMode")) await dbPut(env, `rule_proxy_mode:${groupId}`, normalizeRuleProxyMode(body.proxyMode));
+    if (!(permissions.aiAdmin || permissions.nativeAdmin || role === "admin" || role === "owner" || portalIsDeveloper)) return jsonResponse({ ok: false, message: "需要 QQ 管理员或以上权限。" }, 403);
+    const isCurrentOwner = await isVerifiedGroupOwner(env, groupId, authed.qq);
+    if (Object.prototype.hasOwnProperty.call(body, "monitorEnabled")) {
+      if (!isCurrentOwner) return jsonResponse({ ok: false, message: "只有当前真实群主可以开关群规持续监控。" }, 403);
+      await dbPut(env, `rule_monitor_enabled:${groupId}`, body.monitorEnabled ? "true" : "false");
+    }
+    if (Object.prototype.hasOwnProperty.call(body, "proxyMode")) {
+      const nextMode = normalizeRuleProxyMode(body.proxyMode);
+      if (nextMode === "auto" && !isCurrentOwner) return jsonResponse({ ok: false, message: "auto 模式只能由当前真实群主启用；管理员可使用 record、warn 或 mute。" }, 403);
+      await dbPut(env, `rule_proxy_mode:${groupId}`, nextMode);
+    }
     if (Object.prototype.hasOwnProperty.call(body, "muteSeconds")) await dbPut(env, `rule_proxy_mute_seconds:${groupId}`, String(parseUnlimitedNonNegativeInteger(body.muteSeconds, DEFAULTS.ruleProxyMuteSeconds)));
-    if (Object.prototype.hasOwnProperty.call(body, "kickAuthorized")) body.kickAuthorized ? await dbPut(env, `rule_proxy_kick_authorized:${groupId}`, "true") : await dbDel(env, `rule_proxy_kick_authorized:${groupId}`);
+    if (Object.prototype.hasOwnProperty.call(body, "kickAuthorized")) {
+      if (!isCurrentOwner) return jsonResponse({ ok: false, message: "只有当前真实群主可以修改 AI 踢出授权。" }, 403);
+      body.kickAuthorized ? await dbPut(env, `rule_proxy_kick_authorized:${groupId}`, "true") : await dbDel(env, `rule_proxy_kick_authorized:${groupId}`);
+    }
     await writeSystemAudit(env, { type: "rule_proxy_portal_settings", groupId, actorId: authed.qq, action: "update" });
-    return jsonResponse({ ok: true, message: "群规监控与 AI 代理设置已保存。" });
+    return jsonResponse({ ok: true, message: "AI 群规代理设置已保存。" });
   }
 
   if (request.method === "GET" && path === "/moderation/proposals") {
@@ -6340,7 +6668,9 @@ async function handlePortalApi(request, env, url) {
       const haystack = JSON.stringify(item).toLowerCase();
       return (!query || haystack.includes(query)) && (!type || String(item.type || "").toLowerCase().includes(type)) && (!actor || String(item.actorId || "") === actor);
     });
-    return jsonResponse({ ok: true, logs: filtered.slice(-500).reverse() });
+    const selected = filtered.slice(-500).reverse();
+    const enriched = await enrichAuditLogsForPortal(env, selected);
+    return jsonResponse({ ok: true, logs: enriched });
   }
 
   if (request.method === "POST" && path === "/admin/blacklist") {
@@ -6646,12 +6976,12 @@ async function handleAppealApi(request, env, url) {
 }
 
 function getAppealPage(host) {
-  return `<!doctype html><html lang="zh-Hant"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>QQAI 匿名申訴</title><style>*{box-sizing:border-box}body{margin:0;min-height:100vh;font-family:system-ui;background:radial-gradient(circle at 30% 10%,#173b60,#060d18 45%,#020409);color:#edf7ff;padding:22px}.wrap{max-width:760px;margin:auto}.card{background:#07101ee8;border:1px solid #ffffff22;border-radius:16px;padding:20px;margin:14px 0}h1{margin-bottom:6px}.muted{color:#a9bacd;line-height:1.6}label{display:block;margin-top:12px;color:#b8c7d9}input,select,textarea{width:100%;border:1px solid #ffffff24;background:#081525;color:#fff;border-radius:9px;padding:11px;margin-top:6px}textarea{min-height:150px}button{margin-top:14px;border:0;border-radius:9px;background:#67ddff;color:#03111a;font-weight:800;padding:11px 16px;cursor:pointer}.hidden{display:none}.msg{white-space:pre-wrap;color:#8ff0c0;margin-top:12px}.item{border-top:1px solid #ffffff17;padding:10px 0}</style></head><body><div class="wrap"><h1>匿名申訴</h1><div class="muted">審核人看不到申訴人的 QQ；只有開發者可查看真實身分。系統會先确认你屬於可使用 AI 的白名單群。</div><section class="card" id="login"><label>QQ 號</label><input id="qq" inputmode="numeric"><button id="send">發送驗證碼</button><label>驗證碼</label><input id="code" maxlength="6" inputmode="numeric"><button id="verify">驗證</button><div class="msg" id="loginMsg"></div></section><section class="card hidden" id="form"><label>所屬白名單群</label><select id="group"></select><label>申訴類型</label><select id="type"><option>禁言</option><option>踢出</option><option>AI黑名单</option><option>管理操作</option><option>排程</option><option>其他</option></select><label>相關訊息 ID（選填）</label><input id="evidence"><label>申訴內容</label><textarea id="content"></textarea><button id="submit">匿名提交</button><button id="refresh">查看我的案件</button><div class="msg" id="formMsg"></div><div id="cases"></div></section></div><script>let token='';const post=async(p,d)=>{const r=await fetch('/api/appeal'+p,{method:'POST',headers:{'Content-Type':'application/json',...(token?{Authorization:'Bearer '+token}:{})},body:JSON.stringify(d||{})});return r.json()},get=async p=>(await fetch('/api/appeal'+p,{headers:token?{Authorization:'Bearer '+token}:{}})).json();send.onclick=async()=>loginMsg.textContent=(await post('/request-code',{qq:qq.value})).message;verify.onclick=async()=>{const r=await post('/verify-code',{qq:qq.value,code:code.value});loginMsg.textContent=r.message;if(r.ok){token=r.token;const g=await get('/groups');group.innerHTML=(g.groups||[]).map(x=>'<option value="'+x.groupId+'">'+x.groupName+'（'+x.groupId+'）</option>').join('');login.classList.add('hidden');form.classList.remove('hidden')}};submit.onclick=async()=>{const r=await post('/submit',{groupId:group.value,type:type.value,content:content.value,evidenceMessageId:evidence.value});formMsg.textContent=r.message;if(r.ok){content.value='';load()}};async function load(){const r=await get('/mine');cases.innerHTML=(r.appeals||[]).map(a=>'<div class="item"><b>'+a.id+'</b>｜'+a.status+'<br>'+a.type+'｜'+a.content+(a.result?'<br>結果：'+a.result:'')+'</div>').join('')||'<div class="muted">暂无案件</div>'}refresh.onclick=load;</script></body></html>`;
+  return `<!doctype html><html lang="zh-Hant"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>QQAI 匿名申訴</title><style>*{box-sizing:border-box}body{margin:0;min-height:100vh;font-family:system-ui;background:radial-gradient(circle at 30% 10%,#173b60,#060d18 45%,#020409);color:#edf7ff;padding:22px}.wrap{max-width:760px;margin:auto}.card{background:#07101ee8;border:1px solid #ffffff22;border-radius:16px;padding:20px;margin:14px 0}h1{margin-bottom:6px}.muted{color:#a9bacd;line-height:1.6}label{display:block;margin-top:12px;color:#b8c7d9}input,select,textarea{width:100%;border:1px solid #ffffff24;background:#081525;color:#fff;border-radius:9px;padding:11px;margin-top:6px}textarea{min-height:150px}button{margin-top:14px;border:0;border-radius:9px;background:#67ddff;color:#03111a;font-weight:800;padding:11px 16px;cursor:pointer}.hidden{display:none}.msg{white-space:pre-wrap;color:#8ff0c0;margin-top:12px}.item{border-top:1px solid #ffffff17;padding:10px 0}</style></head><body><div class="wrap"><h1>匿名申訴</h1><div class="muted">審核人看不到申訴人的 QQ；只有開發者可查看真實身分。系統會先确认你屬於可使用 AI 的白名單群。</div><section class="card" id="login"><label>QQ 号</label><input id="qq" inputmode="numeric"><button id="send">發送驗證碼</button><label>驗證碼</label><input id="code" maxlength="6" inputmode="numeric"><button id="verify">驗證</button><div class="msg" id="loginMsg"></div></section><section class="card hidden" id="form"><label>所屬白名單群</label><select id="group"></select><label>申訴類型</label><select id="type"><option>禁言</option><option>踢出</option><option>AI黑名单</option><option>管理操作</option><option>排程</option><option>其他</option></select><label>相關訊息 ID（選填）</label><input id="evidence"><label>申訴內容</label><textarea id="content"></textarea><button id="submit">匿名提交</button><button id="refresh">查看我的案件</button><div class="msg" id="formMsg"></div><div id="cases"></div></section></div><script>let token='';const post=async(p,d)=>{const r=await fetch('/api/appeal'+p,{method:'POST',headers:{'Content-Type':'application/json',...(token?{Authorization:'Bearer '+token}:{})},body:JSON.stringify(d||{})});return r.json()},get=async p=>(await fetch('/api/appeal'+p,{headers:token?{Authorization:'Bearer '+token}:{}})).json();send.onclick=async()=>loginMsg.textContent=(await post('/request-code',{qq:qq.value})).message;verify.onclick=async()=>{const r=await post('/verify-code',{qq:qq.value,code:code.value});loginMsg.textContent=r.message;if(r.ok){token=r.token;const g=await get('/groups');group.innerHTML=(g.groups||[]).map(x=>'<option value="'+x.groupId+'">'+x.groupName+'（'+x.groupId+'）</option>').join('');login.classList.add('hidden');form.classList.remove('hidden')}};submit.onclick=async()=>{const r=await post('/submit',{groupId:group.value,type:type.value,content:content.value,evidenceMessageId:evidence.value});formMsg.textContent=r.message;if(r.ok){content.value='';load()}};async function load(){const r=await get('/mine');cases.innerHTML=(r.appeals||[]).map(a=>'<div class="item"><b>'+a.id+'</b>｜'+a.status+'<br>'+a.type+'｜'+a.content+(a.result?'<br>結果：'+a.result:'')+'</div>').join('')||'<div class="muted">暂无案件</div>'}refresh.onclick=load;</script></body></html>`;
 }
 
 function getPortalHomePage(host) {
   return String.raw`<!doctype html>
-<html lang="zh-Hant-TW">
+<html lang="zh-Hans-CN">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
@@ -6667,14 +6997,14 @@ function getPortalHomePage(host) {
 .btn{border:0;border-radius:11px;padding:10px 14px;font-weight:700;cursor:pointer;background:var(--panel2);color:var(--text)}.btn:hover{filter:brightness(.98)}.btn.primary{background:var(--primary);color:#fff}.btn.danger{background:#fde9ec;color:var(--bad)}.btn.ghost{background:transparent;border:1px solid var(--line)}.btn:disabled{opacity:.55;cursor:not-allowed}.notice{margin-top:14px;padding:11px 13px;border-radius:11px;background:var(--panel2);color:var(--muted);font-size:14px;line-height:1.55}
 .app{min-height:100vh;display:grid;grid-template-columns:250px 1fr}.sidebar{position:sticky;top:0;height:100vh;background:#171b2b;color:#e9ecf4;padding:18px 14px;display:flex;flex-direction:column}.side-brand{display:flex;align-items:center;gap:10px;padding:8px 8px 18px}.side-brand .logo{width:38px;height:38px;border-radius:12px}.side-brand b{display:block}.side-brand small{color:#98a2b7}.nav{display:grid;gap:4px;overflow:auto}.nav button{border:0;background:transparent;color:#aeb7c9;padding:10px 12px;border-radius:10px;text-align:left;cursor:pointer;font-weight:650}.nav button:hover,.nav button.active{background:rgba(255,255,255,.1);color:#fff}.side-bottom{margin-top:auto;padding:12px 8px 2px;border-top:1px solid rgba(255,255,255,.1)}
 .main{min-width:0}.topbar{height:72px;display:flex;align-items:center;justify-content:space-between;gap:16px;padding:0 24px;border-bottom:1px solid var(--line);background:var(--topbar-bg);backdrop-filter:blur(12px);position:sticky;top:0;z-index:5}.topbar h2{margin:0;font-size:20px}.top-actions{display:flex;align-items:center;gap:10px}.top-actions select{max-width:250px;border:1px solid var(--line);border-radius:10px;padding:9px 10px;background:#fff}.content{padding:24px;max-width:1500px;margin:auto}.view{display:none}.view.active{display:block}.section-head{display:flex;justify-content:space-between;gap:16px;align-items:flex-start;margin-bottom:18px}.section-head h2{margin:0 0 5px;font-size:25px}.section-head p{margin:0;color:var(--muted)}
-.grid{display:grid;grid-template-columns:repeat(12,minmax(0,1fr));gap:16px}.card{background:var(--panel);border:1px solid var(--line);border-radius:17px;padding:18px;box-shadow:0 8px 28px rgba(38,49,76,.045);min-width:0}.span-3{grid-column:span 3}.span-4{grid-column:span 4}.span-6{grid-column:span 6}.span-8{grid-column:span 8}.span-12{grid-column:1/-1}.metric-label{font-size:13px;color:var(--muted);margin-bottom:8px}.metric-value{font-size:27px;font-weight:800;letter-spacing:-.03em}.metric-sub{font-size:12px;color:var(--muted);margin-top:7px}.card h3{margin:0 0 13px;font-size:16px}.status{display:inline-flex;align-items:center;gap:7px;border-radius:999px;padding:5px 9px;font-size:12px;font-weight:800;background:#edf1f7}.status:before{content:"";width:7px;height:7px;border-radius:50%;background:#8390a5}.status.ok{background:#e5f5ee;color:var(--ok)}.status.ok:before{background:var(--ok)}.status.warning{background:#fff2d9;color:var(--warn)}.status.warning:before{background:var(--warn)}.status.error{background:#fde9ec;color:var(--bad)}.status.error:before{background:var(--bad)}
+.grid{display:grid;grid-template-columns:repeat(12,minmax(0,1fr));gap:16px}.card{background:var(--panel);border:1px solid var(--line);border-radius:17px;padding:18px;box-shadow:0 8px 28px rgba(38,49,76,.045);min-width:0}.span-3{grid-column:span 3}.span-4{grid-column:span 4}.span-5{grid-column:span 5}.span-6{grid-column:span 6}.span-7{grid-column:span 7}.span-8{grid-column:span 8}.span-12{grid-column:1/-1}.metric-label{font-size:13px;color:var(--muted);margin-bottom:8px}.metric-value{font-size:27px;font-weight:800;letter-spacing:-.03em}.metric-sub{font-size:12px;color:var(--muted);margin-top:7px}.card h3{margin:0 0 13px;font-size:16px}.status{display:inline-flex;align-items:center;gap:7px;border-radius:999px;padding:5px 9px;font-size:12px;font-weight:800;background:#edf1f7}.status:before{content:"";width:7px;height:7px;border-radius:50%;background:#8390a5}.status.ok{background:#e5f5ee;color:var(--ok)}.status.ok:before{background:var(--ok)}.status.warning{background:#fff2d9;color:var(--warn)}.status.warning:before{background:var(--warn)}.status.error{background:#fde9ec;color:var(--bad)}.status.error:before{background:var(--bad)}
 .list{display:grid;gap:10px}.item{border:1px solid var(--line);border-radius:13px;padding:13px;background:var(--panel)}.item-head{display:flex;justify-content:space-between;gap:12px;align-items:flex-start}.item-title{font-weight:800;word-break:break-word}.item-meta{font-size:12px;color:var(--muted);margin-top:5px;line-height:1.55}.item-body{margin-top:9px;line-height:1.55;word-break:break-word}.empty{padding:28px 12px;text-align:center;color:var(--muted);border:1px dashed var(--line);border-radius:13px}.health-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:13px}.health-card{border:1px solid var(--line);border-radius:14px;padding:14px;background:var(--panel)}.health-card .latency{font-size:12px;color:var(--muted);margin-top:8px}.health-card .detail{font-size:12px;color:var(--muted);margin-top:8px;word-break:break-word;white-space:pre-wrap}
 .timeline{display:grid;gap:8px}.step{display:flex;gap:10px;align-items:flex-start}.step i{width:9px;height:9px;border-radius:50%;background:var(--primary);margin-top:6px;flex:0 0 auto}.step span{line-height:1.5}.pill{display:inline-block;border-radius:999px;padding:4px 8px;background:#eef0ff;color:#5050bd;font-size:12px;font-weight:700;margin:2px 4px 2px 0}.split{display:grid;grid-template-columns:1fr 1fr;gap:16px}.switch{display:flex;align-items:center;gap:9px;margin:10px 0}.switch input{width:18px;height:18px}.code{font-family:ui-monospace,SFMono-Regular,Consolas,monospace;background:#151a29;color:#e9ecf4;border-radius:12px;padding:12px;white-space:pre-wrap;word-break:break-word;font-size:12px}
-.toast{position:fixed;right:22px;bottom:22px;max-width:420px;padding:12px 15px;border-radius:12px;background:#1c2233;color:#fff;box-shadow:var(--shadow);z-index:30}.mobile-menu{display:none}
+.log-toolbar{margin-bottom:14px}.log-summary{margin:0 0 12px}.log-card{padding:15px 16px}.log-card-head{display:flex;align-items:flex-start;justify-content:space-between;gap:12px}.log-card-title{font-size:16px;font-weight:850;line-height:1.35}.log-card-time{font-size:12px;color:var(--muted);margin-top:5px}.log-badge{flex:0 0 auto;border-radius:999px;padding:5px 9px;font-size:12px;font-weight:800;background:var(--panel2);color:var(--muted)}.log-badge.ok{background:#e5f5ee;color:var(--ok)}.log-badge.warn{background:#fff2d9;color:var(--warn)}.log-badge.error{background:#fde9ec;color:var(--bad)}.log-badge.info{background:#eef0ff;color:#5050bd}.log-human{margin-top:11px;line-height:1.65}.log-facts{display:flex;gap:7px;flex-wrap:wrap;margin-top:11px}.log-fact{border:1px solid var(--line);background:var(--panel2);border-radius:9px;padding:6px 9px;font-size:12px}.log-details{margin-top:11px;border-top:1px solid var(--line);padding-top:10px}.log-details summary{cursor:pointer;color:var(--muted);font-size:12px;font-weight:700}.log-details pre{margin:9px 0 0;padding:11px;border-radius:10px;background:#151a29;color:#e9ecf4;overflow:auto;white-space:pre-wrap;word-break:break-word;font-size:11px;line-height:1.5}.toast{position:fixed;right:22px;bottom:22px;max-width:420px;padding:12px 15px;border-radius:12px;background:#1c2233;color:#fff;box-shadow:var(--shadow);z-index:30}.mobile-menu{display:none}
 :root[data-theme="dark"] .sidebar{background:#090d17}:root[data-theme="dark"] .btn.danger{background:#351820}:root[data-theme="dark"] .status{background:#20283a}:root[data-theme="dark"] .status.ok{background:#13372d}:root[data-theme="dark"] .status.warning{background:#3a2b13}:root[data-theme="dark"] .status.error{background:#3a1820}:root[data-theme="dark"] .pill{background:#292750;color:#c8c7ff}
 .theme-toggle{white-space:nowrap}
-@media(max-width:1050px){.span-3{grid-column:span 6}.span-4{grid-column:span 6}.span-8{grid-column:span 12}}
-@media(max-width:760px){.app{display:block}.sidebar{position:fixed;left:0;top:0;width:270px;z-index:20;transform:translateX(-102%);transition:.2s}.sidebar.open{transform:none}.mobile-menu{display:inline-flex}.topbar{padding:0 14px}.topbar h2{font-size:17px}.top-actions select{max-width:145px}.content{padding:16px}.span-3,.span-4,.span-6,.span-8{grid-column:1/-1}.split{grid-template-columns:1fr}.section-head{display:block}.section-head .row{margin-top:12px}}
+@media(max-width:1050px){.span-3{grid-column:span 6}.span-4,.span-5,.span-6,.span-7{grid-column:span 6}.span-8{grid-column:span 12}}
+@media(max-width:760px){.app{display:block}.sidebar{position:fixed;left:0;top:0;width:270px;z-index:20;transform:translateX(-102%);transition:.2s}.sidebar.open{transform:none}.mobile-menu{display:inline-flex}.topbar{padding:0 14px}.topbar h2{font-size:17px}.top-actions select{max-width:145px}.content{padding:16px}.span-3,.span-4,.span-5,.span-6,.span-7,.span-8{grid-column:1/-1}.split{grid-template-columns:1fr}.section-head{display:block}.section-head .row{margin-top:12px}}
 </style>
 </head>
 <body>
@@ -6682,11 +7012,11 @@ function getPortalHomePage(host) {
   <div class="login-card">
     <div class="brand"><div class="logo">AI</div><div><h1>QQAIbot Control Center</h1></div></div>
     <div class="row"><button id="loginThemeToggle" type="button" class="btn ghost theme-toggle">切换黑色模式</button></div>
-    <div class="field"><label for="loginQq">QQ 號</label><input id="loginQq" inputmode="numeric" placeholder="輸入你的 QQ 號"></div>
-    <div class="row"><button id="sendCode" type="button" class="btn ghost grow">傳送驗證碼</button></div>
-    <div class="field"><label for="loginCode">六位驗證碼</label><input id="loginCode" inputmode="numeric" maxlength="6" placeholder="驗證碼"></div>
-    <button id="verifyCode" type="button" class="btn primary" style="width:100%">登入管理中心</button>
-    <div id="loginNotice" class="notice">驗證碼會由已連線的 NapCat 私訊至你的 QQ。</div>
+    <div class="field"><label for="loginQq">QQ 号</label><input id="loginQq" inputmode="numeric" placeholder="輸入你的 QQ 号"></div>
+    <div class="row"><button id="sendCode" type="button" class="btn ghost grow">发送验证码</button></div>
+    <div class="field"><label for="loginCode">六位验证码</label><input id="loginCode" inputmode="numeric" maxlength="6" placeholder="验证码"></div>
+    <button id="verifyCode" type="button" class="btn primary" style="width:100%">登录管理中心</button>
+    <div id="loginNotice" class="notice">验证码会由已连接的 NapCat 私信发送至你的 QQ。</div>
   </div>
 </section>
 <div id="app" class="app hidden">
@@ -6755,7 +7085,7 @@ function getPortalHomePage(host) {
         <div class="grid"><div class="card span-4"><h3>新增記憶</h3><div class="field"><label>範圍</label><select id="memoryScope"><option value="private">個人</option><option value="public">群組公開</option></select></div><div class="field"><label>內容</label><textarea id="memoryText"></textarea></div><button id="addMemory" class="btn primary">新增</button></div><div class="card span-8"><h3>目前記憶</h3><div id="memoryList" class="list"><div class="empty">暂无記憶</div></div></div></div>
       </section>
       <section id="v-logs" class="view">
-        <div class="section-head"><div><h2>操作日志</h2><p>群務與設定操作獨立保存，不會當成 AI 聊天語料。</p></div><button id="reloadLogs" class="btn">重新加载</button></div><div id="logList" class="list"><div class="empty">暂无日誌</div></div>
+        <div class="section-head"><div><h2>操作日志</h2><p>用简单中文显示谁在什么时间做了什么；技术资料默认收起，也不会作为 AI 聊天内容。</p></div><button id="reloadLogs" class="btn">重新加载</button></div><div id="logList" class="list"><div class="empty">暂无操作日志</div></div>
       </section>
     </div>
   </main>
@@ -6770,7 +7100,7 @@ function activeTheme(){return document.documentElement.dataset.theme==='dark'?'d
 function updateThemeButtons(){var dark=activeTheme()==='dark';if($('loginThemeToggle'))$('loginThemeToggle').textContent=dark?'切换白色模式':'切换黑色模式';if($('themeToggle'))$('themeToggle').textContent=dark?'白色模式':'黑色模式'}
 function setTheme(theme){var next=theme==='dark'?'dark':'light';document.documentElement.dataset.theme=next;try{localStorage.setItem('qqai_theme',next)}catch(e){}updateThemeButtons()}
 function toggleTheme(){setTheme(activeTheme()==='dark'?'light':'dark')}
-var titles={overview:'总览',health:'健康检查',tasks:'任务与等待队列',moderation:'待确认操作',simulator:'事件模拟器',models:'模型中心',quota:'额度与限制',groups:'群组设置',memory:'记忆管理',logs:'操作日志',aidecisions:'AI 回复记录',appeals:'匿名申诉',platform:'300 功能平台'};
+var titles={overview:'总览',health:'健康检查',tasks:'任务与等待队列',moderation:'待确认操作',simulator:'事件模拟器',models:'模型中心',quota:'额度与限制',groups:'群组设置',memory:'记忆管理',logs:'操作日志',aidecisions:'AI 回复记录',appeals:'匿名申诉',platform:'功能权限中心'};
 function esc(v){return String(v==null?'':v).replace(/[&<>"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]})}
 function toast(msg){$('toast').textContent=String(msg||'');$('toast').classList.remove('hidden');clearTimeout(toast.t);toast.t=setTimeout(function(){$('toast').classList.add('hidden')},3200)}
 async function raw(path,method,data){try{var opt={method:method||'GET',headers:{},credentials:'same-origin',cache:'no-store'};if(data!==undefined){opt.headers['Content-Type']='application/json';opt.body=JSON.stringify(data)}var r=await fetch(path,opt);var j=await r.json().catch(function(){return{ok:false,message:'无法解析服务器响应'}});if(!r.ok&&!j.message)j.message='HTTP '+r.status;return j}catch(e){return{ok:false,message:'网络请求失败：'+String(e&&e.message||e)}}}
@@ -6780,7 +7110,7 @@ function ensureModal(){if($('qqaiModal'))return;var d=document.createElement('di
 function customDialog(message,options){ensureModal();options=options||{};return new Promise(function(resolve){var d=$('qqaiModal'),input=$('qqaiModalInput');$('qqaiModalTitle').textContent=options.title||'确认操作';$('qqaiModalText').textContent=String(message||'');input.classList.toggle('hidden',!options.input);input.value=options.value||'';d.classList.remove('hidden');var done=function(value){d.classList.add('hidden');$('qqaiModalOk').onclick=null;$('qqaiModalCancel').onclick=null;resolve(value)};$('qqaiModalOk').onclick=function(){done(options.input?input.value:true)};$('qqaiModalCancel').onclick=function(){done(options.input?null:false)}})}
 function confirmModal(message,title){return customDialog(message,{title:title||'确认操作'})}
 function textModal(message,value,title){return customDialog(message,{title:title||'编辑内容',input:true,value:value||''})}
-function applyRoleVisibility(){if(!session)return;var p=session.permissions||{},role=session.role||'member';document.querySelectorAll('#nav button').forEach(function(b){var v=b.dataset.view,show=true;if(role==='member'&&!['overview','models','memory','appeals'].includes(v))show=false;if(role==='admin'&&['quota','health'].includes(v))show=false;if(role==='owner'&&v==='quota')show=false;if(v==='quota'&&!p.developer)show=false;b.style.display=show?'':'none'})}
+function applyRoleVisibility(){if(!session)return;var p=session.permissions||{},role=session.role||'member';document.querySelectorAll('#nav button').forEach(function(b){var v=b.dataset.view,show=true;if(role==='member'&&!['overview','models','memory','appeals','settingscenter'].includes(v))show=false;if(role==='admin'&&['quota','health'].includes(v))show=false;if(role==='owner'&&v==='quota')show=false;if(v==='quota'&&!p.developer)show=false;b.style.display=show?'':'none'})}
 function ensureGroupSettingsExtras(){if($('welcomeEnabled')||!$('v-groups'))return;var grid=$('v-groups').querySelector('.grid');if(!grid)return;var card=document.createElement('div');card.className='card span-12';card.innerHTML='<h3>自动化与安全参数</h3><div class="grid"><div class="card span-6"><div class="notice">自动 QQ 群打卡固定在台北时间 00:00:00，对机器人所在的全部群执行，不受 AI 开关与 AI 白名单影响。Cloudflare／NapCat 实际发送可能有数秒延迟，因此是尽力争取首个打卡。</div><label class="switch"><input id="welcomeEnabled" type="checkbox">自动欢迎新人</label><label class="switch"><input id="joinAssistEnabled" type="checkbox">入群辅助（只建议同意，不拒绝）</label><label class="switch"><input id="ruleMonitorEnabled" type="checkbox">持续检查群成员是否违反群规</label><div class="field"><label>欢迎词（支持 {at}、{qq} 与表情符号）</label><textarea id="welcomeText"></textarea></div></div><div class="card span-6"><div class="field"><label>同一对象处置冷却（秒，默认 0＝关闭）</label><input id="moderationCooldown" type="number" min="0" ></div><div class="notice">处置冷却默认 0 秒且不设最大值；0 代表关闭。</div><div class="field"><label>新人观察期（天，0＝关闭）</label><input id="newcomerDays" type="number" min="0" max="30"></div><div class="notice">群规持续监控只有当前真实群主可以开关；开发者与 QQ 管理员可查看。它只提示疑似违规，不会自动处罚。</div></div></div>';grid.appendChild(card);ensureDeveloperPermissionPanel()}
 
 function ensureR3Views(){
@@ -6788,19 +7118,22 @@ function ensureR3Views(){
   function addView(name,label){if(!$('v-'+name)){var b=document.createElement('button');b.dataset.view=name;b.textContent=label;b.onclick=function(){showView(name)};nav.appendChild(b);var section=document.createElement('section');section.id='v-'+name;section.className='view';container.appendChild(section)}titles[name]=label}
   addView('ruleviolations','群规监控');addView('settingscenter','设置中心');addView('bilibili','B站串接');addView('aidecisions','AI 回复记录');addView('appeals','匿名申诉');
   if(!$('v-ruleviolations').dataset.ready){$('v-ruleviolations').dataset.ready='1';$('v-ruleviolations').innerHTML='<div class="section-head"><div><h2>群规监控记录</h2><p>默认开启并仅记录；可按群友、内容与 AI 分类的违规项目搜索。</p></div><button id="rvReload" class="btn">重新加载</button></div><div class="card"><div class="row"><input id="rvMember" placeholder="群友名称或 QQ"><input id="rvContent" placeholder="消息内容"><input id="rvType" placeholder="违规项目"><button id="rvSearch" class="btn primary">搜索</button></div><div class="row" style="margin-top:12px"><select id="rvProxyMode"><option value="record">仅记录</option><option value="warn">自动警告</option><option value="mute">自动禁言</option><option value="auto">按 AI 分类处理</option></select><input id="rvMuteSeconds" type="number" min="0" placeholder="禁言秒数"><label class="switch"><input id="rvKickAuth" type="checkbox">授权 AI 踢出</label><button id="rvSave" class="btn primary">保存代理设置</button></div></div><div id="rvList" class="list" style="margin-top:16px"></div>';$('rvReload').onclick=loadRuleViolations;$('rvSearch').onclick=loadRuleViolations;$('rvSave').onclick=saveRuleViolationSettings}
-  if(!$('v-settingscenter').dataset.ready){$('v-settingscenter').dataset.ready='1';$('v-settingscenter').innerHTML='<div class="section-head"><div><h2>设置中心</h2><p>按角色显示可配置项目。开发者可指定目标 QQ/角色，并选择是否写入操作日志。</p></div><button id="scReload" class="btn">重新加载</button></div><div id="scDeveloper" class="card hidden"><div class="row"><input id="scTargetQq" placeholder="目标 QQ"><select id="scTargetRole"><option value="member">群员</option><option value="admin">管理员</option><option value="owner">群主</option><option value="developer">开发者</option></select><select id="scAudit"><option value="log">记录 log</option><option value="silent">不记录 log</option></select></div></div><div id="scList" class="list" style="margin-top:16px"></div>';$('scReload').onclick=loadSettingsCenter;['scTargetQq','scTargetRole'].forEach(function(id){$(id).onchange=loadSettingsCenter})}
+  if(!$('v-settingscenter').dataset.ready){$('v-settingscenter').dataset.ready='1';$('v-settingscenter').innerHTML='<div class="section-head"><div><h2>设置中心</h2><p>系统只显示你有权查看和修改的项目。修改完成后统一保存一次。</p></div><div class="row"><button id="scReload" class="btn">重新加载</button><button id="scSaveAll" class="btn primary">保存全部设置</button></div></div><div id="scDeveloper" class="card hidden"><div class="row"><input id="scTargetQq" placeholder="目标 QQ（输入后自动识别权限）"><span id="scResolvedRole" class="status">尚未识别</span><label class="switch"><input id="scAuditLog" type="checkbox" checked>记录操作日志（可选）</label></div></div><div id="scMessage" class="notice">尚未加载设置。</div><div id="scList" class="list" style="margin-top:16px"></div>';$('scReload').onclick=loadSettingsCenter;$('scSaveAll').onclick=saveAllSettings;$('scTargetQq').onchange=loadSettingsCenter;$('scTargetQq').onkeydown=function(e){if(e.key==='Enter')loadSettingsCenter()}}
   if(!$('v-aidecisions').dataset.ready){$('v-aidecisions').dataset.ready='1';$('v-aidecisions').innerHTML='<div class="section-head"><div><h2>AI 回复与未回复记录</h2><p>每則群聊觸發判斷、主動插話來源、模型、智能 @ 規劃、獨立搜索內容與實際發送結果都獨立保存。</p></div><button id="aiLogReload" class="btn">重新加载</button></div><div class="card"><div class="row"><input id="aiLogSearch" class="grow" placeholder="搜索 QQ、訊息、原因、模型"><select id="aiLogDecision"><option value="">全部決策</option><option value="reply_generated">已產生回覆</option><option value="skipped">未回覆</option><option value="blocked">遭阻擋</option><option value="error">錯誤</option></select><select id="aiLogTrigger"><option value="">全部觸發</option><option value="mention">@機器人</option><option value="reply_to_ai">回覆機器人</option><option value="auto_interject">主動插話</option><option value="private">私聊</option><option value="none">未觸發</option></select><button id="aiLogSearchBtn" class="btn primary">搜索</button></div></div><div id="aiDecisionList" class="list" style="margin-top:16px"><div class="empty">尚未加载</div></div>';$('aiLogReload').onclick=loadAiDecisions;$('aiLogSearchBtn').onclick=loadAiDecisions;$('aiLogSearch').onkeydown=function(e){if(e.key==='Enter')loadAiDecisions()}}
-  if(!$('v-appeals').dataset.ready){$('v-appeals').dataset.ready='1';$('v-appeals').innerHTML='<div class="section-head"><div><h2>匿名申诉</h2><p>申诉审核者不会看到你的 QQ；只有开发者可查看真实身份。独立申诉网页已停用，本功能统一在 Control Center 使用。</p></div><button id="appealReload" class="btn">刷新案件</button></div><div class="grid"><div class="card span-5"><div class="field"><label>所属群组</label><select id="appealGroup"><option value="">请选择群组</option></select></div><div class="field"><label>申诉类型</label><select id="appealType"><option>禁言</option><option>踢出</option><option>AI黑名单</option><option>管理操作</option><option>排程</option><option>其他</option></select></div><div class="field"><label>相关消息 ID（选填）</label><input id="appealEvidence"></div><div class="field"><label>申诉内容</label><textarea id="appealContent" placeholder="请说明发生了什么、希望如何处理"></textarea></div><button id="appealSubmit" class="btn primary">匿名提交</button><div id="appealMessage" class="notice">提交后可在右侧查看处理状态。</div></div><div class="card span-7"><h3>我的案件</h3><div id="appealList" class="list"><div class="empty">暂无案件</div></div></div></div>';$('appealReload').onclick=loadAppeals;$('appealSubmit').onclick=submitAppeal}
-  if(!$('v-bilibili').dataset.ready){$('v-bilibili').dataset.ready='1';$('v-bilibili').innerHTML='<div class="section-head"><div><h2>B站串接</h2><p>不绑定固定示例账号。填写使用者实际要求串接的创作者，并选择直播/新视频及 @全体选项。</p></div><button id="biliReload" class="btn">重新加载</button></div><div class="card"><div class="row"><input id="biliCreatorName" placeholder="创作者名称"><input id="biliCreatorId" placeholder="开放平台创作者 ID / UID"><select id="biliMode"><option value="official_webhook">B站开放平台 Webhook</option><option value="generic_webhook">通用事件桥接 Webhook</option></select></div><div class="row"><label class="switch"><input id="biliLiveNotify" type="checkbox">开播通知</label><label class="switch"><input id="biliLiveAtAll" type="checkbox">开播 @全体</label><label class="switch"><input id="biliVideoNotify" type="checkbox">新视频通知</label><label class="switch"><input id="biliVideoAtAll" type="checkbox">新视频 @全体</label><button id="biliAdd" class="btn primary">新增串接</button></div><div class="notice">所有通知均可关闭，此时只记录事件。@全体只有 Bot 为 QQ 管理员或群主时才会发送。</div></div><div id="biliList" class="list" style="margin-top:16px"></div>';$('biliReload').onclick=loadBilibili;$('biliAdd').onclick=saveBilibiliConnector}
-  if(!$('v-platform')){var b=document.createElement('button');b.dataset.view='platform';b.textContent='300 功能平台';$('nav').appendChild(b);b.onclick=function(){showView('platform')};var v=document.createElement('section');v.id='v-platform';v.className='view';v.innerHTML='<div class="section-head"><div><h2>300 功能平台</h2><p>搜索功能、查看實作模式並依角色管理開關。</p></div><button id="pfReload" class="btn">重新加载</button></div><div class="card"><div class="row"><input id="pfSearch" class="grow" placeholder="搜索功能名稱、ID、類別"><select id="pfAudit"><option value="log">記錄 Log</option><option value="silent">不記錄 Log（僅開發者）</option></select><button id="pfGo" class="btn primary">搜索</button></div><div id="pfSummary" class="notice">尚未加载</div></div><div id="pfList" class="list" style="margin-top:16px"></div>';document.querySelector('.content').appendChild(v);$('pfReload').onclick=loadPlatformFeatures;$('pfGo').onclick=loadPlatformFeatures;$('pfSearch').onkeydown=function(e){if(e.key==='Enter')loadPlatformFeatures()}}
+  if(!$('v-appeals').dataset.ready){$('v-appeals').dataset.ready='1';$('v-appeals').innerHTML='<div class="section-head"><div><h2>匿名申诉</h2><p>审核者看不到你的 QQ；只有开发者可以查看真实身份。</p></div><button id="appealReload" class="btn">刷新案件</button></div><div class="grid"><div class="card span-5"><h3>提交申诉</h3><div class="field"><label>所属群组</label><select id="appealGroup"><option value="">请选择群组</option></select></div><div class="field"><label>申诉类型</label><select id="appealType"><option>禁言</option><option>踢出</option><option>AI黑名单</option><option>管理操作</option><option>排程</option><option>其他</option></select></div><div class="field"><label>相关消息 ID（选填）</label><input id="appealEvidence"></div><div class="field"><label>申诉内容</label><textarea id="appealContent" placeholder="请说明发生了什么、希望如何处理"></textarea></div><button id="appealSubmit" class="btn primary" style="width:100%">匿名提交</button><div id="appealMessage" class="notice">提交后可在“我的案件”查看处理状态。</div></div><div class="card span-7"><h3>我的案件</h3><div id="appealList" class="list"><div class="empty">暂无案件</div></div></div></div>';$('appealReload').onclick=loadAppeals;$('appealSubmit').onclick=submitAppeal}
+  if(!$('v-bilibili').dataset.ready){$('v-bilibili').dataset.ready='1';$('v-bilibili').innerHTML='<div class="section-head"><div><h2>B站自动监控</h2><p>输入 B站用户 UID，Worker 会定时检查开播状态和最新视频，不需要 Webhook。</p></div><button id="biliReload" class="btn">重新加载</button></div><div class="card"><div class="row"><input id="biliCreatorName" placeholder="创作者名称（选填）"><input id="biliCreatorId" inputmode="numeric" placeholder="B站用户 UID（必填）"><select id="biliPollInterval"><option value="60">每 1 分钟</option><option value="120" selected>每 2 分钟</option><option value="300">每 5 分钟</option><option value="600">每 10 分钟</option></select></div><div class="row"><label class="switch"><input id="biliLiveNotify" type="checkbox" checked>开播通知</label><label class="switch"><input id="biliLiveAtAll" type="checkbox">开播 @全体</label><label class="switch"><input id="biliVideoNotify" type="checkbox" checked>新视频通知</label><label class="switch"><input id="biliVideoAtAll" type="checkbox">新视频 @全体</label><button id="biliAdd" class="btn primary">保存并启用自动监控</button></div><div class="notice">首次检查只记录当前状态，不会把旧视频当成新视频发送。B站接口发生风控或变更时，会在项目状态中显示错误并自动延后重试。</div></div><div id="biliList" class="list" style="margin-top:16px"></div>';$('biliReload').onclick=loadBilibili;$('biliAdd').onclick=saveBilibiliConnector}
+  if(!$('v-platform')){var b=document.createElement('button');b.dataset.view='platform';b.textContent='功能权限中心';$('nav').appendChild(b);b.onclick=function(){showView('platform')};var v=document.createElement('section');v.id='v-platform';v.className='view';v.innerHTML='<div class="section-head"><div><h2>功能权限中心</h2><p>这是机器人功能总开关。系统只显示当前权限等级可以查看或修改的功能；开发者可以查看全部 300 项。</p></div><button id="pfReload" class="btn">重新加载</button></div><div class="card"><div class="row"><input id="pfSearch" class="grow" placeholder="搜索功能名称、ID、类别"><label id="pfAuditWrap" class="switch"><input id="pfAuditSilent" type="checkbox">不记录操作日志（仅开发者）</label><button id="pfGo" class="btn primary">搜索</button></div><div id="pfSummary" class="notice">尚未加载</div></div><div id="pfList" class="list" style="margin-top:16px"></div>';document.querySelector('.content').appendChild(v);$('pfReload').onclick=loadPlatformFeatures;$('pfGo').onclick=loadPlatformFeatures;$('pfSearch').onkeydown=function(e){if(e.key==='Enter')loadPlatformFeatures()}}
 }
-function applyR3RoleVisibility(){ensureR3Views();var perms=(session&&session.permissions)||{};var management=!!(perms.aiAdmin||perms.groupOps||perms.nativeAdmin||perms.developer||session&&['admin','owner'].includes(session.role));var dev=!!perms.developer;document.querySelectorAll('#nav button').forEach(function(b){if(['ruleviolations','bilibili','aidecisions'].includes(b.dataset.view))b.hidden=!management;if(b.dataset.view==='settingscenter')b.hidden=false});$('scDeveloper').classList.toggle('hidden',!dev);if($('rvSave'))$('rvSave').disabled=!(session&&session.role==='owner');if($('rvKickAuth'))$('rvKickAuth').disabled=!(session&&session.role==='owner')}
+function applyR3RoleVisibility(){ensureR3Views();applyRoleVisibility();var perms=(session&&session.permissions)||{};var role=(session&&session.role)||'member';var management=!!(perms.aiAdmin||perms.groupOps||perms.nativeAdmin||perms.developer||['admin','owner'].includes(role));var dev=!!perms.developer;var owner=role==='owner';document.querySelectorAll('#nav button').forEach(function(b){if(['ruleviolations','bilibili','aidecisions'].includes(b.dataset.view))b.hidden=!management;if(b.dataset.view==='settingscenter')b.hidden=false;if(b.dataset.view==='platform')b.hidden=role==='member'&&!dev});$('scDeveloper').classList.toggle('hidden',!dev);if($('pfAuditWrap'))$('pfAuditWrap').classList.toggle('hidden',!dev);if($('rvSave'))$('rvSave').disabled=!management;if($('rvKickAuth'))$('rvKickAuth').disabled=!owner;var autoOption=$('rvProxyMode')&&Array.from($('rvProxyMode').options).find(function(o){return o.value==='auto'});if(autoOption)autoOption.disabled=!owner}
 async function loadAiDecisions(){var p=new URLSearchParams({q:$('aiLogSearch').value||'',decision:$('aiLogDecision').value||'',triggerType:$('aiLogTrigger').value||'',limit:'500'});var r=await api('/ai-decisions?'+p.toString());if(!r.ok){$('aiDecisionList').innerHTML='<div class="empty">'+esc(r.message)+'</div>';return}$('aiDecisionList').innerHTML=(r.logs||[]).map(function(x){var title=(x.decision||'unknown')+'｜'+(x.senderName||x.userId||'')+'（'+(x.userId||'')+'）';var meta=(x.at||'')+'｜觸發 '+(x.triggerType||'none')+'｜原因 '+(x.reason||'')+'｜'+(x.provider||'')+((x.model)?'/'+x.model:'')+'｜發送 '+(x.sendStatus||'');var body='來源訊息：'+(x.input||'')+(x.generatedReply?'\nAI 回覆：'+x.generatedReply:'')+'\n關係：'+JSON.stringify({mentionedQqs:x.mentionedQqs||[],quotedMessageId:x.quotedMessageId||'',quotedSenderId:x.quotedSenderId||''})+'\n智能 @ 規劃：'+JSON.stringify(x.mentionRouting||{})+'\n回覆計畫：'+JSON.stringify(x.replyPlan||{})+'\n是否搜索：'+(x.searchPerformed?'有':'無')+'（需要='+(x.searchRequired?'是':'否')+'，嘗試='+(x.searchAttempted?'是':'否')+'）'+'\n搜索查詢：'+(x.searchQuery||'')+'\n搜索關鍵詞：'+JSON.stringify(x.searchQueries||[])+'\n搜索提供者：'+(x.searchProvider||'')+((x.searchModel)?'/'+x.searchModel:'')+'\n搜索錯誤：'+(x.searchError||'')+'\n搜索內容：'+(x.searchContext||'')+'\n搜索來源：'+JSON.stringify(x.searchSources||[])+'\n上下文：原文 '+(x.contextExactMessages||0)+'／摘要 '+(x.contextSummarizedMessages||0)+'／提供者 '+(x.contextSummaryProvider||'');return '<div class="item"><div class="item-title">'+esc(title)+'</div><div class="item-meta">'+esc(meta)+'</div><div class="item-body" style="white-space:pre-wrap">'+esc(body)+'</div></div>'}).join('')||'<div class="empty">沒有符合的紀錄</div>'}
 async function loadRuleViolations(){var p=new URLSearchParams({member:$('rvMember').value||'',content:$('rvContent').value||'',type:$('rvType').value||''});var r=await api('/rule-violations?'+p.toString());if(!r.ok){$('rvList').innerHTML='<div class="empty">'+esc(r.message)+'</div>';return}$('rvProxyMode').value=r.settings.proxyMode||'record';$('rvMuteSeconds').value=r.settings.muteSeconds||600;$('rvKickAuth').checked=!!r.settings.kickAuthorized;$('rvList').innerHTML=(r.items||[]).map(function(x){return '<div class="item"><div class="item-head"><div><div class="item-title">'+esc(x.senderName||x.userId)+'（'+esc(x.userId)+'）｜'+esc(x.violationType||'其他')+'</div><div class="item-meta">'+new Date(Number(x.createdAt||0)).toLocaleString()+'｜置信度 '+esc(x.confidence)+'｜处理 '+esc(x.actionTaken||'none')+'</div></div></div><div class="item-body">'+esc(x.content)+'<br><b>分类：</b>'+esc(x.violationType||'')+'<br><b>原因：</b>'+esc(x.reason||'')+'<br><b>结果：</b>'+esc(x.actionResult||'')+'</div></div>'}).join('')||'<div class="empty">暂无违规记录</div>'}
-async function saveRuleViolationSettings(){var r=await api('/rule-violations/settings','POST',{proxyMode:$('rvProxyMode').value,muteSeconds:$('rvMuteSeconds').value,kickAuthorized:$('rvKickAuth').checked});toast(r.message);if(r.ok)loadRuleViolations()}
-async function loadSettingsCenter(){var dev=session&&(session.permissions||{}).developer;var p=new URLSearchParams();if(dev){p.set('targetQq',$('scTargetQq').value||session.qq);p.set('targetRole',$('scTargetRole').value)}var r=await api('/settings-center?'+p.toString());if(!r.ok){$('scList').innerHTML='<div class="empty">'+esc(r.message)+'</div>';return}if(dev&&!$('scTargetQq').value)$('scTargetQq').value=r.targetQq||session.qq;$('scList').innerHTML='';(r.settings||[]).forEach(function(s){var d=document.createElement('div');d.className='item';var input;if(s.type==='boolean'){input=document.createElement('input');input.type='checkbox';input.checked=!!s.value}else if(s.type==='select'){input=document.createElement('select');(s.options||[]).forEach(function(v){var o=document.createElement('option');o.value=v;o.textContent=v;input.appendChild(o)});input.value=String(s.value)}else if(s.type==='textarea'){input=document.createElement('textarea');input.value=String(s.value==null?'':s.value)}else{input=document.createElement('input');input.type=s.type==='number'?'number':'text';input.value=String(s.value==null?'':s.value);if(s.min!=null)input.min=s.min;if(s.max!=null)input.max=s.max}var save=document.createElement('button');save.className='btn primary';save.textContent='保存';save.onclick=async function(){var value=input.type==='checkbox'?input.checked:input.value;var payload={key:s.key,value:value};if(dev){payload.targetQq=$('scTargetQq').value;payload.targetRole=$('scTargetRole').value;payload.auditMode=$('scAudit').value}var x=await api('/settings-center','POST',payload);toast(x.message)};d.innerHTML='<div class="item-title">'+esc(s.label)+'</div><div class="item-meta">角色：'+esc(s.minRole)+'｜对应指令：'+esc(s.command||'')+'</div>';d.append(input,save);$('scList').appendChild(d)})}
-async function loadBilibili(){var r=await api('/integrations/bilibili');if(!r.ok){$('biliList').innerHTML='<div class="empty">'+esc(r.message)+'</div>';return}$('biliList').innerHTML='';(r.connectors||[]).forEach(function(c){var d=document.createElement('div');d.className='item';d.innerHTML='<div class="item-title">'+esc(c.creatorName||c.creatorId)+'</div><div class="item-meta">模式：'+esc(c.mode)+'｜直播：'+(c.liveNotify?'通知':'仅记录')+(c.liveAtAll?'＋@全体':'')+'｜视频：'+(c.videoNotify?'通知':'仅记录')+(c.videoAtAll?'＋@全体':'')+'</div><div class="item-body">Webhook：'+esc(c.webhookUrl||'')+'</div>';var row=document.createElement('div');row.className='row';var testLive=document.createElement('button');testLive.className='btn';testLive.textContent='测试开播';testLive.onclick=function(){testBilibili(c.id,'live_start')};var testVideo=document.createElement('button');testVideo.className='btn';testVideo.textContent='测试新视频';testVideo.onclick=function(){testBilibili(c.id,'video_publish')};var del=document.createElement('button');del.className='btn danger';del.textContent='删除';del.onclick=async function(){if(!(await confirmModal('删除此 B站串接？','确认删除')))return;var x=await api('/integrations/bilibili','POST',{action:'delete',id:c.id});toast(x.message);if(x.ok)loadBilibili()};row.append(testLive,testVideo,del);d.appendChild(row);$('biliList').appendChild(d)});if(!$('biliList').children.length)$('biliList').innerHTML='<div class="empty">暂无 B站串接</div>'}
-async function saveBilibiliConnector(){var r=await api('/integrations/bilibili','POST',{action:'save',creatorName:$('biliCreatorName').value,creatorId:$('biliCreatorId').value,mode:$('biliMode').value,liveNotify:$('biliLiveNotify').checked,liveAtAll:$('biliLiveAtAll').checked,videoNotify:$('biliVideoNotify').checked,videoAtAll:$('biliVideoAtAll').checked});toast(r.message);if(r.ok){$('biliCreatorName').value='';$('biliCreatorId').value='';loadBilibili()}}
+async function saveRuleViolationSettings(){var payload={proxyMode:$('rvProxyMode').value,muteSeconds:$('rvMuteSeconds').value};if(session&&session.role==='owner')payload.kickAuthorized=$('rvKickAuth').checked;var r=await api('/rule-violations/settings','POST',payload);toast(r.message);if(r.ok)loadRuleViolations()}
+function portalRoleLabel(role){return({member:'群成员',admin:'QQ 管理员',owner:'群主',developer:'开发者'})[role]||role||'未知'}
+async function loadSettingsCenter(){var dev=session&&(session.permissions||{}).developer;var p=new URLSearchParams();if(dev)p.set('targetQq',$('scTargetQq').value||session.qq);var r=await api('/settings-center?'+p.toString());if(!r.ok){$('scList').innerHTML='<div class="empty">'+esc(r.message)+'</div>';return}if(dev&&!$('scTargetQq').value)$('scTargetQq').value=r.targetQq||session.qq;if($('scResolvedRole')){$('scResolvedRole').textContent='识别权限：'+portalRoleLabel(r.targetRole);$('scResolvedRole').className='status ok'}$('scMessage').textContent='已加载 '+(r.settings||[]).length+' 项设置；修改完成后点击“保存全部设置”。';$('scList').innerHTML='';(r.settings||[]).forEach(function(s){var d=document.createElement('div');d.className='item';var input;if(s.type==='boolean'){input=document.createElement('input');input.type='checkbox';input.checked=!!s.value}else if(s.type==='select'){input=document.createElement('select');(s.options||[]).forEach(function(v){var o=document.createElement('option');o.value=v;o.textContent=v;input.appendChild(o)});input.value=String(s.value)}else if(s.type==='textarea'){input=document.createElement('textarea');input.value=String(s.value==null?'':s.value)}else{input=document.createElement('input');input.type=s.type==='number'?'number':'text';input.value=String(s.value==null?'':s.value);if(s.min!=null)input.min=s.min;if(s.max!=null)input.max=s.max}input.dataset.settingKey=s.key;var roleText=portalRoleLabel(s.minRole);if(s.key==='rule_proxy_mode')roleText+='（auto 仅群主）';d.innerHTML='<div class="item-title">'+esc(s.label)+'</div><div class="item-meta">最低权限：'+esc(roleText)+'｜对应指令：'+esc(s.command||'无')+'</div>';d.appendChild(input);$('scList').appendChild(d)})}
+async function saveAllSettings(){var dev=session&&(session.permissions||{}).developer;var settings=Array.from(document.querySelectorAll('#scList [data-setting-key]')).map(function(input){return{key:input.dataset.settingKey,value:input.type==='checkbox'?input.checked:input.value}});if(!settings.length){toast('没有可保存的设置');return}var button=$('scSaveAll');button.disabled=true;button.textContent='保存中…';var payload={settings:settings};if(dev){payload.targetQq=$('scTargetQq').value;payload.auditMode=$('scAuditLog').checked?'log':'silent'}var r=await api('/settings-center','POST',payload);button.disabled=false;button.textContent='保存全部设置';$('scMessage').textContent=r.message||'保存失败';toast(r.message||'保存失败');if(r.ok)loadSettingsCenter()}
+async function loadBilibili(){var r=await api('/integrations/bilibili');if(!r.ok){$('biliList').innerHTML='<div class="empty">'+esc(r.message)+'</div>';return}$('biliList').innerHTML='';(r.connectors||[]).forEach(function(c){var d=document.createElement('div');d.className='item';var state=c.pollState||{};var status=c.lastCheckStatus||'等待首次检查';var next=c.nextPollAt?new Date(Number(c.nextPollAt)).toLocaleString():'下一次定时任务';d.innerHTML='<div class="item-title">'+esc(c.creatorName||('UID '+c.creatorId))+'</div><div class="item-meta">模式：自动监控｜UID：'+esc(c.creatorId)+'｜间隔：'+esc(c.pollIntervalSeconds||120)+' 秒｜直播：'+(c.liveNotify?'通知':'仅记录')+(c.liveAtAll?'＋@全体':'')+'｜视频：'+(c.videoNotify?'通知':'仅记录')+(c.videoAtAll?'＋@全体':'')+'</div><div class="item-body">状态：'+esc(status)+'｜当前直播：'+(state.live?'是':'否')+'｜最新视频：'+esc(state.latestVideoBvid||'尚未建立基准')+'<br>上次检查：'+esc(c.lastCheckAt?new Date(Number(c.lastCheckAt)).toLocaleString():'尚未检查')+'｜下次检查：'+esc(next)+(c.lastCheckError?'<br><b>错误：</b>'+esc(c.lastCheckError):'')+'</div>';var row=document.createElement('div');row.className='row';row.style.marginTop='10px';var check=document.createElement('button');check.className='btn primary';check.textContent='立即检查';check.onclick=function(){checkBilibiliNow(c.id)};var testLive=document.createElement('button');testLive.className='btn';testLive.textContent='测试开播通知';testLive.onclick=function(){testBilibili(c.id,'live_start')};var testVideo=document.createElement('button');testVideo.className='btn';testVideo.textContent='测试新视频通知';testVideo.onclick=function(){testBilibili(c.id,'video_publish')};var del=document.createElement('button');del.className='btn danger';del.textContent='删除';del.onclick=async function(){if(!(await confirmModal('删除此 B站自动监控？','确认删除')))return;var x=await api('/integrations/bilibili','POST',{action:'delete',id:c.id});toast(x.message);if(x.ok)loadBilibili()};row.append(check,testLive,testVideo,del);d.appendChild(row);$('biliList').appendChild(d)});if(!$('biliList').children.length)$('biliList').innerHTML='<div class="empty">暂无 B站自动监控</div>'}
+async function saveBilibiliConnector(){var uid=String($('biliCreatorId').value||'').replace(/\D/g,'');if(!uid){toast('请输入 B站用户 UID');return}var r=await api('/integrations/bilibili','POST',{action:'save',creatorName:$('biliCreatorName').value,creatorId:uid,pollIntervalSeconds:Number($('biliPollInterval').value||120),liveNotify:$('biliLiveNotify').checked,liveAtAll:$('biliLiveAtAll').checked,videoNotify:$('biliVideoNotify').checked,videoAtAll:$('biliVideoAtAll').checked});toast(r.message);if(r.ok){$('biliCreatorName').value='';$('biliCreatorId').value='';loadBilibili()}}
+async function checkBilibiliNow(id){var r=await api('/integrations/bilibili','POST',{action:'check_now',id:id});toast(r.message);loadBilibili()}
 async function testBilibili(id,eventType){var r=await api('/integrations/bilibili','POST',{action:'test',id:id,eventType:eventType});toast(r.message)}
 
 function setNativeAdminVisibility(botIsOwner){var sel=$('opAction');if(!sel)return;Array.from(sel.options||[]).forEach(function(o){if(o.value==='set_admin'||o.value==='unset_admin'){o.hidden=!botIsOwner;o.disabled=!botIsOwner}});if(sel.selectedOptions&&sel.selectedOptions[0]&&sel.selectedOptions[0].disabled)sel.selectedIndex=0}
@@ -6811,12 +7144,12 @@ function ensureModelRegistryPanel(){if($('runtimeModelPanel')||!$('v-models'))re
 async function runtimeModelAction(action,id,direction,enabled){var r=await api('/root/model-registry','POST',{action:action,kind:$('runtimeModelKind').value,id:id,direction:direction,enabled:enabled});toast(r.message||'完成');if(r.ok)loadRuntimeModels()}
 async function loadRuntimeModels(){if(!session||!(session.permissions||{}).developer)return;ensureModelRegistryPanel();var r=await api('/root/model-registry');if(!r.ok){$('runtimeModelList').innerHTML='<div class="empty">'+esc(r.message)+'</div>';return}var kind=$('runtimeModelKind').value;var state=(r.categories||{})[kind]||{custom:[],immutable:[]};var html='';(state.custom||[]).forEach(function(m){html+='<div class="item"><div class="item-head"><div><div class="item-title">'+esc(m.id)+'</div><div class="item-meta">自定义｜'+(m.enabled?'已启用':'已停用')+'</div></div><div class="row"><button class="btn" data-act="up" data-id="'+esc(m.id)+'">上移</button><button class="btn" data-act="down" data-id="'+esc(m.id)+'">下移</button><button class="btn" data-act="toggle" data-enabled="'+(!m.enabled)+'" data-id="'+esc(m.id)+'">'+(m.enabled?'停用':'启用')+'</button><button class="btn danger" data-act="delete" data-id="'+esc(m.id)+'">删除</button></div></div></div>'});(state.immutable||[]).forEach(function(m){html+='<div class="item"><div class="item-title">'+esc(m.id)+'</div><div class="item-meta">锁定默认后备｜不可修改</div></div>'});$('runtimeModelList').innerHTML=html||'<div class="empty">没有模型</div>';$('runtimeModelList').querySelectorAll('button[data-act]').forEach(function(b){b.onclick=function(){var a=b.dataset.act;if(a==='up'||a==='down')runtimeModelAction('move',b.dataset.id,a);else if(a==='toggle')runtimeModelAction('toggle',b.dataset.id,'',b.dataset.enabled==='true');else runtimeModelAction('delete',b.dataset.id)}})}
 
-function ensureSearchTools(){if($('logList')&&!$('logSearch')){var wrap=document.createElement('div');wrap.className='row';wrap.innerHTML='<input id="logSearch" placeholder="搜索操作、操作者、类型"><button id="logSearchBtn" class="btn">搜索日志</button>';$('logList').parentNode.insertBefore(wrap,$('logList'));$('logSearchBtn').onclick=loadLogs;$('logSearch').onkeydown=function(e){if(e.key==='Enter')loadLogs()}}if($('memoryList')&&!$('vectorSearch')){var v=document.createElement('div');v.className='row';v.innerHTML='<input id="vectorSearch" placeholder="搜索群聊向量"><button id="vectorSearchBtn" class="btn">向量搜索</button><div id="vectorResults" style="width:100%"></div>';$('memoryList').parentNode.insertBefore(v,$('memoryList'));$('vectorSearchBtn').onclick=loadVectorSearch}}
+function ensureSearchTools(){if($('logList')&&!$('logSearch')){var wrap=document.createElement('div');wrap.className='card log-toolbar';wrap.innerHTML='<div class="row"><input id="logSearch" class="grow" placeholder="搜索“禁言”、QQ号、设置名称或错误"><select id="logCategory"><option value="">全部日志</option><option value="moderation">群管理</option><option value="settings">设置修改</option><option value="bilibili">B站监控</option><option value="permission">权限管理</option><option value="system">系统任务</option><option value="error">失败与错误</option></select><button id="logSearchBtn" class="btn primary">搜索</button></div><div id="logSummary" class="notice log-summary" style="margin-top:12px">尚未加载日志。</div>';$('logList').parentNode.insertBefore(wrap,$('logList'));$('logSearchBtn').onclick=loadLogs;$('logSearch').onkeydown=function(e){if(e.key==='Enter')loadLogs()};$('logCategory').onchange=loadLogs}if($('memoryList')&&!$('vectorSearch')){var v=document.createElement('div');v.className='row';v.innerHTML='<input id="vectorSearch" placeholder="搜索群聊向量"><button id="vectorSearchBtn" class="btn">向量搜索</button><div id="vectorResults" style="width:100%"></div>';$('memoryList').parentNode.insertBefore(v,$('memoryList'));$('vectorSearchBtn').onclick=loadVectorSearch}}
 async function loadVectorSearch(){var q=$('vectorSearch')?$('vectorSearch').value.trim():'';if(!q)return;var r=await api('/vector-search?q='+encodeURIComponent(q));$('vectorResults').innerHTML=r.ok?(r.results||[]).map(function(x){return '<div class="item"><div class="item-title">相关度 '+esc(Number(x.score||0).toFixed(3))+'</div><div class="item-meta">QQ '+esc(x.qq||'')+'</div><div class="item-body">'+esc(x.text||'')+'</div></div>'}).join(''):'<div class="empty">'+esc(r.message||'搜索失败')+'</div>'}
 
 function showLogin(){$('login').classList.remove('hidden');$('app').classList.add('hidden')}
 function showApp(){$('login').classList.add('hidden');$('app').classList.remove('hidden')}
-async function loadPlatformFeatures(){var q=$('pfSearch')?$('pfSearch').value:'';var r=await api('/platform/features?q='+encodeURIComponent(q));if(!r.ok){$('pfList').innerHTML='<div class="empty">'+esc(r.message)+'</div>';return}$('pfSummary').textContent='總功能 '+r.total+' 項；目前可見 '+r.visible+' 項；部署模式：單一 Worker；付費 Cloudflare 服務：未啟用';$('pfList').innerHTML='';(r.features||[]).forEach(function(f){var d=document.createElement('div');d.className='item';var sw=document.createElement('input');sw.type='checkbox';sw.checked=!!f.enabled;sw.onchange=async function(){var x=await api('/platform/features','POST',{id:f.id,enabled:sw.checked,auditMode:$('pfAudit').value});toast(x.message);if(!x.ok)sw.checked=!sw.checked};d.innerHTML='<div class="item-head"><div><div class="item-title">'+esc(f.id)+'｜'+esc(f.name)+'</div><div class="item-meta">類別：'+esc(f.category)+'｜模式：'+esc(f.mode)+'｜最低角色：'+esc(f.minRole)+'</div></div></div>';d.appendChild(sw);$('pfList').appendChild(d)});if(!$('pfList').children.length)$('pfList').innerHTML='<div class="empty">沒有符合的功能</div>'}
+async function loadPlatformFeatures(){var q=$('pfSearch')?$('pfSearch').value:'';var r=await api('/platform/features?q='+encodeURIComponent(q));if(!r.ok){$('pfList').innerHTML='<div class="empty">'+esc(r.message)+'</div>';return}$('pfSummary').textContent='全部功能 '+r.total+' 项；当前权限可见 '+r.visible+' 项。不同权限等级看到的内容不同，开发者可查看全部。';$('pfList').innerHTML='';(r.features||[]).forEach(function(f){var d=document.createElement('div');d.className='item';var sw=document.createElement('input');sw.type='checkbox';sw.checked=!!f.enabled;sw.onchange=async function(){var silent=$('pfAuditSilent')&&$('pfAuditSilent').checked;var x=await api('/platform/features','POST',{id:f.id,enabled:sw.checked,auditMode:silent?'silent':'log'});toast(x.message);if(!x.ok)sw.checked=!sw.checked};d.innerHTML='<div class="item-head"><div><div class="item-title">'+esc(f.id)+'｜'+esc(f.name)+'</div><div class="item-meta">类别：'+esc(f.category)+'｜实现方式：'+esc(f.mode)+'｜最低权限：'+esc(portalRoleLabel(f.minRole))+'</div></div></div>';d.appendChild(sw);$('pfList').appendChild(d)});if(!$('pfList').children.length)$('pfList').innerHTML='<div class="empty">没有符合当前权限或搜索条件的功能</div>'}
 function showView(name){document.querySelectorAll('.view').forEach(function(v){v.classList.remove('active')});document.querySelectorAll('#nav button').forEach(function(b){b.classList.toggle('active',b.dataset.view===name)});$('v-'+name).classList.add('active');$('pageTitle').textContent=titles[name]||name;$('sidebar').classList.remove('open');if(name==='health')loadHealth('quick');if(name==='tasks')loadTasks();if(name==='moderation')loadProposals();if(name==='models')loadModels();if(name==='quota')loadQuota();if(name==='groups')loadGroupSettings();if(name==='memory')loadMemory();if(name==='logs')loadLogs();if(name==='aidecisions')loadAiDecisions();else if(name==='appeals')loadAppeals();if(name==='ruleviolations')loadRuleViolations();if(name==='settingscenter')loadSettingsCenter();if(name==='bilibili')loadBilibili();if(name==='platform')loadPlatformFeatures()}
 async function loadGroups(){var r=await api('/groups');if(!r.ok){toast(r.message);return false}var sel=$('groupSelect'),groups=r.groups||[];sel.innerHTML='<option value="">选择群组</option>';groups.forEach(function(g){var o=document.createElement('option');o.value=g.groupId;o.textContent=(g.groupName||g.groupId)+' ('+g.groupId+')';sel.appendChild(o)});if(r.selectedGroupId){sel.value=r.selectedGroupId;currentGroup=r.selectedGroupId}else if(groups.length===1){sel.value=groups[0].groupId;await selectGroup(groups[0].groupId)}else if(!groups.length){toast('没有找到你已加入且启用 QQAI 的群组；仍可使用匿名申诉与个人功能。')}return true}
 async function selectGroup(id){if(!id){currentGroup='';setNativeAdminVisibility(false);return}var r=await api('/select-group','POST',{groupId:id});if(!r.ok){toast(r.message);return}currentGroup=id;session=r.session;$('identity').innerHTML='<b>'+esc(session.qq)+'</b><br><span style="color:#98a2b7">'+esc(session.role||'member')+'</span>';await refreshCapabilities();applyR3RoleVisibility();toast('群组已切换');refreshOverview()}
@@ -6833,10 +7166,24 @@ async function loadMemory(){var r=await api('/memories');if(!r.ok){$('memoryList
 async function syncAppealGroups(){var r=await api('/groups'),sel=$('appealGroup');if(!sel||!r.ok)return;var selected=sel.value;sel.innerHTML='<option value="">请选择群组</option>';(r.groups||[]).forEach(function(g){var o=document.createElement('option');o.value=g.groupId;o.textContent=(g.groupName||g.groupId)+' ('+g.groupId+')';sel.appendChild(o)});sel.value=selected||currentGroup||r.selectedGroupId||''}
 async function loadAppeals(){await syncAppealGroups();var r=await api('/appeals/mine');if(!r.ok){$('appealList').innerHTML='<div class="empty">'+esc(r.message)+'</div>';return}$('appealList').innerHTML=(r.appeals||[]).map(function(a){return '<div class="item"><div class="item-title">'+esc(a.id)+'｜'+esc(a.status||'处理中')+'</div><div class="item-meta">群 '+esc(a.groupId)+'｜'+esc(a.type)+'｜'+esc(a.createdAt||'')+'</div><div class="item-body">'+esc(a.content)+(a.result?'<br><b>处理结果：</b>'+esc(a.result):'')+'</div></div>'}).join('')||'<div class="empty">暂无案件</div>'}
 async function submitAppeal(){var r=await api('/appeals/submit','POST',{groupId:$('appealGroup').value,type:$('appealType').value,evidenceMessageId:$('appealEvidence').value,content:$('appealContent').value});$('appealMessage').textContent=r.message||'提交失败';toast(r.message||'提交失败');if(r.ok){$('appealContent').value='';$('appealEvidence').value='';loadAppeals()}}
-async function loadLogs(){var q=$('logSearch')?$('logSearch').value.trim():'';var r=await api('/admin/logs?q='+encodeURIComponent(q));if(!r.ok){$('logList').innerHTML='<div class="empty">'+esc(r.message)+'</div>';return}$('logList').innerHTML=(r.logs||[]).map(function(a){return '<div class="item"><div class="item-title">'+esc(a.type||a.action||'操作')+'</div><div class="item-meta">'+esc(a.at||'')+'｜'+esc(a.actorId||'')+'</div><div class="item-body">'+esc(a.action||JSON.stringify(a))+'</div></div>'}).join('')||'<div class="empty">暂无操作日志</div>'}
+var logTypeLabels={moderation_proposed:'已建立待确认操作',moderation_cancelled:'已取消待确认操作',moderation_confirmed:'已确认并执行操作',moderation_failed:'待确认操作执行失败',group_operation:'群管理操作成功',group_operation_failed:'群管理操作失败',portal_ai_settings:'群组 AI 设置已保存',ai_settings:'AI 设置已修改',settings_center:'设置中心已修改',bilibili_connector:'B站监控设置已修改',bilibili_auto_monitor:'B站自动监控已修改',bilibili_auto_poll:'B站自动检查',permission:'程序权限已修改',platform_feature:'功能开关已修改',rule_monitor_setting:'群规监控设置已修改',rule_proxy_setting:'AI 群规代理设置已修改',rule_proxy_action:'AI 群规代理已处理',rule_proxy_portal_settings:'AI 群规代理设置已保存',rule_proxy_kick_auth:'AI 踢出授权已修改',join_reject_auth:'入群拒绝授权已修改',rate_limit_setting:'回复间隔已修改',rate_limit_portal:'回复间隔已保存',quota:'DeepSeek 额度已修改',context:'聊天上下文已处理',group_checkin:'群打卡任务',groupwork_requested:'已建立群务申请',groupwork_decided:'群务申请已处理',runtime_model_registry:'模型顺序已修改',platform_job:'系统任务',portal_login:'Control Center 登录'};
+var logActionLabels={mute:'禁言',unmute:'解除禁言',kick:'踢出群聊',reject:'拒绝入群',whole_mute:'开启全员禁言',whole_unmute:'解除全员禁言',set_admin:'设为 QQ 管理员',unset_admin:'取消 QQ 管理员',recall:'撤回消息',create:'新增',update:'更新',enabled:'开启',disabled:'关闭',authorized:'已授权',revoked:'已取消授权',ai_on:'开启 AI',ai_off:'关闭 AI',checked:'检查完成',baseline_created:'建立初始状态',failed:'失败',cancelled:'已取消',commands_enabled:'设置型指令开关',interject_rate:'主动插话率',welcome_enabled:'自动欢迎新人'};
+function logCategoryOf(a){var t=String(a.type||'');if(/moderation|group_operation|groupwork|rule_proxy_action/.test(t))return 'moderation';if(/settings|portal_ai|ai_settings|rule_monitor|rule_proxy_setting|rate_limit|quota|runtime_model|platform_feature|context/.test(t))return 'settings';if(/bilibili/.test(t))return 'bilibili';if(/permission|auth/.test(t))return 'permission';if(/failed|error/.test(t)||a.error)return 'error';return 'system'}
+function logTone(a){var t=String(a.type||''),r=String(a.result||'');if(/failed|error/.test(t)||a.error||/失败|failed/i.test(r))return 'error';if(/cancelled/.test(t))return 'warn';if(/proposed|requested/.test(t))return 'info';return 'ok'}
+function logStatusText(a){var tone=logTone(a);if(tone==='error')return '失败';if(String(a.type||'').includes('cancelled'))return '已取消';if(String(a.type||'').includes('proposed'))return '待确认';return '成功'}
+function logActionText(a){var raw=String(a.action||'').trim();if(!raw)return '';if(logActionLabels[raw])return logActionLabels[raw];if(raw.indexOf(':')>0){var parts=raw.split(':');return (logActionLabels[parts[0]]||parts[0])+'：'+parts.slice(1).join(':')}return raw}
+function logTimeText(v){try{var d=new Date(v);if(isNaN(d.getTime()))return String(v||'');return new Intl.DateTimeFormat('zh-CN',{timeZone:'Asia/Taipei',year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',second:'2-digit',hour12:false}).format(d)}catch(e){return String(v||'')}}
+function logRoleText(){if(!session)return '用户';var p=session.permissions||{};if(p.developer||session.role==='developer')return '开发者';if(session.role==='owner')return '群主';if(session.role==='admin')return 'QQ 管理员';return '群成员'}
+function logActorText(a){var id=String(a.actorId||'');if(!id)return '未知操作者';if(id==='system'||id.indexOf('system:')===0)return '系统自动任务';if(session&&id===String(session.qq))return logRoleText()+'（QQ '+id+'）';return (a.actorName?String(a.actorName)+'（QQ '+id+'）':'QQ '+id)}
+function logTargetText(a){var id=String(a.targetId||'');if(!id)return '';return a.targetName&&String(a.targetName)!==id?String(a.targetName)+'（QQ '+id+'）':'QQ '+id}
+function logDurationText(v){var n=Number(v||0);if(!n)return '';if(n%3600===0)return n/3600+' 小时';if(n%60===0)return n/60+' 分钟';return n+' 秒'}
+function logHumanText(a){var actor=logActorText(a),action=logActionText(a),target=logTargetText(a),type=String(a.type||'');if(type==='moderation_proposed')return actor+'建立了“'+(action||'群管理')+'”待确认操作'+(target?'，目标是 '+target:'')+'。';if(type==='moderation_cancelled')return actor+'取消了“'+(action||'群管理')+'”操作，实际没有执行。';if(type==='moderation_confirmed')return actor+'确认并执行了“'+(action||'群管理')+'”操作'+(target?'，目标是 '+target:'')+'。';if(type==='moderation_failed')return actor+'确认了“'+(action||'群管理')+'”操作，但执行失败。';if(type==='group_operation')return actor+'执行了“'+(action||'群管理')+'”'+(target?'，目标是 '+target:'')+'，执行成功。';if(type==='group_operation_failed')return actor+'尝试执行“'+(action||'群管理')+'”'+(target?'，目标是 '+target:'')+'，但执行失败。';if(type==='portal_ai_settings')return actor+'保存了当前群的 AI 设置。';if(type==='settings_center')return actor+'修改了设置中心项目：'+(action||'设置')+'。';if(type==='bilibili_connector'||type==='bilibili_auto_monitor')return actor+(String(a.action)==='create'?'新增':'更新')+'了 B站自动监控。';if(type==='bilibili_auto_poll')return '系统完成了一次 B站自动检查。';if(type==='permission')return actor+'修改了 '+(target||'指定用户')+' 的程序权限：'+(action||'权限')+'。';if(type==='platform_feature')return actor+(a.enabled?'开启':'关闭')+'了功能：'+String(a.featureName||a.action||'未知功能')+'。';if(type==='portal_ai_settings'||type==='ai_settings')return actor+'修改了 AI 设置。';return actor+'执行了“'+(action||logTypeLabels[type]||type||'操作')+'”。'}
+function logFacts(a){var rows=[],target=logTargetText(a),duration=logDurationText(a.durationSeconds);if(target)rows.push('目标：'+target);if(duration)rows.push('时长：'+duration);if(a.classifierReason)rows.push('识别原因：'+String(a.classifierReason));if(a.proposalId)rows.push('操作编号：'+String(a.proposalId));if(a.error)rows.push('错误：'+String(a.error));else if(a.result&&String(a.result)!=='cancelled')rows.push('结果：'+String(a.result));return rows}
+function renderReadableLog(a){var type=String(a.type||''),title=logTypeLabels[type]||logActionText(a)||'系统操作',tone=logTone(a),facts=logFacts(a);return '<div class="item log-card"><div class="log-card-head"><div><div class="log-card-title">'+esc(title)+'</div><div class="log-card-time">'+esc(logTimeText(a.at))+'｜'+esc(logActorText(a))+'</div></div><span class="log-badge '+tone+'">'+esc(logStatusText(a))+'</span></div><div class="log-human">'+esc(logHumanText(a))+'</div>'+(facts.length?'<div class="log-facts">'+facts.map(function(x){return '<span class="log-fact">'+esc(x)+'</span>'}).join('')+'</div>':'')+'<details class="log-details"><summary>查看技术详情</summary><pre>'+esc(JSON.stringify(a,null,2))+'</pre></details></div>'}
+async function loadLogs(){ensureSearchTools();var q=$('logSearch')?$('logSearch').value.trim():'',category=$('logCategory')?$('logCategory').value:'';var r=await api('/admin/logs?q='+encodeURIComponent(q));if(!r.ok){$('logList').innerHTML='<div class="empty">'+esc(r.message)+'</div>';if($('logSummary'))$('logSummary').textContent='加载失败：'+String(r.message||'未知错误');return}var all=r.logs||[],logs=category?all.filter(function(a){return logCategoryOf(a)===category}):all;if($('logSummary'))$('logSummary').textContent='共显示 '+logs.length+' 条日志'+(q?'，搜索内容：“'+q+'”':'')+(category?'，已按类别筛选':'')+'。时间已换算为台北时间。';$('logList').innerHTML=logs.map(renderReadableLog).join('')||'<div class="empty">没有符合条件的操作日志</div>'}
 async function refreshOverview(){var h=await api('/health?mode=quick');if(h.checks)renderHealth(h);var t=await api('/tasks');if(t.ok){$('mActive').textContent=t.inFlightQuestions||0;$('mQueued').textContent=t.queuedQuestions||0}var p=await api('/moderation/proposals');if(p.ok)$('mProposals').textContent=(p.proposals||[]).filter(function(x){return proposalState(x)==='pending'}).length;var doCheck=(h.checks||[]).find(function(c){return c.name==='Durable Object / NapCat'});var connected=doCheck&&doCheck.status==='ok';$('mNapcat').textContent=connected?'已連線':'未連線';$('mNapcatSub').textContent=doCheck?String(doCheck.latencyMs)+' ms':'暂无資料'}
-async function requestLoginCode(){var qq=String($('loginQq').value||'').replace(/\D/g,'');if(!/^\d{5,12}$/.test(qq)){$('loginNotice').textContent='请输入正确的 QQ 号。';return}var b=$('sendCode');b.disabled=true;b.textContent='傳送中…';$('loginNotice').textContent='正在透過 NapCat 傳送驗證碼…';var r=await raw('/api/auth/request-code','POST',{qq:qq});$('loginNotice').textContent=r.message||'驗證碼傳送失敗。';b.disabled=false;b.textContent=r.ok?'重新傳送驗證碼':'傳送驗證碼'}
-async function verifyLoginCode(){var qq=String($('loginQq').value||'').replace(/\D/g,''),code=String($('loginCode').value||'').replace(/\D/g,'');if(!/^\d{5,12}$/.test(qq)||!/^\d{6}$/.test(code)){$('loginNotice').textContent='请输入正确的 QQ 号與六位驗證碼。';return}var b=$('verifyCode');b.disabled=true;b.textContent='驗證中…';var r=await raw('/api/auth/verify-code','POST',{qq:qq,code:code});$('loginNotice').textContent=r.message||'驗證失敗。';b.disabled=false;b.textContent='登入管理中心';if(r.ok){boot()}}
+async function requestLoginCode(){var qq=String($('loginQq').value||'').replace(/\D/g,'');if(!/^\d{5,12}$/.test(qq)){$('loginNotice').textContent='请输入正确的 QQ 号。';return}var b=$('sendCode');b.disabled=true;b.textContent='傳送中…';$('loginNotice').textContent='正在透過 NapCat 发送验证码…';var r=await raw('/api/auth/request-code','POST',{qq:qq});$('loginNotice').textContent=r.message||'驗證碼傳送失敗。';b.disabled=false;b.textContent=r.ok?'重新发送验证码':'发送验证码'}
+async function verifyLoginCode(){var qq=String($('loginQq').value||'').replace(/\D/g,''),code=String($('loginCode').value||'').replace(/\D/g,'');if(!/^\d{5,12}$/.test(qq)||!/^\d{6}$/.test(code)){$('loginNotice').textContent='请输入正确的 QQ 号與六位验证码。';return}var b=$('verifyCode');b.disabled=true;b.textContent='驗證中…';var r=await raw('/api/auth/verify-code','POST',{qq:qq,code:code});$('loginNotice').textContent=r.message||'驗證失敗。';b.disabled=false;b.textContent='登录管理中心';if(r.ok){boot()}}
 $('sendCode').addEventListener('click',requestLoginCode);$('verifyCode').addEventListener('click',verifyLoginCode);$('loginQq').addEventListener('keydown',function(e){if(e.key==='Enter')requestLoginCode()});$('loginCode').addEventListener('keydown',function(e){if(e.key==='Enter')verifyLoginCode()});$('loginThemeToggle').addEventListener('click',toggleTheme);$('themeToggle').addEventListener('click',toggleTheme);updateThemeButtons();
 $('logout').onclick=async function(){await raw('/api/auth/logout','POST',{});location.reload()};$('menu').onclick=function(){$('sidebar').classList.toggle('open')};$('refresh').onclick=function(){var active=document.querySelector('#nav button.active');showView(active?active.dataset.view:'overview')};$('groupSelect').onchange=function(){selectGroup(this.value)};document.querySelectorAll('#nav button').forEach(function(b){b.onclick=function(){showView(b.dataset.view)}});
 $('quickHealth').onclick=function(){loadHealth('quick')};$('fullHealth').onclick=function(){loadHealth('full')};$('reloadTasks').onclick=loadTasks;$('clearQueue').onclick=async function(){if(!currentGroup){toast('請先选择群组');return}if(!(await confirmModal('清空当前群所有等待中的问题？正在生成的问题不会被强制中断。','清空等待队列')))return;var r=await api('/tasks/clear','POST',{groupId:currentGroup});toast(r.message||'完成');loadTasks()};$('reloadProposals').onclick=loadProposals;
