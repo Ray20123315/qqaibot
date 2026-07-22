@@ -1,4 +1,4 @@
-const VERSION = "1.2.1";
+const VERSION = "1.2.2";
 const QQAI_V1_COMPLETE_MARKER = "QQAI_V1_COMPLETE_MARKER";
 const QQAI_V1_R3_MARKER = "QQAI_V1_R3_MARKER";
 const BUILD_DATE = "2026-07-23";
@@ -485,26 +485,33 @@ export default {
         attempts: 0
       }));
 
-      const sent = await sendOneBotAction(env, {
-        action: "send_private_msg",
-        params: {
-          user_id: qq,
-          message: `【QQAIbot 门户登录验证码】\n验证码：${code}\n有效期：5 分钟。\n若非本人操作，请忽略。`,
-          auto_escape: false
-        },
-        echo: `qqai:portal-code:${Date.now()}:${crypto.randomUUID()}`
-      });
+      const verificationMessage = `【QQAIbot Portal 登入驗證碼】\n驗證碼：${code}\n有效期：5 分鐘。\n若非本人操作，請忽略。`;
+      const delivery = await sendPortalVerificationMessage(env, qq, verificationMessage);
 
-      if (!sent) {
+      await writeSystemAudit(env, {
+        type: "portal_auth_code_delivery",
+        actorId: qq,
+        action: delivery.ok ? "sent" : "failed",
+        transport: delivery.transport,
+        errors: delivery.ok ? [] : delivery.errors?.slice(-4) || []
+      }).catch(() => {});
+
+      if (!delivery.ok) {
+        await dbDel(env, authKey);
+        const httpConfigured = Boolean(String(env.ONEBOT_HTTP_ACTION_URL || env.ONEBOT_HTTP_URL || env.NAPCAT_HTTP_URL || "").trim());
         return jsonResponse({
           ok: false,
-          message: "验证码已生成，但当前没有可用的 NapCat WebSocket 连接。请确认 NapCat WebSocket Client 已连接到 wss://qqai.ray2025.com/onebot 后再试。"
+          code: "VERIFICATION_DELIVERY_FAILED",
+          message: httpConfigured
+            ? "驗證碼傳送失敗。NapCat WebSocket 與 HTTP 備援皆無法送出，請檢查 NapCat 連線、Access Token 與私訊權限。"
+            : "驗證碼傳送失敗。請確認 NapCat WebSocket Client 已連線到 wss://qqai.ray2025.com/onebot；也可設定 ONEBOT_HTTP_URL 作為 HTTP 備援。"
         }, 503);
       }
 
       return jsonResponse({
         ok: true,
-        message: "验证码已发送至该 QQ 私讯，请在 5 分钟内输入。",
+        message: "驗證碼已傳送至該 QQ 私訊，請在 5 分鐘內輸入。",
+        transport: delivery.transport,
         ttl_seconds: 300
       });
     }
@@ -5234,6 +5241,75 @@ async function sendOneBotAction(env, actionPayload) {
   }
 }
 
+function oneBotHttpActionUrl(env, action) {
+  const raw = String(env.ONEBOT_HTTP_ACTION_URL || env.ONEBOT_HTTP_URL || env.NAPCAT_HTTP_URL || "").trim();
+  if (!raw) return null;
+  let url;
+  try { url = new URL(raw); } catch { return null; }
+  if (/\/(?:send_private_msg|send_msg)$/.test(url.pathname)) {
+    url.pathname = url.pathname.replace(/\/(?:send_private_msg|send_msg)$/, "/" + action);
+  } else {
+    url.pathname = url.pathname.replace(/\/+$/, "") + "/" + action;
+  }
+  return url;
+}
+
+async function sendOneBotHttpAction(env, action, params, timeoutMs = 12000) {
+  const url = oneBotHttpActionUrl(env, action);
+  if (!url) throw new Error("NAPCAT_HTTP_NOT_CONFIGURED");
+  const token = String(env.ONEBOT_ACCESS_TOKEN || env.NAPCAT_ACCESS_TOKEN || "").trim();
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort("NAPCAT_HTTP_TIMEOUT"), Math.max(1000, timeoutMs));
+  try {
+    const headers = { "Content-Type": "application/json" };
+    if (token) {
+      headers.Authorization = `Bearer ${token}`;
+      headers["X-Access-Token"] = token;
+    }
+    const response = await fetch(url.toString(), {
+      method: "POST",
+      headers,
+      body: JSON.stringify(params || {}),
+      signal: controller.signal
+    });
+    const data = await response.json().catch(() => null);
+    const ok = response.ok && (data?.status === "ok" || Number(data?.retcode ?? 0) === 0);
+    if (!ok) throw new Error(data?.message || data?.wording || `NAPCAT_HTTP_${response.status}`);
+    return data?.data ?? data;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function sendPortalVerificationMessage(env, qq, message) {
+  const userId = numericId(qq);
+  const errors = [];
+  const attempts = [
+    { transport: "websocket:send_private_msg", payload: { action: "send_private_msg", params: { user_id: userId, message, auto_escape: false } } },
+    { transport: "websocket:send_msg", payload: { action: "send_msg", params: { message_type: "private", user_id: userId, message, auto_escape: false } } }
+  ];
+  for (const attempt of attempts) {
+    try {
+      await callOneBotAction(env, attempt.payload, 12000);
+      return { ok: true, transport: attempt.transport };
+    } catch (error) {
+      errors.push(`${attempt.transport}:${String(error?.message || error)}`);
+    }
+  }
+  for (const action of ["send_private_msg", "send_msg"]) {
+    try {
+      const params = action === "send_msg"
+        ? { message_type: "private", user_id: userId, message, auto_escape: false }
+        : { user_id: userId, message, auto_escape: false };
+      await sendOneBotHttpAction(env, action, params, 12000);
+      return { ok: true, transport: `http:${action}` };
+    } catch (error) {
+      errors.push(`http:${action}:${String(error?.message || error)}`);
+    }
+  }
+  return { ok: false, transport: "none", errors };
+}
+
 
 
 function extractGroupId(groupText) {
@@ -5343,7 +5419,7 @@ function commandChangesWebSettings(message) {
   if (!/^[!！]/.test(text)) return false;
   if (/^[!！]指令(开|開|关|關)\b/.test(text)) return true;
   return [
-    "关闭ai", "關閉ai", "开启ai", "開啟ai", "ai关", "ai關", "ai开", "ai開",
+    // AI 開關屬於緊急管理指令；即使 Portal 已關閉設定型 ! 指令，仍必須可用。
     "记忆开", "記憶開", "记忆关", "記憶關",
     "切换人格", "切換人格", "恢复人格", "恢復人格", "取消使用",
     "set群规", "set群規", "群规设置", "群規設定",
@@ -6462,25 +6538,29 @@ function getAppealPage(host) {
 }
 
 function getPortalHomePage(host) {
-  return `<!doctype html>
+  return String.raw`<!doctype html>
 <html lang="zh-Hant-TW">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>QQAIbot Control Center</title>
+<script>(function(){try{var t=localStorage.getItem('qqai_theme');document.documentElement.dataset.theme=t==='dark'?'dark':'light'}catch(e){document.documentElement.dataset.theme='light'}})();</script>
 <style>
-:root{color-scheme:light;--bg:#f5f7fb;--panel:#fff;--panel2:#f8fafc;--text:#172033;--muted:#68748a;--line:#e3e8f0;--primary:#5b5bd6;--primary2:#7777e8;--ok:#17845f;--warn:#b26a00;--bad:#c53d4d;--shadow:0 18px 48px rgba(31,42,68,.08);font-family:Inter,"Noto Sans TC","Microsoft JhengHei",system-ui,sans-serif}
+:root{color-scheme:light;--bg:#f5f7fb;--panel:#fff;--panel2:#f8fafc;--text:#172033;--muted:#68748a;--line:#e3e8f0;--primary:#5b5bd6;--primary2:#7777e8;--ok:#17845f;--warn:#b26a00;--bad:#c53d4d;--shadow:0 18px 48px rgba(31,42,68,.08);--login-panel:rgba(255,255,255,.92);--topbar-bg:rgba(245,247,251,.88);font-family:Inter,"Noto Sans TC","Microsoft JhengHei",system-ui,sans-serif}
+:root[data-theme="dark"]{color-scheme:dark;--bg:#070a11;--panel:#101521;--panel2:#151c2a;--text:#eef2f8;--muted:#9ca8bb;--line:#293247;--primary:#8585ff;--primary2:#a091ff;--ok:#48cfa0;--warn:#e5a94f;--bad:#ff7687;--shadow:0 18px 48px rgba(0,0,0,.38);--login-panel:rgba(16,21,34,.94);--topbar-bg:rgba(7,10,17,.9)}
 *{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text)}button,input,select,textarea{font:inherit}.hidden{display:none!important}.muted{color:var(--muted)}
 .login{min-height:100vh;display:grid;place-items:center;padding:24px;background:radial-gradient(circle at 15% 10%,rgba(91,91,214,.15),transparent 38%),radial-gradient(circle at 90% 90%,rgba(23,132,95,.11),transparent 40%),var(--bg)}
-.login-card{width:min(450px,100%);background:rgba(255,255,255,.92);border:1px solid var(--line);border-radius:26px;padding:30px;box-shadow:var(--shadow);backdrop-filter:blur(14px)}.brand{display:flex;align-items:center;gap:12px;margin-bottom:24px}.logo{width:46px;height:46px;border-radius:15px;display:grid;place-items:center;background:linear-gradient(135deg,var(--primary),#8a69e8);color:#fff;font-weight:800}.brand h1{font-size:22px;margin:0}.brand p{margin:4px 0 0;color:var(--muted);font-size:14px}
-.field{display:grid;gap:7px;margin:14px 0}.field label{font-size:13px;font-weight:700}.field input,.field select,.field textarea{width:100%;border:1px solid var(--line);border-radius:12px;background:#fff;color:var(--text);padding:11px 12px;outline:none}.field input:focus,.field select:focus,.field textarea:focus{border-color:var(--primary);box-shadow:0 0 0 3px rgba(91,91,214,.12)}.field textarea{min-height:100px;resize:vertical}.row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}.grow{flex:1;min-width:160px}
-.btn{border:0;border-radius:11px;padding:10px 14px;font-weight:700;cursor:pointer;background:#e9edf5;color:var(--text)}.btn:hover{filter:brightness(.98)}.btn.primary{background:var(--primary);color:#fff}.btn.danger{background:#fde9ec;color:var(--bad)}.btn.ghost{background:transparent;border:1px solid var(--line)}.btn:disabled{opacity:.55;cursor:not-allowed}.notice{margin-top:14px;padding:11px 13px;border-radius:11px;background:var(--panel2);color:var(--muted);font-size:14px;line-height:1.55}
+.login-card{width:min(450px,100%);background:var(--login-panel);border:1px solid var(--line);border-radius:26px;padding:30px;box-shadow:var(--shadow);backdrop-filter:blur(14px)}.brand{display:flex;align-items:center;gap:12px;margin-bottom:24px}.logo{width:46px;height:46px;border-radius:15px;display:grid;place-items:center;background:linear-gradient(135deg,var(--primary),#8a69e8);color:#fff;font-weight:800}.brand h1{font-size:22px;margin:0}.brand p{margin:4px 0 0;color:var(--muted);font-size:14px}
+.field{display:grid;gap:7px;margin:14px 0}.field label{font-size:13px;font-weight:700}.field input,.field select,.field textarea{width:100%;border:1px solid var(--line);border-radius:12px;background:var(--panel);color:var(--text);padding:11px 12px;outline:none}.field input:focus,.field select:focus,.field textarea:focus{border-color:var(--primary);box-shadow:0 0 0 3px rgba(91,91,214,.12)}.field textarea{min-height:100px;resize:vertical}.row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}.grow{flex:1;min-width:160px}
+.btn{border:0;border-radius:11px;padding:10px 14px;font-weight:700;cursor:pointer;background:var(--panel2);color:var(--text)}.btn:hover{filter:brightness(.98)}.btn.primary{background:var(--primary);color:#fff}.btn.danger{background:#fde9ec;color:var(--bad)}.btn.ghost{background:transparent;border:1px solid var(--line)}.btn:disabled{opacity:.55;cursor:not-allowed}.notice{margin-top:14px;padding:11px 13px;border-radius:11px;background:var(--panel2);color:var(--muted);font-size:14px;line-height:1.55}
 .app{min-height:100vh;display:grid;grid-template-columns:250px 1fr}.sidebar{position:sticky;top:0;height:100vh;background:#171b2b;color:#e9ecf4;padding:18px 14px;display:flex;flex-direction:column}.side-brand{display:flex;align-items:center;gap:10px;padding:8px 8px 18px}.side-brand .logo{width:38px;height:38px;border-radius:12px}.side-brand b{display:block}.side-brand small{color:#98a2b7}.nav{display:grid;gap:4px;overflow:auto}.nav button{border:0;background:transparent;color:#aeb7c9;padding:10px 12px;border-radius:10px;text-align:left;cursor:pointer;font-weight:650}.nav button:hover,.nav button.active{background:rgba(255,255,255,.1);color:#fff}.side-bottom{margin-top:auto;padding:12px 8px 2px;border-top:1px solid rgba(255,255,255,.1)}
-.main{min-width:0}.topbar{height:72px;display:flex;align-items:center;justify-content:space-between;gap:16px;padding:0 24px;border-bottom:1px solid var(--line);background:rgba(245,247,251,.88);backdrop-filter:blur(12px);position:sticky;top:0;z-index:5}.topbar h2{margin:0;font-size:20px}.top-actions{display:flex;align-items:center;gap:10px}.top-actions select{max-width:250px;border:1px solid var(--line);border-radius:10px;padding:9px 10px;background:#fff}.content{padding:24px;max-width:1500px;margin:auto}.view{display:none}.view.active{display:block}.section-head{display:flex;justify-content:space-between;gap:16px;align-items:flex-start;margin-bottom:18px}.section-head h2{margin:0 0 5px;font-size:25px}.section-head p{margin:0;color:var(--muted)}
+.main{min-width:0}.topbar{height:72px;display:flex;align-items:center;justify-content:space-between;gap:16px;padding:0 24px;border-bottom:1px solid var(--line);background:var(--topbar-bg);backdrop-filter:blur(12px);position:sticky;top:0;z-index:5}.topbar h2{margin:0;font-size:20px}.top-actions{display:flex;align-items:center;gap:10px}.top-actions select{max-width:250px;border:1px solid var(--line);border-radius:10px;padding:9px 10px;background:#fff}.content{padding:24px;max-width:1500px;margin:auto}.view{display:none}.view.active{display:block}.section-head{display:flex;justify-content:space-between;gap:16px;align-items:flex-start;margin-bottom:18px}.section-head h2{margin:0 0 5px;font-size:25px}.section-head p{margin:0;color:var(--muted)}
 .grid{display:grid;grid-template-columns:repeat(12,minmax(0,1fr));gap:16px}.card{background:var(--panel);border:1px solid var(--line);border-radius:17px;padding:18px;box-shadow:0 8px 28px rgba(38,49,76,.045);min-width:0}.span-3{grid-column:span 3}.span-4{grid-column:span 4}.span-6{grid-column:span 6}.span-8{grid-column:span 8}.span-12{grid-column:1/-1}.metric-label{font-size:13px;color:var(--muted);margin-bottom:8px}.metric-value{font-size:27px;font-weight:800;letter-spacing:-.03em}.metric-sub{font-size:12px;color:var(--muted);margin-top:7px}.card h3{margin:0 0 13px;font-size:16px}.status{display:inline-flex;align-items:center;gap:7px;border-radius:999px;padding:5px 9px;font-size:12px;font-weight:800;background:#edf1f7}.status:before{content:"";width:7px;height:7px;border-radius:50%;background:#8390a5}.status.ok{background:#e5f5ee;color:var(--ok)}.status.ok:before{background:var(--ok)}.status.warning{background:#fff2d9;color:var(--warn)}.status.warning:before{background:var(--warn)}.status.error{background:#fde9ec;color:var(--bad)}.status.error:before{background:var(--bad)}
-.list{display:grid;gap:10px}.item{border:1px solid var(--line);border-radius:13px;padding:13px;background:#fff}.item-head{display:flex;justify-content:space-between;gap:12px;align-items:flex-start}.item-title{font-weight:800;word-break:break-word}.item-meta{font-size:12px;color:var(--muted);margin-top:5px;line-height:1.55}.item-body{margin-top:9px;line-height:1.55;word-break:break-word}.empty{padding:28px 12px;text-align:center;color:var(--muted);border:1px dashed var(--line);border-radius:13px}.health-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:13px}.health-card{border:1px solid var(--line);border-radius:14px;padding:14px;background:#fff}.health-card .latency{font-size:12px;color:var(--muted);margin-top:8px}.health-card .detail{font-size:12px;color:var(--muted);margin-top:8px;word-break:break-word;white-space:pre-wrap}
+.list{display:grid;gap:10px}.item{border:1px solid var(--line);border-radius:13px;padding:13px;background:var(--panel)}.item-head{display:flex;justify-content:space-between;gap:12px;align-items:flex-start}.item-title{font-weight:800;word-break:break-word}.item-meta{font-size:12px;color:var(--muted);margin-top:5px;line-height:1.55}.item-body{margin-top:9px;line-height:1.55;word-break:break-word}.empty{padding:28px 12px;text-align:center;color:var(--muted);border:1px dashed var(--line);border-radius:13px}.health-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:13px}.health-card{border:1px solid var(--line);border-radius:14px;padding:14px;background:var(--panel)}.health-card .latency{font-size:12px;color:var(--muted);margin-top:8px}.health-card .detail{font-size:12px;color:var(--muted);margin-top:8px;word-break:break-word;white-space:pre-wrap}
 .timeline{display:grid;gap:8px}.step{display:flex;gap:10px;align-items:flex-start}.step i{width:9px;height:9px;border-radius:50%;background:var(--primary);margin-top:6px;flex:0 0 auto}.step span{line-height:1.5}.pill{display:inline-block;border-radius:999px;padding:4px 8px;background:#eef0ff;color:#5050bd;font-size:12px;font-weight:700;margin:2px 4px 2px 0}.split{display:grid;grid-template-columns:1fr 1fr;gap:16px}.switch{display:flex;align-items:center;gap:9px;margin:10px 0}.switch input{width:18px;height:18px}.code{font-family:ui-monospace,SFMono-Regular,Consolas,monospace;background:#151a29;color:#e9ecf4;border-radius:12px;padding:12px;white-space:pre-wrap;word-break:break-word;font-size:12px}
 .toast{position:fixed;right:22px;bottom:22px;max-width:420px;padding:12px 15px;border-radius:12px;background:#1c2233;color:#fff;box-shadow:var(--shadow);z-index:30}.mobile-menu{display:none}
+:root[data-theme="dark"] .sidebar{background:#090d17}:root[data-theme="dark"] .btn.danger{background:#351820}:root[data-theme="dark"] .status{background:#20283a}:root[data-theme="dark"] .status.ok{background:#13372d}:root[data-theme="dark"] .status.warning{background:#3a2b13}:root[data-theme="dark"] .status.error{background:#3a1820}:root[data-theme="dark"] .pill{background:#292750;color:#c8c7ff}
+.theme-toggle{white-space:nowrap}
 @media(max-width:1050px){.span-3{grid-column:span 6}.span-4{grid-column:span 6}.span-8{grid-column:span 12}}
 @media(max-width:760px){.app{display:block}.sidebar{position:fixed;left:0;top:0;width:270px;z-index:20;transform:translateX(-102%);transition:.2s}.sidebar.open{transform:none}.mobile-menu{display:inline-flex}.topbar{padding:0 14px}.topbar h2{font-size:17px}.top-actions select{max-width:145px}.content{padding:16px}.span-3,.span-4,.span-6,.span-8{grid-column:1/-1}.split{grid-template-columns:1fr}.section-head{display:block}.section-head .row{margin-top:12px}}
 </style>
@@ -6488,17 +6568,18 @@ function getPortalHomePage(host) {
 <body>
 <section id="login" class="login">
   <div class="login-card">
-    <div class="brand"><div class="logo">AI</div><div><h1>QQAIbot Control Center</h1><p>v1.2.0 長上下文、精準回覆與 AI 決策紀錄</p></div></div>
+    <div class="brand"><div class="logo">AI</div><div><h1>QQAIbot Control Center</h1></div></div>
+    <div class="row"><button id="loginThemeToggle" type="button" class="btn ghost theme-toggle">切換黑色模式</button></div>
     <div class="field"><label for="loginQq">QQ 號</label><input id="loginQq" inputmode="numeric" placeholder="輸入你的 QQ 號"></div>
-    <div class="row"><button id="sendCode" class="btn ghost grow">傳送驗證碼</button></div>
+    <div class="row"><button id="sendCode" type="button" class="btn ghost grow">傳送驗證碼</button></div>
     <div class="field"><label for="loginCode">六位驗證碼</label><input id="loginCode" inputmode="numeric" maxlength="6" placeholder="驗證碼"></div>
-    <button id="verifyCode" class="btn primary" style="width:100%">登录管理中心</button>
+    <button id="verifyCode" type="button" class="btn primary" style="width:100%">登入管理中心</button>
     <div id="loginNotice" class="notice">驗證碼會由已連線的 NapCat 私訊至你的 QQ。</div>
   </div>
 </section>
 <div id="app" class="app hidden">
   <aside id="sidebar" class="sidebar">
-    <div class="side-brand"><div class="logo">AI</div><div><b>QQAIbot</b><small>Control Center 1.2.0</small></div></div>
+    <div class="side-brand"><div class="logo">AI</div><div><b>QQAIbot</b><small>Control Center</small></div></div>
     <nav class="nav" id="nav">
       <button data-view="overview" class="active">總覽</button>
       <button data-view="health">健康檢查</button>
@@ -6514,7 +6595,7 @@ function getPortalHomePage(host) {
     <div class="side-bottom"><div id="identity" style="font-size:13px"></div><button id="logout" class="btn ghost" style="margin-top:10px;width:100%;color:#fff;border-color:rgba(255,255,255,.18)">登出</button></div>
   </aside>
   <main class="main">
-    <header class="topbar"><div class="row"><button id="menu" class="btn ghost mobile-menu">☰</button><h2 id="pageTitle">總覽</h2></div><div class="top-actions"><select id="groupSelect"><option value="">选择群组</option></select><button id="refresh" class="btn ghost">重新整理</button></div></header>
+    <header class="topbar"><div class="row"><button id="menu" class="btn ghost mobile-menu">☰</button><h2 id="pageTitle">總覽</h2></div><div class="top-actions"><select id="groupSelect"><option value="">选择群组</option></select><button id="themeToggle" type="button" class="btn ghost theme-toggle">黑色模式</button><button id="refresh" class="btn ghost">重新整理</button></div></header>
     <div class="content">
       <section id="v-overview" class="view active">
         <div class="section-head"><div><h2>系統總覽</h2><p>只顯示重要狀態；詳細資訊可進入對應頁面。</p></div><span id="overallStatus" class="status">尚未檢查</span></div>
@@ -6572,10 +6653,15 @@ function getPortalHomePage(host) {
 (function(){
 'use strict';
 var token='';var currentGroup='';var session=null;
-var $=function(id){return document.getElementById(id)};var titles={overview:'总览',health:'健康检查',tasks:'任务与等待队列',moderation:'待确认操作',simulator:'事件模拟器',models:'模型中心',quota:'额度与限制',groups:'群组设置',memory:'记忆管理',logs:'操作日志',aidecisions:'AI 回覆紀錄',platform:'300 功能平台'};
+var $=function(id){return document.getElementById(id)};
+function activeTheme(){return document.documentElement.dataset.theme==='dark'?'dark':'light'}
+function updateThemeButtons(){var dark=activeTheme()==='dark';if($('loginThemeToggle'))$('loginThemeToggle').textContent=dark?'切換白色模式':'切換黑色模式';if($('themeToggle'))$('themeToggle').textContent=dark?'白色模式':'黑色模式'}
+function setTheme(theme){var next=theme==='dark'?'dark':'light';document.documentElement.dataset.theme=next;try{localStorage.setItem('qqai_theme',next)}catch(e){}updateThemeButtons()}
+function toggleTheme(){setTheme(activeTheme()==='dark'?'light':'dark')}
+var titles={overview:'总览',health:'健康检查',tasks:'任务与等待队列',moderation:'待确认操作',simulator:'事件模拟器',models:'模型中心',quota:'额度与限制',groups:'群组设置',memory:'记忆管理',logs:'操作日志',aidecisions:'AI 回覆紀錄',platform:'300 功能平台'};
 function esc(v){return String(v==null?'':v).replace(/[&<>"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]})}
 function toast(msg){$('toast').textContent=String(msg||'');$('toast').classList.remove('hidden');clearTimeout(toast.t);toast.t=setTimeout(function(){$('toast').classList.add('hidden')},3200)}
-async function raw(path,method,data){var opt={method:method||'GET',headers:{}};if(data!==undefined){opt.headers['Content-Type']='application/json';opt.body=JSON.stringify(data)}var r=await fetch(path,opt);var j=await r.json().catch(function(){return{ok:false,message:'無法解析伺服器回應'}});if(!r.ok&&!j.message)j.message='HTTP '+r.status;return j}
+async function raw(path,method,data){try{var opt={method:method||'GET',headers:{},credentials:'same-origin',cache:'no-store'};if(data!==undefined){opt.headers['Content-Type']='application/json';opt.body=JSON.stringify(data)}var r=await fetch(path,opt);var j=await r.json().catch(function(){return{ok:false,message:'無法解析伺服器回應'}});if(!r.ok&&!j.message)j.message='HTTP '+r.status;return j}catch(e){return{ok:false,message:'網路請求失敗：'+String(e&&e.message||e)}}}
 async function api(path,method,data){var opt={method:method||'GET',headers:{},credentials:'same-origin'};if(data!==undefined){opt.headers['Content-Type']='application/json';opt.body=JSON.stringify(data)}var r=await fetch('/api/portal'+path,opt);var j=await r.json().catch(function(){return{ok:false,message:'無法解析伺服器回應'}});if(r.status===401){showLogin()}return j}
 function statusClass(s){return s==='ok'?'ok':s==='warning'?'warning':s==='error'?'error':''}
 function ensureModal(){if($('qqaiModal'))return;var d=document.createElement('div');d.id='qqaiModal';d.className='hidden';d.style.cssText='position:fixed;inset:0;z-index:9999;background:#0009;display:grid;place-items:center;padding:18px';d.innerHTML='<div style="width:min(520px,100%);background:#101826;border:1px solid #ffffff22;border-radius:16px;padding:20px"><h3 id="qqaiModalTitle" style="margin-top:0">确认操作</h3><div id="qqaiModalText" style="white-space:pre-wrap;margin:12px 0"></div><textarea id="qqaiModalInput" class="hidden" style="width:100%;min-height:110px;margin:8px 0"></textarea><div style="display:flex;justify-content:flex-end;gap:10px"><button id="qqaiModalCancel" class="btn">取消</button><button id="qqaiModalOk" class="btn primary">确认</button></div></div>';document.body.appendChild(d)}
@@ -6633,7 +6719,9 @@ async function loadGroupSettings(){ensureGroupSettingsExtras();var r=await api('
 async function loadMemory(){var r=await api('/memories');if(!r.ok){$('memoryList').innerHTML='<div class="empty">'+esc(r.message)+'</div>';return}var all=(r.private||[]).map(function(x){return Object.assign({},x,{_scope:'private'})}).concat((r.public||[]).map(function(x){return Object.assign({},x,{_scope:'public'})})).filter(function(x){return x.id&&String(x.text||'').trim()});$('memoryList').innerHTML='';all.forEach(function(m){var d=document.createElement('div');d.className='item';d.innerHTML='<div class="item-head"><div><div class="item-title">'+esc(m.text)+'</div><div class="item-meta">'+esc(m._scope)+'｜'+esc(m.at||m.updatedAt||'')+'</div></div></div>';var row=document.createElement('div');row.className='row';var edit=document.createElement('button');edit.className='btn';edit.textContent='编辑';edit.onclick=async function(){var text=await textModal('修改记忆内容',m.text,'编辑记忆');if(text===null)return;var x=await api('/memories','PUT',{scope:m._scope,id:m.id,text:text});toast(x.message|| (x.ok?'已更新':'更新失败'));loadMemory()};var del=document.createElement('button');del.className='btn danger';del.textContent='删除';del.onclick=async function(){if(!(await confirmModal('删除这条记忆？对应的长期记忆向量也会删除。','删除记忆')))return;var x=await api('/memories','DELETE',{scope:m._scope,id:m.id});toast(x.message||'已删除');loadMemory()};row.append(edit,del);d.appendChild(row);$('memoryList').appendChild(d)});if(!$('memoryList').children.length)$('memoryList').innerHTML='<div class="empty">暂无记忆</div>';ensureSearchTools()}
 async function loadLogs(){var q=$('logSearch')?$('logSearch').value.trim():'';var r=await api('/admin/logs?q='+encodeURIComponent(q));if(!r.ok){$('logList').innerHTML='<div class="empty">'+esc(r.message)+'</div>';return}$('logList').innerHTML=(r.logs||[]).map(function(a){return '<div class="item"><div class="item-title">'+esc(a.type||a.action||'操作')+'</div><div class="item-meta">'+esc(a.at||'')+'｜'+esc(a.actorId||'')+'</div><div class="item-body">'+esc(a.action||JSON.stringify(a))+'</div></div>'}).join('')||'<div class="empty">暂无操作日志</div>'}
 async function refreshOverview(){var h=await api('/health?mode=quick');if(h.checks)renderHealth(h);var t=await api('/tasks');if(t.ok){$('mActive').textContent=t.inFlightQuestions||0;$('mQueued').textContent=t.queuedQuestions||0}var p=await api('/moderation/proposals');if(p.ok)$('mProposals').textContent=(p.proposals||[]).filter(function(x){return proposalState(x)==='pending'}).length;var doCheck=(h.checks||[]).find(function(c){return c.name==='Durable Object / NapCat'});var connected=doCheck&&doCheck.status==='ok';$('mNapcat').textContent=connected?'已連線':'未連線';$('mNapcatSub').textContent=doCheck?String(doCheck.latencyMs)+' ms':'暂无資料'}
-$('sendCode').onclick=async function(){var r=await raw('/api/auth/request-code','POST',{qq:$('loginQq').value});$('loginNotice').textContent=r.message};$('verifyCode').onclick=async function(){var r=await raw('/api/auth/verify-code','POST',{qq:$('loginQq').value,code:$('loginCode').value});$('loginNotice').textContent=r.message;if(r.ok){boot()}};
+async function requestLoginCode(){var qq=String($('loginQq').value||'').replace(/\D/g,'');if(!/^\d{5,12}$/.test(qq)){$('loginNotice').textContent='請輸入正確的 QQ 號。';return}var b=$('sendCode');b.disabled=true;b.textContent='傳送中…';$('loginNotice').textContent='正在透過 NapCat 傳送驗證碼…';var r=await raw('/api/auth/request-code','POST',{qq:qq});$('loginNotice').textContent=r.message||'驗證碼傳送失敗。';b.disabled=false;b.textContent=r.ok?'重新傳送驗證碼':'傳送驗證碼'}
+async function verifyLoginCode(){var qq=String($('loginQq').value||'').replace(/\D/g,''),code=String($('loginCode').value||'').replace(/\D/g,'');if(!/^\d{5,12}$/.test(qq)||!/^\d{6}$/.test(code)){$('loginNotice').textContent='請輸入正確的 QQ 號與六位驗證碼。';return}var b=$('verifyCode');b.disabled=true;b.textContent='驗證中…';var r=await raw('/api/auth/verify-code','POST',{qq:qq,code:code});$('loginNotice').textContent=r.message||'驗證失敗。';b.disabled=false;b.textContent='登入管理中心';if(r.ok){boot()}}
+$('sendCode').addEventListener('click',requestLoginCode);$('verifyCode').addEventListener('click',verifyLoginCode);$('loginQq').addEventListener('keydown',function(e){if(e.key==='Enter')requestLoginCode()});$('loginCode').addEventListener('keydown',function(e){if(e.key==='Enter')verifyLoginCode()});$('loginThemeToggle').addEventListener('click',toggleTheme);$('themeToggle').addEventListener('click',toggleTheme);updateThemeButtons();
 $('logout').onclick=async function(){await raw('/api/auth/logout','POST',{});location.reload()};$('menu').onclick=function(){$('sidebar').classList.toggle('open')};$('refresh').onclick=function(){var active=document.querySelector('#nav button.active');showView(active?active.dataset.view:'overview')};$('groupSelect').onchange=function(){selectGroup(this.value)};document.querySelectorAll('#nav button').forEach(function(b){b.onclick=function(){showView(b.dataset.view)}});
 $('quickHealth').onclick=function(){loadHealth('quick')};$('fullHealth').onclick=function(){loadHealth('full')};$('reloadTasks').onclick=loadTasks;$('clearQueue').onclick=async function(){if(!currentGroup){toast('請先选择群组');return}if(!(await confirmModal('清空当前群所有等待中的问题？正在生成的问题不会被强制中断。','清空等待队列')))return;var r=await api('/tasks/clear','POST',{groupId:currentGroup});toast(r.message||'完成');loadTasks()};$('reloadProposals').onclick=loadProposals;
 $('createProposal').onclick=async function(){var r=await api('/ops/action','POST',{action:$('opAction').value,qq:$('opQq').value,duration:$('opDuration').value});$('opMessage').textContent=r.message;toast(r.message);if(r.ok)loadProposals()};
