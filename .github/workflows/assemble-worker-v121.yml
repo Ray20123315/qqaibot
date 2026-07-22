@@ -5,7 +5,7 @@ on:
     branches:
       - agent/qqaibot-v1.1.0-complete
     paths:
-      - .tmp/worker-v1.2.1.js.gz.b64
+      - .tmp/worker-v1.2.1.ready
 
 permissions:
   contents: write
@@ -24,7 +24,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          base64 --decode .tmp/worker-v1.2.1.js.gz.b64 | gzip --decompress > worker.js
+          cat .tmp/worker-v1.2.1.part-* | base64 --decode | gzip --decompress > worker.js
           echo "0a54833226c1f587e97334f0acc24493ca2d1d4c26a2871211f726f400d89c7b  worker.js" | sha256sum --check --strict
           node --check worker.js
 
@@ -32,7 +32,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          rm -f .tmp/worker-v1.2.1.js.gz.b64 .github/workflows/assemble-worker-v121.yml
+          rm -f .tmp/worker-v1.2.1.part-* .tmp/worker-v1.2.1.ready .github/workflows/assemble-worker-v121.yml
           rmdir .tmp 2>/dev/null || true
           git config user.name "QQAI Build Bot"
           git config user.email "actions@users.noreply.github.com"
