@@ -2,32 +2,22 @@
 
 name = "qqai"
 main = "worker.js"
-compatibility_date = "2026-07-21"
+compatibility_date = "2026-07-22"
 compatibility_flags = ["nodejs_compat"]
 workers_dev = true
 
-# 自訂網域
 [[routes]]
 pattern = "qqai.ray2025.com"
 custom_domain = true
 
-# Cloudflare Browser Rendering
-[browser]
-binding = "BROWSER"
-
-# Cloudflare Workers AI
 [ai]
 binding = "AI"
 
-# Durable Object
-# 目前 worker.js 只匯出並使用 OneBotHub。
 [[durable_objects.bindings]]
 name = "ONEBOT_HUB"
 class_name = "OneBotHub"
 
-# Durable Object migration 歷史不可刪除或改名。
-# Cloudflare 已部署到 v2_budget_guard；即使目前不再綁定 BudgetGuard，
-# 仍必須保留 v1、v2，否則 Wrangler 會嘗試從 v1 重新套用並失敗。
+# 已部署過的 Durable Object migration 歷史不可刪除、改名或重排。
 [[migrations]]
 tag = "v1_onebot_hub"
 new_sqlite_classes = ["OneBotHub"]
@@ -36,52 +26,46 @@ new_sqlite_classes = ["OneBotHub"]
 tag = "v2_budget_guard"
 new_sqlite_classes = ["BudgetGuard"]
 
-# Cloudflare 遠端目前已部署至 v2_budget_guard。
-# 新部署只會執行此 v3，移除已不再由 worker.js 匯出或綁定的 BudgetGuard。
 [[migrations]]
 tag = "v3_remove_budget_guard"
 deleted_classes = ["BudgetGuard"]
 
-# D1
 [[d1_databases]]
 binding = "DB"
 database_name = "qqaibot"
 database_id = "569a01fe-3297-40e1-832f-09c3793056ed"
 
-# Vectorize
 [[vectorize]]
 binding = "VECTORIZE"
 index_name = "qqai"
 
-# 排程、主動發話與暫存清理：每分鐘觸發
+# 午夜打卡、排程、B站事件、平台維護與暫存清理每分鐘檢查。
 [triggers]
 crons = ["* * * * *"]
 
-# Cloudflare Rate Limiter
-[[ratelimits]]
-name = "MY_RATE_LIMITER"
-namespace_id = "999"
-
-  [ratelimits.simple]
-  limit = 1
-  period = 10
-
-# 可安全提交到 GitHub 的公開變數
+# 速率限制改為 D1 執行時設定，不使用固定 Cloudflare Rate Limiter binding。
+# 不使用 Browser Rendering、R2、Queues、Workflows 或 Analytics Engine。
 [vars]
 DEVELOPER_ID = "3569028262"
 ENABLE_ONEBOT_HTTP_EVENTS = "false"
+PLATFORM_FEATURE_COUNT = "300"
+PLATFORM_DEPLOYMENT_MODE = "single_worker"
+PAID_DEPENDENCY_POLICY = "deepseek_only"
+DISABLE_PAID_CLOUDFLARE_SERVICES = "true"
 
+MODEL_COST_POLICY = "free_first"
+DEEPSEEK_EMERGENCY_FALLBACK = "false"
+ALLOW_PAID_CONTEXT_SUMMARY = "false"
 DEEPSEEK_FLASH_MODEL = "deepseek-v4-flash"
 DEEPSEEK_PRO_MODEL = "deepseek-v4-pro"
 DEEPSEEK_DAILY_BUDGET_CNY = "0.35"
 
-GEMINI_CHAT_MODELS = "gemini-3.5-flash,gemini-3.1-flash-lite,gemini-3-flash-preview,gemini-2.5-flash,gemini-2.5-flash-lite,gemma-4-26b-a4b-it,gemma-4-31b-it"
-GEMMA_DECISION_MODELS = "gemma-4-26b-a4b-it,gemma-4-31b-it"
-GEMINI_IMAGE_MODELS = ""
-IMAGEN_MODELS = "imagen-4.0-fast-generate-001,imagen-4.0-generate-001,imagen-4.0-ultra-generate-001"
+GEMINI_CHAT_MODELS = "gemini-3.5-flash,gemini-3.1-flash-lite,gemini-3-flash-preview,gemini-2.5-flash,gemini-2.5-flash-lite"
+GEMMA_DECISION_MODELS = "gemma-4-26b-a4b-it"
+GEMMA_CHAT_MODELS = "gemma-4-31b-it"
+GEMMA_LAST_RESORT_MODELS = "gemma-4-31b-it"
 GEMINI_TTS_MODELS = "gemini-3.1-flash-tts-preview,gemini-2.5-flash-preview-tts"
 GEMINI_LIVE_MODEL = "models/gemini-3.1-flash-live-preview"
 
-# 持久化 Workers Logs；需要時可改成 true
 [observability]
 enabled = false
