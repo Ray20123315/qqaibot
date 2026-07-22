@@ -6,24 +6,30 @@ on:
       - agent/qqaibot-v1.1.0-complete
     paths:
       - .tmp/worker-v1.2.1.ready
+  pull_request:
+    types: [opened, synchronize, reopened]
+    paths:
+      - .tmp/worker-v1.2.1.ready
 
 permissions:
   contents: write
 
 jobs:
   assemble:
+    if: github.repository == 'Ray20123315/qqaibot'
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout branch
+      - name: Checkout source branch
         uses: actions/checkout@v4
         with:
-          ref: ${{ github.ref_name }}
+          ref: ${{ github.head_ref || github.ref_name }}
           fetch-depth: 0
 
       - name: Assemble worker.js
         shell: bash
         run: |
           set -euo pipefail
+          test "$(ls .tmp/worker-v1.2.1.part-* | wc -l)" -eq 10
           cat .tmp/worker-v1.2.1.part-* | base64 --decode | gzip --decompress > worker.js
           echo "0a54833226c1f587e97334f0acc24493ca2d1d4c26a2871211f726f400d89c7b  worker.js" | sha256sum --check --strict
           node --check worker.js
@@ -32,6 +38,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          BRANCH="${{ github.head_ref || github.ref_name }}"
           rm -f .tmp/worker-v1.2.1.part-* .tmp/worker-v1.2.1.ready .github/workflows/assemble-worker-v121.yml
           rmdir .tmp 2>/dev/null || true
           git config user.name "QQAI Build Bot"
@@ -42,4 +49,4 @@ jobs:
             exit 0
           fi
           git commit -m "Update worker to v1.2.1"
-          git push origin HEAD:${{ github.ref_name }}
+          git push origin "HEAD:${BRANCH}"
