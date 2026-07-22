@@ -1,11 +1,16 @@
-const VERSION = "0.5.3";
-const BUILD_DATE = "2026-07-22";
+const VERSION = "1.2.1";
+const QQAI_V1_COMPLETE_MARKER = "QQAI_V1_COMPLETE_MARKER";
+const QQAI_V1_R3_MARKER = "QQAI_V1_R3_MARKER";
+const BUILD_DATE = "2026-07-23";
 const DEFAULT_DEVELOPER_ID = "3569028262";
 const DEFAULTS = Object.freeze({
   deepseekFlashModel: "deepseek-v4-flash",
-  deepseekProModel: "deepseek-v4-pro",
   interjectRate: 25,
-  contextSummaryThreshold: 6,
+  contextSummaryThreshold: 20,
+  groupContextExactMessages: 60,
+  groupContextMaximumMessages: 240,
+  conversationHistoryItems: 32,
+  aiDecisionLogLimit: 2000,
   thinkingDelayMs: 1200,
   scheduleMinIntervalMinutes: 1,
   scheduleMaxActivePerUser: 0,
@@ -17,7 +22,332 @@ const DEFAULTS = Object.freeze({
   modelCostPolicy: "free_first",
   deepseekEmergencyFallback: false,
   paidContextSummary: false,
+  portalSessionTtlMs: 30 * 60 * 1000,
+  moderationTargetCooldownSeconds: 0,
+  newcomerObservationDays: 0,
+  autoCheckinTime: "00:00",
+  welcomeText: "歡迎 {at} 加入本群 🎉 請先閱讀群規，有問題可以詢問管理員。",
+  ruleMonitorEnabled: true,
+  ruleProxyMode: "record",
+  ruleProxyMuteSeconds: 600,
+  runtimeRateLimitSeconds: 0,
+  joinPatternAutoApproveThreshold: 2,
 });
+
+let GEMINI_KEY_CURSOR = 0;
+let GEMINI_SEARCH_KEY_CURSOR = 0;
+let DEEPSEEK_KEY_CURSOR = 0;
+
+const PLATFORM_FEATURE_COUNT = 300;
+const PLATFORM_FEATURE_NAMES = Object.freeze([
+  "群規持續監控",
+  "違規紀錄獨立頁面",
+  "依群員搜尋違規",
+  "依訊息內容搜尋違規",
+  "依 AI 違規分類搜尋",
+  "AI 代理僅記錄",
+  "AI 代理警告",
+  "AI 代理禁言",
+  "AI 踢出群主授權",
+  "AI 踢出授權撤回",
+  "處置冷卻不限上限",
+  "開發者全域速率限制",
+  "開發者群組速率限制",
+  "設定型指令開關",
+  "關閉指令後僅網頁可改",
+  "角色分層設定中心",
+  "開發者代改成員設定",
+  "開發者代改管理員設定",
+  "開發者代改群主設定",
+  "設定修改稽核模式",
+  "設定修改靜默模式",
+  "入群輔助關閉零 AI",
+  "重複入群申請模式快取",
+  "AI 自動同意入群",
+  "AI 拒絕入群群主授權",
+  "AI 拒絕入群授權撤回",
+  "B站創作者自訂串接",
+  "B站開播通知",
+  "B站新影片通知",
+  "B站開播 @全體",
+  "B站新影片 @全體",
+  "B站只記錄不通知",
+  "Bot 群身分即時驗證",
+  "自然語言禁言提案",
+  "自然語言解除禁言",
+  "踢人提案",
+  "批量踢人提案",
+  "全員禁言提案",
+  "設定管理員提案",
+  "修改群名提案",
+  "修改群名片提案",
+  "移出精華消息",
+  "設為精華消息",
+  "查看禁言列表",
+  "管理操作原因必填",
+  "管理動作預覽",
+  "雙人批准",
+  "延遲執行",
+  "管理撤銷",
+  "管理黑名單保護",
+  "危險語義區分",
+  "加群申請摘要",
+  "Gemma 判斷申請內容",
+  "管理員 Portal 審核",
+  "同意／拒絕二次確認",
+  "黑名單比對",
+  "重複申請冷卻",
+  "自動歡迎訊息",
+  "新人群規確認",
+  "新人答題驗證",
+  "AI 草擬公告",
+  "公告發布前預覽",
+  "公告版本歷史",
+  "定時公告",
+  "公告閱讀提醒",
+  "群公告摘要",
+  "公告內容翻譯",
+  "群文件搜尋",
+  "列出指定資料夾內容",
+  "取得群文件下載 URL",
+  "檔案自動分類",
+  "檔案重複偵測",
+  "群文件索引進知識庫",
+  "檔案上傳通知",
+  "檔案過期提醒",
+  "長回答自動合併轉發",
+  "長回答分頁",
+  "引用原問題回答",
+  "回覆撤回失敗補救",
+  "訊息發送狀態追蹤",
+  "重複訊息去重",
+  "圖片＋文字保持原順序",
+  "戳一戳互動",
+  "AI 群語音",
+  "一人同時一題",
+  "第二題起排隊",
+  "最多等待題數可設定",
+  "過期自動丟棄",
+  "插隊只限管理員",
+  "可取消自己的等待題",
+  "可替換尚未開始的最後一題",
+  "合併短時間連續訊息",
+  "顯示目前順位",
+  "顯示預估等待時間",
+  "不讓單一群占滿所有 AI",
+  "各群輪流取一題",
+  "明確 @ 高於隨機插話",
+  "管理確認高於普通聊天",
+  "短確認語使用快速通道",
+  "圖片理解使用獨立併發槽",
+  "搜尋任務使用獨立併發槽",
+  "DeepSeek Pro 有較低全站併發",
+  "取消",
+  "暫停",
+  "重試",
+  "改用其他模型重試",
+  "查看原始錯誤",
+  "查看目前處理階段",
+  "查看工具呼叫",
+  "查看 Token",
+  "查看搜尋來源",
+  "查看記憶命中",
+  "超時自動清除正在思考",
+  "Worker 重啟後恢復等待任務",
+  "踢人／禁言二次確認",
+  "入群審核",
+  "群白名單申請",
+  "定時活動流程",
+  "每週報告",
+  "模型健康巡檢",
+  "API Key 輪換檢查",
+  "大型文件索引",
+  "記憶重建",
+  "提示詞發布審核",
+  "設定變更批准",
+  "管理員角色申請",
+  "資料刪除請求",
+  "批次群通知",
+  "錯誤自動修復流程",
+  "使用者偏好",
+  "使用者明確事實",
+  "群組共同規則",
+  "管理員手動記憶",
+  "臨時上下文",
+  "AI 推測",
+  "文件知識",
+  "搜尋知識快取",
+  "事件記憶",
+  "禁止保存的敏感內容",
+  "記憶衝突偵測",
+  "新資訊覆蓋舊資訊前確認",
+  "記憶自動過期",
+  "長期未使用記憶降權",
+  "使用者查看自己的記憶",
+  "使用者刪除自己的記憶",
+  "群主查看群記憶",
+  "每群 namespace 隔離",
+  "不允許跨群洩漏",
+  "指令及系統提示永不進記憶",
+  "AI 推測記憶低可信度",
+  "明確陳述高可信度",
+  "時間敏感事實自動過期",
+  "搜尋結果不直接當永久事實",
+  "記憶使用原因顯示在 Trace",
+  "記憶命中數量限制",
+  "相似重複記憶合併",
+  "記憶摘要壓縮",
+  "記憶版本歷史",
+  "一鍵重建 Vectorize 索引",
+  "24 小時成功率",
+  "平均延遲",
+  "P50／P95／P99 延遲",
+  "每模型成功率",
+  "每模型限流率",
+  "每模型超時率",
+  "每群請求數",
+  "每人請求數",
+  "等待列平均長度",
+  "等待時間分布",
+  "OneBot 發送成功率",
+  "NapCat 心跳中斷次數",
+  "搜尋使用率",
+  "搜尋平均來源數",
+  "圖片取得失敗率",
+  "快取命中率",
+  "DeepSeek Prompt cache 命中率",
+  "記憶命中率",
+  "回答重試率",
+  "使用者好評率",
+  "插話被回覆率",
+  "插話被忽略率",
+  "管理提案確認率",
+  "管理提案取消率",
+  "各類錯誤排行",
+  "成本走勢",
+  "額度耗盡預測",
+  "最繁忙時段",
+  "最慢模型",
+  "最常降級的模型",
+  "Prompt Injection 偵測",
+  "要求顯示系統提示的紀錄",
+  "要求洩漏 API Key 的阻擋",
+  "網頁內容中的惡意提示隔離",
+  "圖片 OCR 中的惡意提示隔離",
+  "搜尋結果只能作為資料，不能變更系統規則",
+  "QQ 號遮罩",
+  "電話、身分證、銀行資料遮罩",
+  "AI 回覆密鑰格式掃描",
+  "私人訊息禁止進公開群記憶",
+  "管理 API CSRF 防護",
+  "Portal 工作階段管理",
+  "強制登出其他裝置",
+  "登入異常通知",
+  "危險操作二次驗證",
+  "管理操作完整稽核",
+  "API Key 只顯示尾碼",
+  "Secrets 不回傳前端",
+  "群管理權限即時重新確認",
+  "AI 不得自行提升權限",
+  "可選簡體／繁體",
+  "可選回答長度",
+  "可選語氣",
+  "可選是否附來源",
+  "可選是否顯示使用模型",
+  "可選是否顯示搜尋狀態",
+  "長回答合併轉發",
+  "超長回答產生文字檔",
+  "「繼續」接續未完成答案",
+  "「簡短點」重新濃縮",
+  "「詳細點」重新展開",
+  "「用白話說」重新改寫",
+  "「給例子」追加範例",
+  "「引用來源」只顯示來源",
+  "「重新回答」換模型重試",
+  "查看自己的排隊順位",
+  "取消自己的題目",
+  "更新等待中的題目",
+  "合併 5 秒內連續訊息",
+  "同一題重複 @ 自動去重",
+  "問題太模糊時只問一個澄清問題",
+  "偵測使用者已自行解決，取消等待題",
+  "第二題回答時保留前一題上下文",
+  "排隊過久通知",
+  "AI 忙碌時顯示預估等待時間",
+  "每日群聊摘要",
+  "未讀重點摘要",
+  "本週熱門話題",
+  "新人快速了解群聊",
+  "活動提醒",
+  "投票建立",
+  "投票摘要",
+  "群成員生日提醒",
+  "事件倒數",
+  "群內 FAQ",
+  "群規問答",
+  "群檔案導航",
+  "Minecraft 伺服器狀態",
+  "遊戲版本查詢",
+  "模組相容性查詢",
+  "總覽",
+  "群組中心",
+  "使用者中心",
+  "模型中心",
+  "動態路由編輯器",
+  "Prompt 管理",
+  "搜尋中心",
+  "文件知識庫",
+  "圖片理解",
+  "記憶中心",
+  "記憶衝突",
+  "任務中心",
+  "等待列",
+  "Workflow",
+  "管理提案",
+  "加群申請",
+  "健康檢查",
+  "Trace",
+  "日誌",
+  "成本與額度",
+  "Analytics",
+  "SLA",
+  "評測資料集",
+  "安全中心",
+  "通知中心",
+  "Feature Flags",
+  "設定版本",
+  "備份還原",
+  "管理員權限",
+  "開發者工具",
+  "全域搜尋",
+  "深色模式",
+  "手機響應式",
+  "未保存變更提示",
+  "操作快捷鍵",
+  "即時狀態刷新",
+  "可摺疊側邊欄",
+  "可拖曳模型順序",
+  "狀態顏色＋文字雙重標示",
+  "不顯示原始超長 JSON",
+  "錯誤直接連至 Trace",
+  "每張健康卡可單獨重測",
+  "一鍵複製去敏診斷報告",
+  "危險操作輸入確認文字",
+  "設定差異視圖",
+  "一鍵回滾",
+  "通知已讀／未讀",
+  "表格欄位自訂",
+  "CSV 匯出",
+  "圖表時間範圍切換",
+  "DeepSeek V4 遷移"
+]);
+const PLATFORM_FEATURES = Object.freeze(PLATFORM_FEATURE_NAMES.map((name,index)=>{
+  const dangerous=/(?:踢|禁言|拒絕|拒绝|管理員|管理员|黑名單|黑名单|API Key|密鑰|密钥|權限|权限)/i.test(name);
+  const ownerOnly=/(?:群主授權|群主授权|群規持續監控)/i.test(name);
+  const developerOnly=/(?:開發者|开发者|全域|全局|成本|額度|额度|Trace|健康檢查|健康检查|備份|备份|模型路由)/i.test(name);
+  const emulated=/(?:Queue|Queues|Workflow|Analytics Engine|R2|AI Worker 分離|AI Worker 分离|Dead Letter)/i.test(name);
+  return Object.freeze({id:`F${String(index+1).padStart(3,'0')}`,name,category:index<60?'group_ops':index<120?'ai_tools':index<180?'knowledge_memory':index<240?'security_portal':'automation_integrations',minRole:ownerOnly?'owner':developerOnly?'developer':dangerous?'admin':'member',scope:developerOnly?'global':'group',mode:emulated?'single_worker_emulation':dangerous?'guarded':'native',defaultEnabled:true});
+}));
 
 // ==========================================
 // 🗄️ D1 資料庫操作小幫手 (模擬 KV 行為)
@@ -50,7 +380,7 @@ async function dbDel(env, key) {
     const stmt = env.DB.prepare("DELETE FROM kv_store WHERE key = ?").bind(key);
     await stmt.run();
   } catch (e) {
-    console.error(`刪除 DB 失敗 [${key}]:`, e);
+    console.error(`删除 DB 失敗 [${key}]:`, e);
   }
 }
 
@@ -126,6 +456,10 @@ export default {
 
     if (url.pathname.startsWith('/api/appeal/')) {
       return handleAppealApi(request, env, url);
+    }
+
+    if (request.method === 'POST' && url.pathname.startsWith('/api/integrations/bilibili/webhook/')) {
+      return handleBilibiliWebhook(request, env, url);
     }
 
     if (url.pathname.startsWith('/api/portal/')) {
@@ -206,9 +540,14 @@ export default {
         group: "",
         groupId: "",
         role: session.role,
-        permissions: session.permissions || {},
-        token: session.token
-      });
+        permissions: session.permissions || {}
+      }, 200, { "Set-Cookie": portalSessionCookie(session.token, 1800) });
+    }
+
+    if (request.method === 'POST' && url.pathname === '/api/auth/logout') {
+      const token = readCookie(request, "qqai_session");
+      if (token) await dbDel(env, `portal_session:${token}`);
+      return jsonResponse({ ok: true, message: "已退出登录。" }, 200, { "Set-Cookie": portalSessionCookie("", 0) });
     }
 
     // ==========================================
@@ -245,10 +584,10 @@ export default {
       const id = activeThinkingMessageId; activeThinkingMessageId = null;
       try { await callOneBotAction(env, { action: 'delete_msg', params: { message_id: numericId(id) } }, 8000); } catch {}
     };
-    const jsonReply = (text) => {
+    const jsonReply = (text, meta = {}) => {
       const thinkingMessageId = activeThinkingMessageId;
       activeThinkingMessageId = null;
-      return new Response(JSON.stringify({ reply: text, auto_escape: false, thinking_message_id: thinkingMessageId || null, record_reply: false, reply_kind: "command_or_system" }), {
+      return new Response(JSON.stringify({ reply: text, auto_escape: false, thinking_message_id: thinkingMessageId || null, record_reply: false, reply_kind: "command_or_system", ...meta }), {
         status: 200,
         headers: { 'Content-Type': 'application/json; charset=utf-8' }
       });
@@ -256,8 +595,7 @@ export default {
 
     // 【專用小助手】呼叫 Gemini API (用於獨立工具指令)
     const callGeminiDirectly = async (prompt) => {
-      const keysStr = env.GEMINI_API_KEYS || "";
-      const apiKeys = keysStr.split(',').map(k => k.trim()).filter(k => k !== "");
+      const apiKeys = roundRobinKeys([...new Set([...parseList(env.GEMINI_API_KEYS), ...parseList(env.VECTORIZE_GEMINI_KEYS)])], "gemini");
       const fallbackModels = ['gemini-3.5-flash', 'gemini-3.1-flash-lite', 'gemini-3-flash-preview', 'gemini-2.5-flash', 'gemini-2.5-flash-lite'];
       if(apiKeys.length === 0) return null;
       for (const apiKey of apiKeys) {
@@ -305,6 +643,38 @@ export default {
     // ==========================================
     try {
       const currentGroupId = body.group_id ? body.group_id.toString() : "";
+      if (body.post_type === 'notice' && body.notice_type === 'group_increase' && currentGroupId) {
+        if (!(await isGroupWhitelisted(env, currentGroupId))) return new Response(null, { status: 204 });
+        const joiningUserId = String(body.user_id || "");
+        if (joiningUserId) {
+          const cached = await readJson(env, `group_members:${currentGroupId}`, []);
+          const existing = cached.find(x => String(x.qq) === joiningUserId);
+          await upsertGroupMember(env, currentGroupId, {
+            qq: joiningUserId,
+            name: existing?.name || joiningUserId,
+            role: existing?.role || "member",
+            groupName: String(body.group_name || currentGroupId),
+            firstSeenAt: existing?.firstSeenAt || new Date().toISOString()
+          });
+        }
+        if (await dbGet(env, `welcome_enabled:${currentGroupId}`) === "true") {
+          const template = String(await dbGet(env, `welcome_text:${currentGroupId}`) || DEFAULTS.welcomeText);
+          const atCode = `[CQ:at,qq=${joiningUserId}]`;
+          let rendered = template.replaceAll('{qq}', joiningUserId).replaceAll('{at}', atCode).trim();
+          if (!rendered.includes(atCode)) rendered = `${atCode} ${rendered}`;
+          await sendOneBotAction(env, {
+            action: "send_group_msg",
+            params: { group_id: numericId(currentGroupId), message: rendered, auto_escape: false }
+          });
+        }
+        return new Response(null, { status: 204 });
+      }
+      if (body.post_type === "request" && body.request_type === "group" && currentGroupId) {
+        if (!(await isGroupWhitelisted(env, currentGroupId))) return new Response(null, { status: 204 });
+        if (await dbGet(env, `join_assist_enabled:${currentGroupId}`) !== "true") return new Response(null, { status: 204 });
+        await createJoinRequestAssist(env, body);
+        return new Response(null, { status: 204 });
+      }
       if (!['message', 'message_sent'].includes(body.post_type)) return new Response(null, { status: 204 });
 
       // 🕒 獲取當前伺服器的真實時間（台北時間）
@@ -324,7 +694,7 @@ export default {
         const historyData = await dbGet(env, sessionKey);
         if (historyData) {
           history = JSON.parse(historyData);
-          console.log(`🧠 成功載入歷史記憶，當前記憶條數: ${history.length}`);
+          console.log(`🧠 成功加载歷史記憶，當前記憶條數: ${history.length}`);
         }
       } catch (historyError) {
         console.error("讀取 D1 歷史紀錄失敗:", historyError);
@@ -462,22 +832,28 @@ export default {
       const repliedToOwnerHuman = Boolean(quotedMessage && quotedMessage.source === 'owner-human');
       const explicitlyTriggered = botMentioned || repliedToBot || sameQqSelfAsk || isCommandMessage;
 
-      // 白名單是群 AI 的硬入口；非白名單群不呼叫模型、不寫入記憶。
+      // 只有真实文字或媒体才算有效提问；单独 @、空白、换行、全角空格与零宽字符全部静默丢弃。
+      const hasAnyMediaAttachment = Boolean(imageUrl || imageFile || voiceUrl || voiceFile || videoUrl || videoFile);
+      const meaningfulText = String(userMessage || "")
+        .replace(/\[CQ:(?:at|reply),[^\]]+\]/gi, "")
+        .replace(/\[CQ:[^\]]+\]/g, "")
+        .replace(/[\s\u00A0\u200B-\u200D\u2060\u3000\uFEFF]+/g, "");
+      if (isGroup && botMentioned && !meaningfulText && !hasAnyMediaAttachment) {
+        ctx.waitUntil(writeAiDecisionLog(env, {
+          groupId: currentGroupId, userId, senderName: senderCard, sourceMessageId: replyMessageId,
+          input: cleanMessage, mentionedQqs, botMentioned: true, isGroup: true,
+          decision: "skipped", reason: "mention_without_content", triggerType: "mention"
+        }));
+        return new Response(null, { status: 204 });
+      }
+
+      // 白名單是群 AI 的硬入口；非白名單群即使 @ 机器人也完全静默，不呼叫模型、不排队、不写入记忆。
       if (isGroup && !(await isGroupWhitelisted(env, currentGroupId))) {
         const whitelistAdminCommand = isDeveloper && /^(群白名单|群白名單|删群白名单|刪群白名單|allowgroup|removegroup)(?:\s|$)/i.test(commandBody);
         const applicationCommand = /^(申请白名单|申請白名單)(?:\s|$)/i.test(commandBody);
         const helpCommand = /^(help|帮助|幫助)$/.test(commandBody.toLowerCase());
         const allowedEntryCommand = whitelistAdminCommand || applicationCommand || helpCommand;
-        if (!allowedEntryCommand) {
-          // 没有 @、没有回复机器人、不是同号 ?? 提问，也不是命令：直接忽略。
-          if (!explicitlyTriggered) return new Response(null, { status: 204 });
-          const onceKey = `notice:not_whitelisted:${currentGroupId}:${userId}`;
-          if (!(await dbGet(env, onceKey))) {
-            await dbPut(env, onceKey, String(Date.now()));
-            return jsonReply(`${atSender}本群尚未加入 AI 白名单，请联系开发者。`);
-          }
-          return new Response(null, { status: 204 });
-        }
+        if (!allowedEntryCommand) return new Response(null, { status: 204 });
       }
 
       // v0.2.6 以前無法區分聊天回覆與系統回覆；一次性移除舊 recent_logs 中全部機器人條目，
@@ -518,6 +894,22 @@ export default {
         ? `当前消息引用了 ${quotedMessage?.senderName || '未知成员'}（QQ:${quotedMessage?.senderId || '未知'}，来源:${quotedMessage?.source || 'unknown'}）的消息：${quotedMessageText ? `「${quotedMessageText}」` : '未能取得正文'}。用户当前正文与引用内容必须分开理解。${repliedToOwnerHuman ? '这是同 QQ 模式下的人工消息，不是机器人回答。' : ''}`
         : "";
       const relationContext = [quoteContext, mentionContext].filter(Boolean).join("\n");
+      const aiDecisionBase = {
+        groupId: currentGroupId,
+        userId,
+        senderName: senderCard,
+        sourceMessageId: replyMessageId,
+        input: cleanMessage,
+        quotedMessageId,
+        quotedSenderId: String(quotedMessage?.senderId || ""),
+        quotedSource: String(quotedMessage?.source || ""),
+        botMentioned,
+        repliedToBot,
+        mentionedQqs,
+        targetMentionQqs,
+        isPrivate,
+        isGroup
+      };
 
       // 權限拆分：AI 管理與真正群操作互不混用。
       const permissionSet = await getEffectivePermissions(env, currentGroupId, userId, senderRole, isDeveloper);
@@ -536,8 +928,16 @@ export default {
 
       // 敏感詞過濾：內建底線 + 群務面板設定。
       const groupKeywords = await readJson(env, `keyword_filter:${currentGroupId}`, []);
-      const sensitiveWords = ['习近平', '六四', '台独', '法轮功', ...groupKeywords];
-      if (sensitiveWords.some(word => cleanMessage.includes(word))) return new Response(null, { status: 204 });
+      const sensitiveWords = [...groupKeywords];
+      const matchedSensitiveWord = sensitiveWords.find(word => cleanMessage.includes(word));
+      if (matchedSensitiveWord) {
+        ctx.waitUntil(writeAiDecisionLog(env, { ...aiDecisionBase, decision: "blocked", reason: "keyword_filter", triggerType: botMentioned ? "mention" : repliedToBot ? "reply_to_ai" : isPrivate ? "private" : "none", matchedKeyword: matchedSensitiveWord }));
+        return new Response(null, { status: 204 });
+      }
+
+      if (isGroup && !isCommandMessage && !isSelfAccount && cleanMessage.length > 1 && await dbGet(env, `rule_monitor_enabled:${currentGroupId}`) !== "false") {
+        ctx.waitUntil(inspectMessageAgainstGroupRules(env, { groupId: currentGroupId, userId, senderName: senderCard, text: cleanMessage, messageId: replyMessageId }));
+      }
 
       // 🎲 插話每日上限不設限，只保留概率、冷卻與免打擾；插話率本身就是開關，0% 代表關閉。
       const interjectChance = Math.max(0, Math.min(100, Number(await dbGet(env, `interject_rate:${currentGroupId}`) || String(DEFAULTS.interjectRate)))) / 100;
@@ -559,7 +959,169 @@ export default {
         return { targetQq, targetQqs: targetMentionQqs.slice(), restText };
       };
 
-      // v0.5.0：管理层自然语言只建立提案，必须二次确认才执行。
+      const webSettingCommandsDisabledEarly = await dbGet(env, `web_command_off:${currentGroupId}`) === "true";
+      if (webSettingCommandsDisabledEarly && commandChangesWebSettings(userMessage)) {
+        return jsonReply(`${atSender}本群已關閉設定型 ! 指令。關閉後只能從 Portal 網頁重新開啟或修改設定。`);
+      }
+
+      const ruleMonitorSetting = cleanMessage.match(/^[!！](?:群规监控|群規監控|规则监控|規則監控)\s*(开|開|关|關|状态|狀態)$/i);
+      if (ruleMonitorSetting) {
+        const mode = ruleMonitorSetting[1];
+        const current = await dbGet(env, `rule_monitor_enabled:${currentGroupId}`) !== "false";
+        if (/状态|狀態/.test(mode)) return jsonReply(`${atSender}群规持续监控当前为：${current ? "开启" : "关闭"}。默认开启；监控本身只记录到独立网页。`);
+        if (!(await isVerifiedGroupOwner(env, currentGroupId, userId))) return jsonReply(`${atSender}只有 NapCat 即時確認的目前群主可以改變群規持續監控。`);
+        const enabled = /开|開/.test(mode);
+        await dbPut(env, `rule_monitor_enabled:${currentGroupId}`, enabled ? "true" : "false");
+        await writeSystemAudit(env, { type: "rule_monitor_setting", groupId: currentGroupId, actorId: userId, action: enabled ? "enabled" : "disabled" });
+        return jsonReply(`${atSender}群规持续监控已${enabled ? "开启" : "关闭"}。开启后默认只记录到网页，不会自动处罚。`);
+      }
+
+      const proxySetting = cleanMessage.match(/^[!！](?:AI群规代理|AI群規代理|群规代理|群規代理)\s*(关闭|關閉|记录|記錄|警告|禁言|自动|自動|状态|狀態)$/i);
+      if (proxySetting) {
+        if (!(await isVerifiedGroupOwner(env, currentGroupId, userId))) return jsonReply(`${atSender}只有 NapCat 即時確認的目前群主可以設定 AI 群規代理。`);
+        const rawMode = proxySetting[1];
+        if (/状态|狀態/.test(rawMode)) {
+          const currentMode = normalizeRuleProxyMode(await dbGet(env, `rule_proxy_mode:${currentGroupId}`) || DEFAULTS.ruleProxyMode);
+          const kick = await dbGet(env, `rule_proxy_kick_authorized:${currentGroupId}`) === "true";
+          return jsonReply(`${atSender}AI 群规代理模式：${currentMode}；AI 踢出授权：${kick ? "已授权" : "未授权"}。`);
+        }
+        const nextMode = /关闭|關閉|记录|記錄/.test(rawMode) ? "record" : /警告/.test(rawMode) ? "warn" : /禁言/.test(rawMode) ? "mute" : "auto";
+        await dbPut(env, `rule_proxy_mode:${currentGroupId}`, nextMode);
+        await writeSystemAudit(env, { type: "rule_proxy_setting", groupId: currentGroupId, actorId: userId, action: nextMode });
+        return jsonReply(`${atSender}AI 群规代理已设为 ${nextMode}。record 只记录；warn 警告；mute 禁言；auto 依 AI 分类在授权范围内处理。`);
+      }
+
+      if (/^[!！](?:授权AI踢出|授權AI踢出)$/i.test(cleanMessage)) {
+        if (!(await isVerifiedGroupOwner(env, currentGroupId, userId))) return jsonReply(`${atSender}只有 NapCat 即時確認的目前群主可以授權 AI 踢出。`);
+        await dbPut(env, `rule_proxy_kick_authorized:${currentGroupId}`, "true");
+        await writeSystemAudit(env, { type: "rule_proxy_kick_auth", groupId: currentGroupId, actorId: userId, action: "authorized" });
+        return jsonReply(`${atSender}已完成一次性 AI 踢出授权。授权会持续生效，直到发送「!撤回AI踢出授权」。`);
+      }
+      if (/^[!！](?:撤回AI踢出授权|撤回AI踢出授權)$/i.test(cleanMessage)) {
+        if (!(await isVerifiedGroupOwner(env, currentGroupId, userId))) return jsonReply(`${atSender}只有 NapCat 即時確認的目前群主可以撤回 AI 踢出授權。`);
+        await dbDel(env, `rule_proxy_kick_authorized:${currentGroupId}`);
+        await writeSystemAudit(env, { type: "rule_proxy_kick_auth", groupId: currentGroupId, actorId: userId, action: "revoked" });
+        return jsonReply(`${atSender}已撤回 AI 踢出授权；AI 代理只会记录、警告或禁言。`);
+      }
+
+      const joinAssistSetting = cleanMessage.match(/^[!！](?:入群辅助|入群輔助)\s*(开|開|关|關)$/i);
+      if (joinAssistSetting) {
+        if (!hasAdminAuth) return jsonReply(`${atSender}只有 QQ 管理员、群主、开发者或获授 AI 管理权限者可以开启或关闭入群辅助。`);
+        const enabled = /开|開/.test(joinAssistSetting[1]);
+        await dbPut(env, `join_assist_enabled:${currentGroupId}`, enabled ? "true" : "false");
+        return jsonReply(`${atSender}入群辅助已${enabled ? "开启" : "关闭"}。AI 只会建议同意或请管理核对，绝不会自动拒绝。`);
+      }
+      const joinDecision = cleanMessage.match(/^[!！]?(确认入群|确认入群|忽略入群)\s+(jr_[a-z0-9_-]+)$/i);
+      if (joinDecision) {
+        const result = await decideJoinRequestAssist(env, { groupId: currentGroupId, actorId: userId, id: joinDecision[2], decision: /忽略/.test(joinDecision[1]) ? "ignore" : "approve" });
+        return jsonReply(`${atSender}${result.message}`);
+      }
+
+      const runtimeRateLimitCommand = cleanMessage.match(/^[!！](?:设置速率限制|設定速率限制)\s+(\d+)$/i);
+      if (runtimeRateLimitCommand) {
+        if (!isDeveloper) return jsonReply(`${atSender}只有开发者可以设置速率限制。`);
+        const seconds = parseUnlimitedNonNegativeInteger(runtimeRateLimitCommand[1], DEFAULTS.runtimeRateLimitSeconds);
+        await dbPut(env, `runtime_rate_limit_seconds:group:${currentGroupId}`, String(seconds));
+        await writeSystemAudit(env, { type: "rate_limit_setting", groupId: currentGroupId, actorId: userId, action: `group:${seconds}` });
+        return jsonReply(`${atSender}本群调用速率限制已设为 ${seconds} 秒；0 代表关闭。`);
+      }
+      const globalRateLimitCommand = cleanMessage.match(/^[!！](?:设置全局速率限制|設定全域速率限制)\s+(\d+)$/i);
+      if (globalRateLimitCommand) {
+        if (!isDeveloper) return jsonReply(`${atSender}只有开发者可以设置全局速率限制。`);
+        const seconds = parseUnlimitedNonNegativeInteger(globalRateLimitCommand[1], DEFAULTS.runtimeRateLimitSeconds);
+        await dbPut(env, "runtime_rate_limit_seconds:global", String(seconds));
+        await writeSystemAudit(env, { type: "rate_limit_setting", groupId: currentGroupId, actorId: userId, action: `global:${seconds}` });
+        return jsonReply(`${atSender}全局调用速率限制已设为 ${seconds} 秒；群组单独值优先，0 代表关闭。`);
+      }
+
+      if (/^[!！](?:授权AI拒绝入群|授權AI拒絕入群)$/i.test(cleanMessage)) {
+        if (!(await isVerifiedGroupOwner(env, currentGroupId, userId))) return jsonReply(`${atSender}只有 NapCat 即時確認的目前群主可以授權 AI 拒絕入群申請。`);
+        await dbPut(env, `join_reject_authorized:${currentGroupId}`, "true");
+        await writeSystemAudit(env, { type: "join_reject_auth", groupId: currentGroupId, actorId: userId, action: "authorized" });
+        return jsonReply(`${atSender}已授权 AI 在高置信度明显违规时拒绝入群申请。可用「!撤回AI拒绝入群」撤回。`);
+      }
+      if (/^[!！](?:撤回AI拒绝入群|撤回AI拒絕入群)$/i.test(cleanMessage)) {
+        if (!(await isVerifiedGroupOwner(env, currentGroupId, userId))) return jsonReply(`${atSender}只有 NapCat 即時確認的目前群主可以撤回 AI 拒絕入群授權。`);
+        await dbDel(env, `join_reject_authorized:${currentGroupId}`);
+        await writeSystemAudit(env, { type: "join_reject_auth", groupId: currentGroupId, actorId: userId, action: "revoked" });
+        return jsonReply(`${atSender}已撤回 AI 拒绝入群授权。入群辅助只会同意、建议或交给管理核对。`);
+      }
+
+      const groupWorkCreate = cleanMessage.match(/^[!！](群公告|群待办|群待辦|群文件)\s+([\s\S]+)$/i);
+      if (groupWorkCreate) {
+        if (!isGroup || !(isDeveloper || ["owner", "admin"].includes(senderRole))) return jsonReply(`${atSender}只有本群 QQ 管理员、群主或开发者可以发起群务确认。`);
+        const label = groupWorkCreate[1];
+        const raw = groupWorkCreate[2].trim();
+        const type = label === "群公告" ? "notice" : /待办|待辦/.test(label) ? "todo" : "file";
+        let content = raw, file = "", fileName = "";
+        if (type === "file") {
+          const parts = raw.split(/\s+/); file = parts.shift() || ""; fileName = parts.join(" ") || file.split(/[\/\\]/).pop() || "QQAI上传文件"; content = fileName;
+        }
+        const item = await createGroupWorkRequest(env, { groupId: currentGroupId, creatorId: userId, creatorName: senderCard, type, content, file, fileName, sourceMessageId: replyMessageId });
+        return jsonReply(`${atSender}已建立群务待确认操作\n编号：${item.id}\n类型：${label}\nAI 辅助意见：${item.review.decision === "suggest_approve" ? "建议同意" : "请群主核对"}（${item.review.reason}）\n具有群操作权限者发送「确认群务 ${item.id}」后才会执行；AI 不会自动拒绝，开发者也不能代替群主。`);
+      }
+      const groupWorkDecision = cleanMessage.match(/^[!！]?(确认群务|确认群務|取消群务|取消群務)\s+(gw_[a-z0-9_-]+)$/i);
+      if (groupWorkDecision) {
+        const result = await handleGroupWorkDecision(env, { groupId: currentGroupId, actorId: userId, id: groupWorkDecision[2], decision: /取消/.test(groupWorkDecision[1]) ? "cancel" : "confirm" });
+        return jsonReply(`${atSender}${result.message}`);
+      }
+
+      // v1.0.0：关键开关在任何模型、限流或 AI 休眠判断之前处理，避免“关闭 AI”看起来像当机。
+      const ownerOrDeveloperSetting = senderRole === "owner" || isDeveloper;
+      if (/^[!！](?:关闭ai|關閉ai|ai关|ai關)$/i.test(cleanMessage)) {
+        if (!hasAdminAuth) return jsonReply(`${atSender}只有群主、QQ 管理员或开发者可以关闭 AI。`);
+        await dbPut(env, `ai_off:${currentGroupId}`, "true");
+        await writeSystemAudit(env, { type: "ai_settings", groupId: currentGroupId, actorId: userId, action: "ai_off" });
+        return jsonReply(`${atSender}已关闭本群 AI。此通知由系统直接发送；管理命令、状态查询与重新开启指令仍可使用。`);
+      }
+      if (/^[!！](?:开启ai|開啟ai|ai开|ai開)$/i.test(cleanMessage)) {
+        if (!hasAdminAuth) return jsonReply(`${atSender}只有群主、QQ 管理员或开发者可以开启 AI。`);
+        await dbDel(env, `ai_off:${currentGroupId}`);
+        await writeSystemAudit(env, { type: "ai_settings", groupId: currentGroupId, actorId: userId, action: "ai_on" });
+        return jsonReply(`${atSender}已开启本群 AI。此通知由系统直接发送。`);
+      }
+      if (/^[!！](?:群打卡|群签到|群簽到)$/i.test(cleanMessage)) {
+        if (!ownerOrDeveloperSetting) return jsonReply(`${atSender}只有群主或开发者可以手动触发群打卡。`);
+        const checkin = await performGroupCheckin(env, currentGroupId, userId);
+        return jsonReply(`${atSender}${checkin.ok ? "群打卡完成。" : "群打卡失败：" + checkin.error}`);
+      }
+      let settingMatch = cleanMessage.match(/^[!！](?:自动打卡|自動打卡)(?:\s*(?:开|開|关|關))?$/i);
+      if (settingMatch) {
+        return jsonReply(`${atSender}自动 QQ 群打卡固定在台北时间 00:00:00 执行，不受 AI 开关或 AI 白名单影响，无法关闭或改时。`);
+      }
+      settingMatch = cleanMessage.match(/^[!！](?:打卡时间|打卡時間)(?:\s+[^\s]+)?$/i);
+      if (settingMatch) {
+        return jsonReply(`${atSender}自动 QQ 群打卡固定时间为台北时间 00:00:00。`);
+      }
+      settingMatch = cleanMessage.match(/^[!！](?:自动欢迎|自動歡迎)\s*(开|開|关|關)$/i);
+      if (settingMatch) {
+        if (!ownerOrDeveloperSetting) return jsonReply(`${atSender}只有群主或开发者可以设置自动欢迎。`);
+        const enabled = /开|開/.test(settingMatch[1]);
+        await dbPut(env, `welcome_enabled:${currentGroupId}`, enabled ? "true" : "false");
+        return jsonReply(`${atSender}自动欢迎已${enabled ? "开启" : "关闭"}。欢迎词支持 Unicode 表情符号，也支持 OneBot CQ 表情。`);
+      }
+      settingMatch = cleanMessage.match(/^[!！](?:欢迎词|歡迎詞)\s+([\s\S]+)$/i);
+      if (settingMatch) {
+        if (!ownerOrDeveloperSetting) return jsonReply(`${atSender}只有群主或开发者可以设置欢迎词。`);
+        await dbPut(env, `welcome_text:${currentGroupId}`, settingMatch[1].trim().slice(0, 500));
+        return jsonReply(`${atSender}欢迎词已保存；可使用 {at} 与 {qq} 占位符。`);
+      }
+      settingMatch = cleanMessage.match(/^[!！](?:设置处置冷却|設定處置冷卻)\s+(\d+)$/i);
+      if (settingMatch) {
+        if (!ownerOrDeveloperSetting) return jsonReply(`${atSender}只有群主或开发者可以设置处置冷却。`);
+        const seconds = parseUnlimitedNonNegativeInteger(settingMatch[1], 0);
+        await dbPut(env, `moderation_target_cooldown_seconds:${currentGroupId}`, String(seconds));
+        return jsonReply(`${atSender}同一对象处置冷却已设为 ${seconds} 秒；0 代表关闭。`);
+      }
+      settingMatch = cleanMessage.match(/^[!！](?:设置新人观察期|設定新人觀察期)\s+(\d+)$/i);
+      if (settingMatch) {
+        if (!ownerOrDeveloperSetting) return jsonReply(`${atSender}只有群主或开发者可以设置新人观察期。`);
+        const days = Math.max(0, Math.min(30, Number(settingMatch[1])));
+        await dbPut(env, `newcomer_observation_days:${currentGroupId}`, String(days));
+        return jsonReply(`${atSender}新人观察期已设为 ${days} 天。它只作为 AI 风险提示，不会自动处罚新人；0 代表关闭。`);
+      }
+
+      // v0.5.0：管理层自然语言只建立待确认操作，必须二次确认才执行。
       const moderationConfirmation = isGroup ? parseModerationConfirmation(cleanMessage) : null;
       if (moderationConfirmation) {
         if (!hasGroupOpsAuth) {
@@ -570,7 +1132,8 @@ export default {
           actorId: userId,
           actorRole: senderRole,
           isDeveloper,
-          confirmation: moderationConfirmation
+          confirmation: moderationConfirmation,
+          hasGroupOpsPermission: hasGroupOpsAuth
         });
         return jsonReply(`${atSender}${result.message}`);
       }
@@ -587,55 +1150,47 @@ export default {
           botId,
           messageId: replyMessageId
         });
-        if (proposalResult?.handled) return jsonReply(`${atSender}${proposalResult.message}`);
+        if (proposalResult?.handled) return jsonReply(`${atSender}${proposalResult.message}`, proposalResult.proposal ? { moderation_proposal_id: proposalResult.proposal.id } : {});
       }
 
+      const webSettingCommandsDisabled = await dbGet(env, `web_command_off:${currentGroupId}`) === "true";
+      if (webSettingCommandsDisabled && commandChangesWebSettings(userMessage)) {
+        return jsonReply(`${atSender}本群已关闭设置型 ! 指令。关闭后只能从 Portal 网页重新开启或修改设置。`);
+      }
       if (/^[!！]指令(开|開|关|關)\b/.test(msgLower)) {
-        if (!hasAdminAuth) return jsonReply(`${atSender}❌ 只有群主、管理员或开发者可以切换网页设定指令权限。`);
+        if (!hasAdminAuth) return jsonReply(`${atSender}只有群主、QQ 管理员或开发者可以切换设置型指令。`);
         const enable = /^[!！]指令(开|開)\b/.test(msgLower);
-        if (enable) await dbDel(env, `web_command_off:${currentGroupId}`);
-        else await dbPut(env, `web_command_off:${currentGroupId}`, "true");
-        return jsonReply(`${atSender}${enable ? "✅ 已开启" : "⛔ 已关闭"}可修改网页设定的 ! 指令。`);
-      }
-
-      if (await dbGet(env, `web_command_off:${currentGroupId}`) === "true" && commandChangesWebSettings(userMessage)) {
-        return jsonReply(`${atSender}⛔ 本群已关闭可修改网页设定的 ! 指令，请改到门户网页调整，或由管理员使用 !指令开 重新开启。`);
+        if (enable) {
+          await dbDel(env, `web_command_off:${currentGroupId}`);
+          return jsonReply(`${atSender}设置型 ! 指令已开启。`);
+        }
+        await dbPut(env, `web_command_off:${currentGroupId}`, "true");
+        return jsonReply(`${atSender}设置型 ! 指令已关闭。之后只能从 Portal 网页重新开启或修改设置。`);
       }
 
       // ==========================================
       // 🛑 防禦陣線
       // ==========================================
-      const hasAnyMediaAttachment = Boolean(imageUrl || imageFile || voiceUrl || voiceFile || videoUrl || videoFile);
-      if ((!userMessage || userMessage.trim() === "") && !hasAnyMediaAttachment) {
-        console.log(`⚠️ 偵測到群友 ${userId} 僅 @機器人 但未輸入有效內容，自動快速攔截。`);
+      if (!meaningfulText && !hasAnyMediaAttachment) {
+        console.log(`⚠️ 偵測到群友 ${userId} 未輸入有效內容，自動快速攔截。`);
         return new Response(null, { status: 204 });
       }
 
       // ⏳ Cloudflare 原生速率限制器 (10秒冷卻鎖) - 開發者、群主、管理員豁免
       const isBypassCooldown = isDeveloper || senderRole === 'owner' || senderRole === 'admin' || body.__qqai_queued === true;
-      if (!isBypassCooldown && env.MY_RATE_LIMITER) {
-        const rateLimitKey = isGroup ? `${currentGroupId}:${userId}` : `private:${userId}`;
-        const { success } = await env.MY_RATE_LIMITER.limit({ key: rateLimitKey });
-        if (!success) {
-          console.log(`⏳ 用戶 ${userId} 頻繁調用，觸發冷卻限制，自動裝死。`);
-          return new Response(null, { status: 204 });
+      if (!isBypassCooldown) {
+        const rate = await checkRuntimeRateLimit(env, { groupId: currentGroupId, userId, isPrivate });
+        if (!rate.allowed) {
+          ctx.waitUntil(writeAiDecisionLog(env, { ...aiDecisionBase, decision: "blocked", reason: "rate_limited", triggerType: botMentioned ? "mention" : repliedToBot ? "reply_to_ai" : isPrivate ? "private" : "none", remainingSeconds: rate.remaining }));
+          return jsonReply(`${atSender}请求过于频繁，请等待约 ${rate.remaining} 秒后再试。此提示不会调用任何 AI 模型。`);
         }
       }
 
       // ==========================================
       // 🤖 依據 AI Studio 權限清單與最新模型庫對齊
       // ==========================================
-      const chatModels = parseList(env.GEMINI_CHAT_MODELS, [
-        'gemini-3.5-flash',
-        'gemini-3.1-flash-lite',
-        'gemini-3-flash-preview',
-        'gemini-2.5-flash',
-        'gemini-2.5-flash-lite'
-      ]);
-      const ttsModels = parseList(env.GEMINI_TTS_MODELS, [
-        'gemini-3.1-flash-tts-preview',
-        'gemini-2.5-flash-preview-tts'
-      ]);
+      const chatModels = await effectiveRuntimeModels(env, "chat");
+      const ttsModels = await effectiveRuntimeModels(env, "tts");
       const modelList = chatModels;
 
 
@@ -760,10 +1315,10 @@ export default {
         const raw = cleanMessage.replace(/^[!！](?:模型|model)/i, '').trim();
         if (!raw) {
           const pref = await dbGet(env, `model_pref:${currentGroupId || 'private'}:${userId}`) || 'auto';
-          return jsonReply(`${atSender}当前模型偏好：${modelPreferenceLabel(pref)}\n可选：自动、Gemma 26B、Gemma 31B、Gemini、DeepSeek、DeepSeek High、DeepSeek Max`);
+          return jsonReply(`${atSender}当前模型偏好：${modelPreferenceLabel(pref)}\n可选：自动、Gemini、DeepSeek、DeepSeek High、DeepSeek Max`);
         }
         const pref = normalizeModelPreference(raw);
-        if (!pref) return jsonReply(`${atSender}可选：!模型 自动／Gemma 26B／Gemma 31B／Gemini／DeepSeek／DeepSeek High／DeepSeek Max`);
+        if (!pref) return jsonReply(`${atSender}可选：!模型 自动／Gemini／DeepSeek／DeepSeek High／DeepSeek Max`);
         await dbPut(env, `model_pref:${currentGroupId || 'private'}:${userId}`, pref);
         return jsonReply(`${atSender}模型偏好已保存：${modelPreferenceLabel(pref)}`);
       }
@@ -791,7 +1346,7 @@ export default {
           const list = await listUserSchedules(env, userId, currentGroupId);
           return jsonReply(`${atSender}${list.length ? list.map(formatScheduleLine).join('\n') : '目前没有排程。'}`);
         }
-        const cancelMatch = scheduleText.match(/^(?:取消|删除|刪除|cancel)\s+([\w-]+)/i);
+        const cancelMatch = scheduleText.match(/^(?:取消|删除|删除|cancel)\s+([\w-]+)/i);
         if (cancelMatch) {
           const result = await cancelSchedule(env, cancelMatch[1], userId, isDeveloper || hasAdminAuth);
           return jsonReply(`${atSender}${result.message}`);
@@ -830,7 +1385,7 @@ export default {
         const duration = Math.max(60, parseDurationSeconds(restText || '10分'));
         const member = await getGroupMemberSafe(env, currentGroupId, targetQq);
         const proposal = await createModerationProposal(env, { groupId: currentGroupId, actorId: userId, actorName: senderCard, actorRole: isDeveloper ? 'developer' : senderRole, action: 'mute', targetId: targetQq, targetName: member?.card || member?.nickname || targetQq, targetRole: member?.role || 'member', durationSeconds: duration, sourceText: cleanMessage, classifierReason: '明确禁言指令', messageId: replyMessageId });
-        return jsonReply(`${atSender}${formatModerationProposal(proposal)}`);
+        return jsonReply(`${atSender}${formatModerationProposal(proposal)}`, { moderation_proposal_id: proposal.id });
       }
 
       if (/^[!！](?:解禁|unmute)(?:\s|$)/i.test(cleanMessage)) {
@@ -840,7 +1395,7 @@ export default {
         if (!targetQq) return jsonReply(`${atSender}格式：!解禁 @成员`);
         const member = await getGroupMemberSafe(env, currentGroupId, targetQq);
         const proposal = await createModerationProposal(env, { groupId: currentGroupId, actorId: userId, actorName: senderCard, actorRole: isDeveloper ? 'developer' : senderRole, action: 'unmute', targetId: targetQq, targetName: member?.card || member?.nickname || targetQq, targetRole: member?.role || 'member', sourceText: cleanMessage, classifierReason: '明确解禁指令', messageId: replyMessageId });
-        return jsonReply(`${atSender}${formatModerationProposal(proposal)}`);
+        return jsonReply(`${atSender}${formatModerationProposal(proposal)}`, { moderation_proposal_id: proposal.id });
       }
 
       if (/^[!！](?:踢出|踢人|kick)(?:\s|$)/i.test(cleanMessage)) {
@@ -850,7 +1405,7 @@ export default {
         if (!targetQq) return jsonReply(`${atSender}格式：!踢出 @成员`);
         const member = await getGroupMemberSafe(env, currentGroupId, targetQq);
         const proposal = await createModerationProposal(env, { groupId: currentGroupId, actorId: userId, actorName: senderCard, actorRole: isDeveloper ? 'developer' : senderRole, action: 'kick', targetId: targetQq, targetName: member?.card || member?.nickname || targetQq, targetRole: member?.role || 'member', sourceText: cleanMessage, classifierReason: '明确踢出指令', messageId: replyMessageId });
-        return jsonReply(`${atSender}${formatModerationProposal(proposal)}`);
+        return jsonReply(`${atSender}${formatModerationProposal(proposal)}`, { moderation_proposal_id: proposal.id });
       }
 
       if (/^[!！](?:撤回|recall)$/i.test(cleanMessage)) {
@@ -863,13 +1418,13 @@ export default {
       if (/^[!！](?:全员禁言|全員禁言)$/i.test(cleanMessage)) {
         if (!hasGroupOpsAuth) return jsonReply(`${atSender}你没有群操作权限。`);
         const proposal = await createModerationProposal(env, { groupId: currentGroupId, actorId: userId, actorName: senderCard, actorRole: isDeveloper ? 'developer' : senderRole, action: 'whole_mute', sourceText: cleanMessage, classifierReason: '明确全员禁言指令', messageId: replyMessageId });
-        return jsonReply(`${atSender}${formatModerationProposal(proposal)}`);
+        return jsonReply(`${atSender}${formatModerationProposal(proposal)}`, { moderation_proposal_id: proposal.id });
       }
 
       if (/^[!！](?:解除全员禁言|解除全員禁言)$/i.test(cleanMessage)) {
         if (!hasGroupOpsAuth) return jsonReply(`${atSender}你没有群操作权限。`);
         const proposal = await createModerationProposal(env, { groupId: currentGroupId, actorId: userId, actorName: senderCard, actorRole: isDeveloper ? 'developer' : senderRole, action: 'whole_unmute', sourceText: cleanMessage, classifierReason: '明确解除全员禁言指令', messageId: replyMessageId });
-        return jsonReply(`${atSender}${formatModerationProposal(proposal)}`);
+        return jsonReply(`${atSender}${formatModerationProposal(proposal)}`, { moderation_proposal_id: proposal.id });
       }
 
       if (/^[!！](?:改群名|设置群名|設定群名)\s+/i.test(cleanMessage)) {
@@ -974,8 +1529,8 @@ export default {
                      `!撤回 (回复目标消息)\n` +
                      `!踢出 [@成员]\n` +
                      `!全员禁言 / !解除全员禁言\n` +
-                     `自然语言也可提出操作，例如「把 @某人 杀了」\n` +
-                     `以上高风险操作只建立提案；确认 <操作编号> 后才执行\n` +
+                     `自然语言也可发起确认操作，例如「把 @某人 杀了」\n` +
+                     `以上高风险操作只建立待确认操作；确认 <操作编号> 后才执行\n` +
                      `取消 <操作编号> 可撤销提案\n` +
                      `!改群名 [新名称]\n` +
                      `!改名片 [@成员] [新名片]\n`;
@@ -1009,7 +1564,7 @@ export default {
         const statusMsg = `📊 【系统运行状态报告】\n` +
                           `--------------------\n` +
                           `🔑 Gemini 金钥总数: ${totalKeys} 把\n` +
-                          `🧩 DeepSeek: ${env.DEEPSEEK_API_KEY ? '已配置' : '未配置'}\n` +
+                          `🧩 DeepSeek Flash 金钥: ${deepSeekApiKeys(env).length} 把\n` +
                           `🧠 核心回复开关: ${currentAiSwitch}\n` +
                           `💾 向量记忆开关: ${currentMemSwitch}\n` +
                           `--------------------\n` +
@@ -1032,7 +1587,7 @@ export default {
           contents: [{ role: "user", parts: [{ text: userPrompt }] }], maxOutputTokens: 500, temperature: 0.7, useSearch: false
         }).catch(() => null);
         if (!textResult?.text) return jsonReply(`${atSender}暂时无法生成语音内容。`);
-        const keys = [...new Set([...parseList(env.GEMINI_API_KEYS), ...parseList(env.VECTORIZE_GEMINI_KEYS)])];
+        const keys = roundRobinKeys([...new Set([...parseList(env.GEMINI_API_KEYS), ...parseList(env.VECTORIZE_GEMINI_KEYS)])], "gemini");
         let lastError = "没有音频结果";
         for (const model of ttsModels) {
           for (const key of keys.slice(0, 4)) {
@@ -1178,7 +1733,7 @@ export default {
         }
       }
 
-      // 第四段到此完美結束，準備進入第五段的專屬記憶管理與人設切換模組...
+      // 第四段到此完美結束，準備進入第五段的專屬记忆管理與人設切換模組...
 
       // ==========================================
       // 🧠 专属记忆管理 (D1 数据库重构版)
@@ -1195,7 +1750,8 @@ export default {
         const kvKey = `user_memo:${currentGroupId}:${memoryOwner}`;
         const memos = normalizeMemoryItems(await readJson(env, kvKey, []), memoryOwner);
         if (!hasAdminAuth && memos.length >= 100) return jsonReply(`${atSender}专属记忆已达 100 条上限，请先删除部分内容。`);
-        const item = { id: crypto.randomUUID(), text: targetMem, scope: 'private', owner: memoryOwner, creator: userId, at: new Date().toISOString() };
+        let item = { id: crypto.randomUUID(), text: targetMem, scope: 'private', owner: memoryOwner, subjectQq: memoryOwner, creator: userId, at: new Date().toISOString() };
+        item = await upsertMemoryVector(env, item, currentGroupId).catch(error => { console.warn("指令记忆向量写入失败", error); return item; });
         memos.push(item);
         await dbPut(env, kvKey, JSON.stringify(memos));
         await writeMemoryAudit(env, { groupId: currentGroupId, userId, action: `新增记忆:${memoryOwner}`, before: null, after: targetMem });
@@ -1217,8 +1773,9 @@ export default {
         const next = memos.filter(m => !m.text.includes(query));
         if (!removed.length) return jsonReply(`${atSender}没找到包含「${query}」的记忆。`);
         if (next.length) await dbPut(env, kvKey, JSON.stringify(next)); else await dbDel(env, kvKey);
-        await writeMemoryAudit(env, { groupId: currentGroupId, userId, action: `删除记忆:${memoryOwner}`, before: removed.map(x => x.text).join(' | '), after: 'Vectorize保留' });
-        return jsonReply(`${atSender}已删除 ${removed.length} 条手动记忆；Vectorize 历史向量未删除。`);
+        for (const item of removed) await deleteMemoryVector(env, item).catch(error => console.warn("指令记忆向量删除失败", error));
+        await writeMemoryAudit(env, { groupId: currentGroupId, userId, action: `删除记忆与向量:${memoryOwner}`, before: removed.map(x => x.text).join(' | '), after: null });
+        return jsonReply(`${atSender}已删除 ${removed.length} 条长期记忆，并同步删除对应 Vectorize 向量。`);
       }
 
       // !你记住了什么：支持 @，但查看他人私人记忆需要 AI 管理权。
@@ -1539,6 +2096,7 @@ export default {
       if (isGroup) {
         const isAiOff = await dbGet(env, `ai_off:${currentGroupId}`);
         if (isAiOff === "true") {
+          ctx.waitUntil(writeAiDecisionLog(env, { ...aiDecisionBase, decision: "blocked", reason: "group_ai_disabled", triggerType: botMentioned ? "mention" : repliedToBot ? "reply_to_ai" : "none" }));
           return new Response(null, { status: 204 }); // 默默装死
         }
       }
@@ -1546,6 +2104,7 @@ export default {
       // 2. 检查发送者是否在黑名单中
       const isBlacklisted = (await dbGet(env, `blacklist:${currentGroupId}:${userId}`)) || (await dbGet(env, `blacklist:${userId}`));
       if (isBlacklisted === "true") {
+        ctx.waitUntil(writeAiDecisionLog(env, { ...aiDecisionBase, decision: "blocked", reason: "blacklisted", triggerType: botMentioned ? "mention" : repliedToBot ? "reply_to_ai" : isPrivate ? "private" : "none" }));
         return new Response(null, { status: 204 }); // 黑名单用户直接装死
       }
 
@@ -1553,6 +2112,7 @@ export default {
       // 📝 动态群组语料收集 (整合 D1 滾屏與向量空間長期記憶)
       // ==========================================
       // 只有群聊且「非指令」的普通对话，才纳入系统语料库
+      let groupConversationLogs = [];
       if (isGroup && !msgLower.startsWith('!') && !msgLower.startsWith('！')) {
          const logKey = `recent_logs:${currentGroupId}`;
          let recentLogs = [];
@@ -1567,8 +2127,9 @@ export default {
          const logEntry = `[${senderCard || '群友'}(QQ:${userId})]: ${cleanMessage || ((imageUrl || imageFile)?"发了张图":(voiceUrl || voiceFile)?"发了语音":"发了视频")}${relationForLog}`;
          recentLogs.push(logEntry);
          
-         // 保持最多 200 条记录防止撑爆空间
-         if (recentLogs.length > 200) recentLogs = recentLogs.slice(-200);
+         // 保存更长的群聊上下文；精确近期消息与压缩摘要会分层使用。
+         if (recentLogs.length > DEFAULTS.groupContextMaximumMessages) recentLogs = recentLogs.slice(-DEFAULTS.groupContextMaximumMessages);
+         groupConversationLogs = recentLogs.slice();
          
          // 💡 使用 ctx.waitUntil 异步存入 D1，绝不阻塞当前回覆流程！
          ctx.waitUntil(dbPut(env, logKey, JSON.stringify(recentLogs)));
@@ -1620,7 +2181,9 @@ export default {
           groupId: currentGroupId, userId, senderName: senderCard, text: cleanMessage, botId
         });
         if (conflictResult?.replyText) {
-          return new Response(JSON.stringify({ reply: conflictResult.replyText, reply_plan: { mode: conflictResult.mentionIds?.length ? 'mention_targets' : 'plain', mentionIds: conflictResult.mentionIds || [], quoteMessageId: '', text: conflictResult.replyText } }), { status: 200, headers: { 'Content-Type': 'application/json; charset=utf-8' } });
+          const conflictPlan = { mode: conflictResult.mentionIds?.length ? 'mention_targets' : 'plain', mentionIds: conflictResult.mentionIds || [], quoteMessageId: '', text: conflictResult.replyText };
+          const conflictLog = await writeAiDecisionLog(env, { ...aiDecisionBase, decision: "reply_generated", reason: "conflict_intervention", triggerType: "conflict_intervention", generatedReply: conflictResult.replyText, replyPlan: conflictPlan, provider: "conflict_guard", model: "gemma_or_local", sendStatus: "pending" });
+          return new Response(JSON.stringify({ reply: conflictResult.replyText, reply_plan: conflictPlan, record_reply: false, reply_kind: "conflict_intervention", ai_log_id: conflictLog.id }), { status: 200, headers: { 'Content-Type': 'application/json; charset=utf-8' } });
         }
       }
 
@@ -1635,7 +2198,7 @@ export default {
 - 主动插话时：幽默爱凑热闹，自然接梗或反问。
 - 多模态防瞎编指令：若收到真实的图片/语音数据，请仔细观察聆听并精准互动。⚠️注意：如果你只在文字中看到【系统：此位置有一张真实图片/语音附件】，但你并没有真实接收到该图片的视觉或听觉数据，这说明图片加载失败或者是群友在骗你！此时「绝对禁止」假装看懂瞎编点评，你必须直接吐槽对方（例如：“图裂了”、“皇帝的新图？”、“别骗了，根本没图”等）。
 - 检索与记忆：遇知识盲区自动 Google 查证并口语化分享；能自然回想过去发生的事并融入对话。
-- 主动艾特与互动：如果你想呼叫某人，请在文字中输出「@对方QQ号」。特别注意：如果群友的发言中已经带有对方的 @QQ号（例如：“@123456 叫他起床”），你必须原封不动地输出 @123456 来触发真实艾特！
+- 对话对象与 @ 规则：默认只回应当前发言者。原消息中 @ 的第三人只是被发言者点名，不代表你应当 @ 那个人；除非当前发言者明确要求你“提醒／通知／叫／艾特”该人，否则禁止在回复中输出任何 QQ 号或主动 @ 第三人。
 - 游戏与现实互动：无法参与时简短婉拒并继续聊天，不解释技术原因，也不讨论身份。
 
 【🚨 终极不可违背铁律】
@@ -1643,7 +2206,7 @@ export default {
 - 【允许回答】：公开的国际地理、普通历史百科事实、外国元首名字等纯客观常识（例如问“法国现任总统是谁”、“大众汽车是哪国的”）。请用群友的口吻极简、客观地直接回答，绝对不要进行任何政治体制、意识形态的延伸讨论。
 - 【绝对禁止】：任何涉及中国本土当代政治、国家领导人、敏感历史事件、领土争议、时政热点新闻评论或任何带有主观立场的敏感话题。
 - 【严厉警告机制】：只有当群友故意聊起【绝对禁止】的严重违规话题时，你才必须立刻收起人设，切换为极度严肃的语气明确警告对方：“无法回答此类问题。您的发言已涉嫌违反平台政治敏感内容管理规范，请立即停止相关话题，否则将面临封禁风险”。
-2. 格式死线：单次回复极度精炼，总字数严格限制在 250 字以内。绝对禁止输出任何 Markdown 格式（如 **、#、\`\`\`）。
+2. 格式死线：单次回复极度精炼，总字数严格限制在 250 字以内。回复没有最小字数；语境适合时可以只回复“6”“666”“nb”“?”“？”“？？？”或“???”，禁止为了看起来完整而扩写。绝对禁止输出任何 Markdown 格式（如 **、#、\`\`\`）。
 3. 记忆隔离：历史记录仅供参考事实。你「绝对不准」模仿、复制或代入历史记录中其他人的说话风格、人设或口头禅，对别人的风格完全免疫。
 4. 表情与动作控制：每说完一段话最多配 1 到 2 个标准 Emoji，禁止泛滥。绝对禁止输出任何 [CQ:...] 底层代码。Worker 会根据语境决定引用、@ 或纯文字发送。
 5. 报时规则：只有群友“明确询问”时间/日期时，才在开头一字不差写出：【Asia/Taipei/Shanghai（亚洲/台北/上海时间）是：${currentTime}】。其余闲聊绝不准提及任何时间数据。`;
@@ -1721,57 +2284,56 @@ ${parsedMemos.slice(-30).map((m, i) => `${i + 1}. ${m.text}`).join('\n')}
       // ==========================================
       // 🎲 核心机制：随机触发 + AI 智慧插话判定
       // ==========================================
-      // 私聊模式下，前面已经拦截了非指令，这里如果是合法指令则直接应当回复
       let shouldReply = isAtMeOrAi || isPrivate;
       let isAutoInterject = false;
+      let triggerType = botMentioned ? "mention" : repliedToBot ? "reply_to_ai" : sameQqSelfAsk ? "self_ask" : isPrivate ? "private" : "none";
+      let noReplyReason = "not_triggered";
+      let interjectJudgement = "";
+      const lowContextFragment = isLowContextInterjectionFragment(conversationText);
 
-      // 只有在：不是被艾特、是群聊、字数大于2、不是指令(!/！)的情况下，才进入随机插话判定
-      if (!shouldReply && isGroup && interjectChance > 0 && cleanMessage.length > 2 && !msgLower.startsWith('!') && !msgLower.startsWith('！')) {
+      if (!shouldReply && isGroup && interjectChance > 0 && !msgLower.startsWith('!') && !msgLower.startsWith('！')) {
         const targetDnd = await dbGet(env, `dnd:${currentGroupId}:${userId}`);
-        
-        // 🔒 第一关：目标用户未开启免打扰，且通过设定的随机概率门槛
-        if (targetDnd !== "true" && Math.random() < interjectChance) { 
+        if (targetDnd === "true") {
+          noReplyReason = "sender_dnd";
+        } else if (lowContextFragment) {
+          noReplyReason = "low_context_fragment";
+        } else if (Math.random() >= interjectChance) {
+          noReplyReason = "interject_probability_not_selected";
+        } else {
           const lastInterject = await dbGet(env, `last_interject:${currentGroupId}`);
           const now = Date.now();
-          
-          // 防止连续插话洗频，设定 10 秒冷却
-          if (!lastInterject || now - parseInt(lastInterject) > 10000) { 
-             
-             // 🧠 第二关：只用 Gemma 进行语境合理性判定，不消耗 Gemini / DeepSeek 聊天额度。
-             if (requiresAiJudgment) {
-                const judgePrompt = `群友发言：“${cleanMessage}”
-判断它是否适合机器人自然插话。`;
-                let judgement = "";
-                try {
-                  const judged = await callGemmaDecision(env, {
-                    system: "你是群聊插话分类器。疑问、有趣话题、可接的梗或情绪吐槽输出适合；无意义语气词、私人恩怨、无上下文碎片输出不适合。只能输出适合或不适合。",
-                    prompt: judgePrompt,
-                    maxOutputTokens: 12
-                  });
-                  judgement = judged.text;
-                } catch (error) {
-                  console.warn("Gemma interject judgement unavailable:", error);
-                }
-                
-                if (judgement && judgement.includes('适合') && !judgement.includes('不适合')) {
-                    shouldReply = true;
-                    isAutoInterject = true;
-                    ctx.waitUntil(dbPut(env, `last_interject:${currentGroupId}`, now.toString()));
-                } else {
-                    console.log(`🤖 随机概率抽中，但 AI 判定发言内容不适合插话，已放弃。`);
-                }
-             } else {
-                // 如果您未来想关掉 AI 判定，直接放行
-                shouldReply = true;
-                isAutoInterject = true;
-                ctx.waitUntil(dbPut(env, `last_interject:${currentGroupId}`, now.toString()));
-             }
+          const interjectCooldownSeconds = parseUnlimitedNonNegativeInteger(await dbGet(env, `interject_cooldown_seconds:${currentGroupId}`), 0);
+          if (lastInterject && interjectCooldownSeconds > 0 && now - Number(lastInterject) <= interjectCooldownSeconds * 1000) {
+            noReplyReason = "interject_cooldown";
+          } else if (requiresAiJudgment) {
+            const recentForJudge = (groupConversationLogs.length ? groupConversationLogs : await readJson(env, `recent_logs:${currentGroupId}`, [])).slice(-14).join("\n");
+            const judgePrompt = `最近群聊：\n${recentForJudge}\n\n候选插话触发句：${cleanMessage}\n判断机器人此刻插话是否能明确接上正在讨论的话题。`;
+            try {
+              const judged = await callGemmaDecision(env, {
+                system: "你是严格的 QQ 群聊插话门控器。只有机器人能明确理解当前多人对话、知道自己要回应谁、且确实能增加价值时输出 REPLY。纯数字、短问号、单个词、只有群友之间才懂的暗号、私人对话、关系不明、可能认错人或只能尬聊时输出 SKIP。只能输出 REPLY 或 SKIP。DeepSeek 不得用于此判断。",
+                prompt: judgePrompt,
+                maxOutputTokens: 12
+              });
+              interjectJudgement = String(judged.text || "").trim().toUpperCase();
+            } catch (error) {
+              console.warn("Gemma interject judgement unavailable:", error);
+              interjectJudgement = "SKIP";
+            }
+            if (interjectJudgement.includes("REPLY") && !interjectJudgement.includes("SKIP")) {
+              shouldReply = true;
+              isAutoInterject = true;
+              triggerType = "auto_interject";
+              noReplyReason = "";
+              ctx.waitUntil(dbPut(env, `last_interject:${currentGroupId}`, now.toString()));
+            } else {
+              noReplyReason = "interject_judge_rejected";
+            }
           }
         }
       }
 
-      // 如果未被艾特，也不是私聊合法指令，更没有触发插话，则直接装死
       if (!shouldReply) {
+         ctx.waitUntil(writeAiDecisionLog(env, { ...aiDecisionBase, decision: "skipped", reason: noReplyReason, triggerType, interjectChance, interjectJudgement, lowContextFragment, contextMessageCount: groupConversationLogs.length }));
          return new Response(null, { status: 204 });
       }
 
@@ -1780,20 +2342,31 @@ ${parsedMemos.slice(-30).map((m, i) => `${i + 1}. ${m.text}`).join('\n')}
       // ==========================================
       let memoryContext = "";
 
-      if (env.VECTORIZE && cleanMessage) {
+      if (env.VECTORIZE && cleanMessage && await dbGet(env, `memo:${currentGroupId}`) !== "false") {
         try {
           const queryVec = await getVector(conversationText);
           if (queryVec && typeof queryVec !== 'string') {
-            const matches = await env.VECTORIZE.query(queryVec, { topK: 5, returnMetadata: "all" });
-            const validMatches = matches?.matches?.filter(m => String(m.metadata?.groupId || m.metadata?.group || m.metadata?.group_id || '') === currentGroupId);
-            
-            if (validMatches?.length > 0) {
-              memoryContext += "\n【潜意识回想起来的相关零碎片段】:\n" + 
-                               validMatches.slice(0, 2).map(m => m.metadata?.text || "").filter(t => t !== "").join("\n") + "\n(仅供参考，绝对不准模仿上面的语气！)";
+            const matches = await env.VECTORIZE.query(queryVec, {
+              topK: 8,
+              returnMetadata: "all",
+              filter: { kind: "memory", groupId: String(currentGroupId), subjectQq: String(userId) }
+            });
+            const validMatches = [];
+            for (const match of matches?.matches || []) {
+              const vectorId = String(match.id || "");
+              if (!vectorId || await dbGet(env, `memory_vector_tombstone:${vectorId}`) === "true") continue;
+              if (String(match.metadata?.groupId || "") !== String(currentGroupId)) continue;
+              if (String(match.metadata?.subjectQq || "") !== String(userId)) continue;
+              if (match.metadata?.kind !== "memory") continue;
+              validMatches.push(match);
+            }
+            if (validMatches.length > 0) {
+              memoryContext += "\n【与当前用户相关的长期记忆检索】:\n" +
+                validMatches.slice(0, 3).map(m => m.metadata?.text || "").filter(Boolean).join("\n");
             }
           }
         } catch(e) {
-          console.error("向量检索失败:", e);
+          console.error("长期记忆向量检索失败，继续使用 D1 记忆:", e);
         }
       }
 
@@ -1801,8 +2374,23 @@ ${parsedMemos.slice(-30).map((m, i) => `${i + 1}. ${m.text}`).join('\n')}
           finalStylePrompt += `\n\n${memoryContext}`;
       }
 
+      let longGroupContext = null;
+      if (isGroup && groupConversationLogs.length) {
+        longGroupContext = await withTimeout(buildLongGroupConversationContext(env, {
+          groupId: currentGroupId,
+          userId,
+          logs: groupConversationLogs,
+          currentText: conversationText,
+          relationContext
+        }), 12000, "LONG_GROUP_CONTEXT_TIMEOUT").catch(error => {
+          console.warn("Long group context skipped:", error?.message || error);
+          return null;
+        });
+        if (longGroupContext?.text) finalStylePrompt += `\n\n【群聊长上下文】\n${longGroupContext.text}`;
+      }
+
       if (relationContext) {
-          finalStylePrompt += `\n\n【当前消息关系上下文】\n${relationContext}\n如果用户是在回复某条消息，必须把引用原文与用户当前正文分开理解；如果用户 @ 了别人，该 QQ 是被点名对象，不是发言者。`;
+          finalStylePrompt += `\n\n【当前消息关系上下文】\n${relationContext}\n如果用户是在回复某条消息，必须把引用原文与用户当前正文分开理解；如果用户 @ 了别人，该 QQ 是被点名对象，不是发言者。不要因为原消息出现第三人 @ 就默认在回答中继续 @；可以在回答草稿中保留真正需要点名的已知 QQ，最终由独立对象规划器判定。`;
       }
 
       // 只有明确 @ 机器人时显示临时状态；随机插话、回复触发与普通私聊均不显示“正在思考”。
@@ -1811,7 +2399,7 @@ ${parsedMemos.slice(-30).map((m, i) => `${i + 1}. ${m.text}`).join('\n')}
       }
 
       // 只有上下文确实复杂时才生成摘要；默认使用免费 Gemma/Gemini，短确认词禁止走重型摘要链路。
-      const shouldBuildContextSummary = !isFastAcknowledgement && history.length >= 4 && (conversationText.length >= 24 || Boolean(relationContext));
+      const shouldBuildContextSummary = !isFastAcknowledgement && history.length >= DEFAULTS.contextSummaryThreshold && !longGroupContext?.summary;
       let deepseekContextSummary = "";
       if (shouldBuildContextSummary) {
         deepseekContextSummary = await withTimeout(buildDeepSeekContextSummary(env, {
@@ -1835,7 +2423,7 @@ ${deepseekContextSummary}`;
       
       // 1. 如果是主动插话状态，微调行为模式
       let userPrompt = isAutoInterject
-        ? `(你现在是主动凑热闹插话状态，请自然地接梗或搭腔，极度精简！不要像回答问题一样，只需1~2句话)\n${relationContext ? relationContext + "\n" : ""}[${roleName} ${senderCard}(QQ:${userId})]: ${conversationText}`
+        ? `(主动插话模式：只针对下面这一句以及给出的群聊长上下文接话。不得猜测人物关系，不得替群友解释暗号。只有在上下文能高度确定被回应对象、且点名确有必要时才可在草稿中写出该成员 QQ；最终是否发送 @ 将由独立对象规划器复核。能用“6”“666”“nb”“?”“？”等极短反应就不要扩写；若仍不确定该说什么，只输出 [SKIP]。)\n${relationContext ? relationContext + "\n" : ""}[${roleName} ${senderCard}(QQ:${userId})]: ${conversationText}`
         : `${relationContext ? relationContext + "\n" : ""}[${roleName} ${senderCard}(QQ:${userId})]: ${conversationText}`;
 
       aiInputParts.push({ text: userPrompt });
@@ -1898,6 +2486,7 @@ ${deepseekContextSummary}`;
       let baseText = "";
       let usedModel = "";
       let usedProvider = "";
+      let searchInfo = { required: false, attempted: false, performed: false, query: "", context: "", sources: [], queries: [], provider: "", model: "", error: "" };
       const modelPref = await dbGet(env, `model_pref:${currentGroupId || 'private'}:${userId}`) || 'auto';
       try {
         const generated = await generateHybridReply(env, {
@@ -1908,6 +2497,18 @@ ${deepseekContextSummary}`;
         baseText = String(generated?.text || '').trim();
         usedModel = generated?.model || 'unknown';
         usedProvider = generated?.provider || 'unknown';
+        searchInfo = {
+          required: Boolean(generated?.searchRequired),
+          attempted: Boolean(generated?.searchAttempted),
+          performed: Boolean(generated?.searchPerformed),
+          query: String(generated?.searchQuery || conversationText || ""),
+          context: String(generated?.searchContext || ""),
+          sources: Array.isArray(generated?.searchSources) ? generated.searchSources : [],
+          queries: Array.isArray(generated?.searchQueries) ? generated.searchQueries : [],
+          provider: String(generated?.searchProvider || ""),
+          model: String(generated?.searchModel || ""),
+          error: String(generated?.searchError || "")
+        };
         success = Boolean(baseText);
       } catch (e) {
         console.error('Hybrid generation failed:', e);
@@ -1919,8 +2520,14 @@ ${deepseekContextSummary}`;
         ctx.waitUntil(dbPut(env, 'STAT_TOTAL_CALLS', String(totalCalls + 1)));
         ctx.waitUntil(dbPut(env, 'STAT_LAST_MODEL', `${usedProvider}:${usedModel}`));
       } else {
+        ctx.waitUntil(writeAiDecisionLog(env, { ...aiDecisionBase, decision: "error", reason: "all_models_failed", triggerType, interjectJudgement, contextMessageCount: groupConversationLogs.length, contextSummaryProvider: longGroupContext?.summaryProvider || "" }));
         if (isAutoInterject) return new Response(null, { status: 204 });
         return jsonReply(`${atSender}暂时无法完成回复，请稍后再试。`);
+      }
+
+      if (isAutoInterject && /^\s*\[SKIP\]\s*$/i.test(baseText)) {
+        ctx.waitUntil(writeAiDecisionLog(env, { ...aiDecisionBase, decision: "skipped", reason: "model_declined_interjection", triggerType, provider: usedProvider, model: usedModel, interjectJudgement, searchRequired: searchInfo.required, searchAttempted: searchInfo.attempted, searchPerformed: searchInfo.performed, searchQuery: searchInfo.query, searchContext: searchInfo.context, searchSources: searchInfo.sources, searchQueries: searchInfo.queries, searchProvider: searchInfo.provider, searchModel: searchInfo.model, searchError: searchInfo.error, contextMessageCount: groupConversationLogs.length, contextSummaryProvider: longGroupContext?.summaryProvider || "" }));
+        return new Response(null, { status: 204 });
       }
 
       // ==========================================
@@ -1931,8 +2538,8 @@ ${deepseekContextSummary}`;
       // 💡 注意：这里存入的是 baseText (纯文字的 @)，这样 AI 下次读取时才不会被 CQ 码搞混
       history.push({ role: 'user', parts: aiInputParts });
       history.push({ role: 'model', parts: [{ text: baseText }] }); 
-      // 保持最近 8 条上下文流，防止 Token 爆炸
-      if (history.length > 8) history = history.slice(-8); 
+      // 保留较长的直接对话流；更早的群聊由长上下文摘要承担。
+      if (history.length > DEFAULTS.conversationHistoryItems) history = history.slice(-DEFAULTS.conversationHistoryItems); 
       ctx.waitUntil(dbPut(env, sessionKey, JSON.stringify(history)));
 
       // ==========================================
@@ -1942,14 +2549,50 @@ ${deepseekContextSummary}`;
       const generatedMentionIds = extractTextMentionIds(replyText);
       const visibleReplyText = removeTextMentionTokens(replyText);
       const senderDndCheck = await dbGet(env, `dnd:${currentGroupId}:${userId}`) === "true";
+      const mentionRouting = await decideReplyMentionRouting(env, {
+        isGroup, isAutoInterject, botMentioned, quotedMessageId, userId, selfId: botId,
+        quotedSenderId: String(quotedMessage?.senderId || ""), targetMentionQqs, generatedMentionIds,
+        senderDnd: senderDndCheck, inputText: conversationText, replyText: visibleReplyText,
+        relationContext, recentContext: groupConversationLogs
+      });
       const replyPlan = buildReplyPlan({
         isGroup, isAutoInterject, botMentioned, quotedMessageId, messageId: replyMessageId,
-        userId, selfId: botId, targetMentionQqs, generatedMentionIds, senderDnd: senderDndCheck,
+        userId, selfId: botId, selectedMentionIds: mentionRouting.mentionIds, senderDnd: senderDndCheck,
         text: visibleReplyText
+      });
+      const aiDecision = await writeAiDecisionLog(env, {
+        ...aiDecisionBase,
+        decision: "reply_generated",
+        reason: isAutoInterject ? "auto_interject_accepted" : "direct_trigger",
+        triggerType,
+        interjectChance,
+        interjectJudgement,
+        lowContextFragment,
+        provider: usedProvider,
+        model: usedModel,
+        generatedReply: visibleReplyText,
+        replyPlan,
+        mentionRouting,
+        searchRequired: searchInfo.required,
+        searchAttempted: searchInfo.attempted,
+        searchPerformed: searchInfo.performed,
+        searchQuery: searchInfo.query,
+        searchContext: searchInfo.context,
+        searchSources: searchInfo.sources,
+        searchQueries: searchInfo.queries,
+        searchProvider: searchInfo.provider,
+        searchModel: searchInfo.model,
+        searchError: searchInfo.error,
+        contextMessageCount: groupConversationLogs.length,
+        directHistoryItems: history.length,
+        contextSummaryProvider: longGroupContext?.summaryProvider || "",
+        contextExactMessages: longGroupContext?.exactCount || 0,
+        contextSummarizedMessages: longGroupContext?.summarizedCount || 0,
+        sendStatus: "pending"
       });
       const thinkingMessageIdForReply = activeThinkingMessageId;
       activeThinkingMessageId = null;
-      return new Response(JSON.stringify({ reply: visibleReplyText, reply_plan: replyPlan, thinking_message_id: thinkingMessageIdForReply || null, record_reply: true, reply_kind: "conversation" }), {
+      return new Response(JSON.stringify({ reply: visibleReplyText, reply_plan: replyPlan, thinking_message_id: thinkingMessageIdForReply || null, record_reply: true, reply_kind: "conversation", ai_log_id: aiDecision.id }), {
         status: 200, headers: { 'Content-Type': 'application/json; charset=utf-8' }
       });
 
@@ -1972,6 +2615,9 @@ ${deepseekContextSummary}`;
     ctx.waitUntil(dbPut(env, "system:last_cron", String(Number(controller?.scheduledTime || Date.now()))));
     ctx.waitUntil(processDueSchedules(env, Number(controller?.scheduledTime || Date.now())));
     ctx.waitUntil(cleanupTransientState(env));
+    ctx.waitUntil(cleanupExpiredModerationProposals(env));
+    ctx.waitUntil(runAutomaticGroupCheckins(env, Number(controller?.scheduledTime || Date.now())));
+    ctx.waitUntil(processPlatformJobs(env, Number(controller?.scheduledTime || Date.now())));
   }
 }; // 结束 export default
 
@@ -1990,6 +2636,131 @@ function isDeveloperId(env, qq) {
 function parseList(value, fallback = []) {
   const list = String(value || "").split(",").map(x => x.trim()).filter(Boolean);
   return list.length ? [...new Set(list)] : fallback.slice();
+}
+
+function roundRobinKeys(keys, provider = "gemini") {
+  const list = [...new Set((keys || []).map(String).map(x => x.trim()).filter(Boolean))];
+  if (list.length <= 1) return list;
+  const cursor = provider === "deepseek"
+    ? DEEPSEEK_KEY_CURSOR++
+    : provider === "gemini_search"
+      ? GEMINI_SEARCH_KEY_CURSOR++
+      : GEMINI_KEY_CURSOR++;
+  const start = Math.abs(cursor) % list.length;
+  return list.slice(start).concat(list.slice(0, start));
+}
+
+function geminiSearchApiKeys(env) {
+  // 搜索金钥必须独立配置，绝不挪用聊天／Vectorize 金钥。
+  return [...new Set([...parseList(env.GEMINI_SEARCH_API_KEYS), ...parseList(env.GEMINI_SEARCH_API_KEY)])];
+}
+
+function deepSeekApiKeys(env) {
+  return roundRobinKeys([...parseList(env.DEEPSEEK_API_KEYS), ...parseList(env.DEEPSEEK_API_KEY)], "deepseek");
+}
+
+function isLowContextInterjectionFragment(value) {
+  const text = String(value || "").trim();
+  if (!text) return true;
+  const compact = text.replace(/\s+/g, "");
+  if (/^[?？!！.。…~～,，、0-9０-９]+$/.test(compact)) return true;
+  if (compact.length <= 2 && !/[吗嗎呢吧啊呀哦喔哈笑哭]/.test(compact)) return true;
+  return false;
+}
+
+function parseMentionRoutingJson(value) {
+  const raw = String(value || "").trim();
+  const match = raw.match(/\{[\s\S]*\}/);
+  if (!match) return null;
+  try {
+    const parsed = JSON.parse(match[0]);
+    return parsed && typeof parsed === "object" ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+function localMentionRoutingFallback({ isAutoInterject, botMentioned, quotedMessageId, userId, quotedSenderId, targetMentionQqs, generatedMentionIds, senderDnd, inputText }) {
+  const senderId = String(userId || "");
+  const quotedId = String(quotedSenderId || "");
+  const targets = [...new Set((targetMentionQqs || []).map(String).filter(Boolean))];
+  const generated = [...new Set((generatedMentionIds || []).map(String).filter(Boolean))];
+  const explicitThirdPartyRequest = /(?:帮我|幫我|麻烦|麻煩|請|请)?(?:提醒|通知|叫|喊|艾特|at|問|问|告訴|告诉|轉告|转告)(?:一下)?/i.test(String(inputText || ""));
+  const chosen = [];
+  let reason = "fallback_no_mention";
+
+  if (explicitThirdPartyRequest && targets.length) {
+    chosen.push(...targets.filter(id => generated.includes(id) || targets.length === 1));
+    reason = "fallback_explicit_third_party_request";
+  } else if (isAutoInterject && generated.length) {
+    chosen.push(...generated.filter(id => targets.includes(id) || id === quotedId));
+    reason = chosen.length ? "fallback_interject_generated_known_target" : reason;
+  } else if (!isAutoInterject && botMentioned && !quotedMessageId && !senderDnd && senderId) {
+    chosen.push(senderId);
+    reason = "fallback_direct_sender";
+  }
+
+  return { mentionIds: [...new Set(chosen)], reason, confidence: 0.45, model: "local_fallback", raw: "" };
+}
+
+async function decideReplyMentionRouting(env, {
+  isGroup, isAutoInterject, botMentioned, quotedMessageId, userId, selfId,
+  quotedSenderId = "", targetMentionQqs = [], generatedMentionIds = [], senderDnd,
+  inputText = "", replyText = "", relationContext = "", recentContext = []
+}) {
+  if (!isGroup) return { mentionIds: [], reason: "private_chat", confidence: 1, model: "none", raw: "" };
+
+  const senderId = String(userId || "");
+  const botQq = String(selfId || "");
+  const quotedId = String(quotedSenderId || "");
+  const knownCandidates = [...new Set([
+    ...(senderDnd ? [] : [senderId]),
+    quotedId,
+    ...(targetMentionQqs || []).map(String)
+  ].filter(id => id && id !== botQq))];
+  // 草稿中的 @ 只能作为“是否点名”的信号，不能凭空把未知 QQ 变成可发送对象。
+  const generatedKnown = (generatedMentionIds || []).map(String).filter(id => knownCandidates.includes(id));
+  const candidates = knownCandidates;
+  if (!candidates.length) return { mentionIds: [], reason: "no_known_candidate", confidence: 1, model: "none", raw: "" };
+
+  const candidateDescriptions = candidates.map(id => {
+    const roles = [];
+    if (id === senderId) roles.push("当前发言者");
+    if (id === quotedId) roles.push("被引用消息发送者");
+    if ((targetMentionQqs || []).map(String).includes(id)) roles.push("原消息明确@对象");
+    if (generatedKnown.includes(id)) roles.push("回答草稿中出现的@对象");
+    return `${id}:${roles.join("+") || "已知群成员"}`;
+  }).join("、");
+
+  const prompt = `请判断这条 QQ 群回复真正需要 @ 哪些人。\n` +
+    `触发类型：${isAutoInterject ? "机器人主动插话" : botMentioned ? "用户@机器人" : quotedMessageId ? "用户引用消息触发" : "普通触发"}\n` +
+    `当前发言者：${senderId || "未知"}\n候选人：${candidateDescriptions}\n` +
+    `当前关系：${relationContext || "无"}\n` +
+    `最近群聊：\n${(recentContext || []).slice(-12).join("\n").slice(-5000)}\n` +
+    `用户原话：${String(inputText || "").slice(0, 1800)}\n机器人回答草稿：${String(replyText || "").slice(0, 1800)}\n` +
+    `只可从候选人中选择。输出 JSON：{"ids":["QQ"],"confidence":0到1,"reason":"简短理由"}`;
+
+  try {
+    const judged = await callGemmaDecision(env, {
+      system: "你是 QQ 群聊回复对象规划器。不要机械封锁@，也绝不能乱@。只有语义上确实要直接提醒、点名、回答特定对象，或不@会造成明显歧义时才选择候选人。原消息出现第三人@不代表机器人也要@他；主动插话可以@人，但必须从上下文高度确定对象。用户只是和某人聊天时，通常不要替用户@对方。无法确定就返回空 ids。必须只输出合法 JSON。",
+      prompt,
+      maxOutputTokens: 180,
+      maxAttempts: 3
+    });
+    const parsed = parseMentionRoutingJson(judged.text);
+    const requested = Array.isArray(parsed?.ids) ? parsed.ids.map(String) : [];
+    const mentionIds = [...new Set(requested.filter(id => candidates.includes(id) && id !== botQq && !(senderDnd && id === senderId)))];
+    const confidence = Math.max(0, Math.min(1, Number(parsed?.confidence || 0)));
+    // 低信心不是硬性禁止，而是退回语境式本地规划，避免模型随机点名。
+    if (!parsed || confidence < 0.55) {
+      const fallback = localMentionRoutingFallback({ isAutoInterject, botMentioned, quotedMessageId, userId, quotedSenderId, targetMentionQqs, generatedMentionIds, senderDnd, inputText });
+      return { ...fallback, reason: `low_confidence:${String(parsed?.reason || fallback.reason)}`, model: judged.model || "gemma", raw: judged.text || "" };
+    }
+    return { mentionIds, reason: String(parsed.reason || (mentionIds.length ? "model_selected" : "model_no_mention")), confidence, model: judged.model || "gemma", raw: judged.text || "" };
+  } catch (error) {
+    const fallback = localMentionRoutingFallback({ isAutoInterject, botMentioned, quotedMessageId, userId, quotedSenderId, targetMentionQqs, generatedMentionIds, senderDnd, inputText });
+    return { ...fallback, reason: `judge_unavailable:${String(error?.message || error)}` };
+  }
 }
 
 function numericId(value) {
@@ -2129,6 +2900,25 @@ async function getEffectivePermissions(env, groupId, userId, senderRole = "membe
   return { developer, nativeAdmin, aiAdmin, groupOps, scheduleReviewer, appealReviewer };
 }
 
+async function getRuntimeRateLimitSeconds(env, groupId) {
+  const groupRaw = groupId ? await dbGet(env, `runtime_rate_limit_seconds:group:${groupId}`) : null;
+  if (groupRaw !== null && groupRaw !== undefined && groupRaw !== "") return parseUnlimitedNonNegativeInteger(groupRaw, DEFAULTS.runtimeRateLimitSeconds);
+  const globalRaw = await dbGet(env, "runtime_rate_limit_seconds:global");
+  return parseUnlimitedNonNegativeInteger(globalRaw, DEFAULTS.runtimeRateLimitSeconds);
+}
+
+async function checkRuntimeRateLimit(env, { groupId, userId, isPrivate }) {
+  const seconds = await getRuntimeRateLimitSeconds(env, groupId);
+  if (seconds <= 0) return { allowed: true, seconds: 0, remaining: 0 };
+  const key = `runtime_rate_limit_last:${isPrivate ? "private" : "group"}:${groupId || ""}:${userId}`;
+  const now = Date.now();
+  const lastAt = Number(await dbGet(env, key) || 0);
+  const remainingMs = seconds * 1000 - (now - lastAt);
+  if (lastAt && remainingMs > 0) return { allowed: false, seconds, remaining: Math.ceil(remainingMs / 1000) };
+  await dbPut(env, key, String(now));
+  return { allowed: true, seconds, remaining: 0 };
+}
+
 async function writeSystemAudit(env, entry) {
   const item = { id: crypto.randomUUID(), at: new Date().toISOString(), ...entry };
   const keys = ["audit:system:global"];
@@ -2139,6 +2929,121 @@ async function writeSystemAudit(env, entry) {
     await dbPut(env, key, JSON.stringify(list.slice(-1000)));
   }
   return item;
+}
+
+async function writeAiDecisionLog(env, data) {
+  const id = String(data?.id || `ai_${Date.now().toString(36)}_${crypto.randomUUID().slice(0, 8)}`);
+  const item = {
+    id,
+    at: new Date().toISOString(),
+    createdAt: Date.now(),
+    decision: "unknown",
+    reason: "",
+    sendStatus: "not_applicable",
+    searchRequired: false,
+    searchAttempted: false,
+    searchPerformed: false,
+    searchQuery: "",
+    searchContext: "",
+    searchSources: [],
+    searchQueries: [],
+    searchProvider: "",
+    searchModel: "",
+    searchError: "",
+    ...data,
+    id
+  };
+  await dbPut(env, `ai_decision_log:${id}`, JSON.stringify(item));
+  await appendIndex(env, "ai_decision_log:index", id, DEFAULTS.aiDecisionLogLimit);
+  if (item.groupId) await appendIndex(env, `ai_decision_log:index:${item.groupId}`, id, DEFAULTS.aiDecisionLogLimit);
+  return item;
+}
+
+async function updateAiDecisionLog(env, id, patch = {}) {
+  if (!id) return null;
+  const current = await readJson(env, `ai_decision_log:${id}`, null);
+  if (!current) return null;
+  const next = { ...current, ...patch, id: current.id, updatedAt: Date.now() };
+  await dbPut(env, `ai_decision_log:${id}`, JSON.stringify(next));
+  return next;
+}
+
+async function listAiDecisionLogs(env, { groupId = "", query = "", decision = "", triggerType = "", limit = 300 } = {}) {
+  const ids = await readJson(env, groupId ? `ai_decision_log:index:${groupId}` : "ai_decision_log:index", []);
+  const out = [];
+  const q = String(query || "").trim().toLowerCase();
+  for (const id of ids.slice(-Math.max(1, Math.min(DEFAULTS.aiDecisionLogLimit, Number(limit) * 5))).reverse()) {
+    const item = await readJson(env, `ai_decision_log:${id}`, null);
+    if (!item) continue;
+    if (groupId && String(item.groupId || "") !== String(groupId)) continue;
+    if (decision && String(item.decision || "") !== String(decision)) continue;
+    if (triggerType && String(item.triggerType || "") !== String(triggerType)) continue;
+    if (q && !JSON.stringify(item).toLowerCase().includes(q)) continue;
+    out.push(item);
+    if (out.length >= Math.max(1, Math.min(1000, Number(limit) || 300))) break;
+  }
+  return out;
+}
+
+async function buildLongGroupConversationContext(env, { groupId, userId, logs, currentText, relationContext }) {
+  const list = (Array.isArray(logs) ? logs : []).map(String).filter(Boolean).slice(-DEFAULTS.groupContextMaximumMessages);
+  if (!list.length) return null;
+  const exactCount = Math.min(DEFAULTS.groupContextExactMessages, list.length);
+  const exact = list.slice(-exactCount);
+  const older = list.slice(0, -exactCount);
+  let summary = "";
+  let summaryProvider = "";
+  if (older.length >= 16) {
+    const cacheKey = `context_summary:long_group:${groupId}`;
+    const cached = await readJson(env, cacheKey, null);
+    const signature = await sha256Hex(older.join("\n"));
+    const freshEnough = cached?.summary && Date.now() - Number(cached.updatedAt || 0) < 3 * 60 * 1000;
+    if (cached?.signature === signature || freshEnough) {
+      summary = String(cached.summary || "");
+      summaryProvider = String(cached.provider || "cache");
+    } else {
+      const prompt = `请压缩以下 QQ 群较早的对话。保留：每个人的昵称与 QQ、谁在回复谁、@对象、正在讨论的主题、关键事实、笑点、争议、未解决的问题。不得把被 @ 的人当成发言者，不得编造。\n\n${older.join("\n")}`;
+      const system = "你是群聊长上下文整理器，只做信息压缩，不做是否回复、插话或安全判断。输出简体中文，尽量紧凑。";
+      try {
+        const result = await callDeepSeek(env, {
+          messages: [{ role: "system", content: system }, { role: "user", content: prompt }],
+          userId: String(userId || "context-summary"),
+          groupId: String(groupId || "context-summary"),
+          thinking: "disabled",
+          maxTokens: 1200,
+          model: env.DEEPSEEK_FLASH_MODEL || DEFAULTS.deepseekFlashModel
+        });
+        summary = result.text;
+        summaryProvider = "deepseek_flash";
+      } catch (deepseekError) {
+        console.warn("DeepSeek Flash long-context summary unavailable:", deepseekError?.message || deepseekError);
+        try {
+          const result = await callGeminiGenerate(env, {
+            models: parseList(env.GEMINI_CHAT_MODELS, ["gemini-2.5-flash-lite", "gemini-2.5-flash"]),
+            system,
+            contents: [{ role: "user", parts: [{ text: prompt }] }],
+            maxOutputTokens: 1200,
+            temperature: 0.1,
+            useSearch: false,
+            requireSearch: false,
+            timeoutMs: 10000
+          });
+          summary = result.text;
+          summaryProvider = "gemini";
+        } catch (geminiError) {
+          console.warn("Gemini long-context summary unavailable:", geminiError?.message || geminiError);
+          summary = String(cached?.summary || "");
+          summaryProvider = summary ? String(cached?.provider || "stale_cache") : "";
+        }
+      }
+      if (summary) await dbPut(env, cacheKey, JSON.stringify({ signature, summary, provider: summaryProvider, updatedAt: Date.now(), sourceCount: older.length }));
+    }
+  }
+  const sections = [];
+  if (summary) sections.push(`较早对话摘要：\n${summary}`);
+  sections.push(`最近 ${exact.length} 条原始群聊（按时间顺序，必须精确区分发言者、引用者与被 @ 对象）：\n${exact.join("\n")}`);
+  if (currentText || relationContext) sections.push(`当前触发消息关系：\n${relationContext || "无引用／@关系"}\n当前正文：${currentText || ""}`);
+  return { text: sections.join("\n\n"), summary, summaryProvider, exactCount: exact.length, summarizedCount: older.length, totalCount: list.length };
 }
 
 async function appendIndex(env, key, id, max = 2000) {
@@ -2165,8 +3070,7 @@ function normalizeModelPreference(value) {
   const text = String(value || "").trim().toLowerCase().replace(/[ _-]+/g, "");
   if (["自动", "自動", "auto"].includes(text)) return "auto";
   if (["gemini", "谷歌"].includes(text)) return "gemini";
-  if (["gemma", "gemma26", "gemma4-26b", "26b", "便宜"].includes(text)) return "gemma_26b";
-  if (["gemma31", "gemma4-31b", "31b", "gemma高质量", "gemma高品質"].includes(text)) return "gemma_31b";
+  if (["gemma", "gemma26", "gemma4-26b", "26b", "便宜", "gemma31", "gemma4-31b", "31b", "gemma高质量", "gemma高品質"].includes(text)) return "gemini";
   if (["deepseek", "deepseek不思考", "deepseekoff"].includes(text)) return "deepseek";
   if (["deepseekhigh", "high", "深度思考"].includes(text)) return "deepseek_high";
   if (["deepseekmax", "max", "极限", "極限"].includes(text)) return "deepseek_max";
@@ -2174,7 +3078,7 @@ function normalizeModelPreference(value) {
 }
 
 function modelPreferenceLabel(value) {
-  return ({ auto: "自动", gemini: "Gemini", gemma_26b: "Gemma 4 26B", gemma_31b: "Gemma 4 31B", deepseek: "DeepSeek", deepseek_high: "DeepSeek High", deepseek_max: "DeepSeek Max" })[value] || "自动";
+  return ({ auto: "自动（Gemini 免费池）", gemini: "Gemini 免费池", gemma_26b: "Gemini 免费池", gemma_31b: "Gemini 免费池", deepseek: "DeepSeek", deepseek_high: "DeepSeek High", deepseek_max: "DeepSeek Max" })[value] || "自动（Gemini 免费池）";
 }
 
 function normalizeFingerprintText(text) {
@@ -2498,23 +3402,17 @@ function removeTextMentionTokens(text) {
   return String(text || "").replace(/@\d{5,}\s*/g, "").replace(/\s{2,}/g, " ").trim();
 }
 
-function buildReplyPlan({ isGroup, isAutoInterject, botMentioned, quotedMessageId, messageId, userId, selfId, targetMentionQqs = [], generatedMentionIds = [], senderDnd, text }) {
+function buildReplyPlan({ isGroup, isAutoInterject, botMentioned, quotedMessageId, messageId, userId, selfId, selectedMentionIds = [], senderDnd, text }) {
   if (!isGroup) return { mode: "plain", text, mentionIds: [], replyId: "" };
-  const mentionIds = [...new Set([...generatedMentionIds, ...(botMentioned ? targetMentionQqs : [])])].filter(x => x && x !== selfId);
+  const mentionIds = [...new Set((selectedMentionIds || []).map(String))]
+    .filter(id => id && id !== String(selfId || "") && !(senderDnd && id === String(userId || "")));
   let replyId = "";
-  let mode = "plain";
-  if (isAutoInterject) {
-    mode = mentionIds.length ? "mention_targets" : "plain";
-  } else if (quotedMessageId) {
+  let mode = mentionIds.length ? "mention_targets" : "plain";
+
+  if (!isAutoInterject && (quotedMessageId || botMentioned)) {
+    // 回覆目前觸發訊息本身，語意上即是回覆目前發言者；是否額外 @ 由智能規劃器決定。
+    replyId = String(messageId || "");
     mode = mentionIds.length ? "reply_targets" : "reply_only";
-    replyId = String(messageId || "");
-  } else if (botMentioned) {
-    if (mentionIds.length) mode = "reply_targets";
-    else if (senderDnd) mode = "reply_only";
-    else { mode = "reply_mention"; mentionIds.push(String(userId)); }
-    replyId = String(messageId || "");
-  } else if (mentionIds.length) {
-    mode = "mention_targets";
   }
   return { mode, text, mentionIds, replyId, quoteMessageId: replyId };
 }
@@ -2590,32 +3488,95 @@ async function recordDeepSeekUsage(env, { userId, groupId, model, usage }) {
 }
 
 async function callDeepSeek(env, { messages, userId, groupId, thinking = "disabled", effort = "high", maxTokens = 1200, model }) {
-  if (!env.DEEPSEEK_API_KEY) throw new Error("DEEPSEEK_API_KEY_MISSING");
-  const selectedModel = model || (thinking === "disabled" ? (env.DEEPSEEK_FLASH_MODEL || DEFAULTS.deepseekFlashModel) : (env.DEEPSEEK_PRO_MODEL || DEFAULTS.deepseekProModel));
+  const keys = deepSeekApiKeys(env);
+  if (!keys.length) throw new Error("DEEPSEEK_API_KEYS_MISSING");
+  const selectedModel = model || env.DEEPSEEK_FLASH_MODEL || DEFAULTS.deepseekFlashModel;
   const promptText = messages.map(m => `${m.role}:${m.content}`).join("\n");
   const estimatedTokens = estimateTokenCount(promptText) + maxTokens;
-  const estimatedCny = estimatedTokens / 1e6 * (selectedModel.includes("pro") ? 6 : 2);
+  const estimatedCny = estimatedTokens / 1e6 * 2;
   const budget = await checkDeepSeekBudget(env, { userId, groupId, estimatedCny });
   if (!budget.ok) throw new Error("DEEPSEEK_BUDGET_EXCEEDED");
-  const payload = { model: selectedModel, messages, stream: false, max_tokens: maxTokens, thinking: { type: thinking } };
-  if (thinking === "enabled") payload.reasoning_effort = effort === "max" ? "max" : "high";
-  const response = await fetch("https://api.deepseek.com/chat/completions", {
-    method: "POST",
-    headers: { "Content-Type": "application/json", "Authorization": `Bearer ${env.DEEPSEEK_API_KEY}` },
-    body: JSON.stringify(payload),
-    signal: AbortSignal.timeout(thinking === "enabled" ? 60000 : 30000)
-  });
-  const data = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error(`DEEPSEEK_${response.status}:${data?.error?.message || "UNKNOWN"}`);
-  const text = String(data?.choices?.[0]?.message?.content || "").trim();
-  await recordDeepSeekUsage(env, { userId, groupId, model: selectedModel, usage: data.usage || {} });
-  return { text, model: selectedModel, usage: data.usage || {} };
+  const payload = { model: selectedModel, messages, stream: false, max_tokens: maxTokens, thinking: { type: "disabled" } };
+  let lastError = "DEEPSEEK_FAILED";
+  for (const key of keys) {
+    try {
+      const response = await fetch("https://api.deepseek.com/chat/completions", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "Authorization": `Bearer ${key}` },
+        body: JSON.stringify(payload),
+        signal: AbortSignal.timeout(30000)
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        lastError = `DEEPSEEK_${response.status}:${data?.error?.message || "UNKNOWN"}`;
+        continue;
+      }
+      const text = String(data?.choices?.[0]?.message?.content || "").trim();
+      if (!text) { lastError = "DEEPSEEK_EMPTY"; continue; }
+      await recordDeepSeekUsage(env, { userId, groupId, model: selectedModel, usage: data.usage || {} });
+      return { text, model: selectedModel, usage: data.usage || {} };
+    } catch (error) {
+      lastError = String(error?.message || error);
+    }
+  }
+  throw new Error(lastError);
+}
+
+function immutableRuntimeModelDefaults(env, kind) {
+  if (kind === "chat") return parseList(env.GEMINI_CHAT_MODELS, ["gemini-3.5-flash", "gemini-3.1-flash-lite", "gemini-3-flash-preview", "gemini-2.5-flash", "gemini-2.5-flash-lite"]);
+  if (kind === "decision") return parseList(env.GEMMA_DECISION_MODELS, ["gemma-4-26b-a4b-it"]);
+  if (kind === "last_resort") return parseList(env.GEMMA_LAST_RESORT_MODELS || env.GEMMA_CHAT_MODELS, ["gemma-4-31b-it"]);
+  if (kind === "tts") return parseList(env.GEMINI_TTS_MODELS, ["gemini-3.1-flash-tts-preview", "gemini-2.5-flash-preview-tts"]);
+  return [];
+}
+
+function normalizeRuntimeModelKind(value) {
+  const kind = String(value || "").trim().toLowerCase();
+  return ["chat", "decision", "last_resort", "tts"].includes(kind) ? kind : "chat";
+}
+
+function validRuntimeModelId(value) {
+  return /^[a-zA-Z0-9._:/-]{2,180}$/.test(String(value || "").trim());
+}
+
+async function readCustomRuntimeModels(env, kind) {
+  const normalized = normalizeRuntimeModelKind(kind);
+  const list = await readJson(env, `runtime_model_registry:${normalized}`, []);
+  return (Array.isArray(list) ? list : [])
+    .filter(item => item && validRuntimeModelId(item.id))
+    .map((item, index) => ({ id: String(item.id), enabled: item.enabled !== false, order: Number.isFinite(Number(item.order)) ? Number(item.order) : index, createdAt: item.createdAt || null, updatedAt: item.updatedAt || null }))
+    .sort((a, b) => a.order - b.order);
+}
+
+async function writeCustomRuntimeModels(env, kind, items) {
+  const normalized = normalizeRuntimeModelKind(kind);
+  const clean = (items || []).filter(item => validRuntimeModelId(item.id)).map((item, index) => ({ ...item, id: String(item.id), enabled: item.enabled !== false, order: index }));
+  await dbPut(env, `runtime_model_registry:${normalized}`, JSON.stringify(clean));
+  return clean;
+}
+
+async function effectiveRuntimeModels(env, kind) {
+  const custom = (await readCustomRuntimeModels(env, kind)).filter(item => item.enabled).map(item => item.id);
+  const immutable = immutableRuntimeModelDefaults(env, kind);
+  return [...new Set([...custom, ...immutable])];
+}
+
+async function runtimeModelRegistryState(env) {
+  const categories = {};
+  for (const kind of ["chat", "decision", "last_resort", "tts"]) {
+    categories[kind] = {
+      custom: await readCustomRuntimeModels(env, kind),
+      immutable: immutableRuntimeModelDefaults(env, kind).map((id, order) => ({ id, order, locked: true, enabled: true })),
+      effective: await effectiveRuntimeModels(env, kind)
+    };
+  }
+  return categories;
 }
 
 async function callGemmaDecision(env, { system, prompt, maxOutputTokens = 64, deadlineAt = Date.now() + 12000, maxAttempts = 4 }) {
-  const keys = [...new Set([...parseList(env.GEMINI_API_KEYS), ...parseList(env.VECTORIZE_GEMINI_KEYS)])];
+  const keys = roundRobinKeys([...new Set([...parseList(env.GEMINI_API_KEYS), ...parseList(env.VECTORIZE_GEMINI_KEYS)])], "gemini");
   if (!keys.length) throw new Error("GEMMA_API_KEYS_MISSING");
-  const models = parseList(env.GEMMA_DECISION_MODELS, ["gemma-4-26b-a4b-it", "gemma-4-31b-it"]);
+  const models = await effectiveRuntimeModels(env, "decision");
   let lastError = "GEMMA_DECISION_FAILED";
   let attempts = 0;
   for (const model of models) {
@@ -2653,9 +3614,9 @@ async function callGemmaDecision(env, { system, prompt, maxOutputTokens = 64, de
 }
 
 async function callGemmaChat(env, { model, system, contents, maxOutputTokens = 1000, temperature = 0.72, timeoutMs = 30000 }) {
-  const keys = [...new Set([...parseList(env.GEMINI_API_KEYS), ...parseList(env.VECTORIZE_GEMINI_KEYS)])];
+  const keys = roundRobinKeys([...new Set([...parseList(env.GEMINI_API_KEYS), ...parseList(env.VECTORIZE_GEMINI_KEYS)])], "gemini");
   if (!keys.length) throw new Error("GEMMA_API_KEYS_MISSING");
-  const configured = parseList(env.GEMMA_CHAT_MODELS, ["gemma-4-26b-a4b-it", "gemma-4-31b-it"]);
+  const configured = await effectiveRuntimeModels(env, "last_resort");
   const preferred = model === "gemma_31b" ? "gemma-4-31b-it" : "gemma-4-26b-a4b-it";
   const models = [preferred, ...configured.filter(x => x !== preferred)];
   let lastError = "GEMMA_CHAT_FAILED";
@@ -2743,9 +3704,11 @@ function searchRequirement(text) {
   return { needed: explicit || fresh, explicit };
 }
 
-async function callGeminiGenerate(env, { models, system, contents, maxOutputTokens = 1000, temperature = 0.7, useSearch = true, requireSearch = false, timeoutMs = 30000 }) {
-  const keys = [...new Set([...parseList(env.GEMINI_API_KEYS), ...parseList(env.VECTORIZE_GEMINI_KEYS)])];
-  if (!keys.length) throw new Error("GEMINI_API_KEYS_MISSING");
+async function callGeminiGenerate(env, { models, system, contents, maxOutputTokens = 1000, temperature = 0.7, useSearch = true, requireSearch = false, timeoutMs = 30000, apiKeys = null, keyProvider = "gemini" }) {
+  const keys = apiKeys
+    ? roundRobinKeys(apiKeys, keyProvider)
+    : roundRobinKeys([...new Set([...parseList(env.GEMINI_API_KEYS), ...parseList(env.VECTORIZE_GEMINI_KEYS)])], "gemini");
+  if (!keys.length) throw new Error(keyProvider === "gemini_search" ? "GEMINI_SEARCH_API_KEYS_MISSING" : "GEMINI_API_KEYS_MISSING");
   let lastError = "GEMINI_FAILED";
   for (const model of models) {
     for (const key of keys) {
@@ -2783,70 +3746,98 @@ async function callGeminiGenerate(env, { models, system, contents, maxOutputToke
 
 async function buildSharedSearchContext(env, { query, models }) {
   const requirement = searchRequirement(query);
-  if (!requirement.needed) return null;
-  const result = await callGeminiGenerate(env, {
-    models,
-    system: "你是联网检索器。必须使用 Google Search 查证用户问题，输出可供另一个模型引用的简体中文事实摘要。区分事实、日期与不确定性，不要编造来源。",
-    contents: [{ role: "user", parts: [{ text: String(query || "").slice(0, 4000) }] }],
-    maxOutputTokens: 700,
-    temperature: 0.2,
-    useSearch: true,
-    requireSearch: true
-  });
-  return {
-    context: result.text,
-    sources: result.sources || [],
-    searchQueries: result.searchQueries || []
+  const base = {
+    required: requirement.needed,
+    explicit: requirement.explicit,
+    attempted: false,
+    performed: false,
+    query: String(query || ""),
+    context: "",
+    sources: [],
+    searchQueries: [],
+    provider: "gemini_google_search",
+    model: "",
+    error: ""
   };
+  if (!requirement.needed) return base;
+  const searchKeys = geminiSearchApiKeys(env);
+  if (!searchKeys.length) return { ...base, error: "GEMINI_SEARCH_API_KEYS_MISSING" };
+  try {
+    const result = await callGeminiGenerate(env, {
+      models,
+      system: "你是联网检索器。必须使用 Google Search 查证用户问题，输出可供另一个模型引用的简体中文事实摘要。区分事实、日期与不确定性，不要编造来源。",
+      contents: [{ role: "user", parts: [{ text: String(query || "").slice(0, 4000) }] }],
+      maxOutputTokens: 700,
+      temperature: 0.2,
+      useSearch: true,
+      requireSearch: true,
+      apiKeys: searchKeys,
+      keyProvider: "gemini_search"
+    });
+    return {
+      ...base,
+      attempted: true,
+      performed: Boolean(result.grounded || result.sources?.length || result.searchQueries?.length),
+      context: result.text || "",
+      sources: result.sources || [],
+      searchQueries: result.searchQueries || [],
+      model: result.model || ""
+    };
+  } catch (error) {
+    return { ...base, attempted: true, error: String(error?.message || error) };
+  }
 }
 
 async function routeProviderWithGemma(env, text) {
   const source = String(text || "");
   try {
     const result = await callGemmaDecision(env, {
-      system: "你是节省费用优先的模型路由分类器。只能输出 GEMMA_26B、GEMMA_31B、GEMINI、DEEPSEEK_HIGH 或 DEEPSEEK_MAX。Gemini/Gemma 使用免费额度，必须优先：普通短聊天与简单问答选 GEMMA_26B；较长聊天、摘要、解释、一般写作与普通代码选 GEMMA_31B；图片、语音、视频、实时资料或 Google 搜索选 GEMINI。只有在任务确实需要复杂多阶段推理、大型跨文件代码、严格证明或用户明确指定 DeepSeek 时，才选 DEEPSEEK_HIGH；仅极端高难度任务才选 DEEPSEEK_MAX。不要把普通问题送到付费 DeepSeek。",
+      system: "你是费用与能力路由分类器。只能输出 GEMINI 或 DEEPSEEK_HIGH。普通聊天、写作、摘要、搜索、多模态与一般代码全部输出 GEMINI；只有用户明确指定 DeepSeek，或任务明显是超大型跨文件工程、严格证明、复杂多阶段推理时输出 DEEPSEEK_HIGH。Gemma 不负责最终聊天回答。",
       prompt: source.slice(0, 3000),
-      maxOutputTokens: 24
+      maxOutputTokens: 16
     });
-    const upper = result.text.toUpperCase();
-    if (upper.includes("MAX")) return "deepseek_max";
-    if (upper.includes("DEEPSEEK")) return "deepseek_high";
-    if (upper.includes("GEMINI")) return "gemini";
-    if (upper.includes("31")) return "gemma_31b";
-    return "gemma_26b";
+    return result.text.toUpperCase().includes("DEEPSEEK") ? "deepseek_high" : "gemini";
   } catch (error) {
     console.warn("Gemma provider routing unavailable, using local rules:", error);
-    if (/今天|現在|现在|最新|新聞|新闻|搜尋|搜索|查一下|網址|网页|網頁/i.test(source)) return "gemini";
-    if (/明确使用DeepSeek|明確使用DeepSeek|指定DeepSeek|deepseek/i.test(source)) return /max|极限|極限/i.test(source) ? "deepseek_max" : "deepseek_high";
-    if (/大型跨文件|大型跨檔案|严格证明|嚴格證明|多阶段推理|多階段推理|完整系统架构|完整系統架構/i.test(source) && source.length > 1200) return "deepseek_high";
-    return source.length > 220 || /代码|程式|证明|證明|推理|debug|架构|架構/i.test(source) ? "gemma_31b" : "gemma_26b";
+    return /明确使用DeepSeek|明確使用DeepSeek|指定DeepSeek|deepseek|大型跨文件|大型跨檔案|严格证明|嚴格證明|多阶段推理|多階段推理/i.test(source) ? "deepseek_high" : "gemini";
   }
 }
 
 async function generateHybridReply(env, args) {
   let pref = args.modelPref || "auto";
   if (args.hasMedia) pref = "gemini";
-  else if (args.fastChat) pref = "gemma_26b";
-  if (pref === "auto") pref = await routeProviderWithGemma(env, args.cleanText);
+  if (["gemma_26b", "gemma_31b"].includes(pref)) pref = "gemini";
+  if (pref === "auto") pref = "gemini";
   const deepseekEnabled = await getFeatureFlag(env, "deepseek_enabled", true);
   const costPolicy = String(env.MODEL_COST_POLICY || DEFAULTS.modelCostPolicy).trim().toLowerCase();
-  const allowPaidEmergencyFallback = envFlag(env.DEEPSEEK_EMERGENCY_FALLBACK, DEFAULTS.deepseekEmergencyFallback);
+  const allowPaidEmergencyFallback = envFlag(env.DEEPSEEK_EMERGENCY_FALLBACK, true);
   const searchState = searchRequirement(args.cleanText);
   let sharedSearchPromise = null;
   const getSharedSearch = async () => {
-    if (!searchState.needed || args.hasMedia) return null;
+    if (args.hasMedia) return { required: false, explicit: false, attempted: false, performed: false, query: args.cleanText, context: "", sources: [], searchQueries: [], provider: "", model: "", error: "media_request" };
     if (!sharedSearchPromise) sharedSearchPromise = buildSharedSearchContext(env, { query: args.cleanText, models: args.chatModels });
     return sharedSearchPromise;
   };
-  const mergeSearchPrompt = (prompt, search) => search?.context
-    ? `${prompt}\n\n【已联网查证的资料】\n${search.context}\n\n回答时只能将以上检索结果当作实时事实依据；无法由资料支持的部分必须说明不确定。`
-    : prompt;
-  const finish = (provider, result, search = null) => ({
+  const mergeSearchPrompt = (prompt, search) => {
+    if (search?.context) return `${prompt}\n\n【独立联网搜索结果】\n${search.context}\n\n回答时只能将以上检索结果当作实时事实依据；无法由资料支持的部分必须说明不确定。`;
+    if (search?.required) return `${prompt}\n\n【联网搜索状态】本题需要实时资料，但独立搜索服务未取得可用结果（${search.error || "未返回可靠来源"}）。不得假装已经联网；涉及实时事实时要明确说明无法查证。`;
+    return prompt;
+  };
+  const finish = (provider, result, search) => ({
     provider,
     ...result,
-    text: appendSearchSources(result.text, result.sources?.length ? result.sources : search?.sources || []),
-    searchQueries: result.searchQueries?.length ? result.searchQueries : search?.searchQueries || [],
-    grounded: Boolean(result.grounded || search?.sources?.length)
+    text: appendSearchSources(result.text, search?.sources?.length ? search.sources : result.sources || []),
+    searchRequired: Boolean(search?.required || searchState.needed),
+    searchAttempted: Boolean(search?.attempted),
+    searchPerformed: Boolean(search?.performed),
+    searchQuery: String(search?.query || args.cleanText || ""),
+    searchContext: String(search?.context || ""),
+    searchSources: search?.sources || [],
+    searchQueries: search?.searchQueries || [],
+    searchProvider: String(search?.provider || ""),
+    searchModel: String(search?.model || ""),
+    searchError: String(search?.error || ""),
+    grounded: Boolean(search?.performed)
   });
 
   const tryGemma = async modelPref => {
@@ -2863,41 +3854,34 @@ async function generateHybridReply(env, args) {
     return finish("gemma", result, search);
   };
   const tryGemini = async () => {
+    const search = await getSharedSearch();
     const result = await callGeminiGenerate(env, {
       models: args.chatModels,
-      system: args.finalStylePrompt,
+      system: mergeSearchPrompt(args.finalStylePrompt, search),
       contents: args.contents,
       maxOutputTokens: args.fastChat ? 180 : 1000,
       temperature: args.fastChat ? 0.9 : 0.82,
-      useSearch: args.fastChat ? false : true,
-      requireSearch: args.fastChat ? false : searchState.needed,
+      // 搜索只允许独立搜索金钥执行；聊天金钥不挂 Google Search tool。
+      useSearch: false,
+      requireSearch: false,
       timeoutMs: args.fastChat ? 12000 : 30000
     });
-    return finish("gemini", result);
+    return finish("gemini", result, search);
   };
-  const tryDeepSeek = async mode => {
-    if (!deepseekEnabled || !env.DEEPSEEK_API_KEY || args.hasMedia) throw new Error("DEEPSEEK_UNAVAILABLE");
+  const tryDeepSeek = async () => {
+    if (!deepseekEnabled || !deepSeekApiKeys(env).length || args.hasMedia) throw new Error("DEEPSEEK_UNAVAILABLE");
     const search = await getSharedSearch();
-    const thinking = mode === "deepseek" ? "disabled" : "enabled";
-    const effort = mode === "deepseek_max" ? "max" : "high";
-    const messages = [{ role: "system", content: mergeSearchPrompt(args.finalStylePrompt, search) }, ...flattenGeminiContents(args.contents).slice(-16)];
-    const result = await callDeepSeek(env, { messages, userId: args.userId, groupId: args.groupId || "private", thinking, effort, maxTokens: 1000 });
+    const messages = [{ role: "system", content: mergeSearchPrompt(args.finalStylePrompt, search) }, ...flattenGeminiContents(args.contents).slice(-32)];
+    const result = await callDeepSeek(env, { messages, userId: args.userId, groupId: args.groupId || "private", thinking: "disabled", maxTokens: 1000, model: env.DEEPSEEK_FLASH_MODEL || DEFAULTS.deepseekFlashModel });
     return finish("deepseek", result, search);
   };
 
   const attempts = [];
-  if (args.fastChat) {
-    attempts.push(() => tryGemma("gemma_26b"), tryGemini);
-  } else if (pref === "gemma_26b" || pref === "gemma_31b") {
-    attempts.push(() => tryGemma(pref), tryGemini);
-    if (costPolicy !== "free_first" || allowPaidEmergencyFallback) attempts.push(() => tryDeepSeek("deepseek"));
-  } else if (pref.startsWith("deepseek")) {
-    // DeepSeek 只有被明确选择或路由器判定为高难度时才优先调用；失败后回退免费模型。
-    attempts.push(() => tryDeepSeek(pref), () => tryGemma("gemma_31b"), tryGemini);
-  } else {
-    attempts.push(tryGemini, () => tryGemma("gemma_31b"));
-    if (costPolicy !== "free_first" || allowPaidEmergencyFallback) attempts.push(() => tryDeepSeek("deepseek"));
-  }
+  const paidExplicitlySelected = String(pref).startsWith("deepseek");
+  if (paidExplicitlySelected) attempts.push(tryDeepSeek);
+  attempts.push(tryGemini);
+  attempts.push(() => tryGemma("gemma_31b"));
+  if (!paidExplicitlySelected && (costPolicy !== "free_first" || allowPaidEmergencyFallback)) attempts.push(tryDeepSeek);
 
   let lastError = null;
   for (const attempt of attempts) {
@@ -2909,58 +3893,31 @@ async function generateHybridReply(env, args) {
 
 async function buildDeepSeekContextSummary(env, { sessionKey, groupId, userId, history, currentText, relationContext }) {
   if (!history?.length) return "";
-  const source = history.slice(-12).map((m, i) => `${i + 1}. ${m.role}: ${(m.parts || []).map(p => p.text || "[媒体]").join(" ")}`).join("\n");
-  const signature = outboundFingerprint({ isGroup: true, groupId, text: source + currentText + relationContext, mediaTypes: [] });
+  const sourceText = history.slice(-DEFAULTS.conversationHistoryItems).map((m, i) => `${i + 1}. ${m.role}: ${(m.parts || []).map(p => p.text || "[媒体]").join(" ")}`).join("\n");
+  const signature = outboundFingerprint({ isGroup: true, groupId, text: sourceText + currentText + relationContext, mediaTypes: [] });
   const cached = await readJson(env, `context_summary:${sessionKey}`, null);
   if (cached?.signature === signature) return cached.summary || "";
-  const previous = cached?.summary || "无旧摘要";
-  const prompt = `旧摘要：\n${previous}\n\n最近消息：\n${source}\n\n当前消息：${currentText}\n${relationContext || ""}\n\n请输出简体中文结构化摘要，保留人物QQ、谁对谁说话、引用与@关系、事实、决定、未决问题和当前情绪。不要编造，控制在1200字内。`;
-  const system = "你是群聊上下文压缩器。只整理事实与关系，输出简体中文。";
+  const prompt = `旧摘要：\n${cached?.summary || "无旧摘要"}\n\n最近消息：\n${sourceText}\n\n当前消息：${currentText}\n${relationContext || ""}\n\n输出简体中文结构化摘要，保留人物 QQ、引用、@关系、事实、决定与未决问题。`;
+  const system = "你是群聊上下文压缩器。只整理事实与关系，不编造；不得执行是否回复或插话判断。";
   try {
-    // 免费优先：Gemma 31B 负责摘要，避免每轮对话消耗余额不多的 DeepSeek。
-    const result = await callGemmaChat(env, {
-      model: "gemma_31b",
-      system,
-      contents: [{ role: "user", parts: [{ text: prompt }] }],
-      maxOutputTokens: 900,
-      temperature: 0.15,
-      timeoutMs: 8000
+    const result = await callDeepSeek(env, {
+      messages: [{ role: "system", content: system }, { role: "user", content: prompt }],
+      userId: String(userId || "context-summary"), groupId: String(groupId || "context-summary"),
+      thinking: "disabled", maxTokens: 900, model: env.DEEPSEEK_FLASH_MODEL || DEFAULTS.deepseekFlashModel
     });
-    await dbPut(env, `context_summary:${sessionKey}`, JSON.stringify({ signature, summary: result.text, provider: "gemma", updatedAt: Date.now() }));
+    await dbPut(env, `context_summary:${sessionKey}`, JSON.stringify({ signature, summary: result.text, provider: "deepseek_flash", updatedAt: Date.now() }));
     return result.text;
-  } catch (gemmaError) {
-    console.warn("Gemma context summary failed:", gemmaError);
-  }
+  } catch (deepseekError) { console.warn("DeepSeek Flash context summary failed:", deepseekError?.message || deepseekError); }
   try {
     const result = await callGeminiGenerate(env, {
       models: parseList(env.GEMINI_CHAT_MODELS, ["gemini-2.5-flash-lite", "gemini-2.5-flash"]),
       system,
       contents: [{ role: "user", parts: [{ text: prompt }] }],
-      maxOutputTokens: 900,
-      temperature: 0.15,
-      useSearch: false,
-      requireSearch: false,
-      timeoutMs: 8000
+      maxOutputTokens: 900, temperature: 0.15, useSearch: false, requireSearch: false, timeoutMs: 8000
     });
     await dbPut(env, `context_summary:${sessionKey}`, JSON.stringify({ signature, summary: result.text, provider: "gemini", updatedAt: Date.now() }));
     return result.text;
-  } catch (geminiError) {
-    console.warn("Gemini context summary failed:", geminiError);
-  }
-  const allowPaidSummary = envFlag(env.ALLOW_PAID_CONTEXT_SUMMARY, DEFAULTS.paidContextSummary);
-  if (allowPaidSummary && env.DEEPSEEK_API_KEY && await getFeatureFlag(env, "deepseek_enabled", true)) {
-    try {
-      const result = await callDeepSeek(env, {
-        userId: `summary:${groupId || userId}`, groupId: groupId || "private", thinking: "disabled", maxTokens: 900,
-        model: env.DEEPSEEK_FLASH_MODEL || DEFAULTS.deepseekFlashModel,
-        messages: [{ role: "system", content: system }, { role: "user", content: prompt }]
-      });
-      await dbPut(env, `context_summary:${sessionKey}`, JSON.stringify({ signature, summary: result.text, provider: "deepseek", updatedAt: Date.now() }));
-      return result.text;
-    } catch (deepseekError) {
-      console.warn("Paid DeepSeek context summary failed:", deepseekError);
-    }
-  }
+  } catch (geminiError) { console.warn("Gemini context summary failed:", geminiError?.message || geminiError); }
   return cached?.summary || "";
 }
 
@@ -3008,6 +3965,45 @@ async function filterAuthorizedReviewers(env, groupId, reviewerIds, kind) {
     (allowed ? valid : invalid).push(reviewerId);
   }
   return { valid, invalid };
+}
+
+async function getBotIdentity(env) {
+  const cached = await readJson(env, "onebot:self_identity", null);
+  if (cached?.userId && Date.now() - Number(cached.at || 0) < 5 * 60 * 1000) return cached;
+  try {
+    const data = await callOneBotAction(env, { action: "get_login_info", params: {} }, 10000);
+    const identity = { userId: String(data?.user_id || data?.userId || ""), nickname: String(data?.nickname || ""), at: Date.now() };
+    if (identity.userId) await dbPut(env, "onebot:self_identity", JSON.stringify(identity));
+    return identity;
+  } catch {
+    return cached || { userId: "", nickname: "", at: 0 };
+  }
+}
+
+async function getBotGroupRole(env, groupId) {
+  const cacheKey = `onebot:self_group_role:${groupId}`;
+  const cached = await readJson(env, cacheKey, null);
+  if (cached?.role && Date.now() - Number(cached.at || 0) < 60 * 1000) return cached;
+  const self = await getBotIdentity(env);
+  if (!self.userId) return cached || { userId: "", role: "unknown", at: 0 };
+  try {
+    const member = await callOneBotAction(env, { action: "get_group_member_info", params: { group_id: numericId(groupId), user_id: numericId(self.userId), no_cache: true } }, 10000);
+    const state = { userId: self.userId, role: String(member?.role || "member"), at: Date.now() };
+    await dbPut(env, cacheKey, JSON.stringify(state));
+    return state;
+  } catch {
+    return cached || { userId: self.userId, role: "unknown", at: 0 };
+  }
+}
+
+async function isBotVerifiedGroupOwner(env, groupId) {
+  return (await getBotGroupRole(env, groupId)).role === "owner";
+}
+
+async function canUseBotGroupOperations(env, groupId, userId) {
+  const role = await resolvePortalRole(env, String(userId), String(groupId));
+  const permissions = await getEffectivePermissions(env, String(groupId), String(userId), role, isDeveloperId(env, userId));
+  return Boolean(permissions.groupOps || permissions.nativeAdmin || permissions.developer);
 }
 
 async function getGroupOwnerId(env, groupId) {
@@ -3254,6 +4250,60 @@ async function processActiveSpeaking(env, now = Date.now()) {
   }
 }
 
+async function performGroupCheckin(env, groupId, actorId = "system") {
+  const params = { group_id: numericId(groupId) };
+  let lastError = "未知错误";
+  for (const action of ["set_group_sign", "send_group_sign"]) {
+    try {
+      await callOneBotAction(env, { action, params }, 12000);
+      await writeSystemAudit(env, { type: "group_checkin", groupId: String(groupId), actorId: String(actorId), action });
+      return { ok: true, action };
+    } catch (error) { lastError = String(error?.message || error); }
+  }
+  return { ok: false, error: lastError };
+}
+
+async function runAutomaticGroupCheckins(env, now = Date.now()) {
+  const parts = taipeiParts(now);
+  const currentTime = `${String(parts.hour).padStart(2, "0")}:${String(parts.minute).padStart(2, "0")}:${String(parts.second).padStart(2, "0")}`;
+  if (!currentTime.startsWith("00:00:")) return;
+  const dayKey = `${parts.year}-${parts.month}-${parts.day}`;
+  let groups = [];
+  try {
+    const data = await callOneBotAction(env, { action: "get_group_list", params: { no_cache: true } }, 20000);
+    groups = Array.isArray(data) ? data : Array.isArray(data?.data) ? data.data : [];
+  } catch (error) {
+    console.warn("00:00 自动群打卡无法取得群列表", error);
+    return;
+  }
+  for (const group of groups.slice(0, 500)) {
+    const groupId = String(group?.group_id || group?.groupId || group?.id || "").replace(/\D/g, "");
+    if (!groupId) continue;
+    const onceKey = `auto_checkin_done:${groupId}:${dayKey}`;
+    if (await dbGet(env, onceKey)) continue;
+    const result = await performGroupCheckin(env, groupId, "system:midnight_checkin");
+    await dbPut(env, onceKey, JSON.stringify({ scheduledAt: now, executedAt: Date.now(), ok: result.ok, result }));
+  }
+}
+
+async function cleanupExpiredModerationProposals(env, now = Date.now()) {
+  if (!env.DB) return;
+  try {
+    const rows = await env.DB.prepare("SELECT key, value FROM kv_store WHERE key LIKE 'moderation:proposal:op_%'").all();
+    for (const row of rows.results || []) {
+      let proposal = null;
+      try { proposal = JSON.parse(row.value); } catch {}
+      if (!proposal || proposal.status !== "pending" || now <= Number(proposal.expiresAt || 0)) continue;
+      proposal.status = "expired";
+      proposal.expiredAt = now;
+      await retractModerationProposalMessage(env, proposal, "expired");
+      await dbPut(env, row.key, JSON.stringify(proposal));
+    }
+  } catch (error) {
+    console.warn("moderation expiry cleanup failed", error);
+  }
+}
+
 async function cleanupTransientState(env) {
   if (!env.DB) return;
   try {
@@ -3348,10 +4398,11 @@ function moderationActionNeedsTarget(action) {
 
 function parseModerationConfirmation(text) {
   const value = String(text || "").trim();
-  const confirm = value.match(/^[!！]?(?:确认|確認|同意执行|同意執行|执行|執行)(?:\s+([a-z0-9_-]+))?$/i);
-  if (confirm) return { type: "confirm", id: confirm[1] || "" };
-  const cancel = value.match(/^[!！]?(?:取消操作|取消执行|取消執行|取消)(?:\s+([a-z0-9_-]+))?$/i);
-  if (cancel) return { type: "cancel", id: cancel[1] || "" };
+  // 为避免普通聊天中的“确认／取消”误触发，必须带 op；“确认op”代表本群最近一笔待处理提案。
+  const confirm = value.match(/^[!！]?(?:确认|确认|同意执行|同意執行|执行|執行)\s*(op(?:_[a-z0-9_-]+)?)$/i);
+  if (confirm) return { type: "confirm", id: /^op$/i.test(confirm[1]) ? "" : confirm[1], alias: /^op$/i.test(confirm[1]) ? "latest" : "explicit" };
+  const cancel = value.match(/^[!！]?(?:取消操作|取消执行|取消執行|取消)\s*(op(?:_[a-z0-9_-]+)?)$/i);
+  if (cancel) return { type: "cancel", id: /^op$/i.test(cancel[1]) ? "" : cancel[1], alias: /^op$/i.test(cancel[1]) ? "latest" : "explicit" };
   return null;
 }
 
@@ -3449,9 +4500,327 @@ async function resolveModerationTarget(env, { groupId, targetMentionQqs = [], in
   return { ok: true, targetQq, member, targetName: member.card || member.nickname || member.name || targetName };
 }
 
+async function reviewGroupWorkWithGemma(env, type, content) {
+  try {
+    const result = await callGemmaDecision(env, {
+      system: "你是群务辅助审查器。你只能输出 JSON：{\"decision\":\"suggest_approve|owner_review\",\"reason\":\"简短原因\"}。可以建议同意，但绝不能代替群主拒绝，也绝不能执行。遇到不确定、隐私、文件风险或可能骚扰时输出 owner_review。",
+      prompt: JSON.stringify({ type, content: String(content || "").slice(0, 3000) }),
+      maxOutputTokens: 100
+    });
+    const parsed = JSON.parse(result.text.match(/\{[\s\S]*\}/)?.[0] || "{}");
+    return { decision: parsed.decision === "suggest_approve" ? "suggest_approve" : "owner_review", reason: String(parsed.reason || "请群主核对") };
+  } catch (error) {
+    return { decision: "owner_review", reason: "AI 辅助审查暂时不可用，请群主人工核对" };
+  }
+}
+
+async function joinRequestPatternHash(comment, subType = "add") {
+  const normalized = `${String(subType || "add").toLowerCase()}|${String(comment || "").toLowerCase().replace(/\s+/g, " ").trim()}`;
+  const bytes = new TextEncoder().encode(normalized);
+  const digest = await crypto.subtle.digest("SHA-256", bytes);
+  return [...new Uint8Array(digest)].map(byte => byte.toString(16).padStart(2, "0")).join("").slice(0, 32);
+}
+
+async function readJoinPattern(env, groupId, hash) {
+  return readJson(env, `joinpattern:${groupId}:${hash}`, { hash, approvedCount: 0, rejectedCount: 0 });
+}
+
+async function recordJoinPatternDecision(env, groupId, hash, comment, decision) {
+  const item = await readJoinPattern(env, groupId, hash);
+  item.comment = String(comment || "").slice(0, 1000);
+  item[decision === "approved" ? "approvedCount" : "rejectedCount"] = Number(item[decision === "approved" ? "approvedCount" : "rejectedCount"] || 0) + 1;
+  item.lastDecision = decision;
+  item.updatedAt = Date.now();
+  await dbPut(env, `joinpattern:${groupId}:${hash}`, JSON.stringify(item));
+  return item;
+}
+
+async function reviewJoinRequestAssist(env, requestInfo) {
+  try {
+    const result = await callGemmaDecision(env, {
+      system: `你是入群申請輔助審查器。只能輸出 JSON：{"decision":"suggest_approve|suggest_reject|owner_review","confidence":0到1,"reason":"原因"}。只有明顯滿足群規時建議同意；只有明顯廣告、詐騙、惡意騷擾或明確違反入群要求時建議拒絕；不確定必須 owner_review。`,
+      prompt: JSON.stringify(requestInfo).slice(0, 4000),
+      maxOutputTokens: 140
+    });
+    const parsed = JSON.parse(result.text.match(/\{[\s\S]*\}/)?.[0] || "{}");
+    const decision = ["suggest_approve", "suggest_reject"].includes(parsed.decision) ? parsed.decision : "owner_review";
+    return { decision, confidence: Math.max(0, Math.min(1, Number(parsed.confidence || 0))), reason: String(parsed.reason || "请管理核对") };
+  } catch {
+    return { decision: "owner_review", confidence: 0, reason: "AI 辅助审查暂时不可用" };
+  }
+}
+
+async function createJoinRequestAssist(env, body) {
+  const groupId = String(body.group_id || "");
+  const comment = String(body.comment || "");
+  const subType = String(body.sub_type || "add");
+  const patternHash = await joinRequestPatternHash(comment, subType);
+  const pattern = await readJoinPattern(env, groupId, patternHash);
+  const threshold = Math.max(1, parseUnlimitedNonNegativeInteger(await dbGet(env, `join_pattern_auto_approve_threshold:${groupId}`), DEFAULTS.joinPatternAutoApproveThreshold));
+
+  if (Number(pattern.approvedCount || 0) >= threshold && Number(pattern.rejectedCount || 0) === 0) {
+    try {
+      await callOneBotAction(env, { action: "set_group_add_request", params: { flag: String(body.flag || ""), sub_type: subType, approve: true, reason: "" } }, 15000);
+      const id = `jr_${Date.now().toString(36)}_${crypto.randomUUID().slice(0, 6)}`;
+      const item = { id, groupId, userId: String(body.user_id || ""), flag: String(body.flag || ""), subType, comment, patternHash, review: { decision: "cached_approve", reason: `相同申请方式已获准 ${pattern.approvedCount} 次` }, status: "approved_cached", createdAt: Date.now() };
+      await dbPut(env, `joinrequest:${id}`, JSON.stringify(item));
+      await appendIndex(env, `joinrequest:index:${groupId}`, id, 1000);
+      await recordJoinPatternDecision(env, groupId, patternHash, comment, "approved");
+      return item;
+    } catch (error) { console.warn("cached join approval failed", error); }
+  }
+
+  const review = await reviewJoinRequestAssist(env, { groupId, userId: String(body.user_id || ""), comment, subType });
+  const rejectAuthorized = await dbGet(env, `join_reject_authorized:${groupId}`) === "true";
+  if (review.decision === "suggest_reject" && rejectAuthorized && review.confidence >= 0.92) {
+    const id = `jr_${Date.now().toString(36)}_${crypto.randomUUID().slice(0, 6)}`;
+    const item = { id, groupId, userId: String(body.user_id || ""), flag: String(body.flag || ""), subType, comment, patternHash, review, status: "rejected_ai", createdAt: Date.now() };
+    try {
+      await callOneBotAction(env, { action: "set_group_add_request", params: { flag: item.flag, sub_type: subType, approve: false, reason: String(review.reason || "不符合入群要求").slice(0, 120) } }, 15000);
+      await recordJoinPatternDecision(env, groupId, patternHash, comment, "rejected");
+    } catch (error) { item.status = "reject_failed"; item.result = String(error?.message || error); }
+    await dbPut(env, `joinrequest:${id}`, JSON.stringify(item));
+    await appendIndex(env, `joinrequest:index:${groupId}`, id, 1000);
+    return item;
+  }
+
+  const id = `jr_${Date.now().toString(36)}_${crypto.randomUUID().slice(0, 6)}`;
+  const item = { id, groupId, userId: String(body.user_id || ""), flag: String(body.flag || ""), subType, comment, patternHash, review, status: "pending_management", createdAt: Date.now() };
+  await dbPut(env, `joinrequest:${id}`, JSON.stringify(item));
+  await appendIndex(env, `joinrequest:index:${groupId}`, id, 1000);
+  try {
+    const members = await callOneBotAction(env, { action: "get_group_member_list", params: { group_id: numericId(groupId), no_cache: false } }, 15000);
+    const list = Array.isArray(members) ? members : members?.data || [];
+    for (const manager of list.filter(member => ["owner", "admin"].includes(member.role)).slice(0, 10)) {
+      await callOneBotAction(env, { action: "send_private_msg", params: { user_id: numericId(manager.user_id), message: `【入群申请辅助】\n编号：${id}\n群号：${groupId}\n申请人：${item.userId}\n附言：${item.comment || "无"}\nAI 意见：${review.decision === "suggest_approve" ? "建议同意" : review.decision === "suggest_reject" ? "建议人工核对拒绝" : "请人工核对"}（${review.reason}）\n同意：确认入群 ${id}\n忽略：忽略入群 ${id}`, auto_escape: false } }, 12000);
+    }
+  } catch (error) { console.warn("notify management for join request failed", error); }
+  return item;
+}
+
+async function decideJoinRequestAssist(env, { groupId, actorId, id, decision }) {
+  const item = await readJson(env, `joinrequest:${id}`, null);
+  if (!item || String(item.groupId) !== String(groupId)) return { ok: false, message: "找不到该入群申请。" };
+  const actorRole = await resolvePortalRole(env, String(actorId), String(groupId));
+  const actorPermissions = await getEffectivePermissions(env, String(groupId), String(actorId), actorRole, isDeveloperId(env, actorId));
+  if (!(actorPermissions.aiAdmin || actorPermissions.groupOps || actorPermissions.nativeAdmin || actorPermissions.developer)) return { ok: false, message: "缺少管理权限，无法处理入群申请。" };
+  if (decision === "ignore") {
+    item.status = "ignored"; item.decidedAt = Date.now(); item.decidedBy = String(actorId);
+    await dbPut(env, `joinrequest:${id}`, JSON.stringify(item));
+    return { ok: true, message: "已忽略该申请；没有发送拒绝操作。" };
+  }
+  try {
+    await callOneBotAction(env, { action: "set_group_add_request", params: { flag: item.flag, sub_type: item.subType || "add", approve: true, reason: "" } }, 15000);
+    item.status = "approved"; item.decidedAt = Date.now(); item.decidedBy = String(actorId);
+    await dbPut(env, `joinrequest:${id}`, JSON.stringify(item));
+    if (item.patternHash) await recordJoinPatternDecision(env, groupId, item.patternHash, item.comment, "approved");
+    return { ok: true, message: "已由管理确认同意入群申请；相同申请方式已计入缓存。" };
+  } catch (error) {
+    item.status = "failed"; item.result = String(error?.message || error); await dbPut(env, `joinrequest:${id}`, JSON.stringify(item));
+    return { ok: false, message: `同意申请失败：${item.result}` };
+  }
+}
+
+function normalizeRuleProxyMode(value) {
+  const mode = String(value || "").trim().toLowerCase();
+  return ["record", "warn", "mute", "auto"].includes(mode) ? mode : "record";
+}
+
+function parseUnlimitedNonNegativeInteger(value, fallback = 0) {
+  const text = String(value ?? "").trim();
+  if (!text) return Math.max(0, Math.trunc(Number(fallback) || 0));
+  const number = Number(text);
+  if (!Number.isFinite(number) || number < 0) return Math.max(0, Math.trunc(Number(fallback) || 0));
+  return Math.min(Number.MAX_SAFE_INTEGER, Math.trunc(number));
+}
+
+async function appendRuleViolationRecord(env, data) {
+  const id = `rv_${Date.now().toString(36)}_${crypto.randomUUID().slice(0, 8)}`;
+  const item = {
+    id,
+    groupId: String(data.groupId || ""),
+    userId: String(data.userId || ""),
+    senderName: String(data.senderName || data.userId || ""),
+    content: String(data.content || "").slice(0, 4000),
+    violationType: String(data.violationType || "其他").slice(0, 120),
+    rule: String(data.rule || "").slice(0, 500),
+    reason: String(data.reason || "").slice(0, 1000),
+    confidence: Math.max(0, Math.min(1, Number(data.confidence || 0))),
+    recommendedAction: String(data.recommendedAction || "record"),
+    actionTaken: String(data.actionTaken || "none"),
+    actionResult: String(data.actionResult || ""),
+    messageId: String(data.messageId || ""),
+    createdAt: Date.now()
+  };
+  await dbPut(env, `ruleviolation:${id}`, JSON.stringify(item));
+  await appendIndex(env, `ruleviolation:index:${item.groupId}`, id, 10000);
+  return item;
+}
+
+async function updateRuleViolationRecord(env, item, patch) {
+  const next = { ...item, ...patch, updatedAt: Date.now() };
+  await dbPut(env, `ruleviolation:${item.id}`, JSON.stringify(next));
+  return next;
+}
+
+async function ruleProxyCooldownRemaining(env, groupId, userId) {
+  const seconds = parseUnlimitedNonNegativeInteger(await dbGet(env, `moderation_target_cooldown_seconds:${groupId}`), DEFAULTS.moderationTargetCooldownSeconds);
+  if (seconds <= 0) return 0;
+  const key = `rule_proxy_last_action:${groupId}:${userId}`;
+  const lastAt = Number(await dbGet(env, key) || 0);
+  const remaining = seconds * 1000 - (Date.now() - lastAt);
+  return remaining > 0 ? Math.ceil(remaining / 1000) : 0;
+}
+
+async function performRuleProxyAction(env, item, review) {
+  const mode = normalizeRuleProxyMode(await dbGet(env, `rule_proxy_mode:${item.groupId}`) || DEFAULTS.ruleProxyMode);
+  if (mode === "record") return updateRuleViolationRecord(env, item, { actionTaken: "record_only", actionResult: "仅记录，未启用 AI 代理" });
+
+  const remaining = await ruleProxyCooldownRemaining(env, item.groupId, item.userId);
+  if (remaining > 0) return updateRuleViolationRecord(env, item, { actionTaken: "cooldown", actionResult: `处置冷却剩余 ${remaining} 秒；本次仍已记录` });
+
+  let action = mode === "warn" ? "warn" : mode === "mute" ? "mute" : String(review.action || "warn").toLowerCase();
+  if (!["warn", "mute", "kick"].includes(action)) action = "warn";
+  const kickAuthorized = await dbGet(env, `rule_proxy_kick_authorized:${item.groupId}`) === "true";
+  if (action === "kick" && !kickAuthorized) action = "mute";
+
+  const botRole = (await getBotGroupRole(env, item.groupId)).role;
+  const botCanModerate = botRole === "owner" || botRole === "admin";
+  if ((action === "mute" || action === "kick") && !botCanModerate) action = "warn";
+
+  let result = { ok: false, message: "未执行" };
+  try {
+    if (action === "warn") {
+      await callOneBotAction(env, {
+        action: "send_group_msg",
+        params: {
+          group_id: numericId(item.groupId),
+          message: `[CQ:at,qq=${item.userId}] 群规警告：你的消息可能违反「${item.violationType}」。原因：${item.reason || item.rule || "请遵守群规"}`,
+          auto_escape: false
+        }
+      }, 15000);
+      result = { ok: true, message: "已发送警告" };
+    } else if (action === "mute") {
+      const configured = parseUnlimitedNonNegativeInteger(await dbGet(env, `rule_proxy_mute_seconds:${item.groupId}`), DEFAULTS.ruleProxyMuteSeconds);
+      const suggested = parseUnlimitedNonNegativeInteger(review.muteSeconds, configured);
+      const duration = Math.max(60, Math.min(30 * 24 * 3600, suggested || configured || 600));
+      await callOneBotAction(env, { action: "set_group_ban", params: { group_id: numericId(item.groupId), user_id: numericId(item.userId), duration } }, 15000);
+      result = { ok: true, message: `已禁言 ${duration} 秒` };
+    } else if (action === "kick") {
+      await callOneBotAction(env, { action: "set_group_kick", params: { group_id: numericId(item.groupId), user_id: numericId(item.userId), reject_add_request: false } }, 15000);
+      result = { ok: true, message: "已踢出群聊" };
+    }
+  } catch (error) {
+    result = { ok: false, message: String(error?.message || error) };
+  }
+
+  if (result.ok) await dbPut(env, `rule_proxy_last_action:${item.groupId}:${item.userId}`, String(Date.now()));
+  await writeSystemAudit(env, { type: "rule_proxy_action", groupId: item.groupId, actorId: "system:rule_proxy", targetId: item.userId, action, result: result.message, violationId: item.id });
+  return updateRuleViolationRecord(env, item, { actionTaken: action, actionResult: result.message, actionOk: result.ok });
+}
+
+async function inspectMessageAgainstGroupRules(env, { groupId, userId, senderName, text, messageId }) {
+  // 缺省即开启；只有显式写入 false 才关闭。
+  if (await dbGet(env, `rule_monitor_enabled:${groupId}`) === "false") return;
+  const rules = String(await dbGet(env, `group_rules:${groupId}`) || "").trim();
+  const content = String(text || "").trim();
+  if (!rules || !content || content.length < 2) return;
+
+  let review;
+  try {
+    const result = await callGemmaDecision(env, {
+      system: `你是群規合規分類器。只能輸出 JSON：{"violation":true|false,"confidence":0到1,"violationType":"違規項目分類","rule":"涉及群規","reason":"簡短原因","action":"record|warn|mute|kick","muteSeconds":整數}。只有明顯違反提供的群規時才判 true；不確定必須 false。action 只是建議，系統會按授權範圍決定是否執行。`,
+      prompt: JSON.stringify({ rules, message: content, userId, senderName }).slice(0, 6000),
+      maxOutputTokens: 220
+    });
+    review = JSON.parse(result.text.match(/\{[\s\S]*\}/)?.[0] || "{}");
+  } catch (error) {
+    console.warn("群规监控判定失败", error);
+    return;
+  }
+  if (review?.violation !== true || Number(review.confidence || 0) < 0.72) return;
+
+  const item = await appendRuleViolationRecord(env, {
+    groupId, userId, senderName, content,
+    violationType: review.violationType || review.rule || "其他",
+    rule: review.rule || "",
+    reason: review.reason || "",
+    confidence: review.confidence,
+    recommendedAction: review.action || "record",
+    messageId
+  });
+  await performRuleProxyAction(env, item, review);
+}
+
+async function createGroupWorkRequest(env, data) {
+  const id = `gw_${Date.now().toString(36)}_${crypto.randomUUID().slice(0, 6)}`;
+  const review = await reviewGroupWorkWithGemma(env, data.type, data.content || data.file || "");
+  const item = {
+    id, status: "pending_owner", groupId: String(data.groupId), creatorId: String(data.creatorId),
+    creatorName: String(data.creatorName || data.creatorId), type: String(data.type), content: String(data.content || "").slice(0, 5000),
+    file: String(data.file || "").slice(0, 2000), fileName: String(data.fileName || "").slice(0, 255), sourceMessageId: String(data.sourceMessageId || ""),
+    review, createdAt: Date.now(), expiresAt: Date.now() + 24 * 60 * 60 * 1000
+  };
+  await dbPut(env, `groupwork:${id}`, JSON.stringify(item));
+  await appendIndex(env, `groupwork:index:${item.groupId}`, id, 500);
+  await writeSystemAudit(env, { type: "groupwork_requested", groupId: item.groupId, actorId: item.creatorId, action: item.type, requestId: id });
+  return item;
+}
+
+async function executeGroupWorkRequest(env, item, ownerId) {
+  if (!(await canUseBotGroupOperations(env, item.groupId, ownerId))) return { ok: false, message: "缺少群操作权限，无法执行群公告、群待办或群文件操作。" };
+  try {
+    if (item.type === "notice") {
+      await callOneBotAction(env, { action: "_send_group_notice", params: { group_id: numericId(item.groupId), content: item.content } }, 15000);
+      return { ok: true, message: "群公告已由群主授权发布。" };
+    }
+    if (item.type === "todo") {
+      const sent = await callOneBotAction(env, { action: "send_group_msg", params: { group_id: numericId(item.groupId), message: item.content, auto_escape: false } }, 15000);
+      const messageId = sent?.message_id ?? sent?.messageId ?? sent?.data?.message_id ?? sent?.data?.messageId;
+      if (!messageId) throw new Error("发送待办内容后未取得 message_id");
+      await callOneBotAction(env, { action: "set_group_todo", params: { group_id: numericId(item.groupId), message_id: String(messageId) } }, 15000);
+      return { ok: true, message: "群待办已由群主授权建立。" };
+    }
+    if (item.type === "file") {
+      if (!item.file) return { ok: false, message: "群文件缺少可上传的 URL 或 NapCat 可访问路径。" };
+      await callOneBotAction(env, { action: "upload_group_file", params: { group_id: numericId(item.groupId), file: item.file, name: item.fileName || "QQAI上传文件", folder_id: "/" } }, 60000);
+      return { ok: true, message: "群文件已由群主授权上传。" };
+    }
+    return { ok: false, message: "未知群务类型。" };
+  } catch (error) {
+    return { ok: false, message: `群务执行失败：${error?.message || error}` };
+  }
+}
+
+async function handleGroupWorkDecision(env, { groupId, actorId, id, decision }) {
+  const item = await readJson(env, `groupwork:${id}`, null);
+  if (!item || String(item.groupId) !== String(groupId)) return { ok: false, message: "找不到该群务确认单。" };
+  if (item.status !== "pending_owner") return { ok: false, message: `该群务当前状态为 ${item.status}。` };
+  if (!(await canUseBotGroupOperations(env, groupId, actorId))) return { ok: false, message: "只有 QQ 管理员、群主、开发者或获授群操作权限者可以处理该群务确认单。" };
+  if (decision === "cancel") {
+    item.status = "cancelled"; item.decidedAt = Date.now(); item.decidedBy = String(actorId);
+    await dbPut(env, `groupwork:${id}`, JSON.stringify(item));
+    return { ok: true, message: `群务 ${id} 已取消，未执行。` };
+  }
+  const result = await executeGroupWorkRequest(env, item, actorId);
+  item.status = result.ok ? "executed" : "failed"; item.decidedAt = Date.now(); item.decidedBy = String(actorId); item.result = result.message;
+  await dbPut(env, `groupwork:${id}`, JSON.stringify(item));
+  await writeSystemAudit(env, { type: "groupwork_decided", groupId, actorId, action: item.type, requestId: id, result: result.ok ? "executed" : "failed" });
+  return result;
+}
+
 async function createModerationProposal(env, data) {
-  const id = `op_${Date.now().toString(36)}_${crypto.randomUUID().slice(0, 6)}`;
   const now = Date.now();
+  const cooldownSeconds = Math.max(0, Number(await dbGet(env, `moderation_target_cooldown_seconds:${data.groupId}`) || DEFAULTS.moderationTargetCooldownSeconds));
+  const cooldownKey = data.targetId ? `moderation:target_cooldown:${data.groupId}:${data.action}:${data.targetId}` : "";
+  if (cooldownKey && cooldownSeconds > 0) {
+    const lastAt = Number(await dbGet(env, cooldownKey) || 0);
+    if (lastAt && now - lastAt < cooldownSeconds * 1000) {
+      throw new Error(`同一对象处置仍在冷却中，请在 ${Math.ceil((cooldownSeconds * 1000 - (now - lastAt)) / 1000)} 秒后重试。`);
+    }
+    await dbPut(env, cooldownKey, String(now));
+  }
+  const id = `op_${now.toString(36)}_${crypto.randomUUID().slice(0, 6)}`;
   const proposal = {
     id,
     status: "pending",
@@ -3473,6 +4842,7 @@ async function createModerationProposal(env, data) {
   };
   await dbPut(env, `moderation:proposal:${id}`, JSON.stringify(proposal));
   await dbPut(env, `moderation:last:${proposal.groupId}:${proposal.actorId}`, id);
+  await dbPut(env, `moderation:last:${proposal.groupId}`, id);
   await appendIndex(env, `moderation:proposal:index:${proposal.groupId}`, id, 500);
   await writeSystemAudit(env, { type: "moderation_proposed", groupId: proposal.groupId, actorId: proposal.actorId, targetId: proposal.targetId, action: proposal.action, proposalId: id });
   return proposal;
@@ -3496,8 +4866,8 @@ async function validateModerationProposalTarget(env, proposal, confirmerRole, co
   const targetRole = target?.role || proposal.targetRole || "member";
   if (targetRole === "owner") return { ok: false, message: "不能对群主执行该操作。" };
   if (targetRole === "admin" && !["owner", "developer"].includes(confirmerRole)) return { ok: false, message: "管理员不能对其他管理员执行该操作，必须由群主确认。" };
-  if (["set_admin", "unset_admin"].includes(proposal.action) && !(await isVerifiedGroupOwner(env, proposal.groupId, confirmerId))) {
-    return { ok: false, message: "设置或取消 QQ 群管理员只能由当前群主确认；开发者与普通管理员均不能代替群主。" };
+  if (["set_admin", "unset_admin"].includes(proposal.action) && !(await isBotVerifiedGroupOwner(env, proposal.groupId))) {
+    return { ok: false, message: "机器人账号当前不是本群群主，无法新增或撤除真正 QQ 管理员。" };
   }
   return { ok: true, target };
 }
@@ -3527,35 +4897,93 @@ async function executeModerationProposal(env, proposal, confirmer) {
   return result.ok ? { ok: true, message: `已执行：${moderationActionLabel(proposal.action)}。` } : { ok: false, message: `操作失败：${result.error}` };
 }
 
-async function handleModerationConfirmation(env, { groupId, actorId, actorRole, isDeveloper, confirmation }) {
+async function findLatestPendingModerationProposalId(env, groupId) {
+  const pointer = String(await dbGet(env, `moderation:last:${groupId}`) || "");
+  if (pointer) {
+    const proposal = await readJson(env, `moderation:proposal:${pointer}`, null);
+    if (proposal?.status === "pending" && Number(proposal.expiresAt || 0) >= Date.now()) return pointer;
+  }
+  const ids = await readJson(env, `moderation:proposal:index:${groupId}`, []);
+  for (const id of ids.slice().reverse()) {
+    const proposal = await readJson(env, `moderation:proposal:${id}`, null);
+    if (proposal?.status === "pending" && Number(proposal.expiresAt || 0) >= Date.now()) return String(id);
+  }
+  return "";
+}
+
+async function retractModerationProposalMessage(env, proposal, reason = "resolved") {
+  if (!proposal?.notificationMessageId || proposal.notificationRetractedAt) return { ok: true, skipped: true };
+  try {
+    await callOneBotAction(env, { action: "delete_msg", params: { message_id: numericId(proposal.notificationMessageId) } }, 10000);
+    proposal.notificationRetractedAt = Date.now();
+    proposal.notificationRetractReason = reason;
+    proposal.notificationRetractStatus = "success";
+    return { ok: true };
+  } catch (error) {
+    proposal.notificationRetractStatus = "failed";
+    proposal.notificationRetractError = String(error?.message || error);
+    return { ok: false, error: proposal.notificationRetractError };
+  }
+}
+
+async function attachModerationProposalMessage(env, proposalId, messageId, groupId) {
+  if (!proposalId || !messageId) return;
+  const proposal = await readJson(env, `moderation:proposal:${proposalId}`, null);
+  if (!proposal || (groupId && String(proposal.groupId) !== String(groupId))) return;
+  proposal.notificationMessageId = String(messageId);
+  proposal.notificationSentAt = Date.now();
+  if (proposal.status !== "pending" || Date.now() > Number(proposal.expiresAt || 0)) {
+    if (proposal.status === "pending") proposal.status = "expired";
+    await retractModerationProposalMessage(env, proposal, proposal.status || "expired");
+  }
+  await dbPut(env, `moderation:proposal:${proposal.id}`, JSON.stringify(proposal));
+  if (proposal.status === "pending" && Number(proposal.expiresAt || 0) > Date.now()) {
+    try {
+      await getOneBotHub(env).fetch("https://onebot-hub/moderation/expiry", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ proposalId: proposal.id, expiresAt: proposal.expiresAt })
+      });
+    } catch (error) {
+      console.warn("schedule moderation expiry alarm failed", error);
+    }
+  }
+}
+
+async function handleModerationConfirmation(env, { groupId, actorId, actorRole, isDeveloper, hasGroupOpsPermission = false, confirmation }) {
   let id = String(confirmation.id || "").trim();
-  if (!id) id = String(await dbGet(env, `moderation:last:${groupId}:${actorId}`) || "");
-  if (!id) return { handled: true, ok: false, message: "没有找到你待确认的群操作。" };
+  if (!id) id = await findLatestPendingModerationProposalId(env, groupId);
+  if (!id) return { handled: true, ok: false, message: "本群目前没有可处理的待确认操作。" };
   const proposal = await readJson(env, `moderation:proposal:${id}`, null);
   if (!proposal || String(proposal.groupId) !== String(groupId)) return { handled: true, ok: false, message: "找不到该待确认操作。" };
   if (proposal.status !== "pending") return { handled: true, ok: false, message: `该操作当前状态为 ${proposal.status}，不能重复处理。` };
   if (Date.now() > Number(proposal.expiresAt || 0)) {
     proposal.status = "expired";
+    proposal.expiredAt = Date.now();
+    await retractModerationProposalMessage(env, proposal, "expired");
     await dbPut(env, `moderation:proposal:${id}`, JSON.stringify(proposal));
-    return { handled: true, ok: false, message: "该操作已超过 2 分钟确认期限，未执行。" };
+    return { handled: true, ok: false, message: "该操作已超过 2 分钟确认期限，未执行；原提案提示已撤回。" };
   }
   const adminRoleChange = ["set_admin", "unset_admin"].includes(proposal.action);
-  const verifiedOwner = adminRoleChange ? await isVerifiedGroupOwner(env, groupId, actorId) : false;
+  const botIsOwner = adminRoleChange ? await isBotVerifiedGroupOwner(env, groupId) : false;
+  const nativeManagerOrAbove = isDeveloper || actorRole === "owner" || actorRole === "admin";
+  const grantedGroupOps = Boolean(hasGroupOpsPermission);
   const canConfirm = adminRoleChange
-    ? verifiedOwner
-    : (String(proposal.actorId) === String(actorId) || isDeveloper || actorRole === "owner");
+    ? (botIsOwner && (nativeManagerOrAbove || grantedGroupOps))
+    : (nativeManagerOrAbove || grantedGroupOps);
   if (!canConfirm) {
     return { handled: true, ok: false, message: adminRoleChange
-      ? "设置或取消 QQ 群管理员只能由当前群主确认；开发者与普通管理员均无权执行。"
-      : "只有提出操作的人、群主或开发者可以确认。" };
+      ? "只有机器人账号本身是本群群主时，才可新增或撤除真正 QQ 管理员。"
+      : "只有 QQ 管理员、群主或开发者可以处理该提案。" };
   }
   if (confirmation.type === "cancel") {
     proposal.status = "cancelled";
     proposal.cancelledAt = Date.now();
     proposal.cancelledBy = String(actorId);
+    await retractModerationProposalMessage(env, proposal, "cancelled");
     await dbPut(env, `moderation:proposal:${id}`, JSON.stringify(proposal));
     await writeSystemAudit(env, { type: "moderation_cancelled", groupId, actorId, proposalId: id });
-    return { handled: true, ok: true, message: `已取消操作 ${id}，未执行任何群管理动作。` };
+    return { handled: true, ok: true, message: `已取消操作 ${id}，未执行任何群管理动作；原提案提示已撤回。` };
   }
   const result = await executeModerationProposal(env, proposal, { id: String(actorId), role: isDeveloper ? "developer" : actorRole });
   proposal.status = result.ok ? "executed" : "failed";
@@ -3570,8 +4998,8 @@ async function detectNaturalModerationProposal(env, { groupId, actorId, actorNam
   if (!groupId || !(isDeveloper || ["owner", "admin"].includes(actorRole))) return null;
   const intent = await classifyNaturalModerationIntent(env, text);
   if (!intent || intent.action === "none" || Number(intent.confidence || 0) < 0.55) return null;
-  if (["set_admin", "unset_admin"].includes(intent.action) && !(await isVerifiedGroupOwner(env, groupId, actorId))) {
-    return { handled: true, message: "设置或取消 QQ 群管理员只能由当前群主提出并确认；开发者与普通管理员均不能代替群主。" };
+  if (["set_admin", "unset_admin"].includes(intent.action) && !(await isBotVerifiedGroupOwner(env, groupId))) {
+    return { handled: true, message: "机器人账号当前不是本群群主，因此不会显示或建立真正 QQ 管理员任免操作。" };
   }
   let target = { ok: true, targetQq: "", targetName: "", member: null };
   if (moderationActionNeedsTarget(intent.action)) {
@@ -3652,7 +5080,7 @@ async function runHealthChecks(env, { mode = "quick" } = {}) {
     return { connected: true, sockets: state.sockets, pendingRpc: state.pendingRpc, inFlightQuestions: state.inFlightQuestions, queuedQuestions: state.queuedQuestions, lastHeartbeatAt: state.lastHeartbeatAt };
   }, { timeoutMs: 10000 }));
 
-  const keys = [...new Set([...parseList(env.GEMINI_API_KEYS), ...parseList(env.VECTORIZE_GEMINI_KEYS)])];
+  const keys = roundRobinKeys([...new Set([...parseList(env.GEMINI_API_KEYS), ...parseList(env.VECTORIZE_GEMINI_KEYS)])], "gemini");
   checks.push(await runTimedHealthCheck("Gemini API", async () => {
     if (!keys.length) throw new Error("GEMINI_API_KEY_MISSING");
     const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${encodeURIComponent(keys[0])}&pageSize=1`, { signal: AbortSignal.timeout(8000) });
@@ -3689,9 +5117,10 @@ async function runHealthChecks(env, { mode = "quick" } = {}) {
   }, { timeoutMs: 11000 }));
 
   checks.push(await runTimedHealthCheck("DeepSeek API", async () => {
-    if (!env.DEEPSEEK_API_KEY) return { configured: false };
-    if (mode !== "full") return { configured: true, key: maskSecret(env.DEEPSEEK_API_KEY) };
-    const response = await fetch("https://api.deepseek.com/models", { headers: { Authorization: `Bearer ${env.DEEPSEEK_API_KEY}` }, signal: AbortSignal.timeout(8000) });
+    const deepseekKeys = deepSeekApiKeys(env);
+    if (!deepseekKeys.length) return { configured: false };
+    if (mode !== "full") return { configured: true, keys: deepseekKeys.length, key: maskSecret(deepseekKeys[0]) };
+    const response = await fetch("https://api.deepseek.com/models", { headers: { Authorization: `Bearer ${deepseekKeys[0]}` }, signal: AbortSignal.timeout(8000) });
     if (!response.ok) throw new Error(`DEEPSEEK_${response.status}`);
     return { configured: true, reachable: true };
   }, { timeoutMs: 10000, optional: true }));
@@ -3717,7 +5146,7 @@ async function runHealthChecks(env, { mode = "quick" } = {}) {
 
   const lastCron = await dbGet(env, "system:last_cron");
   checks.push({ name: "Cron Scheduler", status: lastCron && Date.now() - Number(lastCron) < 5 * 60 * 1000 ? "ok" : "warning", latencyMs: 0, detail: { lastRunAt: lastCron ? new Date(Number(lastCron)).toISOString() : null }, checkedAt: new Date().toISOString() });
-  checks.push({ name: "Rate Limiter", status: env.MY_RATE_LIMITER ? "ok" : "warning", latencyMs: 0, detail: env.MY_RATE_LIMITER ? "binding present" : "not bound", checkedAt: new Date().toISOString() });
+  checks.push({ name: "D1 Runtime Rate Limit", status: env.DB ? "ok" : "warning", latencyMs: 0, detail: env.DB ? "D1 dynamic rate limit enabled" : "D1 not bound", checkedAt: new Date().toISOString() });
 
   const summary = {
     ok: !checks.some(item => item.status === "error"),
@@ -3748,7 +5177,7 @@ async function buildHealthState(env) {
       gemini: Boolean(env.GEMINI_API_KEYS || env.VECTORIZE_GEMINI_KEYS),
       gemmaDecisionModels: parseList(env.GEMMA_DECISION_MODELS, ["gemma-4-26b-a4b-it", "gemma-4-31b-it"]),
       gemmaChatModels: parseList(env.GEMMA_CHAT_MODELS, ["gemma-4-26b-a4b-it", "gemma-4-31b-it"]),
-      deepseek: Boolean(env.DEEPSEEK_API_KEY),
+      deepseek: deepSeekApiKeys(env).length > 0,
       liveModel: env.GEMINI_LIVE_MODEL || "gemini-3.1-flash-live-preview"
     },
     onebot,
@@ -3760,14 +5189,28 @@ async function buildHealthState(env) {
 
 
 
-function jsonResponse(data, status = 200) {
+function jsonResponse(data, status = 200, extraHeaders = {}) {
   return new Response(JSON.stringify(data), {
     status,
     headers: {
       "Content-Type": "application/json; charset=utf-8",
-      "Cache-Control": "no-store"
+      "Cache-Control": "no-store",
+      ...extraHeaders
     }
   });
+}
+
+function readCookie(request, name) {
+  const raw = String(request.headers.get("Cookie") || "");
+  for (const part of raw.split(";")) {
+    const [key, ...value] = part.trim().split("=");
+    if (key === name) return decodeURIComponent(value.join("="));
+  }
+  return "";
+}
+
+function portalSessionCookie(token, maxAgeSeconds = 1800) {
+  return `qqai_session=${encodeURIComponent(token || "")}; Path=/; Max-Age=${Math.max(0, maxAgeSeconds)}; HttpOnly; Secure; SameSite=Lax`;
 }
 
 function generateSixDigitCode() {
@@ -3812,7 +5255,7 @@ async function createPortalSession(env, data) {
   const permissions = groupId ? await getEffectivePermissions(env, groupId, qq, role, role === "developer") : {
     developer: isDeveloperId(env, qq), nativeAdmin: false, aiAdmin: isDeveloperId(env, qq), groupOps: isDeveloperId(env, qq), scheduleReviewer: isDeveloperId(env, qq), appealReviewer: isDeveloperId(env, qq)
   };
-  const session = { qq, group: data.group || "", groupId, token, role, permissions, expiresAt: Date.now() + 24 * 60 * 60 * 1000 };
+  const session = { qq, group: data.group || "", groupId, token, role, permissions, expiresAt: Date.now() + DEFAULTS.portalSessionTtlMs };
   await dbPut(env, `portal_session:${token}`, JSON.stringify(session));
   return session;
 }
@@ -3829,6 +5272,8 @@ async function getPortalSession(env, token) {
       await dbDel(env, `portal_session:${token}`);
       return null;
     }
+    session.expiresAt = Date.now() + DEFAULTS.portalSessionTtlMs;
+    await dbPut(env, `portal_session:${token}`, JSON.stringify(session));
     return session;
   } catch (e) {
     return null;
@@ -3860,7 +5305,7 @@ async function upsertGroupMember(env, groupId, member) {
   const key = `group_members:${groupId}`;
   const list = await readJson(env, key, []);
   const idx = list.findIndex(x => String(x.qq) === String(member.qq));
-  const next = { ...member, lastSeenAt: new Date().toISOString() };
+  const next = { ...member, firstSeenAt: member.firstSeenAt || (idx >= 0 ? list[idx].firstSeenAt : new Date().toISOString()), lastSeenAt: new Date().toISOString() };
   if (idx >= 0) list[idx] = { ...list[idx], ...next };
   else list.push(next);
   if (list.length > 1000) list.splice(0, list.length - 1000);
@@ -3896,7 +5341,7 @@ async function getUserQuota(env, groupId, userId) {
 function commandChangesWebSettings(message) {
   const text = String(message || "").trim().toLowerCase();
   if (!/^[!！]/.test(text)) return false;
-  if (/^[!！]指令(开|開|关|關)\b/.test(text)) return false;
+  if (/^[!！]指令(开|開|关|關)\b/.test(text)) return true;
   return [
     "关闭ai", "關閉ai", "开启ai", "開啟ai", "ai关", "ai關", "ai开", "ai開",
     "记忆开", "記憶開", "记忆关", "記憶關",
@@ -3907,7 +5352,13 @@ function commandChangesWebSettings(message) {
     "set人格", "del人格",
     "记住", "記住", "忘记", "忘記",
     "禁记忆", "禁記憶", "解禁记忆", "解禁記憶",
-    "banmemory", "unbanmemory"
+    "banmemory", "unbanmemory",
+    "群规监控", "群規監控", "ai群规代理", "ai群規代理",
+    "授权ai踢出", "授權ai踢出", "撤回ai踢出授权", "撤回ai踢出授權",
+    "入群辅助", "入群輔助", "授权ai拒绝入群", "授權ai拒絕入群",
+    "撤回ai拒绝入群", "撤回ai拒絕入群", "设置处置冷却", "設定處置冷卻",
+    "设置速率限制", "設定速率限制", "设置全局速率限制", "設定全域速率限制",
+    "自动欢迎", "自動歡迎", "欢迎词", "歡迎詞"
   ].some(cmd => text.startsWith("!" + cmd) || text.startsWith("！" + cmd));
 }
 
@@ -3960,9 +5411,245 @@ function buildGroupReplyMessage(eventBody, replyText) {
   return message;
 }
 
+async function sha256Hex(value) {
+  const bytes = new TextEncoder().encode(String(value || ""));
+  const digest = await crypto.subtle.digest("SHA-256", bytes);
+  return [...new Uint8Array(digest)].map(x => x.toString(16).padStart(2, "0")).join("");
+}
+
+async function migratePortalMemories(env, key, rawList, ownerFallback) {
+  const input = Array.isArray(rawList) ? rawList : [];
+  const normalized = [];
+  let changed = false;
+  for (let i = 0; i < input.length; i++) {
+    const raw = input[i];
+    const item = typeof raw === "string"
+      ? { text: raw, scope: "private", owner: ownerFallback, migrated: true }
+      : raw && typeof raw === "object" ? { ...raw, text: String(raw.text || ""), owner: String(raw.owner || ownerFallback), scope: raw.scope || "private" } : null;
+    if (!item || !item.text.trim()) { changed = true; continue; }
+    if (!item.id) {
+      item.id = `mem_legacy_${(await sha256Hex(`${key}|${i}|${item.text}`)).slice(0, 24)}`;
+      changed = true;
+    }
+    normalized.push(item);
+  }
+  if (changed) await dbPut(env, key, JSON.stringify(normalized));
+  return normalized;
+}
+
+async function upsertMemoryVector(env, item, groupId) {
+  if (!env.VECTORIZE || !env.AI || !item?.text) return item;
+  const values = await env.AI.run("@cf/baai/bge-m3", { text: [String(item.text)] });
+  const vector = values?.data?.[0];
+  if (!Array.isArray(vector)) return item;
+  const vectorId = String(item.vectorId || `memory_${item.id}`);
+  await env.VECTORIZE.upsert([{ id: vectorId, values: vector, metadata: {
+    kind: "memory", groupId: String(groupId), subjectQq: String(item.subjectQq || item.owner || ""),
+    owner: String(item.owner || ""), scope: String(item.scope || "private"), text: String(item.text), memoryId: String(item.id), updatedAt: Date.now()
+  }}]);
+  await dbDel(env, `memory_vector_tombstone:${vectorId}`);
+  item.vectorId = vectorId;
+  return item;
+}
+
+async function deleteMemoryVector(env, item) {
+  const vectorId = String(item?.vectorId || (item?.id ? `memory_${item.id}` : ""));
+  if (!vectorId) return false;
+  await dbPut(env, `memory_vector_tombstone:${vectorId}`, "true");
+  if (env.VECTORIZE?.deleteByIds) {
+    try { await env.VECTORIZE.deleteByIds([vectorId]); return true; } catch (error) { console.warn("Vectorize memory delete failed", error); }
+  }
+  return false;
+}
+
+async function searchPortalVectors(env, { groupId, userId, permissions, query, limit = 20 }) {
+  if (!env.VECTORIZE || !env.AI || !query) return [];
+  const embedded = await env.AI.run("@cf/baai/bge-m3", { text: [String(query)] });
+  const vector = embedded?.data?.[0];
+  if (!Array.isArray(vector)) return [];
+  const result = await env.VECTORIZE.query(vector, { topK: Math.max(1, Math.min(50, limit)), returnMetadata: "all", filter: { kind: "chat_log", groupId: String(groupId) } });
+  return (result?.matches || []).filter(match => {
+    const meta = match.metadata || {};
+    if (meta.kind !== "chat_log" || String(meta.groupId || meta.group_id || "") !== String(groupId)) return false;
+    if (permissions?.nativeAdmin || permissions?.aiAdmin || permissions?.developer) return true;
+    return String(meta.qq || meta.userId || meta.author || "") === String(userId);
+  }).map(match => ({ id: match.id, score: match.score, text: match.metadata?.text || "", qq: match.metadata?.qq || "", createdAt: match.metadata?.createdAt || null }));
+}
+
+const PORTAL_SETTING_DEFINITIONS = Object.freeze([
+  { key: "dnd", label: "免打扰", command: "!免打扰 / !取消免打扰", minRole: "member", scope: "user", type: "boolean", defaultValue: false },
+  { key: "custom_style", label: "个人回复风格", command: "!set人格 / !del人格", minRole: "member", scope: "user", type: "text", defaultValue: "" },
+  { key: "model_preference", label: "模型偏好", command: "!模型", minRole: "member", scope: "user", type: "select", options: ["auto", "gemini", "deepseek", "deepseek_high", "deepseek_max"], defaultValue: "auto" },
+  { key: "ai_on", label: "启用群 AI", command: "!开启ai / !关闭ai", minRole: "admin", scope: "group", type: "boolean", defaultValue: true },
+  { key: "memory_on", label: "启用长期记忆", command: "!记忆开 / !记忆关", minRole: "admin", scope: "group", type: "boolean", defaultValue: true },
+  { key: "commands_enabled", label: "启用设置型 ! 指令", command: "!指令开 / !指令关", minRole: "admin", scope: "group", type: "boolean", defaultValue: true },
+  { key: "interject_rate", label: "随机插话率", command: "!设置插话率", minRole: "admin", scope: "group", type: "number", min: 0, max: 100, defaultValue: 25 },
+  { key: "join_assist_enabled", label: "入群申请辅助", command: "!入群辅助 开/关", minRole: "admin", scope: "group", type: "boolean", defaultValue: false },
+  { key: "join_pattern_threshold", label: "重复申请方式自动同意门槛", command: "网页设置", minRole: "admin", scope: "group", type: "number", min: 1, defaultValue: 2 },
+  { key: "group_persona", label: "群组人格", command: "!切换人格 / !恢复人格", minRole: "admin", scope: "group", type: "textarea", defaultValue: "" },
+  { key: "keyword_filter", label: "群组关键字过滤", command: "网页设置", minRole: "admin", scope: "group", type: "textarea", defaultValue: "" },
+  { key: "group_rules", label: "群规", command: "!set群规", minRole: "admin", scope: "group", type: "textarea", defaultValue: "" },
+  { key: "welcome_enabled", label: "自动欢迎", command: "!自动欢迎 开/关", minRole: "owner", scope: "group", type: "boolean", defaultValue: false },
+  { key: "welcome_text", label: "欢迎词", command: "!欢迎词", minRole: "owner", scope: "group", type: "textarea", defaultValue: DEFAULTS.welcomeText },
+  { key: "rule_monitor_enabled", label: "群规持续监控", command: "!群规监控", minRole: "owner", scope: "group", type: "boolean", defaultValue: true },
+  { key: "rule_proxy_mode", label: "AI 群规代理模式", command: "!AI群规代理", minRole: "owner", scope: "group", type: "select", options: ["record", "warn", "mute", "auto"], defaultValue: "record" },
+  { key: "rule_proxy_mute_seconds", label: "AI 代理禁言秒数", command: "网页 / AI代理设置", minRole: "owner", scope: "group", type: "number", min: 0, defaultValue: 600 },
+  { key: "rule_proxy_kick_authorized", label: "AI 踢出授权", command: "!授权AI踢出 / !撤回AI踢出授权", minRole: "owner", scope: "group", type: "boolean", defaultValue: false },
+  { key: "join_reject_authorized", label: "AI 拒绝入群授权", command: "!授权AI拒绝入群 / !撤回AI拒绝入群", minRole: "owner", scope: "group", type: "boolean", defaultValue: false },
+  { key: "moderation_cooldown_seconds", label: "同对象处置冷却秒数", command: "!设置处置冷却", minRole: "owner", scope: "group", type: "number", min: 0, defaultValue: 0 },
+  { key: "active_speaking", label: "主动发话", command: "开发者后台", minRole: "developer", scope: "group", type: "boolean", defaultValue: false },
+  { key: "rate_limit_seconds", label: "群调用速率限制秒数", command: "!设置速率限制", minRole: "developer", scope: "group", type: "number", min: 0, defaultValue: 10 }
+]);
+
+function portalRoleRank(role) {
+  return ({ member: 0, admin: 1, owner: 2, developer: 3 })[String(role || "member")] ?? 0;
+}
+
+async function readPortalSettingValue(env, definition, groupId, targetQq) {
+  const qq = String(targetQq || "");
+  switch (definition.key) {
+    case "dnd": return await dbGet(env, `dnd:${groupId}:${qq}`) === "true";
+    case "custom_style": return await dbGet(env, `custom_style:${groupId}:${qq}`) || "";
+    case "model_preference": return await dbGet(env, `model_pref:${groupId}:${qq}`) || "auto";
+    case "ai_on": return await dbGet(env, `ai_off:${groupId}`) !== "true";
+    case "memory_on": return await dbGet(env, `memo:${groupId}`) !== "false";
+    case "commands_enabled": return await dbGet(env, `web_command_off:${groupId}`) !== "true";
+    case "interject_rate": return Number(await dbGet(env, `interject_rate:${groupId}`) || DEFAULTS.interjectRate);
+    case "join_assist_enabled": return await dbGet(env, `join_assist_enabled:${groupId}`) === "true";
+    case "join_pattern_threshold": return Math.max(1, parseUnlimitedNonNegativeInteger(await dbGet(env, `join_pattern_auto_approve_threshold:${groupId}`), DEFAULTS.joinPatternAutoApproveThreshold));
+    case "group_persona": return await dbGet(env, `group_persona:${groupId}`) || "";
+    case "keyword_filter": return (await readJson(env, `keyword_filter:${groupId}`, [])).join("\n");
+    case "group_rules": return await dbGet(env, `group_rules:${groupId}`) || "";
+    case "welcome_enabled": return await dbGet(env, `welcome_enabled:${groupId}`) === "true";
+    case "welcome_text": return await dbGet(env, `welcome_text:${groupId}`) || DEFAULTS.welcomeText;
+    case "rule_monitor_enabled": return await dbGet(env, `rule_monitor_enabled:${groupId}`) !== "false";
+    case "rule_proxy_mode": return normalizeRuleProxyMode(await dbGet(env, `rule_proxy_mode:${groupId}`) || DEFAULTS.ruleProxyMode);
+    case "rule_proxy_mute_seconds": return parseUnlimitedNonNegativeInteger(await dbGet(env, `rule_proxy_mute_seconds:${groupId}`), DEFAULTS.ruleProxyMuteSeconds);
+    case "rule_proxy_kick_authorized": return await dbGet(env, `rule_proxy_kick_authorized:${groupId}`) === "true";
+    case "join_reject_authorized": return await dbGet(env, `join_reject_authorized:${groupId}`) === "true";
+    case "moderation_cooldown_seconds": return parseUnlimitedNonNegativeInteger(await dbGet(env, `moderation_target_cooldown_seconds:${groupId}`), 0);
+    case "active_speaking": return await getFeatureFlag(env, `active_speaking:${groupId}`, false);
+    case "rate_limit_seconds": return await getRuntimeRateLimitSeconds(env, groupId);
+    default: return definition.defaultValue;
+  }
+}
+
+async function writePortalSettingValue(env, definition, groupId, targetQq, value) {
+  const qq = String(targetQq || "");
+  switch (definition.key) {
+    case "dnd": return value ? dbPut(env, `dnd:${groupId}:${qq}`, "true") : dbDel(env, `dnd:${groupId}:${qq}`);
+    case "custom_style": return dbPut(env, `custom_style:${groupId}:${qq}`, String(value || "").slice(0, 1000));
+    case "model_preference": { const pref = normalizeModelPreference(value) || "auto"; return dbPut(env, `model_pref:${groupId}:${qq}`, pref); }
+    case "ai_on": return value ? dbDel(env, `ai_off:${groupId}`) : dbPut(env, `ai_off:${groupId}`, "true");
+    case "memory_on": return dbPut(env, `memo:${groupId}`, value ? "true" : "false");
+    case "commands_enabled": return value ? dbDel(env, `web_command_off:${groupId}`) : dbPut(env, `web_command_off:${groupId}`, "true");
+    case "interject_rate": return dbPut(env, `interject_rate:${groupId}`, String(Math.max(0, Math.min(100, Number(value || 0)))));
+    case "join_assist_enabled": return dbPut(env, `join_assist_enabled:${groupId}`, value ? "true" : "false");
+    case "join_pattern_threshold": return dbPut(env, `join_pattern_auto_approve_threshold:${groupId}`, String(Math.max(1, parseUnlimitedNonNegativeInteger(value, DEFAULTS.joinPatternAutoApproveThreshold))));
+    case "group_persona": return dbPut(env, `group_persona:${groupId}`, String(value || "").slice(0, 4000));
+    case "keyword_filter": return dbPut(env, `keyword_filter:${groupId}`, JSON.stringify(String(value || "").split(/\n|,/).map(item => item.trim()).filter(Boolean).slice(0, 500)));
+    case "group_rules": return dbPut(env, `group_rules:${groupId}`, String(value || "").slice(0, 10000));
+    case "welcome_enabled": return dbPut(env, `welcome_enabled:${groupId}`, value ? "true" : "false");
+    case "welcome_text": return dbPut(env, `welcome_text:${groupId}`, String(value || DEFAULTS.welcomeText).slice(0, 1000));
+    case "rule_monitor_enabled": return dbPut(env, `rule_monitor_enabled:${groupId}`, value ? "true" : "false");
+    case "rule_proxy_mode": return dbPut(env, `rule_proxy_mode:${groupId}`, normalizeRuleProxyMode(value));
+    case "rule_proxy_mute_seconds": return dbPut(env, `rule_proxy_mute_seconds:${groupId}`, String(parseUnlimitedNonNegativeInteger(value, DEFAULTS.ruleProxyMuteSeconds)));
+    case "rule_proxy_kick_authorized": return value ? dbPut(env, `rule_proxy_kick_authorized:${groupId}`, "true") : dbDel(env, `rule_proxy_kick_authorized:${groupId}`);
+    case "join_reject_authorized": return value ? dbPut(env, `join_reject_authorized:${groupId}`, "true") : dbDel(env, `join_reject_authorized:${groupId}`);
+    case "moderation_cooldown_seconds": return dbPut(env, `moderation_target_cooldown_seconds:${groupId}`, String(parseUnlimitedNonNegativeInteger(value, 0)));
+    case "active_speaking": return setFeatureFlag(env, `active_speaking:${groupId}`, Boolean(value));
+    case "rate_limit_seconds": return dbPut(env, `runtime_rate_limit_seconds:group:${groupId}`, String(parseUnlimitedNonNegativeInteger(value, DEFAULTS.runtimeRateLimitSeconds)));
+  }
+}
+
+function normalizeBilibiliEvent(payload) {
+  const data = payload?.data || payload?.event_data || payload?.body || payload || {};
+  const rawType = String(payload?.event_type || payload?.event || payload?.cmd || payload?.type || data?.event_type || data?.type || "").toLowerCase();
+  let type = "unknown";
+  if (/live.*start|start.*live|live_open_platform_live_start|开播|開播/.test(rawType)) type = "live_start";
+  else if (/video.*publish|archive.*publish|稿件.*发布|投稿|new_video/.test(rawType)) type = "video_publish";
+  const creatorId = String(data?.open_id || data?.uid || data?.mid || data?.creator_id || payload?.open_id || payload?.uid || "");
+  const creatorName = String(data?.uname || data?.name || data?.creator_name || payload?.creator_name || "");
+  const title = String(data?.title || data?.room_title || data?.archive_title || payload?.title || "");
+  const roomId = String(data?.room_id || data?.roomid || payload?.room_id || "");
+  const bvid = String(data?.bvid || data?.bv_id || payload?.bvid || "");
+  const url = String(data?.url || data?.link || payload?.url || (type === "live_start" && roomId ? `https://live.bilibili.com/${roomId}` : type === "video_publish" && bvid ? `https://www.bilibili.com/video/${bvid}` : ""));
+  const eventId = String(payload?.event_id || payload?.id || data?.event_id || `${type}:${creatorId}:${roomId || bvid}:${title}`);
+  return { type, creatorId, creatorName, title, roomId, bvid, url, eventId, rawType };
+}
+
+async function sendBilibiliConnectorNotification(env, connector, event) {
+  const notify = event.type === "live_start" ? connector.liveNotify : event.type === "video_publish" ? connector.videoNotify : false;
+  const atAllRequested = event.type === "live_start" ? connector.liveAtAll : event.type === "video_publish" ? connector.videoAtAll : false;
+  const log = { at: Date.now(), connectorId: connector.id, groupId: connector.groupId, event };
+  if (!notify) {
+    log.status = "record_only";
+    await dbPut(env, `bili:event:${connector.id}:${event.eventId}`, JSON.stringify(log));
+    return { ok: true, sent: false };
+  }
+  const botRole = (await getBotGroupRole(env, connector.groupId)).role;
+  const canAtAll = botRole === "owner" || botRole === "admin";
+  const prefix = atAllRequested && canAtAll ? "[CQ:at,qq=all] " : "";
+  const label = event.type === "live_start" ? "开播通知" : "新视频通知";
+  const creator = event.creatorName || connector.creatorName || event.creatorId || connector.creatorId || "B站创作者";
+  const message = `${prefix}【${label}】${creator}\n${event.title || (event.type === "live_start" ? "直播已开始" : "已上传新视频")}${event.url ? "\n" + event.url : ""}`;
+  try {
+    await callOneBotAction(env, { action: "send_group_msg", params: { group_id: numericId(connector.groupId), message, auto_escape: false } }, 15000);
+    log.status = "sent";
+    log.atAllRequested = atAllRequested;
+    log.atAllSent = atAllRequested && canAtAll;
+    await dbPut(env, `bili:event:${connector.id}:${event.eventId}`, JSON.stringify(log));
+    return { ok: true, sent: true };
+  } catch (error) {
+    log.status = "failed"; log.error = String(error?.message || error);
+    await dbPut(env, `bili:event:${connector.id}:${event.eventId}`, JSON.stringify(log));
+    return { ok: false, error: log.error };
+  }
+}
+
+async function handleBilibiliWebhook(request, env, url) {
+  const secret = url.pathname.split("/").pop() || "";
+  const connectorId = await dbGet(env, `bili:webhook_secret:${secret}`);
+  if (!connectorId) return jsonResponse({ ok: false, message: "未知串接密钥。" }, 404);
+  const connector = await readJson(env, `bili:connector:${connectorId}`, null);
+  if (!connector || connector.enabled === false) return jsonResponse({ ok: false, message: "串接已停用。" }, 403);
+  const payload = await request.json().catch(() => ({}));
+  if (payload?.challenge) return jsonResponse({ challenge: payload.challenge });
+  const event = normalizeBilibiliEvent(payload);
+  if (event.type === "unknown") return jsonResponse({ ok: true, ignored: true, message: "未识别事件类型。" });
+  if (connector.creatorId && event.creatorId && String(connector.creatorId) !== String(event.creatorId)) return jsonResponse({ ok: true, ignored: true, message: "创作者不匹配。" });
+  const dedupKey = `bili:dedup:${connector.id}:${event.eventId}`;
+  if (await dbGet(env, dedupKey)) return jsonResponse({ ok: true, duplicate: true });
+  await dbPut(env, dedupKey, String(Date.now()));
+  const result = await sendBilibiliConnectorNotification(env, connector, event);
+  connector.lastEventAt = Date.now(); connector.lastEvent = event;
+  await dbPut(env, `bili:connector:${connector.id}`, JSON.stringify(connector));
+  return jsonResponse({ ok: result.ok, event, ...result }, result.ok ? 200 : 502);
+}
+
+async function listBilibiliConnectors(env, groupId) {
+  const ids = await readJson(env, `bili:connector:index:${groupId}`, []);
+  const result = [];
+  for (const id of ids) { const item = await readJson(env, `bili:connector:${id}`, null); if (item) result.push(item); }
+  return result;
+}
+
+
+function platformRoleRank(role){return({member:0,admin:1,owner:2,developer:3})[String(role||'member')]??0}
+function platformFeatureById(id){return PLATFORM_FEATURES.find(x=>x.id===String(id||'').toUpperCase())||null}
+function platformFeatureKey(feature,groupId){return feature.scope==='global'?`platform:feature:${feature.id}:global`:`platform:feature:${feature.id}:group:${String(groupId||'')}`}
+async function platformFeatureEnabled(env,feature,groupId){const v=await dbGet(env,platformFeatureKey(feature,groupId));return v==null?feature.defaultEnabled:v==='true'}
+async function listPlatformFeatures(env,{groupId='',role='member',query='',includeHidden=false}={}){const q=String(query||'').trim().toLowerCase(),rank=platformRoleRank(role),rows=[];for(const f of PLATFORM_FEATURES){if(!includeHidden&&platformRoleRank(f.minRole)>rank)continue;if(q&&!`${f.id} ${f.name} ${f.category} ${f.mode}`.toLowerCase().includes(q))continue;rows.push({...f,enabled:await platformFeatureEnabled(env,f,groupId)})}return rows}
+async function setPlatformFeature(env,{feature,groupId,enabled,actorId,actorRole,auditMode='log'}){if(!feature)return{ok:false,message:'找不到功能。'};if(platformRoleRank(actorRole)<platformRoleRank(feature.minRole))return{ok:false,message:'你的角色無權修改此功能。'};if(feature.scope==='group'&&!groupId)return{ok:false,message:'請先選擇群組。'};await dbPut(env,platformFeatureKey(feature,groupId),enabled?'true':'false');if(auditMode!=='silent')await writeSystemAudit(env,{type:'platform_feature',groupId,actorId,action:feature.id,featureName:feature.name,enabled:Boolean(enabled)});return{ok:true,message:`${feature.id} ${feature.name} 已${enabled?'開啟':'關閉'}。`}}
+async function appendPlatformTrace(env,data){const id=`tr_${Date.now().toString(36)}_${crypto.randomUUID().slice(0,8)}`,item={id,at:Date.now(),...data};await dbPut(env,`platform:trace:${id}`,JSON.stringify(item));await appendIndex(env,'platform:trace:index',id,5000);if(item.groupId)await appendIndex(env,`platform:trace:index:${item.groupId}`,id,2000);return item}
+async function listPlatformTraces(env,{groupId='',query='',limit=200}={}){const ids=await readJson(env,groupId?`platform:trace:index:${groupId}`:'platform:trace:index',[]),q=String(query||'').toLowerCase(),rows=[];for(const id of ids.slice(-Math.max(1,Math.min(1000,Number(limit||200)))).reverse()){const x=await readJson(env,`platform:trace:${id}`,null);if(x&&(!q||JSON.stringify(x).toLowerCase().includes(q)))rows.push(x)}return rows}
+async function enqueuePlatformJob(env,data){const id=`job_${Date.now().toString(36)}_${crypto.randomUUID().slice(0,8)}`,job={id,status:'queued',attempts:0,maxAttempts:Math.max(1,Math.min(10,Number(data.maxAttempts||3))),createdAt:Date.now(),nextRunAt:Number(data.nextRunAt||Date.now()),...data};await dbPut(env,`platform:job:${id}`,JSON.stringify(job));await appendIndex(env,'platform:job:index',id,5000);return job}
+async function listPlatformJobs(env,{groupId='',status='',limit=200}={}){const ids=await readJson(env,'platform:job:index',[]),rows=[];for(const id of ids.slice(-Math.max(1,Math.min(1000,Number(limit||200)))).reverse()){const x=await readJson(env,`platform:job:${id}`,null);if(!x)continue;if(groupId&&String(x.groupId||'')!==String(groupId))continue;if(status&&x.status!==status)continue;rows.push(x)}return rows}
+async function processPlatformJobs(env,now=Date.now()){const jobs=await listPlatformJobs(env,{status:'queued',limit:100});for(const job of jobs.reverse()){if(Number(job.nextRunAt||0)>now)continue;job.status='running';job.attempts=Number(job.attempts||0)+1;try{if(job.type==='notification'&&job.groupId&&job.message)await callOneBotAction(env,{action:'send_group_msg',params:{group_id:numericId(job.groupId),message:String(job.message),auto_escape:false}},15000);else await writeSystemAudit(env,{type:'platform_job',groupId:String(job.groupId||''),actorId:String(job.actorId||'system'),action:String(job.action||job.id)});job.status='completed';job.completedAt=Date.now()}catch(e){job.error=String(e?.message||e);if(job.attempts<job.maxAttempts){job.status='queued';job.nextRunAt=Date.now()+Math.min(3600000,2**job.attempts*30000)}else{job.status='dead_letter';await appendIndex(env,'platform:dead_letter:index',job.id,2000)}}await dbPut(env,`platform:job:${job.id}`,JSON.stringify(job))}}
+
 async function handlePortalApi(request, env, url) {
   const body = request.method === "GET" ? {} : await request.json().catch(() => ({}));
-  const token = request.headers.get("Authorization")?.replace(/^Bearer\s+/i, "") || body.token || url.searchParams.get("token") || "";
+  const token = request.headers.get("Authorization")?.replace(/^Bearer\s+/i, "") || readCookie(request, "qqai_session") || body.token || url.searchParams.get("token") || "";
   let session = await getPortalSession(env, token);
   if (!session) return jsonResponse({ ok: false, message: "未登录或登录已过期。" }, 401);
   const path = url.pathname.replace("/api/portal", "");
@@ -3980,7 +5667,7 @@ async function handlePortalApi(request, env, url) {
     const selected = groups.find(g => g.groupId === groupId);
     const role = await resolvePortalRole(env, session.qq, groupId);
     const permissions = await getEffectivePermissions(env, groupId, session.qq, role, role === "developer");
-    session = { ...session, groupId, group: selected?.groupName || groupId, role, permissions, expiresAt: Date.now() + 24 * 60 * 60 * 1000 };
+    session = { ...session, groupId, group: selected?.groupName || groupId, role, permissions, expiresAt: Date.now() + DEFAULTS.portalSessionTtlMs };
     await dbPut(env, `portal_session:${token}`, JSON.stringify(session));
     await dbPut(env, `private_default_group:${session.qq}`, groupId);
     return jsonResponse({ ok: true, message: "群组已切换。", session });
@@ -4007,7 +5694,116 @@ async function handlePortalApi(request, env, url) {
   }
 
 
+  if (request.method === "GET" && path === "/capabilities") {
+    const botState = groupId ? await getBotGroupRole(env, groupId) : { role: "unknown" };
+    const botRole = String(botState?.role || "unknown");
+    return jsonResponse({
+      ok: true,
+      bot_role: botRole,
+      bot_is_owner: botRole === "owner",
+      can_native_admin_change: botRole === "owner",
+      viewer_can_group_ops: Boolean(permissions.groupOps || permissions.nativeAdmin || permissions.developer),
+      viewer_can_change_rule_monitor: role === "owner",
+      viewer_can_view_owner_controls: Boolean(role === "owner" || permissions.developer)
+    });
+  }
+
   const portalIsDeveloper = permissions.developer || isDeveloperId(env, authed.qq);
+
+
+  if(request.method==='GET'&&path==='/platform/features'){
+    const features=await listPlatformFeatures(env,{groupId,role:portalIsDeveloper?'developer':role,query:url.searchParams.get('q')||'',includeHidden:portalIsDeveloper});
+    return jsonResponse({ok:true,total:PLATFORM_FEATURE_COUNT,visible:features.length,features,deploymentMode:'single_worker',paidCloudflareServices:false});
+  }
+  if(request.method==='POST'&&path==='/platform/features'){
+    const feature=platformFeatureById(body.id);if(!feature)return jsonResponse({ok:false,message:'找不到功能 ID。'},404);
+    if(/(?:群規持續監控|AI 踢出群主授權|AI 拒絕入群群主授權)/.test(feature.name)&&!(await isVerifiedGroupOwner(env,groupId,authed.qq)))return jsonResponse({ok:false,message:'這項高風險設定只能由 NapCat 即時確認的真實群主修改。'},403);
+    const result=await setPlatformFeature(env,{feature,groupId,enabled:Boolean(body.enabled),actorId:authed.qq,actorRole:portalIsDeveloper?'developer':role,auditMode:portalIsDeveloper&&body.auditMode==='silent'?'silent':'log'});return jsonResponse(result,result.ok?200:403);
+  }
+  if(request.method==='GET'&&path==='/platform/traces'){
+    if(!(permissions.aiAdmin||permissions.groupOps||permissions.nativeAdmin||portalIsDeveloper))return jsonResponse({ok:false,message:'缺少 Trace 查看權限。'},403);
+    return jsonResponse({ok:true,traces:await listPlatformTraces(env,{groupId:portalIsDeveloper&&url.searchParams.get('all')==='1'?'':groupId,query:url.searchParams.get('q')||'',limit:Number(url.searchParams.get('limit')||200)})});
+  }
+  if(request.method==='GET'&&path==='/platform/jobs'){
+    if(!(permissions.groupOps||permissions.nativeAdmin||portalIsDeveloper))return jsonResponse({ok:false,message:'缺少任務中心權限。'},403);
+    return jsonResponse({ok:true,jobs:await listPlatformJobs(env,{groupId:portalIsDeveloper&&url.searchParams.get('all')==='1'?'':groupId,status:url.searchParams.get('status')||'',limit:Number(url.searchParams.get('limit')||200)})});
+  }
+  if(request.method==='POST'&&path==='/platform/jobs'){
+    if(!(permissions.groupOps||permissions.nativeAdmin||portalIsDeveloper))return jsonResponse({ok:false,message:'缺少建立任務權限。'},403);
+    const job=await enqueuePlatformJob(env,{type:String(body.type||'audit'),groupId,actorId:authed.qq,message:String(body.message||'').slice(0,4000),action:String(body.action||'manual'),nextRunAt:Number(body.nextRunAt||Date.now()),maxAttempts:Number(body.maxAttempts||3)});await appendPlatformTrace(env,{type:'job_created',groupId,actorId:authed.qq,jobId:job.id});return jsonResponse({ok:true,message:'任務已加入 D1 任務列。',job});
+  }
+
+  if (request.method === "GET" && path === "/settings-center") {
+    const targetQq = portalIsDeveloper ? String(url.searchParams.get("targetQq") || authed.qq).replace(/\D/g, "") : authed.qq;
+    const targetRoleRequested = String(url.searchParams.get("targetRole") || "");
+    const targetRole = portalIsDeveloper && ["member", "admin", "owner", "developer"].includes(targetRoleRequested) ? targetRoleRequested : await resolvePortalRole(env, targetQq, groupId);
+    const visibleRank = portalIsDeveloper ? 3 : portalRoleRank(role);
+    const settings = [];
+    for (const definition of PORTAL_SETTING_DEFINITIONS) {
+      if (portalRoleRank(definition.minRole) > visibleRank) continue;
+      settings.push({ ...definition, value: await readPortalSettingValue(env, definition, groupId, targetQq) });
+    }
+    return jsonResponse({ ok: true, targetQq, targetRole, viewerRole: portalIsDeveloper ? "developer" : role, settings, developerAuditModes: portalIsDeveloper ? ["log", "silent"] : ["log"] });
+  }
+  if (request.method === "POST" && path === "/settings-center") {
+    const definition = PORTAL_SETTING_DEFINITIONS.find(item => item.key === String(body.key || ""));
+    if (!definition) return jsonResponse({ ok: false, message: "未知设置项目。" }, 400);
+    const targetQq = portalIsDeveloper ? String(body.targetQq || authed.qq).replace(/\D/g, "") : authed.qq;
+    const targetRole = portalIsDeveloper && ["member", "admin", "owner", "developer"].includes(String(body.targetRole || "")) ? String(body.targetRole) : await resolvePortalRole(env, targetQq, groupId);
+    const actorRank = portalIsDeveloper ? 3 : portalRoleRank(role);
+    if (portalRoleRank(definition.minRole) > actorRank) return jsonResponse({ ok: false, message: "你的角色无权修改该设置。" }, 403);
+    if (!portalIsDeveloper && definition.scope === "user" && targetQq !== authed.qq) return jsonResponse({ ok: false, message: "只能修改自己的个人设置。" }, 403);
+    if (["rule_monitor_enabled","rule_proxy_mode","rule_proxy_mute_seconds","rule_proxy_kick_authorized","join_reject_authorized"].includes(definition.key) && !(await isVerifiedGroupOwner(env, groupId, authed.qq))) return jsonResponse({ ok: false, message: "此高風險群級設定只能由 NapCat 即時確認的目前群主修改。" }, 403);
+    await writePortalSettingValue(env, definition, groupId, targetQq, body.value);
+    const auditMode = portalIsDeveloper && body.auditMode === "silent" ? "silent" : "log";
+    if (auditMode === "log") await writeSystemAudit(env, { type: "settings_center", groupId, actorId: authed.qq, targetId: targetQq, targetRole, action: definition.key, value: body.value });
+    return jsonResponse({ ok: true, message: auditMode === "silent" ? "设置已保存（不记录操作日志）。" : "设置已保存并记录操作日志。" });
+  }
+
+  if (request.method === "GET" && path === "/integrations/bilibili") {
+    if (!(permissions.aiAdmin || permissions.groupOps || permissions.nativeAdmin || portalIsDeveloper)) return jsonResponse({ ok: false, message: "缺少串接管理权限。" }, 403);
+    const connectors = await listBilibiliConnectors(env, groupId);
+    return jsonResponse({ ok: true, connectors: connectors.map(item => ({ ...item, webhookUrl: `https://${url.host}/api/integrations/bilibili/webhook/${item.webhookSecret}` })), note: "不固定任何创作者。请填写实际要串接的创作者，并让其授权你的 Bilibili 开放平台应用，或由你信任的事件桥接器向专属 Webhook 发送事件。" });
+  }
+  if (request.method === "POST" && path === "/integrations/bilibili") {
+    if (!(permissions.aiAdmin || permissions.groupOps || permissions.nativeAdmin || portalIsDeveloper)) return jsonResponse({ ok: false, message: "缺少串接管理权限。" }, 403);
+    const action = String(body.action || "save");
+    if (action === "delete") {
+      const item = await readJson(env, `bili:connector:${body.id}`, null);
+      if (!item || item.groupId !== groupId) return jsonResponse({ ok: false, message: "找不到串接。" }, 404);
+      await dbDel(env, `bili:webhook_secret:${item.webhookSecret}`);
+      await dbDel(env, `bili:connector:${item.id}`);
+      const ids = await readJson(env, `bili:connector:index:${groupId}`, []);
+      await dbPut(env, `bili:connector:index:${groupId}`, JSON.stringify(ids.filter(id => id !== item.id)));
+      return jsonResponse({ ok: true, message: "B站串接已删除。" });
+    }
+    if (action === "test") {
+      const item = await readJson(env, `bili:connector:${body.id}`, null);
+      if (!item || item.groupId !== groupId) return jsonResponse({ ok: false, message: "找不到串接。" }, 404);
+      const eventType = body.eventType === "video_publish" ? "video_publish" : "live_start";
+      const result = await sendBilibiliConnectorNotification(env, item, { type: eventType, creatorId: item.creatorId, creatorName: item.creatorName, title: eventType === "live_start" ? "测试直播通知" : "测试新视频通知", url: "https://www.bilibili.com/", eventId: `test:${Date.now()}` });
+      return jsonResponse({ ok: result.ok, message: result.ok ? "测试事件已处理。" : result.error }, result.ok ? 200 : 502);
+    }
+    const id = String(body.id || `bili_${Date.now().toString(36)}_${crypto.randomUUID().slice(0, 8)}`);
+    const existing = await readJson(env, `bili:connector:${id}`, null);
+    const webhookSecret = existing?.webhookSecret || crypto.randomUUID().replaceAll("-", "") + crypto.randomUUID().replaceAll("-", "");
+    const item = {
+      id, groupId, webhookSecret,
+      creatorId: String(body.creatorId || existing?.creatorId || "").trim(),
+      creatorName: String(body.creatorName || existing?.creatorName || "").trim().slice(0, 120),
+      mode: ["official_webhook", "generic_webhook"].includes(body.mode) ? body.mode : "official_webhook",
+      enabled: body.enabled !== false,
+      liveNotify: Boolean(body.liveNotify), liveAtAll: Boolean(body.liveAtAll),
+      videoNotify: Boolean(body.videoNotify), videoAtAll: Boolean(body.videoAtAll),
+      createdBy: existing?.createdBy || authed.qq, createdAt: existing?.createdAt || Date.now(), updatedAt: Date.now()
+    };
+    if (!item.creatorId && !item.creatorName) return jsonResponse({ ok: false, message: "请填写创作者名称或开放平台创作者 ID。" }, 400);
+    await dbPut(env, `bili:connector:${id}`, JSON.stringify(item));
+    await dbPut(env, `bili:webhook_secret:${webhookSecret}`, id);
+    await appendIndex(env, `bili:connector:index:${groupId}`, id, 500);
+    await writeSystemAudit(env, { type: "bilibili_connector", groupId, actorId: authed.qq, action: existing ? "update" : "create", connectorId: id });
+    return jsonResponse({ ok: true, message: "B站串接已保存。", connector: { ...item, webhookUrl: `https://${url.host}/api/integrations/bilibili/webhook/${webhookSecret}` } });
+  }
 
   if (request.method === "GET" && path === "/health") {
     const mode = url.searchParams.get("mode") === "full" ? "full" : "quick";
@@ -4021,13 +5817,13 @@ async function handlePortalApi(request, env, url) {
     const registry = [
       ...parseList(env.GEMMA_CHAT_MODELS, ["gemma-4-26b-a4b-it", "gemma-4-31b-it"]).map((id, index) => ({ id, provider: "Google", family: "Gemma", billing: "Gemini 免费层额度", capabilities: ["text", "chat", "routing"], priority: index + 1, status: lastByName[id.includes("31b") ? "Gemma 4 31B" : "Gemma 4 26B"]?.status || "unknown" })),
       ...parseList(env.GEMINI_CHAT_MODELS).map((id, index) => ({ id, provider: "Google", family: "Gemini", billing: "未启用付费／免费层额度", capabilities: ["text", "chat", "vision"], priority: index + 1, status: lastByName["Gemini API"]?.status || "unknown" })),
-      ...[env.DEEPSEEK_FLASH_MODEL, env.DEEPSEEK_PRO_MODEL].filter(Boolean).map((id, index) => ({ id, provider: "DeepSeek", family: "DeepSeek", billing: "付费余额／受每日预算限制", capabilities: ["text", "chat", "reasoning", "code"], priority: index + 1, status: lastByName["DeepSeek API"]?.status || (env.DEEPSEEK_API_KEY ? "unknown" : "unconfigured") }))
+      ...[env.DEEPSEEK_FLASH_MODEL || DEFAULTS.deepseekFlashModel].filter(Boolean).map((id, index) => ({ id, provider: "DeepSeek", family: "DeepSeek Flash", billing: "付费余额／受每日预算限制", capabilities: ["text", "chat", "context_summary", "code"], priority: index + 1, status: lastByName["DeepSeek API"]?.status || (deepSeekApiKeys(env).length ? "unknown" : "unconfigured") }))
     ];
     const deepseekDailyBudgetCny = await getQuotaNumber(env, "quota:deepseek:global_daily_cny", Number(env.DEEPSEEK_DAILY_BUDGET_CNY || 0.35));
     return jsonResponse({
       ok: true,
       models: registry,
-      routing: { simple: "gemma-4-26b-a4b-it", general: "gemma-4-31b-it", vision: parseList(env.GEMINI_CHAT_MODELS)[0] || "Gemini", complex: env.DEEPSEEK_FLASH_MODEL || "DeepSeek" },
+      routing: { decision: "gemma-4-26b-a4b-it（仅插话／规则分类）", simple: "Gemini 免费模型池", general: "Gemini 免费模型池", vision: "Gemini 免费模型池", freeFallback: "gemma-4-31b-it", paidEmergencyFallback: env.DEEPSEEK_FLASH_MODEL || DEFAULTS.deepseekFlashModel },
       costPolicy: { mode: String(env.MODEL_COST_POLICY || DEFAULTS.modelCostPolicy), geminiBilling: "free_tier", deepseekBilling: "paid_limited", deepseekDailyBudgetCny, emergencyFallback: envFlag(env.DEEPSEEK_EMERGENCY_FALLBACK, DEFAULTS.deepseekEmergencyFallback), paidContextSummary: envFlag(env.ALLOW_PAID_CONTEXT_SUMMARY, DEFAULTS.paidContextSummary) }
     });
   }
@@ -4059,7 +5855,8 @@ async function handlePortalApi(request, env, url) {
 
   if (request.method === "POST" && path === "/simulator") {
     const text = String(body.text || "").trim();
-    const senderRole = ["owner", "admin", "member"].includes(body.senderRole) ? body.senderRole : "member";
+    const requestedSenderRole = String(body.senderRole || body.role || body.sender_role || "member");
+    const senderRole = ["owner", "admin", "member"].includes(requestedSenderRole) ? requestedSenderRole : "member";
     const mentionsBot = Boolean(body.mentionsBot);
     const hasImage = Boolean(body.hasImage);
     const currentlyBusy = Boolean(body.currentlyBusy);
@@ -4074,34 +5871,81 @@ async function handlePortalApi(request, env, url) {
     else if (explicitQuestion && currentlyBusy) final = "加入该群友的个人等待列";
     else if (explicitQuestion) final = "立即进入 AI 回答流程";
     else if (interjectRate > 0) final = "可进入随机插话候选；仍需 Gemma 判断与概率检查";
-    return jsonResponse({ ok: true, parsed: { text, senderRole, mentionsBot, hasImage, isCommand, managementCandidate, managementAction: localManagement.action, explicitQuestion, currentlyBusy, interjectRate }, decisions: { queue: explicitQuestion && currentlyBusy, thinking: explicitQuestion && !currentlyBusy, recordReply: explicitQuestion && !isCommand, commandOrSystemRecordedAsChat: false, final }, steps: ["解析 OneBot 事件", `发送者角色：${senderRole}`, mentionsBot ? "检测到 @机器人" : "未检测到 @机器人", managementCandidate ? `检测到管理提案：${moderationActionLabel(localManagement.action)}` : "未检测到明确管理提案", final] });
+    return jsonResponse({ ok: true, parsed: { text, senderRole, mentionsBot, hasImage, isCommand, managementCandidate, managementAction: localManagement.action, explicitQuestion, currentlyBusy, interjectRate }, decisions: { queue: explicitQuestion && currentlyBusy, thinking: explicitQuestion && !currentlyBusy, recordReply: explicitQuestion && !isCommand, commandOrSystemRecordedAsChat: false, final }, steps: ["解析 OneBot 事件", `发送者角色：${senderRole}`, mentionsBot ? "检测到 @机器人" : "未检测到 @机器人", managementCandidate ? `检测到待确认操作：${moderationActionLabel(localManagement.action)}` : "未检测到明确待确认操作", final] });
   }
 
   if (!groupId && !path.startsWith("/root/")) return jsonResponse({ ok: false, message: "请先选择群组。" }, 400);
   if (groupId && !(await isGroupWhitelisted(env, groupId))) return jsonResponse({ ok: false, message: "该群已不在白名单。" }, 403);
 
 
+  if (request.method === "GET" && path === "/group-work") {
+    if (!(permissions.groupOps || permissions.aiAdmin || portalIsDeveloper)) return jsonResponse({ ok: false, message: "缺少群务查看权限。" }, 403);
+    const ids = await readJson(env, `groupwork:index:${groupId}`, []); const items = [];
+    for (const id of ids.slice(-200).reverse()) { const item = await readJson(env, `groupwork:${id}`, null); if (item) items.push(item); }
+    return jsonResponse({ ok: true, items });
+  }
+  if (request.method === "POST" && path === "/group-work/decision") {
+    const result = await handleGroupWorkDecision(env, { groupId, actorId: authed.qq, id: String(body.id || ""), decision: body.decision === "cancel" ? "cancel" : "confirm" });
+    return jsonResponse(result, result.ok ? 200 : 403);
+  }
+
+  if (request.method === "GET" && path === "/rule-violations") {
+    if (!(permissions.aiAdmin || permissions.groupOps || permissions.nativeAdmin || portalIsDeveloper)) return jsonResponse({ ok: false, message: "缺少群规记录查看权限。" }, 403);
+    const ids = await readJson(env, `ruleviolation:index:${groupId}`, []);
+    const member = String(url.searchParams.get("member") || "").trim().toLowerCase();
+    const content = String(url.searchParams.get("content") || "").trim().toLowerCase();
+    const type = String(url.searchParams.get("type") || "").trim().toLowerCase();
+    const items = [];
+    for (const id of ids.slice(-5000).reverse()) {
+      const item = await readJson(env, `ruleviolation:${id}`, null);
+      if (!item) continue;
+      const memberText = `${item.senderName || ""} ${item.userId || ""}`.toLowerCase();
+      if (member && !memberText.includes(member)) continue;
+      if (content && !String(item.content || "").toLowerCase().includes(content)) continue;
+      if (type && !String(item.violationType || item.rule || "").toLowerCase().includes(type)) continue;
+      items.push(item);
+      if (items.length >= Math.max(1, Math.min(1000, Number(url.searchParams.get("limit") || 300)))) break;
+    }
+    return jsonResponse({ ok: true, items, settings: {
+      monitorEnabled: await dbGet(env, `rule_monitor_enabled:${groupId}`) !== "false",
+      proxyMode: normalizeRuleProxyMode(await dbGet(env, `rule_proxy_mode:${groupId}`) || DEFAULTS.ruleProxyMode),
+      muteSeconds: parseUnlimitedNonNegativeInteger(await dbGet(env, `rule_proxy_mute_seconds:${groupId}`), DEFAULTS.ruleProxyMuteSeconds),
+      kickAuthorized: await dbGet(env, `rule_proxy_kick_authorized:${groupId}`) === "true"
+    } });
+  }
+  if (request.method === "POST" && path === "/rule-violations/settings") {
+    if (!(await isVerifiedGroupOwner(env, groupId, authed.qq))) return jsonResponse({ ok: false, message: "只有 NapCat 即時確認的目前群主可以修改群規監控與 AI 代理設定。" }, 403);
+    if (Object.prototype.hasOwnProperty.call(body, "monitorEnabled")) await dbPut(env, `rule_monitor_enabled:${groupId}`, body.monitorEnabled ? "true" : "false");
+    if (Object.prototype.hasOwnProperty.call(body, "proxyMode")) await dbPut(env, `rule_proxy_mode:${groupId}`, normalizeRuleProxyMode(body.proxyMode));
+    if (Object.prototype.hasOwnProperty.call(body, "muteSeconds")) await dbPut(env, `rule_proxy_mute_seconds:${groupId}`, String(parseUnlimitedNonNegativeInteger(body.muteSeconds, DEFAULTS.ruleProxyMuteSeconds)));
+    if (Object.prototype.hasOwnProperty.call(body, "kickAuthorized")) body.kickAuthorized ? await dbPut(env, `rule_proxy_kick_authorized:${groupId}`, "true") : await dbDel(env, `rule_proxy_kick_authorized:${groupId}`);
+    await writeSystemAudit(env, { type: "rule_proxy_portal_settings", groupId, actorId: authed.qq, action: "update" });
+    return jsonResponse({ ok: true, message: "群规监控与 AI 代理设置已保存。" });
+  }
+
   if (request.method === "GET" && path === "/moderation/proposals") {
-    if (!(permissions.groupOps || permissions.aiAdmin || portalIsDeveloper)) return jsonResponse({ ok: false, message: "缺少群管理提案查看权限。" }, 403);
+    if (!(permissions.groupOps || permissions.aiAdmin || portalIsDeveloper)) return jsonResponse({ ok: false, message: "缺少群待确认操作查看权限。" }, 403);
     const items = await listModerationProposals(env, groupId, { limit: Number(url.searchParams.get("limit") || 100) });
     return jsonResponse({ ok: true, proposals: items });
   }
 
   if (request.method === "POST" && path === "/moderation/confirm") {
     if (!(permissions.groupOps || portalIsDeveloper)) return jsonResponse({ ok: false, message: "缺少确认群管理操作的权限。" }, 403);
-    const result = await handleModerationConfirmation(env, { groupId, actorId: authed.qq, actorRole: role, isDeveloper: portalIsDeveloper, confirmation: { type: "confirm", id: String(body.id || "") } });
+    const result = await handleModerationConfirmation(env, { groupId, actorId: authed.qq, actorRole: role, isDeveloper: portalIsDeveloper, hasGroupOpsPermission: permissions.groupOps, confirmation: { type: "confirm", id: String(body.id || "") } });
     return jsonResponse({ ok: result.ok !== false, ...result }, result.ok === false ? 400 : 200);
   }
 
   if (request.method === "POST" && path === "/moderation/cancel") {
     if (!(permissions.groupOps || portalIsDeveloper)) return jsonResponse({ ok: false, message: "缺少取消群管理操作的权限。" }, 403);
-    const result = await handleModerationConfirmation(env, { groupId, actorId: authed.qq, actorRole: role, isDeveloper: portalIsDeveloper, confirmation: { type: "cancel", id: String(body.id || "") } });
+    const result = await handleModerationConfirmation(env, { groupId, actorId: authed.qq, actorRole: role, isDeveloper: portalIsDeveloper, hasGroupOpsPermission: permissions.groupOps, confirmation: { type: "cancel", id: String(body.id || "") } });
     return jsonResponse({ ok: result.ok !== false, ...result }, result.ok === false ? 400 : 200);
   }
 
   if (request.method === "GET" && path === "/memories") {
-    const privateMemos = normalizeMemoryItems(await readJson(env, `user_memo:${groupId}:${authed.qq}`, []), authed.qq);
-    const publicMemos = normalizeMemoryItems(await readJson(env, `group_public_memos:${groupId}`, []), "group");
+    const privateKey = `user_memo:${groupId}:${authed.qq}`;
+    const publicKey = `group_public_memos:${groupId}`;
+    const privateMemos = await migratePortalMemories(env, privateKey, await readJson(env, privateKey, []), authed.qq);
+    const publicMemos = await migratePortalMemories(env, publicKey, await readJson(env, publicKey, []), "group");
     return jsonResponse({ ok: true, private: privateMemos, public: publicMemos, memory_banned: await isMemoryBanned(env, authed.qq) });
   }
 
@@ -4109,29 +5953,47 @@ async function handlePortalApi(request, env, url) {
     if (await isMemoryBanned(env, authed.qq)) return jsonResponse({ ok: false, message: "你的记忆编辑权限已被冻结。" }, 403);
     const scope = body.scope === "public" ? "public" : "private";
     const key = scope === "public" ? `group_public_memos:${groupId}` : `user_memo:${groupId}:${authed.qq}`;
-    const list = normalizeMemoryItems(await readJson(env, key, []), scope === "public" ? "group" : authed.qq);
+    const list = await migratePortalMemories(env, key, await readJson(env, key, []), scope === "public" ? "group" : authed.qq);
     if (request.method === "POST") {
       const text = String(body.text || "").trim();
       if (!text) return jsonResponse({ ok: false, message: "记忆内容不能为空。" }, 400);
-      const item = { id: crypto.randomUUID(), text, scope, owner: authed.qq, subjectQq: String(body.subjectQq || authed.qq), at: new Date().toISOString() };
+      let item = { id: crypto.randomUUID(), text, scope, owner: authed.qq, subjectQq: String(body.subjectQq || authed.qq), at: new Date().toISOString() };
+      item = await upsertMemoryVector(env, item, groupId).catch(error => { console.warn(error); return item; });
       list.push(item); await dbPut(env, key, JSON.stringify(list));
       await writeMemoryAudit(env, { groupId, userId: authed.qq, action: "网页新增记忆", before: null, after: JSON.stringify(item) });
       return jsonResponse({ ok: true, item });
     }
-    const idx = list.findIndex(x => x.id === body.id);
-    if (idx < 0) return jsonResponse({ ok: false, message: "找不到记忆。" }, 404);
+    const id = String(body.id || "");
+    if (!id) return jsonResponse({ ok: false, message: "无效记忆不会显示操作按钮，请刷新页面。" }, 400);
+    const idx = list.findIndex(x => String(x.id) === id);
+    if (idx < 0) return jsonResponse({ ok: false, message: "该记忆已删除或已被更新，请刷新列表。" }, 404);
     const canEdit = scope === "private" || list[idx].owner === authed.qq || permissions.aiAdmin || permissions.developer;
     if (!canEdit) return jsonResponse({ ok: false, message: "权限不足。" }, 403);
     if (request.method === "PUT") {
       const text = String(body.text || "").trim(); if (!text) return jsonResponse({ ok: false, message: "记忆内容不能为空。" }, 400);
-      const before = JSON.stringify(list[idx]); list[idx] = { ...list[idx], text, updatedAt: new Date().toISOString() };
-      await dbPut(env, key, JSON.stringify(list)); await writeMemoryAudit(env, { groupId, userId: authed.qq, action: "网页修改记忆", before, after: JSON.stringify(list[idx]) });
+      const before = JSON.stringify(list[idx]);
+      list[idx] = { ...list[idx], text, updatedAt: new Date().toISOString() };
+      list[idx] = await upsertMemoryVector(env, list[idx], groupId).catch(error => { console.warn(error); return list[idx]; });
+      await dbPut(env, key, JSON.stringify(list));
+      await writeMemoryAudit(env, { groupId, userId: authed.qq, action: "网页修改记忆", before, after: JSON.stringify(list[idx]) });
       return jsonResponse({ ok: true, item: list[idx] });
     }
     const removed = list.splice(idx, 1)[0];
+    const vectorizeDeleted = await deleteMemoryVector(env, removed);
     await dbPut(env, key, JSON.stringify(list));
-    await writeMemoryAudit(env, { groupId, userId: authed.qq, action: "网页删除记忆（保留Vectorize）", before: JSON.stringify(removed), after: null });
-    return jsonResponse({ ok: true, vectorizeDeleted: false });
+    await writeMemoryAudit(env, { groupId, userId: authed.qq, action: "网页删除记忆与向量", before: JSON.stringify(removed), after: null });
+    return jsonResponse({ ok: true, message: "记忆已删除。", vectorizeDeleted });
+  }
+
+  if (request.method === "GET" && path === "/vector-search") {
+    const query = String(url.searchParams.get("q") || "").trim();
+    if (!query) return jsonResponse({ ok: true, results: [] });
+    try {
+      const results = await searchPortalVectors(env, { groupId, userId: authed.qq, permissions, query, limit: Number(url.searchParams.get("limit") || 20) });
+      return jsonResponse({ ok: true, query, results });
+    } catch (error) {
+      return jsonResponse({ ok: false, message: `向量搜索失败：${error?.message || error}` }, 502);
+    }
   }
 
   if (request.method === "GET" && path === "/settings") {
@@ -4181,8 +6043,8 @@ async function handlePortalApi(request, env, url) {
     const target = String(body.qq || "").replace(/\D/g, "");
     const proposedActions = ["mute", "unmute", "kick", "whole_mute", "whole_unmute", "set_admin", "unset_admin"];
     if (proposedActions.includes(action)) {
-      if (["set_admin", "unset_admin"].includes(action) && !(await isVerifiedGroupOwner(env, groupId, authed.qq))) {
-        return jsonResponse({ ok: false, message: "设置或取消 QQ 群管理员只能由当前群主提出；开发者与普通管理员均无权代替。" }, 403);
+      if (["set_admin", "unset_admin"].includes(action) && !(await isBotVerifiedGroupOwner(env, groupId))) {
+        return jsonResponse({ ok: false, message: "机器人账号当前不是本群群主，真正 QQ 管理员任免功能不可用。" }, 403);
       }
       if (moderationActionNeedsTarget(action) && !target) return jsonResponse({ ok: false, message: "请输入目标 QQ。" }, 400);
       const member = target ? await getGroupMemberSafe(env, groupId, target) : null;
@@ -4197,10 +6059,10 @@ async function handlePortalApi(request, env, url) {
         targetRole: member?.role || "member",
         durationSeconds: action === "mute" ? Math.max(60, parseDurationSeconds(String(body.duration || "10分"))) : 0,
         sourceText: `Portal 提出 ${moderationActionLabel(action)}`,
-        classifierReason: "Portal 手动提案",
+        classifierReason: "Portal 手动确认单",
         messageId: ""
       });
-      return jsonResponse({ ok: true, pendingConfirmation: true, proposal, message: `已建立提案 ${proposal.id}，尚未执行。请在「管理提案」页面确认。` });
+      return jsonResponse({ ok: true, pendingConfirmation: true, proposal, message: `已建立待确认操作 ${proposal.id}，尚未执行。请在「待确认操作」页面确认。` });
     }
     let result;
     if (action === "rename_group" && String(body.value || "").trim()) result = await runOneBotGroupOperation(env, "set_group_name", { group_id: numericId(groupId), group_name: String(body.value).trim().slice(0, 60) }, { actorId: authed.qq, groupId, action: "网页改群名" });
@@ -4221,7 +6083,21 @@ async function handlePortalApi(request, env, url) {
       active_speaking: await getFeatureFlag(env, `active_speaking:${groupId}`, false),
       keywords: await readJson(env, `keyword_filter:${groupId}`, []),
       blacklist: await readJson(env, `blacklist_group:${groupId}`, []),
-      audit_logs: await readJson(env, `audit:system:group:${groupId}`, [])
+      audit_logs: await readJson(env, `audit:system:group:${groupId}`, []),
+      auto_checkin_enabled: await dbGet(env, `auto_checkin_enabled:${groupId}`) === "true",
+      auto_checkin_time: await dbGet(env, `auto_checkin_time:${groupId}`) || DEFAULTS.autoCheckinTime,
+      welcome_enabled: await dbGet(env, `welcome_enabled:${groupId}`) === "true",
+      welcome_text: await dbGet(env, `welcome_text:${groupId}`) || DEFAULTS.welcomeText,
+      moderation_target_cooldown_seconds: Number(await dbGet(env, `moderation_target_cooldown_seconds:${groupId}`) || DEFAULTS.moderationTargetCooldownSeconds),
+      newcomer_observation_days: Number(await dbGet(env, `newcomer_observation_days:${groupId}`) || DEFAULTS.newcomerObservationDays),
+      join_assist_enabled: await dbGet(env, `join_assist_enabled:${groupId}`) === "true",
+      rule_monitor_enabled: await dbGet(env, `rule_monitor_enabled:${groupId}`) !== "false",
+      rule_proxy_mode: normalizeRuleProxyMode(await dbGet(env, `rule_proxy_mode:${groupId}`) || DEFAULTS.ruleProxyMode),
+      rule_proxy_mute_seconds: parseUnlimitedNonNegativeInteger(await dbGet(env, `rule_proxy_mute_seconds:${groupId}`), DEFAULTS.ruleProxyMuteSeconds),
+      rule_proxy_kick_authorized: await dbGet(env, `rule_proxy_kick_authorized:${groupId}`) === "true",
+      bot_is_owner: await isBotVerifiedGroupOwner(env, groupId),
+      auto_checkin_enabled: true,
+      auto_checkin_time: "00:00"
     });
   }
   if (request.method === "POST" && path === "/admin/state") {
@@ -4231,6 +6107,21 @@ async function handlePortalApi(request, env, url) {
     if (Object.prototype.hasOwnProperty.call(body, "interject_rate")) await dbPut(env, `interject_rate:${groupId}`, String(Math.max(0, Math.min(100, Number(body.interject_rate || 0)))));
     if (Object.prototype.hasOwnProperty.call(body, "commands_enabled")) body.commands_enabled ? await dbDel(env, `web_command_off:${groupId}`) : await dbPut(env, `web_command_off:${groupId}`, "true");
     if (Object.prototype.hasOwnProperty.call(body, "keywords")) await dbPut(env, `keyword_filter:${groupId}`, JSON.stringify(String(body.keywords || "").split(/\n|,/).map(s => s.trim()).filter(Boolean)));
+    if (["welcome_enabled", "welcome_text", "moderation_target_cooldown_seconds", "newcomer_observation_days"].some(key => Object.prototype.hasOwnProperty.call(body, key))) {
+      if (!(role === "owner" || permissions.developer)) return jsonResponse({ ok: false, message: "这些群级设置仅群主或开发者可修改。" }, 403);
+      if (Object.prototype.hasOwnProperty.call(body, "welcome_enabled")) await dbPut(env, `welcome_enabled:${groupId}`, body.welcome_enabled ? "true" : "false");
+      if (Object.prototype.hasOwnProperty.call(body, "welcome_text")) await dbPut(env, `welcome_text:${groupId}`, String(body.welcome_text || DEFAULTS.welcomeText).slice(0, 500));
+      if (Object.prototype.hasOwnProperty.call(body, "moderation_target_cooldown_seconds")) await dbPut(env, `moderation_target_cooldown_seconds:${groupId}`, String(parseUnlimitedNonNegativeInteger(body.moderation_target_cooldown_seconds, 0)));
+      if (Object.prototype.hasOwnProperty.call(body, "newcomer_observation_days")) await dbPut(env, `newcomer_observation_days:${groupId}`, String(Math.max(0, Math.min(30, Number(body.newcomer_observation_days || 0)))));
+    }
+    if (Object.prototype.hasOwnProperty.call(body, "join_assist_enabled")) {
+      if (!(permissions.aiAdmin || permissions.developer || permissions.nativeAdmin)) return jsonResponse({ ok: false, message: "缺少 AI 管理权限，无法设置入群辅助。" }, 403);
+      await dbPut(env, `join_assist_enabled:${groupId}`, body.join_assist_enabled ? "true" : "false");
+    }
+    if (Object.prototype.hasOwnProperty.call(body, "rule_monitor_enabled")) {
+      if (!(await isVerifiedGroupOwner(env, groupId, authed.qq))) return jsonResponse({ ok: false, message: "只有当前真实群主可以改变群规持续监控；开发者只能查看。" }, 403);
+      await dbPut(env, `rule_monitor_enabled:${groupId}`, body.rule_monitor_enabled ? "true" : "false");
+    }
     if (Object.prototype.hasOwnProperty.call(body, "active_speaking")) {
       if (!permissions.developer) return jsonResponse({ ok: false, message: "只有开发者可以开关主动发话。" }, 403);
       await setFeatureFlag(env, `active_speaking:${groupId}`, Boolean(body.active_speaking));
@@ -4239,6 +6130,31 @@ async function handlePortalApi(request, env, url) {
     await writeSystemAudit(env, { type: "portal_ai_settings", groupId, actorId: authed.qq, action: "update" });
     return jsonResponse({ ok: true, message: "群务设置已保存。" });
   }
+  if (request.method === "GET" && path === "/ai-decisions") {
+    if (!(permissions.aiAdmin || permissions.groupOps || permissions.nativeAdmin || portalIsDeveloper)) return jsonResponse({ ok: false, message: "缺少 AI 回覆纪录查看权限。" }, 403);
+    const requestedGroupId = portalIsDeveloper && url.searchParams.get("all") === "1" ? "" : groupId;
+    const logs = await listAiDecisionLogs(env, {
+      groupId: requestedGroupId,
+      query: url.searchParams.get("q") || "",
+      decision: url.searchParams.get("decision") || "",
+      triggerType: url.searchParams.get("triggerType") || "",
+      limit: Number(url.searchParams.get("limit") || 300)
+    });
+    return jsonResponse({ ok: true, logs });
+  }
+
+  if (request.method === "GET" && path === "/admin/logs") {
+    const query = String(url.searchParams.get("q") || "").trim().toLowerCase();
+    const type = String(url.searchParams.get("type") || "").trim().toLowerCase();
+    const actor = String(url.searchParams.get("actor") || "").trim();
+    const logs = await readJson(env, `audit:system:group:${groupId}`, []);
+    const filtered = logs.filter(item => {
+      const haystack = JSON.stringify(item).toLowerCase();
+      return (!query || haystack.includes(query)) && (!type || String(item.type || "").toLowerCase().includes(type)) && (!actor || String(item.actorId || "") === actor);
+    });
+    return jsonResponse({ ok: true, logs: filtered.slice(-500).reverse() });
+  }
+
   if (request.method === "POST" && path === "/admin/blacklist") {
     const target = String(body.qq || "").replace(/\D/g, ""); if (!target) return jsonResponse({ ok: false, message: "请输入 QQ。" }, 400);
     if (body.block) await dbPut(env, `blacklist:${groupId}:${target}`, "true"); else await dbDel(env, `blacklist:${groupId}:${target}`);
@@ -4253,7 +6169,7 @@ async function handlePortalApi(request, env, url) {
     const keyCount = parseList(env.GEMINI_API_KEYS).length + parseList(env.VECTORIZE_GEMINI_KEYS).length;
     return jsonResponse({
       ok: true,
-      key_pool: { gemini_keys: parseList(env.GEMINI_API_KEYS).length, vectorize_gemini_keys: parseList(env.VECTORIZE_GEMINI_KEYS).length, total: keyCount, deepseek: Boolean(env.DEEPSEEK_API_KEY) },
+      key_pool: { gemini_keys: parseList(env.GEMINI_API_KEYS).length, vectorize_gemini_keys: parseList(env.VECTORIZE_GEMINI_KEYS).length, total: keyCount, deepseek_keys: deepSeekApiKeys(env).length, deepseek: deepSeekApiKeys(env).length > 0 },
       stats: { total_calls: await dbGet(env, "STAT_TOTAL_CALLS") || "0", last_model: await dbGet(env, "STAT_LAST_MODEL") || "无记录" },
       errors: await readJson(env, "system_error_logs", []),
       groups: await getWhitelistedGroupsForUser(env, authed.qq),
@@ -4303,6 +6219,59 @@ async function handlePortalApi(request, env, url) {
     try { if (Object.prototype.hasOwnProperty.call(body, "globalDailyCny")) await setQuota("quota:deepseek:global_daily_cny", body.globalDailyCny); if (groupId && Object.prototype.hasOwnProperty.call(body, "groupDailyCny")) await setQuota(`quota:deepseek:group:${groupId}`, body.groupDailyCny); } catch (error) { return jsonResponse({ ok: false, message: error.message }, 400); }
     await writeSystemAudit(env, { type: "quota", groupId, actorId: authed.qq, action: "update_deepseek_quota" });
     return jsonResponse({ ok: true, message: "DeepSeek 额度已保存。" });
+  }
+
+  if (request.method === "GET" && path === "/root/rate-limit") {
+    return jsonResponse({ ok: true, globalSeconds: await getRuntimeRateLimitSeconds(env, ""), groupSeconds: groupId ? await getRuntimeRateLimitSeconds(env, groupId) : null, explicitGroup: groupId ? await dbGet(env, `runtime_rate_limit_seconds:group:${groupId}`) : null });
+  }
+  if (request.method === "POST" && path === "/root/rate-limit") {
+    if (Object.prototype.hasOwnProperty.call(body, "globalSeconds")) await dbPut(env, "runtime_rate_limit_seconds:global", String(parseUnlimitedNonNegativeInteger(body.globalSeconds, DEFAULTS.runtimeRateLimitSeconds)));
+    if (groupId && Object.prototype.hasOwnProperty.call(body, "groupSeconds")) {
+      if (body.groupSeconds === "" || body.groupSeconds === null) await dbDel(env, `runtime_rate_limit_seconds:group:${groupId}`);
+      else await dbPut(env, `runtime_rate_limit_seconds:group:${groupId}`, String(parseUnlimitedNonNegativeInteger(body.groupSeconds, DEFAULTS.runtimeRateLimitSeconds)));
+    }
+    await writeSystemAudit(env, { type: "rate_limit_portal", groupId, actorId: authed.qq, action: "update" });
+    return jsonResponse({ ok: true, message: "速率限制已保存。" });
+  }
+
+  if (request.method === "GET" && path === "/root/model-registry") {
+    return jsonResponse({ ok: true, categories: await runtimeModelRegistryState(env), note: "环境变量中的默认模型为锁定后备，后台修改只写入 D1，不修改公开代码或变量。" });
+  }
+  if (request.method === "POST" && path === "/root/model-registry") {
+    const kind = normalizeRuntimeModelKind(body.kind);
+    const action = String(body.action || "").toLowerCase();
+    let items = await readCustomRuntimeModels(env, kind);
+    if (action === "add") {
+      const id = String(body.id || "").trim();
+      if (!validRuntimeModelId(id)) return jsonResponse({ ok: false, message: "模型 ID 格式无效。" }, 400);
+      if (immutableRuntimeModelDefaults(env, kind).includes(id)) return jsonResponse({ ok: false, message: "该模型来自锁定默认变量，不能在后台修改；可新增其他模型并调整优先级。" }, 400);
+      if (items.some(item => item.id === id)) return jsonResponse({ ok: false, message: "该自定义模型已存在。" }, 409);
+      items.push({ id, enabled: true, order: items.length, createdAt: new Date().toISOString() });
+    } else if (action === "delete") {
+      const id = String(body.id || "");
+      items = items.filter(item => item.id !== id);
+    } else if (action === "toggle") {
+      const target = items.find(item => item.id === String(body.id || ""));
+      if (!target) return jsonResponse({ ok: false, message: "找不到该自定义模型。" }, 404);
+      target.enabled = body.enabled !== false;
+      target.updatedAt = new Date().toISOString();
+    } else if (action === "move") {
+      const index = items.findIndex(item => item.id === String(body.id || ""));
+      if (index < 0) return jsonResponse({ ok: false, message: "找不到该自定义模型。" }, 404);
+      const targetIndex = Math.max(0, Math.min(items.length - 1, index + (body.direction === "down" ? 1 : -1)));
+      const [item] = items.splice(index, 1); items.splice(targetIndex, 0, item);
+    } else if (action === "reorder" && Array.isArray(body.ids)) {
+      const order = body.ids.map(String);
+      items.sort((a, b) => {
+        const ai = order.indexOf(a.id), bi = order.indexOf(b.id);
+        return (ai < 0 ? 999999 : ai) - (bi < 0 ? 999999 : bi);
+      });
+    } else {
+      return jsonResponse({ ok: false, message: "不支持的模型管理动作。" }, 400);
+    }
+    items = await writeCustomRuntimeModels(env, kind, items);
+    await writeSystemAudit(env, { type: "runtime_model_registry", groupId, actorId: authed.qq, action: `${action}:${kind}`, targetId: String(body.id || "") });
+    return jsonResponse({ ok: true, items, categories: await runtimeModelRegistryState(env), message: "运行时模型列表已保存到 D1；默认变量与源代码没有被修改。" });
   }
 
   if (request.method === "GET" && path === "/root/schedules") {
@@ -4398,7 +6367,7 @@ async function handlePortalApi(request, env, url) {
 }
 
 async function handleGeminiLiveUpgrade(request, env) {
-  const keys = [...new Set([...parseList(env.GEMINI_API_KEYS), ...parseList(env.VECTORIZE_GEMINI_KEYS)])];
+  const keys = roundRobinKeys([...new Set([...parseList(env.GEMINI_API_KEYS), ...parseList(env.VECTORIZE_GEMINI_KEYS)])], "gemini");
   if (!keys.length) return new Response("未配置 Gemini API 金钥", { status: 500 });
   const key = keys[Math.floor(Math.random() * keys.length)];
   const model = env.GEMINI_LIVE_MODEL || "gemini-3.1-flash-live-preview";
@@ -4489,7 +6458,7 @@ async function handleAppealApi(request, env, url) {
 }
 
 function getAppealPage(host) {
-  return `<!doctype html><html lang="zh-Hant"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>QQAI 匿名申訴</title><style>*{box-sizing:border-box}body{margin:0;min-height:100vh;font-family:system-ui;background:radial-gradient(circle at 30% 10%,#173b60,#060d18 45%,#020409);color:#edf7ff;padding:22px}.wrap{max-width:760px;margin:auto}.card{background:#07101ee8;border:1px solid #ffffff22;border-radius:16px;padding:20px;margin:14px 0}h1{margin-bottom:6px}.muted{color:#a9bacd;line-height:1.6}label{display:block;margin-top:12px;color:#b8c7d9}input,select,textarea{width:100%;border:1px solid #ffffff24;background:#081525;color:#fff;border-radius:9px;padding:11px;margin-top:6px}textarea{min-height:150px}button{margin-top:14px;border:0;border-radius:9px;background:#67ddff;color:#03111a;font-weight:800;padding:11px 16px;cursor:pointer}.hidden{display:none}.msg{white-space:pre-wrap;color:#8ff0c0;margin-top:12px}.item{border-top:1px solid #ffffff17;padding:10px 0}</style></head><body><div class="wrap"><h1>匿名申訴</h1><div class="muted">審核人看不到申訴人的 QQ；只有開發者可查看真實身分。系統會先確認你屬於可使用 AI 的白名單群。</div><section class="card" id="login"><label>QQ 號</label><input id="qq" inputmode="numeric"><button id="send">發送驗證碼</button><label>驗證碼</label><input id="code" maxlength="6" inputmode="numeric"><button id="verify">驗證</button><div class="msg" id="loginMsg"></div></section><section class="card hidden" id="form"><label>所屬白名單群</label><select id="group"></select><label>申訴類型</label><select id="type"><option>禁言</option><option>踢出</option><option>AI黑名单</option><option>管理操作</option><option>排程</option><option>其他</option></select><label>相關訊息 ID（選填）</label><input id="evidence"><label>申訴內容</label><textarea id="content"></textarea><button id="submit">匿名提交</button><button id="refresh">查看我的案件</button><div class="msg" id="formMsg"></div><div id="cases"></div></section></div><script>let token='';const post=async(p,d)=>{const r=await fetch('/api/appeal'+p,{method:'POST',headers:{'Content-Type':'application/json',...(token?{Authorization:'Bearer '+token}:{})},body:JSON.stringify(d||{})});return r.json()},get=async p=>(await fetch('/api/appeal'+p,{headers:token?{Authorization:'Bearer '+token}:{}})).json();send.onclick=async()=>loginMsg.textContent=(await post('/request-code',{qq:qq.value})).message;verify.onclick=async()=>{const r=await post('/verify-code',{qq:qq.value,code:code.value});loginMsg.textContent=r.message;if(r.ok){token=r.token;const g=await get('/groups');group.innerHTML=(g.groups||[]).map(x=>'<option value="'+x.groupId+'">'+x.groupName+'（'+x.groupId+'）</option>').join('');login.classList.add('hidden');form.classList.remove('hidden')}};submit.onclick=async()=>{const r=await post('/submit',{groupId:group.value,type:type.value,content:content.value,evidenceMessageId:evidence.value});formMsg.textContent=r.message;if(r.ok){content.value='';load()}};async function load(){const r=await get('/mine');cases.innerHTML=(r.appeals||[]).map(a=>'<div class="item"><b>'+a.id+'</b>｜'+a.status+'<br>'+a.type+'｜'+a.content+(a.result?'<br>結果：'+a.result:'')+'</div>').join('')||'<div class="muted">尚無案件</div>'}refresh.onclick=load;</script></body></html>`;
+  return `<!doctype html><html lang="zh-Hant"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>QQAI 匿名申訴</title><style>*{box-sizing:border-box}body{margin:0;min-height:100vh;font-family:system-ui;background:radial-gradient(circle at 30% 10%,#173b60,#060d18 45%,#020409);color:#edf7ff;padding:22px}.wrap{max-width:760px;margin:auto}.card{background:#07101ee8;border:1px solid #ffffff22;border-radius:16px;padding:20px;margin:14px 0}h1{margin-bottom:6px}.muted{color:#a9bacd;line-height:1.6}label{display:block;margin-top:12px;color:#b8c7d9}input,select,textarea{width:100%;border:1px solid #ffffff24;background:#081525;color:#fff;border-radius:9px;padding:11px;margin-top:6px}textarea{min-height:150px}button{margin-top:14px;border:0;border-radius:9px;background:#67ddff;color:#03111a;font-weight:800;padding:11px 16px;cursor:pointer}.hidden{display:none}.msg{white-space:pre-wrap;color:#8ff0c0;margin-top:12px}.item{border-top:1px solid #ffffff17;padding:10px 0}</style></head><body><div class="wrap"><h1>匿名申訴</h1><div class="muted">審核人看不到申訴人的 QQ；只有開發者可查看真實身分。系統會先确认你屬於可使用 AI 的白名單群。</div><section class="card" id="login"><label>QQ 號</label><input id="qq" inputmode="numeric"><button id="send">發送驗證碼</button><label>驗證碼</label><input id="code" maxlength="6" inputmode="numeric"><button id="verify">驗證</button><div class="msg" id="loginMsg"></div></section><section class="card hidden" id="form"><label>所屬白名單群</label><select id="group"></select><label>申訴類型</label><select id="type"><option>禁言</option><option>踢出</option><option>AI黑名单</option><option>管理操作</option><option>排程</option><option>其他</option></select><label>相關訊息 ID（選填）</label><input id="evidence"><label>申訴內容</label><textarea id="content"></textarea><button id="submit">匿名提交</button><button id="refresh">查看我的案件</button><div class="msg" id="formMsg"></div><div id="cases"></div></section></div><script>let token='';const post=async(p,d)=>{const r=await fetch('/api/appeal'+p,{method:'POST',headers:{'Content-Type':'application/json',...(token?{Authorization:'Bearer '+token}:{})},body:JSON.stringify(d||{})});return r.json()},get=async p=>(await fetch('/api/appeal'+p,{headers:token?{Authorization:'Bearer '+token}:{}})).json();send.onclick=async()=>loginMsg.textContent=(await post('/request-code',{qq:qq.value})).message;verify.onclick=async()=>{const r=await post('/verify-code',{qq:qq.value,code:code.value});loginMsg.textContent=r.message;if(r.ok){token=r.token;const g=await get('/groups');group.innerHTML=(g.groups||[]).map(x=>'<option value="'+x.groupId+'">'+x.groupName+'（'+x.groupId+'）</option>').join('');login.classList.add('hidden');form.classList.remove('hidden')}};submit.onclick=async()=>{const r=await post('/submit',{groupId:group.value,type:type.value,content:content.value,evidenceMessageId:evidence.value});formMsg.textContent=r.message;if(r.ok){content.value='';load()}};async function load(){const r=await get('/mine');cases.innerHTML=(r.appeals||[]).map(a=>'<div class="item"><b>'+a.id+'</b>｜'+a.status+'<br>'+a.type+'｜'+a.content+(a.result?'<br>結果：'+a.result:'')+'</div>').join('')||'<div class="muted">暂无案件</div>'}refresh.onclick=load;</script></body></html>`;
 }
 
 function getPortalHomePage(host) {
@@ -4519,33 +6488,33 @@ function getPortalHomePage(host) {
 <body>
 <section id="login" class="login">
   <div class="login-card">
-    <div class="brand"><div class="logo">AI</div><div><h1>QQAIbot Control Center</h1><p>v0.5.0 智慧營運、管理提案與等待列</p></div></div>
+    <div class="brand"><div class="logo">AI</div><div><h1>QQAIbot Control Center</h1><p>v1.2.0 長上下文、精準回覆與 AI 決策紀錄</p></div></div>
     <div class="field"><label for="loginQq">QQ 號</label><input id="loginQq" inputmode="numeric" placeholder="輸入你的 QQ 號"></div>
     <div class="row"><button id="sendCode" class="btn ghost grow">傳送驗證碼</button></div>
     <div class="field"><label for="loginCode">六位驗證碼</label><input id="loginCode" inputmode="numeric" maxlength="6" placeholder="驗證碼"></div>
-    <button id="verifyCode" class="btn primary" style="width:100%">登入管理中心</button>
+    <button id="verifyCode" class="btn primary" style="width:100%">登录管理中心</button>
     <div id="loginNotice" class="notice">驗證碼會由已連線的 NapCat 私訊至你的 QQ。</div>
   </div>
 </section>
 <div id="app" class="app hidden">
   <aside id="sidebar" class="sidebar">
-    <div class="side-brand"><div class="logo">AI</div><div><b>QQAIbot</b><small>Control Center 0.5.0</small></div></div>
+    <div class="side-brand"><div class="logo">AI</div><div><b>QQAIbot</b><small>Control Center 1.2.0</small></div></div>
     <nav class="nav" id="nav">
       <button data-view="overview" class="active">總覽</button>
       <button data-view="health">健康檢查</button>
-      <button data-view="tasks">任務與等待列</button>
-      <button data-view="moderation">管理提案</button>
-      <button data-view="simulator">事件模擬器</button>
+      <button data-view="tasks">任务与等待队列</button>
+      <button data-view="moderation">待确认操作</button>
+      <button data-view="simulator">事件模拟器</button>
       <button data-view="models">模型中心</button>
-      <button data-view="quota">額度與限制</button>
-      <button data-view="groups">群組設定</button>
-      <button data-view="memory">記憶管理</button>
-      <button data-view="logs">操作日誌</button>
+      <button data-view="quota">额度与限制</button>
+      <button data-view="groups">群组设置</button>
+      <button data-view="memory">记忆管理</button>
+      <button data-view="logs">操作日志</button>
     </nav>
     <div class="side-bottom"><div id="identity" style="font-size:13px"></div><button id="logout" class="btn ghost" style="margin-top:10px;width:100%;color:#fff;border-color:rgba(255,255,255,.18)">登出</button></div>
   </aside>
   <main class="main">
-    <header class="topbar"><div class="row"><button id="menu" class="btn ghost mobile-menu">☰</button><h2 id="pageTitle">總覽</h2></div><div class="top-actions"><select id="groupSelect"><option value="">選擇群組</option></select><button id="refresh" class="btn ghost">重新整理</button></div></header>
+    <header class="topbar"><div class="row"><button id="menu" class="btn ghost mobile-menu">☰</button><h2 id="pageTitle">總覽</h2></div><div class="top-actions"><select id="groupSelect"><option value="">选择群组</option></select><button id="refresh" class="btn ghost">重新整理</button></div></header>
     <div class="content">
       <section id="v-overview" class="view active">
         <div class="section-head"><div><h2>系統總覽</h2><p>只顯示重要狀態；詳細資訊可進入對應頁面。</p></div><span id="overallStatus" class="status">尚未檢查</span></div>
@@ -4553,7 +6522,7 @@ function getPortalHomePage(host) {
           <div class="card span-3"><div class="metric-label">NapCat</div><div id="mNapcat" class="metric-value">—</div><div id="mNapcatSub" class="metric-sub">等待資料</div></div>
           <div class="card span-3"><div class="metric-label">執行中問題</div><div id="mActive" class="metric-value">0</div><div class="metric-sub">每位群友同時最多 1 題</div></div>
           <div class="card span-3"><div class="metric-label">等待中的問題</div><div id="mQueued" class="metric-value">0</div><div class="metric-sub">前一題完成後自動處理</div></div>
-          <div class="card span-3"><div class="metric-label">待確認管理提案</div><div id="mProposals" class="metric-value">0</div><div class="metric-sub">AI 永遠不直接踢人或禁言</div></div>
+          <div class="card span-3"><div class="metric-label">待确认待确认操作</div><div id="mProposals" class="metric-value">0</div><div class="metric-sub">AI 永遠不直接踢人或禁言</div></div>
           <div class="card span-8"><h3>最近需要注意</h3><div id="overviewIssues" class="list"><div class="empty">執行健康檢查後顯示</div></div></div>
           <div class="card span-4"><h3>路由摘要</h3><div class="item-meta">簡短聊天</div><div class="item-title">Gemma 4 26B</div><div class="item-meta" style="margin-top:10px">一般聊天</div><div class="item-title">Gemma 4 31B</div><div class="item-meta" style="margin-top:10px">圖片理解</div><div class="item-title">Gemini 視覺模型</div><div class="item-meta" style="margin-top:10px">複雜推理／程式</div><div class="item-title">DeepSeek／Gemini</div></div>
         </div>
@@ -4563,37 +6532,37 @@ function getPortalHomePage(host) {
         <div id="healthSummary" class="grid" style="margin-bottom:16px"></div><div id="healthList" class="health-grid"><div class="empty">尚未執行</div></div>
       </section>
       <section id="v-tasks" class="view">
-        <div class="section-head"><div><h2>任務與等待列</h2><p>同一位群友的新問題會排隊，不會與前一題同時生成。</p></div><div class="row"><button id="clearQueue" class="btn danger">清空目前群等待列</button><button id="reloadTasks" class="btn">重新載入</button></div></div>
-        <div id="taskStats" class="grid" style="margin-bottom:16px"></div><div id="taskList" class="list"><div class="empty">尚無任務</div></div>
+        <div class="section-head"><div><h2>任务与等待队列</h2><p>同一位群友的新問題會排隊，不會與前一題同時生成。</p></div><div class="row"><button id="clearQueue" class="btn danger">清空目前群等待列</button><button id="reloadTasks" class="btn">重新加载</button></div></div>
+        <div id="taskStats" class="grid" style="margin-bottom:16px"></div><div id="taskList" class="list"><div class="empty">暂无任務</div></div>
       </section>
       <section id="v-moderation" class="view">
-        <div class="section-head"><div><h2>群管理提案</h2><p>自然語言和 Portal 操作都只建立提案，確認後才會呼叫 OneBot。</p></div><button id="reloadProposals" class="btn">重新載入</button></div>
+        <div class="section-head"><div><h2>群待确认操作</h2><p>自然語言和 Portal 操作都只建立待确认操作，确认後才會呼叫 OneBot。</p></div><button id="reloadProposals" class="btn">重新加载</button></div>
         <div class="grid">
-          <div class="card span-4"><h3>手動建立提案</h3><div class="field"><label>動作</label><select id="opAction"><option value="mute">禁言</option><option value="unmute">解除禁言</option><option value="kick">踢出群聊</option><option value="whole_mute">全員禁言</option><option value="whole_unmute">解除全員禁言</option><option value="set_admin">設為管理員</option><option value="unset_admin">取消管理員</option></select></div><div class="field"><label>目標 QQ（全員操作可留空）</label><input id="opQq" inputmode="numeric"></div><div class="field"><label>禁言時長</label><input id="opDuration" value="10分"></div><button id="createProposal" class="btn primary">建立提案，不直接執行</button><div id="opMessage" class="notice">高風險操作需要二次確認；設為／取消 QQ 群管理員只允許目前群主提出及確認。</div></div>
-          <div class="card span-8"><h3>提案紀錄</h3><div id="proposalList" class="list"><div class="empty">尚無提案</div></div></div>
+          <div class="card span-4"><h3>手動建立待确认操作</h3><div class="field"><label>動作</label><select id="opAction"><option value="mute">禁言</option><option value="unmute">解除禁言</option><option value="kick">踢出群聊</option><option value="whole_mute">全員禁言</option><option value="whole_unmute">解除全員禁言</option><option value="set_admin">設為管理員</option><option value="unset_admin">取消管理員</option></select></div><div class="field"><label>目標 QQ（全員操作可留空）</label><input id="opQq" inputmode="numeric"></div><div class="field"><label>禁言時長</label><input id="opDuration" value="10分"></div><button id="createProposal" class="btn primary">建立待确认操作，不直接執行</button><div id="opMessage" class="notice">高風險操作需要二次确认；設為／取消 QQ 群管理員只允許目前群主提出及确认。</div></div>
+          <div class="card span-8"><h3>提案紀錄</h3><div id="proposalList" class="list"><div class="empty">暂无提案</div></div></div>
         </div>
       </section>
       <section id="v-simulator" class="view">
-        <div class="section-head"><div><h2>事件模擬器</h2><p>部署前先檢查觸發、排隊、思考提示與記憶行為。</p></div><button id="runSimulator" class="btn primary">執行模擬</button></div>
+        <div class="section-head"><div><h2>事件模拟器</h2><p>部署前先檢查觸發、排隊、思考提示與記憶行為。</p></div><button id="runSimulator" class="btn primary">執行模擬</button></div>
         <div class="split"><div class="card"><div class="field"><label>模擬訊息</label><textarea id="simText" placeholder="例如：把 @某人 殺了"></textarea></div><div class="field"><label>發送者角色</label><select id="simRole"><option value="member">群友</option><option value="admin">管理員</option><option value="owner">群主</option></select></div><label class="switch"><input id="simMention" type="checkbox" checked>有 @ 機器人</label><label class="switch"><input id="simImage" type="checkbox">含圖片</label><label class="switch"><input id="simBusy" type="checkbox">此群友已有問題執行中</label></div><div class="card"><h3>模擬結果</h3><div id="simDecision" class="notice">尚未執行</div><div id="simSteps" class="timeline" style="margin-top:14px"></div></div></div>
       </section>
       <section id="v-models" class="view">
-        <div class="section-head"><div><h2>模型中心</h2><p>免費優先：Gemma／Gemini 優先處理；DeepSeek 僅用於高難度或明確指定，並受每日人民幣預算限制。</p></div><button id="reloadModels" class="btn">重新載入</button></div><div id="modelList" class="grid"><div class="empty span-12">尚未載入</div></div>
+        <div class="section-head"><div><h2>模型中心</h2><p>免費優先：Gemma／Gemini 優先處理；DeepSeek 僅用於高難度或明確指定，並受每日人民幣預算限制。</p></div><button id="reloadModels" class="btn">重新加载</button></div><div id="modelList" class="grid"><div class="empty span-12">尚未加载</div></div>
       </section>
       <section id="v-quota" class="view">
-        <div class="section-head"><div><h2>DeepSeek 額度與限制</h2><p>留空代表不限制；填 0 代表完全禁止；正數代表每日人民幣上限。</p></div><button id="saveQuota" class="btn primary">儲存額度</button></div>
-        <div class="grid"><div class="card span-6"><h3>全站每日 CNY</h3><div class="field"><label>所有群組合計上限</label><input id="globalQuota" type="number" min="0" step="0.01" placeholder="留空＝無限制"></div><div class="notice">0＝完全停用 DeepSeek；空白＝不設每日上限。</div></div><div class="card span-6"><h3>目前群每日 CNY</h3><div class="field"><label>目前選擇群組上限</label><input id="groupQuota" type="number" min="0" step="0.01" placeholder="留空＝無限制"></div><div id="quotaStatus" class="notice">僅開發者可以修改。</div></div></div>
+        <div class="section-head"><div><h2>DeepSeek 额度与限制</h2><p>留空代表不限制；填 0 代表完全禁止；正數代表每日人民幣上限。</p></div><button id="saveQuota" class="btn primary">儲存額度</button></div>
+        <div class="grid"><div class="card span-6"><h3>全站每日 CNY</h3><div class="field"><label>所有群組合計上限</label><input id="globalQuota" type="number" min="0" step="0.01" placeholder="留空＝無限制"></div><div class="notice">0＝完全停用 DeepSeek；空白＝不設每日上限。</div></div><div class="card span-6"><h3>目前群每日 CNY</h3><div class="field"><label>目前选择群组上限</label><input id="groupQuota" type="number" min="0" step="0.01" placeholder="留空＝無限制"></div><div id="quotaStatus" class="notice">僅開發者可以修改。</div></div></div>
       </section>
       <section id="v-groups" class="view">
-        <div class="section-head"><div><h2>群組設定</h2><p>修改目前選擇群的 AI、記憶、插話率與人格。</p></div><button id="saveGroup" class="btn primary">儲存設定</button></div>
+        <div class="section-head"><div><h2>群组设置</h2><p>修改目前選擇群的 AI、記憶、插話率與人格。</p></div><button id="saveGroup" class="btn primary">儲存設定</button></div>
         <div class="grid"><div class="card span-6"><h3>功能開關</h3><label class="switch"><input id="groupAi" type="checkbox">啟用 AI</label><label class="switch"><input id="groupMemory" type="checkbox">啟用聊天記憶</label><label class="switch"><input id="activeSpeaking" type="checkbox">允許主動發話（開發者）</label><div class="field"><label>隨機插話率（0–100%）</label><input id="interjectRate" type="number" min="0" max="100"></div></div><div class="card span-6"><h3>人格與關鍵字</h3><div class="field"><label>群組人格</label><textarea id="groupPersona"></textarea></div><div class="field"><label>過濾關鍵字（逗號或換行）</label><textarea id="groupKeywords"></textarea></div></div></div>
       </section>
       <section id="v-memory" class="view">
-        <div class="section-head"><div><h2>記憶管理</h2><p>指令、白名單提示與系統訊息不會進入聊天記憶。</p></div><button id="reloadMemory" class="btn">重新載入</button></div>
-        <div class="grid"><div class="card span-4"><h3>新增記憶</h3><div class="field"><label>範圍</label><select id="memoryScope"><option value="private">個人</option><option value="public">群組公開</option></select></div><div class="field"><label>內容</label><textarea id="memoryText"></textarea></div><button id="addMemory" class="btn primary">新增</button></div><div class="card span-8"><h3>目前記憶</h3><div id="memoryList" class="list"><div class="empty">尚無記憶</div></div></div></div>
+        <div class="section-head"><div><h2>记忆管理</h2><p>指令、白名單提示與系統訊息不會進入聊天記憶。</p></div><button id="reloadMemory" class="btn">重新加载</button></div>
+        <div class="grid"><div class="card span-4"><h3>新增記憶</h3><div class="field"><label>範圍</label><select id="memoryScope"><option value="private">個人</option><option value="public">群組公開</option></select></div><div class="field"><label>內容</label><textarea id="memoryText"></textarea></div><button id="addMemory" class="btn primary">新增</button></div><div class="card span-8"><h3>目前記憶</h3><div id="memoryList" class="list"><div class="empty">暂无記憶</div></div></div></div>
       </section>
       <section id="v-logs" class="view">
-        <div class="section-head"><div><h2>操作日誌</h2><p>群務與設定操作獨立保存，不會當成 AI 聊天語料。</p></div><button id="reloadLogs" class="btn">重新載入</button></div><div id="logList" class="list"><div class="empty">尚無日誌</div></div>
+        <div class="section-head"><div><h2>操作日志</h2><p>群務與設定操作獨立保存，不會當成 AI 聊天語料。</p></div><button id="reloadLogs" class="btn">重新加载</button></div><div id="logList" class="list"><div class="empty">暂无日誌</div></div>
       </section>
     </div>
   </main>
@@ -4602,36 +6571,74 @@ function getPortalHomePage(host) {
 <script>
 (function(){
 'use strict';
-var token=sessionStorage.getItem('qqai_token')||'';var currentGroup='';var session=null;
-var $=function(id){return document.getElementById(id)};var titles={overview:'總覽',health:'健康檢查',tasks:'任務與等待列',moderation:'管理提案',simulator:'事件模擬器',models:'模型中心',quota:'額度與限制',groups:'群組設定',memory:'記憶管理',logs:'操作日誌'};
+var token='';var currentGroup='';var session=null;
+var $=function(id){return document.getElementById(id)};var titles={overview:'总览',health:'健康检查',tasks:'任务与等待队列',moderation:'待确认操作',simulator:'事件模拟器',models:'模型中心',quota:'额度与限制',groups:'群组设置',memory:'记忆管理',logs:'操作日志',aidecisions:'AI 回覆紀錄',platform:'300 功能平台'};
 function esc(v){return String(v==null?'':v).replace(/[&<>"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]})}
 function toast(msg){$('toast').textContent=String(msg||'');$('toast').classList.remove('hidden');clearTimeout(toast.t);toast.t=setTimeout(function(){$('toast').classList.add('hidden')},3200)}
 async function raw(path,method,data){var opt={method:method||'GET',headers:{}};if(data!==undefined){opt.headers['Content-Type']='application/json';opt.body=JSON.stringify(data)}var r=await fetch(path,opt);var j=await r.json().catch(function(){return{ok:false,message:'無法解析伺服器回應'}});if(!r.ok&&!j.message)j.message='HTTP '+r.status;return j}
-async function api(path,method,data){var opt={method:method||'GET',headers:{Authorization:'Bearer '+token}};if(data!==undefined){opt.headers['Content-Type']='application/json';opt.body=JSON.stringify(data)}var r=await fetch('/api/portal'+path,opt);var j=await r.json().catch(function(){return{ok:false,message:'無法解析伺服器回應'}});if(r.status===401){sessionStorage.removeItem('qqai_token');showLogin()}return j}
+async function api(path,method,data){var opt={method:method||'GET',headers:{},credentials:'same-origin'};if(data!==undefined){opt.headers['Content-Type']='application/json';opt.body=JSON.stringify(data)}var r=await fetch('/api/portal'+path,opt);var j=await r.json().catch(function(){return{ok:false,message:'無法解析伺服器回應'}});if(r.status===401){showLogin()}return j}
 function statusClass(s){return s==='ok'?'ok':s==='warning'?'warning':s==='error'?'error':''}
+function ensureModal(){if($('qqaiModal'))return;var d=document.createElement('div');d.id='qqaiModal';d.className='hidden';d.style.cssText='position:fixed;inset:0;z-index:9999;background:#0009;display:grid;place-items:center;padding:18px';d.innerHTML='<div style="width:min(520px,100%);background:#101826;border:1px solid #ffffff22;border-radius:16px;padding:20px"><h3 id="qqaiModalTitle" style="margin-top:0">确认操作</h3><div id="qqaiModalText" style="white-space:pre-wrap;margin:12px 0"></div><textarea id="qqaiModalInput" class="hidden" style="width:100%;min-height:110px;margin:8px 0"></textarea><div style="display:flex;justify-content:flex-end;gap:10px"><button id="qqaiModalCancel" class="btn">取消</button><button id="qqaiModalOk" class="btn primary">确认</button></div></div>';document.body.appendChild(d)}
+function customDialog(message,options){ensureModal();options=options||{};return new Promise(function(resolve){var d=$('qqaiModal'),input=$('qqaiModalInput');$('qqaiModalTitle').textContent=options.title||'确认操作';$('qqaiModalText').textContent=String(message||'');input.classList.toggle('hidden',!options.input);input.value=options.value||'';d.classList.remove('hidden');var done=function(value){d.classList.add('hidden');$('qqaiModalOk').onclick=null;$('qqaiModalCancel').onclick=null;resolve(value)};$('qqaiModalOk').onclick=function(){done(options.input?input.value:true)};$('qqaiModalCancel').onclick=function(){done(options.input?null:false)}})}
+function confirmModal(message,title){return customDialog(message,{title:title||'确认操作'})}
+function textModal(message,value,title){return customDialog(message,{title:title||'编辑内容',input:true,value:value||''})}
+function applyRoleVisibility(){if(!session)return;var p=session.permissions||{},role=session.role||'member';document.querySelectorAll('#nav button').forEach(function(b){var v=b.dataset.view,show=true;if(role==='member'&&!['overview','models','memory'].includes(v))show=false;if(role==='admin'&&['quota','health'].includes(v))show=false;if(role==='owner'&&v==='quota')show=false;if(v==='quota'&&!p.developer)show=false;b.style.display=show?'':'none'})}
+function ensureGroupSettingsExtras(){if($('welcomeEnabled')||!$('v-groups'))return;var grid=$('v-groups').querySelector('.grid');if(!grid)return;var card=document.createElement('div');card.className='card span-12';card.innerHTML='<h3>自动化与安全参数</h3><div class="grid"><div class="card span-6"><div class="notice">自动 QQ 群打卡固定在台北时间 00:00:00，对机器人所在的全部群执行，不受 AI 开关与 AI 白名单影响。Cloudflare／NapCat 实际发送可能有数秒延迟，因此是尽力争取首个打卡。</div><label class="switch"><input id="welcomeEnabled" type="checkbox">自动欢迎新人</label><label class="switch"><input id="joinAssistEnabled" type="checkbox">入群辅助（只建议同意，不拒绝）</label><label class="switch"><input id="ruleMonitorEnabled" type="checkbox">持续检查群成员是否违反群规</label><div class="field"><label>欢迎词（支持 {at}、{qq} 与表情符号）</label><textarea id="welcomeText"></textarea></div></div><div class="card span-6"><div class="field"><label>同一对象处置冷却（秒，默认 0＝关闭）</label><input id="moderationCooldown" type="number" min="0" ></div><div class="notice">处置冷却默认 0 秒且不设最大值；0 代表关闭。</div><div class="field"><label>新人观察期（天，0＝关闭）</label><input id="newcomerDays" type="number" min="0" max="30"></div><div class="notice">群规持续监控只有当前真实群主可以开关；开发者与 QQ 管理员可查看。它只提示疑似违规，不会自动处罚。</div></div></div>';grid.appendChild(card);ensureDeveloperPermissionPanel()}
+
+function ensureR3Views(){
+  var nav=$('nav');var container=document.querySelector('main .content')||document.querySelector('main')||$('app');if(!nav||!container)return;
+  function addView(name,label){if(!$('v-'+name)){var b=document.createElement('button');b.dataset.view=name;b.textContent=label;b.onclick=function(){showView(name)};nav.appendChild(b);var section=document.createElement('section');section.id='v-'+name;section.className='view';container.appendChild(section)}titles[name]=label}
+  addView('ruleviolations','群规监控');addView('settingscenter','设置中心');addView('bilibili','B站串接');addView('aidecisions','AI 回覆紀錄');
+  if(!$('v-ruleviolations').dataset.ready){$('v-ruleviolations').dataset.ready='1';$('v-ruleviolations').innerHTML='<div class="section-head"><div><h2>群规监控记录</h2><p>默认开启并仅记录；可按群友、内容与 AI 分类的违规项目搜索。</p></div><button id="rvReload" class="btn">重新加载</button></div><div class="card"><div class="row"><input id="rvMember" placeholder="群友名称或 QQ"><input id="rvContent" placeholder="消息内容"><input id="rvType" placeholder="违规项目"><button id="rvSearch" class="btn primary">搜索</button></div><div class="row" style="margin-top:12px"><select id="rvProxyMode"><option value="record">仅记录</option><option value="warn">自动警告</option><option value="mute">自动禁言</option><option value="auto">按 AI 分类处理</option></select><input id="rvMuteSeconds" type="number" min="0" placeholder="禁言秒数"><label class="switch"><input id="rvKickAuth" type="checkbox">授权 AI 踢出</label><button id="rvSave" class="btn primary">保存代理设置</button></div></div><div id="rvList" class="list" style="margin-top:16px"></div>';$('rvReload').onclick=loadRuleViolations;$('rvSearch').onclick=loadRuleViolations;$('rvSave').onclick=saveRuleViolationSettings}
+  if(!$('v-settingscenter').dataset.ready){$('v-settingscenter').dataset.ready='1';$('v-settingscenter').innerHTML='<div class="section-head"><div><h2>设置中心</h2><p>按角色显示可配置项目。开发者可指定目标 QQ/角色，并选择是否写入操作日志。</p></div><button id="scReload" class="btn">重新加载</button></div><div id="scDeveloper" class="card hidden"><div class="row"><input id="scTargetQq" placeholder="目标 QQ"><select id="scTargetRole"><option value="member">群员</option><option value="admin">管理员</option><option value="owner">群主</option><option value="developer">开发者</option></select><select id="scAudit"><option value="log">记录 log</option><option value="silent">不记录 log</option></select></div></div><div id="scList" class="list" style="margin-top:16px"></div>';$('scReload').onclick=loadSettingsCenter;['scTargetQq','scTargetRole'].forEach(function(id){$(id).onchange=loadSettingsCenter})}
+  if(!$('v-aidecisions').dataset.ready){$('v-aidecisions').dataset.ready='1';$('v-aidecisions').innerHTML='<div class="section-head"><div><h2>AI 回覆與未回覆紀錄</h2><p>每則群聊觸發判斷、主動插話來源、模型、智能 @ 規劃、獨立搜索內容與實際發送結果都獨立保存。</p></div><button id="aiLogReload" class="btn">重新載入</button></div><div class="card"><div class="row"><input id="aiLogSearch" class="grow" placeholder="搜尋 QQ、訊息、原因、模型"><select id="aiLogDecision"><option value="">全部決策</option><option value="reply_generated">已產生回覆</option><option value="skipped">未回覆</option><option value="blocked">遭阻擋</option><option value="error">錯誤</option></select><select id="aiLogTrigger"><option value="">全部觸發</option><option value="mention">@機器人</option><option value="reply_to_ai">回覆機器人</option><option value="auto_interject">主動插話</option><option value="private">私聊</option><option value="none">未觸發</option></select><button id="aiLogSearchBtn" class="btn primary">搜尋</button></div></div><div id="aiDecisionList" class="list" style="margin-top:16px"><div class="empty">尚未載入</div></div>';$('aiLogReload').onclick=loadAiDecisions;$('aiLogSearchBtn').onclick=loadAiDecisions;$('aiLogSearch').onkeydown=function(e){if(e.key==='Enter')loadAiDecisions()}}
+  if(!$('v-bilibili').dataset.ready){$('v-bilibili').dataset.ready='1';$('v-bilibili').innerHTML='<div class="section-head"><div><h2>B站串接</h2><p>不绑定固定示例账号。填写使用者实际要求串接的创作者，并选择直播/新视频及 @全体选项。</p></div><button id="biliReload" class="btn">重新加载</button></div><div class="card"><div class="row"><input id="biliCreatorName" placeholder="创作者名称"><input id="biliCreatorId" placeholder="开放平台创作者 ID / UID"><select id="biliMode"><option value="official_webhook">B站开放平台 Webhook</option><option value="generic_webhook">通用事件桥接 Webhook</option></select></div><div class="row"><label class="switch"><input id="biliLiveNotify" type="checkbox">开播通知</label><label class="switch"><input id="biliLiveAtAll" type="checkbox">开播 @全体</label><label class="switch"><input id="biliVideoNotify" type="checkbox">新视频通知</label><label class="switch"><input id="biliVideoAtAll" type="checkbox">新视频 @全体</label><button id="biliAdd" class="btn primary">新增串接</button></div><div class="notice">所有通知均可关闭，此时只记录事件。@全体只有 Bot 为 QQ 管理员或群主时才会发送。</div></div><div id="biliList" class="list" style="margin-top:16px"></div>';$('biliReload').onclick=loadBilibili;$('biliAdd').onclick=saveBilibiliConnector}
+  if(!$('v-platform')){var b=document.createElement('button');b.dataset.view='platform';b.textContent='300 功能平台';$('nav').appendChild(b);b.onclick=function(){showView('platform')};var v=document.createElement('section');v.id='v-platform';v.className='view';v.innerHTML='<div class="section-head"><div><h2>300 功能平台</h2><p>搜尋功能、查看實作模式並依角色管理開關。</p></div><button id="pfReload" class="btn">重新載入</button></div><div class="card"><div class="row"><input id="pfSearch" class="grow" placeholder="搜尋功能名稱、ID、類別"><select id="pfAudit"><option value="log">記錄 Log</option><option value="silent">不記錄 Log（僅開發者）</option></select><button id="pfGo" class="btn primary">搜尋</button></div><div id="pfSummary" class="notice">尚未載入</div></div><div id="pfList" class="list" style="margin-top:16px"></div>';document.querySelector('.content').appendChild(v);$('pfReload').onclick=loadPlatformFeatures;$('pfGo').onclick=loadPlatformFeatures;$('pfSearch').onkeydown=function(e){if(e.key==='Enter')loadPlatformFeatures()}}
+}
+function applyR3RoleVisibility(){ensureR3Views();var perms=(session&&session.permissions)||{};var management=!!(perms.aiAdmin||perms.groupOps||perms.nativeAdmin||perms.developer||session&&['admin','owner'].includes(session.role));var dev=!!perms.developer;document.querySelectorAll('#nav button').forEach(function(b){if(['ruleviolations','bilibili','aidecisions'].includes(b.dataset.view))b.hidden=!management;if(b.dataset.view==='settingscenter')b.hidden=false});$('scDeveloper').classList.toggle('hidden',!dev);if($('rvSave'))$('rvSave').disabled=!(session&&session.role==='owner');if($('rvKickAuth'))$('rvKickAuth').disabled=!(session&&session.role==='owner')}
+async function loadAiDecisions(){var p=new URLSearchParams({q:$('aiLogSearch').value||'',decision:$('aiLogDecision').value||'',triggerType:$('aiLogTrigger').value||'',limit:'500'});var r=await api('/ai-decisions?'+p.toString());if(!r.ok){$('aiDecisionList').innerHTML='<div class="empty">'+esc(r.message)+'</div>';return}$('aiDecisionList').innerHTML=(r.logs||[]).map(function(x){var title=(x.decision||'unknown')+'｜'+(x.senderName||x.userId||'')+'（'+(x.userId||'')+'）';var meta=(x.at||'')+'｜觸發 '+(x.triggerType||'none')+'｜原因 '+(x.reason||'')+'｜'+(x.provider||'')+((x.model)?'/'+x.model:'')+'｜發送 '+(x.sendStatus||'');var body='來源訊息：'+(x.input||'')+(x.generatedReply?'\nAI 回覆：'+x.generatedReply:'')+'\n關係：'+JSON.stringify({mentionedQqs:x.mentionedQqs||[],quotedMessageId:x.quotedMessageId||'',quotedSenderId:x.quotedSenderId||''})+'\n智能 @ 規劃：'+JSON.stringify(x.mentionRouting||{})+'\n回覆計畫：'+JSON.stringify(x.replyPlan||{})+'\n是否搜索：'+(x.searchPerformed?'有':'無')+'（需要='+(x.searchRequired?'是':'否')+'，嘗試='+(x.searchAttempted?'是':'否')+'）'+'\n搜索查詢：'+(x.searchQuery||'')+'\n搜索關鍵詞：'+JSON.stringify(x.searchQueries||[])+'\n搜索提供者：'+(x.searchProvider||'')+((x.searchModel)?'/'+x.searchModel:'')+'\n搜索錯誤：'+(x.searchError||'')+'\n搜索內容：'+(x.searchContext||'')+'\n搜索來源：'+JSON.stringify(x.searchSources||[])+'\n上下文：原文 '+(x.contextExactMessages||0)+'／摘要 '+(x.contextSummarizedMessages||0)+'／提供者 '+(x.contextSummaryProvider||'');return '<div class="item"><div class="item-title">'+esc(title)+'</div><div class="item-meta">'+esc(meta)+'</div><div class="item-body" style="white-space:pre-wrap">'+esc(body)+'</div></div>'}).join('')||'<div class="empty">沒有符合的紀錄</div>'}
+async function loadRuleViolations(){var p=new URLSearchParams({member:$('rvMember').value||'',content:$('rvContent').value||'',type:$('rvType').value||''});var r=await api('/rule-violations?'+p.toString());if(!r.ok){$('rvList').innerHTML='<div class="empty">'+esc(r.message)+'</div>';return}$('rvProxyMode').value=r.settings.proxyMode||'record';$('rvMuteSeconds').value=r.settings.muteSeconds||600;$('rvKickAuth').checked=!!r.settings.kickAuthorized;$('rvList').innerHTML=(r.items||[]).map(function(x){return '<div class="item"><div class="item-head"><div><div class="item-title">'+esc(x.senderName||x.userId)+'（'+esc(x.userId)+'）｜'+esc(x.violationType||'其他')+'</div><div class="item-meta">'+new Date(Number(x.createdAt||0)).toLocaleString()+'｜置信度 '+esc(x.confidence)+'｜处理 '+esc(x.actionTaken||'none')+'</div></div></div><div class="item-body">'+esc(x.content)+'<br><b>分类：</b>'+esc(x.violationType||'')+'<br><b>原因：</b>'+esc(x.reason||'')+'<br><b>结果：</b>'+esc(x.actionResult||'')+'</div></div>'}).join('')||'<div class="empty">暂无违规记录</div>'}
+async function saveRuleViolationSettings(){var r=await api('/rule-violations/settings','POST',{proxyMode:$('rvProxyMode').value,muteSeconds:$('rvMuteSeconds').value,kickAuthorized:$('rvKickAuth').checked});toast(r.message);if(r.ok)loadRuleViolations()}
+async function loadSettingsCenter(){var dev=session&&(session.permissions||{}).developer;var p=new URLSearchParams();if(dev){p.set('targetQq',$('scTargetQq').value||session.qq);p.set('targetRole',$('scTargetRole').value)}var r=await api('/settings-center?'+p.toString());if(!r.ok){$('scList').innerHTML='<div class="empty">'+esc(r.message)+'</div>';return}if(dev&&!$('scTargetQq').value)$('scTargetQq').value=r.targetQq||session.qq;$('scList').innerHTML='';(r.settings||[]).forEach(function(s){var d=document.createElement('div');d.className='item';var input;if(s.type==='boolean'){input=document.createElement('input');input.type='checkbox';input.checked=!!s.value}else if(s.type==='select'){input=document.createElement('select');(s.options||[]).forEach(function(v){var o=document.createElement('option');o.value=v;o.textContent=v;input.appendChild(o)});input.value=String(s.value)}else if(s.type==='textarea'){input=document.createElement('textarea');input.value=String(s.value==null?'':s.value)}else{input=document.createElement('input');input.type=s.type==='number'?'number':'text';input.value=String(s.value==null?'':s.value);if(s.min!=null)input.min=s.min;if(s.max!=null)input.max=s.max}var save=document.createElement('button');save.className='btn primary';save.textContent='保存';save.onclick=async function(){var value=input.type==='checkbox'?input.checked:input.value;var payload={key:s.key,value:value};if(dev){payload.targetQq=$('scTargetQq').value;payload.targetRole=$('scTargetRole').value;payload.auditMode=$('scAudit').value}var x=await api('/settings-center','POST',payload);toast(x.message)};d.innerHTML='<div class="item-title">'+esc(s.label)+'</div><div class="item-meta">角色：'+esc(s.minRole)+'｜对应指令：'+esc(s.command||'')+'</div>';d.append(input,save);$('scList').appendChild(d)})}
+async function loadBilibili(){var r=await api('/integrations/bilibili');if(!r.ok){$('biliList').innerHTML='<div class="empty">'+esc(r.message)+'</div>';return}$('biliList').innerHTML='';(r.connectors||[]).forEach(function(c){var d=document.createElement('div');d.className='item';d.innerHTML='<div class="item-title">'+esc(c.creatorName||c.creatorId)+'</div><div class="item-meta">模式：'+esc(c.mode)+'｜直播：'+(c.liveNotify?'通知':'仅记录')+(c.liveAtAll?'＋@全体':'')+'｜视频：'+(c.videoNotify?'通知':'仅记录')+(c.videoAtAll?'＋@全体':'')+'</div><div class="item-body">Webhook：'+esc(c.webhookUrl||'')+'</div>';var row=document.createElement('div');row.className='row';var testLive=document.createElement('button');testLive.className='btn';testLive.textContent='测试开播';testLive.onclick=function(){testBilibili(c.id,'live_start')};var testVideo=document.createElement('button');testVideo.className='btn';testVideo.textContent='测试新视频';testVideo.onclick=function(){testBilibili(c.id,'video_publish')};var del=document.createElement('button');del.className='btn danger';del.textContent='删除';del.onclick=async function(){if(!(await confirmModal('删除此 B站串接？','确认删除')))return;var x=await api('/integrations/bilibili','POST',{action:'delete',id:c.id});toast(x.message);if(x.ok)loadBilibili()};row.append(testLive,testVideo,del);d.appendChild(row);$('biliList').appendChild(d)});if(!$('biliList').children.length)$('biliList').innerHTML='<div class="empty">暂无 B站串接</div>'}
+async function saveBilibiliConnector(){var r=await api('/integrations/bilibili','POST',{action:'save',creatorName:$('biliCreatorName').value,creatorId:$('biliCreatorId').value,mode:$('biliMode').value,liveNotify:$('biliLiveNotify').checked,liveAtAll:$('biliLiveAtAll').checked,videoNotify:$('biliVideoNotify').checked,videoAtAll:$('biliVideoAtAll').checked});toast(r.message);if(r.ok){$('biliCreatorName').value='';$('biliCreatorId').value='';loadBilibili()}}
+async function testBilibili(id,eventType){var r=await api('/integrations/bilibili','POST',{action:'test',id:id,eventType:eventType});toast(r.message)}
+
+function setNativeAdminVisibility(botIsOwner){var sel=$('opAction');if(!sel)return;Array.from(sel.options||[]).forEach(function(o){if(o.value==='set_admin'||o.value==='unset_admin'){o.hidden=!botIsOwner;o.disabled=!botIsOwner}});if(sel.selectedOptions&&sel.selectedOptions[0]&&sel.selectedOptions[0].disabled)sel.selectedIndex=0}
+async function refreshCapabilities(){if(!currentGroup){setNativeAdminVisibility(false);return null}var r=await api('/capabilities');if(r&&r.ok)setNativeAdminVisibility(!!r.bot_is_owner);else setNativeAdminVisibility(false);return r}
+function ensureDeveloperPermissionPanel(){if(!session||!(session.permissions||{}).developer||$('developerPermissionPanel')||!$('v-groups'))return;var grid=$('v-groups').querySelector('.grid');if(!grid)return;var card=document.createElement('div');card.id='developerPermissionPanel';card.className='card span-12';card.innerHTML='<h3>程序内 AI 管理权限</h3><p class="notice">这里授予的是使用机器人执行禁言、踢出、待确认操作等程序权限，不会把对方设为真正 QQ 管理员。</p><div class="row"><input id="permissionQq" placeholder="目标 QQ"><select id="permissionType"><option value="ai_admin">AI 管理</option><option value="group_ops">群操作（可用 Bot 禁言等）</option></select><button id="grantPermission" class="btn primary">授予</button><button id="revokePermission" class="btn danger">撤销</button></div>';grid.appendChild(card);$('grantPermission').onclick=function(){changeProgramPermission(true)};$('revokePermission').onclick=function(){changeProgramPermission(false)}}
+async function changeProgramPermission(enabled){var qq=String($('permissionQq').value||'').replace(/\D/g,'');if(!qq){toast('请输入目标 QQ');return}var r=await api('/root/member','POST',{qq:qq,permission:$('permissionType').value,enabled:enabled});toast(r.message||'完成')}
+function ensureModelRegistryPanel(){if($('runtimeModelPanel')||!$('v-models'))return;var panel=document.createElement('div');panel.id='runtimeModelPanel';panel.className='card';panel.style.marginTop='16px';panel.innerHTML='<h3>运行时模型顺序（开发者）</h3><p class="notice">新增、删除与排序只写入 D1。wrangler 环境变量中的默认模型保持锁定，不修改源代码，并只作为后备。</p><div class="row"><select id="runtimeModelKind"><option value="chat">Gemini 聊天</option><option value="decision">Gemma 判断</option><option value="last_resort">Gemma 最后备案</option><option value="tts">TTS</option></select><input id="runtimeModelId" placeholder="模型 ID"><button id="runtimeModelAdd" class="btn primary">新增</button></div><div id="runtimeModelList" class="list" style="margin-top:12px"></div>';$('v-models').appendChild(panel);$('runtimeModelKind').onchange=loadRuntimeModels;$('runtimeModelAdd').onclick=async function(){var id=$('runtimeModelId').value.trim();if(!id){toast('请输入模型 ID');return}var r=await api('/root/model-registry','POST',{action:'add',kind:$('runtimeModelKind').value,id:id});toast(r.message||'完成');if(r.ok){$('runtimeModelId').value='';loadRuntimeModels()}}}
+async function runtimeModelAction(action,id,direction,enabled){var r=await api('/root/model-registry','POST',{action:action,kind:$('runtimeModelKind').value,id:id,direction:direction,enabled:enabled});toast(r.message||'完成');if(r.ok)loadRuntimeModels()}
+async function loadRuntimeModels(){if(!session||!(session.permissions||{}).developer)return;ensureModelRegistryPanel();var r=await api('/root/model-registry');if(!r.ok){$('runtimeModelList').innerHTML='<div class="empty">'+esc(r.message)+'</div>';return}var kind=$('runtimeModelKind').value;var state=(r.categories||{})[kind]||{custom:[],immutable:[]};var html='';(state.custom||[]).forEach(function(m){html+='<div class="item"><div class="item-head"><div><div class="item-title">'+esc(m.id)+'</div><div class="item-meta">自定义｜'+(m.enabled?'已启用':'已停用')+'</div></div><div class="row"><button class="btn" data-act="up" data-id="'+esc(m.id)+'">上移</button><button class="btn" data-act="down" data-id="'+esc(m.id)+'">下移</button><button class="btn" data-act="toggle" data-enabled="'+(!m.enabled)+'" data-id="'+esc(m.id)+'">'+(m.enabled?'停用':'启用')+'</button><button class="btn danger" data-act="delete" data-id="'+esc(m.id)+'">删除</button></div></div></div>'});(state.immutable||[]).forEach(function(m){html+='<div class="item"><div class="item-title">'+esc(m.id)+'</div><div class="item-meta">锁定默认后备｜不可修改</div></div>'});$('runtimeModelList').innerHTML=html||'<div class="empty">没有模型</div>';$('runtimeModelList').querySelectorAll('button[data-act]').forEach(function(b){b.onclick=function(){var a=b.dataset.act;if(a==='up'||a==='down')runtimeModelAction('move',b.dataset.id,a);else if(a==='toggle')runtimeModelAction('toggle',b.dataset.id,'',b.dataset.enabled==='true');else runtimeModelAction('delete',b.dataset.id)}})}
+
+function ensureSearchTools(){if($('logList')&&!$('logSearch')){var wrap=document.createElement('div');wrap.className='row';wrap.innerHTML='<input id="logSearch" placeholder="搜索操作、操作者、类型"><button id="logSearchBtn" class="btn">搜索日志</button>';$('logList').parentNode.insertBefore(wrap,$('logList'));$('logSearchBtn').onclick=loadLogs;$('logSearch').onkeydown=function(e){if(e.key==='Enter')loadLogs()}}if($('memoryList')&&!$('vectorSearch')){var v=document.createElement('div');v.className='row';v.innerHTML='<input id="vectorSearch" placeholder="搜索群聊向量"><button id="vectorSearchBtn" class="btn">向量搜索</button><div id="vectorResults" style="width:100%"></div>';$('memoryList').parentNode.insertBefore(v,$('memoryList'));$('vectorSearchBtn').onclick=loadVectorSearch}}
+async function loadVectorSearch(){var q=$('vectorSearch')?$('vectorSearch').value.trim():'';if(!q)return;var r=await api('/vector-search?q='+encodeURIComponent(q));$('vectorResults').innerHTML=r.ok?(r.results||[]).map(function(x){return '<div class="item"><div class="item-title">相关度 '+esc(Number(x.score||0).toFixed(3))+'</div><div class="item-meta">QQ '+esc(x.qq||'')+'</div><div class="item-body">'+esc(x.text||'')+'</div></div>'}).join(''):'<div class="empty">'+esc(r.message||'搜索失败')+'</div>'}
+
 function showLogin(){$('login').classList.remove('hidden');$('app').classList.add('hidden')}
 function showApp(){$('login').classList.add('hidden');$('app').classList.remove('hidden')}
-function showView(name){document.querySelectorAll('.view').forEach(function(v){v.classList.remove('active')});document.querySelectorAll('#nav button').forEach(function(b){b.classList.toggle('active',b.dataset.view===name)});$('v-'+name).classList.add('active');$('pageTitle').textContent=titles[name]||name;$('sidebar').classList.remove('open');if(name==='health')loadHealth('quick');if(name==='tasks')loadTasks();if(name==='moderation')loadProposals();if(name==='models')loadModels();if(name==='quota')loadQuota();if(name==='groups')loadGroupSettings();if(name==='memory')loadMemory();if(name==='logs')loadLogs()}
-async function loadGroups(){var r=await api('/groups');if(!r.ok){toast(r.message);return false}var sel=$('groupSelect');sel.innerHTML='<option value="">選擇群組</option>';(r.groups||[]).forEach(function(g){var o=document.createElement('option');o.value=g.groupId;o.textContent=(g.groupName||g.groupId)+' ('+g.groupId+')';sel.appendChild(o)});if(r.selectedGroupId){sel.value=r.selectedGroupId;currentGroup=r.selectedGroupId}return true}
-async function selectGroup(id){if(!id){currentGroup='';return}var r=await api('/select-group','POST',{groupId:id});if(!r.ok){toast(r.message);return}currentGroup=id;session=r.session;$('identity').innerHTML='<b>'+esc(session.qq)+'</b><br><span style="color:#98a2b7">'+esc(session.role||'member')+'</span>';toast('群組已切換');refreshOverview()}
-async function boot(){if(!token){showLogin();return}showApp();var me=await api('/me');if(!me.ok){showLogin();return}session=me.session;$('identity').innerHTML='<b>'+esc(session.qq)+'</b><br><span style="color:#98a2b7">'+esc(session.role||'member')+'</span>';await loadGroups();refreshOverview()}
+async function loadPlatformFeatures(){var q=$('pfSearch')?$('pfSearch').value:'';var r=await api('/platform/features?q='+encodeURIComponent(q));if(!r.ok){$('pfList').innerHTML='<div class="empty">'+esc(r.message)+'</div>';return}$('pfSummary').textContent='總功能 '+r.total+' 項；目前可見 '+r.visible+' 項；部署模式：單一 Worker；付費 Cloudflare 服務：未啟用';$('pfList').innerHTML='';(r.features||[]).forEach(function(f){var d=document.createElement('div');d.className='item';var sw=document.createElement('input');sw.type='checkbox';sw.checked=!!f.enabled;sw.onchange=async function(){var x=await api('/platform/features','POST',{id:f.id,enabled:sw.checked,auditMode:$('pfAudit').value});toast(x.message);if(!x.ok)sw.checked=!sw.checked};d.innerHTML='<div class="item-head"><div><div class="item-title">'+esc(f.id)+'｜'+esc(f.name)+'</div><div class="item-meta">類別：'+esc(f.category)+'｜模式：'+esc(f.mode)+'｜最低角色：'+esc(f.minRole)+'</div></div></div>';d.appendChild(sw);$('pfList').appendChild(d)});if(!$('pfList').children.length)$('pfList').innerHTML='<div class="empty">沒有符合的功能</div>'}
+function showView(name){document.querySelectorAll('.view').forEach(function(v){v.classList.remove('active')});document.querySelectorAll('#nav button').forEach(function(b){b.classList.toggle('active',b.dataset.view===name)});$('v-'+name).classList.add('active');$('pageTitle').textContent=titles[name]||name;$('sidebar').classList.remove('open');if(name==='health')loadHealth('quick');if(name==='tasks')loadTasks();if(name==='moderation')loadProposals();if(name==='models')loadModels();if(name==='quota')loadQuota();if(name==='groups')loadGroupSettings();if(name==='memory')loadMemory();if(name==='logs')loadLogs();if(name==='aidecisions')loadAiDecisions();if(name==='ruleviolations')loadRuleViolations();if(name==='settingscenter')loadSettingsCenter();if(name==='bilibili')loadBilibili();if(name==='platform')loadPlatformFeatures()}
+async function loadGroups(){var r=await api('/groups');if(!r.ok){toast(r.message);return false}var sel=$('groupSelect');sel.innerHTML='<option value="">选择群组</option>';(r.groups||[]).forEach(function(g){var o=document.createElement('option');o.value=g.groupId;o.textContent=(g.groupName||g.groupId)+' ('+g.groupId+')';sel.appendChild(o)});if(r.selectedGroupId){sel.value=r.selectedGroupId;currentGroup=r.selectedGroupId}return true}
+async function selectGroup(id){if(!id){currentGroup='';setNativeAdminVisibility(false);return}var r=await api('/select-group','POST',{groupId:id});if(!r.ok){toast(r.message);return}currentGroup=id;session=r.session;$('identity').innerHTML='<b>'+esc(session.qq)+'</b><br><span style="color:#98a2b7">'+esc(session.role||'member')+'</span>';await refreshCapabilities();applyR3RoleVisibility();toast('群组已切换');refreshOverview()}
+async function boot(){ensureR3Views();if(!token){setNativeAdminVisibility(false);showLogin();return}showApp();var me=await api('/me');if(!me.ok){setNativeAdminVisibility(false);showLogin();return}session=me.session;$('identity').innerHTML='<b>'+esc(session.qq)+'</b><br><span style="color:#98a2b7">'+esc(session.role||'member')+'</span>';await loadGroups();await refreshCapabilities();applyR3RoleVisibility();refreshOverview()}
 async function loadHealth(mode){$('healthList').innerHTML='<div class="empty">檢查中…</div>';var r=await api('/health?mode='+encodeURIComponent(mode||'quick'));if(!r.checks){$('healthList').innerHTML='<div class="empty">'+esc(r.message||'檢查失敗')+'</div>';return}renderHealth(r)}
 function renderHealth(r){$('healthSummary').innerHTML='<div class="card span-4"><div class="metric-label">正常</div><div class="metric-value">'+esc(r.counts.ok)+'</div></div><div class="card span-4"><div class="metric-label">警告</div><div class="metric-value">'+esc(r.counts.warning)+'</div></div><div class="card span-4"><div class="metric-label">錯誤</div><div class="metric-value">'+esc(r.counts.error)+'</div></div>';$('healthList').innerHTML=(r.checks||[]).map(function(c){var detail=c.error||JSON.stringify(c.detail||'');return '<div class="health-card"><div class="item-head"><div class="item-title">'+esc(c.name)+'</div><span class="status '+statusClass(c.status)+'">'+esc(c.status)+'</span></div><div class="latency">'+esc(c.latencyMs)+' ms</div><div class="detail">'+esc(detail)+'</div></div>'}).join('')||'<div class="empty">沒有檢查項目</div>';var issues=(r.checks||[]).filter(function(c){return c.status!=='ok'});$('overviewIssues').innerHTML=issues.map(function(c){return '<div class="item"><div class="item-head"><div class="item-title">'+esc(c.name)+'</div><span class="status '+statusClass(c.status)+'">'+esc(c.status)+'</span></div><div class="item-meta">'+esc(c.error||JSON.stringify(c.detail||''))+'</div></div>'}).join('')||'<div class="empty">所有檢查項目正常</div>';$('overallStatus').className='status '+(r.ok?'ok':'error');$('overallStatus').textContent=r.ok?'系統正常':'需要處理'}
 async function loadTasks(){var r=await api('/tasks');if(!r.ok){$('taskList').innerHTML='<div class="empty">'+esc(r.message)+'</div>';return}$('mActive').textContent=r.inFlightQuestions||0;$('mQueued').textContent=r.queuedQuestions||0;$('taskStats').innerHTML='<div class="card span-6"><div class="metric-label">執行中</div><div class="metric-value">'+esc(r.inFlightQuestions||0)+'</div></div><div class="card span-6"><div class="metric-label">等待中</div><div class="metric-value">'+esc(r.queuedQuestions||0)+'</div></div>';$('taskList').innerHTML='';(r.queues||[]).forEach(function(q){var d=document.createElement('div');d.className='item';d.innerHTML='<div class="item-head"><div><div class="item-title">群 '+esc(q.groupId)+'／QQ '+esc(q.userId)+'</div><div class="item-meta">執行中：'+esc(q.preview||'無')+'<br>排隊：'+esc((q.queued||[]).length)+' 題</div></div></div>';(q.queued||[]).forEach(function(x){var p=document.createElement('div');p.className='item-body';p.textContent='等待：'+x.preview;d.appendChild(p)});var b=document.createElement('button');b.className='btn danger';b.textContent='取消此使用者等待列';b.addEventListener('click',async function(){var x=await api('/tasks/cancel','POST',{groupId:q.groupId,userId:q.userId});toast(x.message||'完成');loadTasks()});d.appendChild(b);$('taskList').appendChild(d)});if(!$('taskList').children.length)$('taskList').innerHTML='<div class="empty">目前沒有執行中或等待中的問題</div>'}
 function proposalState(p){if(p.status==='pending'&&Date.now()>Number(p.expiresAt||0))return'expired';return p.status||'pending'}
-async function loadProposals(){var r=await api('/moderation/proposals');if(!r.ok){$('proposalList').innerHTML='<div class="empty">'+esc(r.message)+'</div>';return}var pending=(r.proposals||[]).filter(function(p){return proposalState(p)==='pending'});$('mProposals').textContent=pending.length;$('proposalList').innerHTML='';(r.proposals||[]).forEach(function(p){var st=proposalState(p);var d=document.createElement('div');d.className='item';d.innerHTML='<div class="item-head"><div><div class="item-title">'+esc(p.id)+'｜'+esc(p.actionLabel||p.action)+'</div><div class="item-meta">提出者：'+esc(p.actorName||p.actorId)+'｜目標：'+esc(p.targetName||p.targetId||'全群')+'｜狀態：'+esc(st)+'</div></div><span class="status '+(st==='executed'?'ok':st==='pending'?'warning':st==='failed'?'error':'')+'">'+esc(st)+'</span></div><div class="item-body">'+esc(p.sourceText||'')+'</div>';if(st==='pending'){var a=document.createElement('div');a.className='row';a.style.marginTop='10px';var yes=document.createElement('button');yes.className='btn primary';yes.textContent='確認並執行';yes.onclick=async function(){if(!confirm('確定執行 '+p.id+'？'))return;var x=await api('/moderation/confirm','POST',{id:p.id});toast(x.message);loadProposals()};var no=document.createElement('button');no.className='btn danger';no.textContent='取消';no.onclick=async function(){var x=await api('/moderation/cancel','POST',{id:p.id});toast(x.message);loadProposals()};a.append(yes,no);d.appendChild(a)}$('proposalList').appendChild(d)});if(!$('proposalList').children.length)$('proposalList').innerHTML='<div class="empty">尚無管理提案</div>'}
-async function loadModels(){var r=await api('/models');if(!r.ok){$('modelList').innerHTML='<div class="empty span-12">'+esc(r.message)+'</div>';return}$('modelList').innerHTML=(r.models||[]).map(function(m){return '<div class="card span-4"><div class="item-head"><div><div class="item-title">'+esc(m.id)+'</div><div class="item-meta">'+esc(m.provider)+'／'+esc(m.family)+(m.billing?'／'+esc(m.billing):'')+'</div></div><span class="status '+statusClass(m.status)+'">'+esc(m.status)+'</span></div><div style="margin-top:10px">'+(m.capabilities||[]).map(function(x){return'<span class="pill">'+esc(x)+'</span>'}).join('')+'</div></div>'}).join('')||'<div class="empty span-12">沒有模型</div>'}
+async function loadProposals(){await refreshCapabilities();var r=await api('/moderation/proposals');if(!r.ok){$('proposalList').innerHTML='<div class="empty">'+esc(r.message)+'</div>';return}var pending=(r.proposals||[]).filter(function(p){return proposalState(p)==='pending'});$('mProposals').textContent=pending.length;$('proposalList').innerHTML='';(r.proposals||[]).forEach(function(p){var st=proposalState(p);var d=document.createElement('div');d.className='item';d.innerHTML='<div class="item-head"><div><div class="item-title">'+esc(p.id)+'｜'+esc(p.actionLabel||p.action)+'</div><div class="item-meta">提出者：'+esc(p.actorName||p.actorId)+'｜目标：'+esc(p.targetName||p.targetId||'全群')+'｜状态：'+esc(st)+'</div></div><span class="status '+(st==='executed'?'ok':st==='pending'?'warning':st==='failed'?'error':'')+'">'+esc(st)+'</span></div><div class="item-body">'+esc(p.sourceText||'')+'</div>';if(st==='pending'){var a=document.createElement('div');a.className='row';a.style.marginTop='10px';var yes=document.createElement('button');yes.className='btn primary';yes.textContent='确认并执行';yes.onclick=async function(){if(!(await confirmModal('确定执行 '+p.id+'？','确认待执行操作')))return;var x=await api('/moderation/confirm','POST',{id:p.id});toast(x.message);loadProposals()};var no=document.createElement('button');no.className='btn danger';no.textContent='取消';no.onclick=async function(){var x=await api('/moderation/cancel','POST',{id:p.id});toast(x.message);loadProposals()};a.append(yes,no);d.appendChild(a)}$('proposalList').appendChild(d)});if(!$('proposalList').children.length)$('proposalList').innerHTML='<div class="empty">暂无待确认操作</div>'}
+async function loadModels(){var r=await api('/models');if(!r.ok){$('modelList').innerHTML='<div class="empty span-12">'+esc(r.message)+'</div>';return}$('modelList').innerHTML=(r.models||[]).map(function(m){return '<div class="card span-4"><div class="item-head"><div><div class="item-title">'+esc(m.id)+'</div><div class="item-meta">'+esc(m.provider)+'／'+esc(m.family)+(m.billing?'／'+esc(m.billing):'')+'</div></div><span class="status '+statusClass(m.status)+'">'+esc(m.status)+'</span></div><div style="margin-top:10px">'+(m.capabilities||[]).map(function(x){return'<span class="pill">'+esc(x)+'</span>'}).join('')+'</div></div>'}).join('')||'<div class="empty span-12">没有模型</div>';if(session&&(session.permissions||{}).developer){ensureModelRegistryPanel();loadRuntimeModels()}}
 async function loadQuota(){var r=await api('/root/quotas');if(!r.ok){$('quotaStatus').textContent=r.message;$('globalQuota').disabled=true;$('groupQuota').disabled=true;$('saveQuota').disabled=true;return}$('globalQuota').disabled=false;$('groupQuota').disabled=false;$('saveQuota').disabled=false;$('globalQuota').value=r.globalDailyCny||'';$('groupQuota').value=r.groupDailyCny||'';$('quotaStatus').textContent='全站：'+(r.globalDailyCny===''?'無限制':r.globalDailyCny+' CNY／日')+'；目前群：'+(r.groupDailyCny===''?'無限制':r.groupDailyCny+' CNY／日')}
-async function loadGroupSettings(){var r=await api('/admin/state');if(!r.ok){toast(r.message);return}$('groupAi').checked=!!r.ai_on;$('groupMemory').checked=!!r.memory_on;$('activeSpeaking').checked=!!r.active_speaking;$('interjectRate').value=r.interject_rate;$('groupPersona').value=r.persona||'';$('groupKeywords').value=(r.keywords||[]).join('\\n')}
-async function loadMemory(){var r=await api('/memories');if(!r.ok){$('memoryList').innerHTML='<div class="empty">'+esc(r.message)+'</div>';return}var all=(r.private||[]).map(function(x){x._scope='private';return x}).concat((r.public||[]).map(function(x){x._scope='public';return x}));$('memoryList').innerHTML='';all.forEach(function(m){var d=document.createElement('div');d.className='item';d.innerHTML='<div class="item-head"><div><div class="item-title">'+esc(m.text)+'</div><div class="item-meta">'+esc(m._scope)+'｜'+esc(m.at||m.updatedAt||'')+'</div></div></div>';var b=document.createElement('button');b.className='btn danger';b.textContent='刪除';b.onclick=async function(){var x=await api('/memories','DELETE',{scope:m._scope,id:m.id});toast(x.message||'已刪除');loadMemory()};d.appendChild(b);$('memoryList').appendChild(d)});if(!$('memoryList').children.length)$('memoryList').innerHTML='<div class="empty">尚無記憶</div>'}
-async function loadLogs(){var r=await api('/admin/state');if(!r.ok){$('logList').innerHTML='<div class="empty">'+esc(r.message)+'</div>';return}$('logList').innerHTML=(r.audit_logs||[]).slice().reverse().map(function(a){return '<div class="item"><div class="item-title">'+esc(a.type||a.action||'操作')+'</div><div class="item-meta">'+esc(a.at||'')+'｜'+esc(a.actorId||'')+'</div><div class="item-body">'+esc(a.action||'')+'</div></div>'}).join('')||'<div class="empty">尚無操作日誌</div>'}
-async function refreshOverview(){var h=await api('/health?mode=quick');if(h.checks)renderHealth(h);var t=await api('/tasks');if(t.ok){$('mActive').textContent=t.inFlightQuestions||0;$('mQueued').textContent=t.queuedQuestions||0}var p=await api('/moderation/proposals');if(p.ok)$('mProposals').textContent=(p.proposals||[]).filter(function(x){return proposalState(x)==='pending'}).length;var doCheck=(h.checks||[]).find(function(c){return c.name==='Durable Object / NapCat'});var connected=doCheck&&doCheck.status==='ok';$('mNapcat').textContent=connected?'已連線':'未連線';$('mNapcatSub').textContent=doCheck?String(doCheck.latencyMs)+' ms':'尚無資料'}
-$('sendCode').onclick=async function(){var r=await raw('/api/auth/request-code','POST',{qq:$('loginQq').value});$('loginNotice').textContent=r.message};$('verifyCode').onclick=async function(){var r=await raw('/api/auth/verify-code','POST',{qq:$('loginQq').value,code:$('loginCode').value});$('loginNotice').textContent=r.message;if(r.ok){token=r.token;sessionStorage.setItem('qqai_token',token);boot()}};
-$('logout').onclick=function(){sessionStorage.removeItem('qqai_token');location.reload()};$('menu').onclick=function(){$('sidebar').classList.toggle('open')};$('refresh').onclick=function(){var active=document.querySelector('#nav button.active');showView(active?active.dataset.view:'overview')};$('groupSelect').onchange=function(){selectGroup(this.value)};document.querySelectorAll('#nav button').forEach(function(b){b.onclick=function(){showView(b.dataset.view)}});
-$('quickHealth').onclick=function(){loadHealth('quick')};$('fullHealth').onclick=function(){loadHealth('full')};$('reloadTasks').onclick=loadTasks;$('clearQueue').onclick=async function(){if(!currentGroup){toast('請先選擇群組');return}if(!confirm('清空目前群所有等待中的問題？正在生成的問題不會被強制中斷。'))return;var r=await api('/tasks/clear','POST',{groupId:currentGroup});toast(r.message||'完成');loadTasks()};$('reloadProposals').onclick=loadProposals;
+async function loadGroupSettings(){ensureGroupSettingsExtras();var r=await api('/admin/state');if(!r.ok){toast(r.message);return}$('groupAi').checked=!!r.ai_on;$('groupMemory').checked=!!r.memory_on;$('activeSpeaking').checked=!!r.active_speaking;$('interjectRate').value=r.interject_rate;$('groupPersona').value=r.persona||'';$('groupKeywords').value=(r.keywords||[]).join('\n');$('welcomeEnabled').checked=!!r.welcome_enabled;$('joinAssistEnabled').checked=!!r.join_assist_enabled;$('ruleMonitorEnabled').checked=!!r.rule_monitor_enabled;$('welcomeText').value=r.welcome_text||'歡迎 {at} 加入本群 🎉 請先閱讀群規，有問題可以詢問管理員。';$('moderationCooldown').value=Number(r.moderation_target_cooldown_seconds||0);$('newcomerDays').value=Number(r.newcomer_observation_days||0);var canSetCommon=!!(session&&((session.permissions||{}).aiAdmin||(session.permissions||{}).developer));$('joinAssistEnabled').disabled=!canSetCommon;var owner=!!(session&&session.role==='owner');$('ruleMonitorEnabled').disabled=!owner;var ownerOrDeveloper=!!(session&&(owner||(session.permissions||{}).developer));['welcomeEnabled','welcomeText','moderationCooldown','newcomerDays'].forEach(function(id){$(id).disabled=!ownerOrDeveloper});setNativeAdminVisibility(!!r.bot_is_owner);ensureDeveloperPermissionPanel()}
+async function loadMemory(){var r=await api('/memories');if(!r.ok){$('memoryList').innerHTML='<div class="empty">'+esc(r.message)+'</div>';return}var all=(r.private||[]).map(function(x){return Object.assign({},x,{_scope:'private'})}).concat((r.public||[]).map(function(x){return Object.assign({},x,{_scope:'public'})})).filter(function(x){return x.id&&String(x.text||'').trim()});$('memoryList').innerHTML='';all.forEach(function(m){var d=document.createElement('div');d.className='item';d.innerHTML='<div class="item-head"><div><div class="item-title">'+esc(m.text)+'</div><div class="item-meta">'+esc(m._scope)+'｜'+esc(m.at||m.updatedAt||'')+'</div></div></div>';var row=document.createElement('div');row.className='row';var edit=document.createElement('button');edit.className='btn';edit.textContent='编辑';edit.onclick=async function(){var text=await textModal('修改记忆内容',m.text,'编辑记忆');if(text===null)return;var x=await api('/memories','PUT',{scope:m._scope,id:m.id,text:text});toast(x.message|| (x.ok?'已更新':'更新失败'));loadMemory()};var del=document.createElement('button');del.className='btn danger';del.textContent='删除';del.onclick=async function(){if(!(await confirmModal('删除这条记忆？对应的长期记忆向量也会删除。','删除记忆')))return;var x=await api('/memories','DELETE',{scope:m._scope,id:m.id});toast(x.message||'已删除');loadMemory()};row.append(edit,del);d.appendChild(row);$('memoryList').appendChild(d)});if(!$('memoryList').children.length)$('memoryList').innerHTML='<div class="empty">暂无记忆</div>';ensureSearchTools()}
+async function loadLogs(){var q=$('logSearch')?$('logSearch').value.trim():'';var r=await api('/admin/logs?q='+encodeURIComponent(q));if(!r.ok){$('logList').innerHTML='<div class="empty">'+esc(r.message)+'</div>';return}$('logList').innerHTML=(r.logs||[]).map(function(a){return '<div class="item"><div class="item-title">'+esc(a.type||a.action||'操作')+'</div><div class="item-meta">'+esc(a.at||'')+'｜'+esc(a.actorId||'')+'</div><div class="item-body">'+esc(a.action||JSON.stringify(a))+'</div></div>'}).join('')||'<div class="empty">暂无操作日志</div>'}
+async function refreshOverview(){var h=await api('/health?mode=quick');if(h.checks)renderHealth(h);var t=await api('/tasks');if(t.ok){$('mActive').textContent=t.inFlightQuestions||0;$('mQueued').textContent=t.queuedQuestions||0}var p=await api('/moderation/proposals');if(p.ok)$('mProposals').textContent=(p.proposals||[]).filter(function(x){return proposalState(x)==='pending'}).length;var doCheck=(h.checks||[]).find(function(c){return c.name==='Durable Object / NapCat'});var connected=doCheck&&doCheck.status==='ok';$('mNapcat').textContent=connected?'已連線':'未連線';$('mNapcatSub').textContent=doCheck?String(doCheck.latencyMs)+' ms':'暂无資料'}
+$('sendCode').onclick=async function(){var r=await raw('/api/auth/request-code','POST',{qq:$('loginQq').value});$('loginNotice').textContent=r.message};$('verifyCode').onclick=async function(){var r=await raw('/api/auth/verify-code','POST',{qq:$('loginQq').value,code:$('loginCode').value});$('loginNotice').textContent=r.message;if(r.ok){boot()}};
+$('logout').onclick=async function(){await raw('/api/auth/logout','POST',{});location.reload()};$('menu').onclick=function(){$('sidebar').classList.toggle('open')};$('refresh').onclick=function(){var active=document.querySelector('#nav button.active');showView(active?active.dataset.view:'overview')};$('groupSelect').onchange=function(){selectGroup(this.value)};document.querySelectorAll('#nav button').forEach(function(b){b.onclick=function(){showView(b.dataset.view)}});
+$('quickHealth').onclick=function(){loadHealth('quick')};$('fullHealth').onclick=function(){loadHealth('full')};$('reloadTasks').onclick=loadTasks;$('clearQueue').onclick=async function(){if(!currentGroup){toast('請先选择群组');return}if(!(await confirmModal('清空当前群所有等待中的问题？正在生成的问题不会被强制中断。','清空等待队列')))return;var r=await api('/tasks/clear','POST',{groupId:currentGroup});toast(r.message||'完成');loadTasks()};$('reloadProposals').onclick=loadProposals;
 $('createProposal').onclick=async function(){var r=await api('/ops/action','POST',{action:$('opAction').value,qq:$('opQq').value,duration:$('opDuration').value});$('opMessage').textContent=r.message;toast(r.message);if(r.ok)loadProposals()};
 $('runSimulator').onclick=async function(){var r=await api('/simulator','POST',{text:$('simText').value,senderRole:$('simRole').value,mentionsBot:$('simMention').checked,hasImage:$('simImage').checked,currentlyBusy:$('simBusy').checked});if(!r.ok){toast(r.message);return}$('simDecision').textContent=r.decisions.final;$('simSteps').innerHTML=(r.steps||[]).map(function(x){return'<div class="step"><i></i><span>'+esc(x)+'</span></div>'}).join('')};$('reloadModels').onclick=loadModels;$('saveQuota').onclick=async function(){var r=await api('/root/quotas','POST',{globalDailyCny:$('globalQuota').value,groupDailyCny:$('groupQuota').value});toast(r.message);if(r.ok)loadQuota()};
-$('saveGroup').onclick=async function(){var r=await api('/admin/state','POST',{ai_on:$('groupAi').checked,memory_on:$('groupMemory').checked,active_speaking:$('activeSpeaking').checked,interject_rate:$('interjectRate').value,persona:$('groupPersona').value,keywords:$('groupKeywords').value});toast(r.message)};$('reloadMemory').onclick=loadMemory;$('addMemory').onclick=async function(){var r=await api('/memories','POST',{scope:$('memoryScope').value,text:$('memoryText').value});toast(r.message||'已新增');if(r.ok){$('memoryText').value='';loadMemory()}};$('reloadLogs').onclick=loadLogs;
+$('saveGroup').onclick=async function(){ensureGroupSettingsExtras();var payload={ai_on:$('groupAi').checked,memory_on:$('groupMemory').checked,active_speaking:$('activeSpeaking').checked,interject_rate:$('interjectRate').value,persona:$('groupPersona').value,keywords:$('groupKeywords').value};var perms=(session&&session.permissions)||{};if(perms.aiAdmin||perms.developer)payload.join_assist_enabled=$('joinAssistEnabled').checked;if(session&&session.role==='owner')payload.rule_monitor_enabled=$('ruleMonitorEnabled').checked;if(session&&(session.role==='owner'||perms.developer)){payload.welcome_enabled=$('welcomeEnabled').checked;payload.welcome_text=$('welcomeText').value;payload.moderation_target_cooldown_seconds=$('moderationCooldown').value;payload.newcomer_observation_days=$('newcomerDays').value}var r=await api('/admin/state','POST',payload);toast(r.message)};$('reloadMemory').onclick=loadMemory;$('addMemory').onclick=async function(){var r=await api('/memories','POST',{scope:$('memoryScope').value,text:$('memoryText').value});toast(r.message||'已新增');if(r.ok){$('memoryText').value='';loadMemory()}};$('reloadLogs').onclick=loadLogs;
 boot();
 })();
 </script>
@@ -4704,6 +6711,17 @@ export class OneBotHub {
       }
     }
 
+    if (request.method === "POST" && url.pathname === "/moderation/expiry") {
+      const data = await request.json().catch(() => ({}));
+      const proposalId = String(data.proposalId || "");
+      const expiresAt = Number(data.expiresAt || 0);
+      if (!proposalId || !expiresAt) return Response.json({ ok: false, message: "invalid expiry payload" }, { status: 400 });
+      await this.state.storage.put(`moderation-expiry:${proposalId}`, { proposalId, expiresAt });
+      const currentAlarm = await this.state.storage.getAlarm();
+      if (!currentAlarm || expiresAt < currentAlarm) await this.state.storage.setAlarm(expiresAt);
+      return Response.json({ ok: true, proposalId, expiresAt });
+    }
+
     if (url.pathname === "/status") return Response.json({
       sockets: this.activeSocket?.readyState === WebSocket.OPEN ? 1 : 0,
       connected: this.activeSocket?.readyState === WebSocket.OPEN,
@@ -4736,6 +6754,39 @@ export class OneBotHub {
       return Response.json({ ok: true, removed, message: `已清除 ${removed} 条等待中的问题。` });
     }
     return new Response("OneBotHub OK", { status: 200 });
+  }
+
+  async alarm() {
+    const now = Date.now();
+    const rows = await this.state.storage.list({ prefix: "moderation-expiry:" });
+    let nextAlarm = 0;
+    for (const [storageKey, item] of rows) {
+      const expiresAt = Number(item?.expiresAt || 0);
+      if (expiresAt > now) {
+        nextAlarm = nextAlarm ? Math.min(nextAlarm, expiresAt) : expiresAt;
+        continue;
+      }
+      const proposalId = String(item?.proposalId || storageKey.slice("moderation-expiry:".length));
+      const proposal = await readJson(this.env, `moderation:proposal:${proposalId}`, null);
+      if (proposal?.status === "pending") {
+        proposal.status = "expired";
+        proposal.expiredAt = now;
+        if (proposal.notificationMessageId && !proposal.notificationRetractedAt) {
+          try {
+            await this.sendAction({ action: "delete_msg", params: { message_id: numericId(proposal.notificationMessageId) } }, 10000);
+            proposal.notificationRetractedAt = now;
+            proposal.notificationRetractReason = "expired";
+            proposal.notificationRetractStatus = "success";
+          } catch (error) {
+            proposal.notificationRetractStatus = "failed";
+            proposal.notificationRetractError = String(error?.message || error);
+          }
+        }
+        await dbPut(this.env, `moderation:proposal:${proposalId}`, JSON.stringify(proposal));
+      }
+      await this.state.storage.delete(storageKey);
+    }
+    if (nextAlarm) await this.state.storage.setAlarm(nextAlarm);
   }
 
   rejectAll(reason) {
@@ -4773,7 +6824,7 @@ export class OneBotHub {
     }
     if (!body || body.post_type === "meta_event") return;
 
-    if (this.shouldQueueUserQuestion(body)) {
+    if (await this.shouldQueueUserQuestion(body)) {
       await this.enqueueUserQuestion(body, request.url);
       return;
     }
@@ -4797,7 +6848,7 @@ export class OneBotHub {
     if (!mentioned || !text || /^[!！]/.test(text)) return false;
     const role = String(body.sender?.role || "member");
     if (["owner", "admin"].includes(role) && /(?:踢|移出|请出|請出|杀了|殺了|斩了|斬了|禁言|闭麦|閉麥|全员禁言|全員禁言|管理员|管理員)/i.test(text)) return false;
-    if (["owner", "admin"].includes(role) && /^(?:确认|確認|同意执行|同意執行|执行|執行|取消操作|取消执行|取消執行|取消)(?:\s+[a-z0-9_-]+)?$/i.test(text)) return false;
+    if (["owner", "admin"].includes(role) && /^(?:确认|确认|同意执行|同意執行|执行|執行|取消操作|取消执行|取消執行|取消)(?:\s+[a-z0-9_-]+)?$/i.test(text)) return false;
     return true;
   }
 
@@ -4914,7 +6965,7 @@ export class OneBotHub {
         const timedOut = /abort|timeout/i.test(String(error?.message || error));
         if (toolTask && timedOut) {
           await this.sendDirectText(body, `⏱️ ${toolTask.label}处理超过时限，任务已自动结束；机器人不会继续被占用。`).catch(() => {});
-        } else if (timedOut && this.shouldQueueUserQuestion(body)) {
+        } else if (timedOut && await this.shouldQueueUserQuestion(body)) {
           await this.sendQueueNotice(body, "这次回答处理超时，任务已释放，请稍后再试。").catch(() => {});
         }
         return;
@@ -4930,7 +6981,11 @@ export class OneBotHub {
       try {
         const response = await this.sendAction({ action, params }, 15000);
         const messageId = response?.data?.message_id;
+        if (messageId && payload.moderation_proposal_id) {
+          await attachModerationProposalMessage(this.env, String(payload.moderation_proposal_id), String(messageId), String(body.group_id || ""));
+        }
         // 只有真正的 AI 对话回覆才写入 message cache／recent_logs。
+        if (payload.ai_log_id) await updateAiDecisionLog(this.env, payload.ai_log_id, { sendStatus: "sent", sentMessageId: String(messageId || ""), sentAt: Date.now() });
         if (messageId && payload.record_reply === true) {
           await recordStructuredMessage(this.env, {
             messageId: String(messageId), groupId: String(body.group_id || ""), senderId: String(body.self_id || ""), senderName: "QQAI",
@@ -4940,6 +6995,7 @@ export class OneBotHub {
         }
       } catch (error) {
         console.error("send reply failed", error);
+        if (payload?.ai_log_id) await updateAiDecisionLog(this.env, payload.ai_log_id, { sendStatus: "failed", sendError: String(error?.message || error), sendFailedAt: Date.now() }).catch(() => null);
       } finally {
         if (payload.thinking_message_id) {
           try { await this.sendAction({ action: "delete_msg", params: { message_id: numericId(payload.thinking_message_id) } }, 8000); } catch {}
@@ -5003,7 +7059,7 @@ export class OneBotHub {
   parseCqSegments(value) {
     const input = String(value || "");
     const segments = [];
-    const re = /\[CQ:(at|reply|image|record|video),([^\]]+)\]/g;
+    const re = /\[CQ:(at|reply|image|record|video|face),([^\]]+)\]/g;
     let last = 0, match;
     const parseData = raw => Object.fromEntries(String(raw).split(",").map(part => { const i = part.indexOf("="); return i < 0 ? [part, ""] : [part.slice(0, i), part.slice(i + 1)]; }));
     while ((match = re.exec(input))) {
@@ -5011,7 +7067,7 @@ export class OneBotHub {
       const data = parseData(match[2]);
       if (match[1] === "at" && data.qq) segments.push({ type: "at", data: { qq: String(data.qq) } });
       else if (match[1] === "reply" && (data.id || data.message_id)) segments.push({ type: "reply", data: { id: String(data.id || data.message_id) } });
-      else if (["image", "record", "video"].includes(match[1])) segments.push({ type: match[1], data });
+      else if (["image", "record", "video", "face"].includes(match[1])) segments.push({ type: match[1], data });
       last = re.lastIndex;
     }
     if (last < input.length) segments.push({ type: "text", data: { text: input.slice(last) } });
