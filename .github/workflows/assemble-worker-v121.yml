@@ -1,0 +1,45 @@
+name: Assemble QQAI worker v1.2.1
+
+on:
+  push:
+    branches:
+      - agent/qqaibot-v1.1.0-complete
+    paths:
+      - .tmp/worker-v1.2.1.js.gz.b64
+
+permissions:
+  contents: write
+
+jobs:
+  assemble:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout branch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref_name }}
+          fetch-depth: 0
+
+      - name: Assemble worker.js
+        shell: bash
+        run: |
+          set -euo pipefail
+          base64 --decode .tmp/worker-v1.2.1.js.gz.b64 | gzip --decompress > worker.js
+          echo "0a54833226c1f587e97334f0acc24493ca2d1d4c26a2871211f726f400d89c7b  worker.js" | sha256sum --check --strict
+          node --check worker.js
+
+      - name: Commit assembled worker
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -f .tmp/worker-v1.2.1.js.gz.b64 .github/workflows/assemble-worker-v121.yml
+          rmdir .tmp 2>/dev/null || true
+          git config user.name "QQAI Build Bot"
+          git config user.email "actions@users.noreply.github.com"
+          git add worker.js .tmp .github/workflows/assemble-worker-v121.yml || true
+          if git diff --cached --quiet; then
+            echo "No changes to commit"
+            exit 0
+          fi
+          git commit -m "Update worker to v1.2.1"
+          git push origin HEAD:${{ github.ref_name }}
