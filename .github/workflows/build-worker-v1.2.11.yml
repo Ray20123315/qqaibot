@@ -88,6 +88,8 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: worker-v1.2.11-diagnostics
-          path: patch.log
+          path: |
+            patch.log
+            worker.js
           if-no-files-found: warn
           retention-days: 1
