@@ -1,0 +1,37 @@
+name: Apply worker v1.2.25
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/apply-worker-v1.2.25.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Apply and validate
+        shell: bash
+        run: |
+          set -euo pipefail
+          git apply --check .qqai-patches/worker_v1.2.25.patch
+          git apply .qqai-patches/worker_v1.2.25.patch
+          node --check worker.js
+          grep -F 'const VERSION = "1.2.25";' worker.js
+          grep -F 'cleanMessage.length > 0' worker.js
+          grep -F 'repeatedMessageBurst' worker.js
+          grep -F 'retractRegisteredThinkingIndicators' worker.js
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git rm -r .qqai-patches
+          git rm .github/workflows/apply-worker-v1.2.25.yml
+          git add worker.js
+          git commit -m "Update worker.js to v1.2.25"
+          git push origin HEAD:main
