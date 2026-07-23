@@ -1,0 +1,44 @@
+name: Apply worker v1.2.26
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/apply-worker-v1.2.26.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Rebuild patch, apply and validate
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat .qqai-patches/worker_v1.2.26.patch.gz.b64.part* | base64 -d | gzip -d > /tmp/worker_v1.2.26.patch
+          git apply --recount --check /tmp/worker_v1.2.26.patch
+          git apply --recount /tmp/worker_v1.2.26.patch
+          node --check worker.js
+          grep -F 'const VERSION = "1.2.26";' worker.js
+          grep -F 'buildScheduledGroupMessage' worker.js
+          grep -F 'schedule_completed_deleted' worker.js
+          grep -F '/schedules/skip-once' worker.js
+          grep -F 'join_ai_approve_enabled' worker.js
+          grep -F 'groupRules: groupRules.slice(0, 5000)' worker.js
+          grep -F 'rule_mute_guard_reapplied' worker.js
+          grep -F 'rule_spam_keep_count' worker.js
+          grep -F '标记为误判时必须填写复核说明' worker.js
+          if grep -F 'repeatedSpamClaim' worker.js; then exit 1; fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git rm -r .qqai-patches
+          git rm .github/workflows/apply-worker-v1.2.26.yml
+          git add worker.js
+          git commit -m "Update worker.js to v1.2.26"
+          git push origin HEAD:main
