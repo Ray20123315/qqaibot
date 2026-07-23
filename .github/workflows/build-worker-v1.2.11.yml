@@ -24,7 +24,13 @@ jobs:
           python-version: "3.12"
 
       - name: Apply worker patch
-        run: python tools/patch_worker_v1_2_11.py
+        shell: bash
+        run: |
+          set +e
+          python tools/patch_worker_v1_2_11.py > patch.log 2>&1
+          status=$?
+          cat patch.log
+          exit $status
 
       - name: Set up Node.js
         uses: actions/setup-node@v4
@@ -69,9 +75,19 @@ jobs:
           print("All requested behavior checks passed.")
 
       - name: Upload worker only
+        if: success()
         uses: actions/upload-artifact@v4
         with:
           name: worker-v1.2.11
           path: worker.js
           if-no-files-found: error
+          retention-days: 1
+
+      - name: Upload diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: worker-v1.2.11-diagnostics
+          path: patch.log
+          if-no-files-found: warn
           retention-days: 1
