@@ -42,3 +42,4 @@ jobs:
           git add worker.js
           git commit -m "Update worker.js to v1.2.26"
           git push origin HEAD:main
+# retry-trigger-1
