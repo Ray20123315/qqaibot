@@ -1,4 +1,4 @@
-const VERSION = "1.2.10";
+const VERSION = "1.2.11";
 const QQAI_V1_COMPLETE_MARKER = "QQAI_V1_COMPLETE_MARKER";
 const QQAI_V1_R3_MARKER = "QQAI_V1_R3_MARKER";
 const BUILD_DATE = "2026-07-23";
@@ -43,6 +43,7 @@ const DEFAULTS = Object.freeze({
 
 let GEMINI_KEY_CURSOR = 0;
 let GEMINI_SEARCH_KEY_CURSOR = 0;
+let GEMINI_VISION_KEY_CURSOR = 0;
 let DEEPSEEK_KEY_CURSOR = 0;
 
 // v1.2.4：所有用户可见输出统一转为简体；输入命令仍兼容简体、繁体与英文别名。
@@ -815,6 +816,7 @@ export default {
       // 📦 【智慧型訊息結構解析器】完美兼容還原 AT 節點、圖片、語音、影片
       // ========================================================
       let userMessage = "";
+      let aiReplyOptOut = false;
       let imageUrl = null;
       let imageFile = null;
       let voiceUrl = null;
@@ -864,6 +866,11 @@ export default {
         }
       }
       mentionedQqs = [...new Set(mentionedQqs.filter(Boolean).map(String))];
+      if (isGroup && !isSelfAccount) {
+        const optOut = stripGroupAiOptOutPrefix(userMessage);
+        aiReplyOptOut = optOut.optedOut;
+        userMessage = optOut.text;
+      }
       userMessage = normalizeMultilingualCommand(userMessage);
 
       // 清洗 CQ 标签，保留媒体存在的语义提示。
@@ -891,7 +898,7 @@ export default {
 
         if (cleanMessage.startsWith('//')) {
           cleanMessage = cleanMessage.slice(2).trim();
-          sameQqHumanOnly = true;
+          sameQqSelfAsk = true;
         } else if (cleanMessage.startsWith('??')) {
           cleanMessage = cleanMessage.slice(2).trim();
           sameQqSelfAsk = true;
@@ -902,7 +909,7 @@ export default {
 
       let msgLower = cleanMessage.trim().toLowerCase();
       let atSender = isGroup ? `[CQ:at,qq=${userId}] ` : "";
-      const isCommandMessage = /^[!！]/.test(cleanMessage);
+      const isCommandMessage = !aiReplyOptOut && /^[!！]/.test(cleanMessage);
       const commandBody = cleanMessage.replace(/^[!！]+/, '').trim();
       const isAppealCommand = /^(申诉|申訴|appeal)(?:\s|$)/i.test(commandBody);
       const isScheduleCommand = /^(排程|定时|定時|schedule)(?:\s|$)/i.test(commandBody);
@@ -927,7 +934,7 @@ export default {
       const botMentioned = Boolean(botId && mentionedQqs.includes(botId));
       const repliedToBot = Boolean(quotedMessage && quotedMessage.source === 'ai');
       const repliedToOwnerHuman = Boolean(quotedMessage && quotedMessage.source === 'owner-human');
-      const explicitlyTriggered = botMentioned || repliedToBot || sameQqSelfAsk || isCommandMessage;
+      const explicitlyTriggered = !aiReplyOptOut && (botMentioned || repliedToBot || sameQqSelfAsk || isCommandMessage);
 
       // 只有真实文字或媒体才算有效提问；单独 @、空白、换行、全角空格与零宽字符全部静默丢弃。
       const hasAnyMediaAttachment = Boolean(imageUrl || imageFile || voiceUrl || voiceFile || videoUrl || videoFile);
@@ -957,10 +964,14 @@ export default {
       // 避免歷史白名單提示、權限提示或指令結果繼續污染摘要、模仿與判斷語料。
       if (isGroup && botId) await purgeLegacyBotRepliesFromRecentLogs(env, currentGroupId, botId);
 
-      // 用户问“看到图片了吗”但当前消息既未附图、也未回复图片时，不允许模型假装看见。
+      // 图片检查使用独立多金钥池；未配置时自动关闭。
+      const imageInspectionConfigured = imageInspectionEnabled(env);
       const hasImageReference = Boolean(imageUrl || imageFile);
       if (explicitlyTriggered && /(?:看|讀|读|识别|識別|看到|看见|看見).{0,10}(?:图片|圖片|照片|图|圖)|(?:图片|圖片|照片|图|圖).{0,10}(?:看到|看见|看見|看得到|看得見)/i.test(cleanMessage) && !hasImageReference) {
         return jsonReply(`${atSender}我这则消息没有收到可读取的图片。请直接“回复那张图片”再 @我，或把图片和问题放在同一则消息发送。`);
+      }
+      if (explicitlyTriggered && hasImageReference && !imageInspectionConfigured) {
+        return jsonReply(`${atSender}图片检查目前未启用。开发者配置 GEMINI_VISION_API_KEYS（可填写多个，以逗号分隔）后会自动启用；未配置时系统会自动保持关闭。`);
       }
 
       // 私聊聊天、私聊排程、匿名申訴各自使用獨立開關。
@@ -2398,6 +2409,12 @@ ${dynamicLogs.join('\n')}`;
         finalStylePrompt = dynamicPersona + "\n\n" + finalStylePrompt;
       }
 
+      finalStylePrompt += `
+
+【命令前缀安全规则】
+你绝对不能以 //、/!、! 或！开头输出，也不能模仿用户输入这些控制前缀、声称已经执行机器人命令、诱导绕过权限，或用命令实施违法违规行为。需要说明命令时，只能把命令放在引号或代码样式的普通说明文字中。`;
+
+
 // 💖 叠加高情商情绪微调 BUFF (阅后即焚)
       const emotionBuff = await dbGet(env, `emotion_buff:${currentGroupId}:${userId}`);
       if (emotionBuff) {
@@ -2420,14 +2437,14 @@ ${parsedMemos.slice(-30).map((m, i) => `${i + 1}. ${m.text}`).join('\n')}
       // ==========================================
       // 🎲 核心机制：随机触发 + AI 智慧插话判定
       // ==========================================
-      let shouldReply = isAtMeOrAi || isPrivate;
+      let shouldReply = !aiReplyOptOut && (isAtMeOrAi || isPrivate);
       let isAutoInterject = false;
-      let triggerType = botMentioned ? "mention" : repliedToBot ? "reply_to_ai" : sameQqSelfAsk ? "self_ask" : isPrivate ? "private" : "none";
-      let noReplyReason = "not_triggered";
+      let triggerType = aiReplyOptOut ? "user_opt_out" : botMentioned ? "mention" : repliedToBot ? "reply_to_ai" : sameQqSelfAsk ? "self_ask" : isPrivate ? "private" : "none";
+      let noReplyReason = aiReplyOptOut ? "user_opt_out" : "not_triggered";
       let interjectJudgement = "";
       const lowContextFragment = isLowContextInterjectionFragment(conversationText);
 
-      if (!shouldReply && isGroup && interjectChance > 0 && !msgLower.startsWith('!') && !msgLower.startsWith('！')) {
+      if (!shouldReply && !aiReplyOptOut && isGroup && interjectChance > 0 && !msgLower.startsWith('!') && !msgLower.startsWith('！')) {
         const targetDnd = await dbGet(env, `dnd:${currentGroupId}:${userId}`);
         if (targetDnd === "true") {
           noReplyReason = "sender_dnd";
@@ -2566,7 +2583,7 @@ ${deepseekContextSummary}`;
 
       // 2. 注入多模态媒体 (图片/语音/视频)
       let loadedImage = false;
-      if (imageUrl || imageFile) {
+      if ((imageUrl || imageFile) && imageInspectionConfigured) {
         try {
           const imageData = await fetchImageAsBase64({ url: imageUrl, file: imageFile });
           if (imageData) {
@@ -2628,7 +2645,9 @@ ${deepseekContextSummary}`;
         const generated = await generateHybridReply(env, {
           modelPref, chatModels, finalStylePrompt, contents, cleanText: conversationText,
           fastChat: isFastAcknowledgement,
-          hasMedia: Boolean(imageUrl || imageFile || voiceUrl || voiceFile || videoUrl || videoFile), userId, groupId: currentGroupId, isDeveloper
+          hasMedia: Boolean(loadedImage || voiceUrl || voiceFile || videoUrl || videoFile),
+          visionRequest: loadedImage,
+          userId, groupId: currentGroupId, isDeveloper
         });
         baseText = String(generated?.text || '').trim();
         usedModel = generated?.model || 'unknown';
@@ -2770,6 +2789,22 @@ function isDeveloperId(env, qq) {
   return Boolean(qq && String(qq) === developerId(env));
 }
 
+function stripGroupAiOptOutPrefix(value) {
+  const source = String(value || "");
+  const match = source.match(/^(\s*(?:\[CQ:(?:reply|at),[^\]]+\]\s*)*)\/!\s*/i);
+  if (!match) return { optedOut: false, text: source };
+  return {
+    optedOut: true,
+    text: `${match[1] || ""}${source.slice(match[0].length)}`
+  };
+}
+
+function neutralizeAiCommandPrefix(value) {
+  const output = String(value || "").trim();
+  if (!output) return output;
+  return /^(?:\/\/|\/!|[!！])/.test(output) ? `AI 回复：${output}` : output;
+}
+
 function parseList(value, fallback = []) {
   const list = String(value || "").split(",").map(x => x.trim()).filter(Boolean);
   return list.length ? [...new Set(list)] : fallback.slice();
@@ -2782,7 +2817,9 @@ function roundRobinKeys(keys, provider = "gemini") {
     ? DEEPSEEK_KEY_CURSOR++
     : provider === "gemini_search"
       ? GEMINI_SEARCH_KEY_CURSOR++
-      : GEMINI_KEY_CURSOR++;
+      : provider === "gemini_vision"
+        ? GEMINI_VISION_KEY_CURSOR++
+        : GEMINI_KEY_CURSOR++;
   const start = Math.abs(cursor) % list.length;
   return list.slice(start).concat(list.slice(0, start));
 }
@@ -2790,6 +2827,22 @@ function roundRobinKeys(keys, provider = "gemini") {
 function geminiSearchApiKeys(env) {
   // 搜索金钥必须独立配置，绝不挪用聊天／Vectorize 金钥。
   return [...new Set([...parseList(env.GEMINI_SEARCH_API_KEYS), ...parseList(env.GEMINI_SEARCH_API_KEY)])];
+}
+
+function geminiVisionApiKeys(env) {
+  // 图片检查使用独立金钥池；未配置时自动关闭，绝不挪用聊天、搜索或 Vectorize 金钥。
+  return [...new Set([
+    ...parseList(env.GEMINI_VISION_API_KEYS),
+    ...parseList(env.GEMINI_VISION_API_KEY),
+    ...parseList(env.IMAGE_CHECK_API_KEYS),
+    ...parseList(env.IMAGE_CHECK_API_KEY)
+  ])];
+}
+
+function imageInspectionEnabled(env) {
+  const mode = String(env.IMAGE_INSPECTION_ENABLED ?? "auto").trim().toLowerCase();
+  if (["0", "false", "off", "disabled", "关闭", "關閉"].includes(mode)) return false;
+  return geminiVisionApiKeys(env).length > 0;
 }
 
 function deepSeekApiKeys(env) {
@@ -3618,12 +3671,12 @@ function formatDuration(seconds) {
 }
 
 function sanitizeAiReply(text) {
-  return String(text || "")
+  return neutralizeAiCommandPrefix(String(text || "")
     .replace(/\[CQ:[^\]]+\]/g, "")
     .replace(/\*\*/g, "")
     .replace(/^#+\s*/gm, "")
     .trim()
-    .slice(0, 4000);
+    .slice(0, 4000));
 }
 
 function extractTextMentionIds(text) {
@@ -4088,7 +4141,9 @@ async function generateHybridReply(env, args) {
   const tryGemini = async () => {
     const search = await getSharedSearch();
     const result = await callGeminiGenerate(env, {
-      models: args.chatModels,
+      models: args.visionRequest ? parseList(env.GEMINI_VISION_MODELS, args.chatModels) : args.chatModels,
+      apiKeys: args.visionRequest ? geminiVisionApiKeys(env) : null,
+      keyProvider: args.visionRequest ? "gemini_vision" : "gemini",
       system: mergeSearchPrompt(args.finalStylePrompt, search),
       contents: args.contents,
       maxOutputTokens: args.fastChat ? 180 : 1000,
@@ -5821,6 +5876,20 @@ async function runHealthChecks(env, { mode = "quick" } = {}) {
     return { key: maskSecret(keys[0]), reachable: true };
   }, { timeoutMs: 10000 }));
 
+  const visionKeys = roundRobinKeys(geminiVisionApiKeys(env), "gemini_vision");
+  checks.push(await runTimedHealthCheck("Gemini 图片检查", async () => {
+    if (!visionKeys.length) return { configured: false, enabled: false, mode: "auto_off" };
+    const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${encodeURIComponent(visionKeys[0])}&pageSize=1`, { signal: AbortSignal.timeout(8000) });
+    if (!response.ok) throw new Error(`GEMINI_VISION_${response.status}`);
+    return {
+      configured: true,
+      enabled: true,
+      keys: visionKeys.length,
+      key: maskSecret(visionKeys[0]),
+      models: parseList(env.GEMINI_VISION_MODELS, parseList(env.GEMINI_CHAT_MODELS))
+    };
+  }, { timeoutMs: 10000, optional: true }));
+
   checks.push(await runTimedHealthCheck("Gemma 4 26B", async () => {
     if (mode !== "full") return { configured: parseList(env.GEMMA_CHAT_MODELS, ["gemma-4-26b-a4b-it", "gemma-4-31b-it"]).includes("gemma-4-26b-a4b-it") };
     if (!keys.length) throw new Error("GEMMA_API_KEY_MISSING");
@@ -5908,6 +5977,11 @@ async function buildHealthState(env) {
     bindings: { db: Boolean(env.DB), vectorize: Boolean(env.VECTORIZE), ai: Boolean(env.AI), onebotHub: Boolean(env.ONEBOT_HUB) },
     providers: {
       gemini: Boolean(env.GEMINI_API_KEYS || env.VECTORIZE_GEMINI_KEYS),
+      geminiVision: {
+        enabled: imageInspectionEnabled(env),
+        keys: geminiVisionApiKeys(env).length,
+        models: parseList(env.GEMINI_VISION_MODELS, parseList(env.GEMINI_CHAT_MODELS))
+      },
       gemmaDecisionModels: parseList(env.GEMMA_DECISION_MODELS, ["gemma-4-26b-a4b-it", "gemma-4-31b-it"]),
       gemmaChatModels: parseList(env.GEMMA_CHAT_MODELS, ["gemma-4-26b-a4b-it", "gemma-4-31b-it"]),
       deepseek: deepSeekApiKeys(env).length > 0,
@@ -6016,6 +6090,7 @@ async function sendOneBotHttpAction(env, action, params, timeoutMs = 12000) {
 
 async function sendPortalVerificationMessage(env, qq, message) {
   const userId = numericId(qq);
+  message = toSimplifiedChinese(String(message || ""));
   const errors = [];
   const attempts = [
     { transport: "websocket:send_private_msg", payload: { action: "send_private_msg", params: { user_id: userId, message, auto_escape: false } } },
@@ -6354,6 +6429,8 @@ const PORTAL_SETTING_DEFINITIONS = Object.freeze([
   { key: "rule_proxy_kick_authorized", label: "AI 踢出授权", command: "!授权AI踢出 / !撤回AI踢出授权", minRole: "owner", scope: "group", type: "boolean", defaultValue: false },
   { key: "join_reject_authorized", label: "AI 拒绝入群授权", command: "!授权AI拒绝入群 / !撤回AI拒绝入群", minRole: "owner", scope: "group", type: "boolean", defaultValue: false },
   { key: "moderation_cooldown_seconds", label: "同对象处置冷却秒数", command: "!设置处置冷却", minRole: "owner", scope: "group", type: "number", min: 0, defaultValue: 0 },
+  { key: "interject_cooldown_seconds", label: "主动插话冷却秒数", command: "网页设置", minRole: "admin", scope: "group", type: "number", min: 0, defaultValue: 0 },
+  { key: "newcomer_observation_days", label: "新人观察期（天）", command: "网页设置", minRole: "owner", scope: "group", type: "number", min: 0, max: 30, defaultValue: 0 },
   { key: "active_speaking", label: "主动发话", command: "开发者后台", minRole: "developer", scope: "group", type: "boolean", defaultValue: false },
   { key: "rate_limit_seconds", label: "群调用速率限制秒数", command: "!设置速率限制", minRole: "developer", scope: "group", type: "number", min: 0, defaultValue: 10 }
 ]);
@@ -6386,6 +6463,8 @@ async function readPortalSettingValue(env, definition, groupId, targetQq) {
     case "rule_proxy_kick_authorized": return await dbGet(env, `rule_proxy_kick_authorized:${groupId}`) === "true";
     case "join_reject_authorized": return await dbGet(env, `join_reject_authorized:${groupId}`) === "true";
     case "moderation_cooldown_seconds": return parseUnlimitedNonNegativeInteger(await dbGet(env, `moderation_target_cooldown_seconds:${groupId}`), 0);
+    case "interject_cooldown_seconds": return parseUnlimitedNonNegativeInteger(await dbGet(env, `interject_cooldown_seconds:${groupId}`), 0);
+    case "newcomer_observation_days": return Math.max(0, Math.min(30, parseUnlimitedNonNegativeInteger(await dbGet(env, `newcomer_observation_days:${groupId}`), 0)));
     case "active_speaking": return await getFeatureFlag(env, `active_speaking:${groupId}`, false);
     case "rate_limit_seconds": return await getRuntimeRateLimitSeconds(env, groupId);
     default: return definition.defaultValue;
@@ -6416,6 +6495,8 @@ async function writePortalSettingValue(env, definition, groupId, targetQq, value
     case "rule_proxy_kick_authorized": return value ? dbPut(env, `rule_proxy_kick_authorized:${groupId}`, "true") : dbDel(env, `rule_proxy_kick_authorized:${groupId}`);
     case "join_reject_authorized": return value ? dbPut(env, `join_reject_authorized:${groupId}`, "true") : dbDel(env, `join_reject_authorized:${groupId}`);
     case "moderation_cooldown_seconds": return dbPut(env, `moderation_target_cooldown_seconds:${groupId}`, String(parseUnlimitedNonNegativeInteger(value, 0)));
+    case "interject_cooldown_seconds": return dbPut(env, `interject_cooldown_seconds:${groupId}`, String(parseUnlimitedNonNegativeInteger(value, 0)));
+    case "newcomer_observation_days": return dbPut(env, `newcomer_observation_days:${groupId}`, String(Math.max(0, Math.min(30, parseUnlimitedNonNegativeInteger(value, 0)))));
     case "active_speaking": return setFeatureFlag(env, `active_speaking:${groupId}`, Boolean(value));
     case "rate_limit_seconds": return dbPut(env, `runtime_rate_limit_seconds:group:${groupId}`, String(parseUnlimitedNonNegativeInteger(value, DEFAULTS.runtimeRateLimitSeconds)));
   }
@@ -6493,10 +6574,10 @@ async function listBilibiliConnectors(env, groupId) {
   return result;
 }
 
-const BILIBILI_POLL_MIN_SECONDS = 300;
+const BILIBILI_POLL_MIN_SECONDS = 1800;
 const BILIBILI_POLL_DEFAULT_SECONDS = 1800;
 const BILIBILI_POLL_MAX_SECONDS = 21600;
-const BILIBILI_BLOCK_BACKOFF_MAX_SECONDS = 24 * 60 * 60;
+const BILIBILI_BLOCK_BACKOFF_MAX_SECONDS = 72 * 60 * 60;
 
 function normalizeBilibiliUid(value) {
   return String(value || "").replace(/\D/g, "").slice(0, 24);
@@ -6508,7 +6589,7 @@ function bilibiliPollIntervalSeconds(value) {
 }
 
 function waitMs(ms) { return new Promise(resolve => setTimeout(resolve, Math.max(0, Number(ms) || 0))); }
-function isBilibiliBlockedError(error) { return /HTTP\s*412|错误\s*-412|request was banned|请求被拦截|風控|风控/i.test(String(error?.message || error || "")); }
+function isBilibiliBlockedError(error) { return /HTTP\s*(?:412|429)|错误\s*-412|request was banned|请求被拦截|風控|风控|rate.?limit/i.test(String(error?.message || error || "")); }
 
 async function fetchBilibiliJson(url, timeoutMs = 12000) {
   const controller = new AbortController();
@@ -6516,9 +6597,8 @@ async function fetchBilibiliJson(url, timeoutMs = 12000) {
   try {
     const response = await fetch(url, {
       headers: {
-        "Accept": "application/json, text/plain, */*",
-        "User-Agent": `Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/124 Safari/537.36 QQAIbot/${VERSION}`,
-        "Referer": "https://www.bilibili.com/"
+        "Accept": "application/json",
+        "User-Agent": `QQAIbot/${VERSION} (compatibility-public-polling; developer=${DEFAULT_DEVELOPER_ID})`
       },
       signal: controller.signal
     });
@@ -6693,11 +6773,11 @@ async function pollOneAutomaticBilibiliConnector(env, connector, now = Date.now(
     connector.consecutiveFailures = Number(connector.consecutiveFailures || 0) + 1;
     const blocked = isBilibiliBlockedError(error);
     const backoffSeconds = blocked
-      ? Math.min(BILIBILI_BLOCK_BACKOFF_MAX_SECONDS, 6 * 60 * 60 * (2 ** Math.min(2, connector.consecutiveFailures - 1)))
+      ? Math.min(BILIBILI_BLOCK_BACKOFF_MAX_SECONDS, 12 * 60 * 60 * (2 ** Math.min(2, connector.consecutiveFailures - 1)))
       : Math.min(BILIBILI_POLL_MAX_SECONDS, Math.max(intervalSeconds, 15 * 60 * (2 ** Math.min(4, connector.consecutiveFailures - 1))));
     connector.lastCheckStatus = blocked ? "blocked" : "failed";
     connector.lastCheckError = blocked
-      ? `B站返回 412 风控，通常是 Cloudflare 出口 IP 被拦截。系统已暂停检查 ${Math.round(backoffSeconds / 3600)} 小时；调慢频率可降低触发概率，但不能保证 B站解除拦截。原始错误：${String(error?.message || error)}`.slice(0, 1200)
+      ? `B站返回 412／429 风控或限流。兼容轮询已暂停 ${Math.round(backoffSeconds / 3600)} 小时；建议改用开放平台 Webhook 或合法授权的中继，不要提高抓取频率。原始错误：${String(error?.message || error)}`.slice(0, 1200)
       : String(error?.message || error).slice(0, 1200);
     connector.nextPollAt = now + backoffSeconds * 1000;
     connector.updatedAt = Date.now();
@@ -7046,24 +7126,42 @@ ${summary}`.slice(0, 4000),
   }
 
   if (request.method === "GET" && path === "/settings-center") {
-    if (!portalIsDeveloper) return jsonResponse({ ok: false, message: "设置中心仅开发者可见。群管理员请使用“群组设置”“群规监控”“B站监控”等对应页面。" }, 403);
-    const targetQq = String(url.searchParams.get("targetQq") || authed.qq).replace(/\D/g, "");
-    if (!targetQq) return jsonResponse({ ok: false, message: "请输入有效的目标 QQ。" }, 400);
+    if (!groupId) return jsonResponse({ ok: false, message: "请先选择群组。" }, 400);
+    const requestedTargetQq = String(url.searchParams.get("targetQq") || authed.qq).replace(/\D/g, "");
+    if (!requestedTargetQq) return jsonResponse({ ok: false, message: "请输入有效的目标 QQ。" }, 400);
+    if (!portalIsDeveloper && requestedTargetQq !== String(authed.qq)) return jsonResponse({ ok: false, message: "非开发者只能修改自己的个人设置与当前权限允许的群设置。" }, 403);
+    const targetQq = portalIsDeveloper ? requestedTargetQq : String(authed.qq);
     const targetRole = await resolvePortalRole(env, targetQq, groupId);
-    const visibleRank = 3;
+    const effectiveViewerRole = portalIsDeveloper
+      ? "developer"
+      : role === "owner"
+        ? "owner"
+        : (permissions.aiAdmin || permissions.groupOps || permissions.nativeAdmin || role === "admin")
+          ? "admin"
+          : "member";
+    const visibleRank = portalRoleRank(effectiveViewerRole);
     const settings = [];
     for (const definition of PORTAL_SETTING_DEFINITIONS) {
       if (portalRoleRank(definition.minRole) > visibleRank) continue;
       settings.push({ ...definition, value: await readPortalSettingValue(env, definition, groupId, targetQq) });
     }
-    return jsonResponse({ ok: true, targetQq, targetRole, viewerRole: portalIsDeveloper ? "developer" : role, settings, canDisableAuditLog: portalIsDeveloper });
+    return jsonResponse({ ok: true, targetQq, targetRole, viewerRole: effectiveViewerRole, settings, canEditTargetQq: portalIsDeveloper, canDisableAuditLog: portalIsDeveloper });
   }
   if (request.method === "POST" && path === "/settings-center") {
-    if (!portalIsDeveloper) return jsonResponse({ ok: false, message: "设置中心仅开发者可用。" }, 403);
-    const targetQq = String(body.targetQq || authed.qq).replace(/\D/g, "");
-    if (!targetQq) return jsonResponse({ ok: false, message: "请输入有效的目标 QQ。" }, 400);
+    if (!groupId) return jsonResponse({ ok: false, message: "请先选择群组。" }, 400);
+    const requestedTargetQq = String(body.targetQq || authed.qq).replace(/\D/g, "");
+    if (!requestedTargetQq) return jsonResponse({ ok: false, message: "请输入有效的目标 QQ。" }, 400);
+    if (!portalIsDeveloper && requestedTargetQq !== String(authed.qq)) return jsonResponse({ ok: false, message: "非开发者只能修改自己的个人设置与当前权限允许的群设置。" }, 403);
+    const targetQq = portalIsDeveloper ? requestedTargetQq : String(authed.qq);
     const targetRole = await resolvePortalRole(env, targetQq, groupId);
-    const actorRank = 3;
+    const effectiveActorRole = portalIsDeveloper
+      ? "developer"
+      : role === "owner"
+        ? "owner"
+        : (permissions.aiAdmin || permissions.groupOps || permissions.nativeAdmin || role === "admin")
+          ? "admin"
+          : "member";
+    const actorRank = portalRoleRank(effectiveActorRole);
     const requested = Array.isArray(body.settings)
       ? body.settings
       : [{ key: String(body.key || ""), value: body.value }];
@@ -7101,8 +7199,8 @@ ${summary}`.slice(0, 4000),
     const connectors = await listBilibiliConnectors(env, groupId);
     return jsonResponse({
       ok: true,
-      connectors: connectors.map(item => { const { webhookSecret, ...safe } = item; return { ...safe, mode: item.mode === "generic_webhook" ? "generic_webhook" : "automatic_polling" }; }),
-      note: "填写 B站用户 UID 后，Worker 会按设定间隔自动检查开播状态与最新视频。首次检查只建立基准，不发送旧内容。"
+      connectors: connectors.map(item => { const { webhookSecret, ...safe } = item; return { ...safe, mode: item.mode === "generic_webhook" ? "official_webhook" : "automatic_polling" }; }),
+      note: "推荐使用哔哩哔哩开放平台 Webhook 或经过合法授权的中继。兼容轮询仅使用公开网页接口、最低 30 分钟一次，可能受 412／429 风控影响。"
     });
   }
   if (request.method === "POST" && path === "/integrations/bilibili") {
@@ -7128,6 +7226,7 @@ ${summary}`.slice(0, 4000),
     if (action === "check_now") {
       const item = await readJson(env, `bili:connector:${body.id}`, null);
       if (!item || item.groupId !== groupId) return jsonResponse({ ok: false, message: "找不到监控项目。" }, 404);
+      if (item.mode === "generic_webhook") return jsonResponse({ ok: false, message: "Webhook 模式不执行主动抓取；请从开放平台或授权中继发送测试事件。" }, 400);
       const result = await pollOneAutomaticBilibiliConnector(env, item, Date.now(), { force: true });
       const { webhookSecret, ...safeConnector } = result.connector || item;
       return jsonResponse({ ok: result.ok, message: result.ok ? (result.baseline ? "检查成功，已建立当前状态基准。" : `检查成功，发现 ${result.events?.length || 0} 个新事件。`) : `检查失败：${result.message}`, connector: safeConnector }, result.ok ? 200 : 502);
@@ -7135,6 +7234,7 @@ ${summary}`.slice(0, 4000),
     if (action === "update_interval") {
       const item = await readJson(env, `bili:connector:${body.id}`, null);
       if (!item || item.groupId !== groupId) return jsonResponse({ ok: false, message: "找不到监控项目。" }, 404);
+      if (item.mode === "generic_webhook") return jsonResponse({ ok: false, message: "Webhook 模式没有轮询频率。" }, 400);
       item.pollIntervalSeconds = bilibiliPollIntervalSeconds(body.pollIntervalSeconds || item.pollIntervalSeconds);
       item.nextPollAt = Date.now() + item.pollIntervalSeconds * 1000;
       item.updatedAt = Date.now();
@@ -7144,29 +7244,45 @@ ${summary}`.slice(0, 4000),
     }
     const id = String(body.id || `bili_${Date.now().toString(36)}_${crypto.randomUUID().slice(0, 8)}`);
     const existing = await readJson(env, `bili:connector:${id}`, null);
+    const requestedMode = body.mode === "official_webhook" ? "generic_webhook" : "automatic_polling";
     const creatorId = normalizeBilibiliUid(body.creatorId || existing?.creatorId || "");
-    if (!creatorId) return jsonResponse({ ok: false, message: "自动监控必须填写 B站用户的数字 UID。" }, 400);
+    if (!creatorId) return jsonResponse({ ok: false, message: "请填写 B站用户的数字 UID，用于核对事件来源。" }, 400);
     const item = {
       ...existing,
       id, groupId,
       creatorId,
       creatorName: String(body.creatorName || existing?.creatorName || "").trim().slice(0, 120),
-      mode: "automatic_polling",
+      mode: requestedMode,
       enabled: body.enabled !== false,
-      pollIntervalSeconds: bilibiliPollIntervalSeconds(body.pollIntervalSeconds || existing?.pollIntervalSeconds),
+      pollIntervalSeconds: requestedMode === "automatic_polling" ? bilibiliPollIntervalSeconds(body.pollIntervalSeconds || existing?.pollIntervalSeconds) : 0,
       liveNotify: Boolean(body.liveNotify), liveAtAll: Boolean(body.liveAtAll),
       videoNotify: Boolean(body.videoNotify), videoAtAll: Boolean(body.videoAtAll),
       createdBy: existing?.createdBy || authed.qq,
       createdAt: existing?.createdAt || Date.now(), updatedAt: Date.now(),
       nextPollAt: 0
     };
-    if (existing?.webhookSecret) await dbDel(env, `bili:webhook_secret:${existing.webhookSecret}`);
-    delete item.webhookSecret;
+    if (existing?.webhookSecret && requestedMode !== "generic_webhook") await dbDel(env, `bili:webhook_secret:${existing.webhookSecret}`);
+    let webhookUrl = "";
+    if (requestedMode === "generic_webhook") {
+      item.webhookSecret = existing?.webhookSecret || crypto.randomUUID().replaceAll("-", "");
+      await dbPut(env, `bili:webhook_secret:${item.webhookSecret}`, id);
+      webhookUrl = `${url.origin}/api/integrations/bilibili/webhook/${item.webhookSecret}`;
+    } else {
+      delete item.webhookSecret;
+    }
     await dbPut(env, `bili:connector:${id}`, JSON.stringify(item));
     await appendIndex(env, `bili:connector:index:${groupId}`, id, 500);
     await appendIndex(env, "bili:connector:index:all", id, 5000);
-    await writeSystemAudit(env, { type: "bilibili_auto_monitor", groupId, actorId: authed.qq, action: existing ? "update" : "create", connectorId: id, creatorId, pollIntervalSeconds: item.pollIntervalSeconds });
-    return jsonResponse({ ok: true, message: "B站自动监控已保存，将在下一次定时任务检查；也可以立即检查。", connector: item });
+    await writeSystemAudit(env, { type: "bilibili_auto_monitor", groupId, actorId: authed.qq, action: existing ? "update" : "create", connectorId: id, creatorId, mode: requestedMode, pollIntervalSeconds: item.pollIntervalSeconds });
+    const { webhookSecret, ...safeItem } = item;
+    return jsonResponse({
+      ok: true,
+      message: requestedMode === "generic_webhook"
+        ? "Webhook 监控已保存。请把回调地址配置到哔哩哔哩开放平台，或合法授权的事件中继。"
+        : "兼容轮询已保存；首次检查只建立基准。建议优先改用 Webhook。",
+      connector: safeItem,
+      webhookUrl
+    });
   }
 
   if (request.method === "GET" && path === "/health") {
@@ -7178,16 +7294,17 @@ ${summary}`.slice(0, 4000),
   if (request.method === "GET" && path === "/models") {
     const health = await readJson(env, "health:last:quick", null);
     const lastByName = Object.fromEntries((health?.checks || []).map(item => [item.name, item]));
+    const visionConfigured = imageInspectionEnabled(env);
     const registry = [
       ...parseList(env.GEMMA_CHAT_MODELS, ["gemma-4-26b-a4b-it", "gemma-4-31b-it"]).map((id, index) => ({ id, provider: "Google", family: "Gemma", billing: "Gemini 免费层额度", capabilities: ["text", "chat", "routing"], priority: index + 1, status: lastByName[id.includes("31b") ? "Gemma 4 31B" : "Gemma 4 26B"]?.status || "unknown" })),
-      ...parseList(env.GEMINI_CHAT_MODELS).map((id, index) => ({ id, provider: "Google", family: "Gemini", billing: "未启用付费／免费层额度", capabilities: ["text", "chat", "vision"], priority: index + 1, status: lastByName["Gemini API"]?.status || "unknown" })),
+      ...parseList(env.GEMINI_CHAT_MODELS).map((id, index) => ({ id, provider: "Google", family: "Gemini", billing: "未启用付费／免费层额度", capabilities: ["text", "chat", ...(visionConfigured ? ["vision"] : [])], priority: index + 1, status: lastByName["Gemini API"]?.status || "unknown" })),
       ...[env.DEEPSEEK_FLASH_MODEL || DEFAULTS.deepseekFlashModel].filter(Boolean).map((id, index) => ({ id, provider: "DeepSeek", family: "DeepSeek Flash", billing: "付费余额／受每日预算限制", capabilities: ["text", "chat", "context_summary", "code"], priority: index + 1, status: lastByName["DeepSeek API"]?.status || (deepSeekApiKeys(env).length ? "unknown" : "unconfigured") }))
     ];
     const deepseekDailyBudgetCny = await getQuotaNumber(env, "quota:deepseek:global_daily_cny", Number(env.DEEPSEEK_DAILY_BUDGET_CNY || 0.35));
     return jsonResponse({
       ok: true,
       models: registry,
-      routing: { decision: "gemma-4-26b-a4b-it（仅插话／规则分类）", simple: "Gemini 免费模型池", general: "Gemini 免费模型池", vision: "Gemini 免费模型池", freeFallback: "gemma-4-31b-it", paidEmergencyFallback: env.DEEPSEEK_FLASH_MODEL || DEFAULTS.deepseekFlashModel },
+      routing: { decision: "gemma-4-26b-a4b-it（仅插话／规则分类）", simple: "Gemini 免费模型池", general: "Gemini 免费模型池", vision: visionConfigured ? `Gemini 独立图片金钥池（${geminiVisionApiKeys(env).length} 个）` : "未配置，自动关闭", freeFallback: "gemma-4-31b-it", paidEmergencyFallback: env.DEEPSEEK_FLASH_MODEL || DEFAULTS.deepseekFlashModel },
       costPolicy: { mode: String(env.MODEL_COST_POLICY || DEFAULTS.modelCostPolicy), geminiBilling: "free_tier", deepseekBilling: "paid_limited", deepseekDailyBudgetCny, emergencyFallback: envFlag(env.DEEPSEEK_EMERGENCY_FALLBACK, DEFAULTS.deepseekEmergencyFallback), paidContextSummary: envFlag(env.ALLOW_PAID_CONTEXT_SUMMARY, DEFAULTS.paidContextSummary) }
     });
   }
@@ -7799,8 +7916,8 @@ async function handleGeminiLiveUpgrade(request, env) {
 }
 
 function getLiveHtmlPage(host) {
-  return `<!doctype html>
-<html lang="zh-Hant"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+  return toSimplifiedChinese(`<!doctype html>
+<html lang="zh-Hans-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>QQAI Live</title><style>
 *{box-sizing:border-box}body{margin:0;min-height:100vh;font-family:system-ui,-apple-system,"Segoe UI",sans-serif;background:radial-gradient(circle at 50% 20%,#183c61,#07101e 42%,#03050a);color:#eef7ff;display:grid;place-items:center;padding:20px}.card{width:min(760px,100%);border:1px solid #ffffff24;background:#07101ed9;backdrop-filter:blur(18px);border-radius:18px;padding:24px;box-shadow:0 30px 80px #0008}h1{margin:0 0 8px}.muted{color:#a8b8ca;line-height:1.65}.row{display:flex;gap:10px;flex-wrap:wrap;margin-top:16px}button{border:0;border-radius:10px;height:44px;padding:0 18px;font-weight:800;cursor:pointer;background:#65dcff;color:#02101a}button.stop{background:#ff7474;color:#1a0505}button:disabled{opacity:.45;cursor:not-allowed}.meter{height:10px;background:#ffffff12;border-radius:99px;overflow:hidden;margin-top:16px}.bar{height:100%;width:0;background:linear-gradient(90deg,#60dcff,#86ffbd);transition:width .08s}.log{margin-top:16px;background:#02060d;border:1px solid #ffffff18;border-radius:12px;padding:12px;min-height:150px;max-height:320px;overflow:auto;white-space:pre-wrap;line-height:1.55}.status{font-weight:800;color:#8ff0c0}.warn{color:#ffd58a}@media(max-width:520px){button{width:100%}}
 </style></head><body><main class="card"><h1>QQAI Live</h1><div class="muted">即時麥克風對話。瀏覽器會傳送 16 kHz PCM 音訊，回傳語音會在本機播放。請勿在對話中提供密碼或敏感資料。</div><div class="row"><button id="start">開始通話</button><button id="mute" disabled>靜音</button><button id="stop" class="stop" disabled>結束</button></div><div class="meter"><div class="bar" id="bar"></div></div><div class="log"><div class="status" id="status">尚未连接</div><div id="transcript"></div></div></main>
@@ -7818,7 +7935,7 @@ async function start(){startBtn.disabled=true;statusEl.textContent='取得麥克
 inputCtx=new AudioContext({sampleRate:16000});source=inputCtx.createMediaStreamSource(stream);processor=inputCtx.createScriptProcessor(4096,1,1);processor.onaudioprocess=e=>{if(!ready||muted||!ws||ws.readyState!==1)return;const pcm=f32ToPcm16(e.inputBuffer.getChannelData(0));ws.send(JSON.stringify({realtimeInput:{audio:{mimeType:'audio/pcm;rate=16000',data:b64FromBytes(pcm)}}}))};source.connect(processor);processor.connect(inputCtx.destination);stopBtn.disabled=false;muteBtn.disabled=false}catch(e){statusEl.textContent='無法啟動：'+e.message;cleanup(false)}}
 function cleanup(close=true){ready=false;if(close&&ws&&ws.readyState<2)ws.close();try{processor?.disconnect();source?.disconnect();inputCtx?.close();stream?.getTracks().forEach(t=>t.stop())}catch{}ws=null;stream=null;processor=null;source=null;inputCtx=null;startBtn.disabled=false;stopBtn.disabled=true;muteBtn.disabled=true;bar.style.width='0'}
 startBtn.onclick=start;stopBtn.onclick=()=>cleanup(true);muteBtn.onclick=()=>{muted=!muted;muteBtn.textContent=muted?'取消靜音':'靜音'};
-</script></body></html>`;
+</script></body></html>`);
 }
 
 async function handleAppealApi(request, env, url) {
@@ -7854,11 +7971,11 @@ async function handleAppealApi(request, env, url) {
 }
 
 function getAppealPage(host) {
-  return `<!doctype html><html lang="zh-Hant"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>QQAI 匿名申訴</title><style>*{box-sizing:border-box}body{margin:0;min-height:100vh;font-family:system-ui;background:radial-gradient(circle at 30% 10%,#173b60,#060d18 45%,#020409);color:#edf7ff;padding:22px}.wrap{max-width:760px;margin:auto}.card{background:#07101ee8;border:1px solid #ffffff22;border-radius:16px;padding:20px;margin:14px 0}h1{margin-bottom:6px}.muted{color:#a9bacd;line-height:1.6}label{display:block;margin-top:12px;color:#b8c7d9}input,select,textarea{width:100%;border:1px solid #ffffff24;background:#081525;color:#fff;border-radius:9px;padding:11px;margin-top:6px}textarea{min-height:150px}button{margin-top:14px;border:0;border-radius:9px;background:#67ddff;color:#03111a;font-weight:800;padding:11px 16px;cursor:pointer}.hidden{display:none}.msg{white-space:pre-wrap;color:#8ff0c0;margin-top:12px}.item{border-top:1px solid #ffffff17;padding:10px 0}</style></head><body><div class="wrap"><h1>匿名申訴</h1><div class="muted">審核人看不到申訴人的 QQ；只有開發者可查看真實身分。系統會先确认你屬於可使用 AI 的白名單群。</div><section class="card" id="login"><label>QQ 号</label><input id="qq" inputmode="numeric"><button id="send">發送驗證碼</button><label>驗證碼</label><input id="code" maxlength="6" inputmode="numeric"><button id="verify">驗證</button><div class="msg" id="loginMsg"></div></section><section class="card hidden" id="form"><label>所屬白名單群</label><select id="group"></select><label>申訴類型</label><select id="type"><option>禁言</option><option>踢出</option><option>AI黑名单</option><option>管理操作</option><option>排程</option><option>其他</option></select><label>相關訊息 ID（選填）</label><input id="evidence"><label>申訴內容</label><textarea id="content"></textarea><button id="submit">匿名提交</button><button id="refresh">查看我的案件</button><div class="msg" id="formMsg"></div><div id="cases"></div></section></div><script>let token='';const post=async(p,d)=>{const r=await fetch('/api/appeal'+p,{method:'POST',headers:{'Content-Type':'application/json',...(token?{Authorization:'Bearer '+token}:{})},body:JSON.stringify(d||{})});return r.json()},get=async p=>(await fetch('/api/appeal'+p,{headers:token?{Authorization:'Bearer '+token}:{}})).json();send.onclick=async()=>loginMsg.textContent=(await post('/request-code',{qq:qq.value})).message;verify.onclick=async()=>{const r=await post('/verify-code',{qq:qq.value,code:code.value});loginMsg.textContent=r.message;if(r.ok){token=r.token;const g=await get('/groups');group.innerHTML=(g.groups||[]).map(x=>'<option value="'+x.groupId+'">'+x.groupName+'（'+x.groupId+'）</option>').join('');login.classList.add('hidden');form.classList.remove('hidden')}};submit.onclick=async()=>{const r=await post('/submit',{groupId:group.value,type:type.value,content:content.value,evidenceMessageId:evidence.value});formMsg.textContent=r.message;if(r.ok){content.value='';load()}};async function load(){const r=await get('/mine');cases.innerHTML=(r.appeals||[]).map(a=>'<div class="item"><b>'+a.id+'</b>｜'+a.status+'<br>'+a.type+'｜'+a.content+(a.result?'<br>結果：'+a.result:'')+'</div>').join('')||'<div class="muted">暂无案件</div>'}refresh.onclick=load;</script></body></html>`;
+  return toSimplifiedChinese(`<!doctype html><html lang="zh-Hans-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>QQAI 匿名申訴</title><style>*{box-sizing:border-box}body{margin:0;min-height:100vh;font-family:system-ui;background:radial-gradient(circle at 30% 10%,#173b60,#060d18 45%,#020409);color:#edf7ff;padding:22px}.wrap{max-width:760px;margin:auto}.card{background:#07101ee8;border:1px solid #ffffff22;border-radius:16px;padding:20px;margin:14px 0}h1{margin-bottom:6px}.muted{color:#a9bacd;line-height:1.6}label{display:block;margin-top:12px;color:#b8c7d9}input,select,textarea{width:100%;border:1px solid #ffffff24;background:#081525;color:#fff;border-radius:9px;padding:11px;margin-top:6px}textarea{min-height:150px}button{margin-top:14px;border:0;border-radius:9px;background:#67ddff;color:#03111a;font-weight:800;padding:11px 16px;cursor:pointer}.hidden{display:none}.msg{white-space:pre-wrap;color:#8ff0c0;margin-top:12px}.item{border-top:1px solid #ffffff17;padding:10px 0}</style></head><body><div class="wrap"><h1>匿名申訴</h1><div class="muted">審核人看不到申訴人的 QQ；只有開發者可查看真實身分。系統會先确认你屬於可使用 AI 的白名單群。</div><section class="card" id="login"><label>QQ 号</label><input id="qq" inputmode="numeric"><button id="send">發送驗證碼</button><label>驗證碼</label><input id="code" maxlength="6" inputmode="numeric"><button id="verify">驗證</button><div class="msg" id="loginMsg"></div></section><section class="card hidden" id="form"><label>所屬白名單群</label><select id="group"></select><label>申訴類型</label><select id="type"><option>禁言</option><option>踢出</option><option>AI黑名单</option><option>管理操作</option><option>排程</option><option>其他</option></select><label>相關訊息 ID（選填）</label><input id="evidence"><label>申訴內容</label><textarea id="content"></textarea><button id="submit">匿名提交</button><button id="refresh">查看我的案件</button><div class="msg" id="formMsg"></div><div id="cases"></div></section></div><script>let token='';const post=async(p,d)=>{const r=await fetch('/api/appeal'+p,{method:'POST',headers:{'Content-Type':'application/json',...(token?{Authorization:'Bearer '+token}:{})},body:JSON.stringify(d||{})});return r.json()},get=async p=>(await fetch('/api/appeal'+p,{headers:token?{Authorization:'Bearer '+token}:{}})).json();send.onclick=async()=>loginMsg.textContent=(await post('/request-code',{qq:qq.value})).message;verify.onclick=async()=>{const r=await post('/verify-code',{qq:qq.value,code:code.value});loginMsg.textContent=r.message;if(r.ok){token=r.token;const g=await get('/groups');group.innerHTML=(g.groups||[]).map(x=>'<option value="'+x.groupId+'">'+x.groupName+'（'+x.groupId+'）</option>').join('');login.classList.add('hidden');form.classList.remove('hidden')}};submit.onclick=async()=>{const r=await post('/submit',{groupId:group.value,type:type.value,content:content.value,evidenceMessageId:evidence.value});formMsg.textContent=r.message;if(r.ok){content.value='';load()}};async function load(){const r=await get('/mine');cases.innerHTML=(r.appeals||[]).map(a=>'<div class="item"><b>'+a.id+'</b>｜'+a.status+'<br>'+a.type+'｜'+a.content+(a.result?'<br>結果：'+a.result:'')+'</div>').join('')||'<div class="muted">暂无案件</div>'}refresh.onclick=load;</script></body></html>`);
 }
 
 function getPortalHomePage(host) {
-  return String.raw`<!doctype html>
+  return toSimplifiedChinese(String.raw`<!doctype html>
 <html lang="zh-Hans-CN">
 <head>
 <meta charset="utf-8">
@@ -7868,21 +7985,22 @@ function getPortalHomePage(host) {
 <style>
 :root{color-scheme:light;--bg:#f5f7fb;--panel:#fff;--panel2:#f8fafc;--text:#172033;--muted:#68748a;--line:#e3e8f0;--primary:#5b5bd6;--primary2:#7777e8;--ok:#17845f;--warn:#b26a00;--bad:#c53d4d;--shadow:0 18px 48px rgba(31,42,68,.08);--login-panel:rgba(255,255,255,.92);--topbar-bg:rgba(245,247,251,.88);font-family:Inter,"Noto Sans TC","Microsoft JhengHei",system-ui,sans-serif}
 :root[data-theme="dark"]{color-scheme:dark;--bg:#070a11;--panel:#101521;--panel2:#151c2a;--text:#eef2f8;--muted:#9ca8bb;--line:#293247;--primary:#8585ff;--primary2:#a091ff;--ok:#48cfa0;--warn:#e5a94f;--bad:#ff7687;--shadow:0 18px 48px rgba(0,0,0,.38);--login-panel:rgba(16,21,34,.94);--topbar-bg:rgba(7,10,17,.9)}
-*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text)}button,input,select,textarea{font:inherit}.hidden{display:none!important}.muted{color:var(--muted)}
+*{box-sizing:border-box}html,body{max-width:100%;overflow-x:hidden}body{margin:0;min-width:0;min-height:100dvh;background:var(--bg);color:var(--text)}img,video,canvas,svg{max-width:100%}button,input,select,textarea{font:inherit;min-width:0}.hidden{display:none!important}.muted{color:var(--muted)}
 .login{min-height:100vh;display:grid;place-items:center;padding:24px;background:radial-gradient(circle at 15% 10%,rgba(91,91,214,.15),transparent 38%),radial-gradient(circle at 90% 90%,rgba(23,132,95,.11),transparent 40%),var(--bg)}
 .login-card{width:min(450px,100%);background:var(--login-panel);border:1px solid var(--line);border-radius:26px;padding:30px;box-shadow:var(--shadow);backdrop-filter:blur(14px)}.brand{display:flex;align-items:center;gap:12px;margin-bottom:24px}.logo{width:46px;height:46px;border-radius:15px;display:grid;place-items:center;background:linear-gradient(135deg,var(--primary),#8a69e8);color:#fff;font-weight:800}.brand h1{font-size:22px;margin:0}.brand p{margin:4px 0 0;color:var(--muted);font-size:14px}
 .field{display:grid;gap:7px;margin:14px 0}.field label{font-size:13px;font-weight:700}.field input,.field select,.field textarea{width:100%;border:1px solid var(--line);border-radius:12px;background:var(--panel);color:var(--text);padding:11px 12px;outline:none}.field input:focus,.field select:focus,.field textarea:focus{border-color:var(--primary);box-shadow:0 0 0 3px rgba(91,91,214,.12)}.field textarea{min-height:100px;resize:vertical}.row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}.grow{flex:1;min-width:160px}
 .btn{border:0;border-radius:11px;padding:10px 14px;font-weight:700;cursor:pointer;background:var(--panel2);color:var(--text)}.btn:hover{filter:brightness(.98)}.btn.primary{background:var(--primary);color:#fff}.btn.danger{background:#fde9ec;color:var(--bad)}.btn.ghost{background:transparent;border:1px solid var(--line)}.btn:disabled{opacity:.55;cursor:not-allowed}.notice{margin-top:14px;padding:11px 13px;border-radius:11px;background:var(--panel2);color:var(--muted);font-size:14px;line-height:1.55}
-.app{min-height:100vh;display:grid;grid-template-columns:250px 1fr}.sidebar{position:sticky;top:0;height:100vh;background:#171b2b;color:#e9ecf4;padding:18px 14px;display:flex;flex-direction:column}.side-brand{display:flex;align-items:center;gap:10px;padding:8px 8px 18px}.side-brand .logo{width:38px;height:38px;border-radius:12px}.side-brand b{display:block}.side-brand small{color:#98a2b7}.nav{display:grid;gap:4px;overflow:auto}.nav button{border:0;background:transparent;color:#aeb7c9;padding:10px 12px;border-radius:10px;text-align:left;cursor:pointer;font-weight:650}.nav button:hover,.nav button.active{background:rgba(255,255,255,.1);color:#fff}.side-bottom{margin-top:auto;padding:12px 8px 2px;border-top:1px solid rgba(255,255,255,.1)}
+.app{min-height:100vh;display:grid;grid-template-columns:250px 1fr}.sidebar{position:sticky;top:0;height:100vh;background:#171b2b;color:#e9ecf4;padding:18px 14px;display:flex;flex-direction:column}.side-brand{display:flex;align-items:center;gap:10px;padding:8px 8px 18px}.side-brand .logo{width:38px;height:38px;border-radius:12px}.side-brand b{display:block}.side-brand small{color:#98a2b7}.nav{display:grid;gap:12px;overflow:auto}.nav-group{display:grid;gap:4px}.nav-heading{padding:4px 12px;color:#77839a;font-size:11px;font-weight:800;letter-spacing:.08em;text-transform:uppercase}.nav button{border:0;background:transparent;color:#aeb7c9;padding:10px 12px;border-radius:10px;text-align:left;cursor:pointer;font-weight:650}.nav button:hover,.nav button.active{background:rgba(255,255,255,.1);color:#fff}.side-bottom{margin-top:auto;padding:12px 8px 2px;border-top:1px solid rgba(255,255,255,.1)}
 .main{min-width:0}.topbar{height:72px;display:flex;align-items:center;justify-content:space-between;gap:16px;padding:0 24px;border-bottom:1px solid var(--line);background:var(--topbar-bg);backdrop-filter:blur(12px);position:sticky;top:0;z-index:5}.topbar h2{margin:0;font-size:20px}.top-actions{display:flex;align-items:center;gap:10px}.top-actions select{max-width:250px;border:1px solid var(--line);border-radius:10px;padding:9px 10px;background:#fff}.content{padding:24px;max-width:1500px;margin:auto}.view{display:none}.view.active{display:block}.section-head{display:flex;justify-content:space-between;gap:16px;align-items:flex-start;margin-bottom:18px}.section-head h2{margin:0 0 5px;font-size:25px}.section-head p{margin:0;color:var(--muted)}
 .grid{display:grid;grid-template-columns:repeat(12,minmax(0,1fr));gap:16px}.card{background:var(--panel);border:1px solid var(--line);border-radius:17px;padding:18px;box-shadow:0 8px 28px rgba(38,49,76,.045);min-width:0}.span-3{grid-column:span 3}.span-4{grid-column:span 4}.span-5{grid-column:span 5}.span-6{grid-column:span 6}.span-7{grid-column:span 7}.span-8{grid-column:span 8}.span-12{grid-column:1/-1}.metric-label{font-size:13px;color:var(--muted);margin-bottom:8px}.metric-value{font-size:27px;font-weight:800;letter-spacing:-.03em}.metric-sub{font-size:12px;color:var(--muted);margin-top:7px}.card h3{margin:0 0 13px;font-size:16px}.status{display:inline-flex;align-items:center;gap:7px;border-radius:999px;padding:5px 9px;font-size:12px;font-weight:800;background:#edf1f7}.status:before{content:"";width:7px;height:7px;border-radius:50%;background:#8390a5}.status.ok{background:#e5f5ee;color:var(--ok)}.status.ok:before{background:var(--ok)}.status.warning{background:#fff2d9;color:var(--warn)}.status.warning:before{background:var(--warn)}.status.error{background:#fde9ec;color:var(--bad)}.status.error:before{background:var(--bad)}
 .list{display:grid;gap:10px}.item{border:1px solid var(--line);border-radius:13px;padding:13px;background:var(--panel)}.item-head{display:flex;justify-content:space-between;gap:12px;align-items:flex-start}.item-title{font-weight:800;word-break:break-word}.item-meta{font-size:12px;color:var(--muted);margin-top:5px;line-height:1.55}.item-body{margin-top:9px;line-height:1.55;word-break:break-word}.empty{padding:28px 12px;text-align:center;color:var(--muted);border:1px dashed var(--line);border-radius:13px}.health-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:13px}.health-card{border:1px solid var(--line);border-radius:14px;padding:14px;background:var(--panel)}.health-card .latency{font-size:12px;color:var(--muted);margin-top:8px}.health-card .detail{font-size:12px;color:var(--muted);margin-top:8px;word-break:break-word;white-space:pre-wrap}
 .timeline{display:grid;gap:8px}.step{display:flex;gap:10px;align-items:flex-start}.step i{width:9px;height:9px;border-radius:50%;background:var(--primary);margin-top:6px;flex:0 0 auto}.step span{line-height:1.5}.pill{display:inline-block;border-radius:999px;padding:4px 8px;background:#eef0ff;color:#5050bd;font-size:12px;font-weight:700;margin:2px 4px 2px 0}.split{display:grid;grid-template-columns:1fr 1fr;gap:16px}.switch{display:flex;align-items:center;gap:9px;margin:10px 0}.switch input{width:18px;height:18px}.code{font-family:ui-monospace,SFMono-Regular,Consolas,monospace;background:#151a29;color:#e9ecf4;border-radius:12px;padding:12px;white-space:pre-wrap;word-break:break-word;font-size:12px}
-.log-toolbar{margin-bottom:14px}.log-summary{margin:0 0 12px}.log-card{padding:15px 16px}.log-card-head{display:flex;align-items:flex-start;justify-content:space-between;gap:12px}.log-card-title{font-size:16px;font-weight:850;line-height:1.35}.log-card-time{font-size:12px;color:var(--muted);margin-top:5px}.log-badge{flex:0 0 auto;border-radius:999px;padding:5px 9px;font-size:12px;font-weight:800;background:var(--panel2);color:var(--muted)}.log-badge.ok{background:#e5f5ee;color:var(--ok)}.log-badge.warn{background:#fff2d9;color:var(--warn)}.log-badge.error{background:#fde9ec;color:var(--bad)}.log-badge.info{background:#eef0ff;color:#5050bd}.log-human{margin-top:11px;line-height:1.65}.log-facts{display:flex;gap:7px;flex-wrap:wrap;margin-top:11px}.log-fact{border:1px solid var(--line);background:var(--panel2);border-radius:9px;padding:6px 9px;font-size:12px}.log-details{margin-top:11px;border-top:1px solid var(--line);padding-top:10px}.log-details summary{cursor:pointer;color:var(--muted);font-size:12px;font-weight:700}.log-details pre{margin:9px 0 0;padding:11px;border-radius:10px;background:#151a29;color:#e9ecf4;overflow:auto;white-space:pre-wrap;word-break:break-word;font-size:11px;line-height:1.5}.qqai-modal{position:fixed;inset:0;z-index:9999;background:rgba(5,8,15,.68);display:grid;place-items:center;padding:18px;backdrop-filter:blur(6px)}.qqai-modal-card{width:min(560px,100%);background:var(--panel);color:var(--text);border:1px solid var(--line);border-radius:18px;padding:20px;box-shadow:0 26px 80px rgba(0,0,0,.34)}.qqai-modal-card h3{margin:0}.qqai-modal-text{white-space:pre-wrap;line-height:1.65;margin:12px 0;color:var(--muted)}.qqai-modal-input{width:100%;min-height:120px;resize:vertical;border:1px solid var(--line);background:var(--panel2);color:var(--text);border-radius:12px;padding:11px;margin:8px 0 14px}.qqai-modal-actions{display:flex;justify-content:flex-end;gap:10px}.toast{position:fixed;right:22px;bottom:22px;max-width:420px;padding:12px 15px;border-radius:12px;background:#1c2233;color:#fff;box-shadow:var(--shadow);z-index:30}.mobile-menu{display:none}
+.log-toolbar{margin-bottom:14px}.log-summary{margin:0 0 12px}.log-card{padding:15px 16px}.log-card-head{display:flex;align-items:flex-start;justify-content:space-between;gap:12px}.log-card-title{font-size:16px;font-weight:850;line-height:1.35}.log-card-time{font-size:12px;color:var(--muted);margin-top:5px}.log-badge{flex:0 0 auto;border-radius:999px;padding:5px 9px;font-size:12px;font-weight:800;background:var(--panel2);color:var(--muted)}.log-badge.ok{background:#e5f5ee;color:var(--ok)}.log-badge.warn{background:#fff2d9;color:var(--warn)}.log-badge.error{background:#fde9ec;color:var(--bad)}.log-badge.info{background:#eef0ff;color:#5050bd}.log-human{margin-top:11px;line-height:1.65}.log-facts{display:flex;gap:7px;flex-wrap:wrap;margin-top:11px}.log-fact{border:1px solid var(--line);background:var(--panel2);border-radius:9px;padding:6px 9px;font-size:12px}.log-details{margin-top:11px;border-top:1px solid var(--line);padding-top:10px}.log-details summary{cursor:pointer;color:var(--muted);font-size:12px;font-weight:700}.log-details pre{margin:9px 0 0;padding:11px;border-radius:10px;background:#151a29;color:#e9ecf4;overflow:auto;white-space:pre-wrap;word-break:break-word;font-size:11px;line-height:1.5}.qqai-modal{position:fixed;inset:0;z-index:9999;background:rgba(5,8,15,.68);display:grid;place-items:center;padding:18px;backdrop-filter:blur(6px)}.qqai-modal-card{width:min(560px,100%);background:var(--panel);color:var(--text);border:1px solid var(--line);border-radius:18px;padding:20px;box-shadow:0 26px 80px rgba(0,0,0,.34)}.qqai-modal-card h3{margin:0}.qqai-modal-text{white-space:pre-wrap;line-height:1.65;margin:12px 0;color:var(--muted)}.qqai-modal-input{width:100%;min-height:120px;resize:vertical;border:1px solid var(--line);background:var(--panel2);color:var(--text);border-radius:12px;padding:11px;margin:8px 0 14px}.qqai-modal-actions{display:flex;justify-content:flex-end;gap:10px}.toast{position:fixed;right:22px;bottom:22px;max-width:420px;padding:12px 15px;border-radius:12px;background:#1c2233;color:#fff;box-shadow:var(--shadow);z-index:60}.mobile-menu{display:none}.sidebar-backdrop{display:none}
 :root[data-theme="dark"] .sidebar{background:#090d17}:root[data-theme="dark"] .btn.danger{background:#351820}:root[data-theme="dark"] .status{background:#20283a}:root[data-theme="dark"] .status.ok{background:#13372d}:root[data-theme="dark"] .status.warning{background:#3a2b13}:root[data-theme="dark"] .status.error{background:#3a1820}:root[data-theme="dark"] .pill{background:#292750;color:#c8c7ff}
 .theme-toggle{white-space:nowrap}
 @media(max-width:1050px){.span-3{grid-column:span 6}.span-4,.span-5,.span-6,.span-7{grid-column:span 6}.span-8{grid-column:span 12}}
-@media(max-width:760px){.app{display:block}.sidebar{position:fixed;left:0;top:0;width:270px;z-index:20;transform:translateX(-102%);transition:.2s}.sidebar.open{transform:none}.mobile-menu{display:inline-flex}.topbar{padding:0 14px}.topbar h2{font-size:17px}.top-actions select{max-width:145px}.content{padding:16px}.span-3,.span-4,.span-5,.span-6,.span-7,.span-8{grid-column:1/-1}.split{grid-template-columns:1fr}.section-head{display:block}.section-head .row{margin-top:12px}}
+@media(max-width:760px){.app{display:block;min-height:100dvh}.sidebar{position:fixed;inset:0 auto 0 0;width:min(86vw,300px);height:100dvh;z-index:40;transform:translateX(-102%);transition:transform .2s ease;padding:calc(14px + env(safe-area-inset-top)) 12px calc(12px + env(safe-area-inset-bottom))}.sidebar.open{transform:none}.sidebar-backdrop{position:fixed;inset:0;z-index:35;background:rgba(3,6,12,.66);backdrop-filter:blur(2px)}.sidebar-backdrop.open{display:block}.mobile-menu{display:inline-flex}.topbar{height:auto;min-height:64px;flex-wrap:wrap;padding:calc(10px + env(safe-area-inset-top)) 12px 10px}.topbar h2{font-size:17px}.top-actions{width:100%;display:grid;grid-template-columns:minmax(0,1fr) auto auto;gap:8px}.top-actions select{width:100%;max-width:none}.content{width:100%;padding:14px 12px calc(22px + env(safe-area-inset-bottom))}.span-3,.span-4,.span-5,.span-6,.span-7,.span-8{grid-column:1/-1}.split{grid-template-columns:1fr}.section-head{display:block}.section-head .row,.section-head>.btn{margin-top:12px}.row>input,.row>select,.row>textarea{flex:1 1 150px;max-width:100%}.btn{min-height:44px}.card{padding:14px;border-radius:14px;overflow:hidden}.item-head,.log-card-head{flex-wrap:wrap}.grid{gap:12px}.code,.log-details pre{overflow:auto}}
+@media(max-width:480px){.top-actions{grid-template-columns:1fr 1fr}.top-actions select{grid-column:1/-1}.row>.btn{flex:1 1 auto}.login{padding:14px}.login-card{padding:20px;border-radius:18px}.toast{left:12px;right:12px;bottom:calc(12px + env(safe-area-inset-bottom));max-width:none}}
 </style>
 </head>
 <body>
@@ -7914,6 +8032,7 @@ function getPortalHomePage(host) {
     </nav>
     <div class="side-bottom"><div id="identity" style="font-size:13px"></div><button id="logout" class="btn ghost" style="margin-top:10px;width:100%;color:#fff;border-color:rgba(255,255,255,.18)">登出</button></div>
   </aside>
+  <div id="sidebarBackdrop" class="sidebar-backdrop"></div>
   <main class="main">
     <header class="topbar"><div class="row"><button id="menu" class="btn ghost mobile-menu">☰</button><h2 id="pageTitle">總覽</h2></div><div class="top-actions"><select id="groupSelect"><option value="">选择群组</option></select><button id="themeToggle" type="button" class="btn ghost theme-toggle">黑色模式</button><button id="refresh" class="btn ghost">重新整理</button></div></header>
     <div class="content">
@@ -7989,7 +8108,7 @@ function customDialog(message,options){ensureModal();options=options||{};return 
 function confirmModal(message,title,options){return customDialog(message,Object.assign({title:title||'确认操作'},options||{}))}
 function textModal(message,value,title,options){return customDialog(message,Object.assign({title:title||'编辑内容',input:true,value:value||''},options||{}))}
 function portalRoleLabel(role){return({developer:'开发者',owner:'群主',admin:'QQ 管理员',member:'群成员'})[String(role||'member')]||String(role||'群成员')}
-function applyRoleVisibility(){if(!session)return;var p=session.permissions||{},role=session.role||'member';document.querySelectorAll('#nav button').forEach(function(b){var v=b.dataset.view,show=true;if(role==='member'&&!['overview','models','memory','appeals','violationhistory'].includes(v))show=false;if(role==='admin'&&['quota','health'].includes(v))show=false;if(role==='owner'&&v==='quota')show=false;if(v==='quota'&&!p.developer)show=false;b.style.display=show?'':'none'})}
+function applyRoleVisibility(){if(!session)return;var p=session.permissions||{},role=session.role||'member';document.querySelectorAll('#nav button').forEach(function(b){var v=b.dataset.view,show=true;if(role==='member'&&!['overview','models','memory','appeals','violationhistory','settingscenter','platform'].includes(v))show=false;if(role==='admin'&&['quota','health'].includes(v))show=false;if(role==='owner'&&v==='quota')show=false;if(v==='quota'&&!p.developer)show=false;b.style.display=show?'':'none'});refreshSidebarGroupVisibility()}
 function ensureGroupSettingsExtras(){if($('welcomeEnabled')||!$('v-groups'))return;var grid=$('v-groups').querySelector('.grid');if(!grid)return;var card=document.createElement('div');card.className='card span-12';card.innerHTML='<h3>自动化与安全参数</h3><div class="grid"><div class="card span-6"><div class="notice">自动 QQ 群打卡固定在台北时间 00:00:00，对机器人所在的全部群执行，不受 AI 开关与 AI 白名单影响。Cloudflare／NapCat 实际发送可能有数秒延迟，因此是尽力争取首个打卡。</div><label class="switch"><input id="welcomeEnabled" type="checkbox">自动欢迎新人</label><label class="switch"><input id="joinAssistEnabled" type="checkbox">入群辅助（只建议同意，不拒绝）</label><label class="switch"><input id="ruleMonitorEnabled" type="checkbox">持续检查群成员是否违反群规</label><div class="field"><label>欢迎词（支持 {at}、{qq} 与表情符号）</label><textarea id="welcomeText"></textarea></div></div><div class="card span-6"><div class="field"><label>同一对象处置冷却（秒，默认 0＝关闭）</label><input id="moderationCooldown" type="number" min="0" ></div><div class="notice">处置冷却默认 0 秒且不设最大值；0 代表关闭。</div><div class="field"><label>新人观察期（天，0＝关闭）</label><input id="newcomerDays" type="number" min="0" max="30"></div><div class="notice">群规持续监控只有当前真实群主可以开关；开发者与 QQ 管理员可查看。它只提示疑似违规，不会自动处罚。</div></div></div>';grid.appendChild(card);ensureDeveloperPermissionPanel()}
 
 function ensureR3Views(){
@@ -7997,15 +8116,19 @@ function ensureR3Views(){
   function addView(name,label){if(!$('v-'+name)){var b=document.createElement('button');b.dataset.view=name;b.textContent=label;b.onclick=function(){showView(name)};nav.appendChild(b);var section=document.createElement('section');section.id='v-'+name;section.className='view';container.appendChild(section)}titles[name]=label}
   addView('ruleviolations','群规监控');addView('settingscenter','设置中心');addView('bilibili','B站串接');addView('aidecisions','AI 回复记录');addView('appeals','匿名申诉');addView('violationhistory','历史违规记录');addView('appealreview','申诉处理');
   if(!$('v-ruleviolations').dataset.ready){$('v-ruleviolations').dataset.ready='1';$('v-ruleviolations').innerHTML='<div class="section-head"><div><h2>群规监控记录</h2><p>AI 会结合聊天上下文、链接内容、分类备注、严重程度与人工复核结果判断。</p></div><button id="rvReload" class="btn">重新加载</button></div><div class="card"><div class="row"><input id="rvMember" placeholder="群友名称或 QQ"><input id="rvContent" placeholder="消息内容"><select id="rvType"><option value="">全部违规项目</option></select><button id="rvSearch" class="btn primary">搜索</button></div><div class="row" style="margin-top:12px"><select id="rvStrictness" title="群规判断严格度"><option value="loose">宽松</option><option value="low">低</option><option value="medium" selected>中</option><option value="high">高</option><option value="strict">严格</option></select><select id="rvProxyMode"><option value="record">仅记录</option><option value="warn">自动警告（不累计）</option><option value="mute">自动禁言（不累计）</option><option value="auto">按分类与严重程度处理</option></select><input id="rvMuteSeconds" type="number" min="0" placeholder="固定禁言秒数"><label class="switch"><input id="rvKickAuth" type="checkbox">授权 AI 踢出</label><button id="rvSave" class="btn primary">保存群规设置</button></div><div class="notice" style="margin-top:12px">AI 会先判断是否真的违规、影响程度及是否故意。轻微、初次或无明显恶意的情况可只友善提醒，并且不计入累计警告；只有设置为累进且达到一般以上程度时才累计。</div></div><div class="card" style="margin-top:16px"><div class="section-head"><div><h3>本群累进处罚规则</h3><p>这只是当前群的独立设置，不是所有群的固定规则。管理以上可以按群规自行调整。</p></div></div><div class="grid"><div class="card span-4"><div class="field"><label>累计有效期（天）</label><input id="rvProgressiveWindow" type="number" min="1" max="365"></div><div class="field"><label>轻微或无明显恶意</label><select id="rvMinorAction"><option value="remind">友善提醒，不累计</option><option value="warn">正式警告，不累计</option><option value="manual">交管理复核</option></select></div></div><div class="card span-4"><div class="field"><label>第 1 次</label><select id="rvFirstAction"><option value="remind">提醒</option><option value="warn">警告</option><option value="mute">禁言</option><option value="kick">踢出</option><option value="manual">人工复核</option></select></div><div class="field"><label>禁言秒数（仅禁言时使用）</label><input id="rvFirstMute" type="number" min="0"></div><div class="field"><label>第 2 次</label><select id="rvSecondAction"><option value="remind">提醒</option><option value="warn">警告</option><option value="mute">禁言</option><option value="kick">踢出</option><option value="manual">人工复核</option></select></div><div class="field"><label>禁言秒数</label><input id="rvSecondMute" type="number" min="0"></div></div><div class="card span-4"><div class="field"><label>第 3 次及以后</label><select id="rvThirdAction"><option value="remind">提醒</option><option value="warn">警告</option><option value="mute">禁言</option><option value="kick">踢出</option><option value="manual">人工复核</option></select></div><div class="field"><label>禁言秒数</label><input id="rvThirdMute" type="number" min="0"></div><div class="notice">例如当前群可以设成 7 天内：第 1 次 1 分钟、第 2 次 10 分钟、第 3 次踢出；其他群可以完全不同。</div></div></div></div><div class="card" style="margin-top:16px"><div class="section-head"><div><h3>群规分类与处罚</h3><p>管理以上可调整分类、处罚和备注。普通提醒与普通警告默认都不计入累进次数；选择“使用本群累进规则”才会按上方规则累计。</p></div><button id="rvAddPolicy" class="btn">新增分类</button></div><div id="rvPolicyList" class="list"></div></div><div id="rvList" class="list" style="margin-top:16px"></div>';$('rvReload').onclick=loadRuleViolations;$('rvSearch').onclick=loadRuleViolations;$('rvSave').onclick=saveRuleViolationSettings;$('rvAddPolicy').onclick=addRulePolicyRow}
-  if(!$('v-settingscenter').dataset.ready){$('v-settingscenter').dataset.ready='1';$('v-settingscenter').innerHTML='<div class="section-head"><div><h2>设置中心</h2><p>仅开发者可见，用于跨权限排查与集中维护。群管理员的日常设置请放在群组设置、群规监控、B站监控等对应页面。</p></div><div class="row"><button id="scReload" class="btn">重新加载</button><button id="scSaveAll" class="btn primary">保存全部设置</button></div></div><div id="scDeveloper" class="card hidden"><div class="row"><input id="scTargetQq" placeholder="目标 QQ（输入后自动识别权限）"><span id="scResolvedRole" class="status">尚未识别</span><label class="switch"><input id="scAuditLog" type="checkbox" checked>记录操作日志（可选）</label></div></div><div id="scMessage" class="notice">尚未加载设置。</div><div id="scList" class="list" style="margin-top:16px"></div>';$('scReload').onclick=loadSettingsCenter;$('scSaveAll').onclick=saveAllSettings;$('scTargetQq').onchange=loadSettingsCenter;$('scTargetQq').onkeydown=function(e){if(e.key==='Enter')loadSettingsCenter()}}
+  if(!$('v-settingscenter').dataset.ready){$('v-settingscenter').dataset.ready='1';$('v-settingscenter').innerHTML='<div class="section-head"><div><h2>设置中心</h2><p>集中显示当前账号可修改的全部设置。普通成员、管理员、群主与开发者会看到不同项目；高风险设置仍需真实群主验证。</p></div><div class="row"><button id="scReload" class="btn">重新加载</button><button id="scSaveAll" class="btn primary">保存全部设置</button></div></div><div id="scDeveloper" class="card hidden"><div class="row"><input id="scTargetQq" placeholder="目标 QQ（输入后自动识别权限）"><span id="scResolvedRole" class="status">尚未识别</span><label class="switch"><input id="scAuditLog" type="checkbox" checked>记录操作日志（可选）</label></div></div><div id="scMessage" class="notice">尚未加载设置。</div><div id="scList" class="list" style="margin-top:16px"></div>';$('scReload').onclick=loadSettingsCenter;$('scSaveAll').onclick=saveAllSettings;$('scTargetQq').onchange=loadSettingsCenter;$('scTargetQq').onkeydown=function(e){if(e.key==='Enter')loadSettingsCenter()}}
   if(!$('v-aidecisions').dataset.ready){$('v-aidecisions').dataset.ready='1';$('v-aidecisions').innerHTML='<div class="section-head"><div><h2>AI 回复与未回复记录</h2><p>每則群聊觸發判斷、主動插話來源、模型、智能 @ 規劃、獨立搜索內容與實際發送結果都獨立保存。</p></div><button id="aiLogReload" class="btn">重新加载</button></div><div class="card"><div class="row"><input id="aiLogSearch" class="grow" placeholder="搜索 QQ、訊息、原因、模型"><select id="aiLogDecision"><option value="">全部決策</option><option value="reply_generated">已產生回覆</option><option value="skipped">未回覆</option><option value="blocked">遭阻擋</option><option value="error">錯誤</option></select><select id="aiLogTrigger"><option value="">全部觸發</option><option value="mention">@機器人</option><option value="reply_to_ai">回覆機器人</option><option value="auto_interject">主動插話</option><option value="private">私聊</option><option value="none">未觸發</option></select><button id="aiLogSearchBtn" class="btn primary">搜索</button></div></div><div id="aiDecisionList" class="list" style="margin-top:16px"><div class="empty">尚未加载</div></div>';$('aiLogReload').onclick=loadAiDecisions;$('aiLogSearchBtn').onclick=loadAiDecisions;$('aiLogSearch').onkeydown=function(e){if(e.key==='Enter')loadAiDecisions()}}
   if(!$('v-appeals').dataset.ready){$('v-appeals').dataset.ready='1';$('v-appeals').innerHTML='<div class="section-head"><div><h2>匿名申诉</h2><p>审核者看不到你的 QQ；只有开发者可以查看真实身份。当前成员和退出未满 30 天的前成员都可以申诉。</p></div><button id="appealReload" class="btn">刷新案件</button></div><div class="grid"><div class="card span-5"><h3>提交申诉</h3><div class="field"><label>所属群组</label><select id="appealGroup"><option value="">请选择群组</option></select></div><div class="field"><label>申诉类型</label><select id="appealType"><option>禁言</option><option>踢出</option><option>AI黑名单</option><option>管理操作</option><option>排程</option><option>其他</option></select></div><div class="field"><label>相关消息 ID（选填）</label><input id="appealEvidence"></div><div class="field"><label>申诉内容</label><textarea id="appealContent" placeholder="请说明发生了什么、希望如何处理"></textarea></div><button id="appealSubmit" class="btn primary" style="width:100%">匿名提交</button><div id="appealMessage" class="notice">提交后可在“我的案件”查看处理状态。前成员资格从系统收到退群事件起保留 30 天。</div></div><div class="card span-7"><h3>我的案件</h3><div id="appealList" class="list"><div class="empty">暂无案件</div></div></div></div>';$('appealReload').onclick=loadAppeals;$('appealSubmit').onclick=submitAppeal}
   if(!$('v-violationhistory').dataset.ready){$('v-violationhistory').dataset.ready='1';$('v-violationhistory').innerHTML='<div class="section-head"><div><h2>历史违规记录</h2><p>你可以查看自己的群规记录，并对单条或多条记录一键申诉。只有属于你的记录会显示。</p></div><button id="vhReload" class="btn">重新加载</button></div><div class="card"><div class="row"><select id="vhGroup"><option value="">全部可申诉群组</option></select><button id="vhSelectAll" class="btn">全选当前列表</button><button id="vhAppealSelected" class="btn primary">申诉所选记录</button></div><div class="notice" style="margin-top:12px">退出群聊未满 30 天仍可查看并申诉；超过期限后不能再提交新申诉。</div></div><div id="vhList" class="list" style="margin-top:16px"><div class="empty">尚未加载</div></div>';$('vhReload').onclick=loadViolationHistory;$('vhGroup').onchange=loadViolationHistory;$('vhSelectAll').onclick=function(){document.querySelectorAll('.vhCheck:not(:disabled)').forEach(function(x){x.checked=true})};$('vhAppealSelected').onclick=function(){appealViolationRecords(Array.from(document.querySelectorAll('.vhCheck:checked')).map(function(x){return x.value}))}}
   if(!$('v-appealreview').dataset.ready){$('v-appealreview').dataset.ready='1';$('v-appealreview').innerHTML='<div class="section-head"><div><h2>申诉处理</h2><p>处理当前选中群组的匿名申诉。非开发者看不到申诉人的真实 QQ。</p></div><button id="appealReviewReload" class="btn">重新加载</button></div><div class="card"><div class="row"><select id="appealReviewStatus"><option value="">全部状态</option><option value="pending_owner">待处理</option><option value="pending_review">审核中</option><option value="approved">已通过</option><option value="rejected">已驳回</option></select><button id="appealReviewSearch" class="btn primary">筛选</button></div></div><div id="appealReviewList" class="list" style="margin-top:16px"><div class="empty">请选择群组后加载案件</div></div>';$('appealReviewReload').onclick=loadAppealReviews;$('appealReviewSearch').onclick=loadAppealReviews}
-  if(!$('v-bilibili').dataset.ready){$('v-bilibili').dataset.ready='1';$('v-bilibili').innerHTML='<div class="section-head"><div><h2>B站自动监控</h2><p>输入 B站用户 UID，Worker 会按你选择的频率检查。建议 30 分钟或更慢，过快容易触发 B站 412 风控。</p></div><button id="biliReload" class="btn">重新加载</button></div><div class="card"><div class="row"><input id="biliCreatorName" placeholder="创作者名称（选填）"><input id="biliCreatorId" inputmode="numeric" placeholder="B站用户 UID（必填）"><select id="biliPollInterval"><option value="300">每 5 分钟</option><option value="600">每 10 分钟</option><option value="900">每 15 分钟</option><option value="1800" selected>每 30 分钟（推荐）</option><option value="3600">每 1 小时</option><option value="7200">每 2 小时</option><option value="21600">每 6 小时</option></select></div><div class="row"><label class="switch"><input id="biliLiveNotify" type="checkbox" checked>开播通知</label><label class="switch"><input id="biliLiveAtAll" type="checkbox">开播 @全体</label><label class="switch"><input id="biliVideoNotify" type="checkbox" checked>新视频通知</label><label class="switch"><input id="biliVideoAtAll" type="checkbox">新视频 @全体</label><button id="biliAdd" class="btn primary">保存并启用自动监控</button></div><div class="notice">首次检查只记录当前状态，不会发送旧视频。若出现 HTTP 412，表示 B站拦截了当前 Cloudflare 出口 IP；系统会自动暂停 6～24 小时，避免持续请求加重风控。</div></div><div id="biliList" class="list" style="margin-top:16px"></div>';$('biliReload').onclick=loadBilibili;$('biliAdd').onclick=saveBilibiliConnector}
+  if(!$('v-bilibili').dataset.ready){$('v-bilibili').dataset.ready='1';$('v-bilibili').innerHTML='<div class="section-head"><div><h2>B站监控</h2><p>推荐使用哔哩哔哩开放平台 Webhook；兼容轮询仅保留为低频备用，不保证长期可用。</p></div><button id="biliReload" class="btn">重新加载</button></div><div class="card"><div class="row"><input id="biliCreatorName" placeholder="创作者名称（选填）"><input id="biliCreatorId" inputmode="numeric" placeholder="B站用户 UID（必填）"><select id="biliMode"><option value="official_webhook" selected>开放平台 Webhook（推荐）</option><option value="automatic_polling">兼容轮询（公开网页接口）</option></select><select id="biliPollInterval"><option value="1800" selected>每 30 分钟</option><option value="3600">每 1 小时</option><option value="7200">每 2 小时</option><option value="21600">每 6 小时</option></select></div><div class="row"><label class="switch"><input id="biliLiveNotify" type="checkbox" checked>开播通知</label><label class="switch"><input id="biliLiveAtAll" type="checkbox">开播 @全体</label><label class="switch"><input id="biliVideoNotify" type="checkbox" checked>新视频通知</label><label class="switch"><input id="biliVideoAtAll" type="checkbox">新视频 @全体</label><button id="biliAdd" class="btn primary">保存并启用自动监控</button></div><div class="notice">Webhook 模式会产生带随机密钥的回调地址，请配置到哔哩哔哩开放平台或合法授权的事件中继。兼容轮询最低 30 分钟一次；出现 412／429 后会自动暂停 12～72 小时，避免持续请求。</div><div id="biliWebhookResult" class="notice hidden"></div></div><div id="biliList" class="list" style="margin-top:16px"></div>';$('biliReload').onclick=loadBilibili;$('biliAdd').onclick=saveBilibiliConnector;$('biliMode').onchange=function(){$('biliPollInterval').disabled=this.value==='official_webhook'};$('biliMode').onchange()}
   if(!$('v-platform')){var b=document.createElement('button');b.dataset.view='platform';b.textContent='功能权限中心';$('nav').appendChild(b);b.onclick=function(){showView('platform')};var v=document.createElement('section');v.id='v-platform';v.className='view';v.innerHTML='<div class="section-head"><div><h2>功能权限中心</h2><p>这是机器人功能总开关。系统只显示当前权限等级可以查看或修改的功能；开发者可以查看全部 300 项。</p></div><button id="pfReload" class="btn">重新加载</button></div><div class="card"><div class="row"><input id="pfSearch" class="grow" placeholder="搜索功能名称、ID、类别"><label id="pfAuditWrap" class="switch"><input id="pfAuditSilent" type="checkbox">不记录操作日志（仅开发者）</label><button id="pfGo" class="btn primary">搜索</button></div><div id="pfSummary" class="notice">尚未加载</div></div><div id="pfList" class="list" style="margin-top:16px"></div>';document.querySelector('.content').appendChild(v);$('pfReload').onclick=loadPlatformFeatures;$('pfGo').onclick=loadPlatformFeatures;$('pfSearch').onkeydown=function(e){if(e.key==='Enter')loadPlatformFeatures()}}
 }
-function applyR3RoleVisibility(){ensureR3Views();applyRoleVisibility();var perms=(session&&session.permissions)||{};var role=(session&&session.role)||'member';var management=!!(perms.aiAdmin||perms.groupOps||perms.nativeAdmin||perms.developer||['admin','owner'].includes(role));var dev=!!perms.developer;document.querySelectorAll('#nav button').forEach(function(b){if(['ruleviolations','bilibili','aidecisions'].includes(b.dataset.view))b.hidden=!management;if(b.dataset.view==='appealreview')b.hidden=!(perms.appealReviewer||perms.nativeAdmin||perms.developer||['admin','owner'].includes(role));if(b.dataset.view==='settingscenter')b.hidden=!dev;if(b.dataset.view==='platform')b.hidden=role==='member'&&!dev});$('scDeveloper').classList.toggle('hidden',!dev);if($('pfAuditWrap'))$('pfAuditWrap').classList.toggle('hidden',!dev);if($('rvSave'))$('rvSave').disabled=!management}
+function organizeSidebarNavigation(){var nav=$('nav');if(!nav||nav.dataset.grouped==='1')return;var groups=[['概览',['overview','health']],['AI 与模型',['tasks','models','aidecisions','memory']],['群组与安全',['groups','settingscenter','ruleviolations','moderation','violationhistory','appeals','appealreview','bilibili']],['系统与开发',['simulator','quota','platform','logs']]];groups.forEach(function(g){var wrap=document.createElement('div');wrap.className='nav-group';wrap.dataset.navGroup=g[0];var h=document.createElement('div');h.className='nav-heading';h.textContent=g[0];wrap.appendChild(h);g[1].forEach(function(v){var b=nav.querySelector('button[data-view="'+v+'"]');if(b)wrap.appendChild(b)});nav.appendChild(wrap)});Array.from(nav.children).forEach(function(x){if(x.tagName==='BUTTON'){var misc=nav.querySelector('.nav-group[data-nav-group="系统与开发"]');if(misc)misc.appendChild(x)}});nav.dataset.grouped='1';refreshSidebarGroupVisibility()}
+function refreshSidebarGroupVisibility(){document.querySelectorAll('#nav .nav-group').forEach(function(g){var visible=Array.from(g.querySelectorAll('button')).some(function(b){return !b.hidden&&b.style.display!=='none'});g.style.display=visible?'':'none'})}
+function closeMobileSidebar(){if($('sidebar'))$('sidebar').classList.remove('open');if($('sidebarBackdrop'))$('sidebarBackdrop').classList.remove('open')}
+function toggleMobileSidebar(){var open=!$('sidebar').classList.contains('open');$('sidebar').classList.toggle('open',open);if($('sidebarBackdrop'))$('sidebarBackdrop').classList.toggle('open',open)}
+function applyR3RoleVisibility(){ensureR3Views();organizeSidebarNavigation();applyRoleVisibility();var perms=(session&&session.permissions)||{};var role=(session&&session.role)||'member';var management=!!(perms.aiAdmin||perms.groupOps||perms.nativeAdmin||perms.developer||['admin','owner'].includes(role));var dev=!!perms.developer;document.querySelectorAll('#nav button').forEach(function(b){if(['ruleviolations','bilibili','aidecisions'].includes(b.dataset.view))b.hidden=!management;if(b.dataset.view==='appealreview')b.hidden=!(perms.appealReviewer||perms.nativeAdmin||perms.developer||['admin','owner'].includes(role));if(b.dataset.view==='settingscenter')b.hidden=false;if(b.dataset.view==='platform')b.hidden=false});if($('scDeveloper'))$('scDeveloper').classList.remove('hidden');if($('scTargetQq')){$('scTargetQq').disabled=!dev;if(!dev)$('scTargetQq').value=session.qq}if($('scAuditLog')){$('scAuditLog').disabled=!dev;var auditLabel=$('scAuditLog').closest('label');if(auditLabel)auditLabel.classList.toggle('hidden',!dev)}if($('pfAuditWrap'))$('pfAuditWrap').classList.toggle('hidden',!dev);if($('rvSave'))$('rvSave').disabled=!management;refreshSidebarGroupVisibility()}
 async function loadAiDecisions(){var p=new URLSearchParams({q:$('aiLogSearch').value||'',decision:$('aiLogDecision').value||'',triggerType:$('aiLogTrigger').value||'',limit:'500'});var r=await api('/ai-decisions?'+p.toString());if(!r.ok){$('aiDecisionList').innerHTML='<div class="empty">'+esc(r.message)+'</div>';return}$('aiDecisionList').innerHTML=(r.logs||[]).map(function(x){var title=(x.decision||'unknown')+'｜'+(x.senderName||x.userId||'')+'（'+(x.userId||'')+'）';var meta=(x.at||'')+'｜觸發 '+(x.triggerType||'none')+'｜原因 '+(x.reason||'')+'｜'+(x.provider||'')+((x.model)?'/'+x.model:'')+'｜發送 '+(x.sendStatus||'');var body='來源訊息：'+(x.input||'')+(x.generatedReply?'\nAI 回覆：'+x.generatedReply:'')+'\n關係：'+JSON.stringify({mentionedQqs:x.mentionedQqs||[],quotedMessageId:x.quotedMessageId||'',quotedSenderId:x.quotedSenderId||''})+'\n智能 @ 規劃：'+JSON.stringify(x.mentionRouting||{})+'\n回覆計畫：'+JSON.stringify(x.replyPlan||{})+'\n是否搜索：'+(x.searchPerformed?'有':'無')+'（需要='+(x.searchRequired?'是':'否')+'，嘗試='+(x.searchAttempted?'是':'否')+'）'+'\n搜索查詢：'+(x.searchQuery||'')+'\n搜索關鍵詞：'+JSON.stringify(x.searchQueries||[])+'\n搜索提供者：'+(x.searchProvider||'')+((x.searchModel)?'/'+x.searchModel:'')+'\n搜索錯誤：'+(x.searchError||'')+'\n搜索內容：'+(x.searchContext||'')+'\n搜索來源：'+JSON.stringify(x.searchSources||[])+'\n上下文：原文 '+(x.contextExactMessages||0)+'／摘要 '+(x.contextSummarizedMessages||0)+'／提供者 '+(x.contextSummaryProvider||'');return '<div class="item"><div class="item-title">'+esc(title)+'</div><div class="item-meta">'+esc(meta)+'</div><div class="item-body" style="white-space:pre-wrap">'+esc(body)+'</div></div>'}).join('')||'<div class="empty">沒有符合的紀錄</div>'}
 var ruleCategoryPolicies=[];
 function rulePolicyActionText(v){return({record:'仅记录',remind:'友善提醒（不累计）',warn:'正式警告（不累计）',mute:'固定禁言（不累计）',progressive:'使用本群累进规则',kick:'直接踢出',manual:'人工复核'})[v]||v}
@@ -8020,10 +8143,10 @@ async function loadRuleViolations(){var p=new URLSearchParams({member:$('rvMembe
 async function submitRuleFeedback(id,verdict){var note=await textModal(verdict==='not_violation'?'请说明为什么这是误判。系统会尝试撤回机器人警告、解除禁言并移除累计次数。':'确认存在违规。可以填写分类调整、语境或判断备注。','',verdict==='not_violation'?'标记为误判':'确认违规',{placeholder:'请输入复核说明'});if(note===null)return;if(verdict==='not_violation'&&!(await confirmModal('确定标记为误判，并撤销目前可以自动撤销的处罚吗？','撤销错误处罚',{danger:true,okText:'确认撤销'})))return;var r=await api('/rule-violations/feedback','POST',{id:id,verdict:verdict,note:String(note||'').trim()});toast(r.message||'处理完成');if(r.ok)loadRuleViolations()}
 async function saveRuleViolationSettings(){var payload={strictness:$('rvStrictness').value,proxyMode:$('rvProxyMode').value,muteSeconds:$('rvMuteSeconds').value,categoryPolicies:collectRulePolicies(),progressivePolicy:collectProgressivePolicy()};if(!$('rvKickAuth').disabled)payload.kickAuthorized=$('rvKickAuth').checked;var r=await api('/rule-violations/settings','POST',payload);toast(r.message);if(r.ok)loadRuleViolations()}
 
-async function loadSettingsCenter(){var dev=session&&(session.permissions||{}).developer;if(!dev){$('scMessage').textContent='设置中心仅开发者可见。';$('scList').innerHTML='<div class="empty">设置中心仅开发者可见。</div>';return}if(!currentGroup){$('scMessage').textContent='请先从右上角选择需要维护的群组。';$('scList').innerHTML='<div class="empty">尚未选择群组</div>';return}$('scMessage').textContent='正在加载设置…';$('scList').innerHTML='<div class="empty">正在读取当前群设置</div>';try{var p=new URLSearchParams();p.set('targetQq',$('scTargetQq').value||session.qq);var r=await api('/settings-center?'+p.toString());if(!r.ok){$('scMessage').textContent=r.message||'加载失败';$('scList').innerHTML='<div class="empty">'+esc(r.message)+'</div>';return}if(!$('scTargetQq').value)$('scTargetQq').value=r.targetQq||session.qq;if($('scResolvedRole')){$('scResolvedRole').textContent='识别权限：'+portalRoleLabel(r.targetRole);$('scResolvedRole').className='status ok'}$('scMessage').textContent='已加载 '+(r.settings||[]).length+' 项设置；只会提交实际改动的项目。';$('scList').innerHTML='';(r.settings||[]).forEach(function(s){var d=document.createElement('div');d.className='item';var input;if(s.type==='boolean'){input=document.createElement('input');input.type='checkbox';input.checked=!!s.value}else if(s.type==='select'){input=document.createElement('select');(s.options||[]).forEach(function(v){var o=document.createElement('option');o.value=v;o.textContent=v;input.appendChild(o)});input.value=String(s.value)}else if(s.type==='textarea'){input=document.createElement('textarea');input.value=String(s.value==null?'':s.value)}else{input=document.createElement('input');input.type=s.type==='number'?'number':'text';input.value=String(s.value==null?'':s.value);if(s.min!=null)input.min=s.min;if(s.max!=null)input.max=s.max}input.dataset.settingKey=s.key;input.dataset.initialValue=input.type==='checkbox'?String(input.checked):String(input.value);var roleText=portalRoleLabel(s.minRole);if(s.key==='rule_proxy_mode')roleText+='（auto 仅群主）';d.innerHTML='<div class="item-title">'+esc(s.label)+'</div><div class="item-meta">最低权限：'+esc(roleText)+'｜对应指令：'+esc(s.command||'无')+'</div>';d.appendChild(input);$('scList').appendChild(d)});if(!$('scList').children.length)$('scList').innerHTML='<div class="empty">当前没有可维护的设置项目</div>'}catch(e){$('scMessage').textContent='加载设置时发生错误。';$('scList').innerHTML='<div class="empty">'+esc(String(e&&e.message||e))+'</div>'}}
-async function saveAllSettings(){var dev=session&&(session.permissions||{}).developer;if(!dev){toast('设置中心仅开发者可用');return}var settings=Array.from(document.querySelectorAll('#scList [data-setting-key]')).filter(function(input){var now=input.type==='checkbox'?String(input.checked):String(input.value);return now!==String(input.dataset.initialValue)}).map(function(input){return{key:input.dataset.settingKey,value:input.type==='checkbox'?input.checked:input.value}});if(!settings.length){toast('没有检测到设置变化');return}var button=$('scSaveAll');button.disabled=true;button.textContent='保存中…';var payload={settings:settings,targetQq:$('scTargetQq').value,auditMode:$('scAuditLog').checked?'log':'silent'};var r=await api('/settings-center','POST',payload);button.disabled=false;button.textContent='保存全部设置';$('scMessage').textContent=r.message||'保存失败';toast(r.message||'保存失败');if(r.ok)loadSettingsCenter()}
-async function loadBilibili(){var r=await api('/integrations/bilibili');if(!r.ok){$('biliList').innerHTML='<div class="empty">'+esc(r.message)+'</div>';return}$('biliList').innerHTML='';(r.connectors||[]).forEach(function(c){var d=document.createElement('div');d.className='item';var state=c.pollState||{};var status=c.lastCheckStatus||'等待首次检查';var next=c.nextPollAt?new Date(Number(c.nextPollAt)).toLocaleString():'下一次定时任务';d.innerHTML='<div class="item-title">'+esc(c.creatorName||('UID '+c.creatorId))+'</div><div class="item-meta">模式：自动监控｜UID：'+esc(c.creatorId)+'｜间隔：'+esc(c.pollIntervalSeconds||1800)+' 秒｜直播：'+(c.liveNotify?'通知':'仅记录')+(c.liveAtAll?'＋@全体':'')+'｜视频：'+(c.videoNotify?'通知':'仅记录')+(c.videoAtAll?'＋@全体':'')+'</div><div class="item-body">状态：'+esc(status)+'｜当前直播：'+(state.live?'是':'否')+'｜最新视频：'+esc(state.latestVideoBvid||'尚未建立基准')+'<br>上次检查：'+esc(c.lastCheckAt?new Date(Number(c.lastCheckAt)).toLocaleString():'尚未检查')+'｜下次检查：'+esc(next)+(c.lastCheckError?'<br><b>错误：</b>'+esc(c.lastCheckError):'')+'</div>';var row=document.createElement('div');row.className='row';row.style.marginTop='10px';var interval=document.createElement('select');[[300,'5 分钟'],[600,'10 分钟'],[900,'15 分钟'],[1800,'30 分钟'],[3600,'1 小时'],[7200,'2 小时'],[21600,'6 小时']].forEach(function(v){var o=document.createElement('option');o.value=v[0];o.textContent='每 '+v[1];interval.appendChild(o)});interval.value=String(c.pollIntervalSeconds||1800);var saveInterval=document.createElement('button');saveInterval.className='btn';saveInterval.textContent='保存检查频率';saveInterval.onclick=function(){updateBilibiliInterval(c.id,interval.value)};var check=document.createElement('button');check.className='btn primary';check.textContent='立即检查';check.onclick=function(){checkBilibiliNow(c.id)};var testLive=document.createElement('button');testLive.className='btn';testLive.textContent='测试开播通知';testLive.onclick=function(){testBilibili(c.id,'live_start')};var testVideo=document.createElement('button');testVideo.className='btn';testVideo.textContent='测试新视频通知';testVideo.onclick=function(){testBilibili(c.id,'video_publish')};var del=document.createElement('button');del.className='btn danger';del.textContent='删除';del.onclick=async function(){if(!(await confirmModal('删除此 B站自动监控？','确认删除')))return;var x=await api('/integrations/bilibili','POST',{action:'delete',id:c.id});toast(x.message);if(x.ok)loadBilibili()};row.append(interval,saveInterval,check,testLive,testVideo,del);d.appendChild(row);$('biliList').appendChild(d)});if(!$('biliList').children.length)$('biliList').innerHTML='<div class="empty">暂无 B站自动监控</div>'}
-async function saveBilibiliConnector(){var uid=String($('biliCreatorId').value||'').replace(/\D/g,'');if(!uid){toast('请输入 B站用户 UID');return}var r=await api('/integrations/bilibili','POST',{action:'save',creatorName:$('biliCreatorName').value,creatorId:uid,pollIntervalSeconds:Number($('biliPollInterval').value||1800),liveNotify:$('biliLiveNotify').checked,liveAtAll:$('biliLiveAtAll').checked,videoNotify:$('biliVideoNotify').checked,videoAtAll:$('biliVideoAtAll').checked});toast(r.message);if(r.ok){$('biliCreatorName').value='';$('biliCreatorId').value='';loadBilibili()}}
+async function loadSettingsCenter(){var dev=session&&(session.permissions||{}).developer;if(!currentGroup){$('scMessage').textContent='请先从右上角选择需要维护的群组。';$('scList').innerHTML='<div class="empty">尚未选择群组</div>';return}$('scMessage').textContent='正在加载设置…';$('scList').innerHTML='<div class="empty">正在读取当前群设置</div>';try{var p=new URLSearchParams();p.set('targetQq',dev?($('scTargetQq').value||session.qq):session.qq);var r=await api('/settings-center?'+p.toString());if(!r.ok){$('scMessage').textContent=r.message||'加载失败';$('scList').innerHTML='<div class="empty">'+esc(r.message)+'</div>';return}if(!$('scTargetQq').value)$('scTargetQq').value=r.targetQq||session.qq;if($('scResolvedRole')){$('scResolvedRole').textContent='识别权限：'+portalRoleLabel(r.targetRole);$('scResolvedRole').className='status ok'}$('scMessage').textContent='已加载 '+(r.settings||[]).length+' 项设置；只会提交实际改动的项目。';$('scList').innerHTML='';(r.settings||[]).forEach(function(s){var d=document.createElement('div');d.className='item';var input;if(s.type==='boolean'){input=document.createElement('input');input.type='checkbox';input.checked=!!s.value}else if(s.type==='select'){input=document.createElement('select');(s.options||[]).forEach(function(v){var o=document.createElement('option');o.value=v;o.textContent=v;input.appendChild(o)});input.value=String(s.value)}else if(s.type==='textarea'){input=document.createElement('textarea');input.value=String(s.value==null?'':s.value)}else{input=document.createElement('input');input.type=s.type==='number'?'number':'text';input.value=String(s.value==null?'':s.value);if(s.min!=null)input.min=s.min;if(s.max!=null)input.max=s.max}input.dataset.settingKey=s.key;input.dataset.initialValue=input.type==='checkbox'?String(input.checked):String(input.value);var roleText=portalRoleLabel(s.minRole);if(s.key==='rule_proxy_mode')roleText+='（auto 仅群主）';d.innerHTML='<div class="item-title">'+esc(s.label)+'</div><div class="item-meta">最低权限：'+esc(roleText)+'｜对应指令：'+esc(s.command||'无')+'</div>';d.appendChild(input);$('scList').appendChild(d)});if(!$('scList').children.length)$('scList').innerHTML='<div class="empty">当前没有可维护的设置项目</div>'}catch(e){$('scMessage').textContent='加载设置时发生错误。';$('scList').innerHTML='<div class="empty">'+esc(String(e&&e.message||e))+'</div>'}}
+async function saveAllSettings(){var dev=session&&(session.permissions||{}).developer;var settings=Array.from(document.querySelectorAll('#scList [data-setting-key]')).filter(function(input){var now=input.type==='checkbox'?String(input.checked):String(input.value);return now!==String(input.dataset.initialValue)}).map(function(input){return{key:input.dataset.settingKey,value:input.type==='checkbox'?input.checked:input.value}});if(!settings.length){toast('没有检测到设置变化');return}var button=$('scSaveAll');button.disabled=true;button.textContent='保存中…';var payload={settings:settings,targetQq:dev?$('scTargetQq').value:session.qq,auditMode:dev&&$('scAuditLog').checked?'log':'silent'};var r=await api('/settings-center','POST',payload);button.disabled=false;button.textContent='保存全部设置';$('scMessage').textContent=r.message||'保存失败';toast(r.message||'保存失败');if(r.ok)loadSettingsCenter()}
+async function loadBilibili(){var r=await api('/integrations/bilibili');if(!r.ok){$('biliList').innerHTML='<div class="empty">'+esc(r.message)+'</div>';return}$('biliList').innerHTML='';(r.connectors||[]).forEach(function(c){var d=document.createElement('div');d.className='item';var state=c.pollState||{};var status=c.lastCheckStatus||'等待首次事件';var webhook=c.mode==='official_webhook';var next=webhook?'由 Webhook 推送':(c.nextPollAt?new Date(Number(c.nextPollAt)).toLocaleString():'下一次定时任务');d.innerHTML='<div class="item-title">'+esc(c.creatorName||('UID '+c.creatorId))+'</div><div class="item-meta">模式：'+(webhook?'开放平台 Webhook':'兼容轮询')+'｜UID：'+esc(c.creatorId)+(webhook?'':'｜间隔：'+esc(c.pollIntervalSeconds||1800)+' 秒')+'｜直播：'+(c.liveNotify?'通知':'仅记录')+(c.liveAtAll?'＋@全体':'')+'｜视频：'+(c.videoNotify?'通知':'仅记录')+(c.videoAtAll?'＋@全体':'')+'</div><div class="item-body">状态：'+esc(status)+'｜当前直播：'+(state.live?'是':'否')+'｜最新视频：'+esc(state.latestVideoBvid||'尚未建立基准')+'<br>上次检查：'+esc(c.lastCheckAt?new Date(Number(c.lastCheckAt)).toLocaleString():'尚未检查')+'｜下次检查：'+esc(next)+(c.lastCheckError?'<br><b>错误：</b>'+esc(c.lastCheckError):'')+'</div>';var row=document.createElement('div');row.className='row';row.style.marginTop='10px';var interval=document.createElement('select');[[1800,'30 分钟'],[3600,'1 小时'],[7200,'2 小时'],[21600,'6 小时']].forEach(function(v){var o=document.createElement('option');o.value=v[0];o.textContent='每 '+v[1];interval.appendChild(o)});interval.value=String(c.pollIntervalSeconds||1800);interval.disabled=webhook;var saveInterval=document.createElement('button');saveInterval.className='btn';saveInterval.textContent='保存检查频率';saveInterval.disabled=webhook;saveInterval.onclick=function(){updateBilibiliInterval(c.id,interval.value)};var check=document.createElement('button');check.className='btn primary';check.textContent='立即检查';check.disabled=webhook;check.onclick=function(){checkBilibiliNow(c.id)};var testLive=document.createElement('button');testLive.className='btn';testLive.textContent='测试开播通知';testLive.onclick=function(){testBilibili(c.id,'live_start')};var testVideo=document.createElement('button');testVideo.className='btn';testVideo.textContent='测试新视频通知';testVideo.onclick=function(){testBilibili(c.id,'video_publish')};var del=document.createElement('button');del.className='btn danger';del.textContent='删除';del.onclick=async function(){if(!(await confirmModal('删除此 B站自动监控？','确认删除')))return;var x=await api('/integrations/bilibili','POST',{action:'delete',id:c.id});toast(x.message);if(x.ok)loadBilibili()};row.append(interval,saveInterval,check,testLive,testVideo,del);d.appendChild(row);$('biliList').appendChild(d)});if(!$('biliList').children.length)$('biliList').innerHTML='<div class="empty">暂无 B站自动监控</div>'}
+async function saveBilibiliConnector(){var uid=String($('biliCreatorId').value||'').replace(/\D/g,'');if(!uid){toast('请输入 B站用户 UID');return}var r=await api('/integrations/bilibili','POST',{action:'save',mode:$('biliMode').value,creatorName:$('biliCreatorName').value,creatorId:uid,pollIntervalSeconds:Number($('biliPollInterval').value||1800),liveNotify:$('biliLiveNotify').checked,liveAtAll:$('biliLiveAtAll').checked,videoNotify:$('biliVideoNotify').checked,videoAtAll:$('biliVideoAtAll').checked});toast(r.message);if(r.ok){if(r.webhookUrl){$('biliWebhookResult').textContent='Webhook 回调地址（只在建立或更新时显示）：'+r.webhookUrl;$('biliWebhookResult').classList.remove('hidden')}else $('biliWebhookResult').classList.add('hidden');$('biliCreatorName').value='';$('biliCreatorId').value='';loadBilibili()}}
 async function updateBilibiliInterval(id,seconds){var r=await api('/integrations/bilibili','POST',{action:'update_interval',id:id,pollIntervalSeconds:Number(seconds)});toast(r.message);if(r.ok)loadBilibili()}
 async function checkBilibiliNow(id){var r=await api('/integrations/bilibili','POST',{action:'check_now',id:id});toast(r.message);loadBilibili()}
 async function testBilibili(id,eventType){var r=await api('/integrations/bilibili','POST',{action:'test',id:id,eventType:eventType});toast(r.message)}
@@ -8042,10 +8165,10 @@ async function loadVectorSearch(){var q=$('vectorSearch')?$('vectorSearch').valu
 function showLogin(){$('login').classList.remove('hidden');$('app').classList.add('hidden')}
 function showApp(){$('login').classList.add('hidden');$('app').classList.remove('hidden')}
 async function loadPlatformFeatures(){var q=$('pfSearch')?$('pfSearch').value:'';var r=await api('/platform/features?q='+encodeURIComponent(q));if(!r.ok){$('pfList').innerHTML='<div class="empty">'+esc(r.message)+'</div>';return}$('pfSummary').textContent='全部功能 '+r.total+' 项；当前权限可见 '+r.visible+' 项。不同权限等级看到的内容不同，开发者可查看全部。';$('pfList').innerHTML='';(r.features||[]).forEach(function(f){var d=document.createElement('div');d.className='item';var sw=document.createElement('input');sw.type='checkbox';sw.checked=!!f.enabled;sw.onchange=async function(){var silent=$('pfAuditSilent')&&$('pfAuditSilent').checked;var x=await api('/platform/features','POST',{id:f.id,enabled:sw.checked,auditMode:silent?'silent':'log'});toast(x.message);if(!x.ok)sw.checked=!sw.checked};d.innerHTML='<div class="item-head"><div><div class="item-title">'+esc(f.id)+'｜'+esc(f.name)+'</div><div class="item-meta">类别：'+esc(f.category)+'｜实现方式：'+esc(f.mode)+'｜最低权限：'+esc(portalRoleLabel(f.minRole))+'</div></div></div>';d.appendChild(sw);$('pfList').appendChild(d)});if(!$('pfList').children.length)$('pfList').innerHTML='<div class="empty">没有符合当前权限或搜索条件的功能</div>'}
-function showView(name){document.querySelectorAll('.view').forEach(function(v){v.classList.remove('active')});document.querySelectorAll('#nav button').forEach(function(b){b.classList.toggle('active',b.dataset.view===name)});$('v-'+name).classList.add('active');$('pageTitle').textContent=titles[name]||name;$('sidebar').classList.remove('open');if(name==='health')loadHealth('quick');if(name==='tasks')loadTasks();if(name==='moderation')loadProposals();if(name==='models')loadModels();if(name==='quota')loadQuota();if(name==='groups')loadGroupSettings();if(name==='memory')loadMemory();if(name==='logs')loadLogs();if(name==='aidecisions')loadAiDecisions();else if(name==='appeals')loadAppeals();else if(name==='appealreview')loadAppealReviews();if(name==='ruleviolations')loadRuleViolations();if(name==='violationhistory')loadViolationHistory();if(name==='settingscenter')loadSettingsCenter();if(name==='bilibili')loadBilibili();if(name==='platform')loadPlatformFeatures()}
+function showView(name){document.querySelectorAll('.view').forEach(function(v){v.classList.remove('active')});document.querySelectorAll('#nav button').forEach(function(b){b.classList.toggle('active',b.dataset.view===name)});$('v-'+name).classList.add('active');$('pageTitle').textContent=titles[name]||name;closeMobileSidebar();if(name==='health')loadHealth('quick');if(name==='tasks')loadTasks();if(name==='moderation')loadProposals();if(name==='models')loadModels();if(name==='quota')loadQuota();if(name==='groups')loadGroupSettings();if(name==='memory')loadMemory();if(name==='logs')loadLogs();if(name==='aidecisions')loadAiDecisions();else if(name==='appeals')loadAppeals();else if(name==='appealreview')loadAppealReviews();if(name==='ruleviolations')loadRuleViolations();if(name==='violationhistory')loadViolationHistory();if(name==='settingscenter')loadSettingsCenter();if(name==='bilibili')loadBilibili();if(name==='platform')loadPlatformFeatures()}
 async function loadGroups(){var r=await api('/groups');if(!r.ok){toast(r.message);return false}var sel=$('groupSelect'),groups=r.groups||[];sel.innerHTML='<option value="">选择群组</option>';groups.forEach(function(g){var o=document.createElement('option');o.value=g.groupId;o.textContent=(g.groupName||g.groupId)+' ('+g.groupId+')';sel.appendChild(o)});if(r.selectedGroupId){sel.value=r.selectedGroupId;currentGroup=r.selectedGroupId}else if(groups.length===1){sel.value=groups[0].groupId;await selectGroup(groups[0].groupId)}else if(!groups.length){toast('没有找到你已加入且启用 QQAI 的群组；仍可使用匿名申诉与个人功能。')}return true}
 async function selectGroup(id){if(!id){currentGroup='';setNativeAdminVisibility(false);return}var r=await api('/select-group','POST',{groupId:id});if(!r.ok){toast(r.message);return}currentGroup=id;session=r.session;$('identity').innerHTML='<b>'+esc(session.qq)+'</b><br><span style="color:#98a2b7">'+esc(session.role||'member')+'</span>';await refreshCapabilities();applyR3RoleVisibility();toast('群组已切换');refreshOverview()}
-async function boot(){ensureR3Views();var me=await api('/me');if(!me.ok){setNativeAdminVisibility(false);showLogin();return}showApp();session=me.session;$('identity').innerHTML='<b>'+esc(session.qq)+'</b><br><span style="color:#98a2b7">'+esc(session.role||'member')+'</span>';var loaded=await loadGroups();if(!loaded)return;await refreshCapabilities();applyR3RoleVisibility();var hash=String(location.hash||'').replace(/^#/,'');if(hash&&$('v-'+hash))showView(hash);else refreshOverview()}
+async function boot(){ensureR3Views();organizeSidebarNavigation();var me=await api('/me');if(!me.ok){setNativeAdminVisibility(false);showLogin();return}showApp();session=me.session;$('identity').innerHTML='<b>'+esc(session.qq)+'</b><br><span style="color:#98a2b7">'+esc(session.role||'member')+'</span>';var loaded=await loadGroups();if(!loaded)return;await refreshCapabilities();applyR3RoleVisibility();var hash=String(location.hash||'').replace(/^#/,'');if(hash&&$('v-'+hash))showView(hash);else refreshOverview()}
 async function loadHealth(mode){$('healthList').innerHTML='<div class="empty">檢查中…</div>';var r=await api('/health?mode='+encodeURIComponent(mode||'quick'));if(!r.checks){$('healthList').innerHTML='<div class="empty">'+esc(r.message||'檢查失敗')+'</div>';return}renderHealth(r)}
 function renderHealth(r){$('healthSummary').innerHTML='<div class="card span-4"><div class="metric-label">正常</div><div class="metric-value">'+esc(r.counts.ok)+'</div></div><div class="card span-4"><div class="metric-label">警告</div><div class="metric-value">'+esc(r.counts.warning)+'</div></div><div class="card span-4"><div class="metric-label">錯誤</div><div class="metric-value">'+esc(r.counts.error)+'</div></div>';$('healthList').innerHTML=(r.checks||[]).map(function(c){var detail=c.error||JSON.stringify(c.detail||'');return '<div class="health-card"><div class="item-head"><div class="item-title">'+esc(c.name)+'</div><span class="status '+statusClass(c.status)+'">'+esc(c.status)+'</span></div><div class="latency">'+esc(c.latencyMs)+' ms</div><div class="detail">'+esc(detail)+'</div></div>'}).join('')||'<div class="empty">沒有檢查項目</div>';var issues=(r.checks||[]).filter(function(c){return c.status!=='ok'});$('overviewIssues').innerHTML=issues.map(function(c){return '<div class="item"><div class="item-head"><div class="item-title">'+esc(c.name)+'</div><span class="status '+statusClass(c.status)+'">'+esc(c.status)+'</span></div><div class="item-meta">'+esc(c.error||JSON.stringify(c.detail||''))+'</div></div>'}).join('')||'<div class="empty">所有檢查項目正常</div>';$('overallStatus').className='status '+(r.ok?'ok':'error');$('overallStatus').textContent=r.ok?'系統正常':'需要處理'}
 async function loadTasks(){var r=await api('/tasks');if(!r.ok){$('taskList').innerHTML='<div class="empty">'+esc(r.message)+'</div>';return}$('mActive').textContent=r.inFlightQuestions||0;$('mQueued').textContent=r.queuedQuestions||0;$('taskStats').innerHTML='<div class="card span-6"><div class="metric-label">執行中</div><div class="metric-value">'+esc(r.inFlightQuestions||0)+'</div></div><div class="card span-6"><div class="metric-label">等待中</div><div class="metric-value">'+esc(r.queuedQuestions||0)+'</div></div>';$('taskList').innerHTML='';(r.queues||[]).forEach(function(q){var d=document.createElement('div');d.className='item';d.innerHTML='<div class="item-head"><div><div class="item-title">群 '+esc(q.groupId)+'／QQ '+esc(q.userId)+'</div><div class="item-meta">執行中：'+esc(q.preview||'無')+'<br>排隊：'+esc((q.queued||[]).length)+' 題</div></div></div>';(q.queued||[]).forEach(function(x){var p=document.createElement('div');p.className='item-body';p.textContent='等待：'+x.preview;d.appendChild(p)});var b=document.createElement('button');b.className='btn danger';b.textContent='取消此使用者等待列';b.addEventListener('click',async function(){var x=await api('/tasks/cancel','POST',{groupId:q.groupId,userId:q.userId});toast(x.message||'完成');loadTasks()});d.appendChild(b);$('taskList').appendChild(d)});if(!$('taskList').children.length)$('taskList').innerHTML='<div class="empty">目前沒有執行中或等待中的問題</div>'}
@@ -8085,7 +8208,7 @@ var lastPortalInteractionAt=Date.now();['pointerdown','keydown','input','change'
 async function requestLoginCode(){var qq=String($('loginQq').value||'').replace(/\D/g,'');if(!/^\d{5,12}$/.test(qq)){$('loginNotice').textContent='请输入正确的 QQ 号。';return}var b=$('sendCode');b.disabled=true;b.textContent='发送中…';$('loginNotice').textContent='正在透過 NapCat 发送验证码…';var r=await raw('/api/auth/request-code','POST',{qq:qq});$('loginNotice').textContent=r.message||'验证码发送失败。';b.disabled=false;b.textContent=r.ok?'重新发送验证码':'发送验证码'}
 async function verifyLoginCode(){var qq=String($('loginQq').value||'').replace(/\D/g,''),code=String($('loginCode').value||'').replace(/\D/g,'');if(!/^\d{5,12}$/.test(qq)||!/^\d{6}$/.test(code)){$('loginNotice').textContent='请输入正确的 QQ 号和六位验证码。';return}var b=$('verifyCode');b.disabled=true;b.textContent='验证中…';var r=await raw('/api/auth/verify-code','POST',{qq:qq,code:code});$('loginNotice').textContent=r.message||'验证失败。';b.disabled=false;b.textContent='登录管理中心';if(r.ok){boot()}}
 $('sendCode').addEventListener('click',requestLoginCode);$('verifyCode').addEventListener('click',verifyLoginCode);$('loginQq').addEventListener('keydown',function(e){if(e.key==='Enter')requestLoginCode()});$('loginCode').addEventListener('keydown',function(e){if(e.key==='Enter')verifyLoginCode()});$('loginThemeToggle').addEventListener('click',toggleTheme);$('themeToggle').addEventListener('click',toggleTheme);updateThemeButtons();
-$('logout').onclick=async function(){await raw('/api/auth/logout','POST',{});location.reload()};$('menu').onclick=function(){$('sidebar').classList.toggle('open')};$('refresh').onclick=function(){var active=document.querySelector('#nav button.active');showView(active?active.dataset.view:'overview')};$('groupSelect').onchange=function(){selectGroup(this.value)};document.querySelectorAll('#nav button').forEach(function(b){b.onclick=function(){showView(b.dataset.view)}});
+$('logout').onclick=async function(){await raw('/api/auth/logout','POST',{});location.reload()};$('menu').onclick=toggleMobileSidebar;if($('sidebarBackdrop'))$('sidebarBackdrop').onclick=closeMobileSidebar;document.addEventListener('keydown',function(e){if(e.key==='Escape')closeMobileSidebar()});$('refresh').onclick=function(){var active=document.querySelector('#nav button.active');showView(active?active.dataset.view:'overview')};$('groupSelect').onchange=function(){selectGroup(this.value)};document.querySelectorAll('#nav button').forEach(function(b){b.onclick=function(){showView(b.dataset.view)}});
 $('quickHealth').onclick=function(){loadHealth('quick')};$('fullHealth').onclick=function(){loadHealth('full')};$('reloadTasks').onclick=loadTasks;$('clearQueue').onclick=async function(){if(!currentGroup){toast('请先选择群组');return}if(!(await confirmModal('清空当前群所有等待中的问题？正在生成的问题不会被强制中断。','清空等待队列')))return;var r=await api('/tasks/clear','POST',{groupId:currentGroup});toast(r.message||'完成');loadTasks()};$('reloadProposals').onclick=loadProposals;
 $('createProposal').onclick=async function(){var r=await api('/ops/action','POST',{action:$('opAction').value,qq:$('opQq').value,duration:$('opDuration').value});$('opMessage').textContent=r.message;toast(r.message);if(r.ok)loadProposals()};
 $('runSimulator').onclick=async function(){var r=await api('/simulator','POST',{text:$('simText').value,senderRole:$('simRole').value,mentionsBot:$('simMention').checked,hasImage:$('simImage').checked,currentlyBusy:$('simBusy').checked});if(!r.ok){toast(r.message);return}$('simDecision').textContent=r.decisions.final;$('simSteps').innerHTML=(r.steps||[]).map(function(x){return'<div class="step"><i></i><span>'+esc(x)+'</span></div>'}).join('')};$('reloadModels').onclick=loadModels;$('saveQuota').onclick=async function(){var r=await api('/root/quotas','POST',{globalDailyCny:$('globalQuota').value,groupDailyCny:$('groupQuota').value});toast(r.message);if(r.ok)loadQuota()};
@@ -8093,7 +8216,7 @@ $('saveGroup').onclick=async function(){ensureGroupSettingsExtras();var payload=
 boot();
 })();
 </script>
-</body></html>`;
+</body></html>`);
 }
 
 export class OneBotHub {
@@ -8296,7 +8419,7 @@ export class OneBotHub {
       mentioned = Boolean(selfId && raw.includes(`[CQ:at,qq=${selfId}]`));
       text = raw.replace(/\[CQ:[^\]]+\]/g, " ").trim();
     }
-    if (!mentioned || !text || /^[!！]/.test(text)) return false;
+    if (!mentioned || !text || /^(?:[!！]|\/!)/.test(text)) return false;
     const role = String(body.sender?.role || "member");
     if (["owner", "admin"].includes(role) && /(?:踢|移出|请出|請出|杀了|殺了|斩了|斬了|禁言|闭麦|閉麥|全员禁言|全員禁言|管理员|管理員)/i.test(text)) return false;
     if (["owner", "admin"].includes(role) && /^(?:确认|确认|同意执行|同意執行|执行|執行|取消操作|取消执行|取消執行|取消)(?:\s+[a-z0-9_-]+)?$/i.test(text)) return false;
