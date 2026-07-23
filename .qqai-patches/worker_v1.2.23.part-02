@@ -1,0 +1,49 @@
+ericId(item.groupId), message: `[CQ:at,qq=${item.userId}] 群规提醒：这条消息可能不太合适（${item.violationType}）。${item.reason || item.rule || "请留意群规"}。本次仅提醒，不计入累计次数。
+-${appealHint}`, auto_escape: false } }, 15000);
++      const sent = await callOneBotAction(env, { action: "send_group_msg", params: { group_id: numericId(item.groupId), message: quotedRuleMessage(`群规提醒：这条消息可能不太合适（${item.violationType}）。`, item.reason || item.rule || "请留意群规"), auto_escape: false } }, 15000);
+       warningMessageId = extractOneBotMessageId(sent);
+       result = { ok: true, message: fallbackNote || "已发送友善提醒，不计入累计次数" };
+     } else if (action === "warn") {
+-      const sent = await callOneBotAction(env, { action: "send_group_msg", params: { group_id: numericId(item.groupId), message: `[CQ:at,qq=${item.userId}] 群规警告：你的消息可能违反“${item.violationType}”。原因：${item.reason || item.rule || "请遵守群规"}${countText}。
+-${appealHint}`, auto_escape: false } }, 15000);
++      const sent = await callOneBotAction(env, { action: "send_group_msg", params: { group_id: numericId(item.groupId), message: quotedRuleMessage(`群规警告：你的消息可能违反“${item.violationType}”。`, item.reason || item.rule || "请遵守群规"), auto_escape: false } }, 15000);
+       warningMessageId = extractOneBotMessageId(sent);
+       actionTaken = strikeCounted ? "progressive_warn" : "warn";
+       result = { ok: true, message: fallbackNote || (strikeCounted ? `已发送警告（${progressivePolicy.windowDays} 天内第 ${progressiveCount} 次）` : "已发送警告，本次不计入累计次数") };
+@@ -6493,13 +6553,28 @@
+       if (!item.messageId) throw new Error("该违规记录没有原消息 ID，无法撤回");
+       await callOneBotAction(env, { action: "delete_msg", params: { message_id: String(item.messageId) } }, 15000);
+       actionTaken = strikeCounted ? "progressive_recall" : "recall";
+-      result = { ok: true, message: `已撤回违规消息${countText}` };
++      try {
++        const sent = await callOneBotAction(env, { action: "send_group_msg", params: { group_id: numericId(item.groupId), message: [
++          { type: "at", data: { qq: String(item.userId) } },
++          { type: "text", data: { text: `
++群规处理：已撤回一条可能违反“${item.violationType}”的消息。
++
++原因：${item.reason || item.rule || "请遵守群规"}
++${countLine}
++
++${appealHint}` } }
++        ], auto_escape: false } }, 15000);
++        warningMessageId = extractOneBotMessageId(sent);
++      } catch (notifyError) {
++        fallbackNote = `${fallbackNote ? fallbackNote + "；" : ""}违规消息已撤回，但公开通知发送失败：${String(notifyError?.message || notifyError).slice(0, 200)}`;
++      }
++      result = { ok: true, message: `${fallbackNote ? fallbackNote + "；" : ""}已撤回违规消息${strikeCounted ? `（第 ${progressiveCount} 次累计）` : "（不计入累计次数）"}` };
+     } else if (action === "mute") {
+       const configured = parseUnlimitedNonNegativeInteger(await dbGet(env, `rule_proxy_mute_seconds:${item.groupId}`), DEFAULTS.ruleProxyMuteSeconds);
+       const suggested = parseUnlimitedNonNegativeInteger(duration || policy.muteSeconds || review?.muteSeconds, configured);
+       duration = Math.max(60, Math.min(30 * 24 * 3600, suggested || configured || 600));
+-      const sent = await callOneBotAction(env, { action: "send_group_msg", params: { group_id: numericId(item.groupId), message: `[CQ:at,qq=${item.userId}] 群规处理：违反“${item.violationType}”，本次禁言 ${duration >= 60 && duration % 60 === 0 ? `${duration / 60} 分钟` : `${duration} 秒`}${countText}。
+-${appealHint}`, auto_escape: false } }, 15000);
++      const durationText = duration >= 60 && duration % 60 === 0 ? `${duration / 60} 分钟` : `${duration} 秒`;
++      const sent = await callOneBotAction(env, { action: "send_group_msg", params: { group_id: numericId(item.groupId), message: quotedRuleMessage(`群规处理：违反“${item.violationType}”，本次禁言 ${durationText}。`, item.reason || item.rule || "请遵守群规"), auto_escape: false } }, 15000);
+       warningMessageId = extractOneBotMessageId(sent);
+       await callOneBotAction(env, { action: "set_group_ban", params: { group_id: numericId(item.groupId), user_id: numericId(item.userId), duration } }, 15000);
+       actionTaken = strikeCounted ? "progressive_mute" : "mute";
+@@ -9676,7 +9751,7 @@
+   addView('schedules','排程管理');addView('conversations','对话记录');addView('ruleviolations','群规监控');addView('settingscenter','设置中心');addView('bilibili','B站串接');addView('aidecisions','AI 回复记录');addView('appeals','匿名申诉');addView('violationhistory','历史违规记录');addView('appealreview','申诉处理');
+ 
+   if(!$('v-schedules').dataset.ready){$('v-schedules').dataset.ready='1';$('v-schedules').innerHTML='<div class="section-head"><div><h2>排程管理</h2><p>在网页建立、查看与取消群消息排程；排程执行依赖 Cloudflare Cron Trigger 定期调用 Worker 的 scheduled()。</p></div><button id="scheduleReload" class="btn">重新加载</button></div><div class="grid"><div class="card span-5"><h3>建立排程</h3><div class="field"><label>排程内容</label><textarea id="scheduleText" placeholder="例如：每天 18:00 记得填写日报&#10;每周一 09:00 本周会议开始&#10;2026-07-30 20:00 活动开始&#10;每隔 2小时 请查看群公告"></textarea></div><button id="scheduleCreate" class="btn primary" style="width:100%">建立排程</button><div id="scheduleCronState" class="notice" style="margin-top:12px">尚未读取 Cron 状态。</div></div><div class="card span-7"><h3>我的排程</h3><div id="scheduleMine" class="list"><div class="empty">尚未加载</div></div></div><div id="scheduleReviewCard" class="card span-6 hidden"><h3>分配给我的审核</h3><div id="scheduleReviewList" class="list"><div class="empty">没有待审核排程</div></div></div><div id="scheduleRootCard" class="card span-6 hidden"><h3>开发者排程总览</h3><div id="scheduleRootList" class="list"><div class="empty">尚未加载</div></div></div></div>';$('scheduleReload').onclick=loadSchedules;$('scheduleCreate').onclick=createScheduleFromPortal}
+-  if(!$('v-ruleviolations').dataset.ready){$('v-ruleviolations').dataset.ready='1';$('v-ruleviolations').innerHTML='<div class="section-head"><div><h2>群规监控记录</h2><p>AI 会结合聊天上下文、链接内容、分类备注、严重程度与人工复核结果判断。</p></div><button id="rvReload" class="btn">重新加载</button></div><div class="card"><div class="row"><input id="rvMember" placeholder="群友名称或 QQ"><input id="rvContent" placeholder="消息内容"><select id="rvType"><option value="">全部违规项目<
