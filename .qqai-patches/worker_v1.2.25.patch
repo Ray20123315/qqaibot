@@ -1,0 +1,14 @@
+--- a/worker.js
++++ b/worker.js
+@@ -1,4 +1,4 @@
+-const VERSION = "1.2.24";
++const VERSION = "1.2.25";
+ const QQAI_V1_COMPLETE_MARKER = "QQAI_V1_COMPLETE_MARKER";
+ const QQAI_V1_R3_MARKER = "QQAI_V1_R3_MARKER";
+ const BUILD_DATE = "2026-07-23";
+@@ -1220,7 +1220,7 @@
+-      if (isGroup && !isCommandMessage && !isSelfAccount && cleanMessage.length > 1 && await dbGet(env, `rule_monitor_enabled:${currentGroupId}`) !== "false") {
++      if (isGroup && !isCommandMessage && !isSelfAccount && cleanMessage.length > 0 && await dbGet(env, `rule_monitor_enabled:${currentGroupId}`) !== "false") {
+         // 在后台检查；检查器会先即时确认机器人为群主／管理员，否则直接返回且不建立记录。
+         ctx.waitUntil(inspectMessageAgainstGroupRules(env, { groupId: currentGroupId, userId, senderName: senderCard, text: cleanMessage, messageId: replyMessageId }));
+       }
