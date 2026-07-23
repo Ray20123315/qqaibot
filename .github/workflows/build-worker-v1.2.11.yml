@@ -6,6 +6,7 @@ on:
     paths:
       - worker.js
       - tools/patch_worker_v1_2_11.py
+      - tools/run_patch_worker_v1_2_11.py
       - .github/workflows/build-worker-v1.2.11.yml
 
 permissions:
@@ -27,7 +28,7 @@ jobs:
         shell: bash
         run: |
           set +e
-          python tools/patch_worker_v1_2_11.py > patch.log 2>&1
+          python tools/run_patch_worker_v1_2_11.py > patch.log 2>&1
           status=$?
           cat patch.log
           exit $status
@@ -52,6 +53,7 @@ jobs:
               "same QQ slash chat": "cleanMessage.startsWith('//')",
               "group opt out": "function stripGroupAiOptOutPrefix",
               "AI prefix guard": "function neutralizeAiCommandPrefix",
+              "AI safety prompt": "【命令前缀安全规则】",
               "settings permissions": "canEditTargetQq: portalIsDeveloper",
               "mobile safe area": "safe-area-inset-top",
               "mobile backdrop": "sidebar-backdrop",
