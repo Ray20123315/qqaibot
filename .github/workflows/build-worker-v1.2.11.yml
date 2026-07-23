@@ -1,0 +1,77 @@
+name: Build worker v1.2.11
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - worker.js
+      - tools/patch_worker_v1_2_11.py
+      - .github/workflows/build-worker-v1.2.11.yml
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout pull request
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Apply worker patch
+        run: python tools/patch_worker_v1_2_11.py
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Check JavaScript syntax
+        run: node --check worker.js
+
+      - name: Verify requested behavior
+        shell: python
+        run: |
+          from pathlib import Path
+          s = Path("worker.js").read_text(encoding="utf-8")
+          required = {
+              "version": 'const VERSION = "1.2.11";',
+              "vision keys": "GEMINI_VISION_API_KEYS",
+              "vision auto off": "function imageInspectionEnabled",
+              "same QQ slash chat": "cleanMessage.startsWith('//')",
+              "group opt out": "function stripGroupAiOptOutPrefix",
+              "AI prefix guard": "function neutralizeAiCommandPrefix",
+              "settings permissions": "canEditTargetQq: portalIsDeveloper",
+              "mobile safe area": "safe-area-inset-top",
+              "mobile backdrop": "sidebar-backdrop",
+              "categorized sidebar": "function organizeSidebarNavigation",
+              "Bilibili webhook": "official_webhook",
+              "Bilibili minimum": "const BILIBILI_POLL_MIN_SECONDS = 1800;",
+              "Simplified portal": "return toSimplifiedChinese(String.raw`<!doctype html>",
+          }
+          missing = [name for name, needle in required.items() if needle not in s]
+          if missing:
+              raise SystemExit("Missing checks: " + ", ".join(missing))
+          forbidden = [
+              "设置中心仅开发者可见。",
+              "设置中心仅开发者可用。",
+              'lang="zh-Hant"',
+              "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
+          ]
+          found = [needle for needle in forbidden if needle in s]
+          if found:
+              raise SystemExit("Forbidden output remains: " + repr(found))
+          print("All requested behavior checks passed.")
+
+      - name: Upload worker only
+        uses: actions/upload-artifact@v4
+        with:
+          name: worker-v1.2.11
+          path: worker.js
+          if-no-files-found: error
+          retention-days: 1
