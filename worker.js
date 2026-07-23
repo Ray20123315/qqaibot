@@ -1,7 +1,7 @@
-const VERSION = "1.2.25";
+const VERSION = "1.2.26";
 const QQAI_V1_COMPLETE_MARKER = "QQAI_V1_COMPLETE_MARKER";
 const QQAI_V1_R3_MARKER = "QQAI_V1_R3_MARKER";
-const BUILD_DATE = "2026-07-23";
+const BUILD_DATE = "2026-07-24";
 const DEFAULT_DEVELOPER_ID = "3569028262";
 const DEFAULTS = Object.freeze({
   deepseekFlashModel: "deepseek-v4-flash",
@@ -45,6 +45,11 @@ const DEFAULTS = Object.freeze({
   ruleStrictness: "medium",
   runtimeRateLimitSeconds: 0,
   joinPatternAutoApproveThreshold: 2,
+  joinAiApproveConfidence: 0.90,
+  ruleSpamWindowSeconds: 60,
+  ruleSpamThreshold: 4,
+  ruleSpamKeepCount: 3,
+  ruleMuteGuardEnabled: true,
 });
 
 const AI_MEDIA_LIMITS = Object.freeze({
@@ -866,7 +871,7 @@ export default {
       }
       if (body.post_type === "request" && body.request_type === "group" && currentGroupId) {
         if (!(await isGroupWhitelisted(env, currentGroupId))) return new Response(null, { status: 204 });
-        if (await dbGet(env, `join_assist_enabled:${currentGroupId}`) !== "true") return new Response(null, { status: 204 });
+        if (await dbGet(env, `join_assist_enabled:${currentGroupId}`) === "false") return new Response(null, { status: 204 });
         await createJoinRequestAssist(env, body);
         return new Response(null, { status: 204 });
       }
@@ -1242,6 +1247,33 @@ export default {
         return { targetQq, targetQqs: targetMentionQqs.slice(), restText };
       };
 
+      const noViolationCommand = cleanMessage.match(/^[!！](?:无违规|無違規)(?:\s|$)/i);
+      if (noViolationCommand) {
+        if (!(isDeveloper || permissionSet.nativeAdmin)) return jsonReply(`${atSender}只有当前 QQ 管理员、群主或开发者可以撤销群规误判。`);
+        const prefix = noViolationCommand[0].trim();
+        const { targetQq, restText } = parseArgs(userMessage, prefix);
+        if (!targetQq || !String(restText || "").trim()) return jsonReply(`${atSender}格式：!无违规 @被判定违规群友 补充说明。目标和补充说明都必须填写。`);
+        const violation = await findLatestActiveRuleViolationForUser(env, currentGroupId, targetQq);
+        if (!violation) return jsonReply(`${atSender}找不到该成员尚未撤销的群规处理记录。`);
+        const updated = await recordRuleViolationFeedback(env, violation, userId, "not_violation", String(restText).trim());
+        await dbDel(env, `rule_mute_enforcement:${currentGroupId}:${targetQq}`);
+        return jsonReply(`${atSender}已将 ${targetQq} 的记录 ${updated.id} 标记为误判，并撤销可撤销处罚。补充：${String(restText).trim()}`);
+      }
+
+      const muteGuardSetting = cleanMessage.match(/^[!！](?:违规禁言保护|違規禁言保護)\s*(开|開|关|關|状态|狀態)$/i);
+      if (muteGuardSetting) {
+        if (!(isDeveloper || await isVerifiedGroupOwner(env, currentGroupId, userId))) return jsonReply(`${atSender}只有当前群主或开发者可以开关违规禁言保护。`);
+        const mode = muteGuardSetting[1];
+        if (/状态|狀態/.test(mode)) {
+          const enabled = await dbGet(env, `rule_mute_guard_enabled:${currentGroupId}`) !== "false";
+          return jsonReply(`${atSender}违规禁言保护当前为：${enabled ? "开启" : "关闭"}。`);
+        }
+        const enabled = /开|開/.test(mode);
+        await dbPut(env, `rule_mute_guard_enabled:${currentGroupId}`, enabled ? "true" : "false");
+        await writeSystemAudit(env, { type: "rule_mute_guard_setting", groupId: currentGroupId, actorId: userId, action: enabled ? "enabled" : "disabled" });
+        return jsonReply(`${atSender}违规禁言保护已${enabled ? "开启" : "关闭"}。${enabled ? "管理提前解除 AI 群规禁言时，将按剩余时间重新禁言。" : "之后不会重新禁言，也不会发送提示。"}`);
+      }
+
       const webSettingCommandsDisabledEarly = await dbGet(env, `web_command_off:${currentGroupId}`) === "true";
       if (webSettingCommandsDisabledEarly && commandChangesWebSettings(userMessage)) {
         return jsonReply(`${atSender}本群已關閉設定型 ! 指令。關閉後只能從 Portal 網頁重新開啟或修改設定。`);
@@ -1250,10 +1282,13 @@ export default {
       const ruleMonitorSetting = cleanMessage.match(/^[!！](?:群规监控|群規監控|规则监控|規則監控)\s*(开|開|关|關|状态|狀態)$/i);
       if (ruleMonitorSetting) {
         const mode = ruleMonitorSetting[1];
-        const current = await dbGet(env, `rule_monitor_enabled:${currentGroupId}`) !== "false";
-        if (/状态|狀態/.test(mode)) return jsonReply(`${atSender}群规持续监控当前为：${current ? "开启" : "关闭"}。默认开启；监控本身只记录到独立网页。`);
-        if (!(await isVerifiedGroupOwner(env, currentGroupId, userId))) return jsonReply(`${atSender}只有 NapCat 即時確認的目前群主可以改變群規持續監控。`);
+        const botRuleState = await getBotGroupRole(env, currentGroupId);
+        const monitorAvailable = botCanRunRuleMonitor(botRuleState);
+        const current = monitorAvailable && await dbGet(env, `rule_monitor_enabled:${currentGroupId}`) !== "false";
+        if (/状态|狀態/.test(mode)) return jsonReply(`${atSender}${monitorAvailable ? `群规持续监控当前为：${current ? "开启" : "关闭"}。` : "机器人在当前群不是群主或管理员，群规监控完全停用，也不会调用分类模型或建立违规记录。"}`);
+        if (!(await isVerifiedGroupOwner(env, currentGroupId, userId))) return jsonReply(`${atSender}只有 NapCat 即时确认的目前群主可以改变群规持续监控。`);
         const enabled = /开|開/.test(mode);
+        if (enabled && !monitorAvailable) return jsonReply(`${atSender}机器人在当前群不是群主或管理员，无法开启群规监控；系统不会降级记录。`);
         await dbPut(env, `rule_monitor_enabled:${currentGroupId}`, enabled ? "true" : "false");
         await writeSystemAudit(env, { type: "rule_monitor_setting", groupId: currentGroupId, actorId: userId, action: enabled ? "enabled" : "disabled" });
         return jsonReply(`${atSender}群规持续监控已${enabled ? "开启" : "关闭"}。开启后默认只记录到网页，不会自动处罚。`);
@@ -1307,7 +1342,7 @@ export default {
         if (!hasAdminAuth) return jsonReply(`${atSender}只有 QQ 管理员、群主、开发者或获授 AI 管理权限者可以开启或关闭入群辅助。`);
         const enabled = /开|開/.test(joinAssistSetting[1]);
         await dbPut(env, `join_assist_enabled:${currentGroupId}`, enabled ? "true" : "false");
-        return jsonReply(`${atSender}入群辅助已${enabled ? "开启" : "关闭"}。AI 只会建议同意或请管理核对，绝不会自动拒绝。`);
+        return jsonReply(`${atSender}入群辅助已${enabled ? "开启" : "关闭"}。开启时 Gemma 高置信度可自动同意；不确定会交给管理核对，未单独授权时不会自动拒绝。`);
       }
       const joinDecision = cleanMessage.match(/^[!！]?(确认入群|确认入群|忽略入群)\s+(jr_[a-z0-9_-]+)$/i);
       if (joinDecision) {
@@ -1659,9 +1694,21 @@ export default {
           const list = await listUserSchedules(env, userId, currentGroupId);
           return jsonReply(`${atSender}${list.length ? list.map(formatScheduleLine).join('\n') : '目前没有排程。'}`);
         }
-        const cancelMatch = scheduleText.match(/^(?:取消|删除|删除|cancel)\s+([\w-]+)/i);
+        const cancelMatch = scheduleText.match(/^(?:取消|删除|刪除|cancel)\s+([\w-]+)/i);
         if (cancelMatch) {
-          const result = await cancelSchedule(env, cancelMatch[1], userId, isDeveloper || hasAdminAuth);
+          const result = await cancelSchedule(env, cancelMatch[1], userId, isDeveloper || hasAdminAuth, currentGroupId, isDeveloper);
+          return jsonReply(`${atSender}${result.message}`);
+        }
+        const editMatch = scheduleText.match(/^(?:编辑|編輯|修改|edit)\s+([\w-]+)\s+([\s\S]+)$/i);
+        if (editMatch) {
+          activeThinkingMessageId = await sendThinkingIndicator(env, { isGroup, groupId: currentGroupId, userId, text: '正在审查排程修改...' }).catch(() => null);
+          const result = await reviseScheduleRecord(env, { id: editMatch[1], actorId: userId, canManage: isDeveloper || hasAdminAuth, canDirectManage: permissionSet.groupOps, scheduleText: editMatch[2], scopeGroupId: currentGroupId, allowCrossGroup: isDeveloper });
+          if (result.ok && result.schedule?.status === 'pending_owner') await notifyDeveloper(env, `【排程修改待审核】\n编号：${result.schedule.id}\n群号：${result.schedule.groupId}\n申请人：${senderCard}（${userId}）\n内容：${result.schedule.content}`);
+          return jsonReply(`${atSender}${result.message}`);
+        }
+        const skipMatch = scheduleText.match(/^(?:暂停一次|暫停一次|跳过一次|跳過一次|skip)\s+([\w-]+)$/i);
+        if (skipMatch) {
+          const result = await skipScheduleOnce(env, skipMatch[1], userId, isDeveloper || hasAdminAuth, currentGroupId, isDeveloper);
           return jsonReply(`${atSender}${result.message}`);
         }
         const scheduleGroupId = isGroup ? currentGroupId : (await dbGet(env, `private_default_group:${userId}`) || '');
@@ -1680,7 +1727,7 @@ export default {
         const record = await createScheduleRecord(env, {
           groupId: scheduleGroupId, creatorId: userId, creatorName: senderCard,
           source: isPrivate ? 'private' : 'group', status, review,
-          managementAction, ...parsedSchedule
+          managementAction, scheduleSpec: scheduleText, mentionIds: extractScheduleMentionIds(parsedSchedule.content), ...parsedSchedule
         });
         if (status === 'pending_owner') {
           await notifyDeveloper(env, `【排程待审核】\n编号：${record.id}\n群号：${record.groupId}\n申请人：${record.creatorName}（${record.creatorId}）\n内容：${record.content}\n请在 Root 面板自行审核或指定审核人。`);
@@ -5155,7 +5202,7 @@ async function saveGroupFamily(env, data) {
   for (const item of Array.isArray(data.branches) ? data.branches : []) {
     const groupId = String(item?.groupId || "").replace(/\D/g, "");
     if (!groupId || groupId === headGroupId) continue;
-    branchMap.set(groupId, { groupId, alias: String(item?.alias || groupId).trim().slice(0, 80) || groupId });
+    branchMap.set(groupId, { groupId, alias: String(item?.alias || groupId).trim().slice(0, 80) || groupId, note: String(item?.note || "").trim().slice(0, 300) });
   }
   const family = {
     id: `family_${headGroupId}`,
@@ -5198,7 +5245,8 @@ async function notifyModerationProposalGroup(env, proposal) {
     ? `\n目标：${proposal.targetName || proposal.targetId}（QQ:${proposal.targetId}）`
     : "\n目标：全群";
   const durationLine = proposal.action === "mute" ? `\n时长：${formatDuration(proposal.durationSeconds || 600)}` : "";
-  const message = `【Portal 群管理待确认】\n编号：${proposal.id}\n提出者：${proposalActorText(proposal)}\n动作：${moderationActionLabel(proposal.action)}${targetLine}${durationLine}\n状态：待确认\n请由本群 QQ 管理员、群主或开发者在 2 分钟内发送“确认 ${proposal.id}”或“取消 ${proposal.id}”。未确认不会执行。`;
+  const reasonLine = proposal.reason ? `\n补充原因：${proposal.reason}` : "";
+  const message = `【Portal 群管理待确认】\n编号：${proposal.id}\n提出者：${proposalActorText(proposal)}\n动作：${moderationActionLabel(proposal.action)}${targetLine}${durationLine}${reasonLine}\n状态：待确认\n请由本群 QQ 管理员、群主或开发者在 2 分钟内发送“确认 ${proposal.id}”或“取消 ${proposal.id}”。未确认不会执行。`;
   try {
     const sent = await callOneBotAction(env, { action: "send_group_msg", params: { group_id: numericId(proposal.groupId), message, auto_escape: false } }, 20000);
     const messageId = sent?.message_id ?? sent?.messageId ?? sent?.data?.message_id ?? sent?.data?.messageId;
@@ -5486,9 +5534,93 @@ function parseManagementScheduleAction(content) {
   return m ? { command: m[1], raw: text } : null;
 }
 
+
+function extractScheduleMentionIds(content) {
+  return [...new Set([...String(content || "").matchAll(/@(\d{5,})/g)].map(match => match[1]))].slice(0, 50);
+}
+
+function buildScheduledGroupMessage(content, mentionIds = []) {
+  const text = String(content || "");
+  const allowed = new Set((Array.isArray(mentionIds) ? mentionIds : []).map(String));
+  const segments = [];
+  let last = 0;
+  for (const match of text.matchAll(/@(\d{5,})/g)) {
+    const id = String(match[1] || "");
+    if (!allowed.has(id)) continue;
+    if (match.index > last) segments.push({ type: "text", data: { text: text.slice(last, match.index) } });
+    segments.push({ type: "at", data: { qq: id } });
+    last = Number(match.index || 0) + match[0].length;
+  }
+  if (last < text.length) segments.push({ type: "text", data: { text: text.slice(last) } });
+  return segments.length ? segments : text;
+}
+
+function scheduleSpecFromRecord(item) {
+  if (item?.scheduleSpec) return String(item.scheduleSpec);
+  const content = String(item?.content || "");
+  if (item?.type === "once" && item.nextRunAt) {
+    const p = taipeiParts(Number(item.nextRunAt));
+    return `${p.year}-${p.month}-${p.day} ${p.hour}:${p.minute} ${content}`;
+  }
+  if (item?.type === "daily") return `每天 ${item.timeOfDay || "00:00"} ${content}`;
+  if (item?.type === "weekly") return `每周${"一二三四五六日"[Math.max(0, Number(item.weekday || 1) - 1)] || "一"} ${item.timeOfDay || "00:00"} ${content}`;
+  if (item?.type === "monthly") return `每月${Number(item.dayOfMonth || 1)}日 ${item.timeOfDay || "00:00"} ${content}`;
+  if (item?.type === "interval") return `每隔 ${Math.max(1, Math.round(Number(item.intervalMs || 60000) / 60000))}分钟 ${content}`;
+  return content;
+}
+
+async function deleteScheduleRecord(env, id) {
+  await dbDel(env, `schedule:${id}`);
+  await removeFromIndex(env, "schedule:index", id);
+}
+
+async function reviseScheduleRecord(env, { id, actorId, canManage = false, canDirectManage = false, scheduleText, scopeGroupId = "", allowCrossGroup = false }) {
+  const item = await readJson(env, `schedule:${id}`, null);
+  if (!item) return { ok: false, message: "找不到该排程。" };
+  if (scopeGroupId && String(item.groupId || "") !== String(scopeGroupId) && !allowCrossGroup) return { ok: false, message: "该排程不属于当前群组。" };
+  if (String(item.creatorId || "") !== String(actorId || "") && !canManage) return { ok: false, message: "你没有编辑该排程的权限。" };
+  const parsed = parseScheduleRequest(String(scheduleText || ""), Date.now());
+  if (!parsed.ok) return parsed;
+  const review = await reviewScheduleWithGemma(env, JSON.stringify(parsed));
+  if (review.decision === "reject") return { ok: false, message: `排程已拒绝：${review.reason || "内容不符合要求"}` };
+  const managementAction = parseManagementScheduleAction(parsed.content);
+  const status = managementAction ? (canDirectManage ? "active" : "pending_owner") : (review.decision === "allow" ? "active" : "pending_owner");
+  for (const key of ["timeOfDay", "weekday", "dayOfMonth", "intervalMs"]) delete item[key];
+  Object.assign(item, parsed, {
+    scheduleSpec: String(scheduleText || "").trim(),
+    mentionIds: extractScheduleMentionIds(parsed.content),
+    managementAction,
+    review,
+    status,
+    enabled: status === "active",
+    skipNextRun: false,
+    failureCount: 0,
+    updatedAt: Date.now(),
+    updatedBy: String(actorId || "")
+  });
+  await dbPut(env, `schedule:${id}`, JSON.stringify(item));
+  return { ok: true, schedule: item, message: status === "active" ? `排程 ${id} 已更新。` : `排程 ${id} 已更新并送交审核。` };
+}
+
+async function skipScheduleOnce(env, id, actorId, canManage = false, scopeGroupId = "", allowCrossGroup = false) {
+  const item = await readJson(env, `schedule:${id}`, null);
+  if (!item) return { ok: false, message: "找不到该排程。" };
+  if (scopeGroupId && String(item.groupId || "") !== String(scopeGroupId) && !allowCrossGroup) return { ok: false, message: "该排程不属于当前群组。" };
+  if (String(item.creatorId || "") !== String(actorId || "") && !canManage) return { ok: false, message: "你没有操作该排程的权限。" };
+  if (item.type === "once") return { ok: false, message: "单次排程不能暂停一次；请编辑时间或取消。" };
+  if (!item.enabled || item.status !== "active") return { ok: false, message: "只有执行中的重复排程可以暂停一次。" };
+  item.skipNextRun = true;
+  item.skipRequestedAt = Date.now();
+  item.skipRequestedBy = String(actorId || "");
+  await dbPut(env, `schedule:${id}`, JSON.stringify(item));
+  return { ok: true, schedule: item, message: `排程 ${id} 将跳过下一次执行，之后自动恢复。` };
+}
+
 async function createScheduleRecord(env, data) {
   const id = `sch_${Date.now().toString(36)}_${crypto.randomUUID().slice(0, 8)}`;
   const record = { id, enabled: true, createdAt: new Date().toISOString(), lastRunAt: null, lastResult: null, failureCount: 0, reviewerIds: [], votes: {}, approvalRule: "single", ...data };
+  record.scheduleSpec = String(record.scheduleSpec || scheduleSpecFromRecord(record));
+  record.mentionIds = Array.isArray(record.mentionIds) ? record.mentionIds : extractScheduleMentionIds(record.content);
   await dbPut(env, `schedule:${id}`, JSON.stringify(record));
   await appendIndex(env, "schedule:index", id, 5000);
   return record;
@@ -5513,10 +5645,11 @@ function formatScheduleLine(item) {
   return `${item.id}｜${item.status}｜${time}｜${String(item.content || "").slice(0, 60)}`;
 }
 
-async function cancelSchedule(env, id, actorId, canManage = false) {
+async function cancelSchedule(env, id, actorId, canManage = false, scopeGroupId = "", allowCrossGroup = false) {
   const item = await readJson(env, `schedule:${id}`, null);
   if (!item) return { ok: false, message: "找不到该排程。" };
-  if (item.creatorId !== actorId && !canManage) return { ok: false, message: "你没有取消该排程的权限。" };
+  if (scopeGroupId && String(item.groupId || "") !== String(scopeGroupId) && !allowCrossGroup) return { ok: false, message: "该排程不属于当前群组。" };
+  if (String(item.creatorId || "") !== String(actorId || "") && !canManage) return { ok: false, message: "你没有取消该排程的权限。" };
   item.enabled = false; item.status = "cancelled"; item.cancelledAt = new Date().toISOString(); item.cancelledBy = actorId;
   await dbPut(env, `schedule:${id}`, JSON.stringify(item));
   return { ok: true, message: `排程 ${id} 已取消。` };
@@ -5575,6 +5708,16 @@ async function processDueSchedules(env, now = Date.now()) {
     const item = await readJson(env, `schedule:${id}`, null);
     if (!item || !item.enabled || item.status !== "active" || Number(item.nextRunAt || Infinity) > now) continue;
     if (!(await isGroupWhitelisted(env, item.groupId))) { item.status = "paused"; item.lastResult = "群不在白名单"; await dbPut(env, `schedule:${id}`, JSON.stringify(item)); continue; }
+    if (item.skipNextRun && item.type !== "once") {
+      item.skipNextRun = false;
+      item.lastResult = "skipped_once";
+      item.lastSkippedAt = new Date(now).toISOString();
+      item.nextRunAt = computeNextScheduleRun(item, now);
+      await dbPut(env, `schedule:${id}`, JSON.stringify(item));
+      await writeSystemAudit(env, { type: "schedule_skipped_once", groupId: item.groupId, actorId: item.skipRequestedBy || item.creatorId, action: "skip_once", scheduleId: id, nextRunAt: item.nextRunAt });
+      continue;
+    }
+    let deleteAfterSuccess = false;
     try {
       let result;
       if (item.managementAction) result = await executeManagementSchedule(env, item);
@@ -5585,19 +5728,33 @@ async function processDueSchedules(env, now = Date.now()) {
           const generated = await callGeminiGenerate(env, { models: parseList(env.GEMINI_CHAT_MODELS, ["gemini-3.5-flash", "gemini-3.1-flash-lite"]), system: "生成适合QQ群发送的简体中文内容，不讨论模型身份。", contents: [{ role: "user", parts: [{ text: prompt }] }], maxOutputTokens: 500, temperature: 0.8, useSearch: false });
           message = generated.text;
         }
-        await callOneBotAction(env, { action: "send_group_msg", params: { group_id: numericId(item.groupId), message, auto_escape: false } }, 15000);
+        const outboundMessage = /^(AI生成|AI生成：|AI:)/i.test(String(item.content || ""))
+          ? message
+          : buildScheduledGroupMessage(message, item.mentionIds || extractScheduleMentionIds(item.content));
+        await callOneBotAction(env, { action: "send_group_msg", params: { group_id: numericId(item.groupId), message: outboundMessage, auto_escape: false } }, 15000);
         result = { ok: true };
       }
       if (!result?.ok) throw new Error(result?.error || "执行失败");
       item.lastRunAt = new Date(now).toISOString(); item.lastResult = "success"; item.failureCount = 0;
       const next = computeNextScheduleRun(item, now);
-      if (next) item.nextRunAt = next; else { item.enabled = false; item.status = "completed"; item.nextRunAt = null; }
+      if (next) item.nextRunAt = next;
+      else {
+        item.enabled = false;
+        item.status = "completed";
+        item.nextRunAt = null;
+        deleteAfterSuccess = item.type === "once";
+      }
     } catch (error) {
       item.failureCount = Number(item.failureCount || 0) + 1; item.lastResult = String(error.message || error);
       if (item.failureCount >= 3) { item.status = "paused"; item.enabled = false; await notifyDeveloper(env, `【排程已暂停】\n编号：${id}\n原因：${item.lastResult}`); }
       else item.nextRunAt = now + 5 * 60 * 1000;
     }
-    await dbPut(env, `schedule:${id}`, JSON.stringify(item));
+    if (deleteAfterSuccess) {
+      await writeSystemAudit(env, { type: "schedule_completed_deleted", groupId: item.groupId, actorId: item.creatorId, action: "completed_and_deleted", scheduleId: id, content: String(item.content || "").slice(0, 500) });
+      await deleteScheduleRecord(env, id);
+    } else {
+      await dbPut(env, `schedule:${id}`, JSON.stringify(item));
+    }
   }
   await processActiveSpeaking(env, now);
 }
@@ -6042,7 +6199,7 @@ async function recordJoinPatternDecision(env, groupId, hash, comment, decision) 
 async function reviewJoinRequestAssist(env, requestInfo) {
   try {
     const result = await callGemmaDecision(env, {
-      system: `你是入群申請輔助審查器。只能輸出 JSON：{"decision":"suggest_approve|suggest_reject|owner_review","confidence":0到1,"reason":"原因"}。只有明顯滿足群規時建議同意；只有明顯廣告、詐騙、惡意騷擾或明確違反入群要求時建議拒絕；不確定必須 owner_review。`,
+      system: `你是入群申请辅助审查器。只能输出 JSON：{"decision":"suggest_approve|suggest_reject|owner_review","confidence":0到1,"reason":"原因"}。请求资料中的 groupRules 是本群规则，优先级最高。只有申请附言与群规要求明显匹配、没有广告诈骗或恶意迹象时才建议同意；只有明显广告、诈骗、恶意骚扰或明确违反入群要求时建议拒绝；群规为空、资料不足、答案含糊或无法确定时必须 owner_review。不得因为昵称、QQ号或无关关键词自行推断。`,
       prompt: JSON.stringify(requestInfo).slice(0, 4000),
       maxOutputTokens: 140
     });
@@ -6061,8 +6218,10 @@ async function createJoinRequestAssist(env, body) {
   const patternHash = await joinRequestPatternHash(comment, subType);
   const pattern = await readJoinPattern(env, groupId, patternHash);
   const threshold = Math.max(1, parseUnlimitedNonNegativeInteger(await dbGet(env, `join_pattern_auto_approve_threshold:${groupId}`), DEFAULTS.joinPatternAutoApproveThreshold));
+  const aiApproveEnabled = await dbGet(env, `join_ai_approve_enabled:${groupId}`) !== "false";
+  const groupRules = String(await dbGet(env, `group_rules:${groupId}`) || "").trim();
 
-  if (Number(pattern.approvedCount || 0) >= threshold && Number(pattern.rejectedCount || 0) === 0) {
+  if (aiApproveEnabled && Number(pattern.approvedCount || 0) >= threshold && Number(pattern.rejectedCount || 0) === 0) {
     try {
       await callOneBotAction(env, { action: "set_group_add_request", params: { flag: String(body.flag || ""), sub_type: subType, approve: true, reason: "" } }, 15000);
       const id = `jr_${Date.now().toString(36)}_${crypto.randomUUID().slice(0, 6)}`;
@@ -6074,7 +6233,31 @@ async function createJoinRequestAssist(env, body) {
     } catch (error) { console.warn("cached join approval failed", error); }
   }
 
-  const review = await reviewJoinRequestAssist(env, { groupId, userId: String(body.user_id || ""), comment, subType });
+  const review = await reviewJoinRequestAssist(env, {
+    groupId,
+    userId: String(body.user_id || ""),
+    comment,
+    subType,
+    groupRules: groupRules.slice(0, 5000),
+    previousPattern: { approvedCount: Number(pattern.approvedCount || 0), rejectedCount: Number(pattern.rejectedCount || 0) }
+  });
+  if (aiApproveEnabled && review.decision === "suggest_approve" && Number(review.confidence || 0) >= DEFAULTS.joinAiApproveConfidence) {
+    const id = `jr_${Date.now().toString(36)}_${crypto.randomUUID().slice(0, 6)}`;
+    const item = { id, groupId, userId: String(body.user_id || ""), flag: String(body.flag || ""), subType, comment, patternHash, review, status: "approved_ai", createdAt: Date.now() };
+    try {
+      await callOneBotAction(env, { action: "set_group_add_request", params: { flag: item.flag, sub_type: subType, approve: true, reason: "" } }, 15000);
+      await recordJoinPatternDecision(env, groupId, patternHash, comment, "approved");
+      await writeSystemAudit(env, { type: "join_request_ai_approved", groupId, actorId: "system:join_assist", targetId: item.userId, action: "approve", confidence: Number(review.confidence || 0), reason: review.reason });
+      await dbPut(env, `joinrequest:${id}`, JSON.stringify(item));
+      await appendIndex(env, `joinrequest:index:${groupId}`, id, 1000);
+      return item;
+    } catch (error) {
+      item.status = "approve_failed";
+      item.result = String(error?.message || error);
+      await dbPut(env, `joinrequest:${id}`, JSON.stringify(item));
+      await appendIndex(env, `joinrequest:index:${groupId}`, id, 1000);
+    }
+  }
   const rejectAuthorized = await dbGet(env, `join_reject_authorized:${groupId}`) === "true";
   if (review.decision === "suggest_reject" && rejectAuthorized && review.confidence >= 0.92) {
     const id = `jr_${Date.now().toString(36)}_${crypto.randomUUID().slice(0, 6)}`;
@@ -6631,6 +6814,11 @@ ${appealHint}` } }
       const sent = await callOneBotAction(env, { action: "send_group_msg", params: { group_id: numericId(item.groupId), message: quotedRuleMessage(`群规处理：违反“${item.violationType}”，本次禁言 ${durationText}。`, item.reason || item.rule || "请遵守群规"), auto_escape: false } }, 15000);
       warningMessageId = extractOneBotMessageId(sent);
       await callOneBotAction(env, { action: "set_group_ban", params: { group_id: numericId(item.groupId), user_id: numericId(item.userId), duration } }, 15000);
+      const muteStartedAt = Date.now();
+      await dbPut(env, `rule_mute_enforcement:${item.groupId}:${item.userId}`, JSON.stringify({
+        violationId: item.id, groupId: item.groupId, userId: item.userId, startedAt: muteStartedAt,
+        durationSeconds: duration, expiresAt: muteStartedAt + duration * 1000, active: true
+      }));
       actionTaken = strikeCounted ? "progressive_mute" : "mute";
       result = { ok: true, message: `${fallbackNote ? fallbackNote + "；" : ""}已禁言 ${duration} 秒${strikeCounted ? `（第 ${progressiveCount} 次累计）` : "（不计入累计次数）"}` };
     } else if (action === "kick") {
@@ -6663,6 +6851,7 @@ async function reverseRuleViolationAction(env, item, actorId) {
   }
   if (["mute", "progressive_mute"].includes(String(item.actionTaken || ""))) {
     try {
+      await dbDel(env, `rule_mute_enforcement:${item.groupId}:${item.userId}`);
       await callOneBotAction(env, { action: "set_group_ban", params: { group_id: numericId(item.groupId), user_id: numericId(item.userId), duration: 0 } }, 15000);
       results.push("已解除禁言");
     } catch (error) { results.push(`解除禁言失败：${String(error?.message || error)}`); }
@@ -6719,6 +6908,22 @@ async function recordRuleViolationFeedback(env, item, actorId, verdict, note = "
   });
 }
 
+async function findLatestActiveRuleViolationForUser(env, groupId, userId) {
+  const enforcement = await readJson(env, `rule_mute_enforcement:${groupId}:${userId}`, null);
+  if (enforcement?.violationId) {
+    const linked = await readJson(env, `ruleviolation:${enforcement.violationId}`, null);
+    if (linked && String(linked.humanVerdict || "") !== "not_violation") return linked;
+  }
+  const ids = await readJson(env, `ruleviolation:index:${groupId}`, []);
+  for (const id of ids.slice().reverse()) {
+    const item = await readJson(env, `ruleviolation:${id}`, null);
+    if (!item || String(item.userId || "") !== String(userId || "")) continue;
+    if (String(item.humanVerdict || "") === "not_violation") continue;
+    if (["mute", "progressive_mute", "warn", "progressive_warn", "remind", "recall", "progressive_recall"].includes(String(item.actionTaken || ""))) return item;
+  }
+  return null;
+}
+
 async function inspectMessageAgainstGroupRules(env, { groupId, userId, senderName, text, messageId }) {
   // 机器人不是本群群主／管理员时完全停用：不调用分类模型，也不建立任何违规记录。
   const botRuleState = await getBotGroupRole(env, groupId);
@@ -6729,17 +6934,21 @@ async function inspectMessageAgainstGroupRules(env, { groupId, userId, senderNam
   const content = String(text || "").trim();
   if (!rules || !content) return;
 
-  // “刷屏”按多条独立消息判断，而不是把单条“人人人……”误当成四次发送。
+  // 刷屏门槛按群设置；确定性计数只是提供上下文，不强行覆盖群规模型判断。
   const now = Date.now();
+  const spamWindowSeconds = Math.max(5, Math.min(3600, parseUnlimitedNonNegativeInteger(await dbGet(env, `rule_spam_window_seconds:${groupId}`), DEFAULTS.ruleSpamWindowSeconds)));
+  const spamThreshold = Math.max(2, Math.min(50, parseUnlimitedNonNegativeInteger(await dbGet(env, `rule_spam_threshold:${groupId}`), DEFAULTS.ruleSpamThreshold)));
+  const configuredKeepCount = Math.max(0, Math.min(49, parseUnlimitedNonNegativeInteger(await dbGet(env, `rule_spam_keep_count:${groupId}`), DEFAULTS.ruleSpamKeepCount)));
+  const spamKeepCount = Math.min(configuredKeepCount, spamThreshold - 1);
   const burstKey = `rule_message_burst:${groupId}:${userId}`;
   const normalizeBurstText = value => String(value || "").replace(/\s+/g, " ").trim().toLowerCase();
   let burstRows = (await readJson(env, burstKey, []))
-    .filter(row => now - Number(row?.at || 0) <= 60000)
+    .filter(row => now - Number(row?.at || 0) <= spamWindowSeconds * 1000)
     .map(row => ({ at: Number(row.at || 0), messageId: String(row.messageId || ""), text: String(row.text || ""), normalized: normalizeBurstText(row.normalized || row.text || "") }));
   if (!messageId || !burstRows.some(row => row.messageId === String(messageId))) {
     burstRows.push({ at: now, messageId: String(messageId || ""), text: content.slice(0, 1000), normalized: normalizeBurstText(content) });
   }
-  burstRows = burstRows.slice(-12);
+  burstRows = burstRows.slice(-Math.max(20, spamThreshold + 8));
   await dbPut(env, burstKey, JSON.stringify(burstRows));
   const currentNormalized = normalizeBurstText(content);
   let trailingSameCount = 0;
@@ -6747,9 +6956,10 @@ async function inspectMessageAgainstGroupRules(env, { groupId, userId, senderNam
     if (burstRows[index].normalized !== currentNormalized) break;
     trailingSameCount += 1;
   }
-  const repeatedMessageBurst = trailingSameCount >= 4;
+  const repeatedMessageBurst = trailingSameCount >= spamThreshold;
+  const excessCount = repeatedMessageBurst ? Math.max(1, trailingSameCount - spamKeepCount) : 0;
   const repeatedMessageIds = repeatedMessageBurst
-    ? burstRows.slice(-trailingSameCount).map(row => row.messageId).filter(Boolean)
+    ? burstRows.slice(-excessCount).map(row => row.messageId).filter(Boolean)
     : [];
   if (content.length < 2 && !repeatedMessageBurst) return;
 
@@ -6774,10 +6984,10 @@ async function inspectMessageAgainstGroupRules(env, { groupId, userId, senderNam
 7. 管理人工复核结果是学习样本；被标记为误判的相似表达不得再次仅凭表面词语判违规。
 8. severity 必须按实际影响判断：minor 是轻微、初次、无明显恶意或可通过提醒改善；moderate 是明确违规；severe 是重复、明显恶意或造成较大影响；critical 是需要立即制止的严重行为。
 9. intentional 只有在语境显示明确故意时才为 true。轻微、误发、误解、初次边界行为应优先标记 minor，并由系统采用不累计次数的友善提醒。
-10. “重复刷屏”必须指同一成员在短时间内发送多条独立消息。单条消息内部重复很多字符，不等于发送了多条消息；除非本群规则另有明确规定，否则不得据此声称“连续发送多条”。
-11. 只有 repeatedMessageBurst=true，或最近聊天语境中明确存在多条独立重复消息时，才可以用“连续重复发送／刷屏”作为判定理由。
+10. 刷屏标准以本群群规和本群配置为准；当前确定性配置为 ${spamWindowSeconds} 秒内同内容 ${spamThreshold} 条，处罚撤回时保留最早 ${spamKeepCount} 条。
+11. repeatedMessageBurst 只是确定性参考。即使它为 false，也可以根据最近聊天语境识别变体刷屏；但必须说明实际的多条消息证据，不能把单条消息内重复字符谎称为多次发送。
 12. 不确定必须输出 violation=false。action 只是建议，系统会按授权范围决定是否执行。`,
-      prompt: JSON.stringify({ currentMessage: content, userId, senderName, recentContext, recentUserMessageBurst: burstRows, repeatedMessageBurst, trailingSameCount, strictness: strictness.level, categoryPolicies: categoryPolicies.map(item => ({ name: item.name, punishment: item.punishment, note: String(item.note || "").slice(0, 400) })), progressivePolicy, humanFeedbackExamples, rules: rules.slice(0, 5000), urlInspections }).slice(0, 14000),
+      prompt: JSON.stringify({ currentMessage: content, userId, senderName, recentContext, recentUserMessageBurst: burstRows, repeatedMessageBurst, trailingSameCount, spamWindowSeconds, spamThreshold, spamKeepCount, strictness: strictness.level, categoryPolicies: categoryPolicies.map(item => ({ name: item.name, punishment: item.punishment, note: String(item.note || "").slice(0, 400) })), progressivePolicy, humanFeedbackExamples, rules: rules.slice(0, 5000), urlInspections }).slice(0, 14000),
       maxOutputTokens: 320
     });
     review = JSON.parse(result.text.match(/\{[\s\S]*\}/)?.[0] || "{}");
@@ -6787,8 +6997,6 @@ async function inspectMessageAgainstGroupRules(env, { groupId, userId, senderNam
   }
 
   const reviewText = `${review?.violationType || ""} ${review?.rule || ""} ${review?.reason || ""}`;
-  const repeatedSpamClaim = /刷屏|洗版|连续发送|連續發送|重复发送|重複發送|大量重复字符|大量重複字符/i.test(reviewText);
-  if (repeatedSpamClaim && !repeatedMessageBurst) return;
   const allLinksInternal = urlInspections.length > 0 && urlInspections.every(item => item.trustedInternal);
   if (allLinksInternal && /拉人|宣群|宣传|推广|引流/i.test(reviewText) && !explicitPromotionLanguage(content)) return;
   if (review?.testContext === true && !/(明确威胁|现实伤害|泄露隐私|诈骗|恶意刷屏)/i.test(reviewText)) return;
@@ -6901,6 +7109,7 @@ async function createModerationProposal(env, data) {
     rejectAddRequest: Boolean(data.rejectAddRequest),
     sourceText: String(data.sourceText || "").slice(0, 1000),
     classifierReason: String(data.classifierReason || ""),
+    reason: String(data.reason || "").trim().slice(0, 1000),
     messageId: String(data.messageId || "")
   };
   await dbPut(env, `moderation:proposal:${id}`, JSON.stringify(proposal));
@@ -6917,6 +7126,7 @@ async function createModerationProposal(env, data) {
     action: proposal.action,
     durationSeconds: proposal.durationSeconds,
     classifierReason: proposal.classifierReason,
+    reason: proposal.reason,
     proposalId: id
   });
   return proposal;
@@ -6927,7 +7137,8 @@ function formatModerationProposal(proposal) {
     ? `\n目标：${proposal.targetName || proposal.targetId}（QQ:${proposal.targetId}）`
     : "";
   const durationLine = proposal.action === "mute" ? `\n时长：${formatDuration(proposal.durationSeconds || 600)}` : "";
-  return `⚠️ 已建立待确认操作\n编号：${proposal.id}\n动作：${moderationActionLabel(proposal.action)}${targetLine}${durationLine}\n识别原因：${proposal.classifierReason || "管理指令"}\n请在 2 分钟内发送「确认op」执行，或发送「取消op」取消。编号仍可用于「确认 ${proposal.id}」或「取消 ${proposal.id}」；未确认不会执行任何群操作。`;
+  const reasonLine = proposal.reason ? `\n补充原因：${proposal.reason}` : "";
+  return `⚠️ 已建立待确认操作\n编号：${proposal.id}\n动作：${moderationActionLabel(proposal.action)}${targetLine}${durationLine}${reasonLine}\n识别原因：${proposal.classifierReason || "管理指令"}\n请在 2 分钟内发送「确认op」执行，或发送「取消op」取消。编号仍可用于「确认 ${proposal.id}」或「取消 ${proposal.id}」；未确认不会执行任何群操作。`;
 }
 
 async function validateModerationProposalTarget(env, proposal, confirmerRole, confirmerId) {
@@ -7824,7 +8035,8 @@ const PORTAL_SETTING_DEFINITIONS = Object.freeze([
   { key: "memory_on", label: "启用长期记忆", command: "!记忆开 / !记忆关", minRole: "admin", scope: "group", type: "boolean", defaultValue: true },
   { key: "commands_enabled", label: "启用设置型 ! 指令", command: "!指令开 / !指令关", minRole: "admin", scope: "group", type: "boolean", defaultValue: true },
   { key: "interject_rate", label: "随机插话率", command: "!设置插话率", minRole: "admin", scope: "group", type: "number", min: 0, max: 100, defaultValue: 25 },
-  { key: "join_assist_enabled", label: "入群申请辅助", command: "!入群辅助 开/关", minRole: "admin", scope: "group", type: "boolean", defaultValue: false },
+  { key: "join_assist_enabled", label: "入群申请辅助", command: "!入群辅助 开/关", minRole: "admin", scope: "group", type: "boolean", defaultValue: true },
+  { key: "join_ai_approve_enabled", label: "Gemma 审查后自动同意入群", command: "网页设置", minRole: "admin", scope: "group", type: "boolean", defaultValue: true },
   { key: "join_pattern_threshold", label: "重复申请方式自动同意门槛", command: "网页设置", minRole: "admin", scope: "group", type: "number", min: 1, defaultValue: 2 },
   { key: "group_persona", label: "群组人格", command: "!切换人格 / !恢复人格", minRole: "admin", scope: "group", type: "textarea", defaultValue: "" },
   { key: "keyword_filter", label: "群组关键字过滤", command: "网页设置", minRole: "admin", scope: "group", type: "textarea", defaultValue: "" },
@@ -7835,6 +8047,10 @@ const PORTAL_SETTING_DEFINITIONS = Object.freeze([
   { key: "rule_proxy_mode", label: "AI 群规代理模式", command: "!AI群规代理（auto 仅群主）", minRole: "admin", scope: "group", type: "select", options: ["record", "warn", "mute", "auto"], defaultValue: "record" },
   { key: "rule_strictness", label: "群规判断严格度", command: "!群规严格度 宽松/低/中/高/严格", minRole: "admin", scope: "group", type: "select", options: ["loose", "low", "medium", "high", "strict"], defaultValue: "medium" },
   { key: "rule_proxy_mute_seconds", label: "AI 代理禁言秒数", command: "网页 / AI代理设置", minRole: "admin", scope: "group", type: "number", min: 0, defaultValue: 600 },
+  { key: "rule_spam_window_seconds", label: "刷屏判定时间窗（秒）", command: "网页设置", minRole: "admin", scope: "group", type: "number", min: 5, max: 3600, defaultValue: DEFAULTS.ruleSpamWindowSeconds },
+  { key: "rule_spam_threshold", label: "重复消息刷屏门槛（条）", command: "网页设置", minRole: "admin", scope: "group", type: "number", min: 2, max: 50, defaultValue: DEFAULTS.ruleSpamThreshold },
+  { key: "rule_spam_keep_count", label: "刷屏撤回后保留条数", command: "网页设置", minRole: "admin", scope: "group", type: "number", min: 0, max: 49, defaultValue: DEFAULTS.ruleSpamKeepCount },
+  { key: "rule_mute_guard_enabled", label: "违规禁言防提前解除", command: "!违规禁言保护 开/关", minRole: "owner", scope: "group", type: "boolean", defaultValue: true },
   { key: "rule_proxy_kick_authorized", label: "AI 踢出授权", command: "!授权AI踢出 / !撤回AI踢出授权", minRole: "owner", scope: "group", type: "boolean", defaultValue: false },
   { key: "join_reject_authorized", label: "AI 拒绝入群授权", command: "!授权AI拒绝入群 / !撤回AI拒绝入群", minRole: "owner", scope: "group", type: "boolean", defaultValue: false },
   { key: "moderation_cooldown_seconds", label: "同对象处置冷却秒数", command: "!设置处置冷却", minRole: "owner", scope: "group", type: "number", min: 0, defaultValue: 0 },
@@ -7858,7 +8074,8 @@ async function readPortalSettingValue(env, definition, groupId, targetQq) {
     case "memory_on": return await dbGet(env, `memo:${groupId}`) !== "false";
     case "commands_enabled": return await dbGet(env, `web_command_off:${groupId}`) !== "true";
     case "interject_rate": return Number(await dbGet(env, `interject_rate:${groupId}`) || DEFAULTS.interjectRate);
-    case "join_assist_enabled": return await dbGet(env, `join_assist_enabled:${groupId}`) === "true";
+    case "join_assist_enabled": return await dbGet(env, `join_assist_enabled:${groupId}`) !== "false";
+    case "join_ai_approve_enabled": return await dbGet(env, `join_ai_approve_enabled:${groupId}`) !== "false";
     case "join_pattern_threshold": return Math.max(1, parseUnlimitedNonNegativeInteger(await dbGet(env, `join_pattern_auto_approve_threshold:${groupId}`), DEFAULTS.joinPatternAutoApproveThreshold));
     case "group_persona": return await dbGet(env, `group_persona:${groupId}`) || "";
     case "keyword_filter": return (await readJson(env, `keyword_filter:${groupId}`, [])).join("\n");
@@ -7869,6 +8086,10 @@ async function readPortalSettingValue(env, definition, groupId, targetQq) {
     case "rule_proxy_mode": return normalizeRuleProxyMode(await dbGet(env, `rule_proxy_mode:${groupId}`) || DEFAULTS.ruleProxyMode);
     case "rule_strictness": return normalizeRuleStrictness(await dbGet(env, `rule_strictness:${groupId}`) || DEFAULTS.ruleStrictness);
     case "rule_proxy_mute_seconds": return parseUnlimitedNonNegativeInteger(await dbGet(env, `rule_proxy_mute_seconds:${groupId}`), DEFAULTS.ruleProxyMuteSeconds);
+    case "rule_spam_window_seconds": return Math.max(5, Math.min(3600, parseUnlimitedNonNegativeInteger(await dbGet(env, `rule_spam_window_seconds:${groupId}`), DEFAULTS.ruleSpamWindowSeconds)));
+    case "rule_spam_threshold": return Math.max(2, Math.min(50, parseUnlimitedNonNegativeInteger(await dbGet(env, `rule_spam_threshold:${groupId}`), DEFAULTS.ruleSpamThreshold)));
+    case "rule_spam_keep_count": return Math.max(0, Math.min(49, parseUnlimitedNonNegativeInteger(await dbGet(env, `rule_spam_keep_count:${groupId}`), DEFAULTS.ruleSpamKeepCount)));
+    case "rule_mute_guard_enabled": return await dbGet(env, `rule_mute_guard_enabled:${groupId}`) !== "false";
     case "rule_proxy_kick_authorized": return await dbGet(env, `rule_proxy_kick_authorized:${groupId}`) === "true";
     case "join_reject_authorized": return await dbGet(env, `join_reject_authorized:${groupId}`) === "true";
     case "moderation_cooldown_seconds": return parseUnlimitedNonNegativeInteger(await dbGet(env, `moderation_target_cooldown_seconds:${groupId}`), 0);
@@ -7891,6 +8112,7 @@ async function writePortalSettingValue(env, definition, groupId, targetQq, value
     case "commands_enabled": return value ? dbDel(env, `web_command_off:${groupId}`) : dbPut(env, `web_command_off:${groupId}`, "true");
     case "interject_rate": return dbPut(env, `interject_rate:${groupId}`, String(Math.max(0, Math.min(100, Number(value || 0)))));
     case "join_assist_enabled": return dbPut(env, `join_assist_enabled:${groupId}`, value ? "true" : "false");
+    case "join_ai_approve_enabled": return dbPut(env, `join_ai_approve_enabled:${groupId}`, value ? "true" : "false");
     case "join_pattern_threshold": return dbPut(env, `join_pattern_auto_approve_threshold:${groupId}`, String(Math.max(1, parseUnlimitedNonNegativeInteger(value, DEFAULTS.joinPatternAutoApproveThreshold))));
     case "group_persona": return dbPut(env, `group_persona:${groupId}`, String(value || "").slice(0, 4000));
     case "keyword_filter": return dbPut(env, `keyword_filter:${groupId}`, JSON.stringify(String(value || "").split(/\n|,/).map(item => item.trim()).filter(Boolean).slice(0, 500)));
@@ -7901,6 +8123,10 @@ async function writePortalSettingValue(env, definition, groupId, targetQq, value
     case "rule_proxy_mode": return dbPut(env, `rule_proxy_mode:${groupId}`, normalizeRuleProxyMode(value));
     case "rule_strictness": return dbPut(env, `rule_strictness:${groupId}`, normalizeRuleStrictness(value));
     case "rule_proxy_mute_seconds": return dbPut(env, `rule_proxy_mute_seconds:${groupId}`, String(parseUnlimitedNonNegativeInteger(value, DEFAULTS.ruleProxyMuteSeconds)));
+    case "rule_spam_window_seconds": return dbPut(env, `rule_spam_window_seconds:${groupId}`, String(Math.max(5, Math.min(3600, parseUnlimitedNonNegativeInteger(value, DEFAULTS.ruleSpamWindowSeconds)))));
+    case "rule_spam_threshold": return dbPut(env, `rule_spam_threshold:${groupId}`, String(Math.max(2, Math.min(50, parseUnlimitedNonNegativeInteger(value, DEFAULTS.ruleSpamThreshold)))));
+    case "rule_spam_keep_count": return dbPut(env, `rule_spam_keep_count:${groupId}`, String(Math.max(0, Math.min(49, parseUnlimitedNonNegativeInteger(value, DEFAULTS.ruleSpamKeepCount)))));
+    case "rule_mute_guard_enabled": return dbPut(env, `rule_mute_guard_enabled:${groupId}`, value ? "true" : "false");
     case "rule_proxy_kick_authorized": return value ? dbPut(env, `rule_proxy_kick_authorized:${groupId}`, "true") : dbDel(env, `rule_proxy_kick_authorized:${groupId}`);
     case "join_reject_authorized": return value ? dbPut(env, `join_reject_authorized:${groupId}`, "true") : dbDel(env, `join_reject_authorized:${groupId}`);
     case "moderation_cooldown_seconds": return dbPut(env, `moderation_target_cooldown_seconds:${groupId}`, String(parseUnlimitedNonNegativeInteger(value, 0)));
@@ -8848,7 +9074,8 @@ ${summary}`.slice(0, 4000),
       groups,
       family,
       canEdit,
-      generatedJoinUrl: family?.headGroupId ? `${url.origin}/join/${family.headGroupId}` : ""
+      generatedJoinUrl: family?.headGroupId ? `${url.origin}/join/${family.headGroupId}` : "",
+      defaultGroupId: String(await dbGet(env, `private_default_group:${session.qq}`) || "")
     });
   }
 
@@ -8863,6 +9090,15 @@ ${summary}`.slice(0, 4000),
     const family = await saveGroupFamily(env, { ...body, headGroupId, branches, updatedBy: session.qq });
     await writeSystemAudit(env, { type: "group_family_binding", groupId: headGroupId, actorId: session.qq, action: "save", branchGroupIds: family.branches.map(item => item.groupId) });
     return jsonResponse({ ok: true, family, generatedJoinUrl: `${url.origin}/join/${family.headGroupId}`, message: "多群绑定与总群引导已保存。" });
+  }
+
+  if (request.method === "POST" && path === "/group-bindings/default") {
+    const targetGroupId = String(body.groupId || "").replace(/\D/g, "");
+    const available = await getWhitelistedGroupsForUser(env, session.qq);
+    if (!available.some(item => String(item.groupId) === targetGroupId)) return jsonResponse({ ok: false, message: "默认群必须是你已加入且启用 QQAI 的群。" }, 403);
+    await dbPut(env, `private_default_group:${session.qq}`, targetGroupId);
+    await writeSystemAudit(env, { type: "group_family_default", groupId: targetGroupId, actorId: session.qq, action: "set_private_default_group" });
+    return jsonResponse({ ok: true, defaultGroupId: targetGroupId, message: "默认群已保存；私聊建立排程时会使用此群。" });
   }
 
   if (request.method === "POST" && path === "/group-bindings/guide") {
@@ -9074,8 +9310,11 @@ ${summary}`.slice(0, 4000),
     }
     const categoryPolicies = await getRuleCategoryPolicies(env, groupId);
     const violationTypes = [...new Set([...categoryPolicies.map(item => item.name), ...items.map(item => String(item.violationType || "")).filter(Boolean)])];
+    const botRuleState = await getBotGroupRole(env, groupId);
+    const ruleMonitorAvailable = botCanRunRuleMonitor(botRuleState);
     return jsonResponse({ ok: true, items, violationTypes, settings: {
-      monitorEnabled: await dbGet(env, `rule_monitor_enabled:${groupId}`) !== "false",
+      monitorEnabled: ruleMonitorAvailable && await dbGet(env, `rule_monitor_enabled:${groupId}`) !== "false",
+      monitorAvailable: ruleMonitorAvailable,
       proxyMode: normalizeRuleProxyMode(await dbGet(env, `rule_proxy_mode:${groupId}`) || DEFAULTS.ruleProxyMode),
       strictness: normalizeRuleStrictness(await dbGet(env, `rule_strictness:${groupId}`) || DEFAULTS.ruleStrictness),
       muteSeconds: parseUnlimitedNonNegativeInteger(await dbGet(env, `rule_proxy_mute_seconds:${groupId}`), DEFAULTS.ruleProxyMuteSeconds),
@@ -9090,6 +9329,7 @@ ${summary}`.slice(0, 4000),
     const isCurrentOwner = await isVerifiedGroupOwner(env, groupId, authed.qq);
     if (Object.prototype.hasOwnProperty.call(body, "monitorEnabled")) {
       if (!isCurrentOwner) return jsonResponse({ ok: false, message: "只有当前真实群主可以开关群规持续监控。" }, 403);
+      if (body.monitorEnabled && !botCanRunRuleMonitor(await getBotGroupRole(env, groupId))) return jsonResponse({ ok: false, message: "机器人在当前群不是群主或管理员，无法开启群规监控；系统不会降级记录。" }, 403);
       await dbPut(env, `rule_monitor_enabled:${groupId}`, body.monitorEnabled ? "true" : "false");
     }
     if (Object.prototype.hasOwnProperty.call(body, "proxyMode")) {
@@ -9117,7 +9357,9 @@ ${summary}`.slice(0, 4000),
     const item = await readJson(env, `ruleviolation:${String(body.id || "")}`, null);
     if (!item || String(item.groupId) !== groupId) return jsonResponse({ ok: false, message: "找不到当前群的群规记录。" }, 404);
     const verdict = body.verdict === "not_violation" ? "not_violation" : "violation";
-    const updated = await recordRuleViolationFeedback(env, item, authed.qq, verdict, String(body.note || ""));
+    const feedbackNote = String(body.note || "").trim();
+    if (verdict === "not_violation" && !feedbackNote) return jsonResponse({ ok: false, message: "标记为误判时必须填写复核说明。" }, 400);
+    const updated = await recordRuleViolationFeedback(env, item, authed.qq, verdict, feedbackNote);
     return jsonResponse({ ok: true, message: verdict === "not_violation" ? `已标记为误判。${updated.reversalResult ? ` ${updated.reversalResult}` : ""}` : "已确认存在违规，结果会作为后续判断参考。", item: updated });
   }
 
@@ -9239,12 +9481,26 @@ ${summary}`.slice(0, 4000),
     const managementAction = parseManagementScheduleAction(parsed.content);
     const directManagement = Boolean(managementAction && (permissions.nativeAdmin || permissions.groupOps || permissions.developer));
     const status = managementAction ? (directManagement ? "active" : "pending_owner") : (review.decision === "allow" ? "active" : "pending_owner");
-    const item = await createScheduleRecord(env, { ...parsed, creatorId: authed.qq, groupId, status, enabled: status === "active", managementAction, review });
+    const item = await createScheduleRecord(env, { ...parsed, creatorId: authed.qq, groupId, status, enabled: status === "active", managementAction, review, scheduleSpec: String(body.schedule || "").trim(), mentionIds: extractScheduleMentionIds(parsed.content) });
     if (status === "pending_owner") await notifyDeveloper(env, `【排程待处理】\n编号：${item.id}\n群号：${groupId}\n申请人：${authed.qq}\n内容：${item.content}\n请在 Portal 指派审核人或自行处理。`);
     return jsonResponse({ ok: true, schedule: item, message: status === "active" ? "排程已建立。" : "排程已送交开发者处理。" });
   }
+  if (request.method === "POST" && path === "/schedules/edit") {
+    const result = await reviseScheduleRecord(env, {
+      id: String(body.id || ""), actorId: authed.qq,
+      canManage: permissions.aiAdmin || permissions.developer,
+      canDirectManage: permissions.nativeAdmin || permissions.groupOps || permissions.developer,
+      scheduleText: String(body.schedule || ""), scopeGroupId: groupId, allowCrossGroup: permissions.developer
+    });
+    if (result.ok && result.schedule?.status === "pending_owner") await notifyDeveloper(env, `【排程修改待处理】\n编号：${result.schedule.id}\n群号：${groupId}\n申请人：${authed.qq}\n内容：${result.schedule.content}`);
+    return jsonResponse(result, result.ok ? 200 : 400);
+  }
+  if (request.method === "POST" && path === "/schedules/skip-once") {
+    const result = await skipScheduleOnce(env, String(body.id || ""), authed.qq, permissions.aiAdmin || permissions.developer, groupId, permissions.developer);
+    return jsonResponse(result, result.ok ? 200 : 400);
+  }
   if (request.method === "DELETE" && path === "/schedules") {
-    const result = await cancelSchedule(env, String(body.id || ""), authed.qq, permissions.aiAdmin || permissions.developer);
+    const result = await cancelSchedule(env, String(body.id || ""), authed.qq, permissions.aiAdmin || permissions.developer, groupId, permissions.developer);
     return jsonResponse(result, result.ok ? 200 : 403);
   }
 
@@ -9273,6 +9529,7 @@ ${summary}`.slice(0, 4000),
         durationSeconds: action === "mute" ? Math.max(60, parseDurationSeconds(String(body.duration || "10分"))) : 0,
         sourceText: `Portal 提出 ${moderationActionLabel(action)}`,
         classifierReason: "Portal 手动确认单",
+        reason: String(body.reason || "").trim(),
         messageId: ""
       });
       const notification = await notifyModerationProposalGroup(env, proposal);
@@ -9315,10 +9572,15 @@ ${summary}`.slice(0, 4000),
       welcome_text: await dbGet(env, `welcome_text:${groupId}`) || DEFAULTS.welcomeText,
       moderation_target_cooldown_seconds: Number(await dbGet(env, `moderation_target_cooldown_seconds:${groupId}`) || DEFAULTS.moderationTargetCooldownSeconds),
       newcomer_observation_days: Number(await dbGet(env, `newcomer_observation_days:${groupId}`) || DEFAULTS.newcomerObservationDays),
-      join_assist_enabled: await dbGet(env, `join_assist_enabled:${groupId}`) === "true",
+      join_assist_enabled: await dbGet(env, `join_assist_enabled:${groupId}`) !== "false",
+      join_ai_approve_enabled: await dbGet(env, `join_ai_approve_enabled:${groupId}`) !== "false",
       rule_monitor_enabled: botCanMonitorRules && await dbGet(env, `rule_monitor_enabled:${groupId}`) !== "false",
       rule_proxy_mode: normalizeRuleProxyMode(await dbGet(env, `rule_proxy_mode:${groupId}`) || DEFAULTS.ruleProxyMode),
       rule_proxy_mute_seconds: parseUnlimitedNonNegativeInteger(await dbGet(env, `rule_proxy_mute_seconds:${groupId}`), DEFAULTS.ruleProxyMuteSeconds),
+      rule_spam_window_seconds: Math.max(5, Math.min(3600, parseUnlimitedNonNegativeInteger(await dbGet(env, `rule_spam_window_seconds:${groupId}`), DEFAULTS.ruleSpamWindowSeconds))),
+      rule_spam_threshold: Math.max(2, Math.min(50, parseUnlimitedNonNegativeInteger(await dbGet(env, `rule_spam_threshold:${groupId}`), DEFAULTS.ruleSpamThreshold))),
+      rule_spam_keep_count: Math.max(0, Math.min(49, parseUnlimitedNonNegativeInteger(await dbGet(env, `rule_spam_keep_count:${groupId}`), DEFAULTS.ruleSpamKeepCount))),
+      rule_mute_guard_enabled: await dbGet(env, `rule_mute_guard_enabled:${groupId}`) !== "false",
       rule_proxy_kick_authorized: await dbGet(env, `rule_proxy_kick_authorized:${groupId}`) === "true",
       bot_is_owner: botRuleRole === "owner",
       bot_rule_role: botRuleRole,
@@ -9333,16 +9595,24 @@ ${summary}`.slice(0, 4000),
     if (Object.prototype.hasOwnProperty.call(body, "interject_rate")) await dbPut(env, `interject_rate:${groupId}`, String(Math.max(0, Math.min(100, Number(body.interject_rate || 0)))));
     if (Object.prototype.hasOwnProperty.call(body, "commands_enabled")) body.commands_enabled ? await dbDel(env, `web_command_off:${groupId}`) : await dbPut(env, `web_command_off:${groupId}`, "true");
     if (Object.prototype.hasOwnProperty.call(body, "keywords")) await dbPut(env, `keyword_filter:${groupId}`, JSON.stringify(String(body.keywords || "").split(/\n|,/).map(s => s.trim()).filter(Boolean)));
-    if (["welcome_enabled", "welcome_text", "moderation_target_cooldown_seconds", "newcomer_observation_days"].some(key => Object.prototype.hasOwnProperty.call(body, key))) {
+    if (["welcome_enabled", "welcome_text", "moderation_target_cooldown_seconds", "newcomer_observation_days", "rule_mute_guard_enabled"].some(key => Object.prototype.hasOwnProperty.call(body, key))) {
       if (!(role === "owner" || permissions.developer)) return jsonResponse({ ok: false, message: "这些群级设置仅群主或开发者可修改。" }, 403);
       if (Object.prototype.hasOwnProperty.call(body, "welcome_enabled")) await dbPut(env, `welcome_enabled:${groupId}`, body.welcome_enabled ? "true" : "false");
       if (Object.prototype.hasOwnProperty.call(body, "welcome_text")) await dbPut(env, `welcome_text:${groupId}`, String(body.welcome_text || DEFAULTS.welcomeText).slice(0, 500));
       if (Object.prototype.hasOwnProperty.call(body, "moderation_target_cooldown_seconds")) await dbPut(env, `moderation_target_cooldown_seconds:${groupId}`, String(parseUnlimitedNonNegativeInteger(body.moderation_target_cooldown_seconds, 0)));
       if (Object.prototype.hasOwnProperty.call(body, "newcomer_observation_days")) await dbPut(env, `newcomer_observation_days:${groupId}`, String(Math.max(0, Math.min(30, Number(body.newcomer_observation_days || 0)))));
+      if (Object.prototype.hasOwnProperty.call(body, "rule_mute_guard_enabled")) await dbPut(env, `rule_mute_guard_enabled:${groupId}`, body.rule_mute_guard_enabled ? "true" : "false");
     }
-    if (Object.prototype.hasOwnProperty.call(body, "join_assist_enabled")) {
+    if (["rule_spam_window_seconds", "rule_spam_threshold", "rule_spam_keep_count"].some(key => Object.prototype.hasOwnProperty.call(body, key))) {
+      if (!(permissions.aiAdmin || permissions.developer || permissions.nativeAdmin)) return jsonResponse({ ok: false, message: "缺少 AI 管理权限，无法设置刷屏判定。" }, 403);
+      if (Object.prototype.hasOwnProperty.call(body, "rule_spam_window_seconds")) await dbPut(env, `rule_spam_window_seconds:${groupId}`, String(Math.max(5, Math.min(3600, parseUnlimitedNonNegativeInteger(body.rule_spam_window_seconds, DEFAULTS.ruleSpamWindowSeconds)))));
+      if (Object.prototype.hasOwnProperty.call(body, "rule_spam_threshold")) await dbPut(env, `rule_spam_threshold:${groupId}`, String(Math.max(2, Math.min(50, parseUnlimitedNonNegativeInteger(body.rule_spam_threshold, DEFAULTS.ruleSpamThreshold)))));
+      if (Object.prototype.hasOwnProperty.call(body, "rule_spam_keep_count")) await dbPut(env, `rule_spam_keep_count:${groupId}`, String(Math.max(0, Math.min(49, parseUnlimitedNonNegativeInteger(body.rule_spam_keep_count, DEFAULTS.ruleSpamKeepCount)))));
+    }
+    if (Object.prototype.hasOwnProperty.call(body, "join_assist_enabled") || Object.prototype.hasOwnProperty.call(body, "join_ai_approve_enabled")) {
       if (!(permissions.aiAdmin || permissions.developer || permissions.nativeAdmin)) return jsonResponse({ ok: false, message: "缺少 AI 管理权限，无法设置入群辅助。" }, 403);
-      await dbPut(env, `join_assist_enabled:${groupId}`, body.join_assist_enabled ? "true" : "false");
+      if (Object.prototype.hasOwnProperty.call(body, "join_assist_enabled")) await dbPut(env, `join_assist_enabled:${groupId}`, body.join_assist_enabled ? "true" : "false");
+      if (Object.prototype.hasOwnProperty.call(body, "join_ai_approve_enabled")) await dbPut(env, `join_ai_approve_enabled:${groupId}`, body.join_ai_approve_enabled ? "true" : "false");
     }
     if (Object.prototype.hasOwnProperty.call(body, "rule_monitor_enabled")) {
       const botRuleState = await getBotGroupRole(env, groupId);
@@ -9781,7 +10051,7 @@ function getPortalHomePage(host) {
       <section id="v-moderation" class="view">
         <div class="section-head"><div><h2>群待确认操作</h2><p>自然語言和 Portal 操作都只建立待确认操作，确认後才會呼叫 OneBot。</p></div><button id="reloadProposals" class="btn">重新加载</button></div>
         <div class="grid">
-          <div class="card span-4"><h3>手動建立待确认操作</h3><div class="field"><label>動作</label><select id="opAction"><option value="mute">禁言</option><option value="unmute">解除禁言</option><option value="kick">踢出群聊</option><option value="whole_mute">全員禁言</option><option value="whole_unmute">解除全員禁言</option><option value="set_admin">設為管理員</option><option value="unset_admin">取消管理員</option></select></div><div class="field"><label>目標 QQ（全員操作可留空）</label><input id="opQq" inputmode="numeric"></div><div class="field"><label>禁言時長</label><input id="opDuration" value="10分"></div><button id="createProposal" class="btn primary">建立待确认操作，不直接執行</button><div id="opMessage" class="notice">高風險操作需要二次确认；設為／取消 QQ 群管理員只允許目前群主提出及确认。</div></div>
+          <div class="card span-4"><h3>手動建立待确认操作</h3><div class="field"><label>動作</label><select id="opAction"><option value="mute">禁言</option><option value="unmute">解除禁言</option><option value="kick">踢出群聊</option><option value="whole_mute">全員禁言</option><option value="whole_unmute">解除全員禁言</option><option value="set_admin">設為管理員</option><option value="unset_admin">取消管理員</option></select></div><div class="field"><label>目標 QQ（全員操作可留空）</label><input id="opQq" inputmode="numeric"></div><div class="field"><label>禁言時長</label><input id="opDuration" value="10分"></div><div class="field"><label>原因（可留空）</label><textarea id="opReason" placeholder="例如：持续骚扰群友；留空也可以建立待确认操作"></textarea></div><button id="createProposal" class="btn primary">建立待确认操作，不直接執行</button><div id="opMessage" class="notice">高風險操作需要二次确认；設為／取消 QQ 群管理員只允許目前群主提出及确认。</div></div>
           <div class="card span-8"><h3>提案紀錄</h3><div id="proposalList" class="list"><div class="empty">暂无提案</div></div></div>
         </div>
       </section>
@@ -9832,8 +10102,9 @@ function confirmModal(message,title,options){return customDialog(message,Object.
 function textModal(message,value,title,options){return customDialog(message,Object.assign({title:title||'编辑内容',input:true,value:value||''},options||{}))}
 function portalRoleLabel(role){return({developer:'开发者',owner:'群主',admin:'QQ 管理员',member:'群成员'})[String(role||'member')]||String(role||'群成员')}
 function applyRoleVisibility(){if(!session)return;var p=session.permissions||{},role=session.role||'member';document.querySelectorAll('#nav button').forEach(function(b){var v=b.dataset.view,show=true;if(role==='member'&&!['overview','schedules','models','memory','appeals','violationhistory','settingscenter'].includes(v))show=false;if(role==='admin'&&['quota','health'].includes(v))show=false;if(role==='owner'&&v==='quota')show=false;if(v==='quota'&&!p.developer)show=false;b.style.display=show?'':'none'});refreshSidebarGroupVisibility()}
-function ensureGroupSettingsExtras(){if($('welcomeEnabled')||!$('v-groups'))return;var grid=$('v-groups').querySelector('.grid');if(!grid)return;var card=document.createElement('div');card.className='card span-12';card.innerHTML='<h3>自动化与安全参数</h3><div class="grid"><div class="card span-6"><div class="notice">自动 QQ 群打卡会在台北时间 23:59 预热群列表，并于 00:00:00～00:01:59 快速重试；成功后立即停止，不受 AI 开关与白名单影响。</div><label class="switch"><input id="welcomeEnabled" type="checkbox">自动欢迎新人</label><label class="switch"><input id="joinAssistEnabled" type="checkbox">入群辅助（只建议同意，不拒绝）</label><label class="switch"><input id="ruleMonitorEnabled" type="checkbox">持续检查群成员是否违反群规</label><div id="ruleMonitorHint" class="notice">只有你在当前群是 QQ 管理员、群主或开发者时才开放。</div><div class="field"><label>欢迎词（支持 {at}、{qq} 与表情符号）</label><textarea id="welcomeText"></textarea></div></div><div class="card span-6"><div class="field"><label>同一对象处置冷却（秒，默认 0＝关闭）</label><input id="moderationCooldown" type="number" min="0"></div><div class="notice">处置冷却默认 0 秒且不设最大值；0 代表关闭。</div><div class="field"><label>新人观察期（天，0＝关闭）</label><input id="newcomerDays" type="number" min="0" max="30"></div></div></div>';grid.appendChild(card);ensureGroupBindingPanel();ensureDeveloperPermissionPanel()}
-function ensureGroupBindingPanel(){if($('groupBindingPanel')||!$('v-groups'))return;var grid=$('v-groups').querySelector('.grid');if(!grid)return;var card=document.createElement('div');card.id='groupBindingPanel';card.className='card span-12';card.innerHTML='<div class="section-head"><div><h3>多群绑定与总群引导</h3><p>自行指定总群和多个分群。分群别名会显示在右上角群组选择器；总群管理层可提醒尚未进入总群的分群成员。</p></div><button id="reloadGroupBinding" class="btn">重新加载</button></div><div class="grid"><div class="card span-5"><div class="field"><label>总群</label><select id="familyHeadGroup"></select></div><div class="field"><label>总群显示名称</label><input id="familyHeadAlias" placeholder="例如：小南大魔头总部"></div><div class="field"><label>总群加入链接（可选）</label><input id="familyJoinUrl" placeholder="QQ 生成的邀请链接；留空时引导页提供群号"></div><div class="field"><label>引导文字</label><textarea id="familyGuideText"></textarea></div><button id="saveGroupBinding" class="btn primary">保存多群绑定</button><div id="familyJoinPreview" class="notice">保存后会生成总群引导链接。</div></div><div class="card span-7"><h3>选择要绑定的分群并设置名称</h3><div id="familyGroupChoices" class="group-binding-list"></div><div class="field"><label>提醒哪个分群中尚未加入总群的成员</label><select id="familyGuideBranch"></select></div><button id="familyGuideMissing" class="btn">@ 未加入总群的群员</button><div id="familyBindingMessage" class="notice">提醒没有应用内人数上限；系统会按消息长度自动分批发送。</div></div></div>';grid.appendChild(card);$('reloadGroupBinding').onclick=loadGroupBindings;$('saveGroupBinding').onclick=saveGroupBindings;$('familyGuideMissing').onclick=guideMissingHeadMembers}
+function ensureGroupSettingsExtras(){if($('welcomeEnabled')||!$('v-groups'))return;var grid=$('v-groups').querySelector('.grid');if(!grid)return;var card=document.createElement('div');card.className='card span-12';card.innerHTML='<h3>自动化与安全参数</h3><div class="grid"><div class="card span-6"><div class="notice">自动 QQ 群打卡会在台北时间 23:59 预热群列表，并于 00:00:00～00:01:59 快速重试；成功后立即停止，不受 AI 开关与白名单影响。</div><label class="switch"><input id="welcomeEnabled" type="checkbox">自动欢迎新人</label><label class="switch"><input id="joinAssistEnabled" type="checkbox">入群申请辅助</label><label class="switch"><input id="joinAiApproveEnabled" type="checkbox">Gemma 高置信度审查后自动同意入群</label><label class="switch"><input id="ruleMonitorEnabled" type="checkbox">持续检查群成员是否违反群规</label><div id="ruleMonitorHint" class="notice">机器人不是群主或管理员时，群规监控完全停用且不建立记录。</div><div class="field"><label>欢迎词（支持 {at}、{qq} 与表情符号）</label><textarea id="welcomeText"></textarea></div></div><div class="card span-6"><div class="field"><label>同一对象处置冷却（秒，默认 0＝关闭）</label><input id="moderationCooldown" type="number" min="0"></div><div class="field"><label>新人观察期（天，0＝关闭）</label><input id="newcomerDays" type="number" min="0" max="30"></div><label class="switch"><input id="ruleMuteGuardEnabled" type="checkbox">违规禁言被管理提前解除时，按剩余时间重新禁言</label><div class="notice">此开关默认开启，只有群主或开发者可修改。误判时可在 Portal 复核，或发送「!无违规 @成员 补充说明」。目标和补充均必填。</div></div><div class="card span-12"><h3>刷屏判定（按群独立设置）</h3><div class="grid"><div class="field span-4"><label>时间窗（秒）</label><input id="ruleSpamWindow" type="number" min="5" max="3600"></div><div class="field span-4"><label>重复消息门槛（条）</label><input id="ruleSpamThreshold" type="number" min="2" max="50"></div><div class="field span-4"><label>撤回后保留条数</label><input id="ruleSpamKeep" type="number" min="0" max="49"></div></div><div class="notice">默认是 60 秒内第 4 条触发，执行撤回时保留最早 3 条，只撤回超出的部分。群规模型仍会结合实际上下文判断变体刷屏。</div></div></div>';grid.appendChild(card);ensureGroupBindingPanel();ensureDeveloperPermissionPanel()}
+
+function ensureGroupBindingPanel(){if($('groupBindingPanel')||!$('v-groups'))return;var grid=$('v-groups').querySelector('.grid');if(!grid)return;var card=document.createElement('div');card.id='groupBindingPanel';card.className='card span-12';card.innerHTML='<div class="section-head"><div><h3>多群绑定与总群引导</h3><p>设置总群、分群别名与用途备注；还可以指定私聊排程默认发送到哪个群。</p></div><button id="reloadGroupBinding" class="btn">重新加载</button></div><div class="grid"><div class="card span-5"><div class="field"><label>总群</label><select id="familyHeadGroup"></select></div><div class="field"><label>总群显示名称</label><input id="familyHeadAlias" placeholder="例如：小南大魔头总部"></div><div class="field"><label>总群加入链接（可选）</label><input id="familyJoinUrl" placeholder="QQ 生成的邀请链接；留空时引导页提供群号"></div><div class="field"><label>引导文字</label><textarea id="familyGuideText"></textarea></div><button id="saveGroupBinding" class="btn primary">保存多群绑定</button><div id="familyJoinPreview" class="notice">保存后会生成总群引导链接。</div><div class="field"><label>我的私聊排程默认群</label><select id="familyDefaultGroup"></select></div><button id="saveFamilyDefaultGroup" class="btn">保存默认群</button></div><div class="card span-7"><h3>选择要绑定的分群并设置名称与用途</h3><div id="familyGroupChoices" class="group-binding-list"></div><div class="field"><label>提醒哪个分群中尚未加入总群的成员</label><select id="familyGuideBranch"></select></div><button id="familyGuideMissing" class="btn">@ 未加入总群的群员</button><div id="familyBindingMessage" class="notice">分群备注仅供后台辨识，不会自动公开发送。</div></div></div>';grid.appendChild(card);$('reloadGroupBinding').onclick=loadGroupBindings;$('saveGroupBinding').onclick=saveGroupBindings;$('familyGuideMissing').onclick=guideMissingHeadMembers;$('saveFamilyDefaultGroup').onclick=saveFamilyDefaultGroup}
 
 function ensureR3Views(){
   var nav=$('nav');var container=document.querySelector('main .content')||document.querySelector('main')||$('app');if(!nav||!container)return;
@@ -9870,7 +10141,7 @@ function addProgressiveStep(){var last=progressiveSteps[progressiveSteps.length-
 function loadProgressivePolicy(p){p=p||{};$('rvProgressiveWindow').value=p.windowDays||7;$('rvMinorAction').value=p.minorAction||'remind';if(Array.isArray(p.steps)&&p.steps.length)progressiveSteps=p.steps.map(function(x){return{action:x.action||'warn',muteSeconds:Number(x.muteSeconds||0)}});else progressiveSteps=[{action:p.firstAction||'mute',muteSeconds:Number(p.firstMuteSeconds||60)},{action:p.secondAction||'mute',muteSeconds:Number(p.secondMuteSeconds||600)},{action:p.thirdAction||'kick',muteSeconds:Number(p.thirdMuteSeconds||0)}];renderProgressiveSteps()}
 function collectProgressivePolicy(){document.querySelectorAll('.rvStepAction').forEach(function(el){progressiveSteps[Number(el.dataset.i)].action=el.value});document.querySelectorAll('.rvStepMute').forEach(function(el){progressiveSteps[Number(el.dataset.i)].muteSeconds=Math.max(0,Number(el.value||0))});return{windowDays:$('rvProgressiveWindow').value,minorAction:$('rvMinorAction').value,steps:progressiveSteps.slice(0,20)}}
 async function loadRuleViolations(){var p=new URLSearchParams({member:$('rvMember').value||'',content:$('rvContent').value||'',type:$('rvType').value||''});var r=await api('/rule-violations?'+p.toString());if(!r.ok){$('rvList').innerHTML='<div class="empty">'+esc(r.message)+'</div>';return}$('rvStrictness').value=r.settings.strictness||'medium';$('rvProxyMode').value=r.settings.proxyMode||'record';$('rvMuteSeconds').value=r.settings.muteSeconds||600;$('rvKickAuth').checked=!!r.settings.kickAuthorized;loadProgressivePolicy(r.settings.progressivePolicy);var ownerControls=!!r.settings.canOwnerControls;$('rvKickAuth').disabled=!ownerControls;var autoOption=Array.from($('rvProxyMode').options).find(function(o){return o.value==='auto'});if(autoOption)autoOption.disabled=!ownerControls;ruleCategoryPolicies=(r.settings.categoryPolicies||[]).map(function(x){return{name:x.name||'',punishment:x.punishment||'manual',note:x.note||''}});renderRulePolicyRows();var selected=$('rvType').value;$('rvType').innerHTML='<option value="">全部违规项目</option>'+(r.violationTypes||[]).map(function(x){return'<option value="'+esc(x)+'">'+esc(x)+'</option>'}).join('');$('rvType').value=selected;var canFeedback=!!((session&&session.permissions||{}).aiAdmin||(session&&session.permissions||{}).nativeAdmin||(session&&session.permissions||{}).developer||['admin','owner'].includes((session&&session.role)||''));$('rvList').innerHTML=(r.items||[]).map(function(x){var links=(x.urlInspections||[]).map(function(u){return esc(u.hostname||u.url||'链接')+(u.title?'｜'+esc(u.title):'')+(u.ok===false?'（检查失败）':'')}).join('<br>');var verdict=x.humanVerdict==='violation'?'<span class="status ok">人工确认违规</span>':x.humanVerdict==='not_violation'?'<span class="status error">人工判定误判</span>':'';var actions=canFeedback&&!x.humanVerdict?'<div class="row" style="margin-top:12px"><button class="btn primary rvFeedback" data-id="'+esc(x.id)+'" data-verdict="violation">有违规</button><button class="btn danger rvFeedback" data-id="'+esc(x.id)+'" data-verdict="not_violation">无违规（撤销处罚）</button></div>':'';return '<div class="item"><div class="item-head"><div><div class="item-title">'+esc(x.senderName||x.userId)+'（'+esc(x.userId)+'）｜'+esc(x.violationType||'其他')+'</div><div class="item-meta">'+new Date(Number(x.createdAt||0)).toLocaleString()+'｜判断等级 '+esc(ruleStrictnessText(x.strictness||'medium'))+'｜影响程度 '+esc(ruleSeverityText(x.severity||'moderate'))+'｜置信度 '+esc(x.confidence)+'｜处理 '+esc(ruleActionText(x.actionTaken||'none'))+(x.strikeCounted?'｜已计入累计次数':'｜未计入累计次数')+'</div></div>'+verdict+'</div><div class="item-body">'+esc(x.content)+'<br><b>分类：</b>'+esc(x.violationType||'')+'<br><b>分类处罚：</b>'+esc(rulePolicyActionText(x.policyAction||'manual'))+(x.policyNote?'<br><b>分类备注：</b>'+esc(x.policyNote):'')+'<br><b>AI 原因：</b>'+esc(x.reason||'')+'<br><b>结果：</b>'+esc(x.actionResult||'')+(x.humanFeedbackNote?'<br><b>人工备注：</b>'+esc(x.humanFeedbackNote):'')+(x.reversalResult?'<br><b>撤销结果：</b>'+esc(x.reversalResult):'')+(links?'<br><b>链接检查：</b><br>'+links:'')+'</div>'+actions+'</div>'}).join('')||'<div class="empty">暂无违规记录</div>';$('rvList').querySelectorAll('.rvFeedback').forEach(function(btn){btn.onclick=function(){submitRuleFeedback(this.dataset.id,this.dataset.verdict)}})}
-async function submitRuleFeedback(id,verdict){var note=await textModal(verdict==='not_violation'?'请说明为什么这是误判。系统会尝试撤回机器人警告、解除禁言并移除累计次数。':'确认存在违规。可以填写分类调整、语境或判断备注。','',verdict==='not_violation'?'标记为误判':'确认违规',{placeholder:'请输入复核说明'});if(note===null)return;if(verdict==='not_violation'&&!(await confirmModal('确定标记为误判，并撤销目前可以自动撤销的处罚吗？','撤销错误处罚',{danger:true,okText:'确认撤销'})))return;var r=await api('/rule-violations/feedback','POST',{id:id,verdict:verdict,note:String(note||'').trim()});toast(r.message||'处理完成');if(r.ok)loadRuleViolations()}
+async function submitRuleFeedback(id,verdict){var note=await textModal(verdict==='not_violation'?'请说明为什么这是误判。系统会尝试撤回机器人警告、解除禁言并移除累计次数。复核说明必填。':'确认存在违规。可以填写分类调整、语境或判断备注。','',verdict==='not_violation'?'标记为误判':'确认违规',{placeholder:'请输入复核说明'});if(note===null)return;note=String(note||'').trim();if(verdict==='not_violation'&&!note){toast('标记为误判时必须填写复核说明');return}if(verdict==='not_violation'&&!(await confirmModal('确定标记为误判，并撤销目前可以自动撤销的处罚吗？','撤销错误处罚',{danger:true,okText:'确认撤销'})))return;var r=await api('/rule-violations/feedback','POST',{id:id,verdict:verdict,note:note});toast(r.message||'处理完成');if(r.ok)loadRuleViolations()}
 async function saveRuleViolationSettings(){var payload={strictness:$('rvStrictness').value,proxyMode:$('rvProxyMode').value,muteSeconds:$('rvMuteSeconds').value,categoryPolicies:collectRulePolicies(),progressivePolicy:collectProgressivePolicy()};if(!$('rvKickAuth').disabled)payload.kickAuthorized=$('rvKickAuth').checked;var r=await api('/rule-violations/settings','POST',payload);toast(r.message);if(r.ok)loadRuleViolations()}
 
 async function loadSettingsCenter(){var dev=session&&(session.permissions||{}).developer;if(!currentGroup){$('scMessage').textContent='请先从右上角选择需要维护的群组。';$('scList').innerHTML='<div class="empty">尚未选择群组</div>';return}$('scMessage').textContent='正在加载设置…';$('scList').innerHTML='<div class="empty">正在读取当前群设置</div>';try{var p=new URLSearchParams();p.set('targetQq',dev?($('scTargetQq').value||session.qq):session.qq);var r=await api('/settings-center?'+p.toString());if(!r.ok){$('scMessage').textContent=r.message||'加载失败';$('scList').innerHTML='<div class="empty">'+esc(r.message)+'</div>';return}if(!$('scTargetQq').value)$('scTargetQq').value=r.targetQq||session.qq;if($('scResolvedRole')){$('scResolvedRole').textContent='识别权限：'+portalRoleLabel(r.targetRole);$('scResolvedRole').className='status ok'}$('scMessage').textContent='已加载 '+(r.settings||[]).length+' 项设置；只会提交实际改动的项目。';$('scList').innerHTML='';(r.settings||[]).forEach(function(s){var d=document.createElement('div');d.className='item';var input;if(s.type==='boolean'){input=document.createElement('input');input.type='checkbox';input.checked=!!s.value}else if(s.type==='select'){input=document.createElement('select');(s.options||[]).forEach(function(v){var o=document.createElement('option');o.value=v;o.textContent=v;input.appendChild(o)});input.value=String(s.value)}else if(s.type==='textarea'){input=document.createElement('textarea');input.value=String(s.value==null?'':s.value)}else{input=document.createElement('input');input.type=s.type==='number'?'number':'text';input.value=String(s.value==null?'':s.value);if(s.min!=null)input.min=s.min;if(s.max!=null)input.max=s.max}input.dataset.settingKey=s.key;input.dataset.initialValue=input.type==='checkbox'?String(input.checked):String(input.value);var roleText=portalRoleLabel(s.minRole);if(s.key==='rule_proxy_mode')roleText+='（auto 仅群主）';d.innerHTML='<div class="item-title">'+esc(s.label)+'</div><div class="item-meta">最低权限：'+esc(roleText)+'｜对应指令：'+esc(s.command||'无')+'</div>';d.appendChild(input);$('scList').appendChild(d)});if(!$('scList').children.length)$('scList').innerHTML='<div class="empty">当前没有可维护的设置项目</div>'}catch(e){$('scMessage').textContent='加载设置时发生错误。';$('scList').innerHTML='<div class="empty">'+esc(String(e&&e.message||e))+'</div>'}}
@@ -9921,21 +10192,24 @@ function showLogin(){$('login').classList.remove('hidden');$('app').classList.ad
 function showApp(){$('login').classList.add('hidden');$('app').classList.remove('hidden')}
 async function loadPlatformFeatures(){var q=$('pfSearch')?$('pfSearch').value:'';var r=await api('/platform/features?q='+encodeURIComponent(q));if(!r.ok){$('pfList').innerHTML='<div class="empty">'+esc(r.message)+'</div>';return}$('pfSummary').textContent='全部功能 '+r.total+' 项；当前权限可见 '+r.visible+' 项。不同权限等级看到的内容不同，开发者可查看全部。';$('pfList').innerHTML='';(r.features||[]).forEach(function(f){var d=document.createElement('div');d.className='item';var sw=document.createElement('input');sw.type='checkbox';sw.checked=!!f.enabled;sw.onchange=async function(){var silent=$('pfAuditSilent')&&$('pfAuditSilent').checked;var x=await api('/platform/features','POST',{id:f.id,enabled:sw.checked,auditMode:silent?'silent':'log'});toast(x.message);if(!x.ok)sw.checked=!sw.checked};d.innerHTML='<div class="item-head"><div><div class="item-title">'+esc(f.id)+'｜'+esc(f.name)+'</div><div class="item-meta">类别：'+esc(f.category)+'｜实现方式：'+esc(f.mode)+'｜最低权限：'+esc(portalRoleLabel(f.minRole))+'</div></div></div>';d.appendChild(sw);$('pfList').appendChild(d)});if(!$('pfList').children.length)$('pfList').innerHTML='<div class="empty">没有符合当前权限或搜索条件的功能</div>'}
 function showView(name){document.querySelectorAll('.view').forEach(function(v){v.classList.remove('active')});document.querySelectorAll('#nav button').forEach(function(b){b.classList.toggle('active',b.dataset.view===name)});$('v-'+name).classList.add('active');$('pageTitle').textContent=titles[name]||name;closeMobileSidebar();if(name==='health'){loadHealth('quick');loadModelCheckCandidates()}if(name==='tasks')loadTasks();if(name==='schedules')loadSchedules();if(name==='moderation')loadProposals();if(name==='models')loadModels();if(name==='quota')loadQuota();if(name==='groups')loadGroupSettings();if(name==='memory')loadMemory();if(name==='logs')loadLogs();if(name==='aidecisions')loadAiDecisions();else if(name==='appeals')loadAppeals();else if(name==='appealreview')loadAppealReviews();if(name==='ruleviolations')loadRuleViolations();if(name==='violationhistory')loadViolationHistory();if(name==='settingscenter')loadSettingsCenter();if(name==='bilibili')loadBilibili();if(name==='platform')loadPlatformFeatures();if(name==='conversations')loadConversations()}
-async function loadGroupBindings(){if(!$('familyGroupChoices'))return;var r=await api('/group-bindings');if(!r.ok){$('familyBindingMessage').textContent=r.message||'加载失败';return}var groups=r.groups||[],family=r.family||null,head=(family&&family.headGroupId)||currentGroup||'';$('familyHeadGroup').innerHTML=groups.map(function(g){return '<option value="'+esc(g.groupId)+'">'+esc(g.displayName||g.groupName||g.groupId)+'（'+esc(g.groupId)+'）</option>'}).join('');$('familyHeadGroup').value=head;$('familyHeadAlias').value=family?String(family.headAlias||''):((groups.find(function(g){return g.groupId===head})||{}).displayName||'');$('familyJoinUrl').value=family?String(family.customJoinUrl||''):'';$('familyGuideText').value=family?String(family.guideText||''):'请加入总群，以便接收完整公告、群规与活动通知。';var branchMap=new Map((family&&family.branches||[]).map(function(x){return[String(x.groupId),x]}));$('familyGroupChoices').innerHTML=groups.filter(function(g){return g.groupId!==head}).map(function(g){var b=branchMap.get(String(g.groupId));return '<label class="group-binding-row"><input type="checkbox" data-family-group="'+esc(g.groupId)+'" '+(b?'checked':'')+'><span>'+esc(g.groupName||g.groupId)+'（'+esc(g.groupId)+'）</span><input data-family-alias="'+esc(g.groupId)+'" value="'+esc(b?b.alias:(g.displayName||g.groupName||g.groupId))+'" placeholder="显示名称"></label>'}).join('')||'<div class="empty">没有其他可绑定群组</div>';$('familyGuideBranch').innerHTML=(family&&family.branches||[]).map(function(b){return '<option value="'+esc(b.groupId)+'">'+esc(b.alias||b.groupId)+'（'+esc(b.groupId)+'）</option>'}).join('')||'<option value="">暂无分群</option>';$('saveGroupBinding').disabled=!r.canEdit;$('familyGuideMissing').disabled=!r.canEdit||!(family&&family.branches&&family.branches.length);$('familyJoinPreview').innerHTML=r.generatedJoinUrl?'总群引导链接：<a href="'+esc(r.generatedJoinUrl)+'" target="_blank" rel="noreferrer">'+esc(r.generatedJoinUrl)+'</a>':'保存后会生成总群引导链接。';$('familyBindingMessage').textContent=r.canEdit?'可编辑当前绑定。提醒会覆盖全部未进总群成员，并按长度自动分批。':'你可以查看绑定，但只有总群 QQ 管理员、群主或开发者可以修改与发送引导。';$('familyHeadGroup').onchange=function(){loadGroupBindingsForHeadSelection(groups,this.value)}}
-function loadGroupBindingsForHeadSelection(groups,head){$('familyGroupChoices').innerHTML=groups.filter(function(g){return g.groupId!==head}).map(function(g){return '<label class="group-binding-row"><input type="checkbox" data-family-group="'+esc(g.groupId)+'"><span>'+esc(g.groupName||g.groupId)+'（'+esc(g.groupId)+'）</span><input data-family-alias="'+esc(g.groupId)+'" value="'+esc(g.displayName||g.groupName||g.groupId)+'" placeholder="显示名称"></label>'}).join('')||'<div class="empty">没有其他可绑定群组</div>';var selected=groups.find(function(g){return g.groupId===head});$('familyHeadAlias').value=selected?(selected.displayName||selected.groupName||head):head}
-async function saveGroupBindings(){var head=$('familyHeadGroup').value;if(!head){toast('请选择总群');return}var branches=[];$('familyGroupChoices').querySelectorAll('[data-family-group]:checked').forEach(function(c){var id=c.dataset.familyGroup,a=$('familyGroupChoices').querySelector('[data-family-alias="'+id+'"]');branches.push({groupId:id,alias:a?a.value:id})});var r=await api('/group-bindings','POST',{headGroupId:head,headAlias:$('familyHeadAlias').value,customJoinUrl:$('familyJoinUrl').value,guideText:$('familyGuideText').value,branches:branches});toast(r.message||'完成');if(r.ok){await loadGroups();await loadGroupBindings()}}
+async function loadGroupBindings(){if(!$('familyGroupChoices'))return;var r=await api('/group-bindings');if(!r.ok){$('familyBindingMessage').textContent=r.message||'加载失败';return}var groups=r.groups||[],family=r.family||null,head=(family&&family.headGroupId)||currentGroup||'';$('familyHeadGroup').innerHTML=groups.map(function(g){return '<option value="'+esc(g.groupId)+'">'+esc(g.displayName||g.groupName||g.groupId)+'（'+esc(g.groupId)+'）</option>'}).join('');$('familyHeadGroup').value=head;$('familyDefaultGroup').innerHTML=groups.map(function(g){return '<option value="'+esc(g.groupId)+'">'+esc(g.displayName||g.groupName||g.groupId)+'（'+esc(g.groupId)+'）</option>'}).join('');$('familyDefaultGroup').value=r.defaultGroupId||currentGroup||head;$('familyHeadAlias').value=family?String(family.headAlias||''):((groups.find(function(g){return g.groupId===head})||{}).displayName||'');$('familyJoinUrl').value=family?String(family.customJoinUrl||''):'';$('familyGuideText').value=family?String(family.guideText||''):'请加入总群，以便接收完整公告、群规与活动通知。';var branchMap=new Map((family&&family.branches||[]).map(function(x){return[String(x.groupId),x]}));$('familyGroupChoices').innerHTML=groups.filter(function(g){return g.groupId!==head}).map(function(g){var b=branchMap.get(String(g.groupId));return '<div class="group-binding-row"><label><input type="checkbox" data-family-group="'+esc(g.groupId)+'" '+(b?'checked':'')+'> '+esc(g.groupName||g.groupId)+'（'+esc(g.groupId)+'）</label><input data-family-alias="'+esc(g.groupId)+'" value="'+esc(b?b.alias:(g.displayName||g.groupName||g.groupId))+'" placeholder="显示名称"><input data-family-note="'+esc(g.groupId)+'" value="'+esc(b?b.note:'')+'" placeholder="用途备注，例如：游戏分群／通知群"></div>'}).join('')||'<div class="empty">没有其他可绑定群组</div>';$('familyGuideBranch').innerHTML=(family&&family.branches||[]).map(function(b){return '<option value="'+esc(b.groupId)+'">'+esc(b.alias||b.groupId)+'（'+esc(b.groupId)+'）'+(b.note?'｜'+esc(b.note):'')+'</option>'}).join('')||'<option value="">暂无分群</option>';$('saveGroupBinding').disabled=!r.canEdit;$('familyGuideMissing').disabled=!r.canEdit||!(family&&family.branches&&family.branches.length);$('familyJoinPreview').innerHTML=r.generatedJoinUrl?'总群引导链接：<a href="'+esc(r.generatedJoinUrl)+'" target="_blank" rel="noreferrer">'+esc(r.generatedJoinUrl)+'</a>':'保存后会生成总群引导链接。';var roleText=family?(String(family.headGroupId)===String(currentGroup)?'当前群是总群':'当前群是分群，所属总群：'+String(family.headAlias||family.headGroupId)):'当前群尚未加入多群绑定。';$('familyBindingMessage').textContent=roleText+' '+(r.canEdit?'你可以编辑绑定并提醒未加入总群的成员。':'只有总群 QQ 管理员、群主或开发者可以修改绑定。');$('familyHeadGroup').onchange=function(){loadGroupBindingsForHeadSelection(groups,this.value)}}
+function loadGroupBindingsForHeadSelection(groups,head){$('familyGroupChoices').innerHTML=groups.filter(function(g){return g.groupId!==head}).map(function(g){return '<div class="group-binding-row"><label><input type="checkbox" data-family-group="'+esc(g.groupId)+'"> '+esc(g.groupName||g.groupId)+'（'+esc(g.groupId)+'）</label><input data-family-alias="'+esc(g.groupId)+'" value="'+esc(g.displayName||g.groupName||g.groupId)+'" placeholder="显示名称"><input data-family-note="'+esc(g.groupId)+'" value="" placeholder="用途备注"></div>'}).join('')||'<div class="empty">没有其他可绑定群组</div>';var selected=groups.find(function(g){return g.groupId===head});$('familyHeadAlias').value=selected?(selected.displayName||selected.groupName||head):head}
+async function saveGroupBindings(){var head=$('familyHeadGroup').value;if(!head){toast('请选择总群');return}var branches=[];$('familyGroupChoices').querySelectorAll('[data-family-group]:checked').forEach(function(c){var id=c.dataset.familyGroup,a=$('familyGroupChoices').querySelector('[data-family-alias="'+id+'"]'),n=$('familyGroupChoices').querySelector('[data-family-note="'+id+'"]');branches.push({groupId:id,alias:a?a.value:id,note:n?n.value:''})});var r=await api('/group-bindings','POST',{headGroupId:head,headAlias:$('familyHeadAlias').value,customJoinUrl:$('familyJoinUrl').value,guideText:$('familyGuideText').value,branches:branches});toast(r.message||'完成');if(r.ok){await loadGroups();await loadGroupBindings()}}
+async function saveFamilyDefaultGroup(){var groupId=$('familyDefaultGroup').value;if(!groupId){toast('请选择默认群');return}var r=await api('/group-bindings/default','POST',{groupId:groupId});toast(r.message||'保存失败')}
 async function guideMissingHeadMembers(){var branch=$('familyGuideBranch').value;if(!branch){toast('请选择分群');return}if(!(await confirmModal('系统会 @ 该分群中所有尚未加入总群的成员；人数不设应用内上限，并会自动分批发送。','提醒未加入总群成员')))return;var r=await api('/group-bindings/guide','POST',{branchGroupId:branch,text:$('familyGuideText').value});toast(r.message||'完成')}
 
 
 function scheduleStatusText(v){return({active:'执行中',pending_owner:'待开发者处理',pending_review:'审核中',cancelled:'已取消',completed:'已完成',paused:'已暂停',rejected:'已拒绝',deleted:'已删除'})[String(v||'')]||String(v||'未知')}
 function scheduleTypeText(x){if(!x)return'未知';if(x.type==='once')return'单次';if(x.type==='daily')return'每天 '+(x.timeOfDay||'');if(x.type==='weekly')return'每周'+('一二三四五六日'[Math.max(0,Number(x.weekday||1)-1)]||'')+' '+(x.timeOfDay||'');if(x.type==='monthly')return'每月 '+(x.dayOfMonth||'')+' 日 '+(x.timeOfDay||'');if(x.type==='interval')return'每隔 '+Math.max(1,Math.round(Number(x.intervalMs||0)/60000))+' 分钟';return String(x.type||'未知')}
 function scheduleTimeText(ms){return ms?new Date(Number(ms)).toLocaleString('zh-CN',{timeZone:'Asia/Taipei'}):'无下次执行时间'}
-function renderScheduleItem(x,mode){var action='';if(mode==='mine'&&x.enabled&&!['cancelled','completed','rejected'].includes(x.status))action='<button class="btn danger" data-schedule-cancel="'+esc(x.id)+'">取消排程</button>';if(mode==='review'&&['pending_review','pending_owner'].includes(x.status))action='<button class="btn primary" data-schedule-vote="approve" data-id="'+esc(x.id)+'">通过</button><button class="btn danger" data-schedule-vote="reject" data-id="'+esc(x.id)+'">拒绝</button>';if(mode==='root'&&['pending_owner','pending_review'].includes(x.status))action='<button class="btn primary" data-schedule-root="approve" data-id="'+esc(x.id)+'">开发者通过</button><button class="btn danger" data-schedule-root="reject" data-id="'+esc(x.id)+'">开发者拒绝</button><button class="btn" data-schedule-root="assign" data-id="'+esc(x.id)+'">指定审核人</button>';var meta='编号：'+esc(x.id)+'｜'+esc(scheduleStatusText(x.status))+'｜'+esc(scheduleTypeText(x))+'｜下次：'+esc(scheduleTimeText(x.nextRunAt));if(x.creatorName||x.creatorId)meta+='｜建立者：'+esc(x.creatorName||x.creatorId)+'（'+esc(x.creatorId||'')+'）';var extra='';if(x.lastRunAt)extra+='<br>上次执行：'+esc(new Date(x.lastRunAt).toLocaleString())+'｜结果：'+esc(x.lastResult||'成功');if(x.review&&x.review.reason)extra+='<br>Gemma 审查：'+esc(x.review.decision||'')+'｜'+esc(x.review.reason);return '<div class="item"><div class="item-head"><div><div class="item-title">'+esc(x.content||'无内容')+'</div><div class="item-meta">'+meta+'</div></div><span class="status">'+esc(scheduleStatusText(x.status))+'</span></div><div class="item-body">时区：'+esc(x.timezone||'Asia/Taipei')+extra+'</div>'+(action?'<div class="row" style="margin-top:10px">'+action+'</div>':'')+'</div>'}
+function renderScheduleItem(x,mode){var action='';if(mode==='mine'&&!['cancelled','completed','rejected','deleted'].includes(x.status)){action='<button class="btn" data-schedule-edit="'+esc(x.id)+'">编辑</button>';if(x.type!=='once'&&x.enabled&&x.status==='active')action+='<button class="btn" data-schedule-skip="'+esc(x.id)+'">暂停一次</button>';if(x.enabled||['pending_owner','pending_review','paused'].includes(x.status))action+='<button class="btn danger" data-schedule-cancel="'+esc(x.id)+'">取消排程</button>'}if(mode==='review'&&['pending_review','pending_owner'].includes(x.status))action='<button class="btn primary" data-schedule-vote="approve" data-id="'+esc(x.id)+'">通过</button><button class="btn danger" data-schedule-vote="reject" data-id="'+esc(x.id)+'">拒绝</button>';if(mode==='root'&&['pending_owner','pending_review'].includes(x.status))action='<button class="btn primary" data-schedule-root="approve" data-id="'+esc(x.id)+'">开发者通过</button><button class="btn danger" data-schedule-root="reject" data-id="'+esc(x.id)+'">开发者拒绝</button><button class="btn" data-schedule-root="assign" data-id="'+esc(x.id)+'">指定审核人</button>';var meta='编号：'+esc(x.id)+'｜'+esc(scheduleStatusText(x.status))+'｜'+esc(scheduleTypeText(x))+'｜下次：'+esc(scheduleTimeText(x.nextRunAt));if(x.creatorName||x.creatorId)meta+='｜建立者：'+esc(x.creatorName||x.creatorId)+'（'+esc(x.creatorId||'')+'）';var extra='';if(x.skipNextRun)extra+='<br><b>下一次执行将跳过，之后自动恢复。</b>';if(x.lastSkippedAt)extra+='<br>上次跳过：'+esc(new Date(x.lastSkippedAt).toLocaleString());if(x.lastRunAt)extra+='<br>上次执行：'+esc(new Date(x.lastRunAt).toLocaleString())+'｜结果：'+esc(x.lastResult||'成功');if(x.review&&x.review.reason)extra+='<br>Gemma 审查：'+esc(x.review.decision||'')+'｜'+esc(x.review.reason);return '<div class="item"><div class="item-head"><div><div class="item-title">'+esc(x.content||'无内容')+'</div><div class="item-meta">'+meta+'</div></div><span class="status">'+esc(scheduleStatusText(x.status))+'</span></div><div class="item-body">时区：'+esc(x.timezone||'Asia/Taipei')+extra+'</div>'+(action?'<div class="row" style="margin-top:10px">'+action+'</div>':'')+'</div>'}
 async function createScheduleFromPortal(){if(!currentGroup){toast('请先选择群组');return}var text=String($('scheduleText').value||'').trim();if(!text){toast('请输入排程内容');return}var r=await api('/schedules','POST',{schedule:text});toast(r.message||'完成');if(r.ok){$('scheduleText').value='';loadSchedules()}}
 async function cancelScheduleFromPortal(id){if(!(await confirmModal('取消后不会再执行，已发送的消息不会被撤回。','取消排程',{danger:true})))return;var r=await api('/schedules','DELETE',{id:id});toast(r.message||'完成');if(r.ok)loadSchedules()}
+async function editScheduleFromPortal(id){var r=await api('/schedules');if(!r.ok)return toast(r.message||'读取失败');var x=(r.schedules||[]).find(function(v){return String(v.id)===String(id)});if(!x)return toast('找不到该排程');var spec=await textModal('编辑排程时间与内容',x.scheduleSpec||x.content||'','编辑排程',{placeholder:'例如：每天 18:00 @123456789 提醒内容'});if(spec===null)return;if(!String(spec).trim())return toast('排程内容不能为空');var y=await api('/schedules/edit','POST',{id:id,schedule:String(spec).trim()});toast(y.message||'更新失败');if(y.ok)loadSchedules()}
+async function skipScheduleOnceFromPortal(id){if(!(await confirmModal('只跳过下一次执行，之后会自动恢复。','暂停一次')))return;var r=await api('/schedules/skip-once','POST',{id:id});toast(r.message||'操作失败');if(r.ok)loadSchedules()}
 async function voteScheduleFromPortal(id,vote){var r=await api('/review/schedule','POST',{id:id,vote:vote});toast(r.message||'审核完成');if(r.ok)loadSchedules()}
 async function rootScheduleAction(id,action){if(action==='assign'){var reviewers=await textModal('输入具有排程审核权限的 QQ，可用逗号或空格分隔。','', '指定排程审核人',{required:true,requiredMessage:'请输入审核人 QQ'});if(reviewers===null)return;var rule=await textModal('审核规则可输入 single、majority 或 all。','single','审核规则',{required:true});if(rule===null)return;var r=await api('/root/schedule-assign','POST',{id:id,reviewerIds:String(reviewers).split(/[,\s]+/).filter(Boolean),approvalRule:String(rule).trim()});toast(r.message||'已指派');if(r.ok)loadSchedules();return}var r=await api('/root/schedule-assign','POST',{id:id,developerDecision:action});toast(r.message||'处理完成');if(r.ok)loadSchedules()}
-async function loadSchedules(){if(!$('scheduleMine'))return;if(!currentGroup){$('scheduleMine').innerHTML='<div class="empty">请先选择群组。</div>';return}var r=await api('/schedules');if(!r.ok){$('scheduleMine').innerHTML='<div class="empty">'+esc(r.message)+'</div>';return}var cron=r.cron||{};$('scheduleCronState').textContent=cron.lastRunAt?'Cron 最近执行：'+new Date(Number(cron.lastRunAt)).toLocaleString()+(cron.recent?'（正常）':'（超过 5 分钟，可能未持续触发）'):(cron.message||'尚未记录 Cron 执行');$('scheduleMine').innerHTML=(r.schedules||[]).map(function(x){return renderScheduleItem(x,'mine')}).join('')||'<div class="empty">目前群没有你建立的排程</div>';$('scheduleMine').querySelectorAll('[data-schedule-cancel]').forEach(function(b){b.onclick=function(){cancelScheduleFromPortal(this.dataset.scheduleCancel)}});var canReview=!!(r.permissions&&r.permissions.canReview),dev=!!(r.permissions&&r.permissions.developer);$('scheduleReviewCard').classList.toggle('hidden',!canReview);$('scheduleRootCard').classList.toggle('hidden',!dev);if(canReview){var q=await api('/review/schedules');$('scheduleReviewList').innerHTML=q.ok?(q.schedules||[]).map(function(x){return renderScheduleItem(x,'review')}).join('')||'<div class="empty">没有分配给你的排程审核</div>':'<div class="empty">'+esc(q.message||'无法读取审核排程')+'</div>';$('scheduleReviewList').querySelectorAll('[data-schedule-vote]').forEach(function(b){b.onclick=function(){voteScheduleFromPortal(this.dataset.id,this.dataset.scheduleVote)}})}if(dev){var all=await api('/root/schedules');$('scheduleRootList').innerHTML=all.ok?(all.schedules||[]).map(function(x){return renderScheduleItem(x,'root')}).join('')||'<div class="empty">没有排程</div>':'<div class="empty">'+esc(all.message||'无法读取全部排程')+'</div>';$('scheduleRootList').querySelectorAll('[data-schedule-root]').forEach(function(b){b.onclick=function(){rootScheduleAction(this.dataset.id,this.dataset.scheduleRoot)}})}}
+async function loadSchedules(){if(!$('scheduleMine'))return;if(!currentGroup){$('scheduleMine').innerHTML='<div class="empty">请先选择群组。</div>';return}var r=await api('/schedules');if(!r.ok){$('scheduleMine').innerHTML='<div class="empty">'+esc(r.message)+'</div>';return}var cron=r.cron||{};$('scheduleCronState').textContent=cron.lastRunAt?'Cron 最近执行：'+new Date(Number(cron.lastRunAt)).toLocaleString()+(cron.recent?'（正常）':'（超过 5 分钟，可能未持续触发）'):(cron.message||'尚未记录 Cron 执行');$('scheduleMine').innerHTML=(r.schedules||[]).map(function(x){return renderScheduleItem(x,'mine')}).join('')||'<div class="empty">目前群没有你建立的排程</div>';$('scheduleMine').querySelectorAll('[data-schedule-cancel]').forEach(function(b){b.onclick=function(){cancelScheduleFromPortal(this.dataset.scheduleCancel)}});$('scheduleMine').querySelectorAll('[data-schedule-edit]').forEach(function(b){b.onclick=function(){editScheduleFromPortal(this.dataset.scheduleEdit)}});$('scheduleMine').querySelectorAll('[data-schedule-skip]').forEach(function(b){b.onclick=function(){skipScheduleOnceFromPortal(this.dataset.scheduleSkip)}});var canReview=!!(r.permissions&&r.permissions.canReview),dev=!!(r.permissions&&r.permissions.developer);$('scheduleReviewCard').classList.toggle('hidden',!canReview);$('scheduleRootCard').classList.toggle('hidden',!dev);if(canReview){var q=await api('/review/schedules');$('scheduleReviewList').innerHTML=q.ok?(q.schedules||[]).map(function(x){return renderScheduleItem(x,'review')}).join('')||'<div class="empty">没有分配给你的排程审核</div>':'<div class="empty">'+esc(q.message||'无法读取审核排程')+'</div>';$('scheduleReviewList').querySelectorAll('[data-schedule-vote]').forEach(function(b){b.onclick=function(){voteScheduleFromPortal(this.dataset.id,this.dataset.scheduleVote)}})}if(dev){var all=await api('/root/schedules');$('scheduleRootList').innerHTML=all.ok?(all.schedules||[]).map(function(x){return renderScheduleItem(x,'root')}).join('')||'<div class="empty">没有排程</div>':'<div class="empty">'+esc(all.message||'无法读取全部排程')+'</div>';$('scheduleRootList').querySelectorAll('[data-schedule-root]').forEach(function(b){b.onclick=function(){rootScheduleAction(this.dataset.id,this.dataset.scheduleRoot)}})}}
 
 async function loadGroups(){var r=await api('/groups');if(!r.ok){toast(r.message);return false}var sel=$('groupSelect'),groups=r.groups||[];sel.innerHTML='<option value="">选择群组</option>';groups.forEach(function(g){var o=document.createElement('option');o.value=g.groupId;o.textContent=(g.displayName||g.groupName||g.groupId)+' ('+g.groupId+')';sel.appendChild(o)});if(r.selectedGroupId){sel.value=r.selectedGroupId;currentGroup=r.selectedGroupId}else if(groups.length===1){sel.value=groups[0].groupId;await selectGroup(groups[0].groupId)}else if(!groups.length){toast('没有找到你已加入且启用 QQAI 的群组；仍可使用匿名申诉与个人功能。')}return true}
 async function selectGroup(id){if(!id){currentGroup='';setNativeAdminVisibility(false);return}var r=await api('/select-group','POST',{groupId:id});if(!r.ok){toast(r.message);return}currentGroup=id;session=r.session;$('identity').innerHTML='<b>'+esc(session.qq)+'</b><br><span style="color:#98a2b7">'+esc(session.role||'member')+'</span>';await refreshCapabilities();applyR3RoleVisibility();toast('群组已切换');refreshOverview()}
@@ -9945,10 +10219,10 @@ function renderHealth(r){$('healthSummary').innerHTML='<div class="card span-4">
 async function loadTasks(){var r=await api('/tasks');if(!r.ok){$('taskList').innerHTML='<div class="empty">'+esc(r.message)+'</div>';return}$('mActive').textContent=r.inFlightQuestions||0;$('mQueued').textContent=r.queuedQuestions||0;$('taskStats').innerHTML='<div class="card span-6"><div class="metric-label">執行中</div><div class="metric-value">'+esc(r.inFlightQuestions||0)+'</div></div><div class="card span-6"><div class="metric-label">等待中</div><div class="metric-value">'+esc(r.queuedQuestions||0)+'</div></div>';$('taskList').innerHTML='';(r.queues||[]).forEach(function(q){var d=document.createElement('div');d.className='item';d.innerHTML='<div class="item-head"><div><div class="item-title">群 '+esc(q.groupId)+'／QQ '+esc(q.userId)+'</div><div class="item-meta">執行中：'+esc(q.preview||'無')+'<br>排隊：'+esc((q.queued||[]).length)+' 題</div></div></div>';(q.queued||[]).forEach(function(x){var p=document.createElement('div');p.className='item-body';p.textContent='等待：'+x.preview;d.appendChild(p)});var b=document.createElement('button');b.className='btn danger';b.textContent='取消此使用者等待列';b.addEventListener('click',async function(){var x=await api('/tasks/cancel','POST',{groupId:q.groupId,userId:q.userId});toast(x.message||'完成');loadTasks()});d.appendChild(b);$('taskList').appendChild(d)});if(!$('taskList').children.length)$('taskList').innerHTML='<div class="empty">目前沒有執行中或等待中的問題</div>'}
 function proposalState(p){if(p.status==='pending'&&Date.now()>Number(p.expiresAt||0))return'expired';return p.status||'pending'}
 function proposalStatusText(v){return({pending:'待确认',executed:'已执行',failed:'失败',cancelled:'已取消',expired:'已过期'})[String(v||'')]||String(v||'未知')}
-async function loadProposals(){await refreshCapabilities();var r=await api('/moderation/proposals');if(!r.ok){$('proposalList').innerHTML='<div class="empty">'+esc(r.message)+'</div>';return}var pending=(r.proposals||[]).filter(function(p){return proposalState(p)==='pending'});$('mProposals').textContent=pending.length;$('proposalList').innerHTML='';(r.proposals||[]).forEach(function(p){var st=proposalState(p);var d=document.createElement('div');d.className='item';d.innerHTML='<div class="item-head"><div><div class="item-title">'+esc(p.id)+'｜'+esc(p.actionLabel||p.action)+'</div><div class="item-meta">提出者：'+esc((p.actorName||p.actorId)+(p.actorId&&String(p.actorName||'').indexOf(String(p.actorId))<0?'（QQ:'+p.actorId+'）':''))+'｜目标：'+esc(p.targetName||p.targetId||'全群')+'｜状态：'+esc(proposalStatusText(st))+'</div></div><span class="status '+(st==='executed'?'ok':st==='pending'?'warning':st==='failed'?'error':'')+'">'+esc(proposalStatusText(st))+'</span></div><div class="item-body">'+esc(p.sourceText||'')+'</div>';if(st==='pending'){var a=document.createElement('div');a.className='row';a.style.marginTop='10px';var yes=document.createElement('button');yes.className='btn primary';yes.textContent='确认并执行';yes.onclick=async function(){if(!(await confirmModal('确定执行 '+p.id+'？','确认待执行操作')))return;var x=await api('/moderation/confirm','POST',{id:p.id});toast(x.message);loadProposals()};var no=document.createElement('button');no.className='btn danger';no.textContent='取消';no.onclick=async function(){var x=await api('/moderation/cancel','POST',{id:p.id});toast(x.message);loadProposals()};a.append(yes,no);d.appendChild(a)}$('proposalList').appendChild(d)});if(!$('proposalList').children.length)$('proposalList').innerHTML='<div class="empty">暂无待确认操作</div>'}
+async function loadProposals(){await refreshCapabilities();var r=await api('/moderation/proposals');if(!r.ok){$('proposalList').innerHTML='<div class="empty">'+esc(r.message)+'</div>';return}var pending=(r.proposals||[]).filter(function(p){return proposalState(p)==='pending'});$('mProposals').textContent=pending.length;$('proposalList').innerHTML='';(r.proposals||[]).forEach(function(p){var st=proposalState(p);var d=document.createElement('div');d.className='item';d.innerHTML='<div class="item-head"><div><div class="item-title">'+esc(p.id)+'｜'+esc(p.actionLabel||p.action)+'</div><div class="item-meta">提出者：'+esc((p.actorName||p.actorId)+(p.actorId&&String(p.actorName||'').indexOf(String(p.actorId))<0?'（QQ:'+p.actorId+'）':''))+'｜目标：'+esc(p.targetName||p.targetId||'全群')+'｜状态：'+esc(proposalStatusText(st))+'</div></div><span class="status '+(st==='executed'?'ok':st==='pending'?'warning':st==='failed'?'error':'')+'">'+esc(proposalStatusText(st))+'</span></div><div class="item-body">'+esc(p.sourceText||'')+(p.reason?'<br><b>原因：</b>'+esc(p.reason):'')+(p.classifierReason?'<br><b>识别依据：</b>'+esc(p.classifierReason):'')+'</div>';if(st==='pending'){var a=document.createElement('div');a.className='row';a.style.marginTop='10px';var yes=document.createElement('button');yes.className='btn primary';yes.textContent='确认并执行';yes.onclick=async function(){if(!(await confirmModal('确定执行 '+p.id+'？','确认待执行操作')))return;var x=await api('/moderation/confirm','POST',{id:p.id});toast(x.message);loadProposals()};var no=document.createElement('button');no.className='btn danger';no.textContent='取消';no.onclick=async function(){var x=await api('/moderation/cancel','POST',{id:p.id});toast(x.message);loadProposals()};a.append(yes,no);d.appendChild(a)}$('proposalList').appendChild(d)});if(!$('proposalList').children.length)$('proposalList').innerHTML='<div class="empty">暂无待确认操作</div>'}
 async function loadModels(){var r=await api('/models');if(!r.ok){$('modelList').innerHTML='<div class="empty span-12">'+esc(r.message)+'</div>';return}$('modelList').innerHTML=(r.models||[]).map(function(m){return '<div class="card span-4"><div class="item-head"><div><div class="item-title">'+esc(m.id)+'</div><div class="item-meta">'+esc(m.provider)+'／'+esc(m.family)+(m.billing?'／'+esc(m.billing):'')+'</div></div><span class="status '+statusClass(m.status)+'">'+esc(m.status)+'</span></div><div style="margin-top:10px">'+(m.capabilities||[]).map(function(x){return'<span class="pill">'+esc(x)+'</span>'}).join('')+'</div></div>'}).join('')||'<div class="empty span-12">没有模型</div>';if(session&&(session.permissions||{}).developer){ensureModelRegistryPanel();loadRuntimeModels()}}
 async function loadQuota(){var r=await api('/root/quotas');if(!r.ok){$('quotaStatus').textContent=r.message;$('globalQuota').disabled=true;$('groupQuota').disabled=true;$('saveQuota').disabled=true;return}$('globalQuota').disabled=false;$('groupQuota').disabled=false;$('saveQuota').disabled=false;$('globalQuota').value=r.globalDailyCny||'';$('groupQuota').value=r.groupDailyCny||'';$('quotaStatus').textContent='全站：'+(r.globalDailyCny===''?'無限制':r.globalDailyCny+' CNY／日')+'；目前群：'+(r.groupDailyCny===''?'無限制':r.groupDailyCny+' CNY／日')}
-async function loadGroupSettings(){ensureGroupSettingsExtras();var r=await api('/admin/state');if(!r.ok){toast(r.message);return}$('groupAi').checked=!!r.ai_on;$('groupMemory').checked=!!r.memory_on;$('activeSpeaking').checked=!!r.active_speaking;$('interjectRate').value=r.interject_rate;$('groupPersona').value=r.persona||'';$('groupKeywords').value=(r.keywords||[]).join('\n');$('welcomeEnabled').checked=!!r.welcome_enabled;$('joinAssistEnabled').checked=!!r.join_assist_enabled;$('ruleMonitorEnabled').checked=!!r.rule_monitor_enabled;$('welcomeText').value=r.welcome_text||'欢迎 {at} 加入本群 🎉 请先阅读群规，有问题可以询问管理员。';$('moderationCooldown').value=Number(r.moderation_target_cooldown_seconds||0);$('newcomerDays').value=Number(r.newcomer_observation_days||0);var canSetCommon=!!(session&&((session.permissions||{}).aiAdmin||(session.permissions||{}).developer));$('joinAssistEnabled').disabled=!canSetCommon;var canMonitor=!!r.can_manage_rule_monitor;$('ruleMonitorEnabled').disabled=!canMonitor;$('ruleMonitorHint').textContent=canMonitor?'机器人与当前账号均具备所需权限，可以开关群规监控。':(r.rule_monitor_available===false?'机器人在当前群不是群主或管理员：群规监控完全停用，也不会建立记录。':'你在当前群不是 QQ 管理员或群主，暂不开放群规监控。');var owner=!!(session&&session.role==='owner'),ownerOrDeveloper=!!(session&&(owner||(session.permissions||{}).developer));['welcomeEnabled','welcomeText','moderationCooldown','newcomerDays'].forEach(function(id){$(id).disabled=!ownerOrDeveloper});setNativeAdminVisibility(!!r.bot_is_owner);ensureDeveloperPermissionPanel();await loadGroupBindings()}
+async function loadGroupSettings(){ensureGroupSettingsExtras();var r=await api('/admin/state');if(!r.ok){toast(r.message);return}$('groupAi').checked=!!r.ai_on;$('groupMemory').checked=!!r.memory_on;$('activeSpeaking').checked=!!r.active_speaking;$('interjectRate').value=r.interject_rate;$('groupPersona').value=r.persona||'';$('groupKeywords').value=(r.keywords||[]).join('\n');$('welcomeEnabled').checked=!!r.welcome_enabled;$('joinAssistEnabled').checked=!!r.join_assist_enabled;$('joinAiApproveEnabled').checked=!!r.join_ai_approve_enabled;$('ruleMonitorEnabled').checked=!!r.rule_monitor_enabled;$('ruleMuteGuardEnabled').checked=!!r.rule_mute_guard_enabled;$('ruleSpamWindow').value=Number(r.rule_spam_window_seconds||60);$('ruleSpamThreshold').value=Number(r.rule_spam_threshold||4);$('ruleSpamKeep').value=Number(r.rule_spam_keep_count||3);$('welcomeText').value=r.welcome_text||'欢迎 {at} 加入本群 🎉 请先阅读群规，有问题可以询问管理员。';$('moderationCooldown').value=Number(r.moderation_target_cooldown_seconds||0);$('newcomerDays').value=Number(r.newcomer_observation_days||0);var canSetCommon=!!(session&&((session.permissions||{}).aiAdmin||(session.permissions||{}).developer));$('joinAssistEnabled').disabled=!canSetCommon;$('joinAiApproveEnabled').disabled=!canSetCommon;['ruleSpamWindow','ruleSpamThreshold','ruleSpamKeep'].forEach(function(id){$(id).disabled=!canSetCommon});var canMonitor=!!r.can_manage_rule_monitor;$('ruleMonitorEnabled').disabled=!canMonitor;$('ruleMonitorHint').textContent=canMonitor?'机器人与当前账号均具备所需权限，可以开关群规监控。':(r.rule_monitor_available===false?'机器人在当前群不是群主或管理员：群规监控完全停用，也不会建立记录。':'你在当前群不是 QQ 管理员或群主，暂不开放群规监控。');var owner=!!(session&&session.role==='owner'),ownerOrDeveloper=!!(session&&(owner||(session.permissions||{}).developer));['welcomeEnabled','welcomeText','moderationCooldown','newcomerDays','ruleMuteGuardEnabled'].forEach(function(id){$(id).disabled=!ownerOrDeveloper});setNativeAdminVisibility(!!r.bot_is_owner);ensureDeveloperPermissionPanel();await loadGroupBindings()}
 async function loadMemory(){var r=await api('/memories');if(!r.ok){$('memoryList').innerHTML='<div class="empty">'+esc(r.message)+'</div>';return}var all=(r.private||[]).map(function(x){return Object.assign({},x,{_scope:'private'})}).concat((r.public||[]).map(function(x){return Object.assign({},x,{_scope:'public'})})).filter(function(x){return x.id&&String(x.text||'').trim()});$('memoryList').innerHTML='';all.forEach(function(m){var d=document.createElement('div');d.className='item';d.innerHTML='<div class="item-head"><div><div class="item-title">'+esc(m.text)+'</div><div class="item-meta">'+esc(m._scope)+'｜'+esc(m.at||m.updatedAt||'')+'</div></div></div>';var row=document.createElement('div');row.className='row';var edit=document.createElement('button');edit.className='btn';edit.textContent='编辑';edit.onclick=async function(){var text=await textModal('修改记忆内容',m.text,'编辑记忆');if(text===null)return;var x=await api('/memories','PUT',{scope:m._scope,id:m.id,text:text});toast(x.message|| (x.ok?'已更新':'更新失败'));loadMemory()};var del=document.createElement('button');del.className='btn danger';del.textContent='删除';del.onclick=async function(){if(!(await confirmModal('删除这条记忆？对应的长期记忆向量也会删除。','删除记忆')))return;var x=await api('/memories','DELETE',{scope:m._scope,id:m.id});toast(x.message||'已删除');loadMemory()};row.append(edit,del);d.appendChild(row);$('memoryList').appendChild(d)});if(!$('memoryList').children.length)$('memoryList').innerHTML='<div class="empty">暂无记忆</div>';ensureSearchTools()}
 function ruleSeverityText(v){return({minor:'轻微',moderate:'一般',severe:'严重',critical:'紧急'})[v]||v||'一般'}
 async function syncViolationGroups(){var r=await api('/appeals/eligible-groups'),sel=$('vhGroup');if(!sel||!r.ok)return;var selected=sel.value;sel.innerHTML='<option value="">全部可申诉群组</option>';(r.groups||[]).forEach(function(g){var o=document.createElement('option');o.value=g.groupId;o.textContent=(g.groupName||g.groupId)+'（'+g.groupId+'）'+(g.former?'｜前成员资格':'');sel.appendChild(o)});sel.value=selected||currentGroup||''}
@@ -9960,8 +10234,8 @@ async function submitAppeal(){var r=await api('/appeals/submit','POST',{groupId:
 function appealStatusText(v){return({pending_owner:'待处理',pending_review:'审核中',approved:'已通过',rejected:'已驳回'})[v]||v||'待处理'}
 async function loadAppealReviews(){if(!currentGroup){$('appealReviewList').innerHTML='<div class="empty">请先从右上角选择群组。</div>';return}var r=await api('/appeals/review?status='+encodeURIComponent($('appealReviewStatus').value||''));if(!r.ok){$('appealReviewList').innerHTML='<div class="empty">'+esc(r.message)+'</div>';return}$('appealReviewList').innerHTML=(r.appeals||[]).map(function(a){var buttons=a.canDecide&&['pending_owner','pending_review'].includes(a.status)?'<div class="row" style="margin-top:12px"><button class="btn primary appealDecision" data-id="'+esc(a.id)+'" data-decision="approve">通过申诉</button><button class="btn danger appealDecision" data-id="'+esc(a.id)+'" data-decision="reject">驳回申诉</button></div>':'';return '<div class="item"><div class="item-head"><div><div class="item-title">'+esc(a.anonymousLabel||a.id)+'｜'+esc(appealStatusText(a.status))+'</div><div class="item-meta">'+esc(a.identityText||'匿名申诉人')+'｜'+esc(a.type||'其他')+'｜'+esc(a.createdAt||'')+(a.applicantMembership==='former'?'｜前成员申诉':'')+'</div></div></div><div class="item-body">'+esc(a.content||'')+(a.evidenceMessageId?'<br><b>相关消息：</b>'+esc(a.evidenceMessageId):'')+(a.result?'<br><b>处理结果：</b>'+esc(a.result):'')+(a.againstAdmin?'<br><b>注意：</b>该案件涉及管理层，只能由群主或开发者决定。':'')+'</div>'+buttons+'</div>'}).join('')||'<div class="empty">当前群没有符合条件的申诉</div>';$('appealReviewList').querySelectorAll('.appealDecision').forEach(function(btn){btn.onclick=function(){decideAppeal(this.dataset.id,this.dataset.decision)}})}
 async function decideAppeal(id,decision){var note=await textModal(decision==='approve'?'请输入通过原因、需要撤销的处理或其他补救说明。':'请输入驳回原因，让申诉人知道为什么没有通过。','',decision==='approve'?'通过申诉':'驳回申诉',{placeholder:'建议填写清楚的处理说明'});if(note===null)return;if(!String(note).trim()&&!(await confirmModal('没有填写处理说明，仍要继续吗？','未填写说明')))return;var r=await api('/appeals/review','POST',{id:id,decision:decision,note:String(note||'').trim()});toast(r.message||'处理完成');if(r.ok)loadAppealReviews()}
-var logTypeLabels={moderation_proposed:'已建立待确认操作',moderation_cancelled:'已取消待确认操作',moderation_confirmed:'已确认并执行操作',moderation_failed:'待确认操作执行失败',group_operation:'群管理操作成功',group_operation_failed:'群管理操作失败',portal_ai_settings:'群组 AI 设置已保存',ai_settings:'AI 设置已修改',settings_center:'设置中心已修改',bilibili_connector:'B站监控设置已修改',bilibili_auto_monitor:'B站自动监控已修改',bilibili_auto_poll:'B站自动检查',permission:'程序权限已修改',platform_feature:'功能开关已修改',rule_monitor_setting:'群规监控设置已修改',rule_proxy_setting:'AI 群规代理设置已修改',rule_strictness_setting:'群规判断严格度已修改',rule_proxy_action:'AI 群规代理已处理',rule_proxy_portal_settings:'AI 群规代理设置已保存',rule_proxy_kick_auth:'AI 踢出授权已修改',join_reject_auth:'入群拒绝授权已修改',rate_limit_setting:'回复间隔已修改',rate_limit_portal:'回复间隔已保存',quota:'DeepSeek 额度已修改',context:'聊天上下文已处理',group_checkin:'群打卡任务',thinking_indicator_recall:'思考提示已撤回',thinking_indicator_residual:'思考提示残留',question_cancelled_by_recall:'问题因撤回取消',groupwork_requested:'已建立群务申请',groupwork_decided:'群务申请已处理',runtime_model_registry:'模型顺序已修改',platform_job:'系统任务',portal_login:'Control Center 登录',appeal_review:'申诉处理',violation_appeal_submitted:'违规记录申诉已提交',rule_violation_reversed:'群规误判已撤销',conversation_action:'对话记录操作',conversation_action_failed:'对话记录操作失败',single_model_health_check:'单一模型健康检查'};
-var logActionLabels={mute:'禁言',unmute:'解除禁言',kick:'踢出群聊',reject:'拒绝入群',whole_mute:'开启全员禁言',whole_unmute:'解除全员禁言',set_admin:'设为 QQ 管理员',unset_admin:'取消 QQ 管理员',recall:'撤回消息',create:'新增',update:'更新',enabled:'开启',disabled:'关闭',authorized:'已授权',revoked:'已取消授权',ai_on:'开启 AI',ai_off:'关闭 AI',checked:'检查完成',baseline_created:'建立初始状态',failed:'失败',cancelled:'已取消',commands_enabled:'设置型指令开关',interject_rate:'主动插话率',welcome_enabled:'自动欢迎新人'};
+var logTypeLabels={moderation_proposed:'已建立待确认操作',moderation_cancelled:'已取消待确认操作',moderation_confirmed:'已确认并执行操作',moderation_failed:'待确认操作执行失败',group_operation:'群管理操作成功',group_operation_failed:'群管理操作失败',portal_ai_settings:'群组 AI 设置已保存',ai_settings:'AI 设置已修改',settings_center:'设置中心已修改',bilibili_connector:'B站监控设置已修改',bilibili_auto_monitor:'B站自动监控已修改',bilibili_auto_poll:'B站自动检查',permission:'程序权限已修改',platform_feature:'功能开关已修改',rule_monitor_setting:'群规监控设置已修改',rule_proxy_setting:'AI 群规代理设置已修改',rule_strictness_setting:'群规判断严格度已修改',rule_proxy_action:'AI 群规代理已处理',rule_proxy_portal_settings:'AI 群规代理设置已保存',rule_proxy_kick_auth:'AI 踢出授权已修改',join_reject_auth:'入群拒绝授权已修改',rate_limit_setting:'回复间隔已修改',rate_limit_portal:'回复间隔已保存',quota:'DeepSeek 额度已修改',context:'聊天上下文已处理',group_checkin:'群打卡任务',thinking_indicator_recall:'思考提示已撤回',thinking_indicator_residual:'思考提示残留',question_cancelled_by_recall:'问题因撤回取消',groupwork_requested:'已建立群务申请',groupwork_decided:'群务申请已处理',runtime_model_registry:'模型顺序已修改',platform_job:'系统任务',portal_login:'Control Center 登录',appeal_review:'申诉处理',violation_appeal_submitted:'违规记录申诉已提交',rule_violation_reversed:'群规误判已撤销',conversation_action:'对话记录操作',conversation_action_failed:'对话记录操作失败',single_model_health_check:'单一模型健康检查',schedule_skipped_once:'重复排程已跳过一次',schedule_completed_deleted:'单次排程完成后已删除',rule_mute_guard_setting:'违规禁言保护设置已修改',rule_mute_guard_reapplied:'违规禁言已按剩余时间恢复',rule_mute_guard_failed:'违规禁言恢复失败',rule_mute_guard_skipped:'违规禁言保护未执行',join_request_ai_approved:'AI 已同意入群申请'};
+var logActionLabels={mute:'禁言',unmute:'解除禁言',kick:'踢出群聊',reject:'拒绝入群',whole_mute:'开启全员禁言',whole_unmute:'解除全员禁言',set_admin:'设为 QQ 管理员',unset_admin:'取消 QQ 管理员',recall:'撤回消息',create:'新增',update:'更新',enabled:'开启',disabled:'关闭',authorized:'已授权',revoked:'已取消授权',ai_on:'开启 AI',ai_off:'关闭 AI',checked:'检查完成',baseline_created:'建立初始状态',failed:'失败',cancelled:'已取消',commands_enabled:'设置型指令开关',interject_rate:'主动插话率',welcome_enabled:'自动欢迎新人',author_recall:'发送者撤回自己的消息',moderator_recall:'管理撤回成员消息',skip_once:'跳过下一次排程',completed_and_deleted:'完成后自动删除'};
 function logCategoryOf(a){var t=String(a.type||'');if(/moderation|group_operation|groupwork|rule_proxy_action/.test(t))return 'moderation';if(/settings|portal_ai|ai_settings|rule_monitor|rule_proxy_setting|rule_strictness|rate_limit|quota|runtime_model|platform_feature|context/.test(t))return 'settings';if(/bilibili/.test(t))return 'bilibili';if(/conversation_action/.test(t))return 'moderation';if(/appeal/.test(t))return 'appeal';if(/permission|auth/.test(t))return 'permission';if(/failed|error/.test(t)||a.error)return 'error';return 'system'}
 function logTone(a){var t=String(a.type||''),r=String(a.result||'');if(/failed|error/.test(t)||a.error||/失败|failed/i.test(r))return 'error';if(/cancelled/.test(t))return 'warn';if(/proposed|requested/.test(t))return 'info';return 'ok'}
 function logStatusText(a){var type=String(a.type||''),action=String(a.action||'');if(type==='appeal_review')return action==='approve'?'已通过':'已驳回';if(type==='violation_appeal_submitted')return '待处理';var tone=logTone(a);if(tone==='error')return '失败';if(type.includes('cancelled'))return '已取消';if(type.includes('proposed'))return '待确认';return '成功'}
@@ -9971,8 +10245,8 @@ function logRoleText(){if(!session)return '用户';var p=session.permissions||{}
 function logActorText(a){var id=String(a.actorId||'');if(!id)return '未知操作者';if(id==='system'||id.indexOf('system:')===0)return '系统自动任务';var role=portalRoleLabel(a.actorRole||(session&&id===String(session.qq)?session.role:'member'));var name=String(a.actorName||'').trim();return (name?name+'｜':'')+'QQ '+id+'｜'+role}
 function logTargetText(a){var id=String(a.targetId||'');if(!id)return '';if(a.targetKind==='appeal'||/^app_/i.test(id))return (a.targetName?String(a.targetName)+'｜':'')+'案件 '+id;var role=a.targetRole?'｜'+portalRoleLabel(a.targetRole):'';return a.targetName&&String(a.targetName)!==id?String(a.targetName)+'（QQ '+id+'）'+role:'QQ '+id+role}
 function logDurationText(v){var n=Number(v||0);if(!n)return '';if(n%3600===0)return n/3600+' 小时';if(n%60===0)return n/60+' 分钟';return n+' 秒'}
-function logHumanText(a){var actor=logActorText(a),action=logActionText(a),target=logTargetText(a),type=String(a.type||'');if(type==='moderation_proposed')return actor+'建立了“'+(action||'群管理')+'”待确认操作'+(target?'，目标是 '+target:'')+'。';if(type==='moderation_cancelled')return actor+'取消了“'+(action||'群管理')+'”操作，实际没有执行。';if(type==='moderation_confirmed')return actor+'确认并执行了“'+(action||'群管理')+'”操作'+(target?'，目标是 '+target:'')+'。';if(type==='moderation_failed')return actor+'确认了“'+(action||'群管理')+'”操作，但执行失败。';if(type==='group_operation')return actor+'执行了“'+(action||'群管理')+'”'+(target?'，目标是 '+target:'')+'，执行成功。';if(type==='group_operation_failed')return actor+'尝试执行“'+(action||'群管理')+'”'+(target?'，目标是 '+target:'')+'，但执行失败。';if(type==='portal_ai_settings')return actor+'保存了当前群的 AI 设置。';if(type==='settings_center')return actor+'修改了设置中心项目：'+(action||'设置')+'。';if(type==='rule_strictness_setting')return actor+'将群规判断严格度设为“'+ruleStrictnessText(action||'medium')+'”。';if(type==='bilibili_connector'||type==='bilibili_auto_monitor')return actor+(String(a.action)==='create'?'新增':'更新')+'了 B站自动监控。';if(type==='bilibili_auto_poll')return '系统完成了一次 B站自动检查。';if(type==='permission')return actor+'修改了 '+(target||'指定用户')+' 的程序权限：'+(action||'权限')+'。';if(type==='platform_feature')return actor+(a.enabled?'开启':'关闭')+'了功能：'+String(a.featureName||a.action||'未知功能')+'。';if(type==='appeal_review')return actor+(String(a.action)==='approve'?'通过了':'驳回了')+'申诉案件 '+(target||String(a.targetId||''))+'。';if(type==='violation_appeal_submitted')return actor+'提交了违规记录申诉 '+(target||String(a.targetId||''))+'。';if(type==='rule_violation_reversed')return actor+'复核后撤销了一条错误的群规判定及可撤销处罚。';if(type==='portal_ai_settings'||type==='ai_settings')return actor+'修改了 AI 设置。';return actor+'执行了“'+(action||logTypeLabels[type]||type||'操作')+'”。'}
-function logFacts(a){var rows=[],target=logTargetText(a),duration=logDurationText(a.durationSeconds),type=String(a.type||'');if(target)rows.push((type==='appeal_review'||type==='violation_appeal_submitted'?'案件：':'目标：')+target);if(Array.isArray(a.violationIds)&&a.violationIds.length)rows.push('违规记录：'+a.violationIds.join('、'));if(duration)rows.push('时长：'+duration);if(a.classifierReason)rows.push('识别原因：'+String(a.classifierReason));if(a.proposalId)rows.push('操作编号：'+String(a.proposalId));if(a.error)rows.push('错误：'+String(a.error));else if(a.result&&String(a.result)!=='cancelled')rows.push('结果：'+String(a.result));return rows}
+function logHumanText(a){var actor=logActorText(a),action=logActionText(a),target=logTargetText(a),type=String(a.type||'');if(type==='moderation_proposed')return actor+'建立了“'+(action||'群管理')+'”待确认操作'+(target?'，目标是 '+target:'')+'。';if(type==='moderation_cancelled')return actor+'取消了“'+(action||'群管理')+'”操作，实际没有执行。';if(type==='moderation_confirmed')return actor+'确认并执行了“'+(action||'群管理')+'”操作'+(target?'，目标是 '+target:'')+'。';if(type==='moderation_failed')return actor+'确认了“'+(action||'群管理')+'”操作，但执行失败。';if(type==='group_operation')return actor+'执行了“'+(action||'群管理')+'”'+(target?'，目标是 '+target:'')+'，执行成功。';if(type==='group_operation_failed')return actor+'尝试执行“'+(action||'群管理')+'”'+(target?'，目标是 '+target:'')+'，但执行失败。';if(type==='portal_ai_settings')return actor+'保存了当前群的 AI 设置。';if(type==='settings_center')return actor+'修改了设置中心项目：'+(action||'设置')+'。';if(type==='rule_strictness_setting')return actor+'将群规判断严格度设为“'+ruleStrictnessText(action||'medium')+'”。';if(type==='bilibili_connector'||type==='bilibili_auto_monitor')return actor+(String(a.action)==='create'?'新增':'更新')+'了 B站自动监控。';if(type==='bilibili_auto_poll')return '系统完成了一次 B站自动检查。';if(type==='permission')return actor+'修改了 '+(target||'指定用户')+' 的程序权限：'+(action||'权限')+'。';if(type==='platform_feature')return actor+(a.enabled?'开启':'关闭')+'了功能：'+String(a.featureName||a.action||'未知功能')+'。';if(type==='appeal_review')return actor+(String(a.action)==='approve'?'通过了':'驳回了')+'申诉案件 '+(target||String(a.targetId||''))+'。';if(type==='violation_appeal_submitted')return actor+'提交了违规记录申诉 '+(target||String(a.targetId||''))+'。';if(type==='rule_violation_reversed')return actor+'复核后撤销了一条错误的群规判定及可撤销处罚。';if(type==='question_cancelled_by_recall')return String(a.action)==='author_recall'?'发送者撤回了自己的提问，系统已取消尚未完成的 AI 处理。':'管理员撤回了该成员的提问，系统已取消尚未完成的 AI 处理。';if(type==='portal_ai_settings'||type==='ai_settings')return actor+'修改了 AI 设置。';return actor+'执行了“'+(action||logTypeLabels[type]||type||'操作')+'”。'}
+function logFacts(a){var rows=[],target=logTargetText(a),duration=logDurationText(a.durationSeconds),type=String(a.type||'');if(target)rows.push((type==='appeal_review'||type==='violation_appeal_submitted'?'案件：':'目标：')+target);if(Array.isArray(a.violationIds)&&a.violationIds.length)rows.push('违规记录：'+a.violationIds.join('、'));if(duration)rows.push('时长：'+duration);if(a.classifierReason)rows.push('识别原因：'+String(a.classifierReason));if(a.reason)rows.push('补充原因：'+String(a.reason));if(a.proposalId)rows.push('操作编号：'+String(a.proposalId));if(a.error)rows.push('错误：'+String(a.error));else if(a.result&&String(a.result)!=='cancelled')rows.push('结果：'+String(a.result));return rows}
 function renderReadableLog(a){var type=String(a.type||''),title=logTypeLabels[type]||logActionText(a)||'系统操作',tone=logTone(a),facts=logFacts(a);return '<div class="item log-card"><div class="log-card-head"><div><div class="log-card-title">'+esc(title)+'</div><div class="log-card-time">'+esc(logTimeText(a.at))+'｜'+esc(logActorText(a))+'</div></div><span class="log-badge '+tone+'">'+esc(logStatusText(a))+'</span></div><div class="log-human">'+esc(logHumanText(a))+'</div>'+(facts.length?'<div class="log-facts">'+facts.map(function(x){return '<span class="log-fact">'+esc(x)+'</span>'}).join('')+'</div>':'')+'<details class="log-details"><summary>查看技术详情</summary><pre>'+esc(JSON.stringify(a,null,2))+'</pre></details></div>'}
 async function loadLogs(){ensureSearchTools();var q=$('logSearch')?$('logSearch').value.trim():'',category=$('logCategory')?$('logCategory').value:'';var r=await api('/admin/logs?q='+encodeURIComponent(q));if(!r.ok){$('logList').innerHTML='<div class="empty">'+esc(r.message)+'</div>';if($('logSummary'))$('logSummary').textContent='加载失败：'+String(r.message||'未知错误');return}var all=r.logs||[],logs=category?all.filter(function(a){return logCategoryOf(a)===category}):all;if($('logSummary'))$('logSummary').textContent='共显示 '+logs.length+' 条日志'+(q?'，搜索内容：“'+q+'”':'')+(category?'，已按类别筛选':'')+'。时间已换算为台北时间。';$('logList').innerHTML=logs.map(renderReadableLog).join('')||'<div class="empty">没有符合条件的操作日志</div>'}
 async function refreshOverview(){var h=await api('/health?mode=quick');if(h.checks)renderHealth(h);var t=await api('/tasks');if(t.ok){$('mActive').textContent=t.inFlightQuestions||0;$('mQueued').textContent=t.queuedQuestions||0}var p=await api('/moderation/proposals');if(p.ok)$('mProposals').textContent=(p.proposals||[]).filter(function(x){return proposalState(x)==='pending'}).length;var doCheck=(h.checks||[]).find(function(c){return c.name==='Durable Object／NapCat'});var connected=doCheck&&doCheck.status==='ok';$('mNapcat').textContent=connected?'已连接':'未连接';$('mNapcatSub').textContent=doCheck?String(doCheck.latencyMs)+' ms':'暂无数据'}
@@ -9982,9 +10256,9 @@ async function verifyLoginCode(){var qq=String($('loginQq').value||'').replace(/
 $('sendCode').addEventListener('click',requestLoginCode);$('verifyCode').addEventListener('click',verifyLoginCode);$('loginQq').addEventListener('keydown',function(e){if(e.key==='Enter')requestLoginCode()});$('loginCode').addEventListener('keydown',function(e){if(e.key==='Enter')verifyLoginCode()});$('loginThemeToggle').addEventListener('click',toggleTheme);$('themeToggle').addEventListener('click',toggleTheme);updateThemeButtons();
 $('logout').onclick=async function(){await raw('/api/auth/logout','POST',{});location.reload()};$('menu').onclick=toggleMobileSidebar;if($('sidebarBackdrop'))$('sidebarBackdrop').onclick=closeMobileSidebar;document.addEventListener('keydown',function(e){if(e.key==='Escape')closeMobileSidebar()});$('refresh').onclick=function(){var active=document.querySelector('#nav button.active');showView(active?active.dataset.view:'overview')};$('groupSelect').onchange=function(){selectGroup(this.value)};document.querySelectorAll('#nav button').forEach(function(b){b.onclick=function(){showView(b.dataset.view)}});
 $('quickHealth').onclick=function(){loadHealth('quick')};$('fullHealth').onclick=function(){loadHealth('full')};$('runModelCheck').onclick=runSingleModelCheck;$('modelCheckProvider').onchange=function(){var p=this.value;$('modelCheckKeyPool').disabled=p!=='gemini'};$('reloadTasks').onclick=loadTasks;$('clearQueue').onclick=async function(){if(!currentGroup){toast('请先选择群组');return}if(!(await confirmModal('清空当前群所有等待中的问题？正在生成的问题不会被强制中断。','清空等待队列')))return;var r=await api('/tasks/clear','POST',{groupId:currentGroup});toast(r.message||'完成');loadTasks()};$('reloadProposals').onclick=loadProposals;
-$('createProposal').onclick=async function(){var r=await api('/ops/action','POST',{action:$('opAction').value,qq:$('opQq').value,duration:$('opDuration').value});$('opMessage').textContent=r.message;toast(r.message);if(r.ok)loadProposals()};
+$('createProposal').onclick=async function(){var r=await api('/ops/action','POST',{action:$('opAction').value,qq:$('opQq').value,duration:$('opDuration').value,reason:$('opReason').value});$('opMessage').textContent=r.message;toast(r.message);if(r.ok)loadProposals()};
 $('runSimulator').onclick=async function(){var r=await api('/simulator','POST',{text:$('simText').value,senderRole:$('simRole').value,mentionsBot:$('simMention').checked,hasImage:$('simImage').checked,currentlyBusy:$('simBusy').checked});if(!r.ok){toast(r.message);return}$('simDecision').textContent=r.decisions.final;$('simSteps').innerHTML=(r.steps||[]).map(function(x){return'<div class="step"><i></i><span>'+esc(x)+'</span></div>'}).join('')};$('reloadModels').onclick=loadModels;$('saveQuota').onclick=async function(){var r=await api('/root/quotas','POST',{globalDailyCny:$('globalQuota').value,groupDailyCny:$('groupQuota').value});toast(r.message);if(r.ok)loadQuota()};
-$('saveGroup').onclick=async function(){ensureGroupSettingsExtras();var payload={ai_on:$('groupAi').checked,memory_on:$('groupMemory').checked,active_speaking:$('activeSpeaking').checked,interject_rate:$('interjectRate').value,persona:$('groupPersona').value,keywords:$('groupKeywords').value};var perms=(session&&session.permissions)||{};if(perms.aiAdmin||perms.developer)payload.join_assist_enabled=$('joinAssistEnabled').checked;if(!$('ruleMonitorEnabled').disabled)payload.rule_monitor_enabled=$('ruleMonitorEnabled').checked;if(session&&(session.role==='owner'||perms.developer)){payload.welcome_enabled=$('welcomeEnabled').checked;payload.welcome_text=$('welcomeText').value;payload.moderation_target_cooldown_seconds=$('moderationCooldown').value;payload.newcomer_observation_days=$('newcomerDays').value}var r=await api('/admin/state','POST',payload);toast(r.message)};$('reloadMemory').onclick=loadMemory;$('addMemory').onclick=async function(){var r=await api('/memories','POST',{scope:$('memoryScope').value,text:$('memoryText').value});toast(r.message||'已新增');if(r.ok){$('memoryText').value='';loadMemory()}};$('reloadLogs').onclick=loadLogs;
+$('saveGroup').onclick=async function(){ensureGroupSettingsExtras();var payload={ai_on:$('groupAi').checked,memory_on:$('groupMemory').checked,active_speaking:$('activeSpeaking').checked,interject_rate:$('interjectRate').value,persona:$('groupPersona').value,keywords:$('groupKeywords').value};var perms=(session&&session.permissions)||{};if(perms.aiAdmin||perms.developer){payload.join_assist_enabled=$('joinAssistEnabled').checked;payload.join_ai_approve_enabled=$('joinAiApproveEnabled').checked;payload.rule_spam_window_seconds=$('ruleSpamWindow').value;payload.rule_spam_threshold=$('ruleSpamThreshold').value;payload.rule_spam_keep_count=$('ruleSpamKeep').value;}if(!$('ruleMonitorEnabled').disabled)payload.rule_monitor_enabled=$('ruleMonitorEnabled').checked;if(session&&(session.role==='owner'||perms.developer)){payload.welcome_enabled=$('welcomeEnabled').checked;payload.welcome_text=$('welcomeText').value;payload.moderation_target_cooldown_seconds=$('moderationCooldown').value;payload.newcomer_observation_days=$('newcomerDays').value;payload.rule_mute_guard_enabled=$('ruleMuteGuardEnabled').checked}var r=await api('/admin/state','POST',payload);toast(r.message)};$('reloadMemory').onclick=loadMemory;$('addMemory').onclick=async function(){var r=await api('/memories','POST',{scope:$('memoryScope').value,text:$('memoryText').value});toast(r.message||'已新增');if(r.ok){$('memoryText').value='';loadMemory()}};$('reloadLogs').onclick=loadLogs;
 boot();
 })();
 </script>
@@ -10374,6 +10648,10 @@ export class OneBotHub {
       pending.resolve(body); return;
     }
     if (!body) return;
+    if (this.isRuleMuteLiftNotice(body)) {
+      await this.handleRuleMuteLiftNotice(body);
+      return;
+    }
     if (this.isQuestionRecallNotice(body)) {
       await this.handleQuestionRecall(body, request.url);
       return;
@@ -10431,6 +10709,48 @@ export class OneBotHub {
       ...extra
     };
     await this.state.storage.put(key, next);
+  }
+
+  isRuleMuteLiftNotice(body) {
+    if (body?.post_type !== "notice" || String(body.notice_type || "") !== "group_ban") return false;
+    const subType = String(body.sub_type || "").toLowerCase();
+    return Boolean(body.group_id && body.user_id) && (subType === "lift_ban" || subType === "unban" || Number(body.duration || 0) === 0);
+  }
+
+  async handleRuleMuteLiftNotice(body) {
+    const groupId = String(body.group_id || "");
+    const userId = String(body.user_id || "");
+    const operatorId = String(body.operator_id || "");
+    const selfId = String(body.self_id || "");
+    if (!groupId || !userId) return;
+    const key = `rule_mute_enforcement:${groupId}:${userId}`;
+    const enforcement = await readJson(this.env, key, null);
+    if (!enforcement?.active) return;
+    const now = Date.now();
+    const remainingSeconds = Math.ceil((Number(enforcement.expiresAt || 0) - now) / 1000);
+    if (remainingSeconds <= 0) { await dbDel(this.env, key); return; }
+    // 合法误判复核会先删除 enforcement；若记录仍存在，即使解禁动作由 Bot 代执行，也要按剩余时间恢复。
+    if (await dbGet(this.env, `rule_mute_guard_enabled:${groupId}`) === "false") return;
+    const botState = await getBotGroupRole(this.env, groupId).catch(() => ({ role: "unknown" }));
+    if (!botCanRunRuleMonitor(botState)) {
+      await writeSystemAudit(this.env, { type: "rule_mute_guard_skipped", groupId, actorId: operatorId || "unknown", targetId: userId, action: "bot_not_admin", remainingSeconds, violationId: enforcement.violationId }).catch(() => {});
+      return;
+    }
+    if (now - Number(enforcement.lastReappliedAt || 0) < 5000) return;
+    enforcement.lastReappliedAt = now;
+    enforcement.lastUnmutedBy = operatorId;
+    enforcement.lastRemainingSeconds = remainingSeconds;
+    await dbPut(this.env, key, JSON.stringify(enforcement));
+    try {
+      await this.sendAction({ action: "set_group_ban", params: { group_id: numericId(groupId), user_id: numericId(userId), duration: Math.max(1, Math.min(30 * 24 * 3600, remainingSeconds)) } }, 15000);
+      const message = [];
+      if (operatorId && operatorId !== selfId) message.push({ type: "at", data: { qq: operatorId } }, { type: "text", data: { text: " " } });
+      message.push({ type: "text", data: { text: `检测到群规禁言被提前解除，已按剩余 ${remainingSeconds} 秒重新禁言 QQ:${userId}。若确认属于误判，请到 Portal 的历史违规记录复核，或发送「!无违规 @${userId} 补充说明」；目标和补充说明都必须填写。` } });
+      await this.sendAction({ action: "send_group_msg", params: { group_id: numericId(groupId), message, auto_escape: false } }, 15000).catch(() => null);
+      await writeSystemAudit(this.env, { type: "rule_mute_guard_reapplied", groupId, actorId: operatorId || "unknown", targetId: userId, action: "reapply_remaining_mute", remainingSeconds, violationId: enforcement.violationId });
+    } catch (error) {
+      await writeSystemAudit(this.env, { type: "rule_mute_guard_failed", groupId, actorId: operatorId || "unknown", targetId: userId, action: "reapply_failed", remainingSeconds, violationId: enforcement.violationId, error: String(error?.message || error) }).catch(() => {});
+    }
   }
 
   isQuestionRecallNotice(body) {
