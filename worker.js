@@ -1,4 +1,4 @@
-const VERSION = "1.2.17";
+const VERSION = "1.2.22";
 const QQAI_V1_COMPLETE_MARKER = "QQAI_V1_COMPLETE_MARKER";
 const QQAI_V1_R3_MARKER = "QQAI_V1_R3_MARKER";
 const BUILD_DATE = "2026-07-23";
@@ -22,6 +22,10 @@ const DEFAULTS = Object.freeze({
   ruleProgressiveSecondMuteSeconds: 600,
   userQueueMax: 5,
   userQueueTtlMs: 10 * 60 * 1000,
+  queueRecoveryAlarmMs: 30 * 1000,
+  queueRecoveryBatchSize: 5,
+  autoCheckinRetryIntervalMs: 1000,
+  autoCheckinConcurrency: 12,
   moderationProposalTtlMs: 2 * 60 * 1000,
   modelCostPolicy: "free_first",
   deepseekEmergencyFallback: false,
@@ -478,6 +482,70 @@ async function dbDel(env, key) {
   }
 }
 
+async function dbDeletePrefix(env, prefix) {
+  if (!env?.DB || !prefix) return;
+  try {
+    await env.DB.prepare("DELETE FROM kv_store WHERE substr(key, 1, ?) = ?").bind(prefix.length, prefix).run();
+  } catch (error) {
+    console.error(`批量删除 DB 失败 [${prefix}]:`, error);
+  }
+}
+
+function parseStoredHistory(raw) {
+  if (!raw) return [];
+  try {
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+async function readChatHistory(env, sessionKey, limit = DEFAULTS.conversationHistoryItems) {
+  const boundedLimit = Math.max(2, Math.min(200, Number(limit || DEFAULTS.conversationHistoryItems)));
+  const legacy = parseStoredHistory(await dbGet(env, sessionKey));
+  if (!String(sessionKey).startsWith("chat:group:") || !env?.DB) return legacy.slice(-boundedLimit);
+  try {
+    const turnLimit = Math.max(1, Math.ceil(boundedLimit / 2) + 4);
+    const turnPrefix = `chat_turn:${sessionKey}:`;
+    const rows = await env.DB.prepare("SELECT value FROM kv_store WHERE substr(key, 1, ?) = ? ORDER BY key DESC LIMIT ?")
+      .bind(turnPrefix.length, turnPrefix, turnLimit)
+      .all();
+    const recent = (rows.results || []).reverse().flatMap(row => {
+      try {
+        const parsed = JSON.parse(row.value);
+        return Array.isArray(parsed?.items) ? parsed.items : [];
+      } catch {
+        return [];
+      }
+    });
+    return [...legacy, ...recent].slice(-boundedLimit);
+  } catch (error) {
+    console.error(`读取并发群聊历史失败 [${sessionKey}]:`, error);
+    return legacy.slice(-boundedLimit);
+  }
+}
+
+async function appendChatHistoryTurn(env, sessionKey, items, metadata = {}) {
+  const cleanItems = Array.isArray(items) ? items.filter(Boolean) : [];
+  if (!cleanItems.length) return;
+  if (!String(sessionKey).startsWith("chat:group:") || !env?.DB) {
+    const current = await readChatHistory(env, sessionKey, DEFAULTS.conversationHistoryItems);
+    await dbPut(env, sessionKey, JSON.stringify([...current, ...cleanItems].slice(-DEFAULTS.conversationHistoryItems)));
+    return;
+  }
+  const createdAt = Math.max(0, Number(metadata.createdAt || Date.now()));
+  const sourceMessageId = String(metadata.messageId || "").replace(/\D/g, "").padStart(20, "0");
+  const key = `chat_turn:${sessionKey}:${String(createdAt).padStart(13, "0")}:${sourceMessageId}:${crypto.randomUUID()}`;
+  await dbPut(env, key, JSON.stringify({ items: cleanItems, createdAt, messageId: String(metadata.messageId || ""), userId: String(metadata.userId || "") }));
+}
+
+async function clearChatSessionHistory(env, sessionKey) {
+  await dbDel(env, sessionKey);
+  await dbDel(env, `context_summary:${sessionKey}`);
+  if (String(sessionKey).startsWith("chat:group:")) await dbDeletePrefix(env, `chat_turn:${sessionKey}:`);
+}
+
 
 function remainingTimeout(deadlineAt, capMs, floorMs = 800) {
   const remaining = Math.max(0, Number(deadlineAt || 0) - Date.now());
@@ -808,15 +876,11 @@ export default {
       // ==========================================
       let history = [];
       try {
-        // 這裡因為上面已經定義了 sessionKey，所以絕對不會再報 defined 錯誤！
-        const historyData = await dbGet(env, sessionKey);
-        if (historyData) {
-          history = JSON.parse(historyData);
-          console.log(`🧠 成功加载歷史記憶，當前記憶條數: ${history.length}`);
-        }
+        history = await readChatHistory(env, sessionKey, DEFAULTS.conversationHistoryItems);
+        if (history.length) console.log(`🧠 成功加载历史记忆，当前记忆条数: ${history.length}`);
       } catch (historyError) {
-        console.error("讀取 D1 歷史紀錄失敗:", historyError);
-        history = []; 
+        console.error("读取 D1 历史记录失败:", historyError);
+        history = [];
       }
       
       // 精準提取群組身分
@@ -848,6 +912,7 @@ export default {
       let forwardIds = [];
       let forwardSnapshots = [];
       let forwardContext = "";
+      let literalPseudoElementContext = "";
       let mentionedQqs = [];
       let replyMessageId = body.message_id ? body.message_id.toString() : "";
       let quotedMessageId = "";
@@ -899,7 +964,7 @@ export default {
       }
       forwardIds = [...new Set(forwardIds.filter(Boolean))].slice(0, AI_MEDIA_LIMITS.forwardBundles);
       fileAttachments = fileAttachments.filter(item => item && (item.name || item.file || item.url)).slice(0, 20);
-      mentionedQqs = [...new Set(mentionedQqs.filter(Boolean).map(String))];
+      mentionedQqs = [...new Set([...mentionedQqs, ...eventMentionedQqs(body)].filter(Boolean).map(String))];
       if (isGroup && !isSelfAccount) {
         const optOut = stripGroupAiOptOutPrefix(userMessage);
         aiReplyOptOut = optOut.optedOut;
@@ -918,6 +983,13 @@ export default {
         .replace(/\[CQ:file,[^\]]+\]/g, '【系统：此位置有一个文件附件】')
         .replace(/\[CQ:forward,[^\]]+\]/g, '【系统：此位置有一组转发消息】')
         .trim();
+
+      // QQ 群友可以手动输入“[聊天记录]”“[图片]”等文字。只有 OneBot 的结构化
+      // forward/image/record/video/file 消息段才代表真实附件，普通方括号文字不得误判。
+      const literalPseudoElements = detectLiteralPseudoElementLabels(cleanMessage);
+      if (literalPseudoElements.length) {
+        literalPseudoElementContext = `解析说明：${literalPseudoElements.join("、")} 是用户手动输入的普通文字，不是真实聊天记录、合并转发或附件。当前消息${forwardIds.length ? "另有真实合并转发消息段" : "没有检测到真实合并转发消息段"}。不得声称已查看任何聊天记录，也不要输出“[不支持的元素类型]”之类占位文字。`;
+      }
 
       // 同 QQ 模式：优先识别人工控制前缀。NapCat 标准上报为 message_sent，
       // 但部分版本／连接配置会把自身消息上报成 message；只有 //、??、!、！前缀才兼容放行，
@@ -1093,7 +1165,7 @@ export default {
       const quoteContext = quotedMessageId
         ? `当前消息引用了 ${quotedMessage?.senderName || '未知成员'}（QQ:${quotedMessage?.senderId || '未知'}，来源:${quotedMessage?.source || 'unknown'}）的消息：${quotedMessageText ? `「${quotedMessageText}」` : '未能取得正文'}。用户当前正文与引用内容必须分开理解。${repliedToOwnerHuman ? '这是同 QQ 模式下的人工消息，不是机器人回答。' : ''}`
         : "";
-      const relationContext = [quoteContext, mentionContext].filter(Boolean).join("\n");
+      const relationContext = [quoteContext, mentionContext, literalPseudoElementContext].filter(Boolean).join("\n");
       const aiDecisionBase = {
         groupId: currentGroupId,
         userId,
@@ -1296,18 +1368,25 @@ export default {
         await writeSystemAudit(env, { type: "ai_settings", groupId: currentGroupId, actorId: userId, action: "ai_on" });
         return jsonReply(`${atSender}已开启本群 AI。此通知由系统直接发送。`);
       }
-      if (/^[!！](?:群打卡|群签到|群簽到)$/i.test(cleanMessage)) {
-        if (!ownerOrDeveloperSetting) return jsonReply(`${atSender}只有群主或开发者可以手动触发群打卡。`);
-        const checkin = await performGroupCheckin(env, currentGroupId, userId);
-        return jsonReply(`${atSender}${checkin.ok ? "群打卡完成。" : "群打卡失败：" + checkin.error}`);
+      const manualCheckinCommand = cleanMessage.match(/^[!！](?:群打卡|群签到|群簽到)(?:\s+(全部|all|\d{5,}))?$/i);
+      if (manualCheckinCommand) {
+        if (isGroup) return jsonReply(`${atSender}群打卡指令仅限私讯使用，群聊中不会执行。请私讯机器人发送「!群打卡」或「!群打卡 群号」。`);
+        const botCommandActor = isSelfAccount || (botId && String(userId) === String(botId));
+        if (!isDeveloper && !botCommandActor) return jsonReply(`只有开发者或机器人账号可以在私讯中执行群打卡。`);
+        const requestedTarget = String(manualCheckinCommand[1] || "全部").toLowerCase();
+        const targetGroupId = /^\d{5,}$/.test(requestedTarget) ? requestedTarget : "";
+        const result = await performManualGroupCheckins(env, { targetGroupId, actorId: botCommandActor ? `bot:${botId || userId}` : userId });
+        if (!result.total) return jsonReply(targetGroupId ? `未找到群 ${targetGroupId}，或机器人不在该群。` : `无法取得机器人所在群列表。`);
+        const failedPreview = result.failed.slice(0, 5).map(item => `${item.groupId}：${item.error}`).join("；");
+        return jsonReply(`群打卡已执行：成功 ${result.success}/${result.total}，失败 ${result.failed.length}${failedPreview ? `。失败示例：${failedPreview}` : ""}`);
       }
       let settingMatch = cleanMessage.match(/^[!！](?:自动打卡|自動打卡)(?:\s*(?:开|開|关|關))?$/i);
       if (settingMatch) {
-        return jsonReply(`${atSender}自动 QQ 群打卡固定在台北时间 00:00:00 执行，不受 AI 开关或 AI 白名单影响，无法关闭或改时。`);
+        return jsonReply(`${atSender}自动 QQ 群打卡会在台北时间 23:59 预热群列表，并从 00:00:00 到 00:01:59 快速重试；成功后立即停止，不受 AI 开关或白名单影响。`);
       }
       settingMatch = cleanMessage.match(/^[!！](?:打卡时间|打卡時間)(?:\s+[^\s]+)?$/i);
       if (settingMatch) {
-        return jsonReply(`${atSender}自动 QQ 群打卡固定时间为台北时间 00:00:00。`);
+        return jsonReply(`${atSender}自动群打卡窗口：台北时间 23:59 预热，00:00:00～00:01:59 快速重试。`);
       }
       settingMatch = cleanMessage.match(/^[!！](?:自动欢迎|自動歡迎)\s*(开|開|关|關)$/i);
       if (settingMatch) {
@@ -1708,8 +1787,7 @@ export default {
 
       if (/^[!！](?:清空群上下文|清除群上下文)$/i.test(cleanMessage)) {
         if (!hasAdminAuth) return jsonReply(`${atSender}你没有 AI 管理权限。`);
-        await dbDel(env, `chat:group:${currentGroupId}`);
-        await dbDel(env, `context_summary:chat:group:${currentGroupId}`);
+        await clearChatSessionHistory(env, `chat:group:${currentGroupId}`);
         await writeSystemAudit(env, { type: 'context', groupId: currentGroupId, actorId: userId, action: 'clear_group_context' });
         return jsonReply(`${atSender}已清空本群短期上下文与 DeepSeek 摘要；Vectorize 历史向量保留。`);
       }
@@ -2422,7 +2500,7 @@ export default {
       }
 
       // 群內衝突分級處理：先勸阻；持續無效時只私訊開發者，不擅自私訊其他管理。
-      if (isGroup && !isCommandMessage && !isSelfAccount) {
+      if (isGroup && !isCommandMessage && !isSelfAccount && body.__qqai_suppress_optional_ai !== true) {
         const conflictResult = await processConflictSignal(env, {
           groupId: currentGroupId, userId, senderName: senderCard, text: cleanMessage, botId
         });
@@ -2555,7 +2633,9 @@ ${parsedMemos.slice(-30).map((m, i) => `${i + 1}. ${m.text}`).join('\n')}
       let interjectJudgement = "";
       const lowContextFragment = isLowContextInterjectionFragment(conversationText);
 
-      if (!shouldReply && !aiReplyOptOut && isGroup && interjectChance > 0 && !msgLower.startsWith('!') && !msgLower.startsWith('！')) {
+      if (!shouldReply && body.__qqai_suppress_optional_ai === true) {
+        noReplyReason = "explicit_chat_priority";
+      } else if (!shouldReply && !aiReplyOptOut && isGroup && interjectChance > 0 && !msgLower.startsWith('!') && !msgLower.startsWith('！')) {
         const targetDnd = await dbGet(env, `dnd:${currentGroupId}:${userId}`);
         if (targetDnd === "true") {
           noReplyReason = "sender_dnd";
@@ -2828,12 +2908,20 @@ ${deepseekContextSummary}`;
         userText: conversationText
       }));
 
-      // 1. 异步将本次对话双向写入 D1 历史纪录 (维持下一次的上下文)
-      history.push({ role: 'user', parts: aiInputParts });
-      history.push({ role: 'model', parts: [{ text: replyText }] });
-      // 保留较长的直接对话流；更早的群聊由长上下文摘要承担。
+      // 1. 群聊使用每回合独立行追加，避免同群多人并发时整份历史互相覆盖；私聊仍按单用户顺序保存。
+      const userHistoryItem = { role: 'user', parts: aiInputParts };
+      const modelHistoryItem = { role: 'model', parts: [{ text: replyText }] };
+      history.push(userHistoryItem, modelHistoryItem);
       if (history.length > DEFAULTS.conversationHistoryItems) history = history.slice(-DEFAULTS.conversationHistoryItems);
-      ctx.waitUntil(dbPut(env, sessionKey, JSON.stringify(history)));
+      if (isGroup) {
+        ctx.waitUntil(appendChatHistoryTurn(env, sessionKey, [userHistoryItem, modelHistoryItem], {
+          createdAt: Number(body.time || 0) > 0 ? Number(body.time) * 1000 : Date.now(),
+          messageId: replyMessageId,
+          userId
+        }));
+      } else {
+        ctx.waitUntil(dbPut(env, sessionKey, JSON.stringify(history)));
+      }
 
       // ==========================================
       // 🚀 最終回覆計畫：可引用、@、純文字或插話
@@ -3926,6 +4014,14 @@ function extractFileDescriptors(message) {
   return rows;
 }
 
+function detectLiteralPseudoElementLabels(value) {
+  const source = String(value || "");
+  const labels = [];
+  const regex = /[\[［](聊天记录|聊天紀錄|聊天記錄|转发消息|轉發消息|轉發訊息|合并转发|合併轉發|图片|圖片|语音|語音|视频|影片|文件|附件)[\]］]/gi;
+  for (const match of source.matchAll(regex)) labels.push(match[0]);
+  return [...new Set(labels)].slice(0, 12);
+}
+
 function extractForwardIds(message) {
   const ids = [];
   if (Array.isArray(message)) {
@@ -4108,6 +4204,32 @@ function extractMessageText(message) {
   return message.map(part => part?.type === "text" ? String(part.data?.text || "") : part?.type === "at" ? `@${part.data?.qq || ""}` : part?.type === "image" ? "[图片]" : part?.type === "record" ? "[语音]" : part?.type === "video" ? "[视频]" : part?.type === "file" ? `[文件：${part.data?.name || part.data?.file_name || part.data?.file || "未命名"}]` : part?.type === "forward" ? "[转发消息]" : "").join("").trim();
 }
 
+function eventMentionedQqs(body) {
+  const ids = [];
+  const message = body?.message;
+  if (Array.isArray(message)) {
+    for (const part of message) {
+      if (String(part?.type || "").toLowerCase() !== "at") continue;
+      const value = part?.data?.qq ?? part?.data?.user_id ?? part?.data?.target_id ?? part?.data?.id;
+      if (value !== undefined && value !== null && String(value).trim()) ids.push(String(value).trim());
+    }
+  }
+  const raw = String(body?.raw_message || (typeof message === "string" ? message : ""));
+  for (const match of raw.matchAll(/\[CQ:at,[^\]]*qq=([^,\]]+)[^\]]*\]/gi)) ids.push(String(match[1] || "").trim());
+  return [...new Set(ids.filter(Boolean))];
+}
+
+function eventHasBotMention(body) {
+  const selfId = String(body?.self_id || "");
+  return Boolean(selfId && eventMentionedQqs(body).includes(selfId));
+}
+
+function eventPlainText(body) {
+  const message = body?.message;
+  const text = extractMessageText(message || body?.raw_message || "");
+  return String(text || "").replace(/@(?:all|\d{5,})/gi, " ").replace(/\s+/g, " ").trim();
+}
+
 async function hasOutboundMessageMarker(env, messageId) {
   if (!messageId) return false;
   const raw = await dbGet(env, `outbound:${messageId}`);
@@ -4214,8 +4336,13 @@ function formatDuration(seconds) {
 function sanitizeAiReply(text) {
   return neutralizeAiCommandPrefix(String(text || "")
     .replace(/\[CQ:[^\]]+\]/g, "")
+    // 模型偶尔会复述解析器或历史上下文的内部标签；这些都不是用户可见内容。
+    .replace(/\s*(?:\[不支持的元素类型\]|【不支持的元素类型】|\[unsupported element type\])\s*/gi, "")
+    .replace(/【历史助手回复，仅供理解事实，禁止延续语气】/g, "")
+    .replace(/【歷史助手回覆，僅供理解事實，禁止延續語氣】/g, "")
     .replace(/\*\*/g, "")
     .replace(/^#+\s*/gm, "")
+    .replace(/\s{2,}/g, " ")
     .trim()
     .slice(0, 4000));
 }
@@ -4275,7 +4402,10 @@ function prepareConversationHistory(history, { allowRoleplay = false } = {}) {
       if (part?.text) {
         let value = String(part.text);
         if (role === "model" && !allowRoleplay) value = neutralizeUnconfiguredPersonaText(value);
-        if (role === "model") value = `【历史助手回复，仅供理解事实，禁止延续语气】${value}`;
+        // 不再把“历史助手回复”标签写进每一条 assistant 历史，避免模型原样复述内部标签。
+        value = value
+          .replace(/【历史助手回复，仅供理解事实，禁止延续语气】/g, "")
+          .replace(/【歷史助手回覆，僅供理解事實，禁止延續語氣】/g, "");
         if (value.trim()) parts.push({ text: value.trim() });
       } else if (part?.inlineData) {
         parts.push({ text: `[历史媒体：${part.inlineData.mimeType || "未知类型"}]` });
@@ -5412,39 +5542,153 @@ async function processActiveSpeaking(env, now = Date.now()) {
   }
 }
 
+function sleepMs(ms) {
+  return new Promise(resolve => setTimeout(resolve, Math.max(0, Number(ms || 0))));
+}
+
+async function listOneBotGroups(env, noCache = true) {
+  const data = await callOneBotAction(env, { action: "get_group_list", params: { no_cache: Boolean(noCache) } }, 20000);
+  const rows = Array.isArray(data) ? data : Array.isArray(data?.data) ? data.data : [];
+  const seen = new Set();
+  return rows.map(group => ({
+    groupId: String(group?.group_id || group?.groupId || group?.id || "").replace(/\D/g, ""),
+    groupName: String(group?.group_name || group?.groupName || group?.name || "")
+  })).filter(group => group.groupId && !seen.has(group.groupId) && seen.add(group.groupId)).slice(0, 500);
+}
+
 async function performGroupCheckin(env, groupId, actorId = "system") {
-  const params = { group_id: numericId(groupId) };
+  const normalizedGroupId = String(groupId || "").replace(/\D/g, "");
+  if (!normalizedGroupId) return { ok: false, error: "群号无效", attempts: [] };
+  const params = { group_id: numericId(normalizedGroupId) };
+  const attempts = [];
   let lastError = "未知错误";
   for (const action of ["set_group_sign", "send_group_sign"]) {
     try {
-      await callOneBotAction(env, { action, params }, 12000);
-      await writeSystemAudit(env, { type: "group_checkin", groupId: String(groupId), actorId: String(actorId), action });
-      return { ok: true, action };
-    } catch (error) { lastError = String(error?.message || error); }
+      const data = await callOneBotAction(env, { action, params }, 8000);
+      attempts.push({ action, ok: true, at: Date.now() });
+      await writeSystemAudit(env, { type: "group_checkin", groupId: normalizedGroupId, actorId: String(actorId), action, result: "ok" });
+      return { ok: true, action, data, attempts };
+    } catch (error) {
+      lastError = String(error?.message || error);
+      attempts.push({ action, ok: false, error: lastError.slice(0, 300), at: Date.now() });
+    }
   }
-  return { ok: false, error: lastError };
+  if (!String(actorId).startsWith("system:midnight_rush:")) {
+    await writeSystemAudit(env, { type: "group_checkin", groupId: normalizedGroupId, actorId: String(actorId), action: "failed", error: lastError.slice(0, 500) }).catch(() => {});
+  }
+  return { ok: false, error: lastError, attempts };
+}
+
+async function performManualGroupCheckins(env, { targetGroupId = "", actorId = "manual" } = {}) {
+  let groups = [];
+  try {
+    groups = await listOneBotGroups(env, true);
+  } catch (error) {
+    return { total: 0, success: 0, failed: [{ groupId: targetGroupId || "all", error: String(error?.message || error) }] };
+  }
+  if (targetGroupId) groups = groups.filter(group => group.groupId === String(targetGroupId));
+  const failed = [];
+  let success = 0;
+  const concurrency = Math.max(1, Math.min(20, Number(env.AUTO_CHECKIN_CONCURRENCY || DEFAULTS.autoCheckinConcurrency)));
+  for (let index = 0; index < groups.length; index += concurrency) {
+    const batch = groups.slice(index, index + concurrency);
+    const results = await Promise.all(batch.map(async group => ({ group, result: await performGroupCheckin(env, group.groupId, actorId) })));
+    for (const item of results) {
+      if (item.result.ok) success++;
+      else failed.push({ groupId: item.group.groupId, groupName: item.group.groupName, error: item.result.error });
+    }
+  }
+  return { total: groups.length, success, failed };
+}
+
+async function checkinDoneForDay(env, groupId, dayKey) {
+  const raw = await dbGet(env, `auto_checkin_done:${groupId}:${dayKey}`);
+  if (!raw) return false;
+  if (raw === "true" || raw === "1") return true;
+  try { return JSON.parse(raw)?.ok === true; } catch { return false; }
+}
+
+async function claimAutomaticCheckinWindow(env, dayKey, owner, now = Date.now()) {
+  const key = `auto_checkin_window_lock:${dayKey}`;
+  const current = await readJson(env, key, null);
+  const heartbeatAge = now - Number(current?.heartbeatAt || current?.startedAt || 0);
+  if (current?.owner && current.owner !== owner && heartbeatAge >= 0 && heartbeatAge < 15000) return false;
+  await dbPut(env, key, JSON.stringify({ owner, startedAt: Number(current?.startedAt || now), heartbeatAt: now, expiresAt: now + 180000 }));
+  const confirmed = await readJson(env, key, null);
+  return confirmed?.owner === owner;
+}
+
+async function heartbeatAutomaticCheckinWindow(env, dayKey, owner) {
+  const key = `auto_checkin_window_lock:${dayKey}`;
+  const current = await readJson(env, key, null);
+  if (current?.owner !== owner) return false;
+  await dbPut(env, key, JSON.stringify({ ...current, heartbeatAt: Date.now(), expiresAt: Date.now() + 180000 }));
+  return true;
 }
 
 async function runAutomaticGroupCheckins(env, now = Date.now()) {
   const parts = taipeiParts(now);
-  const currentTime = `${String(parts.hour).padStart(2, "0")}:${String(parts.minute).padStart(2, "0")}:${String(parts.second).padStart(2, "0")}`;
-  if (!currentTime.startsWith("00:00:")) return;
-  const dayKey = `${parts.year}-${parts.month}-${parts.day}`;
+  const hour = Number(parts.hour);
+  const minute = Number(parts.minute);
+  if (!((hour === 23 && minute === 59) || (hour === 0 && (minute === 0 || minute === 1)))) return;
+
+  const dayKey = hour === 23 ? taipeiDateKey(new Date(now + 2 * 60 * 1000)) : taipeiDateKey(new Date(now));
+  const midnightAt = parseTaipeiDateTime(`${dayKey} 00:00`);
+  const windowEndAt = midnightAt + 2 * 60 * 1000 - 1;
+  if (!Number.isFinite(midnightAt) || now > windowEndAt) return;
+
+  const owner = `cron:${crypto.randomUUID()}`;
+  if (!(await claimAutomaticCheckinWindow(env, dayKey, owner, now))) return;
+
   let groups = [];
   try {
-    const data = await callOneBotAction(env, { action: "get_group_list", params: { no_cache: true } }, 20000);
-    groups = Array.isArray(data) ? data : Array.isArray(data?.data) ? data.data : [];
+    // 23:59 先取得群列表并保持任务，午夜零秒立即开始；不会把 23:59 的旧日期打卡误记成隔日成功。
+    groups = await listOneBotGroups(env, true);
   } catch (error) {
-    console.warn("00:00 自动群打卡无法取得群列表", error);
+    console.warn("自动群打卡无法取得群列表", error);
+    await dbDel(env, `auto_checkin_window_lock:${dayKey}`);
     return;
   }
-  for (const group of groups.slice(0, 500)) {
-    const groupId = String(group?.group_id || group?.groupId || group?.id || "").replace(/\D/g, "");
-    if (!groupId) continue;
-    const onceKey = `auto_checkin_done:${groupId}:${dayKey}`;
-    if (await dbGet(env, onceKey)) continue;
-    const result = await performGroupCheckin(env, groupId, "system:midnight_checkin");
-    await dbPut(env, onceKey, JSON.stringify({ scheduledAt: now, executedAt: Date.now(), ok: result.ok, result }));
+
+  while (Date.now() < midnightAt) {
+    if (!(await heartbeatAutomaticCheckinWindow(env, dayKey, owner))) return;
+    await sleepMs(Math.min(5000, Math.max(0, midnightAt - Date.now())));
+  }
+  const retryIntervalMs = Math.max(500, Math.min(5000, Number(env.AUTO_CHECKIN_RETRY_INTERVAL_MS || DEFAULTS.autoCheckinRetryIntervalMs)));
+  const concurrency = Math.max(1, Math.min(30, Number(env.AUTO_CHECKIN_CONCURRENCY || DEFAULTS.autoCheckinConcurrency)));
+  const attempts = new Map();
+
+  try {
+    while (Date.now() <= windowEndAt) {
+      if (!(await heartbeatAutomaticCheckinWindow(env, dayKey, owner))) return;
+      const pending = [];
+      for (const group of groups) {
+        if (!(await checkinDoneForDay(env, group.groupId, dayKey))) pending.push(group);
+      }
+      if (!pending.length) break;
+
+      for (let index = 0; index < pending.length && Date.now() <= windowEndAt; index += concurrency) {
+        const batch = pending.slice(index, index + concurrency);
+        const results = await Promise.all(batch.map(async group => {
+          const attempt = Number(attempts.get(group.groupId) || 0) + 1;
+          attempts.set(group.groupId, attempt);
+          const result = await performGroupCheckin(env, group.groupId, `system:midnight_rush:${attempt}`);
+          return { group, result, attempt };
+        }));
+        for (const item of results) {
+          const timestamp = Date.now();
+          if (item.result.ok) {
+            await dbPut(env, `auto_checkin_done:${item.group.groupId}:${dayKey}`, JSON.stringify({ ok: true, scheduledAt: now, executedAt: timestamp, dayKey, attempt: item.attempt, result: item.result }));
+          } else {
+            await dbPut(env, `auto_checkin_attempt:${item.group.groupId}:${dayKey}`, JSON.stringify({ ok: false, scheduledAt: now, lastAttemptAt: timestamp, dayKey, attempt: item.attempt, error: item.result.error, result: item.result }));
+          }
+        }
+      }
+      if (Date.now() <= windowEndAt) await sleepMs(retryIntervalMs);
+    }
+  } finally {
+    const current = await readJson(env, `auto_checkin_window_lock:${dayKey}`, null);
+    if (current?.owner === owner) await dbDel(env, `auto_checkin_window_lock:${dayKey}`);
   }
 }
 
@@ -6848,7 +7092,24 @@ async function runHealthChecks(env, { mode = "quick" } = {}) {
     if (!env.ONEBOT_HUB) throw new Error("ONEBOT_HUB_NOT_BOUND");
     const state = await (await getOneBotHub(env).fetch("https://onebot-hub/status")).json();
     if (!state.connected) throw new Error("NAPCAT_NOT_CONNECTED");
-    return { connected: true, sockets: state.sockets, pendingRpc: state.pendingRpc, inFlightQuestions: state.inFlightQuestions, queuedQuestions: state.queuedQuestions, lastHeartbeatAt: state.lastHeartbeatAt };
+    return {
+      connected: true,
+      sockets: state.sockets,
+      transportMode: state.transportMode,
+      connectionId: state.connectionId,
+      connectedAt: state.connectedAt,
+      lastHeartbeatAt: state.lastHeartbeatAt,
+      heartbeatAgeMs: state.heartbeatAgeMs,
+      reconnectCount: state.reconnectCount,
+      closeCount: state.closeCount,
+      errorCount: state.errorCount,
+      lastClose: state.lastClose,
+      lastSocketError: state.lastSocketError,
+      pendingRpc: state.pendingRpc,
+      inFlightQuestions: state.inFlightQuestions,
+      queuedQuestions: state.queuedQuestions,
+      recentGroupIngress: state.recentGroupIngress || []
+    };
   }, { timeoutMs: 10000 }));
 
   const keys = roundRobinKeys([...new Set([...parseList(env.GEMINI_API_KEYS), ...parseList(env.VECTORIZE_GEMINI_KEYS)])], "gemini");
@@ -9155,7 +9416,7 @@ ${summary}`.slice(0, 4000),
     return jsonResponse({ ok: sentCount > 0, message: `广播已发送到 ${sentCount}/${targets.length} 个群。`, sentCount, total: targets.length }, sentCount > 0 ? 200 : 503);
   }
   if (request.method === "POST" && path === "/root/restart") {
-    if (groupId) { await dbDel(env, `chat:group:${groupId}`); await dbDel(env, `context_summary:chat:group:${groupId}`); await dbDel(env, `last_interject:${groupId}`); }
+    if (groupId) { await clearChatSessionHistory(env, `chat:group:${groupId}`); await dbDel(env, `last_interject:${groupId}`); }
     await dbPut(env, "system_last_restart", new Date().toISOString()); return jsonResponse({ ok: true, message: "系统暂存已重置。" });
   }
   if (request.method === "GET" && path === "/root/backup") {
@@ -9341,7 +9602,7 @@ function getPortalHomePage(host) {
         </div>
       </section>
       <section id="v-health" class="view">
-        <div class="section-head"><div><h2>完整健康检查</h2><p>快速检查验证绑定与连接；完整检查会发送最小模型请求。开发者还可单独测试指定 API 模型。</p></div><div class="row"><button id="quickHealth" class="btn">快速检查</button><button id="fullHealth" class="btn primary">完整检查</button></div></div>
+        <div class="section-head"><div><h2>完整健康检查</h2><p>快速检查验证绑定与连接；完整检查会发送最小模型请求，并唤醒持久化等待队列；它不会重启 NapCat，也不会清空状态。开发者还可单独测试指定 API 模型。</p></div><div class="row"><button id="quickHealth" class="btn">快速检查</button><button id="fullHealth" class="btn primary">完整检查</button></div></div>
         <div id="singleModelHealth" class="health-tools hidden">
           <div class="card"><h3>单一 API 模型检查</h3><div class="field"><label>提供者</label><select id="modelCheckProvider"><option value="gemini">Gemini／Gemma</option><option value="deepseek">DeepSeek</option><option value="workers_ai">Workers AI</option></select></div><div class="field"><label>模型 ID</label><input id="modelCheckModel" list="modelCheckCandidates" placeholder="例如 gemini-2.5-flash"><datalist id="modelCheckCandidates"></datalist></div><div class="field"><label>API Key 池</label><select id="modelCheckKeyPool"><option value="chat">聊天 Key</option><option value="vision">图片检查 Key</option><option value="search">搜索 Key</option></select></div><button id="runModelCheck" class="btn primary">检查此模型</button><div id="modelCheckResult" class="notice model-check-result">选择模型后执行检查。</div></div>
           <div class="card"><h3>AI 媒体与转发处理限制</h3><div id="mediaLimitList" class="media-limit-list"><div class="empty">正在读取限制</div></div><div class="notice">这里显示的是本 Worker 主动采用的 AI 处理上限，不等同 QQ／NapCat 的传输上限。</div></div>
@@ -9349,7 +9610,7 @@ function getPortalHomePage(host) {
         <div id="healthSummary" class="grid" style="margin-bottom:16px"></div><div id="healthList" class="health-grid"><div class="empty">尚未执行</div></div>
       </section>
       <section id="v-tasks" class="view">
-        <div class="section-head"><div><h2>任务与等待队列</h2><p>同一位群友的新問題會排隊，不會與前一題同時生成。</p></div><div class="row"><button id="clearQueue" class="btn danger">清空目前群等待列</button><button id="reloadTasks" class="btn">重新加载</button></div></div>
+        <div class="section-head"><div><h2>任务与等待队列</h2><p>同一群的明确提问会串行排队；不同群采用全局公平并发槽，避免某个活跃群占满模型请求。</p></div><div class="row"><button id="clearQueue" class="btn danger">清空目前群等待列</button><button id="reloadTasks" class="btn">重新加载</button></div></div>
         <div id="taskStats" class="grid" style="margin-bottom:16px"></div><div id="taskList" class="list"><div class="empty">暂无任務</div></div>
       </section>
       <section id="v-moderation" class="view">
@@ -9406,7 +9667,7 @@ function confirmModal(message,title,options){return customDialog(message,Object.
 function textModal(message,value,title,options){return customDialog(message,Object.assign({title:title||'编辑内容',input:true,value:value||''},options||{}))}
 function portalRoleLabel(role){return({developer:'开发者',owner:'群主',admin:'QQ 管理员',member:'群成员'})[String(role||'member')]||String(role||'群成员')}
 function applyRoleVisibility(){if(!session)return;var p=session.permissions||{},role=session.role||'member';document.querySelectorAll('#nav button').forEach(function(b){var v=b.dataset.view,show=true;if(role==='member'&&!['overview','schedules','models','memory','appeals','violationhistory','settingscenter'].includes(v))show=false;if(role==='admin'&&['quota','health'].includes(v))show=false;if(role==='owner'&&v==='quota')show=false;if(v==='quota'&&!p.developer)show=false;b.style.display=show?'':'none'});refreshSidebarGroupVisibility()}
-function ensureGroupSettingsExtras(){if($('welcomeEnabled')||!$('v-groups'))return;var grid=$('v-groups').querySelector('.grid');if(!grid)return;var card=document.createElement('div');card.className='card span-12';card.innerHTML='<h3>自动化与安全参数</h3><div class="grid"><div class="card span-6"><div class="notice">自动 QQ 群打卡固定在台北时间 00:00:00，对机器人所在的全部群执行，不受 AI 开关与 AI 白名单影响。</div><label class="switch"><input id="welcomeEnabled" type="checkbox">自动欢迎新人</label><label class="switch"><input id="joinAssistEnabled" type="checkbox">入群辅助（只建议同意，不拒绝）</label><label class="switch"><input id="ruleMonitorEnabled" type="checkbox">持续检查群成员是否违反群规</label><div id="ruleMonitorHint" class="notice">只有你在当前群是 QQ 管理员、群主或开发者时才开放。</div><div class="field"><label>欢迎词（支持 {at}、{qq} 与表情符号）</label><textarea id="welcomeText"></textarea></div></div><div class="card span-6"><div class="field"><label>同一对象处置冷却（秒，默认 0＝关闭）</label><input id="moderationCooldown" type="number" min="0"></div><div class="notice">处置冷却默认 0 秒且不设最大值；0 代表关闭。</div><div class="field"><label>新人观察期（天，0＝关闭）</label><input id="newcomerDays" type="number" min="0" max="30"></div></div></div>';grid.appendChild(card);ensureGroupBindingPanel();ensureDeveloperPermissionPanel()}
+function ensureGroupSettingsExtras(){if($('welcomeEnabled')||!$('v-groups'))return;var grid=$('v-groups').querySelector('.grid');if(!grid)return;var card=document.createElement('div');card.className='card span-12';card.innerHTML='<h3>自动化与安全参数</h3><div class="grid"><div class="card span-6"><div class="notice">自动 QQ 群打卡会在台北时间 23:59 预热群列表，并于 00:00:00～00:01:59 快速重试；成功后立即停止，不受 AI 开关与白名单影响。</div><label class="switch"><input id="welcomeEnabled" type="checkbox">自动欢迎新人</label><label class="switch"><input id="joinAssistEnabled" type="checkbox">入群辅助（只建议同意，不拒绝）</label><label class="switch"><input id="ruleMonitorEnabled" type="checkbox">持续检查群成员是否违反群规</label><div id="ruleMonitorHint" class="notice">只有你在当前群是 QQ 管理员、群主或开发者时才开放。</div><div class="field"><label>欢迎词（支持 {at}、{qq} 与表情符号）</label><textarea id="welcomeText"></textarea></div></div><div class="card span-6"><div class="field"><label>同一对象处置冷却（秒，默认 0＝关闭）</label><input id="moderationCooldown" type="number" min="0"></div><div class="notice">处置冷却默认 0 秒且不设最大值；0 代表关闭。</div><div class="field"><label>新人观察期（天，0＝关闭）</label><input id="newcomerDays" type="number" min="0" max="30"></div></div></div>';grid.appendChild(card);ensureGroupBindingPanel();ensureDeveloperPermissionPanel()}
 function ensureGroupBindingPanel(){if($('groupBindingPanel')||!$('v-groups'))return;var grid=$('v-groups').querySelector('.grid');if(!grid)return;var card=document.createElement('div');card.id='groupBindingPanel';card.className='card span-12';card.innerHTML='<div class="section-head"><div><h3>多群绑定与总群引导</h3><p>自行指定总群和多个分群。分群别名会显示在右上角群组选择器；总群管理层可提醒尚未进入总群的分群成员。</p></div><button id="reloadGroupBinding" class="btn">重新加载</button></div><div class="grid"><div class="card span-5"><div class="field"><label>总群</label><select id="familyHeadGroup"></select></div><div class="field"><label>总群显示名称</label><input id="familyHeadAlias" placeholder="例如：小南大魔头总部"></div><div class="field"><label>总群加入链接（可选）</label><input id="familyJoinUrl" placeholder="QQ 生成的邀请链接；留空时引导页提供群号"></div><div class="field"><label>引导文字</label><textarea id="familyGuideText"></textarea></div><button id="saveGroupBinding" class="btn primary">保存多群绑定</button><div id="familyJoinPreview" class="notice">保存后会生成总群引导链接。</div></div><div class="card span-7"><h3>选择要绑定的分群并设置名称</h3><div id="familyGroupChoices" class="group-binding-list"></div><div class="field"><label>提醒哪个分群中尚未加入总群的成员</label><select id="familyGuideBranch"></select></div><button id="familyGuideMissing" class="btn">@ 未加入总群的群员</button><div id="familyBindingMessage" class="notice">提醒没有应用内人数上限；系统会按消息长度自动分批发送。</div></div></div>';grid.appendChild(card);$('reloadGroupBinding').onclick=loadGroupBindings;$('saveGroupBinding').onclick=saveGroupBindings;$('familyGuideMissing').onclick=guideMissingHeadMembers}
 
 function ensureR3Views(){
@@ -9470,7 +9731,7 @@ function ensureSearchTools(){if($('logList')&&!$('logSearch')){var wrap=document
 async function loadVectorSearch(){var q=$('vectorSearch')?$('vectorSearch').value.trim():'';if(!q)return;var r=await api('/vector-search?q='+encodeURIComponent(q));$('vectorResults').innerHTML=r.ok?(r.results||[]).map(function(x){return '<div class="item"><div class="item-title">相关度 '+esc(Number(x.score||0).toFixed(3))+'</div><div class="item-meta">QQ '+esc(x.qq||'')+'</div><div class="item-body">'+esc(x.text||'')+'</div></div>'}).join(''):'<div class="empty">'+esc(r.message||'搜索失败')+'</div>'}
 
 function healthStatusText(v){return({ok:'正常',warning:'警告',error:'错误',unknown:'未知',unconfigured:'未配置'})[String(v||'').toLowerCase()]||String(v||'未知')}
-function humanizeHealthDetail(value){if(value==null||value==='')return '无详细信息';if(typeof value==='string')return value;var labels={connected:'已连接',sockets:'连接数',pendingRpc:'等待中的 RPC',inFlightQuestions:'执行中的问题',queuedQuestions:'排队中的问题',lastHeartbeatAt:'最后心跳时间',configured:'已配置',enabled:'已启用',keys:'Key 数量',key:'使用的 Key',reachable:'可连接',model:'模型',provider:'提供者',responsePreview:'响应预览',preview:'响应预览',latencyMs:'耗时毫秒',keyPool:'Key 池',checkedAt:'检查时间',usage:'用量',attempts:'尝试记录',status:'状态',message:'消息',dimensions:'向量维度',matches:'匹配数量',lastRunAt:'上次执行时间',mode:'模式'};return Object.keys(value).map(function(k){var v=value[k];if((k==='lastHeartbeatAt'||k==='lastRunAt'||/At$/.test(k))&&v){try{v=new Date(Number(v)||v).toLocaleString('zh-CN',{timeZone:'Asia/Taipei'})}catch(e){}}if(typeof v==='boolean')v=v?'是':'否';else if(v&&typeof v==='object')v=JSON.stringify(v);return(labels[k]||k)+'：'+v}).join('\n')}
+function humanizeHealthDetail(value){if(value==null||value==='')return '无详细信息';if(typeof value==='string')return value;var labels={connected:'已连接',sockets:'连接数',transportMode:'连接保存模式',connectionId:'连接编号',connectedAt:'连接建立时间',heartbeatAgeMs:'距离最后心跳（毫秒）',reconnectCount:'累计连接次数',closeCount:'累计关闭次数',errorCount:'累计错误次数',lastClose:'最近关闭详情',lastSocketError:'最近连接错误',recentGroupIngress:'最近各群收件诊断',pendingRpc:'等待中的 RPC',inFlightQuestions:'执行中的问题',queuedQuestions:'排队中的问题',lastHeartbeatAt:'最后心跳时间',configured:'已配置',enabled:'已启用',keys:'Key 数量',key:'使用的 Key',reachable:'可连接',model:'模型',provider:'提供者',responsePreview:'响应预览',preview:'响应预览',latencyMs:'耗时毫秒',keyPool:'Key 池',checkedAt:'检查时间',usage:'用量',attempts:'尝试记录',status:'状态',message:'消息',dimensions:'向量维度',matches:'匹配数量',lastRunAt:'上次执行时间',mode:'模式'};return Object.keys(value).map(function(k){var v=value[k];if((k==='lastHeartbeatAt'||k==='connectedAt'||k==='lastRunAt'||/At$/.test(k))&&v){try{v=new Date(Number(v)||v).toLocaleString('zh-CN',{timeZone:'Asia/Taipei'})}catch(e){}}if(typeof v==='boolean')v=v?'是':'否';else if(v&&typeof v==='object')v=JSON.stringify(v);return(labels[k]||k)+'：'+v}).join('\n')}
 async function loadModelCheckCandidates(){var box=$('singleModelHealth');if(!box||!session)return;var dev=!!((session.permissions||{}).developer);box.classList.toggle('hidden',!dev);if(!dev)return;var r=await api('/health/model-candidates');if(!r.ok){$('modelCheckResult').textContent=r.message||'无法读取模型列表';return}var list=[];(r.candidates||[]).forEach(function(x){list.push(x)});$('modelCheckCandidates').innerHTML=list.map(function(x){return '<option value="'+esc(x.model||x.id||x)+'">'+esc((x.provider||'')+' '+(x.keyPool||''))+'</option>'}).join('');if(!$('modelCheckModel').value&&list.length){$('modelCheckModel').value=list[0].model||list[0].id||list[0];if(list[0].provider)$('modelCheckProvider').value=list[0].provider;if(list[0].keyPool)$('modelCheckKeyPool').value=list[0].keyPool}var m=r.limits||{};var rows=[['图片 AI 读取上限',(m.imageMiB||0)+' MiB'],['语音 AI 读取上限',(m.audioMiB||0)+' MiB'],['视频 AI 读取上限',(m.videoMiB||0)+' MiB'],['转发包数量',Number(m.forwardBundles||0).toLocaleString()],['每包转发节点',Number(m.forwardNodes||0).toLocaleString()],['转发文字',Number(m.forwardTextChars||0).toLocaleString()+' 字符'],['文件正文',m.documentMode||'仅记录元数据']];$('mediaLimitList').innerHTML=rows.map(function(x){return '<div class="media-limit-row"><span>'+esc(x[0])+'</span><b>'+esc(x[1])+'</b></div>'}).join('')}
 async function runSingleModelCheck(){var b=$('runModelCheck'),model=$('modelCheckModel').value.trim();if(!model){toast('请输入模型 ID');return}b.disabled=true;b.textContent='检查中…';$('modelCheckResult').textContent='正在向指定模型发送最小请求。';var r=await api('/health/model-check','POST',{provider:$('modelCheckProvider').value,model:model,keyPool:$('modelCheckKeyPool').value});b.disabled=false;b.textContent='检查此模型';$('modelCheckResult').textContent=r.ok?humanizeHealthDetail(r.result||r):String(r.message||'模型检查失败')}
 async function loadConversations(){if(!currentGroup){$('conversationList').innerHTML='<div class="empty">请先选择群组</div>';return}var p=new URLSearchParams({q:$('convSearch').value||'',limit:'500'});if($('convViolationOnly').checked)p.set('violation','1');var r=await api('/conversations?'+p.toString());if(!r.ok){$('conversationList').innerHTML='<div class="empty">'+esc(r.message)+'</div>';return}conversationCapabilities=r.capabilities||{recordViolation:false};$('conversationList').innerHTML=(r.items||[]).map(renderConversationRecord).join('')||'<div class="empty">没有符合条件的群友消息</div>';$('conversationList').querySelectorAll('[data-conv-action]').forEach(function(b){b.onclick=function(){handleConversationAction(this.dataset.id,this.dataset.convAction)}});$('conversationList').querySelectorAll('[data-attachment-preview]').forEach(function(b){b.onclick=function(){openAttachmentPreview(this.dataset.attachmentPreview,this.dataset.attachmentType,this.dataset.attachmentName)}})}
@@ -9534,7 +9795,7 @@ async function submitAppeal(){var r=await api('/appeals/submit','POST',{groupId:
 function appealStatusText(v){return({pending_owner:'待处理',pending_review:'审核中',approved:'已通过',rejected:'已驳回'})[v]||v||'待处理'}
 async function loadAppealReviews(){if(!currentGroup){$('appealReviewList').innerHTML='<div class="empty">请先从右上角选择群组。</div>';return}var r=await api('/appeals/review?status='+encodeURIComponent($('appealReviewStatus').value||''));if(!r.ok){$('appealReviewList').innerHTML='<div class="empty">'+esc(r.message)+'</div>';return}$('appealReviewList').innerHTML=(r.appeals||[]).map(function(a){var buttons=a.canDecide&&['pending_owner','pending_review'].includes(a.status)?'<div class="row" style="margin-top:12px"><button class="btn primary appealDecision" data-id="'+esc(a.id)+'" data-decision="approve">通过申诉</button><button class="btn danger appealDecision" data-id="'+esc(a.id)+'" data-decision="reject">驳回申诉</button></div>':'';return '<div class="item"><div class="item-head"><div><div class="item-title">'+esc(a.anonymousLabel||a.id)+'｜'+esc(appealStatusText(a.status))+'</div><div class="item-meta">'+esc(a.identityText||'匿名申诉人')+'｜'+esc(a.type||'其他')+'｜'+esc(a.createdAt||'')+(a.applicantMembership==='former'?'｜前成员申诉':'')+'</div></div></div><div class="item-body">'+esc(a.content||'')+(a.evidenceMessageId?'<br><b>相关消息：</b>'+esc(a.evidenceMessageId):'')+(a.result?'<br><b>处理结果：</b>'+esc(a.result):'')+(a.againstAdmin?'<br><b>注意：</b>该案件涉及管理层，只能由群主或开发者决定。':'')+'</div>'+buttons+'</div>'}).join('')||'<div class="empty">当前群没有符合条件的申诉</div>';$('appealReviewList').querySelectorAll('.appealDecision').forEach(function(btn){btn.onclick=function(){decideAppeal(this.dataset.id,this.dataset.decision)}})}
 async function decideAppeal(id,decision){var note=await textModal(decision==='approve'?'请输入通过原因、需要撤销的处理或其他补救说明。':'请输入驳回原因，让申诉人知道为什么没有通过。','',decision==='approve'?'通过申诉':'驳回申诉',{placeholder:'建议填写清楚的处理说明'});if(note===null)return;if(!String(note).trim()&&!(await confirmModal('没有填写处理说明，仍要继续吗？','未填写说明')))return;var r=await api('/appeals/review','POST',{id:id,decision:decision,note:String(note||'').trim()});toast(r.message||'处理完成');if(r.ok)loadAppealReviews()}
-var logTypeLabels={moderation_proposed:'已建立待确认操作',moderation_cancelled:'已取消待确认操作',moderation_confirmed:'已确认并执行操作',moderation_failed:'待确认操作执行失败',group_operation:'群管理操作成功',group_operation_failed:'群管理操作失败',portal_ai_settings:'群组 AI 设置已保存',ai_settings:'AI 设置已修改',settings_center:'设置中心已修改',bilibili_connector:'B站监控设置已修改',bilibili_auto_monitor:'B站自动监控已修改',bilibili_auto_poll:'B站自动检查',permission:'程序权限已修改',platform_feature:'功能开关已修改',rule_monitor_setting:'群规监控设置已修改',rule_proxy_setting:'AI 群规代理设置已修改',rule_strictness_setting:'群规判断严格度已修改',rule_proxy_action:'AI 群规代理已处理',rule_proxy_portal_settings:'AI 群规代理设置已保存',rule_proxy_kick_auth:'AI 踢出授权已修改',join_reject_auth:'入群拒绝授权已修改',rate_limit_setting:'回复间隔已修改',rate_limit_portal:'回复间隔已保存',quota:'DeepSeek 额度已修改',context:'聊天上下文已处理',group_checkin:'群打卡任务',groupwork_requested:'已建立群务申请',groupwork_decided:'群务申请已处理',runtime_model_registry:'模型顺序已修改',platform_job:'系统任务',portal_login:'Control Center 登录',appeal_review:'申诉处理',violation_appeal_submitted:'违规记录申诉已提交',rule_violation_reversed:'群规误判已撤销',conversation_action:'对话记录操作',conversation_action_failed:'对话记录操作失败',single_model_health_check:'单一模型健康检查'};
+var logTypeLabels={moderation_proposed:'已建立待确认操作',moderation_cancelled:'已取消待确认操作',moderation_confirmed:'已确认并执行操作',moderation_failed:'待确认操作执行失败',group_operation:'群管理操作成功',group_operation_failed:'群管理操作失败',portal_ai_settings:'群组 AI 设置已保存',ai_settings:'AI 设置已修改',settings_center:'设置中心已修改',bilibili_connector:'B站监控设置已修改',bilibili_auto_monitor:'B站自动监控已修改',bilibili_auto_poll:'B站自动检查',permission:'程序权限已修改',platform_feature:'功能开关已修改',rule_monitor_setting:'群规监控设置已修改',rule_proxy_setting:'AI 群规代理设置已修改',rule_strictness_setting:'群规判断严格度已修改',rule_proxy_action:'AI 群规代理已处理',rule_proxy_portal_settings:'AI 群规代理设置已保存',rule_proxy_kick_auth:'AI 踢出授权已修改',join_reject_auth:'入群拒绝授权已修改',rate_limit_setting:'回复间隔已修改',rate_limit_portal:'回复间隔已保存',quota:'DeepSeek 额度已修改',context:'聊天上下文已处理',group_checkin:'群打卡任务',thinking_indicator_recall:'思考提示已撤回',thinking_indicator_residual:'思考提示残留',groupwork_requested:'已建立群务申请',groupwork_decided:'群务申请已处理',runtime_model_registry:'模型顺序已修改',platform_job:'系统任务',portal_login:'Control Center 登录',appeal_review:'申诉处理',violation_appeal_submitted:'违规记录申诉已提交',rule_violation_reversed:'群规误判已撤销',conversation_action:'对话记录操作',conversation_action_failed:'对话记录操作失败',single_model_health_check:'单一模型健康检查'};
 var logActionLabels={mute:'禁言',unmute:'解除禁言',kick:'踢出群聊',reject:'拒绝入群',whole_mute:'开启全员禁言',whole_unmute:'解除全员禁言',set_admin:'设为 QQ 管理员',unset_admin:'取消 QQ 管理员',recall:'撤回消息',create:'新增',update:'更新',enabled:'开启',disabled:'关闭',authorized:'已授权',revoked:'已取消授权',ai_on:'开启 AI',ai_off:'关闭 AI',checked:'检查完成',baseline_created:'建立初始状态',failed:'失败',cancelled:'已取消',commands_enabled:'设置型指令开关',interject_rate:'主动插话率',welcome_enabled:'自动欢迎新人'};
 function logCategoryOf(a){var t=String(a.type||'');if(/moderation|group_operation|groupwork|rule_proxy_action/.test(t))return 'moderation';if(/settings|portal_ai|ai_settings|rule_monitor|rule_proxy_setting|rule_strictness|rate_limit|quota|runtime_model|platform_feature|context/.test(t))return 'settings';if(/bilibili/.test(t))return 'bilibili';if(/conversation_action/.test(t))return 'moderation';if(/appeal/.test(t))return 'appeal';if(/permission|auth/.test(t))return 'permission';if(/failed|error/.test(t)||a.error)return 'error';return 'system'}
 function logTone(a){var t=String(a.type||''),r=String(a.result||'');if(/failed|error/.test(t)||a.error||/失败|failed/i.test(r))return 'error';if(/cancelled/.test(t))return 'warn';if(/proposed|requested/.test(t))return 'info';return 'ok'}
@@ -9570,26 +9831,111 @@ export class OneBotHub {
     this.state = state;
     this.env = env;
     this.activeSocket = null;
+    this.connectionId = "";
     this.connectedAt = null;
     this.lastHeartbeatAt = null;
+    this.socketDiagnostics = { reconnectCount: 0, closeCount: 0, errorCount: 0, history: [] };
     this.pending = new Map();
     this.eventTasks = new Set();
     this.toolInFlight = new Map();
     this.toolCounts = new Map();
     this.userInFlight = new Map();
     this.userQueues = new Map();
+    this.queueSchedulerRunning = false;
+
+    // 使用 Durable Objects WebSocket Hibernation API 后，Object 可被回收并重建，
+    // 但 NapCat 的 WebSocket 仍保持连接。构造时必须从 state 重新取得现有连接。
+    this.restoreActiveSocket();
+
     this.queueReady = Promise.resolve();
     if (state?.storage && typeof state.blockConcurrencyWhile === "function") {
       this.queueReady = state.blockConcurrencyWhile(async () => {
-        const saved = await state.storage.list({ prefix: "userqueue:" });
+        const [saved, savedInFlight, diagnostics] = await Promise.all([
+          state.storage.list({ prefix: "userqueue:" }),
+          state.storage.list({ prefix: "question-inflight:" }),
+          state.storage.get("napcat:socket-diagnostics")
+        ]);
+        if (diagnostics && typeof diagnostics === "object") this.socketDiagnostics = { ...this.socketDiagnostics, ...diagnostics };
         for (const [storageKey, value] of saved) {
-          const key = String(storageKey).slice("userqueue:".length);
-          const queue = Array.isArray(value) ? value.filter(item => Date.now() - Number(item?.enqueuedAt || 0) <= DEFAULTS.userQueueTtlMs) : [];
-          if (queue.length) this.userQueues.set(key, queue);
-          else await state.storage.delete(storageKey);
+          const queue = Array.isArray(value) ? value.filter(item => item?.body && Date.now() - Number(item?.enqueuedAt || 0) <= DEFAULTS.userQueueTtlMs) : [];
+          await state.storage.delete(storageKey);
+          for (const entry of queue) {
+            const key = this.userQueueKey(entry.body);
+            const merged = [...(this.userQueues.get(key) || []), entry]
+              .sort((a, b) => Number(a?.enqueuedAt || 0) - Number(b?.enqueuedAt || 0))
+              .slice(0, DEFAULTS.userQueueMax);
+            this.userQueues.set(key, merged);
+            await state.storage.put(`userqueue:${key}`, merged);
+          }
         }
+        // 若实例在处理中被部署、重启或异常回收，把未完成问题放回该发言者的队首。
+        for (const [storageKey, value] of savedInFlight) {
+          const age = Date.now() - Number(value?.startedAt || value?.enqueuedAt || 0);
+          if (value?.body && age <= DEFAULTS.userQueueTtlMs) {
+            const key = this.userQueueKey(value.body);
+            const recovered = {
+              body: value.body,
+              requestUrl: value.requestUrl || "https://onebot-hub/onebot",
+              enqueuedAt: Number(value.enqueuedAt || value.startedAt || Date.now()),
+              preview: value.preview || this.eventPreview(value.body),
+              recovered: true
+            };
+            const merged = [recovered, ...(this.userQueues.get(key) || [])]
+              .sort((a, b) => Number(a?.enqueuedAt || 0) - Number(b?.enqueuedAt || 0))
+              .slice(0, DEFAULTS.userQueueMax);
+            this.userQueues.set(key, merged);
+            await state.storage.put(`userqueue:${key}`, merged);
+          }
+          await state.storage.delete(storageKey);
+        }
+        this.restoreActiveSocket();
       });
     }
+  }
+
+  socketAttachment(socket) {
+    try { return socket?.deserializeAttachment?.() || {}; } catch { return {}; }
+  }
+
+  restoreActiveSocket() {
+    if (this.activeSocket?.readyState === WebSocket.OPEN) return this.activeSocket;
+    if (!this.state || typeof this.state.getWebSockets !== "function") return null;
+    let sockets = [];
+    try { sockets = this.state.getWebSockets("napcat") || []; } catch { sockets = []; }
+    const openSockets = sockets.filter(ws => ws?.readyState === WebSocket.OPEN);
+    openSockets.sort((a, b) => Number(this.socketAttachment(b).connectedAt || 0) - Number(this.socketAttachment(a).connectedAt || 0));
+    this.activeSocket = openSockets[0] || null;
+    if (this.activeSocket) {
+      const meta = this.socketAttachment(this.activeSocket);
+      this.connectionId = String(meta.connectionId || "");
+      this.connectedAt = Number(meta.connectedAt || this.connectedAt || Date.now());
+      this.lastHeartbeatAt = Number(meta.lastHeartbeatAt || meta.lastEventAt || this.lastHeartbeatAt || this.connectedAt);
+    }
+    return this.activeSocket;
+  }
+
+  async recordSocketDiagnostic(type, detail = {}) {
+    const now = Date.now();
+    const current = this.socketDiagnostics && typeof this.socketDiagnostics === "object"
+      ? { ...this.socketDiagnostics }
+      : { reconnectCount: 0, closeCount: 0, errorCount: 0, history: [] };
+    if (type === "connected") current.reconnectCount = Number(current.reconnectCount || 0) + 1;
+    if (type === "closed") current.closeCount = Number(current.closeCount || 0) + 1;
+    if (type === "error") current.errorCount = Number(current.errorCount || 0) + 1;
+    const event = { type, at: now, connectionId: String(detail.connectionId || this.connectionId || ""), ...detail };
+    current.lastEvent = event;
+    if (type === "closed") current.lastClose = event;
+    if (type === "error") current.lastError = event;
+    current.history = [...(Array.isArray(current.history) ? current.history : []), event].slice(-20);
+    this.socketDiagnostics = current;
+    if (this.state?.storage) await this.state.storage.put("napcat:socket-diagnostics", current);
+  }
+
+  trackEventTask(task) {
+    this.eventTasks.add(task);
+    task.finally(() => this.eventTasks.delete(task));
+    if (typeof this.state?.waitUntil === "function") this.state.waitUntil(task);
+    return task;
   }
 
   async fetch(request) {
@@ -9599,23 +9945,35 @@ export class OneBotHub {
     if (upgrade && upgrade.toLowerCase() === "websocket") {
       const pair = new WebSocketPair();
       const [client, server] = Object.values(pair);
-      server.accept();
-      if (this.activeSocket && this.activeSocket.readyState === WebSocket.OPEN) { try { this.activeSocket.close(4001, "replaced by newer NapCat connection"); } catch {} }
-      this.activeSocket = server; this.connectedAt = Date.now(); this.lastHeartbeatAt = Date.now();
-      server.addEventListener("message", event => {
-        // 不把长任务 Promise 直接回传给 WebSocket 事件；让后续 NapCat 事件与 RPC 回包可继续进入。
-        const task = this.handleMessage(server, request, event).catch(error => console.error("OneBotHub handler failed", error));
-        this.eventTasks.add(task);
-        task.finally(() => this.eventTasks.delete(task));
+      const now = Date.now();
+      const connectionId = crypto.randomUUID();
+      const previousSockets = typeof this.state?.getWebSockets === "function"
+        ? (this.state.getWebSockets("napcat") || []).filter(ws => ws?.readyState === WebSocket.OPEN)
+        : (this.activeSocket?.readyState === WebSocket.OPEN ? [this.activeSocket] : []);
+
+      // 不再使用 server.accept()。Hibernation API 可让 Durable Object 回收内存时仍保留连接。
+      this.state.acceptWebSocket(server, ["napcat"]);
+      server.serializeAttachment({
+        type: "napcat",
+        connectionId,
+        connectedAt: now,
+        lastHeartbeatAt: now,
+        lastEventAt: now,
+        requestUrl: request.url
       });
-      server.addEventListener("close", () => { if (this.activeSocket === server) this.activeSocket = null; this.rejectAll("NapCat disconnected"); });
-      server.addEventListener("error", () => { if (this.activeSocket === server) this.activeSocket = null; this.rejectAll("NapCat socket error"); });
-      for (const key of this.userQueues.keys()) {
-        if (this.userInFlight.has(key)) continue;
-        const task = this.drainUserQueue(key).catch(error => console.error("restore queued questions failed", error));
-        this.eventTasks.add(task);
-        task.finally(() => this.eventTasks.delete(task));
+      this.activeSocket = server;
+      this.connectionId = connectionId;
+      this.connectedAt = now;
+      this.lastHeartbeatAt = now;
+
+      // 先登记新连接，再关闭旧连接，避免旧连接的 close 事件清掉新连接上的 RPC。
+      await this.recordSocketDiagnostic("connected", { connectionId, replacedConnections: previousSockets.length });
+      for (const oldSocket of previousSockets) {
+        if (oldSocket === server) continue;
+        try { oldSocket.close(4001, "replaced by newer NapCat connection"); } catch {}
       }
+
+      this.trackEventTask(this.kickQueueScheduler().catch(error => console.error("restore queued questions failed", error)));
       return new Response(null, { status: 101, webSocket: client });
     }
 
@@ -9642,25 +10000,56 @@ export class OneBotHub {
       return Response.json({ ok: true, proposalId, expiresAt });
     }
 
-    if (url.pathname === "/status") return Response.json({
-      sockets: this.activeSocket?.readyState === WebSocket.OPEN ? 1 : 0,
-      connected: this.activeSocket?.readyState === WebSocket.OPEN,
-      connectedAt: this.connectedAt,
-      lastHeartbeatAt: this.lastHeartbeatAt,
-      pendingRpc: this.pending.size,
-      inFlightQuestions: this.userInFlight.size,
-      queuedQuestions: [...this.userQueues.values()].reduce((sum, list) => sum + list.length, 0),
-      queues: this.queueSnapshot()
-    });
+    if (url.pathname === "/status") {
+      const socket = this.restoreActiveSocket();
+      if (socket?.readyState === WebSocket.OPEN) await this.kickQueueScheduler();
+      const now = Date.now();
+      const heartbeatAgeMs = this.lastHeartbeatAt ? Math.max(0, now - Number(this.lastHeartbeatAt)) : null;
+      const ingressStored = await this.state.storage.list({ prefix: "ingress:" });
+      const recentGroupIngress = [...ingressStored.values()].filter(Boolean).sort((a, b) => Number(b.lastUpdatedAt || 0) - Number(a.lastUpdatedAt || 0)).slice(0, 20);
+      return Response.json({
+        sockets: socket?.readyState === WebSocket.OPEN ? 1 : 0,
+        connected: socket?.readyState === WebSocket.OPEN,
+        transportMode: "durable_object_hibernation",
+        connectionId: this.connectionId || null,
+        connectedAt: this.connectedAt,
+        lastHeartbeatAt: this.lastHeartbeatAt,
+        heartbeatAgeMs,
+        pendingRpc: this.pending.size,
+        inFlightQuestions: this.userInFlight.size,
+        queuedQuestions: [...this.userQueues.values()].reduce((sum, list) => sum + list.length, 0),
+        queuePolicy: "per_user_single_inflight_group_unlimited",
+        schedulerRunning: this.queueSchedulerRunning,
+        reconnectCount: Number(this.socketDiagnostics?.reconnectCount || 0),
+        closeCount: Number(this.socketDiagnostics?.closeCount || 0),
+        errorCount: Number(this.socketDiagnostics?.errorCount || 0),
+        lastClose: this.socketDiagnostics?.lastClose || null,
+        lastSocketError: this.socketDiagnostics?.lastError || null,
+        recentSocketEvents: Array.isArray(this.socketDiagnostics?.history) ? this.socketDiagnostics.history.slice(-8) : [],
+        recentGroupIngress,
+        queues: this.queueSnapshot()
+      });
+    }
     if (request.method === "POST" && url.pathname === "/queue/cancel") {
       const data = await request.json().catch(() => ({}));
-      const key = `group:${String(data.groupId || "")}:user:${String(data.userId || "")}`;
-      const queue = this.userQueues.get(key) || [];
+      const groupId = String(data.groupId || "");
+      const userId = String(data.userId || "");
       const messageId = String(data.messageId || "");
-      const next = messageId ? queue.filter(item => String(item.body?.message_id || "") !== messageId) : [];
-      if (next.length) this.userQueues.set(key, next); else this.userQueues.delete(key);
-      await this.persistUserQueue(key);
-      return Response.json({ ok: true, removed: queue.length - next.length, remaining: next.length, message: `已移除 ${queue.length - next.length} 条等待中的问题。` });
+      const keys = [...new Set([`group:${groupId}`, `group:${groupId}:user:${userId}`])];
+      let removed = 0, remaining = 0;
+      for (const key of keys) {
+        const queue = this.userQueues.get(key) || [];
+        const next = queue.filter(item => {
+          if (messageId) return String(item.body?.message_id || "") !== messageId;
+          if (userId) return String(item.body?.user_id || "") !== userId;
+          return false;
+        });
+        removed += queue.length - next.length;
+        remaining += next.length;
+        if (next.length) this.userQueues.set(key, next); else this.userQueues.delete(key);
+        await this.persistUserQueue(key);
+      }
+      return Response.json({ ok: true, removed, remaining, message: `已移除 ${removed} 条等待中的问题。` });
     }
     if (request.method === "POST" && url.pathname === "/queue/clear") {
       const data = await request.json().catch(() => ({}));
@@ -9674,6 +10063,62 @@ export class OneBotHub {
       return Response.json({ ok: true, removed, message: `已清除 ${removed} 条等待中的问题。` });
     }
     return new Response("OneBotHub OK", { status: 200 });
+  }
+
+  async webSocketMessage(socket, message) {
+    const now = Date.now();
+    const meta = this.socketAttachment(socket);
+    meta.connectionId = String(meta.connectionId || this.connectionId || crypto.randomUUID());
+    meta.connectedAt = Number(meta.connectedAt || this.connectedAt || now);
+    meta.lastHeartbeatAt = now;
+    meta.lastEventAt = now;
+    meta.requestUrl = String(meta.requestUrl || "https://onebot-hub/onebot");
+    try { socket.serializeAttachment(meta); } catch {}
+    if (!this.activeSocket || this.activeSocket.readyState !== WebSocket.OPEN || String(this.socketAttachment(this.activeSocket).connectionId || "") === meta.connectionId) {
+      this.activeSocket = socket;
+      this.connectionId = meta.connectionId;
+      this.connectedAt = meta.connectedAt;
+    }
+    this.lastHeartbeatAt = now;
+    this.trackEventTask(this.kickQueueScheduler().catch(error => console.error("queue recovery wake failed", error)));
+    const task = this.handleMessage(socket, { url: meta.requestUrl }, { data: message })
+      .catch(error => console.error("OneBotHub hibernation handler failed", error));
+    this.trackEventTask(task);
+  }
+
+  async webSocketClose(socket, code, reason, wasClean) {
+    const meta = this.socketAttachment(socket);
+    const connectionId = String(meta.connectionId || "");
+    const isActive = this.activeSocket === socket || (connectionId && connectionId === this.connectionId);
+    if (isActive) {
+      this.activeSocket = null;
+      this.connectionId = "";
+      this.rejectAll(`NapCat disconnected (${code || 1006})`);
+    }
+    await this.recordSocketDiagnostic("closed", {
+      connectionId,
+      code: Number(code || 0),
+      reason: String(reason || ""),
+      wasClean: Boolean(wasClean),
+      wasActiveConnection: isActive
+    });
+    try { if (socket.readyState !== WebSocket.CLOSED) socket.close(code || 1000, String(reason || "closed").slice(0, 120)); } catch {}
+  }
+
+  async webSocketError(socket, error) {
+    const meta = this.socketAttachment(socket);
+    const connectionId = String(meta.connectionId || "");
+    const isActive = this.activeSocket === socket || (connectionId && connectionId === this.connectionId);
+    if (isActive) {
+      this.activeSocket = null;
+      this.connectionId = "";
+      this.rejectAll("NapCat socket error");
+    }
+    await this.recordSocketDiagnostic("error", {
+      connectionId,
+      message: String(error?.message || error || "unknown websocket error"),
+      wasActiveConnection: isActive
+    });
   }
 
   async alarm() {
@@ -9706,7 +10151,11 @@ export class OneBotHub {
       }
       await this.state.storage.delete(storageKey);
     }
-    if (nextAlarm) await this.state.storage.setAlarm(nextAlarm);
+    await this.kickQueueScheduler().catch(error => console.error("queue alarm recovery failed", error));
+    const hasQueued = [...this.userQueues.values()].some(queue => queue?.length);
+    const queueAlarm = hasQueued ? Date.now() + DEFAULTS.queueRecoveryAlarmMs : 0;
+    const targetAlarm = nextAlarm && queueAlarm ? Math.min(nextAlarm, queueAlarm) : (nextAlarm || queueAlarm);
+    if (targetAlarm) await this.state.storage.setAlarm(targetAlarm);
   }
 
   rejectAll(reason) {
@@ -9715,7 +10164,7 @@ export class OneBotHub {
   }
 
   async sendAction(payload, timeoutMs = 15000) {
-    const socket = this.activeSocket;
+    const socket = this.restoreActiveSocket();
     if (!socket || socket.readyState !== WebSocket.OPEN) throw new Error("NAPCAT_NOT_CONNECTED");
     const echo = String(payload.echo || `qqai:rpc:${Date.now()}:${crypto.randomUUID()}`);
     const action = { action: payload.action, params: payload.params || {}, echo };
@@ -9726,14 +10175,28 @@ export class OneBotHub {
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => { this.pending.delete(echo); reject(new Error("ONEBOT_RPC_TIMEOUT")); }, Math.max(1000, Math.min(timeoutMs, 30000)));
       this.pending.set(echo, { resolve, reject, timer, action });
-      try { socket.send(JSON.stringify(action)); } catch (error) { clearTimeout(timer); this.pending.delete(echo); reject(error); }
+      try { socket.send(JSON.stringify(action)); } catch (error) {
+        clearTimeout(timer);
+        this.pending.delete(echo);
+        if (this.activeSocket === socket) this.activeSocket = null;
+        const diagnosticTask = this.recordSocketDiagnostic("error", { connectionId: this.connectionId, message: `send failed: ${String(error?.message || error)}`, wasActiveConnection: true });
+        if (typeof this.state?.waitUntil === "function") this.state.waitUntil(diagnosticTask);
+        reject(error);
+      }
     });
   }
 
   async handleMessage(socket, request, event) {
     let body;
     try { body = JSON.parse(typeof event.data === "string" ? event.data : new TextDecoder().decode(event.data)); } catch { return; }
-    this.lastHeartbeatAt = Date.now();
+    const now = Date.now();
+    this.lastHeartbeatAt = now;
+    const meta = this.socketAttachment(socket);
+    if (meta && typeof socket?.serializeAttachment === "function") {
+      meta.lastHeartbeatAt = now;
+      meta.lastEventAt = now;
+      try { socket.serializeAttachment(meta); } catch {}
+    }
     if (body?.echo && this.pending.has(String(body.echo))) {
       const pending = this.pending.get(String(body.echo)); this.pending.delete(String(body.echo)); clearTimeout(pending.timer);
       const messageId = body?.data?.message_id ?? body?.data?.messageId;
@@ -9744,27 +10207,48 @@ export class OneBotHub {
     }
     if (!body || body.post_type === "meta_event") return;
 
-    if (await this.shouldQueueUserQuestion(body)) {
+    const explicitGroupQuestion = await this.shouldQueueUserQuestion(body);
+    await this.recordIngress(body, "received", { explicit: explicitGroupQuestion }).catch(() => {});
+    if (explicitGroupQuestion) {
       await this.enqueueUserQuestion(body, request.url);
       return;
     }
+    // 普通群消息仍会写入对话记录并执行必要的本地逻辑，但当已有明确 @ 提问正在生成时，
+    // 暂停随机插话与冲突 AI 判断，避免活跃群抢占其他群的模型请求。
+    if (body.post_type === "message" && body.message_type === "group" && this.userInFlight.size > 0) {
+      body = { ...body, __qqai_suppress_optional_ai: true };
+    }
     await this.processInboundEvent(body, request.url);
+  }
+
+  async recordIngress(body, disposition, extra = {}) {
+    const groupId = String(body?.group_id || "");
+    if (!groupId || !["message", "message_sent"].includes(String(body?.post_type || ""))) return;
+    const explicit = Boolean(extra.explicit || eventHasBotMention(body) || /^[!！]/.test(eventPlainText(body)));
+    if (!explicit && !extra.force) return;
+    const key = `ingress:${groupId}`;
+    const previous = await this.state.storage.get(key) || {};
+    const next = {
+      ...previous,
+      groupId,
+      receivedCount: Number(previous.receivedCount || 0) + (disposition === "received" ? 1 : 0),
+      lastReceivedAt: disposition === "received" ? Date.now() : Number(previous.lastReceivedAt || Date.now()),
+      lastUpdatedAt: Date.now(),
+      lastDisposition: String(disposition || "unknown"),
+      lastMessageId: String(body?.message_id || previous.lastMessageId || ""),
+      lastUserId: String(body?.user_id || previous.lastUserId || ""),
+      mentionDetected: eventHasBotMention(body),
+      preview: eventPlainText(body).slice(0, 160),
+      ...extra
+    };
+    await this.state.storage.put(key, next);
   }
 
   shouldQueueUserQuestion(body) {
     if (!body || body.post_type !== "message" || body.message_type !== "group") return false;
     if (String(body.user_id || "") === String(body.self_id || "")) return false;
-    const selfId = String(body.self_id || "");
-    let mentioned = false;
-    let text = "";
-    if (Array.isArray(body.message)) {
-      mentioned = body.message.some(part => part?.type === "at" && String(part?.data?.qq || "") === selfId);
-      text = body.message.filter(part => part?.type === "text").map(part => part?.data?.text || "").join("").trim();
-    } else {
-      const raw = String(body.raw_message || body.message || "");
-      mentioned = Boolean(selfId && raw.includes(`[CQ:at,qq=${selfId}]`));
-      text = raw.replace(/\[CQ:[^\]]+\]/g, " ").trim();
-    }
+    const mentioned = eventHasBotMention(body);
+    const text = eventPlainText(body);
     if (!mentioned || !text || /^(?:[!！]|\/!)/.test(text)) return false;
     const role = String(body.sender?.role || "member");
     if (["owner", "admin"].includes(role) && /(?:踢|移出|请出|請出|杀了|殺了|斩了|斬了|禁言|闭麦|閉麥|全员禁言|全員禁言|管理员|管理員)/i.test(text)) return false;
@@ -9773,19 +10257,24 @@ export class OneBotHub {
   }
 
   userQueueKey(body) {
-    return `group:${String(body.group_id || "")}:user:${String(body.user_id || "")}`;
+    // 只锁定同一位发言者：同群不同成员可同时处理，不设置每群或全局聊天并发上限。
+    const userId = String(body?.user_id || body?.self_id || "");
+    return body?.message_type === "group"
+      ? `group:${String(body.group_id || "")}:user:${userId}`
+      : `private:user:${userId}`;
   }
 
   queueSnapshot() {
     const rows = [];
     for (const [key, active] of this.userInFlight) {
       const queue = this.userQueues.get(key) || [];
-      rows.push({ key, groupId: active.groupId, userId: active.userId, startedAt: active.startedAt, messageId: active.messageId, preview: active.preview, queued: queue.map(item => ({ messageId: String(item.body?.message_id || ""), enqueuedAt: item.enqueuedAt, preview: item.preview })) });
+      rows.push({ key, groupId: active.groupId, userId: active.userId, startedAt: active.startedAt, messageId: active.messageId, preview: active.preview, queued: queue.map(item => ({ userId: String(item.body?.user_id || ""), messageId: String(item.body?.message_id || ""), enqueuedAt: item.enqueuedAt, preview: item.preview })) });
     }
     for (const [key, queue] of this.userQueues) {
       if (this.userInFlight.has(key)) continue;
-      const [groupId, userId] = [key.match(/group:([^:]+)/)?.[1] || "", key.match(/user:([^:]+)/)?.[1] || ""];
-      rows.push({ key, groupId, userId, startedAt: null, messageId: "", preview: "", queued: queue.map(item => ({ messageId: String(item.body?.message_id || ""), enqueuedAt: item.enqueuedAt, preview: item.preview })) });
+      const groupId = key.match(/group:([^:]+)/)?.[1] || "";
+      const userId = key.match(/user:([^:]+)/)?.[1] || String(queue[0]?.body?.user_id || "");
+      rows.push({ key, groupId, userId, startedAt: null, messageId: "", preview: "", queued: queue.map(item => ({ userId: String(item.body?.user_id || ""), messageId: String(item.body?.message_id || ""), enqueuedAt: item.enqueuedAt, preview: item.preview })) });
     }
     return rows;
   }
@@ -9802,48 +10291,109 @@ export class OneBotHub {
     return extractMessageText(body?.message || body?.raw_message || "").replace(/\s+/g, " ").trim().slice(0, 120);
   }
 
+  async persistQuestionInFlight(key, active) {
+    if (!this.state?.storage) return;
+    const storageKey = `question-inflight:${key}`;
+    if (active) await this.state.storage.put(storageKey, active);
+    else await this.state.storage.delete(storageKey);
+  }
+
+  oldestQueuedKey() {
+    let selected = "";
+    let oldest = Infinity;
+    for (const [key, queue] of this.userQueues) {
+      if (this.userInFlight.has(key) || !Array.isArray(queue) || !queue.length) continue;
+      const at = Number(queue[0]?.enqueuedAt || 0);
+      if (at < oldest) { oldest = at; selected = key; }
+    }
+    return selected;
+  }
+
+  async runQuestion(key, body, requestUrl, { fromQueue = false, enqueuedAt = Date.now(), preview = "" } = {}) {
+    const active = {
+      groupId: String(body.group_id || ""),
+      userId: String(body.user_id || ""),
+      messageId: String(body.message_id || ""),
+      preview: preview || this.eventPreview(body),
+      startedAt: Date.now(),
+      enqueuedAt: Number(enqueuedAt || Date.now()),
+      body,
+      requestUrl
+    };
+    this.userInFlight.set(key, active);
+    await this.persistQuestionInFlight(key, active);
+    await this.recordIngress(body, "processing", { explicit: true, fromQueue }).catch(() => {});
+    try {
+      await this.processInboundEvent(fromQueue ? { ...body, __qqai_queued: true } : body, requestUrl);
+    } catch (error) {
+      console.error("user question failed", error);
+      if (fromQueue) await this.sendQueueNotice(body, "排队的问题处理失败，已跳到下一条。请稍后重试。").catch(() => {});
+    } finally {
+      this.userInFlight.delete(key);
+      await this.persistQuestionInFlight(key, null);
+      await this.drainUserQueue(key);
+    }
+  }
+
   async enqueueUserQuestion(body, requestUrl) {
     const key = this.userQueueKey(body);
     const queue = this.userQueues.get(key) || [];
-    if (this.userInFlight.has(key)) {
+    const userBusy = this.userInFlight.has(key);
+    if (userBusy) {
       if (queue.length >= DEFAULTS.userQueueMax) {
-        await this.sendQueueNotice(body, `等待列已满（最多 ${DEFAULTS.userQueueMax} 条），请等前面的回答完成后再问。`).catch(() => {});
+        await this.sendQueueNotice(body, `你的等待列已满（最多 ${DEFAULTS.userQueueMax} 条），请等上一题完成后再问。`).catch(() => {});
         return;
       }
       const entry = { body, requestUrl, enqueuedAt: Date.now(), preview: this.eventPreview(body) };
       queue.push(entry);
       this.userQueues.set(key, queue);
       await this.persistUserQueue(key);
-      await this.sendQueueNotice(body, `你前一个问题仍在处理，这条已加入等待列，目前排第 ${queue.length} 位。`).catch(() => {});
+      await this.recordIngress(body, "queued", { explicit: true, queuePosition: queue.length, userBusy: true }).catch(() => {});
+      await this.sendQueueNotice(body, `你上一题仍在处理，这条已加入个人等待列，目前排第 ${queue.length} 位。`).catch(() => {});
+      await this.scheduleQueueRecoveryAlarm();
       return;
     }
-    this.userInFlight.set(key, { groupId: String(body.group_id || ""), userId: String(body.user_id || ""), messageId: String(body.message_id || ""), preview: this.eventPreview(body), startedAt: Date.now() });
+    await this.runQuestion(key, body, requestUrl);
+  }
+
+  async kickQueueScheduler(preferredKey = "") {
+    if (this.queueSchedulerRunning) return;
+    const socket = this.restoreActiveSocket();
+    if (!socket || socket.readyState !== WebSocket.OPEN) return;
+    this.queueSchedulerRunning = true;
     try {
-      await this.processInboundEvent(body, requestUrl);
+      const keys = [];
+      if (preferredKey && !this.userInFlight.has(preferredKey) && (this.userQueues.get(preferredKey) || []).length) keys.push(preferredKey);
+      for (const [key, queue] of [...this.userQueues.entries()].sort((a, b) => Number(a[1]?.[0]?.enqueuedAt || 0) - Number(b[1]?.[0]?.enqueuedAt || 0))) {
+        if (keys.includes(key) || this.userInFlight.has(key) || !queue?.length) continue;
+        keys.push(key);
+        if (keys.length >= DEFAULTS.queueRecoveryBatchSize) break;
+      }
+      for (const key of keys) {
+        const queue = this.userQueues.get(key) || [];
+        const entry = queue.shift();
+        if (queue.length) this.userQueues.set(key, queue); else this.userQueues.delete(key);
+        await this.persistUserQueue(key);
+        if (!entry || Date.now() - Number(entry.enqueuedAt || 0) > DEFAULTS.userQueueTtlMs) continue;
+        this.trackEventTask(this.runQuestion(key, entry.body, entry.requestUrl, {
+          fromQueue: true, enqueuedAt: entry.enqueuedAt, preview: entry.preview
+        }));
+      }
+      if ([...this.userQueues.values()].some(queue => queue?.length)) await this.scheduleQueueRecoveryAlarm();
     } finally {
-      this.userInFlight.delete(key);
-      await this.drainUserQueue(key);
+      this.queueSchedulerRunning = false;
     }
   }
 
   async drainUserQueue(key) {
-    const queue = this.userQueues.get(key) || [];
-    while (queue.length) {
-      const entry = queue.shift();
-      if (queue.length) this.userQueues.set(key, queue); else this.userQueues.delete(key);
-      await this.persistUserQueue(key);
-      if (!entry || Date.now() - Number(entry.enqueuedAt || 0) > DEFAULTS.userQueueTtlMs) continue;
-      const body = { ...entry.body, __qqai_queued: true };
-      this.userInFlight.set(key, { groupId: String(body.group_id || ""), userId: String(body.user_id || ""), messageId: String(body.message_id || ""), preview: entry.preview, startedAt: Date.now() });
-      try {
-        await this.processInboundEvent(body, entry.requestUrl);
-      } catch (error) {
-        console.error("queued user question failed", error);
-        await this.sendQueueNotice(body, "排队的问题处理失败，已跳到下一条。请稍后重试。").catch(() => {});
-      } finally {
-        this.userInFlight.delete(key);
-      }
-    }
+    await this.kickQueueScheduler(key);
+  }
+
+  async scheduleQueueRecoveryAlarm() {
+    if (!this.state?.storage || ![...this.userQueues.values()].some(queue => queue?.length)) return;
+    const target = Date.now() + DEFAULTS.queueRecoveryAlarmMs;
+    const current = await this.state.storage.getAlarm();
+    if (!current || target < current) await this.state.storage.setAlarm(target);
   }
 
   async sendQueueNotice(body, text) {
@@ -9882,6 +10432,7 @@ export class OneBotHub {
         });
       } catch (error) {
         console.error("OneBot internal event processing failed", error);
+        await this.recordIngress(body, /abort|timeout/i.test(String(error?.message || error)) ? "worker_timeout" : "worker_error", { explicit: eventHasBotMention(body), error: String(error?.message || error).slice(0, 300) }).catch(() => {});
         const timedOut = /abort|timeout/i.test(String(error?.message || error));
         if (toolTask && timedOut) {
           await this.sendDirectText(body, `⏱️ ${toolTask.label}处理超过时限，任务已自动结束；机器人不会继续被占用。`).catch(() => {});
@@ -9890,9 +10441,16 @@ export class OneBotHub {
         }
         return;
       }
-      if (!internalResponse || internalResponse.status === 204) return;
+      if (!internalResponse || internalResponse.status === 204) {
+        await this.recordIngress(body, "worker_no_reply", { explicit: eventHasBotMention(body), httpStatus: internalResponse?.status || 0 }).catch(() => {});
+        return;
+      }
       payload = await internalResponse.json().catch(() => null);
-      if (!payload?.reply) return;
+      if (!payload?.reply) {
+        await this.recordIngress(body, "worker_empty_reply", { explicit: eventHasBotMention(body), httpStatus: internalResponse.status }).catch(() => {});
+        return;
+      }
+      await this.recordIngress(body, "reply_ready", { explicit: eventHasBotMention(body), httpStatus: internalResponse.status }).catch(() => {});
       const plan = payload.reply_plan || {};
       const isPrivate = body.message_type === "private";
       const simplifiedReply = toSimplifiedChinese(payload.reply);
@@ -9902,6 +10460,7 @@ export class OneBotHub {
       try {
         const response = await this.sendAction({ action, params }, 15000);
         const messageId = response?.message_id ?? response?.messageId ?? response?.data?.message_id ?? response?.data?.messageId;
+        await this.recordIngress(body, "sent", { explicit: eventHasBotMention(body), sentMessageId: String(messageId || "") }).catch(() => {});
         if (messageId && payload.moderation_proposal_id) {
           await attachModerationProposalMessage(this.env, String(payload.moderation_proposal_id), String(messageId), String(body.group_id || ""));
         }
@@ -9916,15 +10475,58 @@ export class OneBotHub {
         }
       } catch (error) {
         console.error("send reply failed", error);
+        await this.recordIngress(body, "send_failed", { explicit: eventHasBotMention(body), error: String(error?.message || error).slice(0, 300) }).catch(() => {});
         if (payload?.ai_log_id) await updateAiDecisionLog(this.env, payload.ai_log_id, { sendStatus: "failed", sendError: String(error?.message || error), sendFailedAt: Date.now() }).catch(() => null);
       } finally {
-        if (payload.thinking_message_id) {
-          try { await this.sendAction({ action: "delete_msg", params: { message_id: numericId(payload.thinking_message_id) } }, 8000); } catch {}
-        }
+        if (payload.thinking_message_id) await this.retractThinkingIndicator(body, payload.thinking_message_id).catch(() => {});
       }
     } finally {
       if (toolTask) this.releaseToolLease(lease);
     }
+  }
+
+  async retractThinkingIndicator(body, messageId) {
+    const normalizedMessageId = numericId(messageId);
+    if (!normalizedMessageId) return { ok: true, skipped: true };
+    let firstError = "";
+    try {
+      await this.sendAction({ action: "delete_msg", params: { message_id: normalizedMessageId } }, 8000);
+      return { ok: true, mode: "normal_recall" };
+    } catch (error) {
+      firstError = String(error?.message || error);
+    }
+
+    const groupId = String(body?.group_id || "");
+    let botRole = "unknown";
+    let adminRetryError = "";
+    if (body?.message_type === "group" && groupId) {
+      const state = await getBotGroupRole(this.env, groupId).catch(() => ({ role: "unknown" }));
+      botRole = String(state?.role || "unknown");
+      if (botRole === "owner" || botRole === "admin") {
+        try {
+          await this.sendAction({ action: "delete_msg", params: { message_id: normalizedMessageId } }, 12000);
+          await writeSystemAudit(this.env, { type: "thinking_indicator_recall", groupId, actorId: String(body?.self_id || "bot"), action: "admin_group_recall_retry", messageId: String(messageId), firstError: firstError.slice(0, 500) }).catch(() => {});
+          return { ok: true, mode: "admin_group_recall_retry", botRole };
+        } catch (error) {
+          adminRetryError = String(error?.message || error);
+        }
+      }
+    }
+
+    const residual = {
+      at: Date.now(),
+      groupId,
+      userId: String(body?.user_id || ""),
+      botId: String(body?.self_id || ""),
+      messageId: String(messageId),
+      botRole,
+      firstError: firstError.slice(0, 1000),
+      adminRetryError: adminRetryError.slice(0, 1000),
+      status: "residual"
+    };
+    await dbPut(this.env, `thinking_indicator_residual:${groupId || "private"}:${messageId}`, JSON.stringify(residual)).catch(() => {});
+    await writeSystemAudit(this.env, { type: "thinking_indicator_residual", groupId, actorId: String(body?.self_id || "bot"), action: "recall_failed", ...residual }).catch(() => {});
+    return { ok: false, ...residual };
   }
 
   classifyToolTask(body) {
