@@ -10523,7 +10523,7 @@ export class OneBotHub {
     }
     const queue = this.userQueues.get(key) || [];
     const next = queue.filter(item => !this.questionMessageIds(item.body).includes(messageId));
-    if  (next.length) this.userQueues.set(key, next); else this.userQueues.delete(key);
+    if (next.length) this.userQueues.set(key, next); else this.userQueues.delete(key);
     await this.persistUserQueue(key);
     await writeSystemAudit(this.env, {
       type: "question_cancelled_by_recall",
