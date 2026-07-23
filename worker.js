@@ -1,4 +1,4 @@
-const VERSION = "1.2.16";
+const VERSION = "1.2.17";
 const QQAI_V1_COMPLETE_MARKER = "QQAI_V1_COMPLETE_MARKER";
 const QQAI_V1_R3_MARKER = "QQAI_V1_R3_MARKER";
 const BUILD_DATE = "2026-07-23";
@@ -3726,6 +3726,196 @@ function normalizeFileDescriptor(data) {
     size: Math.max(0, Number(item.size || item.file_size || 0) || 0),
     busid: String(item.busid || item.bus_id || "").slice(0, 120)
   };
+}
+
+function safeAttachmentFilename(value, fallback = "attachment") {
+  const cleaned = String(value || fallback)
+    .replace(/[\u0000-\u001f\u007f]/g, "")
+    .replace(/[\\/:*?"<>|]/g, "_")
+    .trim()
+    .slice(0, 180);
+  return cleaned || fallback;
+}
+
+function guessAttachmentMime(name, type = "") {
+  const lower = String(name || "").toLowerCase();
+  const kind = String(type || "").toLowerCase();
+  if (kind === "image") {
+    if (/\.gif$/i.test(lower)) return "image/gif";
+    if (/\.png$/i.test(lower)) return "image/png";
+    if (/\.webp$/i.test(lower)) return "image/webp";
+    if (/\.bmp$/i.test(lower)) return "image/bmp";
+    return "image/jpeg";
+  }
+  if (kind === "video") return /\.webm$/i.test(lower) ? "video/webm" : "video/mp4";
+  if (kind === "record" || kind === "audio") {
+    if (/\.ogg$/i.test(lower)) return "audio/ogg";
+    if (/\.wav$/i.test(lower)) return "audio/wav";
+    if (/\.m4a$/i.test(lower)) return "audio/mp4";
+    return "audio/mpeg";
+  }
+  if (/\.pdf$/i.test(lower)) return "application/pdf";
+  if (/\.txt$/i.test(lower)) return "text/plain; charset=utf-8";
+  if (/\.json$/i.test(lower)) return "application/json";
+  if (/\.zip$/i.test(lower)) return "application/zip";
+  return "application/octet-stream";
+}
+
+function allMediaDescriptors(message, wantedType) {
+  const type = String(wantedType || "").toLowerCase();
+  if (Array.isArray(message)) {
+    return message
+      .filter(part => String(part?.type || "").toLowerCase() === type)
+      .map(part => ({
+        type,
+        url: String(part?.data?.url || part?.data?.file_url || ""),
+        file: String(part?.data?.file || part?.data?.file_id || ""),
+        name: String(part?.data?.name || part?.data?.file_name || part?.data?.file || "")
+      }));
+  }
+  const result = [];
+  const regex = new RegExp(`\\[CQ:${type},([^\\]]+)\\]`, "gi");
+  for (const match of String(message || "").matchAll(regex)) {
+    const attrs = parseCqAttributes(match[1]);
+    result.push({
+      type,
+      url: String(attrs.url || attrs.file_url || ""),
+      file: String(attrs.file || attrs.file_id || ""),
+      name: String(attrs.name || attrs.file_name || attrs.file || "")
+    });
+  }
+  return result;
+}
+
+async function refreshConversationAttachmentDescriptor(env, record, source, index) {
+  const list = source === "files" ? (record.files || []) : (record.media || []);
+  const descriptor = list[index];
+  if (!descriptor) throw new Error("找不到附件记录");
+  const type = source === "files" ? "file" : String(descriptor.type || "").toLowerCase();
+  let freshUrl = "";
+
+  if (source === "media" && descriptor.file) {
+    try {
+      if (type === "image") {
+        const data = await callOneBotAction(env, { action: "get_image", params: { file: descriptor.file } }, 15000);
+        freshUrl = String(data?.url || data?.file_url || "").trim();
+      } else if (type === "record" || type === "audio") {
+        const data = await callOneBotAction(env, { action: "get_record", params: { file: descriptor.file, out_format: "mp3" } }, 15000);
+        freshUrl = String(data?.url || data?.file_url || "").trim();
+      }
+    } catch {}
+  }
+
+  if (!/^https?:\/\//i.test(freshUrl) && record.messageId) {
+    try {
+      const data = await callOneBotAction(env, { action: "get_msg", params: { message_id: numericId(record.messageId) } }, 15000);
+      if (source === "media") {
+        const candidates = allMediaDescriptors(data?.message || data?.raw_message || "", type);
+        const sameFile = candidates.find(item => descriptor.file && item.file === descriptor.file);
+        const candidate = sameFile || candidates[index] || candidates[0];
+        freshUrl = String(candidate?.url || "").trim();
+        if (candidate?.file && !descriptor.file) descriptor.file = candidate.file;
+      } else {
+        const freshFiles = extractFileDescriptors(data?.message || data?.raw_message || "");
+        const sameFile = freshFiles.find(item => descriptor.file && item.file === descriptor.file);
+        const candidate = sameFile || freshFiles[index] || freshFiles[0];
+        freshUrl = String(candidate?.url || "").trim();
+      }
+    } catch {}
+  }
+
+  if (!/^https?:\/\//i.test(freshUrl) && source === "files" && descriptor.file) {
+    try {
+      const data = await callOneBotAction(env, {
+        action: "get_group_file_url",
+        params: {
+          group_id: numericId(record.groupId),
+          group: String(record.groupId),
+          file_id: descriptor.file,
+          busid: descriptor.busid || undefined
+        }
+      }, 15000);
+      freshUrl = String(data?.url || data?.file_url || "").trim();
+    } catch {}
+  }
+
+  if (!/^https?:\/\//i.test(freshUrl)) throw new Error("NapCat 无法刷新附件直链；附件可能已过期或资源缓存已清理");
+
+  const nextList = list.map((item, i) => i === index ? { ...item, url: freshUrl, refreshedAt: Date.now() } : item);
+  if (source === "files") await updatePortalConversationRecord(env, record.groupId, record.messageId, { files: nextList });
+  else await updatePortalConversationRecord(env, record.groupId, record.messageId, { media: nextList });
+  return { ...descriptor, url: freshUrl };
+}
+
+async function fetchConversationAttachmentResponse(env, record, source, index, download = false) {
+  const list = source === "files" ? (record.files || []) : (record.media || []);
+  let descriptor = list[index];
+  if (!descriptor) return new Response("找不到附件。", { status: 404, headers: { "Content-Type": "text/plain; charset=utf-8" } });
+
+  const type = source === "files" ? "file" : String(descriptor.type || "").toLowerCase();
+  const filename = safeAttachmentFilename(descriptor.name || descriptor.file || `${type || "attachment"}-${record.messageId}`);
+  const maxBytes = type === "image" ? 16 * 1024 * 1024
+    : (type === "record" || type === "audio") ? 24 * 1024 * 1024
+    : type === "video" ? 100 * 1024 * 1024
+    : 100 * 1024 * 1024;
+
+  const tryFetch = async value => {
+    const remoteUrl = String(value || "").trim();
+    if (!/^https?:\/\//i.test(remoteUrl)) return null;
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort("timeout"), 20000);
+    try {
+      const response = await fetch(remoteUrl, {
+        redirect: "follow",
+        headers: {
+          "Accept": "*/*",
+          "User-Agent": `QQAIbot/${VERSION} attachment-proxy`
+        },
+        signal: controller.signal
+      });
+      if (!response.ok) {
+        try { await response.body?.cancel(); } catch {}
+        return null;
+      }
+      const length = Number(response.headers.get("Content-Length") || 0);
+      if (length > maxBytes) {
+        try { await response.body?.cancel(); } catch {}
+        throw new Error(`附件超过 Portal 代理上限 ${Math.round(maxBytes / 1024 / 1024)} MiB`);
+      }
+      return response;
+    } finally {
+      clearTimeout(timer);
+    }
+  };
+
+  let response = await tryFetch(descriptor.url);
+  if (!response) {
+    try {
+      descriptor = await refreshConversationAttachmentDescriptor(env, record, source, index);
+      response = await tryFetch(descriptor.url);
+    } catch (error) {
+      return new Response(`附件加载失败：${String(error?.message || error)}。请确认 NapCat 在线后重试。`, {
+        status: 410,
+        headers: { "Content-Type": "text/plain; charset=utf-8", "Cache-Control": "no-store" }
+      });
+    }
+  }
+  if (!response) {
+    return new Response("附件加载失败：来源服务器拒绝访问或链接已过期。", {
+      status: 410,
+      headers: { "Content-Type": "text/plain; charset=utf-8", "Cache-Control": "no-store" }
+    });
+  }
+
+  const headers = new Headers();
+  const contentType = response.headers.get("Content-Type") || guessAttachmentMime(filename, type);
+  headers.set("Content-Type", contentType);
+  headers.set("Cache-Control", "private, no-store, max-age=0");
+  headers.set("X-Content-Type-Options", "nosniff");
+  headers.set("Content-Disposition", `${download ? "attachment" : "inline"}; filename="attachment"; filename*=UTF-8''${encodeURIComponent(filename)}`);
+  const contentLength = response.headers.get("Content-Length");
+  if (contentLength) headers.set("Content-Length", contentLength);
+  return new Response(response.body, { status: 200, headers });
 }
 
 function extractFileDescriptors(message) {
@@ -7994,7 +8184,7 @@ ${summary}`.slice(0, 4000),
     const connectors = await listBilibiliConnectors(env, groupId);
     return jsonResponse({
       ok: true,
-      connectors: connectors.map(item => { const { webhookSecret, ...safe } = item; return { ...safe, mode: item.mode === "generic_webhook" ? "official_webhook" : "automatic_polling" }; }),
+      connectors: connectors.map(item => { const { webhookSecret, ...safe } = item; return { ...safe, mode: item.mode === "generic_webhook" ? "official_webhook" : "automatic_polling", webhookUrl: item.webhookSecret ? `${url.origin}/api/integrations/bilibili/webhook/${item.webhookSecret}` : "" }; }),
       note: "推荐使用哔哩哔哩开放平台 Webhook 或经过合法授权的中继。兼容轮询仅使用公开网页接口、最低 30 分钟一次，可能受 412／429 风控影响。"
     });
   }
@@ -8010,6 +8200,50 @@ ${summary}`.slice(0, 4000),
       await dbPut(env, `bili:connector:index:${groupId}`, JSON.stringify(ids.filter(id => id !== item.id)));
       await removeFromIndex(env, "bili:connector:index:all", item.id);
       return jsonResponse({ ok: true, message: "B站自动监控已删除。" });
+    }
+
+    if (action === "rotate_webhook") {
+      const item = await readJson(env, `bili:connector:${body.id}`, null);
+      if (!item || item.groupId !== groupId) return jsonResponse({ ok: false, message: "找不到监控项目。" }, 404);
+      if (item.mode !== "generic_webhook") return jsonResponse({ ok: false, message: "当前不是 Webhook 模式。" }, 400);
+      if (item.webhookSecret) await dbDel(env, `bili:webhook_secret:${item.webhookSecret}`);
+      item.webhookSecret = crypto.randomUUID().replaceAll("-", "");
+      item.updatedAt = Date.now();
+      await dbPut(env, `bili:webhook_secret:${item.webhookSecret}`, item.id);
+      await dbPut(env, `bili:connector:${item.id}`, JSON.stringify(item));
+      await writeSystemAudit(env, { type: "bilibili_auto_monitor", groupId, actorId: authed.qq, action: "rotate_webhook", connectorId: item.id, creatorId: item.creatorId });
+      return jsonResponse({ ok: true, message: "Webhook 回调密钥已重新生成；旧地址立即失效。", webhookUrl: `${url.origin}/api/integrations/bilibili/webhook/${item.webhookSecret}` });
+    }
+    if (action === "switch_mode") {
+      const item = await readJson(env, `bili:connector:${body.id}`, null);
+      if (!item || item.groupId !== groupId) return jsonResponse({ ok: false, message: "找不到监控项目。" }, 404);
+      const nextMode = body.mode === "official_webhook" ? "generic_webhook" : "automatic_polling";
+      if (item.webhookSecret && nextMode !== "generic_webhook") {
+        await dbDel(env, `bili:webhook_secret:${item.webhookSecret}`);
+        delete item.webhookSecret;
+      }
+      let webhookUrl = "";
+      if (nextMode === "generic_webhook") {
+        item.webhookSecret = item.webhookSecret || crypto.randomUUID().replaceAll("-", "");
+        await dbPut(env, `bili:webhook_secret:${item.webhookSecret}`, item.id);
+        webhookUrl = `${url.origin}/api/integrations/bilibili/webhook/${item.webhookSecret}`;
+        item.pollIntervalSeconds = 0;
+        item.nextPollAt = 0;
+      } else {
+        item.pollIntervalSeconds = bilibiliPollIntervalSeconds(body.pollIntervalSeconds || BILIBILI_POLL_DEFAULT_SECONDS);
+        item.nextPollAt = Date.now();
+      }
+      item.mode = nextMode;
+      item.updatedAt = Date.now();
+      await dbPut(env, `bili:connector:${item.id}`, JSON.stringify(item));
+      await writeSystemAudit(env, { type: "bilibili_auto_monitor", groupId, actorId: authed.qq, action: "switch_mode", connectorId: item.id, creatorId: item.creatorId, mode: nextMode });
+      return jsonResponse({
+        ok: true,
+        message: nextMode === "generic_webhook"
+          ? "已切换为 Webhook：现在只等待外部事件，不会主动检查 B站。"
+          : "已切换为兼容轮询：可以使用检查频率与立即检查。",
+        webhookUrl
+      });
     }
     if (action === "test") {
       const item = await readJson(env, `bili:connector:${body.id}`, null);
@@ -8297,6 +8531,19 @@ ${summary}`.slice(0, 4000),
     if (!item) return jsonResponse({ ok: false, message: "找不到对话记录。" }, 404);
     const violation = item.violationId ? await readJson(env, `ruleviolation:${item.violationId}`, null) : null;
     return jsonResponse({ ok: true, item, violation });
+  }
+
+
+  if (request.method === "GET" && path === "/conversations/attachment") {
+    const canManage = Boolean(permissions.aiAdmin || permissions.groupOps || permissions.nativeAdmin || role === "admin" || role === "owner" || portalIsDeveloper);
+    if (!canManage) return new Response("缺少对话记录查看权限。", { status: 403, headers: { "Content-Type": "text/plain; charset=utf-8" } });
+    const messageId = String(url.searchParams.get("id") || "").trim();
+    const source = url.searchParams.get("source") === "files" ? "files" : "media";
+    const index = Math.max(0, Math.floor(Number(url.searchParams.get("index") || 0)));
+    const download = url.searchParams.get("download") === "1";
+    const item = await readJson(env, `conversation:${groupId}:${messageId}`, null);
+    if (!item || String(item.groupId) !== groupId) return new Response("找不到当前群的附件记录。", { status: 404, headers: { "Content-Type": "text/plain; charset=utf-8" } });
+    return fetchConversationAttachmentResponse(env, item, source, index, download);
   }
 
   if (request.method === "POST" && path === "/conversations/action") {
@@ -9041,7 +9288,7 @@ function getPortalHomePage(host) {
 .timeline{display:grid;gap:8px}.step{display:flex;gap:10px;align-items:flex-start}.step i{width:9px;height:9px;border-radius:50%;background:var(--primary);margin-top:6px;flex:0 0 auto}.step span{line-height:1.5}.pill{display:inline-block;border-radius:999px;padding:4px 8px;background:#eef0ff;color:#5050bd;font-size:12px;font-weight:700;margin:2px 4px 2px 0}.split{display:grid;grid-template-columns:1fr 1fr;gap:16px}.switch{display:flex;align-items:center;gap:9px;margin:10px 0}.switch input{width:18px;height:18px}.code{font-family:ui-monospace,SFMono-Regular,Consolas,monospace;background:#151a29;color:#e9ecf4;border-radius:12px;padding:12px;white-space:pre-wrap;word-break:break-word;font-size:12px}
 .log-toolbar{margin-bottom:14px}.log-summary{margin:0 0 12px}.log-card{padding:15px 16px}.log-card-head{display:flex;align-items:flex-start;justify-content:space-between;gap:12px}.log-card-title{font-size:16px;font-weight:850;line-height:1.35}.log-card-time{font-size:12px;color:var(--muted);margin-top:5px}.log-badge{flex:0 0 auto;border-radius:999px;padding:5px 9px;font-size:12px;font-weight:800;background:var(--panel2);color:var(--muted)}.log-badge.ok{background:#e5f5ee;color:var(--ok)}.log-badge.warn{background:#fff2d9;color:var(--warn)}.log-badge.error{background:#fde9ec;color:var(--bad)}.log-badge.info{background:#eef0ff;color:#5050bd}.log-human{margin-top:11px;line-height:1.65}.log-facts{display:flex;gap:7px;flex-wrap:wrap;margin-top:11px}.log-fact{border:1px solid var(--line);background:var(--panel2);border-radius:9px;padding:6px 9px;font-size:12px}.log-details{margin-top:11px;border-top:1px solid var(--line);padding-top:10px}.log-details summary{cursor:pointer;color:var(--muted);font-size:12px;font-weight:700}.log-details pre{margin:9px 0 0;padding:11px;border-radius:10px;background:#151a29;color:#e9ecf4;overflow:auto;white-space:pre-wrap;word-break:break-word;font-size:11px;line-height:1.5}.qqai-modal{position:fixed;inset:0;z-index:9999;background:rgba(5,8,15,.68);display:grid;place-items:center;padding:18px;backdrop-filter:blur(6px)}.qqai-modal-card{width:min(560px,100%);background:var(--panel);color:var(--text);border:1px solid var(--line);border-radius:18px;padding:20px;box-shadow:0 26px 80px rgba(0,0,0,.34)}.qqai-modal-card h3{margin:0}.qqai-modal-text{white-space:pre-wrap;line-height:1.65;margin:12px 0;color:var(--muted)}.qqai-modal-input{width:100%;min-height:120px;resize:vertical;border:1px solid var(--line);background:var(--panel2);color:var(--text);border-radius:12px;padding:11px;margin:8px 0 14px}.qqai-modal-actions{display:flex;justify-content:flex-end;gap:10px}.toast{position:fixed;right:22px;bottom:22px;max-width:420px;padding:12px 15px;border-radius:12px;background:#1c2233;color:#fff;box-shadow:var(--shadow);z-index:60}.mobile-menu{display:none}.sidebar-backdrop{display:none}
 
-.health-tools{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:16px;margin:0 0 16px}.model-check-result{min-height:90px;white-space:pre-wrap;word-break:break-word}.settings-fold{margin-top:16px;border:1px solid var(--line);border-radius:17px;background:var(--panel);box-shadow:0 8px 28px rgba(38,49,76,.045);overflow:hidden}.settings-fold>summary{cursor:pointer;list-style:none;padding:17px 18px;font-weight:850;display:flex;align-items:center;justify-content:space-between;gap:12px}.settings-fold>summary::-webkit-details-marker{display:none}.settings-fold>summary:after{content:"展开";font-size:12px;color:var(--muted);font-weight:700}.settings-fold[open]>summary:after{content:"收起"}.settings-fold-body{border-top:1px solid var(--line);padding:18px}.progressive-step{display:grid;grid-template-columns:minmax(100px,.45fr) minmax(150px,1fr) minmax(120px,.7fr) auto;gap:10px;align-items:end;border:1px solid var(--line);border-radius:13px;padding:12px;background:var(--panel2);margin-top:10px}.progressive-step .field{margin:0}.conversation-card{position:relative}.violation-badge{position:absolute;right:12px;top:12px;border-radius:999px;background:var(--bad);color:#fff;padding:5px 9px;font-size:12px;font-weight:850;box-shadow:0 4px 14px rgba(197,61,77,.28)}.conversation-text{white-space:pre-wrap;word-break:break-word;line-height:1.65;padding-right:92px}.conversation-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}.conversation-actions .btn{font-size:12px;padding:8px 10px}.conversation-detail{margin-top:12px}.conversation-detail summary{cursor:pointer;color:var(--primary);font-weight:750}.conversation-detail pre{max-height:420px;overflow:auto;white-space:pre-wrap;word-break:break-word;background:#151a29;color:#e9ecf4;border-radius:10px;padding:12px}.conversation-toolbar{margin-bottom:16px}.media-limit-list{display:grid;gap:8px}.media-limit-row{display:flex;justify-content:space-between;gap:12px;border-bottom:1px solid var(--line);padding:8px 0}.media-limit-row:last-child{border-bottom:0}.member-picker-search{margin:12px 0 10px}.member-picker-list{display:grid;gap:8px;max-height:420px;overflow:auto;border:1px solid var(--line);border-radius:12px;padding:10px;background:var(--panel2)}.conversation-attachments{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}.attachment-link{display:inline-flex;align-items:center;gap:5px;border:1px solid var(--line);background:var(--panel2);color:var(--primary);border-radius:9px;padding:6px 9px;text-decoration:none;font-size:12px;font-weight:750}.attachment-link:hover{border-color:var(--primary)}.attachment-preview-body{margin-top:14px;display:grid;place-items:center;min-height:120px;max-height:70dvh;overflow:auto;background:var(--panel2);border:1px solid var(--line);border-radius:12px;padding:12px}.attachment-preview-body img,.attachment-preview-body video{display:block;max-width:100%;max-height:64dvh;border-radius:10px}.attachment-preview-body audio{width:min(520px,100%)}.member-picker-row{display:grid;grid-template-columns:auto minmax(120px,1fr) minmax(140px,1fr);gap:10px;align-items:center;border-bottom:1px solid var(--line);padding:8px}.member-picker-row:last-child{border-bottom:0}.group-binding-list{display:grid;gap:8px}.group-binding-row{display:grid;grid-template-columns:auto minmax(140px,1fr) minmax(160px,1fr);gap:10px;align-items:center;border:1px solid var(--line);border-radius:11px;padding:9px;background:var(--panel2)}:root[data-theme="dark"] select,:root[data-theme="dark"] .top-actions select{background:#101521!important;color:#eef2f8!important;border-color:#293247!important}
+.health-tools{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:16px;margin:0 0 16px}.model-check-result{min-height:90px;white-space:pre-wrap;word-break:break-word}.settings-fold{margin-top:16px;border:1px solid var(--line);border-radius:17px;background:var(--panel);box-shadow:0 8px 28px rgba(38,49,76,.045);overflow:hidden}.settings-fold>summary{cursor:pointer;list-style:none;padding:17px 18px;font-weight:850;display:flex;align-items:center;justify-content:space-between;gap:12px}.settings-fold>summary::-webkit-details-marker{display:none}.settings-fold>summary:after{content:"展开";font-size:12px;color:var(--muted);font-weight:700}.settings-fold[open]>summary:after{content:"收起"}.settings-fold-body{border-top:1px solid var(--line);padding:18px}.progressive-step{display:grid;grid-template-columns:minmax(100px,.45fr) minmax(150px,1fr) minmax(120px,.7fr) auto;gap:10px;align-items:end;border:1px solid var(--line);border-radius:13px;padding:12px;background:var(--panel2);margin-top:10px}.progressive-step .field{margin:0}.conversation-card{position:relative}.violation-badge{position:absolute;right:12px;top:12px;border-radius:999px;background:var(--bad);color:#fff;padding:5px 9px;font-size:12px;font-weight:850;box-shadow:0 4px 14px rgba(197,61,77,.28)}.conversation-text{white-space:pre-wrap;word-break:break-word;line-height:1.65;padding-right:92px}.conversation-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}.conversation-actions .btn{font-size:12px;padding:8px 10px}.conversation-detail{margin-top:12px}.conversation-detail summary{cursor:pointer;color:var(--primary);font-weight:750}.conversation-detail pre{max-height:420px;overflow:auto;white-space:pre-wrap;word-break:break-word;background:#151a29;color:#e9ecf4;border-radius:10px;padding:12px}.conversation-toolbar{margin-bottom:16px}.media-limit-list{display:grid;gap:8px}.media-limit-row{display:flex;justify-content:space-between;gap:12px;border-bottom:1px solid var(--line);padding:8px 0}.media-limit-row:last-child{border-bottom:0}.member-picker-search{margin:12px 0 10px}.member-picker-list{display:grid;gap:8px;max-height:420px;overflow:auto;border:1px solid var(--line);border-radius:12px;padding:10px;background:var(--panel2)}.conversation-attachments{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}.attachment-link{display:inline-flex;align-items:center;gap:5px;border:1px solid var(--line);background:var(--panel2);color:var(--primary);border-radius:9px;padding:6px 9px;text-decoration:none;font-size:12px;font-weight:750}.attachment-link:hover{border-color:var(--primary)}.attachment-preview-body{margin-top:14px;display:grid;place-items:center;min-height:120px;max-height:70dvh;overflow:auto;background:var(--panel2);border:1px solid var(--line);border-radius:12px;padding:12px}.attachment-preview-body img,.attachment-preview-body video{display:block;max-width:100%;max-height:64dvh;border-radius:10px}.attachment-preview-body audio{width:min(520px,100%)}.attachment-modal-card{width:min(760px,100%)}.attachment-error{text-align:center;max-width:520px;line-height:1.6}.attachment-error p{color:var(--muted)}.bili-webhook-box code{display:block;max-width:100%;overflow:auto;white-space:nowrap;margin-top:7px}.bili-webhook-box input[readonly]{font-family:ui-monospace,SFMono-Regular,Consolas,monospace;font-size:12px}.member-picker-row{display:grid;grid-template-columns:auto minmax(120px,1fr) minmax(140px,1fr);gap:10px;align-items:center;border-bottom:1px solid var(--line);padding:8px}.member-picker-row:last-child{border-bottom:0}.group-binding-list{display:grid;gap:8px}.group-binding-row{display:grid;grid-template-columns:auto minmax(140px,1fr) minmax(160px,1fr);gap:10px;align-items:center;border:1px solid var(--line);border-radius:11px;padding:9px;background:var(--panel2)}:root[data-theme="dark"] select,:root[data-theme="dark"] .top-actions select{background:#101521!important;color:#eef2f8!important;border-color:#293247!important}
 :root[data-theme="dark"] .sidebar{background:#090d17}:root[data-theme="dark"] .btn.danger{background:#351820}:root[data-theme="dark"] .status{background:#20283a}:root[data-theme="dark"] .status.ok{background:#13372d}:root[data-theme="dark"] .status.warning{background:#3a2b13}:root[data-theme="dark"] .status.error{background:#3a1820}:root[data-theme="dark"] .pill{background:#292750;color:#c8c7ff}
 .theme-toggle{white-space:nowrap}
 @media(max-width:1050px){.health-tools{grid-template-columns:1fr}.span-3{grid-column:span 6}.span-4,.span-5,.span-6,.span-7{grid-column:span 6}.span-8{grid-column:span 12}}
@@ -9175,7 +9422,7 @@ function ensureR3Views(){
   if(!$('v-appeals').dataset.ready){$('v-appeals').dataset.ready='1';$('v-appeals').innerHTML='<div class="section-head"><div><h2>匿名申诉</h2><p>审核者看不到你的 QQ；只有开发者可以查看真实身份。当前成员和退出未满 30 天的前成员都可以申诉。</p></div><button id="appealReload" class="btn">刷新案件</button></div><div class="grid"><div class="card span-5"><h3>提交申诉</h3><div class="field"><label>所属群组</label><select id="appealGroup"><option value="">请选择群组</option></select></div><div class="field"><label>申诉类型</label><select id="appealType"><option>禁言</option><option>踢出</option><option>AI黑名单</option><option>管理操作</option><option>排程</option><option>其他</option></select></div><div class="field"><label>相关消息 ID（选填）</label><input id="appealEvidence"></div><div class="field"><label>申诉内容</label><textarea id="appealContent" placeholder="请说明发生了什么、希望如何处理"></textarea></div><button id="appealSubmit" class="btn primary" style="width:100%">匿名提交</button><div id="appealMessage" class="notice">提交后可在“我的案件”查看处理状态。前成员资格从系统收到退群事件起保留 30 天。</div></div><div class="card span-7"><h3>我的案件</h3><div id="appealList" class="list"><div class="empty">暂无案件</div></div></div></div>';$('appealReload').onclick=loadAppeals;$('appealSubmit').onclick=submitAppeal}
   if(!$('v-violationhistory').dataset.ready){$('v-violationhistory').dataset.ready='1';$('v-violationhistory').innerHTML='<div class="section-head"><div><h2>历史违规记录</h2><p>你可以查看自己的群规记录，并对单条或多条记录一键申诉。只有属于你的记录会显示。</p></div><button id="vhReload" class="btn">重新加载</button></div><div class="card"><div class="row"><select id="vhGroup"><option value="">全部可申诉群组</option></select><button id="vhSelectAll" class="btn">全选当前列表</button><button id="vhAppealSelected" class="btn primary">申诉所选记录</button></div><div class="notice" style="margin-top:12px">退出群聊未满 30 天仍可查看并申诉；超过期限后不能再提交新申诉。</div></div><div id="vhList" class="list" style="margin-top:16px"><div class="empty">尚未加载</div></div>';$('vhReload').onclick=loadViolationHistory;$('vhGroup').onchange=loadViolationHistory;$('vhSelectAll').onclick=function(){document.querySelectorAll('.vhCheck:not(:disabled)').forEach(function(x){x.checked=true})};$('vhAppealSelected').onclick=function(){appealViolationRecords(Array.from(document.querySelectorAll('.vhCheck:checked')).map(function(x){return x.value}))}}
   if(!$('v-appealreview').dataset.ready){$('v-appealreview').dataset.ready='1';$('v-appealreview').innerHTML='<div class="section-head"><div><h2>申诉处理</h2><p>处理当前选中群组的匿名申诉。非开发者看不到申诉人的真实 QQ。</p></div><button id="appealReviewReload" class="btn">重新加载</button></div><div class="card"><div class="row"><select id="appealReviewStatus"><option value="">全部状态</option><option value="pending_owner">待处理</option><option value="pending_review">审核中</option><option value="approved">已通过</option><option value="rejected">已驳回</option></select><button id="appealReviewSearch" class="btn primary">筛选</button></div></div><div id="appealReviewList" class="list" style="margin-top:16px"><div class="empty">请选择群组后加载案件</div></div>';$('appealReviewReload').onclick=loadAppealReviews;$('appealReviewSearch').onclick=loadAppealReviews}
-  if(!$('v-bilibili').dataset.ready){$('v-bilibili').dataset.ready='1';$('v-bilibili').innerHTML='<div class="section-head"><div><h2>B站监控</h2><p>推荐使用哔哩哔哩开放平台 Webhook；兼容轮询仅保留为低频备用，不保证长期可用。</p></div><button id="biliReload" class="btn">重新加载</button></div><div class="card"><div class="row"><input id="biliCreatorName" placeholder="创作者名称（选填）"><input id="biliCreatorId" inputmode="numeric" placeholder="B站用户 UID（必填）"><select id="biliMode"><option value="official_webhook" selected>开放平台 Webhook（推荐）</option><option value="automatic_polling">兼容轮询（公开网页接口）</option></select><select id="biliPollInterval"><option value="1800" selected>每 30 分钟</option><option value="3600">每 1 小时</option><option value="7200">每 2 小时</option><option value="21600">每 6 小时</option></select></div><div class="row"><label class="switch"><input id="biliLiveNotify" type="checkbox" checked>开播通知</label><label class="switch"><input id="biliLiveAtAll" type="checkbox">开播 @全体</label><label class="switch"><input id="biliVideoNotify" type="checkbox" checked>新视频通知</label><label class="switch"><input id="biliVideoAtAll" type="checkbox">新视频 @全体</label><button id="biliAdd" class="btn primary">保存并启用自动监控</button></div><div class="notice">Webhook 模式会产生带随机密钥的回调地址，请配置到哔哩哔哩开放平台或合法授权的事件中继。兼容轮询最低 30 分钟一次；出现 412／429 后会自动暂停 12～72 小时，避免持续请求。</div><div id="biliWebhookResult" class="notice hidden"></div></div><div id="biliList" class="list" style="margin-top:16px"></div>';$('biliReload').onclick=loadBilibili;$('biliAdd').onclick=saveBilibiliConnector;$('biliMode').onchange=function(){$('biliPollInterval').disabled=this.value==='official_webhook'};$('biliMode').onchange()}
+  if(!$('v-bilibili').dataset.ready){$('v-bilibili').dataset.ready='1';$('v-bilibili').innerHTML='<div class="section-head"><div><h2>B站监控</h2><p>可选择主动低频检查，或接收外部服务推送的事件。</p></div><button id="biliReload" class="btn">重新加载</button></div><div class="card"><div class="row"><input id="biliCreatorName" placeholder="创作者名称（选填）"><input id="biliCreatorId" inputmode="numeric" placeholder="B站用户 UID（必填）"><select id="biliMode"><option value="automatic_polling" selected>兼容轮询（输入 UID 即可使用）</option><option value="official_webhook">接收 Webhook（高级，需要外部事件来源）</option></select><select id="biliPollInterval"><option value="1800" selected>每 30 分钟</option><option value="3600">每 1 小时</option><option value="7200">每 2 小时</option><option value="21600">每 6 小时</option></select></div><div class="row"><label class="switch"><input id="biliLiveNotify" type="checkbox" checked>开播通知</label><label class="switch"><input id="biliLiveAtAll" type="checkbox">开播 @全体</label><label class="switch"><input id="biliVideoNotify" type="checkbox" checked>新视频通知</label><label class="switch"><input id="biliVideoAtAll" type="checkbox">新视频 @全体</label><button id="biliAdd" class="btn primary">保存监控</button></div><div id="biliModeHelp" class="notice"></div><div class="notice">兼容轮询最低 30 分钟一次；若 B站返回 412／429，系统会自动暂停 12～72 小时。Webhook 不会主动访问 B站，但必须另有开放平台应用或合法事件中继把事件发送到回调地址。</div><div id="biliWebhookResult" class="notice hidden"></div></div><div id="biliList" class="list" style="margin-top:16px"></div>';$('biliReload').onclick=loadBilibili;$('biliAdd').onclick=saveBilibiliConnector;$('biliMode').onchange=function(){var webhook=this.value==='official_webhook';$('biliPollInterval').disabled=webhook;$('biliModeHelp').textContent=webhook?'Webhook 模式：本 Worker 只负责接收事件。仅填写 UID 不会自动检查；保存后请复制回调地址到你的开放平台应用或事件中继。':'兼容轮询：Worker 会按频率主动检查该 UID，可以使用“立即检查”。首次检查只建立当前状态基准。'};$('biliMode').onchange()}
   if(!$('v-platform')){var b=document.createElement('button');b.dataset.view='platform';b.textContent='功能权限中心';b.hidden=true;$('nav').appendChild(b);b.onclick=function(){showView('platform')};var v=document.createElement('section');v.id='v-platform';v.className='view';v.innerHTML='<div class="section-head"><div><h2>功能权限中心</h2><p>这是机器人功能总开关，仅开发者本人可见并可修改全部 300 项。</p></div><button id="pfReload" class="btn">重新加载</button></div><div class="card"><div class="row"><input id="pfSearch" class="grow" placeholder="搜索功能名称、ID、类别"><label id="pfAuditWrap" class="switch"><input id="pfAuditSilent" type="checkbox">不记录操作日志（仅开发者）</label><button id="pfGo" class="btn primary">搜索</button></div><div id="pfSummary" class="notice">尚未加载</div></div><div id="pfList" class="list" style="margin-top:16px"></div>';document.querySelector('.content').appendChild(v);$('pfReload').onclick=loadPlatformFeatures;$('pfGo').onclick=loadPlatformFeatures;$('pfSearch').onkeydown=function(e){if(e.key==='Enter')loadPlatformFeatures()}}
 }
 function organizeSidebarNavigation(){var nav=$('nav');if(!nav||nav.dataset.grouped==='1')return;var groups=[['概览',['overview','health']],['AI 与模型',['tasks','schedules','models','aidecisions','memory']],['群组与安全',['groups','settingscenter','conversations','ruleviolations','moderation','violationhistory','appeals','appealreview','bilibili']],['系统与开发',['simulator','quota','platform','logs']]];groups.forEach(function(g){var wrap=document.createElement('div');wrap.className='nav-group';wrap.dataset.navGroup=g[0];var h=document.createElement('div');h.className='nav-heading';h.textContent=g[0];wrap.appendChild(h);g[1].forEach(function(v){var b=nav.querySelector('button[data-view="'+v+'"]');if(b)wrap.appendChild(b)});nav.appendChild(wrap)});Array.from(nav.children).forEach(function(x){if(x.tagName==='BUTTON'){var misc=nav.querySelector('.nav-group[data-nav-group="系统与开发"]');if(misc)misc.appendChild(x)}});nav.dataset.grouped='1';refreshSidebarGroupVisibility()}
@@ -9202,8 +9449,11 @@ async function saveRuleViolationSettings(){var payload={strictness:$('rvStrictne
 
 async function loadSettingsCenter(){var dev=session&&(session.permissions||{}).developer;if(!currentGroup){$('scMessage').textContent='请先从右上角选择需要维护的群组。';$('scList').innerHTML='<div class="empty">尚未选择群组</div>';return}$('scMessage').textContent='正在加载设置…';$('scList').innerHTML='<div class="empty">正在读取当前群设置</div>';try{var p=new URLSearchParams();p.set('targetQq',dev?($('scTargetQq').value||session.qq):session.qq);var r=await api('/settings-center?'+p.toString());if(!r.ok){$('scMessage').textContent=r.message||'加载失败';$('scList').innerHTML='<div class="empty">'+esc(r.message)+'</div>';return}if(!$('scTargetQq').value)$('scTargetQq').value=r.targetQq||session.qq;if($('scResolvedRole')){$('scResolvedRole').textContent='识别权限：'+portalRoleLabel(r.targetRole);$('scResolvedRole').className='status ok'}$('scMessage').textContent='已加载 '+(r.settings||[]).length+' 项设置；只会提交实际改动的项目。';$('scList').innerHTML='';(r.settings||[]).forEach(function(s){var d=document.createElement('div');d.className='item';var input;if(s.type==='boolean'){input=document.createElement('input');input.type='checkbox';input.checked=!!s.value}else if(s.type==='select'){input=document.createElement('select');(s.options||[]).forEach(function(v){var o=document.createElement('option');o.value=v;o.textContent=v;input.appendChild(o)});input.value=String(s.value)}else if(s.type==='textarea'){input=document.createElement('textarea');input.value=String(s.value==null?'':s.value)}else{input=document.createElement('input');input.type=s.type==='number'?'number':'text';input.value=String(s.value==null?'':s.value);if(s.min!=null)input.min=s.min;if(s.max!=null)input.max=s.max}input.dataset.settingKey=s.key;input.dataset.initialValue=input.type==='checkbox'?String(input.checked):String(input.value);var roleText=portalRoleLabel(s.minRole);if(s.key==='rule_proxy_mode')roleText+='（auto 仅群主）';d.innerHTML='<div class="item-title">'+esc(s.label)+'</div><div class="item-meta">最低权限：'+esc(roleText)+'｜对应指令：'+esc(s.command||'无')+'</div>';d.appendChild(input);$('scList').appendChild(d)});if(!$('scList').children.length)$('scList').innerHTML='<div class="empty">当前没有可维护的设置项目</div>'}catch(e){$('scMessage').textContent='加载设置时发生错误。';$('scList').innerHTML='<div class="empty">'+esc(String(e&&e.message||e))+'</div>'}}
 async function saveAllSettings(){var dev=session&&(session.permissions||{}).developer;var settings=Array.from(document.querySelectorAll('#scList [data-setting-key]')).filter(function(input){var now=input.type==='checkbox'?String(input.checked):String(input.value);return now!==String(input.dataset.initialValue)}).map(function(input){return{key:input.dataset.settingKey,value:input.type==='checkbox'?input.checked:input.value}});if(!settings.length){toast('没有检测到设置变化');return}var button=$('scSaveAll');button.disabled=true;button.textContent='保存中…';var payload={settings:settings,targetQq:dev?$('scTargetQq').value:session.qq,auditMode:dev&&$('scAuditLog').checked?'log':'silent'};var r=await api('/settings-center','POST',payload);button.disabled=false;button.textContent='保存全部设置';$('scMessage').textContent=r.message||'保存失败';toast(r.message||'保存失败');if(r.ok)loadSettingsCenter()}
-async function loadBilibili(){var r=await api('/integrations/bilibili');if(!r.ok){$('biliList').innerHTML='<div class="empty">'+esc(r.message)+'</div>';return}$('biliList').innerHTML='';(r.connectors||[]).forEach(function(c){var d=document.createElement('div');d.className='item';var state=c.pollState||{};var status=c.lastCheckStatus||'等待首次事件';var webhook=c.mode==='official_webhook';var next=webhook?'由 Webhook 推送':(c.nextPollAt?new Date(Number(c.nextPollAt)).toLocaleString():'下一次定时任务');d.innerHTML='<div class="item-title">'+esc(c.creatorName||('UID '+c.creatorId))+'</div><div class="item-meta">模式：'+(webhook?'开放平台 Webhook':'兼容轮询')+'｜UID：'+esc(c.creatorId)+(webhook?'':'｜间隔：'+esc(c.pollIntervalSeconds||1800)+' 秒')+'｜直播：'+(c.liveNotify?'通知':'仅记录')+(c.liveAtAll?'＋@全体':'')+'｜视频：'+(c.videoNotify?'通知':'仅记录')+(c.videoAtAll?'＋@全体':'')+'</div><div class="item-body">状态：'+esc(status)+'｜当前直播：'+(state.live?'是':'否')+'｜最新视频：'+esc(state.latestVideoBvid||'尚未建立基准')+'<br>上次检查：'+esc(c.lastCheckAt?new Date(Number(c.lastCheckAt)).toLocaleString():'尚未检查')+'｜下次检查：'+esc(next)+(c.lastCheckError?'<br><b>错误：</b>'+esc(c.lastCheckError):'')+'</div>';var row=document.createElement('div');row.className='row';row.style.marginTop='10px';var interval=document.createElement('select');[[1800,'30 分钟'],[3600,'1 小时'],[7200,'2 小时'],[21600,'6 小时']].forEach(function(v){var o=document.createElement('option');o.value=v[0];o.textContent='每 '+v[1];interval.appendChild(o)});interval.value=String(c.pollIntervalSeconds||1800);interval.disabled=webhook;var saveInterval=document.createElement('button');saveInterval.className='btn';saveInterval.textContent='保存检查频率';saveInterval.disabled=webhook;saveInterval.onclick=function(){updateBilibiliInterval(c.id,interval.value)};var check=document.createElement('button');check.className='btn primary';check.textContent='立即检查';check.disabled=webhook;check.onclick=function(){checkBilibiliNow(c.id)};var testLive=document.createElement('button');testLive.className='btn';testLive.textContent='测试开播通知';testLive.onclick=function(){testBilibili(c.id,'live_start')};var testVideo=document.createElement('button');testVideo.className='btn';testVideo.textContent='测试新视频通知';testVideo.onclick=function(){testBilibili(c.id,'video_publish')};var del=document.createElement('button');del.className='btn danger';del.textContent='删除';del.onclick=async function(){if(!(await confirmModal('删除此 B站自动监控？','确认删除')))return;var x=await api('/integrations/bilibili','POST',{action:'delete',id:c.id});toast(x.message);if(x.ok)loadBilibili()};row.append(interval,saveInterval,check,testLive,testVideo,del);d.appendChild(row);$('biliList').appendChild(d)});if(!$('biliList').children.length)$('biliList').innerHTML='<div class="empty">暂无 B站自动监控</div>'}
-async function saveBilibiliConnector(){var uid=String($('biliCreatorId').value||'').replace(/\D/g,'');if(!uid){toast('请输入 B站用户 UID');return}var r=await api('/integrations/bilibili','POST',{action:'save',mode:$('biliMode').value,creatorName:$('biliCreatorName').value,creatorId:uid,pollIntervalSeconds:Number($('biliPollInterval').value||1800),liveNotify:$('biliLiveNotify').checked,liveAtAll:$('biliLiveAtAll').checked,videoNotify:$('biliVideoNotify').checked,videoAtAll:$('biliVideoAtAll').checked});toast(r.message);if(r.ok){if(r.webhookUrl){$('biliWebhookResult').textContent='Webhook 回调地址（只在建立或更新时显示）：'+r.webhookUrl;$('biliWebhookResult').classList.remove('hidden')}else $('biliWebhookResult').classList.add('hidden');$('biliCreatorName').value='';$('biliCreatorId').value='';loadBilibili()}}
+async function copyPortalText(value){var text=String(value||'');if(!text)return false;try{await navigator.clipboard.writeText(text);toast('已复制');return true}catch(e){var input=document.createElement('textarea');input.value=text;input.style.position='fixed';input.style.opacity='0';document.body.appendChild(input);input.select();var ok=false;try{ok=document.execCommand('copy')}catch(x){}input.remove();toast(ok?'已复制':'复制失败，请手动选择地址');return ok}}
+async function loadBilibili(){var r=await api('/integrations/bilibili');if(!r.ok){$('biliList').innerHTML='<div class="empty">'+esc(r.message)+'</div>';return}$('biliList').innerHTML='';(r.connectors||[]).forEach(function(c){var d=document.createElement('div');d.className='item bili-connector';var state=c.pollState||{};var status=c.lastCheckStatus||'等待首次事件';var webhook=c.mode==='official_webhook';var next=webhook?'等待外部事件推送':(c.nextPollAt?new Date(Number(c.nextPollAt)).toLocaleString():'等待定时任务');d.innerHTML='<div class="item-title">'+esc(c.creatorName||('UID '+c.creatorId))+'</div><div class="item-meta">模式：'+(webhook?'接收 Webhook（高级）':'兼容轮询')+'｜UID：'+esc(c.creatorId)+'｜直播：'+(c.liveNotify?'通知':'仅记录')+(c.liveAtAll?'＋@全体':'')+'｜视频：'+(c.videoNotify?'通知':'仅记录')+(c.videoAtAll?'＋@全体':'')+'</div><div class="item-body">状态：'+esc(status)+'｜当前直播：'+(state.live?'是':'否')+'｜最新视频：'+esc(state.latestVideoBvid||'尚未建立基准')+'<br>上次处理：'+esc(c.lastCheckAt?new Date(Number(c.lastCheckAt)).toLocaleString():(c.lastEventAt?new Date(Number(c.lastEventAt)).toLocaleString():'尚未处理'))+'｜下一步：'+esc(next)+(c.lastCheckError?'<br><b>错误：</b>'+esc(c.lastCheckError):'')+'</div>';if(webhook){var info=document.createElement('div');info.className='notice bili-webhook-box';info.style.marginTop='10px';info.innerHTML='<b>这个模式为什么没有“立即检查”？</b><br>因为它不会主动查询 B站，只等待外部服务把“开播／新视频”事件 POST 到下方地址。只填写 UID 不会自动产生事件。<div class="row" style="margin-top:10px"><input class="grow" readonly value="'+esc(c.webhookUrl||'回调地址不可用')+'"><button class="btn" data-copy-webhook>复制回调地址</button><button class="btn" data-rotate-webhook>重新生成地址</button><button class="btn primary" data-switch-polling>改用兼容轮询</button></div>';d.appendChild(info);info.querySelector('[data-copy-webhook]').onclick=function(){copyPortalText(c.webhookUrl)};info.querySelector('[data-rotate-webhook]').onclick=function(){rotateBilibiliWebhook(c.id)};info.querySelector('[data-switch-polling]').onclick=function(){switchBilibiliMode(c.id,'automatic_polling')};}var row=document.createElement('div');row.className='row';row.style.marginTop='10px';if(!webhook){var interval=document.createElement('select');[[1800,'30 分钟'],[3600,'1 小时'],[7200,'2 小时'],[21600,'6 小时']].forEach(function(v){var o=document.createElement('option');o.value=v[0];o.textContent='每 '+v[1];interval.appendChild(o)});interval.value=String(c.pollIntervalSeconds||1800);var saveInterval=document.createElement('button');saveInterval.className='btn';saveInterval.textContent='保存检查频率';saveInterval.onclick=function(){updateBilibiliInterval(c.id,interval.value)};var check=document.createElement('button');check.className='btn primary';check.textContent='立即检查';check.onclick=function(){checkBilibiliNow(c.id)};var toWebhook=document.createElement('button');toWebhook.className='btn';toWebhook.textContent='改为 Webhook';toWebhook.onclick=function(){switchBilibiliMode(c.id,'official_webhook')};row.append(interval,saveInterval,check,toWebhook)}var testLive=document.createElement('button');testLive.className='btn';testLive.textContent='测试发送开播通知';testLive.title='只测试发送到 QQ 群，不代表 B站回调已经配置成功';testLive.onclick=function(){testBilibili(c.id,'live_start')};var testVideo=document.createElement('button');testVideo.className='btn';testVideo.textContent='测试发送新视频通知';testVideo.title='只测试发送到 QQ 群，不代表 B站回调已经配置成功';testVideo.onclick=function(){testBilibili(c.id,'video_publish')};var del=document.createElement('button');del.className='btn danger';del.textContent='删除';del.onclick=async function(){if(!(await confirmModal('删除此 B站监控？','确认删除')))return;var x=await api('/integrations/bilibili','POST',{action:'delete',id:c.id});toast(x.message);if(x.ok)loadBilibili()};row.append(testLive,testVideo,del);d.appendChild(row);$('biliList').appendChild(d)});if(!$('biliList').children.length)$('biliList').innerHTML='<div class="empty">暂无 B站监控</div>'}
+async function saveBilibiliConnector(){var uid=String($('biliCreatorId').value||'').replace(/\D/g,'');if(!uid){toast('请输入 B站用户 UID');return}var r=await api('/integrations/bilibili','POST',{action:'save',mode:$('biliMode').value,creatorName:$('biliCreatorName').value,creatorId:uid,pollIntervalSeconds:Number($('biliPollInterval').value||1800),liveNotify:$('biliLiveNotify').checked,liveAtAll:$('biliLiveAtAll').checked,videoNotify:$('biliVideoNotify').checked,videoAtAll:$('biliVideoAtAll').checked});toast(r.message);if(r.ok){if(r.webhookUrl){$('biliWebhookResult').innerHTML='Webhook 回调地址：<code>'+esc(r.webhookUrl)+'</code><br>请复制到你的开放平台应用或事件中继；若没有外部事件来源，请改用兼容轮询。';$('biliWebhookResult').classList.remove('hidden')}else $('biliWebhookResult').classList.add('hidden');$('biliCreatorName').value='';$('biliCreatorId').value='';loadBilibili()}}
+async function rotateBilibiliWebhook(id){if(!(await confirmModal('重新生成后，旧回调地址会立即失效。','重新生成 Webhook 地址')))return;var r=await api('/integrations/bilibili','POST',{action:'rotate_webhook',id:id});toast(r.message);if(r.ok&&r.webhookUrl){await copyPortalText(r.webhookUrl);loadBilibili()}}
+async function switchBilibiliMode(id,mode){var label=mode==='official_webhook'?'Webhook':'兼容轮询';if(!(await confirmModal('确定切换为'+label+'？切换后会停止原模式。','切换监控模式')))return;var r=await api('/integrations/bilibili','POST',{action:'switch_mode',id:id,mode:mode,pollIntervalSeconds:1800});toast(r.message);if(r.ok){if(r.webhookUrl)await copyPortalText(r.webhookUrl);loadBilibili()}}
 async function updateBilibiliInterval(id,seconds){var r=await api('/integrations/bilibili','POST',{action:'update_interval',id:id,pollIntervalSeconds:Number(seconds)});toast(r.message);if(r.ok)loadBilibili()}
 async function checkBilibiliNow(id){var r=await api('/integrations/bilibili','POST',{action:'check_now',id:id});toast(r.message);loadBilibili()}
 async function testBilibili(id,eventType){var r=await api('/integrations/bilibili','POST',{action:'test',id:id,eventType:eventType});toast(r.message)}
@@ -9226,10 +9476,13 @@ async function runSingleModelCheck(){var b=$('runModelCheck'),model=$('modelChec
 async function loadConversations(){if(!currentGroup){$('conversationList').innerHTML='<div class="empty">请先选择群组</div>';return}var p=new URLSearchParams({q:$('convSearch').value||'',limit:'500'});if($('convViolationOnly').checked)p.set('violation','1');var r=await api('/conversations?'+p.toString());if(!r.ok){$('conversationList').innerHTML='<div class="empty">'+esc(r.message)+'</div>';return}conversationCapabilities=r.capabilities||{recordViolation:false};$('conversationList').innerHTML=(r.items||[]).map(renderConversationRecord).join('')||'<div class="empty">没有符合条件的群友消息</div>';$('conversationList').querySelectorAll('[data-conv-action]').forEach(function(b){b.onclick=function(){handleConversationAction(this.dataset.id,this.dataset.convAction)}});$('conversationList').querySelectorAll('[data-attachment-preview]').forEach(function(b){b.onclick=function(){openAttachmentPreview(this.dataset.attachmentPreview,this.dataset.attachmentType,this.dataset.attachmentName)}})}
 function safeAttachmentUrl(value){try{var u=new URL(String(value||''),location.href);return /^https?:$/.test(u.protocol)?u.href:''}catch(e){return''}}
 function attachmentTypeText(type){return({image:'图片',record:'语音',audio:'语音',video:'视频',file:'文件'})[String(type||'').toLowerCase()]||'附件'}
-function conversationAttachmentHtml(x){var rows=[];(x.media||[]).forEach(function(m){var url=safeAttachmentUrl(m.url||m.file_url||m.download_url),type=String(m.type||'').toLowerCase(),label='['+attachmentTypeText(type)+']',name=String(m.name||m.file||'');if(url)rows.push('<button type="button" class="attachment-link" data-attachment-preview="'+esc(url)+'" data-attachment-type="'+esc(type)+'" data-attachment-name="'+esc(name||label)+'">'+esc(label)+'</button><a class="attachment-link" href="'+esc(url)+'" target="_blank" rel="noopener noreferrer">新分页打开</a><a class="attachment-link" href="'+esc(url)+'" download="'+esc(name||'attachment')+'">下载</a>');else rows.push('<span class="attachment-link">'+esc(label+(name?' '+name:''))+'</span>')});(x.files||[]).forEach(function(f){var url=safeAttachmentUrl(f.url||f.file_url||f.download_url),name=String(f.name||f.file||'未命名文件'),label='[文件] '+name;if(url)rows.push('<a class="attachment-link" href="'+esc(url)+'" target="_blank" rel="noopener noreferrer">'+esc(label)+'</a><a class="attachment-link" href="'+esc(url)+'" download="'+esc(name)+'">下载</a>');else rows.push('<span class="attachment-link">'+esc(label)+'</span>')});return rows.length?'<div class="conversation-attachments">'+rows.join('')+'</div>':''}
-function ensureAttachmentPreview(){if($('attachmentPreview'))return;var d=document.createElement('div');d.id='attachmentPreview';d.className='qqai-modal hidden';d.innerHTML='<div class="qqai-modal-card"><h3 id="attachmentPreviewTitle">查看附件</h3><div id="attachmentPreviewBody" class="attachment-preview-body"></div><div class="qqai-modal-actions"><a id="attachmentPreviewOpen" class="btn" target="_blank" rel="noopener noreferrer">在新分页打开</a><a id="attachmentPreviewDownload" class="btn" download>下载</a><button id="attachmentPreviewClose" class="btn primary">关闭</button></div></div>';document.body.appendChild(d);$('attachmentPreviewClose').onclick=function(){closeAttachmentPreview()};d.onclick=function(e){if(e.target===d)closeAttachmentPreview()}}
+function conversationAttachmentProxy(x,source,index,download){var p=new URLSearchParams({id:String(x.messageId||''),source:source,index:String(index)});if(download)p.set('download','1');return'/api/portal/conversations/attachment?'+p.toString()}
+function conversationAttachmentHtml(x){var rows=[];(x.media||[]).forEach(function(m,index){var type=String(m.type||'').toLowerCase(),label='['+attachmentTypeText(type)+']',name=String(m.name||m.file||''),preview=conversationAttachmentProxy(x,'media',index,false),download=conversationAttachmentProxy(x,'media',index,true);rows.push('<button type="button" class="attachment-link" data-attachment-preview="'+esc(preview)+'" data-attachment-type="'+esc(type)+'" data-attachment-name="'+esc(name||label)+'">'+esc(label)+'</button><a class="attachment-link" href="'+esc(preview)+'" target="_blank" rel="noopener noreferrer">新分页打开</a><a class="attachment-link" href="'+esc(download)+'">下载</a>')});(x.files||[]).forEach(function(f,index){var name=String(f.name||f.file||'未命名文件'),label='[文件] '+name,open=conversationAttachmentProxy(x,'files',index,false),download=conversationAttachmentProxy(x,'files',index,true);rows.push('<a class="attachment-link" href="'+esc(open)+'" target="_blank" rel="noopener noreferrer">'+esc(label)+'</a><a class="attachment-link" href="'+esc(download)+'">下载</a>')});return rows.length?'<div class="conversation-attachments">'+rows.join('')+'</div>':''}
+function ensureAttachmentPreview(){if($('attachmentPreview'))return;var d=document.createElement('div');d.id='attachmentPreview';d.className='qqai-modal hidden';d.innerHTML='<div class="qqai-modal-card attachment-modal-card"><h3 id="attachmentPreviewTitle">查看附件</h3><div id="attachmentPreviewBody" class="attachment-preview-body"></div><div class="qqai-modal-actions"><a id="attachmentPreviewOpen" class="btn" target="_blank" rel="noopener noreferrer">在新分页打开</a><a id="attachmentPreviewDownload" class="btn">下载</a><button id="attachmentPreviewClose" class="btn primary">关闭</button></div></div>';document.body.appendChild(d);$('attachmentPreviewClose').onclick=function(){closeAttachmentPreview()};d.onclick=function(e){if(e.target===d)closeAttachmentPreview()}}
 function closeAttachmentPreview(){if(!$('attachmentPreview'))return;$('attachmentPreview').classList.add('hidden');$('attachmentPreviewBody').innerHTML=''}
-function openAttachmentPreview(url,type,name){ensureAttachmentPreview();url=safeAttachmentUrl(url);if(!url){toast('附件链接无效');return}$('attachmentPreviewTitle').textContent=name||attachmentTypeText(type);$('attachmentPreviewOpen').href=url;$('attachmentPreviewDownload').href=url;$('attachmentPreviewDownload').download=name||'attachment';var body=$('attachmentPreviewBody'),t=String(type||'').toLowerCase();if(t==='image')body.innerHTML='<img src="'+esc(url)+'" alt="附件图片">';else if(t==='video')body.innerHTML='<video src="'+esc(url)+'" controls playsinline></video>';else if(t==='record'||t==='audio')body.innerHTML='<audio src="'+esc(url)+'" controls></audio>';else body.innerHTML='<a class="attachment-link" href="'+esc(url)+'" target="_blank" rel="noopener noreferrer">打开附件</a>';$('attachmentPreview').classList.remove('hidden')}
+function attachmentDownloadVariant(url){try{var u=new URL(url,location.href);u.searchParams.set('download','1');return u.href}catch(e){return url}}
+function attachmentPreviewFailure(url,type,name){var body=$('attachmentPreviewBody');body.innerHTML='<div class="attachment-error"><b>附件加载失败</b><p>QQ 图片直链可能已过期，系统已经尝试通过 NapCat 刷新。请确认 NapCat 在线后重试。</p><button id="attachmentRetry" class="btn primary">重试</button></div>';$('attachmentRetry').onclick=function(){openAttachmentPreview(url,type,name)}}
+function openAttachmentPreview(url,type,name){ensureAttachmentPreview();url=safeAttachmentUrl(url);if(!url){toast('附件链接无效');return}$('attachmentPreviewTitle').textContent=name||attachmentTypeText(type);$('attachmentPreviewOpen').href=url;$('attachmentPreviewDownload').href=attachmentDownloadVariant(url);var body=$('attachmentPreviewBody'),t=String(type||'').toLowerCase();body.innerHTML='<div class="muted">正在加载附件…</div>';if(t==='image'){var img=document.createElement('img');img.alt='附件图片';img.onload=function(){body.innerHTML='';body.appendChild(img)};img.onerror=function(){attachmentPreviewFailure(url,type,name)};img.src=url}else if(t==='video'){var video=document.createElement('video');video.controls=true;video.playsInline=true;video.onloadeddata=function(){body.innerHTML='';body.appendChild(video)};video.onerror=function(){attachmentPreviewFailure(url,type,name)};video.src=url;video.load()}else if(t==='record'||t==='audio'){var audio=document.createElement('audio');audio.controls=true;audio.onloadeddata=function(){body.innerHTML='';body.appendChild(audio)};audio.onerror=function(){attachmentPreviewFailure(url,type,name)};audio.src=url;audio.load()}else body.innerHTML='<a class="attachment-link" href="'+esc(url)+'" target="_blank" rel="noopener noreferrer">打开附件</a>';$('attachmentPreview').classList.remove('hidden')}
 function renderConversationRecord(x){var summary=[];if((x.forwardIds||[]).length)summary.push('合并转发 '+x.forwardIds.length+' 个');var badge=x.violationActive?'<span class="violation-badge">违规信息</span>':'';var status=[];if(x.essence)status.push('精华');if(x.groupTodo)status.push('群待办');if(x.recalledAt)status.push('已撤回');var detail={文件:x.files||[],媒体:x.media||[],转发:x.forwardSnapshots||[],违规:x.violation||null};var buttons='<button class="btn primary" data-conv-action="reply" data-id="'+esc(x.messageId)+'">回复</button><button class="btn" data-conv-action="set_essence" data-id="'+esc(x.messageId)+'">设为精华</button><button class="btn" data-conv-action="delete_essence" data-id="'+esc(x.messageId)+'">取消精华</button><button class="btn" data-conv-action="at_all" data-id="'+esc(x.messageId)+'">@全体成员</button><button class="btn" data-conv-action="at_owner" data-id="'+esc(x.messageId)+'">@群主</button><button class="btn" data-conv-action="pick_admins" data-id="'+esc(x.messageId)+'">选择 @管理员</button><button class="btn" data-conv-action="pick_members" data-id="'+esc(x.messageId)+'">选择 @群成员</button><button class="btn" data-conv-action="todo" data-id="'+esc(x.messageId)+'">设为群待办</button><button class="btn" data-conv-action="complete_todo" data-id="'+esc(x.messageId)+'">完成群待办</button><button class="btn" data-conv-action="cancel_todo" data-id="'+esc(x.messageId)+'">取消群待办</button><button class="btn" data-conv-action="announcement" data-id="'+esc(x.messageId)+'">设为公告</button><button class="btn" data-conv-action="refresh_forward" data-id="'+esc(x.messageId)+'" '+(!(x.forwardIds||[]).length?'disabled':'')+'>检查转发</button><button class="btn danger" data-conv-action="recall" data-id="'+esc(x.messageId)+'">撤回消息</button>'+(x.violationActive?'<button class="btn danger" data-conv-action="cancel_violation" data-id="'+esc(x.messageId)+'">取消违规</button>':(conversationCapabilities.recordViolation?'<button class="btn danger" data-conv-action="mark_violation" data-id="'+esc(x.messageId)+'">记录违规</button>':'<button class="btn" disabled title="机器人不是本群管理，群规记录已完全停用">群规记录已停用</button>'));return '<div class="item conversation-card">'+badge+'<div class="item-head"><div><div class="item-title">'+esc(x.senderName||x.userId)+'（'+esc(x.userId)+'）</div><div class="item-meta">'+esc(new Date(Number(x.createdAt||0)).toLocaleString())+'｜消息 ID '+esc(x.messageId)+(status.length?'｜'+esc(status.join('、')):'')+'</div></div></div><div class="item-body conversation-text">'+esc(x.text||'[无文字内容]')+(summary.length?'<br><span class="muted">'+esc(summary.join('｜'))+'</span>':'')+conversationAttachmentHtml(x)+'</div><details class="conversation-detail"><summary>查看附件、转发与违规详细资料</summary><pre>'+esc(JSON.stringify(detail,null,2))+'</pre></details><div class="conversation-actions">'+buttons+'</div></div>'}
 async function handleConversationAction(messageId,action){if(action==='pick_admins'){return openMemberPicker(messageId,['admin'],'选择要 @ 的管理员')}if(action==='pick_members'){return openMemberPicker(messageId,['member'],'选择要 @ 的群成员')}var payload={messageId:messageId,action:action};if(['reply','at_all','at_owner','at_admins','at_members','announcement'].includes(action)){var label=action==='reply'?'回复内容':action==='announcement'?'公告内容':'提醒内容';var text=await textModal('请输入'+label+'。','',label,{required:action==='reply'||action==='at_all',requiredMessage:'请输入内容'});if(text===null)return;payload.text=text}if(action==='mark_violation'){var reason=await textModal('说明违规原因；提交后会触发当前群的违规代理流程。','', '记录违规',{required:true,requiredMessage:'请输入违规原因'});if(reason===null)return;payload.reason=reason;payload.violationType='管理员记录';payload.severity='moderate'}if(action==='cancel_violation'){var note=await textModal('取消后右上角“违规信息”会消失，并尝试撤销可撤销的处罚。','管理员复核后取消违规','取消违规');if(note===null)return;payload.note=note}if(['recall','set_essence','delete_essence','todo','complete_todo','cancel_todo','cancel_violation'].includes(action)){if(!(await confirmModal('确定执行此操作吗？','确认操作',{danger:action==='recall'||action==='cancel_violation'})))return}var r=await api('/conversations/action','POST',payload);toast(r.message||'操作完成');if(r.ok)loadConversations()}
 var memberPickerEntries=[];var memberPickerSelection=new Set();
