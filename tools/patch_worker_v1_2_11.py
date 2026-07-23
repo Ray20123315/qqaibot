@@ -147,7 +147,7 @@ replace_once(
 '''function parseList(value, fallback = []) {''',
 '''function stripGroupAiOptOutPrefix(value) {
   const source = String(value || "");
-  const match = source.match(/^(\\s*(?:\\[CQ:(?:reply|at),[^\\]]+\\]\\s*)*)\\/!\\s*/i);
+  const match = source.match(/^(\s*(?:\[CQ:(?:reply|at),[^\]]+\]\s*)*)\/!\s*/i);
   if (!match) return { optedOut: false, text: source };
   return {
     optedOut: true,
@@ -158,25 +158,37 @@ replace_once(
 function neutralizeAiCommandPrefix(value) {
   const output = String(value || "").trim();
   if (!output) return output;
-  return /^(?:\\/\\/|\\/!|[!！])/.test(output) ? `AI 回复：${output}` : output;
+  return /^(?:\/\/|\/!|[!！])/.test(output) ? `AI 回复：${output}` : output;
 }
 
 function parseList(value, fallback = []) {''',
     "prefix safety helpers"
 )
-replace_in_range(
-    "function sanitizeAiReply(reply) {",
-    "\nfunction removeTextMentionTokens",
-    "  return text.trim();",
-    "  return neutralizeAiCommandPrefix(text);",
+replace_once(
+'''function sanitizeAiReply(text) {
+  return String(text || "")
+    .replace(/\[CQ:[^\]]+\]/g, "")
+    .replace(/\*\*/g, "")
+    .replace(/^#+\s*/gm, "")
+    .trim()
+    .slice(0, 4000);
+}''',
+'''function sanitizeAiReply(text) {
+  return neutralizeAiCommandPrefix(String(text || "")
+    .replace(/\[CQ:[^\]]+\]/g, "")
+    .replace(/\*\*/g, "")
+    .replace(/^#+\s*/gm, "")
+    .trim()
+    .slice(0, 4000));
+}''',
     "sanitize command prefix"
 )
 replace_once(
 '''      if (dynamicPersona !== "") {
-        finalStylePrompt = dynamicPersona + "\\n\\n" + finalStylePrompt;
+        finalStylePrompt = dynamicPersona + "\n\n" + finalStylePrompt;
       }''',
 '''      if (dynamicPersona !== "") {
-        finalStylePrompt = dynamicPersona + "\\n\\n" + finalStylePrompt;
+        finalStylePrompt = dynamicPersona + "\n\n" + finalStylePrompt;
       }
       finalStylePrompt += `
 
@@ -186,7 +198,7 @@ replace_once(
 )
 replace_once(
 '    if (!mentioned || !text || /^[!！]/.test(text)) return false;',
-'    if (!mentioned || !text || /^(?:[!！]|\\/!)/.test(text)) return false;',
+'    if (!mentioned || !text || /^(?:[!！]|\/!)/.test(text)) return false;',
     "queue optout"
 )
 
@@ -226,14 +238,16 @@ replace_once(
     "hybrid vision args"
 )
 replace_once(
-'''            models: args.visionRequest ? parseList(env.GEMINI_VISION_MODELS, args.chatModels) : args.chatModels,
-            systemInstruction: finalStylePrompt,
-            contents:''',
-'''            models: args.visionRequest ? parseList(env.GEMINI_VISION_MODELS, args.chatModels) : args.chatModels,
-            apiKeys: args.visionRequest ? geminiVisionApiKeys(env) : null,
-            keyProvider: args.visionRequest ? "gemini_vision" : "gemini",
-            systemInstruction: finalStylePrompt,
-            contents:''',
+'''    const result = await callGeminiGenerate(env, {
+      models: args.chatModels,
+      system: mergeSearchPrompt(args.finalStylePrompt, search),
+      contents: args.contents,''',
+'''    const result = await callGeminiGenerate(env, {
+      models: args.visionRequest ? parseList(env.GEMINI_VISION_MODELS, args.chatModels) : args.chatModels,
+      apiKeys: args.visionRequest ? geminiVisionApiKeys(env) : null,
+      keyProvider: args.visionRequest ? "gemini_vision" : "gemini",
+      system: mergeSearchPrompt(args.finalStylePrompt, search),
+      contents: args.contents,''',
     "hybrid dedicated vision keys"
 )
 replace_once(
@@ -292,7 +306,7 @@ replace_once(
 replace_once(
 '''  if (request.method === "GET" && path === "/settings-center") {
     if (!portalIsDeveloper) return jsonResponse({ ok: false, message: "设置中心仅开发者可见。群管理员请使用“群组设置”“群规监控”“B站监控”等对应页面。" }, 403);
-    const targetQq = String(url.searchParams.get("targetQq") || authed.qq).replace(/\\D/g, "");
+    const targetQq = String(url.searchParams.get("targetQq") || authed.qq).replace(/\D/g, "");
     if (!targetQq) return jsonResponse({ ok: false, message: "请输入有效的目标 QQ。" }, 400);
     const targetRole = await resolvePortalRole(env, targetQq, groupId);
     const visibleRank = 3;
@@ -305,13 +319,13 @@ replace_once(
   }
   if (request.method === "POST" && path === "/settings-center") {
     if (!portalIsDeveloper) return jsonResponse({ ok: false, message: "设置中心仅开发者可用。" }, 403);
-    const targetQq = String(body.targetQq || authed.qq).replace(/\\D/g, "");
+    const targetQq = String(body.targetQq || authed.qq).replace(/\D/g, "");
     if (!targetQq) return jsonResponse({ ok: false, message: "请输入有效的目标 QQ。" }, 400);
     const targetRole = await resolvePortalRole(env, targetQq, groupId);
     const actorRank = 3;''',
 '''  if (request.method === "GET" && path === "/settings-center") {
     if (!groupId) return jsonResponse({ ok: false, message: "请先选择群组。" }, 400);
-    const requestedTargetQq = String(url.searchParams.get("targetQq") || authed.qq).replace(/\\D/g, "");
+    const requestedTargetQq = String(url.searchParams.get("targetQq") || authed.qq).replace(/\D/g, "");
     if (!requestedTargetQq) return jsonResponse({ ok: false, message: "请输入有效的目标 QQ。" }, 400);
     if (!portalIsDeveloper && requestedTargetQq !== String(authed.qq)) return jsonResponse({ ok: false, message: "非开发者只能修改自己的个人设置与当前权限允许的群设置。" }, 403);
     const targetQq = portalIsDeveloper ? requestedTargetQq : String(authed.qq);
@@ -333,7 +347,7 @@ replace_once(
   }
   if (request.method === "POST" && path === "/settings-center") {
     if (!groupId) return jsonResponse({ ok: false, message: "请先选择群组。" }, 400);
-    const requestedTargetQq = String(body.targetQq || authed.qq).replace(/\\D/g, "");
+    const requestedTargetQq = String(body.targetQq || authed.qq).replace(/\D/g, "");
     if (!requestedTargetQq) return jsonResponse({ ok: false, message: "请输入有效的目标 QQ。" }, 400);
     if (!portalIsDeveloper && requestedTargetQq !== String(authed.qq)) return jsonResponse({ ok: false, message: "非开发者只能修改自己的个人设置与当前权限允许的群设置。" }, 403);
     const targetQq = portalIsDeveloper ? requestedTargetQq : String(authed.qq);
@@ -380,8 +394,8 @@ replace_once(
 replace_once('const BILIBILI_POLL_MIN_SECONDS = 300;', 'const BILIBILI_POLL_MIN_SECONDS = 1800;', "bili min interval")
 replace_once('const BILIBILI_BLOCK_BACKOFF_MAX_SECONDS = 24 * 60 * 60;', 'const BILIBILI_BLOCK_BACKOFF_MAX_SECONDS = 72 * 60 * 60;', "bili max backoff")
 replace_once(
-'function isBilibiliBlockedError(error) { return /HTTP\\s*412|错误\\s*-412|request was banned|请求被拦截|風控|风控/i.test(String(error?.message || error || "")); }',
-'function isBilibiliBlockedError(error) { return /HTTP\\s*(?:412|429)|错误\\s*-412|request was banned|请求被拦截|風控|风控|rate.?limit/i.test(String(error?.message || error || "")); }',
+'function isBilibiliBlockedError(error) { return /HTTP\s*412|错误\s*-412|request was banned|请求被拦截|風控|风控/i.test(String(error?.message || error || "")); }',
+'function isBilibiliBlockedError(error) { return /HTTP\s*(?:412|429)|错误\s*-412|request was banned|请求被拦截|風控|风控|rate.?limit/i.test(String(error?.message || error || "")); }',
     "bili blocked statuses"
 )
 replace_once(
@@ -642,8 +656,8 @@ replace_once(
     "bili render controls"
 )
 replace_once(
-"async function saveBilibiliConnector(){var uid=String($('biliCreatorId').value||'').replace(/\\D/g,'');if(!uid){toast('请输入 B站用户 UID');return}var r=await api('/integrations/bilibili','POST',{action:'save',creatorName:$('biliCreatorName').value,creatorId:uid,pollIntervalSeconds:Number($('biliPollInterval').value||1800),liveNotify:$('biliLiveNotify').checked,liveAtAll:$('biliLiveAtAll').checked,videoNotify:$('biliVideoNotify').checked,videoAtAll:$('biliVideoAtAll').checked});toast(r.message);if(r.ok){$('biliCreatorName').value='';$('biliCreatorId').value='';loadBilibili()}}",
-"async function saveBilibiliConnector(){var uid=String($('biliCreatorId').value||'').replace(/\\D/g,'');if(!uid){toast('请输入 B站用户 UID');return}var r=await api('/integrations/bilibili','POST',{action:'save',mode:$('biliMode').value,creatorName:$('biliCreatorName').value,creatorId:uid,pollIntervalSeconds:Number($('biliPollInterval').value||1800),liveNotify:$('biliLiveNotify').checked,liveAtAll:$('biliLiveAtAll').checked,videoNotify:$('biliVideoNotify').checked,videoAtAll:$('biliVideoAtAll').checked});toast(r.message);if(r.ok){if(r.webhookUrl){$('biliWebhookResult').textContent='Webhook 回调地址（只在建立或更新时显示）：'+r.webhookUrl;$('biliWebhookResult').classList.remove('hidden')}else $('biliWebhookResult').classList.add('hidden');$('biliCreatorName').value='';$('biliCreatorId').value='';loadBilibili()}}",
+"async function saveBilibiliConnector(){var uid=String($('biliCreatorId').value||'').replace(/\D/g,'');if(!uid){toast('请输入 B站用户 UID');return}var r=await api('/integrations/bilibili','POST',{action:'save',creatorName:$('biliCreatorName').value,creatorId:uid,pollIntervalSeconds:Number($('biliPollInterval').value||1800),liveNotify:$('biliLiveNotify').checked,liveAtAll:$('biliLiveAtAll').checked,videoNotify:$('biliVideoNotify').checked,videoAtAll:$('biliVideoAtAll').checked});toast(r.message);if(r.ok){$('biliCreatorName').value='';$('biliCreatorId').value='';loadBilibili()}}",
+"async function saveBilibiliConnector(){var uid=String($('biliCreatorId').value||'').replace(/\D/g,'');if(!uid){toast('请输入 B站用户 UID');return}var r=await api('/integrations/bilibili','POST',{action:'save',mode:$('biliMode').value,creatorName:$('biliCreatorName').value,creatorId:uid,pollIntervalSeconds:Number($('biliPollInterval').value||1800),liveNotify:$('biliLiveNotify').checked,liveAtAll:$('biliLiveAtAll').checked,videoNotify:$('biliVideoNotify').checked,videoAtAll:$('biliVideoAtAll').checked});toast(r.message);if(r.ok){if(r.webhookUrl){$('biliWebhookResult').textContent='Webhook 回调地址（只在建立或更新时显示）：'+r.webhookUrl;$('biliWebhookResult').classList.remove('hidden')}else $('biliWebhookResult').classList.add('hidden');$('biliCreatorName').value='';$('biliCreatorId').value='';loadBilibili()}}",
     "bili save UI"
 )
 replace_once(
