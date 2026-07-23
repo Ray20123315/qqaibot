@@ -35,3 +35,4 @@ jobs:
           git add worker.js
           git commit -m "Update worker.js to v1.2.25"
           git push origin HEAD:main
+# trigger: 2
