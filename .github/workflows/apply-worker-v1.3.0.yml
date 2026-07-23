@@ -31,10 +31,11 @@ jobs:
           cat .qqai-patches/v1.3.0/part00 \
               .qqai-patches/v1.3.0/part01 \
               .qqai-patches/v1.3.0/part02 \
-              .qqai-patches/v1.3.0/part03 \
+              .qqai-patches/v1.3.0/part03a \
+              .qqai-patches/v1.3.0/part03b \
+              .qqai-patches/v1.3.0/part03c \
               .qqai-patches/v1.3.0/part04 > /tmp/worker-v1.3.0.patch.gz.b64
-          wc -c .qqai-patches/v1.3.0/part0* /tmp/worker-v1.3.0.patch.gz.b64
-          sha256sum /tmp/worker-v1.3.0.patch.gz.b64
+          echo '0370464a05dc9b18e333aa4f4e73086885ef303e39b2fdf305a732a7fc509cfc  /tmp/worker-v1.3.0.patch.gz.b64' | sha256sum -c -
           base64 -d /tmp/worker-v1.3.0.patch.gz.b64 | gzip -d > /tmp/worker-v1.3.0.patch
           echo 'd8505006d07df25c061a1403d26da9737540cbd84505067c09e1c52532d875c1  /tmp/worker-v1.3.0.patch' | sha256sum -c -
 
