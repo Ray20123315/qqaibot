@@ -1,0 +1,53 @@
+name: Apply worker v1.2.24
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/apply-worker-v1.2.24.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Sort patch hunks, apply and validate
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import re
+          from pathlib import Path
+          source = Path('.qqai-patches/worker_v1.2.24.patch').read_text(encoding='utf-8')
+          header, *parts = re.split(r'(?=^@@ )', source, flags=re.M)
+          def old_start(part):
+              m = re.match(r'@@ -(\d+)', part)
+              if not m:
+                  raise SystemExit('invalid hunk header: ' + part[:80])
+              return int(m.group(1))
+          sorted_patch = header + ''.join(sorted(parts, key=old_start))
+          Path('/tmp/worker_v1.2.24.patch').write_text(sorted_patch, encoding='utf-8')
+          PY
+          git apply --recount --check /tmp/worker_v1.2.24.patch
+          git apply --recount /tmp/worker_v1.2.24.patch
+          node --check worker.js
+          grep -F 'const VERSION = "1.2.24";' worker.js
+          grep -F 'thinkingIndicatorRegistryKey' worker.js
+          grep -F 'retractRegisteredThinkingIndicators' worker.js
+          grep -F 'repeatedMessageBurst' worker.js
+          grep -F 'relatedMessageIds' worker.js
+          grep -F '同一成员的更正通知已在 30 秒内发送' worker.js
+          grep -F '已进入模型生成后，只有再次明确 @机器人' worker.js
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git rm -r .qqai-patches
+          git rm .github/workflows/apply-worker-v1.2.24.yml
+          git add worker.js
+          git commit -m "Update worker.js to v1.2.24"
+          git push origin HEAD:main
