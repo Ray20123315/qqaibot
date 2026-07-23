@@ -1,0 +1,94 @@
+_proposed:'已建立待确认操作',moderation_cancelled:'已取消待确认操作',moderation_confirmed:'已确认并执行操作',moderation_failed:'待确认操作执行失败',group_operation:'群管理操作成功',group_operation_failed:'群管理操作失败',portal_ai_settings:'群组 AI 设置已保存',ai_settings:'AI 设置已修改',settings_center:'设置中心已修改',bilibili_connector:'B站监控设置已修改',bilibili_auto_monitor:'B站自动监控已修改',bilibili_auto_poll:'B站自动检查',permission:'程序权限已修改',platform_feature:'功能开关已修改',rule_monitor_setting:'群规监控设置已修改',rule_proxy_setting:'AI 群规代理设置已修改',rule_strictness_setting:'群规判断严格度已修改',rule_proxy_action:'AI 群规代理已处理',rule_proxy_portal_settings:'AI 群规代理设置已保存',rule_proxy_kick_auth:'AI 踢出授权已修改',join_reject_auth:'入群拒绝授权已修改',rate_limit_setting:'回复间隔已修改',rate_limit_portal:'回复间隔已保存',quota:'DeepSeek 额度已修改',context:'聊天上下文已处理',group_checkin:'群打卡任务',thinking_indicator_recall:'思考提示已撤回',thinking_indicator_residual:'思考提示残留',question_cancelled_by_recall:'问题因撤回取消',groupwork_requested:'已建立群务申请',groupwork_decided:'群务申请已处理',runtime_model_registry:'模型顺序已修改',platform_job:'系统任务',portal_login:'Control Center 登录',appeal_review:'申诉处理',violation_appeal_submitted:'违规记录申诉已提交',rule_violation_reversed:'群规误判已撤销',conversation_action:'对话记录操作',conversation_action_failed:'对话记录操作失败',single_model_health_check:'单一模型健康检查'};
+ var logActionLabels={mute:'禁言',unmute:'解除禁言',kick:'踢出群聊',reject:'拒绝入群',whole_mute:'开启全员禁言',whole_unmute:'解除全员禁言',set_admin:'设为 QQ 管理员',unset_admin:'取消 QQ 管理员',recall:'撤回消息',create:'新增',update:'更新',enabled:'开启',disabled:'关闭',authorized:'已授权',revoked:'已取消授权',ai_on:'开启 AI',ai_off:'关闭 AI',checked:'检查完成',baseline_created:'建立初始状态',failed:'失败',cancelled:'已取消',commands_enabled:'设置型指令开关',interject_rate:'主动插话率',welcome_enabled:'自动欢迎新人'};
+ function logCategoryOf(a){var t=String(a.type||'');if(/moderation|group_operation|groupwork|rule_proxy_action/.test(t))return 'moderation';if(/settings|portal_ai|ai_settings|rule_monitor|rule_proxy_setting|rule_strictness|rate_limit|quota|runtime_model|platform_feature|context/.test(t))return 'settings';if(/bilibili/.test(t))return 'bilibili';if(/conversation_action/.test(t))return 'moderation';if(/appeal/.test(t))return 'appeal';if(/permission|auth/.test(t))return 'permission';if(/failed|error/.test(t)||a.error)return 'error';return 'system'}
+ function logTone(a){var t=String(a.type||''),r=String(a.result||'');if(/failed|error/.test(t)||a.error||/失败|failed/i.test(r))return 'error';if(/cancelled/.test(t))return 'warn';if(/proposed|requested/.test(t))return 'info';return 'ok'}
+@@ -9841,6 +9916,7 @@
+     this.toolCounts = new Map();
+     this.userInFlight = new Map();
+     this.userQueues = new Map();
++    this.inputBuffers = new Map();
+     this.queueSchedulerRunning = false;
+ 
+     // 使用 Durable Objects WebSocket Hibernation API 后，Object 可被回收并重建，
+@@ -10018,7 +10094,9 @@
+         pendingRpc: this.pending.size,
+         inFlightQuestions: this.userInFlight.size,
+         queuedQuestions: [...this.userQueues.values()].reduce((sum, list) => sum + list.length, 0),
+-        queuePolicy: "per_user_single_inflight_group_unlimited",
++        bufferedQuestions: this.inputBuffers.size,
++        inputDebounceMs: DEFAULTS.inputDebounceMs,
++        queuePolicy: "per_user_single_inflight_group_unlimited_cancel_and_merge",
+         schedulerRunning: this.queueSchedulerRunning,
+         reconnectCount: Number(this.socketDiagnostics?.reconnectCount || 0),
+         closeCount: Number(this.socketDiagnostics?.closeCount || 0),
+@@ -10205,12 +10283,33 @@
+       }
+       pending.resolve(body); return;
+     }
+-    if (!body || body.post_type === "meta_event") return;
++    if (!body) return;
++    if (this.isQuestionRecallNotice(body)) {
++      await this.handleQuestionRecall(body, request.url);
++      return;
++    }
++    if (this.isBotPokeNotice(body)) {
++      await this.flushBufferedQuestion(this.userQueueKey({ message_type: "group", group_id: body.group_id, user_id: body.user_id }), "poke");
++      return;
++    }
++    if (body.post_type === "meta_event") return;
++
++    const answerNowKey = this.answerNowKey(body);
++    if (answerNowKey && this.inputBuffers.has(answerNowKey)) {
++      await this.flushBufferedQuestion(answerNowKey, "answer_now");
++      return;
++    }
++
++    const continuationKey = this.questionContinuationKey(body);
++    if (continuationKey) {
++      await this.receiveUserQuestion(body, request.url);
++      return;
++    }
+ 
+     const explicitGroupQuestion = await this.shouldQueueUserQuestion(body);
+     await this.recordIngress(body, "received", { explicit: explicitGroupQuestion }).catch(() => {});
+     if (explicitGroupQuestion) {
+-      await this.enqueueUserQuestion(body, request.url);
++      await this.receiveUserQuestion(body, request.url);
+       return;
+     }
+     // 普通群消息仍会写入对话记录并执行必要的本地逻辑，但当已有明确 @ 提问正在生成时，
+@@ -10244,6 +10343,198 @@
+     await this.state.storage.put(key, next);
+   }
+ 
++  isQuestionRecallNotice(body) {
++    return body?.post_type === "notice"
++      && ["group_recall", "group_msg_delete", "message_recall"].includes(String(body.notice_type || ""))
++      && Boolean(body.group_id && body.message_id);
++  }
++
++  isBotPokeNotice(body) {
++    return body?.post_type === "notice"
++      && String(body.notice_type || "") === "notify"
++      && String(body.sub_type || "") === "poke"
++      && String(body.target_id || "") === String(body.self_id || "")
++      && Boolean(body.group_id && body.user_id);
++  }
++
++  answerNowKey(body) {
++    if (body?.post_type !== "message" || body?.message_type !== "group") return "";
++    const text = eventPlainText(body).replace(/@\d{5,}\s*/g, "").trim();
++    if (!/^(?:回答吧|回答|可以回答了|开始回答|開始回答|说完了|說完了|好了)$/i.test(text)) return "";
++    return this.userQueueKey(body);
++  }
++
++  questionContinuationKey(body) {
++    if (body?.post_type !== "message" || body?.message_type !== "group") return "";
++    if (String(body.user_id || "") === String(body.self_id || "")) return "";
++    const text = eventPlainText(body).trim();
++    if (!text || /^(?:[!！]|\/!)/.test(text)) return "";
++    const key = this.userQueueKey(body);
++    return this.inputBuffers.has(key) || this.userInFlight.has(key) ? key : "";
++  }
++
++  questionBodies(body) 
