@@ -1,4 +1,4 @@
-const VERSION = "1.2.12";
+const VERSION = "1.2.13";
 const QQAI_V1_COMPLETE_MARKER = "QQAI_V1_COMPLETE_MARKER";
 const QQAI_V1_R3_MARKER = "QQAI_V1_R3_MARKER";
 const BUILD_DATE = "2026-07-23";
@@ -910,18 +910,27 @@ export default {
         .replace(/\[CQ:forward,[^\]]+\]/g, '【系统：此位置有一组转发消息】')
         .trim();
 
-      // 同 QQ 模式：以 Message ID 與傳送前指紋判斷 API 發言，人工指令仍可使用。
+      // 同 QQ 模式：优先识别人工控制前缀。NapCat 标准上报为 message_sent，
+      // 但部分版本／连接配置会把自身消息上报成 message；只有 //、??、!、！前缀才兼容放行，
+      // 其余自身 message 仍静默，避免机器人回复自己形成循环。
       if (isSelfAccount) {
-        if (!isSentEvent) return new Response(null, { status: 204 });
-        const apiMessage = await isKnownOutboundMessage(env, {
-          messageId: replyMessageId,
-          isGroup,
-          groupId: currentGroupId,
-          peerId: String(body.target_id || body.peer_id || rawUserId || userId),
-          text: cleanMessage,
-          mediaTypes: [(imageUrl || imageFile) ? 'image' : '', (voiceUrl || voiceFile) ? 'record' : '', (videoUrl || videoFile) ? 'video' : ''].filter(Boolean)
-        });
-        if (apiMessage) return new Response(null, { status: 204 });
+        const explicitSelfChat = cleanMessage.startsWith('//') || cleanMessage.startsWith('??');
+        const explicitSelfCommand = /^[!！]/.test(cleanMessage);
+        if (!isSentEvent && !explicitSelfChat && !explicitSelfCommand) return new Response(null, { status: 204 });
+
+        // // 与 ?? 是人工同号专用前缀，AI 输出层已禁止生成，因此直接视为人工输入；
+        // 其他自身消息仍用 Message ID／发送前指纹排除 Worker 自己发出的内容。
+        if (!explicitSelfChat) {
+          const apiMessage = await isKnownOutboundMessage(env, {
+            messageId: replyMessageId,
+            isGroup,
+            groupId: currentGroupId,
+            peerId: String(body.target_id || body.peer_id || rawUserId || userId),
+            text: cleanMessage,
+            mediaTypes: [(imageUrl || imageFile) ? 'image' : '', (voiceUrl || voiceFile) ? 'record' : '', (videoUrl || videoFile) ? 'video' : ''].filter(Boolean)
+          });
+          if (apiMessage) return new Response(null, { status: 204 });
+        }
 
         if (cleanMessage.startsWith('//')) {
           cleanMessage = cleanMessage.slice(2).trim();
@@ -929,7 +938,7 @@ export default {
         } else if (cleanMessage.startsWith('??')) {
           cleanMessage = cleanMessage.slice(2).trim();
           sameQqSelfAsk = true;
-        } else if (!/^[!！]/.test(cleanMessage)) {
+        } else if (!explicitSelfCommand) {
           sameQqHumanOnly = true;
         }
       }
@@ -4081,7 +4090,7 @@ async function recordDeepSeekUsage(env, { userId, groupId, model, usage }) {
   return cost;
 }
 
-async function callDeepSeek(env, { messages, userId, groupId, thinking = "disabled", effort = "high", maxTokens = 1200, model }) {
+async function callDeepSeek(env, { messages, userId, groupId, thinking = "disabled", effort = "high", maxTokens = 1200, model, deadlineAt = Date.now() + 12000, maxAttempts = 1 }) {
   const keys = deepSeekApiKeys(env);
   if (!keys.length) throw new Error("DEEPSEEK_API_KEYS_MISSING");
   const selectedModel = model || env.DEEPSEEK_FLASH_MODEL || DEFAULTS.deepseekFlashModel;
@@ -4092,13 +4101,16 @@ async function callDeepSeek(env, { messages, userId, groupId, thinking = "disabl
   if (!budget.ok) throw new Error("DEEPSEEK_BUDGET_EXCEEDED");
   const payload = { model: selectedModel, messages, stream: false, max_tokens: maxTokens, thinking: { type: "disabled" } };
   let lastError = "DEEPSEEK_FAILED";
+  let attempts = 0;
   for (const key of keys) {
+    if (attempts >= Math.max(1, Number(maxAttempts || 1)) || isDeadlineExceeded(deadlineAt, 800)) break;
+    attempts += 1;
     try {
       const response = await fetch("https://api.deepseek.com/chat/completions", {
         method: "POST",
         headers: { "Content-Type": "application/json", "Authorization": `Bearer ${key}` },
         body: JSON.stringify(payload),
-        signal: AbortSignal.timeout(30000)
+        signal: AbortSignal.timeout(remainingTimeout(deadlineAt, 10000, 1200))
       });
       const data = await response.json().catch(() => ({}));
       if (!response.ok) {
@@ -4207,15 +4219,18 @@ async function callGemmaDecision(env, { system, prompt, maxOutputTokens = 64, de
   throw new Error(lastError);
 }
 
-async function callGemmaChat(env, { model, system, contents, maxOutputTokens = 1000, temperature = 0.72, timeoutMs = 30000 }) {
+async function callGemmaChat(env, { model, system, contents, maxOutputTokens = 1000, temperature = 0.72, timeoutMs = 10000, deadlineAt = Date.now() + timeoutMs, maxAttempts = 1 }) {
   const keys = roundRobinKeys([...new Set([...parseList(env.GEMINI_API_KEYS), ...parseList(env.VECTORIZE_GEMINI_KEYS)])], "gemini");
   if (!keys.length) throw new Error("GEMMA_API_KEYS_MISSING");
   const configured = await effectiveRuntimeModels(env, "last_resort");
   const preferred = model === "gemma_31b" ? "gemma-4-31b-it" : "gemma-4-26b-a4b-it";
   const models = [preferred, ...configured.filter(x => x !== preferred)];
   let lastError = "GEMMA_CHAT_FAILED";
+  let attempts = 0;
   for (const selectedModel of models) {
     for (const key of keys) {
+      if (attempts >= Math.max(1, Number(maxAttempts || 1)) || isDeadlineExceeded(deadlineAt, 800)) throw new Error(lastError);
+      attempts += 1;
       try {
         const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${selectedModel}:generateContent?key=${encodeURIComponent(key)}`, {
           method: "POST",
@@ -4232,7 +4247,7 @@ async function callGemmaChat(env, { model, system, contents, maxOutputTokens = 1
               thinkingConfig: { thinkingLevel: selectedModel.includes("31b") ? "high" : "minimal" }
             }
           }),
-          signal: AbortSignal.timeout(Math.max(5000, Math.min(30000, Number(timeoutMs || 30000))))
+          signal: AbortSignal.timeout(remainingTimeout(deadlineAt, Math.max(3000, Math.min(10000, Number(timeoutMs || 10000))), 1200))
         });
         const data = await response.json().catch(() => ({}));
         if (response.ok) {
@@ -4298,14 +4313,17 @@ function searchRequirement(text) {
   return { needed: explicit || fresh, explicit };
 }
 
-async function callGeminiGenerate(env, { models, system, contents, maxOutputTokens = 1000, temperature = 0.7, useSearch = true, requireSearch = false, timeoutMs = 30000, apiKeys = null, keyProvider = "gemini" }) {
+async function callGeminiGenerate(env, { models, system, contents, maxOutputTokens = 1000, temperature = 0.7, useSearch = true, requireSearch = false, timeoutMs = 10000, apiKeys = null, keyProvider = "gemini", deadlineAt = Date.now() + timeoutMs, maxAttempts = 2 }) {
   const keys = apiKeys
     ? roundRobinKeys(apiKeys, keyProvider)
     : roundRobinKeys([...new Set([...parseList(env.GEMINI_API_KEYS), ...parseList(env.VECTORIZE_GEMINI_KEYS)])], "gemini");
   if (!keys.length) throw new Error(keyProvider === "gemini_search" ? "GEMINI_SEARCH_API_KEYS_MISSING" : "GEMINI_API_KEYS_MISSING");
   let lastError = "GEMINI_FAILED";
+  let attempts = 0;
   for (const model of models) {
     for (const key of keys) {
+      if (attempts >= Math.max(1, Number(maxAttempts || 2)) || isDeadlineExceeded(deadlineAt, 800)) throw new Error(lastError);
+      attempts += 1;
       const body = {
         contents,
         systemInstruction: { parts: [{ text: system }] },
@@ -4315,7 +4333,7 @@ async function callGeminiGenerate(env, { models, system, contents, maxOutputToke
       for (let attempt = 0; attempt < 2; attempt++) {
         try {
           const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(key)}`, {
-            method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body), signal: AbortSignal.timeout(Math.max(5000, Math.min(30000, Number(timeoutMs || 30000))))
+            method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body), signal: AbortSignal.timeout(remainingTimeout(deadlineAt, Math.max(3000, Math.min(10000, Number(timeoutMs || 10000))), 1200))
           });
           const data = await response.json().catch(() => ({}));
           if (response.ok) {
@@ -4398,6 +4416,8 @@ async function routeProviderWithGemma(env, text) {
 }
 
 async function generateHybridReply(env, args) {
+  // 正式回答必须在 OneBotHub 的任务租约前完成，预留发送、记录与撤回“正在思考”的时间。
+  const overallDeadlineAt = Date.now() + (args.fastChat ? 22000 : 42000);
   let pref = args.modelPref || "auto";
   if (args.hasMedia) pref = "gemini";
   if (["gemma_26b", "gemma_31b"].includes(pref)) pref = "gemini";
@@ -4443,7 +4463,9 @@ async function generateHybridReply(env, args) {
       contents: args.contents,
       maxOutputTokens: args.fastChat ? 160 : 1000,
       temperature: args.fastChat ? 0.9 : 0.82,
-      timeoutMs: args.fastChat ? 12000 : 30000
+      timeoutMs: args.fastChat ? 7000 : 9000,
+      deadlineAt: overallDeadlineAt,
+      maxAttempts: 1
     });
     return finish("gemma", result, search);
   };
@@ -4460,7 +4482,9 @@ async function generateHybridReply(env, args) {
       // 搜索只允许独立搜索金钥执行；聊天金钥不挂 Google Search tool。
       useSearch: false,
       requireSearch: false,
-      timeoutMs: args.fastChat ? 12000 : 30000
+      timeoutMs: args.fastChat ? 7000 : 10000,
+      deadlineAt: overallDeadlineAt,
+      maxAttempts: args.fastChat ? 1 : 2
     });
     return finish("gemini", result, search);
   };
@@ -4468,7 +4492,11 @@ async function generateHybridReply(env, args) {
     if (!deepseekEnabled || !deepSeekApiKeys(env).length || args.hasMedia) throw new Error("DEEPSEEK_UNAVAILABLE");
     const search = await getSharedSearch();
     const messages = [{ role: "system", content: mergeSearchPrompt(args.finalStylePrompt, search) }, ...flattenGeminiContents(args.contents).slice(-32)];
-    const result = await callDeepSeek(env, { messages, userId: args.userId, groupId: args.groupId || "private", thinking: "disabled", maxTokens: 1000, model: env.DEEPSEEK_FLASH_MODEL || DEFAULTS.deepseekFlashModel });
+    const result = await callDeepSeek(env, {
+      messages, userId: args.userId, groupId: args.groupId || "private", thinking: "disabled",
+      maxTokens: 1000, model: env.DEEPSEEK_FLASH_MODEL || DEFAULTS.deepseekFlashModel,
+      deadlineAt: overallDeadlineAt, maxAttempts: 1
+    });
     return finish("deepseek", result, search);
   };
 
@@ -4481,8 +4509,13 @@ async function generateHybridReply(env, args) {
 
   let lastError = null;
   for (const attempt of attempts) {
-    try { return await attempt(); }
-    catch (error) { lastError = error; console.warn("Model fallback:", error?.message || error); }
+    if (isDeadlineExceeded(overallDeadlineAt, 1200)) break;
+    try {
+      return await withTimeout(attempt(), remainingTimeout(overallDeadlineAt, 12000, 1200), "MODEL_PROVIDER_TIMEOUT");
+    } catch (error) {
+      lastError = error;
+      console.warn("Model fallback:", error?.message || error);
+    }
   }
   throw lastError || new Error("ALL_MODELS_FAILED");
 }
@@ -6315,7 +6348,7 @@ async function runHealthChecks(env, { mode = "quick" } = {}) {
     if (!keys.length) throw new Error("GEMINI_API_KEY_MISSING");
     const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${encodeURIComponent(keys[0])}&pageSize=1`, { signal: AbortSignal.timeout(8000) });
     if (!response.ok) throw new Error(`GEMINI_${response.status}`);
-    return { key: maskSecret(keys[0]), reachable: true };
+    return { key: maskSecret(keys[0]), reachable: true, generationTested: false, note: "快速检查仅验证 API 列表端点；请使用单一模型检查验证实际生成。" };
   }, { timeoutMs: 10000 }));
 
   const visionKeys = roundRobinKeys(geminiVisionApiKeys(env), "gemini_vision");
@@ -6333,7 +6366,7 @@ async function runHealthChecks(env, { mode = "quick" } = {}) {
   }, { timeoutMs: 10000, optional: true }));
 
   checks.push(await runTimedHealthCheck("Gemma 4 26B 模型", async () => {
-    if (mode !== "full") return { configured: parseList(env.GEMMA_CHAT_MODELS, ["gemma-4-26b-a4b-it", "gemma-4-31b-it"]).includes("gemma-4-26b-a4b-it") };
+    if (mode !== "full") return { configured: parseList(env.GEMMA_CHAT_MODELS, ["gemma-4-26b-a4b-it", "gemma-4-31b-it"]).includes("gemma-4-26b-a4b-it"), generationTested: false };
     if (!keys.length) throw new Error("GEMMA_API_KEY_MISSING");
     const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemma-4-26b-a4b-it:generateContent?key=${encodeURIComponent(keys[0])}`, {
       method: "POST",
@@ -6347,7 +6380,7 @@ async function runHealthChecks(env, { mode = "quick" } = {}) {
   }, { timeoutMs: 11000 }));
 
   checks.push(await runTimedHealthCheck("Gemma 4 31B 模型", async () => {
-    if (mode !== "full") return { configured: parseList(env.GEMMA_CHAT_MODELS, ["gemma-4-26b-a4b-it", "gemma-4-31b-it"]).includes("gemma-4-31b-it") };
+    if (mode !== "full") return { configured: parseList(env.GEMMA_CHAT_MODELS, ["gemma-4-26b-a4b-it", "gemma-4-31b-it"]).includes("gemma-4-31b-it"), generationTested: false };
     if (!keys.length) throw new Error("GEMMA_API_KEY_MISSING");
     const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemma-4-31b-it:generateContent?key=${encodeURIComponent(keys[0])}`, {
       method: "POST",
@@ -6363,7 +6396,7 @@ async function runHealthChecks(env, { mode = "quick" } = {}) {
   checks.push(await runTimedHealthCheck("DeepSeek API 连通性", async () => {
     const deepseekKeys = deepSeekApiKeys(env);
     if (!deepseekKeys.length) return { configured: false };
-    if (mode !== "full") return { configured: true, keys: deepseekKeys.length, key: maskSecret(deepseekKeys[0]) };
+    if (mode !== "full") return { configured: true, keys: deepseekKeys.length, key: maskSecret(deepseekKeys[0]), generationTested: false };
     const response = await fetch("https://api.deepseek.com/models", { headers: { Authorization: `Bearer ${deepseekKeys[0]}` }, signal: AbortSignal.timeout(8000) });
     if (!response.ok) throw new Error(`DEEPSEEK_${response.status}`);
     return { configured: true, reachable: true };
@@ -9128,7 +9161,7 @@ export class OneBotHub {
     let action = body.message_type === "private" ? "send_private_msg" : "send_group_msg";
     try {
       const sourceUrl = new URL(requestUrl);
-      const internalTimeoutMs = toolTask ? 82000 : 65000;
+      const internalTimeoutMs = toolTask ? 90000 : 70000;
       let internalResponse;
       try {
         internalResponse = await fetch(`${sourceUrl.protocol}//${sourceUrl.host}/__onebot_event`, {
