@@ -1,4 +1,4 @@
-const VERSION = "1.2.23";
+const VERSION = "1.2.24";
 const QQAI_V1_COMPLETE_MARKER = "QQAI_V1_COMPLETE_MARKER";
 const QQAI_V1_R3_MARKER = "QQAI_V1_R3_MARKER";
 const BUILD_DATE = "2026-07-23";
@@ -757,9 +757,11 @@ export default {
     // Webhook 被动回复工具。长任务会在正式回复前撤回「正在思考...」。
     let activeThinkingMessageId = null;
     const clearThinkingIndicator = async () => {
-      if (!activeThinkingMessageId) return;
-      const id = activeThinkingMessageId; activeThinkingMessageId = null;
-      try { await callOneBotAction(env, { action: 'delete_msg', params: { message_id: numericId(id) } }, 8000); } catch {}
+      const id = activeThinkingMessageId;
+      activeThinkingMessageId = null;
+      await clearRegisteredThinkingIndicators(env, {
+        isGroup: body?.message_type === "group", groupId: String(body?.group_id || ""), userId: String(body?.user_id || body?.self_id || "")
+      }, id ? [id] : []).catch(() => {});
     };
     const jsonReply = (text, meta = {}) => {
       const thinkingMessageId = activeThinkingMessageId;
@@ -4478,13 +4480,52 @@ function buildReplyPlan({ isGroup, isAutoInterject, botMentioned, quotedMessageI
   return { mode, text, mentionIds, replyId, quoteMessageId: replyId };
 }
 
+function thinkingIndicatorRegistryKey({ isGroup, groupId, userId }) {
+  return `thinking_active:${isGroup ? `group:${String(groupId || "")}` : `private:${String(userId || "")}`}:${String(userId || "")}`;
+}
+
+async function registerThinkingIndicator(env, target, messageId) {
+  const id = String(messageId || "").trim();
+  if (!id) return;
+  const key = thinkingIndicatorRegistryKey(target);
+  const rows = await readJson(env, key, []);
+  const next = [...new Set([...(Array.isArray(rows) ? rows : []).map(String), id])].slice(-12);
+  await dbPut(env, key, JSON.stringify(next));
+}
+
+async function clearRegisteredThinkingIndicators(env, target, extraIds = []) {
+  const key = thinkingIndicatorRegistryKey(target);
+  const stored = await readJson(env, key, []);
+  const ids = [...new Set([...(Array.isArray(stored) ? stored : []), ...(Array.isArray(extraIds) ? extraIds : [])].map(String).filter(Boolean))];
+  if (!ids.length) return { ok: true, cleared: 0, failed: [] };
+  const failed = [];
+  let cleared = 0;
+  for (const id of ids) {
+    try {
+      await callOneBotAction(env, { action: "delete_msg", params: { message_id: numericId(id) } }, 10000);
+      cleared += 1;
+    } catch (error) {
+      failed.push({ id, error: String(error?.message || error).slice(0, 500) });
+    }
+  }
+  if (failed.length) await dbPut(env, key, JSON.stringify(failed.map(item => item.id).slice(-12)));
+  else await dbDel(env, key);
+  if (failed.length) await writeSystemAudit(env, {
+    type: "thinking_indicator_residual", groupId: String(target?.groupId || ""), actorId: String(target?.userId || ""),
+    action: "registry_cleanup_failed", failed
+  }).catch(() => {});
+  return { ok: failed.length === 0, cleared, failed };
+}
+
 async function sendThinkingIndicator(env, { isGroup, groupId, userId, text }) {
   const action = isGroup ? "send_group_msg" : "send_private_msg";
   const params = isGroup
     ? { group_id: numericId(groupId), message: [{ type: "text", data: { text: String(text || "正在思考...") } }], auto_escape: false }
     : { user_id: numericId(userId), message: String(text || "正在思考..."), auto_escape: false };
   const data = await callOneBotAction(env, { action, params }, 12000);
-  return String(data?.message_id || data?.messageId || data || "");
+  const messageId = String(data?.message_id || data?.messageId || data || "");
+  if (messageId) await registerThinkingIndicator(env, { isGroup, groupId, userId }, messageId);
+  return messageId;
 }
 
 function flattenGeminiContents(contents) {
@@ -6390,6 +6431,7 @@ async function appendRuleViolationRecord(env, data) {
     actionTaken: String(data.actionTaken || "none"),
     actionResult: String(data.actionResult || ""),
     messageId: String(data.messageId || ""),
+    relatedMessageIds: [...new Set((Array.isArray(data.relatedMessageIds) ? data.relatedMessageIds : []).map(String).filter(Boolean))].slice(-12),
     strictness: normalizeRuleStrictness(data.strictness || DEFAULTS.ruleStrictness),
     urlInspections: Array.isArray(data.urlInspections) ? data.urlInspections.slice(0, 3) : [],
     testContext: Boolean(data.testContext),
@@ -6551,13 +6593,25 @@ ${appealHint}` } });
       result = { ok: true, message: fallbackNote || (strikeCounted ? `已发送警告（${progressivePolicy.windowDays} 天内第 ${progressiveCount} 次）` : "已发送警告，本次不计入累计次数") };
     } else if (action === "recall") {
       if (!item.messageId) throw new Error("该违规记录没有原消息 ID，无法撤回");
-      await callOneBotAction(env, { action: "delete_msg", params: { message_id: String(item.messageId) } }, 15000);
+      const recallIds = [...new Set([item.messageId, ...(Array.isArray(item.relatedMessageIds) ? item.relatedMessageIds : [])].map(String).filter(Boolean))].slice(-12);
+      const recalledIds = [];
+      const recallFailures = [];
+      for (const recallId of recallIds) {
+        try {
+          await callOneBotAction(env, { action: "delete_msg", params: { message_id: numericId(recallId) } }, 15000);
+          recalledIds.push(recallId);
+        } catch (error) {
+          recallFailures.push({ messageId: recallId, error: String(error?.message || error).slice(0, 300) });
+        }
+      }
+      if (!recalledIds.length) throw new Error(`撤回失败：${recallFailures.map(row => `${row.messageId}:${row.error}`).join("；") || "未知错误"}`);
+      if (recallFailures.length) fallbackNote = `${fallbackNote ? fallbackNote + "；" : ""}部分重复消息撤回失败 ${recallFailures.length} 条`;
       actionTaken = strikeCounted ? "progressive_recall" : "recall";
       try {
         const sent = await callOneBotAction(env, { action: "send_group_msg", params: { group_id: numericId(item.groupId), message: [
           { type: "at", data: { qq: String(item.userId) } },
           { type: "text", data: { text: `
-群规处理：已撤回一条可能违反“${item.violationType}”的消息。
+群规处理：已撤回 ${recalledIds.length} 条可能违反“${item.violationType}”的消息。
 
 原因：${item.reason || item.rule || "请遵守群规"}
 ${countLine}
@@ -6568,7 +6622,7 @@ ${appealHint}` } }
       } catch (notifyError) {
         fallbackNote = `${fallbackNote ? fallbackNote + "；" : ""}违规消息已撤回，但公开通知发送失败：${String(notifyError?.message || notifyError).slice(0, 200)}`;
       }
-      result = { ok: true, message: `${fallbackNote ? fallbackNote + "；" : ""}已撤回违规消息${strikeCounted ? `（第 ${progressiveCount} 次累计）` : "（不计入累计次数）"}` };
+      result = { ok: true, message: `${fallbackNote ? fallbackNote + "；" : ""}已撤回 ${recalledIds.length} 条违规消息${strikeCounted ? `（第 ${progressiveCount} 次累计）` : "（不计入累计次数）"}` };
     } else if (action === "mute") {
       const configured = parseUnlimitedNonNegativeInteger(await dbGet(env, `rule_proxy_mute_seconds:${item.groupId}`), DEFAULTS.ruleProxyMuteSeconds);
       const suggested = parseUnlimitedNonNegativeInteger(duration || policy.muteSeconds || review?.muteSeconds, configured);
@@ -6617,21 +6671,28 @@ async function reverseRuleViolationAction(env, item, actorId) {
   if (String(item.actionTaken || "").includes("kick")) results.push("成员已被踢出，QQ 接口无法自动恢复群成员，需要人工重新邀请");
   if (item.strikeCounted || Number(item.progressiveCount || 0) > 0) await removeRuleStrike(env, item);
   const hadPublicAction = ["remind", "warn", "progressive_warn", "mute", "progressive_mute", "kick"].includes(String(item.actionTaken || "")) || Boolean(item.warningMessageId);
-  if (hadPublicAction) {
+  const correctionNoticeKey = `rule_reversal_notice:${item.groupId}:${item.userId}`;
+  const correctionNoticeRecent = Date.now() - Number(await dbGet(env, correctionNoticeKey) || 0) < 30000;
+  if (hadPublicAction && !correctionNoticeRecent) {
     try {
       const sent = await callOneBotAction(env, {
         action: "send_group_msg",
         params: { group_id: numericId(item.groupId), message: `[CQ:at,qq=${item.userId}] 经管理员复核，此前群规判断为误判；相关警告及可撤销处罚已撤销。`, auto_escape: false }
       }, 15000);
-      if (extractOneBotMessageId(sent)) results.push("已发送误判更正通知");
+      if (extractOneBotMessageId(sent)) {
+        await dbPut(env, correctionNoticeKey, String(Date.now()));
+        results.push("已发送误判更正通知");
+      }
     } catch (error) { results.push(`更正通知发送失败：${String(error?.message || error)}`); }
-  } else results.push("该记录没有公开警告或处罚，仅撤销违规判定");
+  } else if (hadPublicAction) results.push("同一成员的更正通知已在 30 秒内发送，本次合并避免刷屏");
+  else results.push("该记录没有公开警告或处罚，仅撤销违规判定");
   await writeSystemAudit(env, { type: "rule_violation_reversed", groupId: item.groupId, actorId: String(actorId), targetId: item.userId, action: item.actionTaken || "none", violationId: item.id, result: results.join("；") });
   return results.join("；") || "没有可自动撤销的处罚";
 }
 
 async function recordRuleViolationFeedback(env, item, actorId, verdict, note = "") {
   const normalizedVerdict = verdict === "not_violation" ? "not_violation" : "violation";
+  if (String(item?.humanVerdict || "") === normalizedVerdict && Number(item?.humanReviewedAt || 0) > 0) return item;
   let reversalResult = "";
   if (normalizedVerdict === "not_violation") reversalResult = await reverseRuleViolationAction(env, item, actorId);
   const feedbackId = `rf_${Date.now().toString(36)}_${crypto.randomUUID().slice(0, 8)}`;
@@ -6666,7 +6727,31 @@ async function inspectMessageAgainstGroupRules(env, { groupId, userId, senderNam
   if (await dbGet(env, `rule_monitor_enabled:${groupId}`) === "false") return;
   const rules = String(await dbGet(env, `group_rules:${groupId}`) || "").trim();
   const content = String(text || "").trim();
-  if (!rules || !content || content.length < 2) return;
+  if (!rules || !content) return;
+
+  // “刷屏”按多条独立消息判断，而不是把单条“人人人……”误当成四次发送。
+  const now = Date.now();
+  const burstKey = `rule_message_burst:${groupId}:${userId}`;
+  const normalizeBurstText = value => String(value || "").replace(/\s+/g, " ").trim().toLowerCase();
+  let burstRows = (await readJson(env, burstKey, []))
+    .filter(row => now - Number(row?.at || 0) <= 60000)
+    .map(row => ({ at: Number(row.at || 0), messageId: String(row.messageId || ""), text: String(row.text || ""), normalized: normalizeBurstText(row.normalized || row.text || "") }));
+  if (!messageId || !burstRows.some(row => row.messageId === String(messageId))) {
+    burstRows.push({ at: now, messageId: String(messageId || ""), text: content.slice(0, 1000), normalized: normalizeBurstText(content) });
+  }
+  burstRows = burstRows.slice(-12);
+  await dbPut(env, burstKey, JSON.stringify(burstRows));
+  const currentNormalized = normalizeBurstText(content);
+  let trailingSameCount = 0;
+  for (let index = burstRows.length - 1; index >= 0; index--) {
+    if (burstRows[index].normalized !== currentNormalized) break;
+    trailingSameCount += 1;
+  }
+  const repeatedMessageBurst = trailingSameCount >= 4;
+  const repeatedMessageIds = repeatedMessageBurst
+    ? burstRows.slice(-trailingSameCount).map(row => row.messageId).filter(Boolean)
+    : [];
+  if (content.length < 2 && !repeatedMessageBurst) return;
 
   const strictness = ruleStrictnessConfig(await dbGet(env, `rule_strictness:${groupId}`) || DEFAULTS.ruleStrictness);
   const recentContext = (await readJson(env, `recent_logs:${groupId}`, [])).slice(-18).join("\n").slice(-5000);
@@ -6689,8 +6774,10 @@ async function inspectMessageAgainstGroupRules(env, { groupId, userId, senderNam
 7. 管理人工复核结果是学习样本；被标记为误判的相似表达不得再次仅凭表面词语判违规。
 8. severity 必须按实际影响判断：minor 是轻微、初次、无明显恶意或可通过提醒改善；moderate 是明确违规；severe 是重复、明显恶意或造成较大影响；critical 是需要立即制止的严重行为。
 9. intentional 只有在语境显示明确故意时才为 true。轻微、误发、误解、初次边界行为应优先标记 minor，并由系统采用不累计次数的友善提醒。
-10. 不确定必须输出 violation=false。action 只是建议，系统会按授权范围决定是否执行。`,
-      prompt: JSON.stringify({ currentMessage: content, userId, senderName, recentContext, strictness: strictness.level, categoryPolicies: categoryPolicies.map(item => ({ name: item.name, punishment: item.punishment, note: String(item.note || "").slice(0, 400) })), progressivePolicy, humanFeedbackExamples, rules: rules.slice(0, 5000), urlInspections }).slice(0, 14000),
+10. “重复刷屏”必须指同一成员在短时间内发送多条独立消息。单条消息内部重复很多字符，不等于发送了多条消息；除非本群规则另有明确规定，否则不得据此声称“连续发送多条”。
+11. 只有 repeatedMessageBurst=true，或最近聊天语境中明确存在多条独立重复消息时，才可以用“连续重复发送／刷屏”作为判定理由。
+12. 不确定必须输出 violation=false。action 只是建议，系统会按授权范围决定是否执行。`,
+      prompt: JSON.stringify({ currentMessage: content, userId, senderName, recentContext, recentUserMessageBurst: burstRows, repeatedMessageBurst, trailingSameCount, strictness: strictness.level, categoryPolicies: categoryPolicies.map(item => ({ name: item.name, punishment: item.punishment, note: String(item.note || "").slice(0, 400) })), progressivePolicy, humanFeedbackExamples, rules: rules.slice(0, 5000), urlInspections }).slice(0, 14000),
       maxOutputTokens: 320
     });
     review = JSON.parse(result.text.match(/\{[\s\S]*\}/)?.[0] || "{}");
@@ -6700,6 +6787,8 @@ async function inspectMessageAgainstGroupRules(env, { groupId, userId, senderNam
   }
 
   const reviewText = `${review?.violationType || ""} ${review?.rule || ""} ${review?.reason || ""}`;
+  const repeatedSpamClaim = /刷屏|洗版|连续发送|連續發送|重复发送|重複發送|大量重复字符|大量重複字符/i.test(reviewText);
+  if (repeatedSpamClaim && !repeatedMessageBurst) return;
   const allLinksInternal = urlInspections.length > 0 && urlInspections.every(item => item.trustedInternal);
   if (allLinksInternal && /拉人|宣群|宣传|推广|引流/i.test(reviewText) && !explicitPromotionLanguage(content)) return;
   if (review?.testContext === true && !/(明确威胁|现实伤害|泄露隐私|诈骗|恶意刷屏)/i.test(reviewText)) return;
@@ -6714,6 +6803,7 @@ async function inspectMessageAgainstGroupRules(env, { groupId, userId, senderNam
     confidence: review.confidence,
     recommendedAction: review.action || "record",
     messageId,
+    relatedMessageIds: repeatedMessageIds,
     strictness: strictness.level,
     urlInspections,
     testContext: Boolean(review.testContext),
@@ -10370,7 +10460,15 @@ export class OneBotHub {
     const text = eventPlainText(body).trim();
     if (!text || /^(?:[!！]|\/!)/.test(text)) return "";
     const key = this.userQueueKey(body);
-    return this.inputBuffers.has(key) || this.userInFlight.has(key) ? key : "";
+    const selfId = String(body.self_id || "");
+    const mentions = eventMentionedQqs(body).map(String).filter(Boolean);
+    // @了其他成员时属于正常群聊，不得偷接到正在生成的问题中。
+    if (mentions.some(id => id !== selfId)) return "";
+    const buffered = this.inputBuffers.get(key);
+    if (buffered && Date.now() - Number(buffered.lastAt || 0) <= DEFAULTS.inputDebounceMs + 800) return key;
+    // 已进入模型生成后，只有再次明确 @机器人，才取消旧生成并重建；普通聊天不再误触。
+    if (this.userInFlight.has(key) && eventHasBotMention(body)) return key;
+    return "";
   }
 
   questionBodies(body) {
@@ -10466,6 +10564,7 @@ export class OneBotHub {
     active.cancelled = true;
     active.cancelledReason = reason;
     try { active.controller?.abort(new DOMException(reason, "AbortError")); } catch { try { active.controller?.abort(); } catch {} }
+    await this.retractRegisteredThinkingIndicators(active.body).catch(error => console.error("cancel thinking cleanup failed", error));
     await this.recordIngress(active.body, reason, { explicit: true, cancelled: true }).catch(() => {});
     return active.parts || this.questionBodies(active.body);
   }
@@ -10631,6 +10730,7 @@ export class OneBotHub {
         if (fromQueue) await this.sendQueueNotice(body, "排队的问题处理失败，已跳到下一条。请稍后重试。").catch(() => {});
       }
     } finally {
+      await this.retractRegisteredThinkingIndicators(body).catch(error => console.error("final thinking cleanup failed", error));
       if (this.userInFlight.get(key)?.token === token) this.userInFlight.delete(key);
       await this.persistQuestionInFlight(key, null);
       if (this.inputBuffers.has(key)) {
@@ -10781,12 +10881,49 @@ export class OneBotHub {
     }
   }
 
+  thinkingRegistryKey(body) {
+    const isGroup = body?.message_type === "group";
+    return thinkingIndicatorRegistryKey({
+      isGroup,
+      groupId: String(body?.group_id || ""),
+      userId: String(body?.user_id || body?.self_id || "")
+    });
+  }
+
+  async forgetThinkingIndicator(body, messageId) {
+    const id = String(messageId || "");
+    if (!id) return;
+    const key = this.thinkingRegistryKey(body);
+    const rows = await readJson(this.env, key, []);
+    const next = (Array.isArray(rows) ? rows : []).map(String).filter(value => value && value !== id);
+    if (next.length) await dbPut(this.env, key, JSON.stringify(next.slice(-12)));
+    else await dbDel(this.env, key);
+  }
+
+  async retractRegisteredThinkingIndicators(body, extraIds = []) {
+    const key = this.thinkingRegistryKey(body);
+    const rows = await readJson(this.env, key, []);
+    const ids = [...new Set([...(Array.isArray(rows) ? rows : []), ...(Array.isArray(extraIds) ? extraIds : [])].map(String).filter(Boolean))];
+    if (!ids.length) return { ok: true, cleared: 0 };
+    let cleared = 0;
+    const failed = [];
+    for (const id of ids) {
+      const result = await this.retractThinkingIndicator(body, id).catch(error => ({ ok: false, error: String(error?.message || error) }));
+      if (result?.ok) cleared += 1;
+      else failed.push(id);
+    }
+    if (failed.length) await dbPut(this.env, key, JSON.stringify(failed.slice(-12)));
+    else await dbDel(this.env, key);
+    return { ok: failed.length === 0, cleared, failed };
+  }
+
   async retractThinkingIndicator(body, messageId) {
     const normalizedMessageId = numericId(messageId);
     if (!normalizedMessageId) return { ok: true, skipped: true };
     let firstError = "";
     try {
       await this.sendAction({ action: "delete_msg", params: { message_id: normalizedMessageId } }, 8000);
+      await this.forgetThinkingIndicator(body, messageId);
       return { ok: true, mode: "normal_recall" };
     } catch (error) {
       firstError = String(error?.message || error);
@@ -10801,6 +10938,7 @@ export class OneBotHub {
       if (botRole === "owner" || botRole === "admin") {
         try {
           await this.sendAction({ action: "delete_msg", params: { message_id: normalizedMessageId } }, 12000);
+          await this.forgetThinkingIndicator(body, messageId);
           await writeSystemAudit(this.env, { type: "thinking_indicator_recall", groupId, actorId: String(body?.self_id || "bot"), action: "admin_group_recall_retry", messageId: String(messageId), firstError: firstError.slice(0, 500) }).catch(() => {});
           return { ok: true, mode: "admin_group_recall_retry", botRole };
         } catch (error) {
