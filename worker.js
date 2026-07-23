@@ -1,4 +1,4 @@
-const VERSION = "1.2.26";
+const VERSION = "1.3.0";
 const QQAI_V1_COMPLETE_MARKER = "QQAI_V1_COMPLETE_MARKER";
 const QQAI_V1_R3_MARKER = "QQAI_V1_R3_MARKER";
 const BUILD_DATE = "2026-07-24";
@@ -50,6 +50,11 @@ const DEFAULTS = Object.freeze({
   ruleSpamThreshold: 4,
   ruleSpamKeepCount: 3,
   ruleMuteGuardEnabled: true,
+  operationsRetentionDays: 90,
+  operationsQuietStart: "23:00",
+  operationsQuietEnd: "08:00",
+  operationsInviteCooldownSeconds: 30,
+  operationsFuseFailureThreshold: 5,
 });
 
 const AI_MEDIA_LIMITS = Object.freeze({
@@ -836,11 +841,14 @@ export default {
       if (body.post_type === 'notice' && body.notice_type === 'group_decrease' && currentGroupId) {
         if (!(await isGroupWhitelisted(env, currentGroupId))) return new Response(null, { status: 204 });
         const leavingUserId = String(body.user_id || "");
-        if (leavingUserId) await markGroupMemberLeft(env, currentGroupId, leavingUserId, {
-          reason: String(body.sub_type || "leave"),
-          operatorId: String(body.operator_id || ""),
-          groupName: String(body.group_name || currentGroupId)
-        });
+        if (leavingUserId) {
+          await markGroupMemberLeft(env, currentGroupId, leavingUserId, {
+            reason: String(body.sub_type || "leave"),
+            operatorId: String(body.operator_id || ""),
+            groupName: String(body.group_name || currentGroupId)
+          });
+          ctx.waitUntil(opsHandleMemberLeave(env, currentGroupId, leavingUserId));
+        }
         return new Response(null, { status: 204 });
       }
       if (body.post_type === 'notice' && body.notice_type === 'group_increase' && currentGroupId) {
@@ -871,7 +879,23 @@ export default {
       }
       if (body.post_type === "request" && body.request_type === "group" && currentGroupId) {
         if (!(await isGroupWhitelisted(env, currentGroupId))) return new Response(null, { status: 204 });
+        const requestUserId = String(body.user_id || "");
+        if (requestUserId && body.flag) {
+          await dbPut(env, `group_join_request:${currentGroupId}:${requestUserId}`, JSON.stringify({
+            flag: String(body.flag),
+            subType: String(body.sub_type || "add"),
+            groupId: String(currentGroupId),
+            userId: requestUserId,
+            comment: String(body.comment || "").slice(0, 1000),
+            at: Date.now()
+          }));
+        }
         if (await dbGet(env, `join_assist_enabled:${currentGroupId}`) === "false") return new Response(null, { status: 204 });
+        const requestOpsSettings = await opsGetSettings(env, currentGroupId);
+        if (requestOpsSettings.maintenanceMode || requestOpsSettings.emergencyLock) {
+          await writeSystemAudit(env, { type: "join_request_paused", groupId: currentGroupId, actorId: requestUserId, action: requestOpsSettings.emergencyLock ? "emergency_lock" : "maintenance" });
+          return new Response(null, { status: 204 });
+        }
         await createJoinRequestAssist(env, body);
         return new Response(null, { status: 204 });
       }
@@ -1222,13 +1246,15 @@ export default {
         return new Response(null, { status: 204 });
       }
 
-      if (isGroup && !isCommandMessage && !isSelfAccount && cleanMessage.length > 0 && await dbGet(env, `rule_monitor_enabled:${currentGroupId}`) !== "false") {
+      const operationsRuntimeSettings = isGroup ? await opsGetSettings(env, currentGroupId) : null;
+      const operationsHighRiskPaused = Boolean(operationsRuntimeSettings?.maintenanceMode || operationsRuntimeSettings?.emergencyLock);
+      if (isGroup && !operationsHighRiskPaused && !isCommandMessage && !isSelfAccount && cleanMessage.length > 0 && await dbGet(env, `rule_monitor_enabled:${currentGroupId}`) !== "false") {
         // 在后台检查；检查器会先即时确认机器人为群主／管理员，否则直接返回且不建立记录。
         ctx.waitUntil(inspectMessageAgainstGroupRules(env, { groupId: currentGroupId, userId, senderName: senderCard, text: cleanMessage, messageId: replyMessageId }));
       }
 
-      // 🎲 插話每日上限不設限，只保留概率、冷卻與免打擾；插話率本身就是開關，0% 代表關閉。
-      const interjectChance = Math.max(0, Math.min(100, Number(await dbGet(env, `interject_rate:${currentGroupId}`) || String(DEFAULTS.interjectRate)))) / 100;
+      // 维护／紧急锁定时暂停主动插话，但保留群友主动 @Bot 的一般聊天。
+      const interjectChance = operationsHighRiskPaused ? 0 : Math.max(0, Math.min(100, Number(await dbGet(env, `interject_rate:${currentGroupId}`) || String(DEFAULTS.interjectRate)))) / 100;
       const requiresAiJudgment = true;
       const isImitationGlobal = true;
 
@@ -1246,6 +1272,15 @@ export default {
           .trim();
         return { targetQq, targetQqs: targetMentionQqs.slice(), restText };
       };
+
+      const opsActivityCommand = await opsHandleActivityCommand(env, {
+        groupId: currentGroupId,
+        userId,
+        userName: senderCard,
+        role: isDeveloper ? "developer" : senderRole,
+        text: cleanMessage
+      });
+      if (opsActivityCommand.handled) return jsonReply(`${atSender}${opsActivityCommand.text}`);
 
       const noViolationCommand = cleanMessage.match(/^[!！](?:无违规|無違規)(?:\s|$)/i);
       if (noViolationCommand) {
@@ -3064,6 +3099,7 @@ ${deepseekContextSummary}`;
     ctx.waitUntil(cleanupExpiredModerationProposals(env));
     ctx.waitUntil(runAutomaticGroupCheckins(env, Number(controller?.scheduledTime || Date.now())));
     ctx.waitUntil(processPlatformJobs(env, Number(controller?.scheduledTime || Date.now())));
+    ctx.waitUntil(opsProcessAutomations(env, Number(controller?.scheduledTime || Date.now())));
     ctx.waitUntil(pollAutomaticBilibiliConnectors(env, Number(controller?.scheduledTime || Date.now())));
   }
 }; // 结束 export default
@@ -5619,6 +5655,7 @@ async function skipScheduleOnce(env, id, actorId, canManage = false, scopeGroupI
 async function createScheduleRecord(env, data) {
   const id = `sch_${Date.now().toString(36)}_${crypto.randomUUID().slice(0, 8)}`;
   const record = { id, enabled: true, createdAt: new Date().toISOString(), lastRunAt: null, lastResult: null, failureCount: 0, reviewerIds: [], votes: {}, approvalRule: "single", ...data };
+  record.originalNextRunAt = Number(record.originalNextRunAt || record.nextRunAt || 0);
   record.scheduleSpec = String(record.scheduleSpec || scheduleSpecFromRecord(record));
   record.mentionIds = Array.isArray(record.mentionIds) ? record.mentionIds : extractScheduleMentionIds(record.content);
   await dbPut(env, `schedule:${id}`, JSON.stringify(record));
@@ -5707,7 +5744,45 @@ async function processDueSchedules(env, now = Date.now()) {
   for (const id of ids.slice(-5000)) {
     const item = await readJson(env, `schedule:${id}`, null);
     if (!item || !item.enabled || item.status !== "active" || Number(item.nextRunAt || Infinity) > now) continue;
+    const scheduleFuse = await opsFuseAllows(env, item.groupId, "schedule");
+    if (!scheduleFuse.allowed) {
+      item.status = "paused";
+      item.enabled = false;
+      item.lastResult = "paused_by_automation_fuse";
+      await dbPut(env, `schedule:${id}`, JSON.stringify(item));
+      continue;
+    }
     if (!(await isGroupWhitelisted(env, item.groupId))) { item.status = "paused"; item.lastResult = "群不在白名单"; await dbPut(env, `schedule:${id}`, JSON.stringify(item)); continue; }
+    if (!item.managementAction && item.ignoreQuietHours !== true) {
+      const opsSettings = await opsGetSettings(env, item.groupId);
+      const quietState = opsQuietState(opsSettings, now);
+      if (quietState.quiet && opsSettings.quietPolicy !== "send") {
+        if (opsSettings.quietPolicy === "defer") {
+          item.lastResult = "deferred_by_quiet_hours";
+          item.nextRunAt = quietState.resumeAt;
+          await dbPut(env, `schedule:${id}`, JSON.stringify(item));
+          continue;
+        }
+        if (opsSettings.quietPolicy === "admin_only") {
+          await sendPortalVerificationMessage(env, item.creatorId, `排程 ${id} 在群安静时段到期，已暂缓群内发送。内容：${String(item.content || "").slice(0, 500)}`).catch(() => {});
+          item.lastResult = "quiet_hours_admin_only";
+          item.nextRunAt = quietState.resumeAt;
+          await dbPut(env, `schedule:${id}`, JSON.stringify(item));
+          continue;
+        }
+        if (opsSettings.quietPolicy === "skip") {
+          item.lastResult = "skipped_by_quiet_hours";
+          if (item.type === "once") {
+            await writeSystemAudit(env, { type: "schedule_quiet_skipped", groupId: item.groupId, actorId: item.creatorId, action: "once_skipped", scheduleId: id });
+            await deleteScheduleRecord(env, id);
+          } else {
+            item.nextRunAt = computeNextScheduleRun(item, now);
+            await dbPut(env, `schedule:${id}`, JSON.stringify(item));
+          }
+          continue;
+        }
+      }
+    }
     if (item.skipNextRun && item.type !== "once") {
       item.skipNextRun = false;
       item.lastResult = "skipped_once";
@@ -5718,6 +5793,10 @@ async function processDueSchedules(env, now = Date.now()) {
       continue;
     }
     let deleteAfterSuccess = false;
+    // 每个重复排程的执行周期都建立自己的补发宽限起点；重试期间保留同一原始到期时间。
+    if (Number(item.failureCount || 0) === 0 || !Number(item.originalNextRunAt || 0)) {
+      item.originalNextRunAt = Number(item.nextRunAt || now);
+    }
     try {
       let result;
       if (item.managementAction) result = await executeManagementSchedule(env, item);
@@ -5736,18 +5815,32 @@ async function processDueSchedules(env, now = Date.now()) {
       }
       if (!result?.ok) throw new Error(result?.error || "执行失败");
       item.lastRunAt = new Date(now).toISOString(); item.lastResult = "success"; item.failureCount = 0;
+      await opsRecordAutomationResult(env, item.groupId, "schedule", true).catch(() => {});
       const next = computeNextScheduleRun(item, now);
-      if (next) item.nextRunAt = next;
-      else {
+      if (next) {
+        item.nextRunAt = next;
+        item.originalNextRunAt = next;
+      } else {
         item.enabled = false;
         item.status = "completed";
         item.nextRunAt = null;
         deleteAfterSuccess = item.type === "once";
       }
     } catch (error) {
-      item.failureCount = Number(item.failureCount || 0) + 1; item.lastResult = String(error.message || error);
-      if (item.failureCount >= 3) { item.status = "paused"; item.enabled = false; await notifyDeveloper(env, `【排程已暂停】\n编号：${id}\n原因：${item.lastResult}`); }
-      else item.nextRunAt = now + 5 * 60 * 1000;
+      item.failureCount = Number(item.failureCount || 0) + 1; item.lastResult = String(error?.message || error);
+      const opsSettings = await opsGetSettings(env, item.groupId);
+      const fuseState = await opsRecordAutomationResult(env, item.groupId, "schedule", false, item.lastResult).catch(() => null);
+      const retryMax = opsSettings.scheduleRetryEnabled ? Number(opsSettings.scheduleRetryMax || 0) : 0;
+      const graceDeadline = Number(item.originalNextRunAt || item.nextRunAt || now) + Number(opsSettings.scheduleRetryGraceMinutes || 30) * 60000;
+      if (item.failureCount > retryMax || now >= graceDeadline || fuseState?.paused) {
+        item.status = "paused";
+        item.enabled = false;
+        await notifyDeveloper(env, `【排程已暂停】\n编号：${id}\n原因：${item.lastResult}`);
+      } else {
+        const backoff = [30000, 120000, 300000, 600000][Math.min(item.failureCount - 1, 3)] || 600000;
+        item.nextRunAt = Math.min(now + backoff, graceDeadline);
+        item.lastResult = `retry_${item.failureCount}:${item.lastResult}`;
+      }
     }
     if (deleteAfterSuccess) {
       await writeSystemAudit(env, { type: "schedule_completed_deleted", groupId: item.groupId, actorId: item.creatorId, action: "completed_and_deleted", scheduleId: id, content: String(item.content || "").slice(0, 500) });
@@ -5763,6 +5856,8 @@ async function processActiveSpeaking(env, now = Date.now()) {
   const groups = await readJson(env, "active_speaking:groups", []);
   for (const groupId of groups) {
     if (!(await getFeatureFlag(env, `active_speaking:${groupId}`, false)) || !(await isGroupWhitelisted(env, groupId))) continue;
+    const opsSettings = await opsGetSettings(env, groupId);
+    if (opsSettings.maintenanceMode || opsSettings.emergencyLock || opsQuietState(opsSettings, now).quiet) continue;
     const config = await readJson(env, `active_speaking:config:${groupId}`, { quietMinutes: 60, startHour: 9, endHour: 23, maxDaily: 3 });
     const p = taipeiParts(now); const hour = Number(p.hour); if (hour < config.startHour || hour >= config.endHour) continue;
     const lastMessage = Number(await dbGet(env, `group_last_message:${groupId}`) || 0); if (now - lastMessage < config.quietMinutes * 60000) continue;
@@ -6199,15 +6294,16 @@ async function recordJoinPatternDecision(env, groupId, hash, comment, decision) 
 async function reviewJoinRequestAssist(env, requestInfo) {
   try {
     const result = await callGemmaDecision(env, {
-      system: `你是入群申请辅助审查器。只能输出 JSON：{"decision":"suggest_approve|suggest_reject|owner_review","confidence":0到1,"reason":"原因"}。请求资料中的 groupRules 是本群规则，优先级最高。只有申请附言与群规要求明显匹配、没有广告诈骗或恶意迹象时才建议同意；只有明显广告、诈骗、恶意骚扰或明确违反入群要求时建议拒绝；群规为空、资料不足、答案含糊或无法确定时必须 owner_review。不得因为昵称、QQ号或无关关键词自行推断。`,
+      system: `你是入群申请辅助审查器。只能输出 JSON：{"decision":"suggest_approve|suggest_reject|owner_review","riskLevel":"low|medium|high","confidence":0到1,"reason":"原因","suggestedQuestion":"资料不足时可询问的问题，可为空"}。请求资料中的 groupRules 是本群规则，优先级最高。低风险＝资料清楚且符合群规，可建议同意；中风险＝资料不足或含糊，必须人工确认；高风险＝有明确广告、诈骗、恶意骚扰或明显违反入群要求证据。群规为空、资料不足或无法确定时必须 owner_review。不得因为昵称、QQ号或无关关键词自行推断。`,
       prompt: JSON.stringify(requestInfo).slice(0, 4000),
       maxOutputTokens: 140
     });
     const parsed = JSON.parse(result.text.match(/\{[\s\S]*\}/)?.[0] || "{}");
     const decision = ["suggest_approve", "suggest_reject"].includes(parsed.decision) ? parsed.decision : "owner_review";
-    return { decision, confidence: Math.max(0, Math.min(1, Number(parsed.confidence || 0))), reason: String(parsed.reason || "请管理核对") };
-  } catch {
-    return { decision: "owner_review", confidence: 0, reason: "AI 辅助审查暂时不可用" };
+    const riskLevel = ["low", "medium", "high"].includes(parsed.riskLevel) ? parsed.riskLevel : decision === "suggest_approve" ? "low" : decision === "suggest_reject" ? "high" : "medium";
+    return { decision, riskLevel, confidence: Math.max(0, Math.min(1, Number(parsed.confidence || 0))), reason: String(parsed.reason || "请管理核对"), suggestedQuestion: String(parsed.suggestedQuestion || "").slice(0, 500) };
+  } catch (error) {
+    return { decision: "owner_review", riskLevel: "medium", confidence: 0, reason: "AI 辅助审查暂时不可用", error: String(error?.message || error) };
   }
 }
 
@@ -6220,8 +6316,10 @@ async function createJoinRequestAssist(env, body) {
   const threshold = Math.max(1, parseUnlimitedNonNegativeInteger(await dbGet(env, `join_pattern_auto_approve_threshold:${groupId}`), DEFAULTS.joinPatternAutoApproveThreshold));
   const aiApproveEnabled = await dbGet(env, `join_ai_approve_enabled:${groupId}`) !== "false";
   const groupRules = String(await dbGet(env, `group_rules:${groupId}`) || "").trim();
+  const joinFuse = await opsFuseAllows(env, groupId, "join_review");
+  const automationAllowed = joinFuse.allowed;
 
-  if (aiApproveEnabled && Number(pattern.approvedCount || 0) >= threshold && Number(pattern.rejectedCount || 0) === 0) {
+  if (automationAllowed && aiApproveEnabled && Number(pattern.approvedCount || 0) >= threshold && Number(pattern.rejectedCount || 0) === 0) {
     try {
       await callOneBotAction(env, { action: "set_group_add_request", params: { flag: String(body.flag || ""), sub_type: subType, approve: true, reason: "" } }, 15000);
       const id = `jr_${Date.now().toString(36)}_${crypto.randomUUID().slice(0, 6)}`;
@@ -6241,7 +6339,8 @@ async function createJoinRequestAssist(env, body) {
     groupRules: groupRules.slice(0, 5000),
     previousPattern: { approvedCount: Number(pattern.approvedCount || 0), rejectedCount: Number(pattern.rejectedCount || 0) }
   });
-  if (aiApproveEnabled && review.decision === "suggest_approve" && Number(review.confidence || 0) >= DEFAULTS.joinAiApproveConfidence) {
+  await opsRecordAutomationResult(env, groupId, "join_review", !review.error, review.error || "").catch(() => {});
+  if (automationAllowed && aiApproveEnabled && review.decision === "suggest_approve" && Number(review.confidence || 0) >= DEFAULTS.joinAiApproveConfidence) {
     const id = `jr_${Date.now().toString(36)}_${crypto.randomUUID().slice(0, 6)}`;
     const item = { id, groupId, userId: String(body.user_id || ""), flag: String(body.flag || ""), subType, comment, patternHash, review, status: "approved_ai", createdAt: Date.now() };
     try {
@@ -6259,7 +6358,7 @@ async function createJoinRequestAssist(env, body) {
     }
   }
   const rejectAuthorized = await dbGet(env, `join_reject_authorized:${groupId}`) === "true";
-  if (review.decision === "suggest_reject" && rejectAuthorized && review.confidence >= 0.92) {
+  if (automationAllowed && review.decision === "suggest_reject" && rejectAuthorized && review.confidence >= 0.92) {
     const id = `jr_${Date.now().toString(36)}_${crypto.randomUUID().slice(0, 6)}`;
     const item = { id, groupId, userId: String(body.user_id || ""), flag: String(body.flag || ""), subType, comment, patternHash, review, status: "rejected_ai", createdAt: Date.now() };
     try {
@@ -6930,9 +7029,22 @@ async function inspectMessageAgainstGroupRules(env, { groupId, userId, senderNam
   if (!botCanRunRuleMonitor(botRuleState)) return;
   // 缺省即开启；只有显式写入 false 才关闭。
   if (await dbGet(env, `rule_monitor_enabled:${groupId}`) === "false") return;
-  const rules = String(await dbGet(env, `group_rules:${groupId}`) || "").trim();
+  const fuse = await opsFuseAllows(env, groupId, "rule_monitor");
+  if (!fuse.allowed) return;
+  const runtimeSettings = await opsGetSettings(env, groupId);
+  if (runtimeSettings.maintenanceMode || runtimeSettings.emergencyLock) return;
   const content = String(text || "").trim();
-  if (!rules || !content) return;
+  if (!content) return;
+  const activeRuleRecords = await opsActiveRuleRecords(env, groupId);
+  const matchedException = opsRuleExceptionMatch(content, activeRuleRecords.exceptions);
+  if (matchedException) {
+    await writeSystemAudit(env, { type: "ops_rule_exception", groupId, actorId: userId, action: "skip", ruleId: matchedException.id, messageId, reason: matchedException.title || matchedException.description || "" });
+    return;
+  }
+  const baseRules = String(await dbGet(env, `group_rules:${groupId}`) || "").trim();
+  const temporaryRules = activeRuleRecords.tempRules.map((item, index) => `${index + 1}. [临时规则 P${Number(item.priority || 0)}] ${item.title || ""}：${item.description || ""}`).join("\n");
+  const rules = [baseRules, temporaryRules].filter(Boolean).join("\n\n").trim();
+  if (!rules) return;
 
   // 刷屏门槛按群设置；确定性计数只是提供上下文，不强行覆盖群规模型判断。
   const now = Date.now();
@@ -6987,20 +7099,27 @@ async function inspectMessageAgainstGroupRules(env, { groupId, userId, senderNam
 10. 刷屏标准以本群群规和本群配置为准；当前确定性配置为 ${spamWindowSeconds} 秒内同内容 ${spamThreshold} 条，处罚撤回时保留最早 ${spamKeepCount} 条。
 11. repeatedMessageBurst 只是确定性参考。即使它为 false，也可以根据最近聊天语境识别变体刷屏；但必须说明实际的多条消息证据，不能把单条消息内重复字符谎称为多次发送。
 12. 不确定必须输出 violation=false。action 只是建议，系统会按授权范围决定是否执行。`,
-      prompt: JSON.stringify({ currentMessage: content, userId, senderName, recentContext, recentUserMessageBurst: burstRows, repeatedMessageBurst, trailingSameCount, spamWindowSeconds, spamThreshold, spamKeepCount, strictness: strictness.level, categoryPolicies: categoryPolicies.map(item => ({ name: item.name, punishment: item.punishment, note: String(item.note || "").slice(0, 400) })), progressivePolicy, humanFeedbackExamples, rules: rules.slice(0, 5000), urlInspections }).slice(0, 14000),
+      prompt: JSON.stringify({ currentMessage: content, userId, senderName, recentContext, recentUserMessageBurst: burstRows, repeatedMessageBurst, trailingSameCount, spamWindowSeconds, spamThreshold, spamKeepCount, strictness: strictness.level, categoryPolicies: categoryPolicies.map(item => ({ name: item.name, punishment: item.punishment, note: String(item.note || "").slice(0, 400) })), progressivePolicy, humanFeedbackExamples, rules: rules.slice(0, 7000), activeTemporaryRules: activeRuleRecords.tempRules.map(item => ({ id: item.id, title: item.title, description: item.description, priority: item.priority, expiresAt: item.expiresAt || 0 })), rulePriorities: activeRuleRecords.priorities.map(item => ({ id: item.id, title: item.title, description: item.description, priority: item.priority })), urlInspections }).slice(0, 16000),
       maxOutputTokens: 320
     });
     review = JSON.parse(result.text.match(/\{[\s\S]*\}/)?.[0] || "{}");
   } catch (error) {
     console.warn("群规监控判定失败", error);
+    await opsRecordAutomationResult(env, groupId, "rule_monitor", false, error?.message || error).catch(() => {});
     return;
   }
+  await opsRecordAutomationResult(env, groupId, "rule_monitor", true).catch(() => {});
 
   const reviewText = `${review?.violationType || ""} ${review?.rule || ""} ${review?.reason || ""}`;
   const allLinksInternal = urlInspections.length > 0 && urlInspections.every(item => item.trustedInternal);
   if (allLinksInternal && /拉人|宣群|宣传|推广|引流/i.test(reviewText) && !explicitPromotionLanguage(content)) return;
   if (review?.testContext === true && !/(明确威胁|现实伤害|泄露隐私|诈骗|恶意刷屏)/i.test(reviewText)) return;
-  if (review?.violation !== true || Number(review.confidence || 0) < strictness.minConfidence) return;
+  if (review?.violation !== true || Number(review.confidence || 0) < strictness.minConfidence) {
+    if (runtimeSettings.ruleSampleReviewPercent > 0 && Math.random() * 100 < runtimeSettings.ruleSampleReviewPercent) {
+      await opsSaveRecord(env, { type: "test_case", groupId, actorId: "system:rule_sample", actorName: "system", data: { title: "无违规判断抽样复核", description: content.slice(0, 4000), status: "pending_review", messageId: String(messageId || ""), userId: String(userId || ""), modelReview: review, recentContext: recentContext.slice(0, 5000) } }).catch(() => {});
+    }
+    return;
+  }
 
   const matchedPolicy = matchRuleCategoryPolicy(review.violationType || review.rule || "其他", categoryPolicies);
   const item = await appendRuleViolationRecord(env, {
@@ -7018,8 +7137,16 @@ async function inspectMessageAgainstGroupRules(env, { groupId, userId, senderNam
     severity: normalizeRuleSeverity(review.severity || "moderate"),
     intentional: review.intentional !== false,
     policyAction: matchedPolicy.punishment,
-    policyNote: matchedPolicy.note
+    policyNote: matchedPolicy.note,
+    matchedRuleSource: activeRuleRecords.tempRules.some(item => reviewText.includes(String(item.title || ""))) ? "temporary_rule" : "base_group_rules",
+    activeTemporaryRuleIds: activeRuleRecords.tempRules.map(item => item.id),
+    rulePriorityIds: activeRuleRecords.priorities.map(item => item.id)
   });
+  if (runtimeSettings.testMode) {
+    await updateRuleViolationRecord(env, item, { actionTaken: "test_mode", actionResult: "测试群模式：只记录模拟结果，没有执行处罚。" });
+    await writeSystemAudit(env, { type: "ops_test_mode", groupId, actorId: "system", targetId: userId, action: "rule_simulated", violationId: item.id });
+    return;
+  }
   await performRuleProxyAction(env, item, review);
 }
 
@@ -8458,6 +8585,1885 @@ async function enqueuePlatformJob(env,data){const id=`job_${Date.now().toString(
 async function listPlatformJobs(env,{groupId='',status='',limit=200}={}){const ids=await readJson(env,'platform:job:index',[]),rows=[];for(const id of ids.slice(-Math.max(1,Math.min(1000,Number(limit||200)))).reverse()){const x=await readJson(env,`platform:job:${id}`,null);if(!x)continue;if(groupId&&String(x.groupId||'')!==String(groupId))continue;if(status&&x.status!==status)continue;rows.push(x)}return rows}
 async function processPlatformJobs(env,now=Date.now()){const jobs=await listPlatformJobs(env,{status:'queued',limit:100});for(const job of jobs.reverse()){if(Number(job.nextRunAt||0)>now)continue;job.status='running';job.attempts=Number(job.attempts||0)+1;try{if(job.type==='notification'&&job.groupId&&job.message)await callOneBotAction(env,{action:'send_group_msg',params:{group_id:numericId(job.groupId),message:String(job.message),auto_escape:false}},15000);else await writeSystemAudit(env,{type:'platform_job',groupId:String(job.groupId||''),actorId:String(job.actorId||'system'),action:String(job.action||job.id)});job.status='completed';job.completedAt=Date.now()}catch(e){job.error=String(e?.message||e);if(job.attempts<job.maxAttempts){job.status='queued';job.nextRunAt=Date.now()+Math.min(3600000,2**job.attempts*30000)}else{job.status='dead_letter';await appendIndex(env,'platform:dead_letter:index',job.id,2000)}}await dbPut(env,`platform:job:${job.id}`,JSON.stringify(job))}}
 
+
+// -----------------------------------------------------------------------------
+// v1.3.0 Operations Suite：权限化活动、投票、草稿、知识、维护与诊断中心
+// -----------------------------------------------------------------------------
+
+const OPS_CAPABILITIES = Object.freeze([
+  { id: "operations.view", name: "查看营运中心", minRole: "member" },
+  { id: "activity.view", name: "查看活动", minRole: "member" },
+  { id: "activity.join", name: "报名／取消报名", minRole: "member" },
+  { id: "activity.manage", name: "建立与管理活动", minRole: "admin" },
+  { id: "activity.cross_group", name: "跨独立群统整活动", minRole: "owner" },
+  { id: "activity.invite", name: "发送活动群邀请／批准待处理申请", minRole: "owner" },
+  { id: "poll.view", name: "查看投票", minRole: "member" },
+  { id: "poll.vote", name: "参与投票", minRole: "member" },
+  { id: "poll.manage", name: "建立与管理投票", minRole: "admin" },
+  { id: "draft.manage", name: "管理消息草稿与发送预览", minRole: "admin" },
+  { id: "draft.send", name: "发送草稿／转为排程", minRole: "admin" },
+  { id: "schedule.view", name: "查看排程预览与冲突", minRole: "member" },
+  { id: "schedule.manage", name: "建立、编辑、补发与取消排程", minRole: "admin" },
+  { id: "schedule.template.manage", name: "管理与套用排程模板", minRole: "admin" },
+  { id: "task.view", name: "查看统一任务中心", minRole: "admin" },
+  { id: "task.manage", name: "取消、重试与恢复任务", minRole: "admin" },
+  { id: "todo.manage", name: "管理群待办与值班", minRole: "admin" },
+  { id: "knowledge.view", name: "查看 FAQ／知识卡片", minRole: "member" },
+  { id: "knowledge.manage", name: "管理 FAQ／知识卡片／AI 修正版", minRole: "admin" },
+  { id: "quality.report", name: "回报 AI 回复品质问题", minRole: "member" },
+  { id: "quality.manage", name: "查看与处理 AI 品质回报", minRole: "admin" },
+  { id: "model.analytics.view", name: "查看模型健康、用量与成本估算", minRole: "admin" },
+  { id: "rules.manage", name: "管理群规版本、临时规则与例外", minRole: "admin" },
+  { id: "rules.sandbox", name: "使用群规测试沙盒", minRole: "admin" },
+  { id: "appeal.manage", name: "管理申诉对话串", minRole: "admin" },
+  { id: "join.risk.manage", name: "管理入群风险分级与问答模板", minRole: "admin" },
+  { id: "member.summary.view", name: "查看成员处理历史摘要", minRole: "admin" },
+  { id: "announcement.manage", name: "管理公告版本", minRole: "admin" },
+  { id: "announcement.publish", name: "发布公告与群待办", minRole: "owner" },
+  { id: "diagnostics.view", name: "查看任务、时间线、健康与统计", minRole: "admin" },
+  { id: "diagnostics.manage", name: "重试任务与清理残留提示", minRole: "admin" },
+  { id: "quiet_hours.manage", name: "管理安静时段", minRole: "admin" },
+  { id: "retention.manage", name: "管理资料保留期限", minRole: "owner" },
+  { id: "automation.fuse.manage", name: "管理自动化保险丝", minRole: "owner" },
+  { id: "maintenance.manage", name: "管理维护模式与紧急锁定", minRole: "owner" },
+  { id: "permissions.manage", name: "管理细分功能权限与临时授权", minRole: "owner" },
+  { id: "handoff.manage", name: "管理 Portal／QQ 管理交接", minRole: "owner" },
+  { id: "settings.export_import", name: "汇出、汇入与复制群设置", minRole: "owner" },
+  { id: "deployment.manage", name: "部署前检查与版本快照", minRole: "developer" },
+  { id: "suggestion.create", name: "提交建议箱内容", minRole: "member" },
+  { id: "suggestion.manage", name: "查看与处理匿名建议", minRole: "admin" },
+  { id: "bug.create", name: "提交问题追踪", minRole: "member" },
+  { id: "bug.manage", name: "查看与处理问题追踪", minRole: "admin" }
+]);
+
+const OPS_RECORD_TYPES = Object.freeze({
+  schedule_template: { name: "排程模板", capability: "schedule.template.manage", visibility: "manager" },
+  draft: { name: "消息草稿", capability: "draft.manage", visibility: "manager" },
+  poll: { name: "群内投票", capability: "poll.manage", visibility: "group" },
+  activity: { name: "活动报名", capability: "activity.manage", visibility: "group" },
+  todo: { name: "群待办", capability: "todo.manage", visibility: "manager" },
+  duty: { name: "管理员值班表", capability: "todo.manage", visibility: "manager" },
+  faq: { name: "群内 FAQ", capability: "knowledge.manage", visibility: "group" },
+  knowledge: { name: "知识卡片", capability: "knowledge.manage", visibility: "group" },
+  correction: { name: "AI 回答修正版", capability: "knowledge.manage", visibility: "manager" },
+  quality_feedback: { name: "AI 回复品质回报", capability: "quality.report", visibility: "self" },
+  rule_version: { name: "群规版本", capability: "rules.manage", visibility: "manager" },
+  temp_rule: { name: "临时群规", capability: "rules.manage", visibility: "group" },
+  exception_rule: { name: "群规例外", capability: "rules.manage", visibility: "manager" },
+  announcement_version: { name: "公告版本", capability: "announcement.manage", visibility: "manager" },
+  appeal_thread: { name: "申诉对话串", capability: "appeal.manage", visibility: "manager" },
+  handoff: { name: "管理交接", capability: "handoff.manage", visibility: "owner" },
+  suggestion: { name: "匿名建议箱", capability: "suggestion.create", visibility: "self" },
+  bug: { name: "问题追踪", capability: "bug.create", visibility: "self" },
+  welcome_template: { name: "欢迎模板", capability: "knowledge.manage", visibility: "manager" },
+  join_template: { name: "入群问答模板", capability: "join.risk.manage", visibility: "manager" },
+  test_case: { name: "测试案例", capability: "rules.sandbox", visibility: "manager" },
+  deployment_snapshot: { name: "版本快照", capability: "deployment.manage", visibility: "developer" },
+  operation_batch: { name: "批次操作模拟", capability: "diagnostics.manage", visibility: "manager" }
+});
+
+function opsRoleRank(role) {
+  return ({ member: 0, admin: 1, owner: 2, developer: 3 })[String(role || "member")] ?? 0;
+}
+function opsCapabilityDef(id) {
+  return OPS_CAPABILITIES.find(item => item.id === String(id || "")) || null;
+}
+function opsTypeDef(type) {
+  return OPS_RECORD_TYPES[String(type || "")] || null;
+}
+function opsSafeId(value) {
+  return String(value || "").replace(/[^a-zA-Z0-9:_-]/g, "").slice(0, 160);
+}
+function opsIndexKey(type) {
+  return `ops:index:${opsSafeId(type)}`;
+}
+function opsRecordKey(type, id) {
+  return `ops:record:${opsSafeId(type)}:${opsSafeId(id)}`;
+}
+function opsVersionKey(type, id) {
+  return `ops:versions:${opsSafeId(type)}:${opsSafeId(id)}`;
+}
+function opsPermissionKey(groupId, qq, capability) {
+  return `ops:permission:${String(groupId || "")}:${String(qq || "")}:${String(capability || "")}`;
+}
+function opsSettingsKey(groupId) {
+  return `ops:settings:${String(groupId || "")}`;
+}
+function opsParticipantsKey(activityId) {
+  return `ops:activity:participants:${opsSafeId(activityId)}`;
+}
+function opsPollVotesKey(pollId) {
+  return `ops:poll:votes:${opsSafeId(pollId)}`;
+}
+
+async function opsGetSettings(env, groupId) {
+  const stored = await readJson(env, opsSettingsKey(groupId), {});
+  return {
+    quietHoursEnabled: Boolean(stored.quietHoursEnabled),
+    quietStart: String(stored.quietStart || DEFAULTS.operationsQuietStart),
+    quietEnd: String(stored.quietEnd || DEFAULTS.operationsQuietEnd),
+    quietPolicy: ["defer", "skip", "admin_only", "send"].includes(stored.quietPolicy) ? stored.quietPolicy : "defer",
+    retentionDays: Math.max(1, Math.min(3650, Number(stored.retentionDays || DEFAULTS.operationsRetentionDays))),
+    maintenanceMode: Boolean(stored.maintenanceMode),
+    maintenanceUntil: Number(stored.maintenanceUntil || 0),
+    emergencyLock: Boolean(stored.emergencyLock),
+    testMode: Boolean(stored.testMode),
+    fuseEnabled: stored.fuseEnabled !== false,
+    fuseFailureThreshold: Math.max(2, Math.min(50, Number(stored.fuseFailureThreshold || DEFAULTS.operationsFuseFailureThreshold))),
+    dailyDigestEnabled: Boolean(stored.dailyDigestEnabled),
+    dailyDigestTime: String(stored.dailyDigestTime || "09:00"),
+    dailyDigestRecipientIds: [...new Set((Array.isArray(stored.dailyDigestRecipientIds) ? stored.dailyDigestRecipientIds : []).map(value => String(value || "").replace(/\D/g, "")).filter(Boolean))].slice(0, 30),
+    scheduleRetryEnabled: stored.scheduleRetryEnabled !== false,
+    scheduleRetryMax: Math.max(0, Math.min(10, Number(stored.scheduleRetryMax ?? 3))),
+    scheduleRetryGraceMinutes: Math.max(1, Math.min(1440, Number(stored.scheduleRetryGraceMinutes ?? 30))),
+    anomalyDetectionEnabled: stored.anomalyDetectionEnabled !== false,
+    ruleSampleReviewPercent: Math.max(0, Math.min(100, Number(stored.ruleSampleReviewPercent || 0))),
+    suggestionDeveloperCanResolveIdentity: stored.suggestionDeveloperCanResolveIdentity !== false,
+    operationQuota: {
+      recallPerMinute: Math.max(1, Math.min(500, Number(stored?.operationQuota?.recallPerMinute || 20))),
+      kickPerHour: Math.max(1, Math.min(100, Number(stored?.operationQuota?.kickPerHour || 5))),
+      batchMuteMax: Math.max(1, Math.min(100, Number(stored?.operationQuota?.batchMuteMax || 10))),
+      announcementPerHour: Math.max(1, Math.min(200, Number(stored?.operationQuota?.announcementPerHour || 20))),
+      activityInvitePerHour: Math.max(1, Math.min(1000, Number(stored?.operationQuota?.activityInvitePerHour || 100))),
+      activityInviteBatchMax: Math.max(1, Math.min(100, Number(stored?.operationQuota?.activityInviteBatchMax || 25)))
+    }
+  };
+}
+
+async function opsSaveSettings(env, groupId, patch) {
+  const current = await opsGetSettings(env, groupId);
+  const next = {
+    ...current,
+    ...patch,
+    operationQuota: { ...current.operationQuota, ...(patch?.operationQuota || {}) },
+    updatedAt: Date.now()
+  };
+  await dbPut(env, opsSettingsKey(groupId), JSON.stringify(next));
+  return next;
+}
+
+function opsMinutesOfDay(text) {
+  const match = String(text || "").match(/^(\d{1,2}):(\d{2})$/);
+  if (!match) return 0;
+  return Math.max(0, Math.min(1439, Number(match[1]) * 60 + Number(match[2])));
+}
+function opsQuietState(settings, now = Date.now()) {
+  if (!settings?.quietHoursEnabled) return { quiet: false, resumeAt: 0 };
+  const p = taipeiParts(now);
+  const minute = Number(p.hour) * 60 + Number(p.minute);
+  const start = opsMinutesOfDay(settings.quietStart);
+  const end = opsMinutesOfDay(settings.quietEnd);
+  const quiet = start === end ? true : start < end ? minute >= start && minute < end : minute >= start || minute < end;
+  if (!quiet) return { quiet: false, resumeAt: 0 };
+  let delta = end - minute;
+  if (delta <= 0) delta += 1440;
+  return { quiet: true, resumeAt: now + delta * 60000 };
+}
+
+async function opsEffectiveCapability(env, { groupId, qq, role, capability }) {
+  const def = opsCapabilityDef(capability);
+  if (!def) return { allowed: false, reason: "未知权限" };
+  if (isDeveloperId(env, qq) || role === "developer") return { allowed: true, source: "developer" };
+  const override = await readJson(env, opsPermissionKey(groupId, qq, capability), null);
+  if (override && Number(override.expiresAt || 0) > 0 && Date.now() > Number(override.expiresAt)) {
+    await dbDel(env, opsPermissionKey(groupId, qq, capability));
+  } else if (override && typeof override.allowed === "boolean") {
+    return { allowed: override.allowed, source: "override", expiresAt: Number(override.expiresAt || 0), reason: override.reason || "" };
+  }
+  return {
+    allowed: opsRoleRank(role) >= opsRoleRank(def.minRole),
+    source: "role",
+    requiredRole: def.minRole
+  };
+}
+
+async function opsRequire(env, authed, capability, groupId = authed.groupId) {
+  const role = String(groupId) === String(authed.groupId)
+    ? authed.role
+    : await resolvePortalRole(env, authed.qq, groupId);
+  const decision = await opsEffectiveCapability(env, { groupId, qq: authed.qq, role, capability });
+  if (!decision.allowed) {
+    return { ok: false, response: jsonResponse({ ok: false, message: `权限不足：需要「${opsCapabilityDef(capability)?.name || capability}」。`, capability, decision }, 403) };
+  }
+  return { ok: true, role, decision };
+}
+
+async function opsListRecords(env, type, { groupId = "", qq = "", role = "member", limit = 300 } = {}) {
+  const def = opsTypeDef(type);
+  if (!def) return [];
+  const ids = await readJson(env, opsIndexKey(type), []);
+  const result = [];
+  for (const id of ids.slice(-Math.max(1, Math.min(2000, Number(limit || 300)))).reverse()) {
+    const item = await readJson(env, opsRecordKey(type, id), null);
+    if (!item || item.deletedAt) continue;
+    const groups = Array.isArray(item.groupIds) ? item.groupIds.map(String) : [String(item.groupId || "")];
+    if (groupId && !groups.includes(String(groupId))) continue;
+    if (def.visibility === "self" && String(item.creatorId || "") !== String(qq) && opsRoleRank(role) < opsRoleRank("admin")) continue;
+    if (def.visibility === "owner" && opsRoleRank(role) < opsRoleRank("owner")) continue;
+    if (def.visibility === "developer" && role !== "developer") continue;
+    result.push(item);
+  }
+  return result;
+}
+
+async function opsSaveRecord(env, { type, existing = null, groupId, actorId, actorName = "", data = {} }) {
+  const def = opsTypeDef(type);
+  if (!def) throw new Error("不支持的记录类型");
+  const now = Date.now();
+  const id = existing?.id || `${type}_${now.toString(36)}_${crypto.randomUUID().slice(0, 8)}`;
+  const previous = existing ? JSON.parse(JSON.stringify(existing)) : null;
+  const groupIds = [...new Set((Array.isArray(data.groupIds) ? data.groupIds : [data.groupId || groupId]).map(value => String(value || "").replace(/\D/g, "")).filter(Boolean))].slice(0, 30);
+  const item = {
+    ...(existing || {}),
+    ...data,
+    id,
+    type,
+    groupId: String(data.groupId || existing?.groupId || groupId || groupIds[0] || ""),
+    groupIds: groupIds.length ? groupIds : [String(groupId || "")],
+    title: String(data.title ?? existing?.title ?? def.name).trim().slice(0, 200),
+    description: String(data.description ?? existing?.description ?? "").trim().slice(0, 8000),
+    status: String(data.status ?? existing?.status ?? "active").slice(0, 40),
+    creatorId: existing?.creatorId || String(actorId || ""),
+    creatorName: existing?.creatorName || String(actorName || actorId || ""),
+    createdAt: existing?.createdAt || now,
+    updatedAt: now,
+    updatedBy: String(actorId || "")
+  };
+  if (type === "poll") {
+    item.options = (Array.isArray(data.options) ? data.options : existing?.options || []).map(value => String(value).trim()).filter(Boolean).slice(0, 20);
+    item.multiple = Boolean(data.multiple ?? existing?.multiple);
+    item.anonymous = Boolean(data.anonymous ?? existing?.anonymous);
+    item.allowChange = data.allowChange !== false;
+    item.deadline = Number(data.deadline || existing?.deadline || 0);
+  }
+  if (type === "activity") {
+    item.capacity = Math.max(0, Math.min(100000, Number(data.capacity ?? existing?.capacity ?? 0)));
+    item.waitlistEnabled = data.waitlistEnabled !== false;
+    item.signupDeadline = Number(data.signupDeadline || existing?.signupDeadline || 0);
+    item.startAt = Number(data.startAt || existing?.startAt || 0);
+    item.activityGroupId = String(data.activityGroupId || existing?.activityGroupId || "").replace(/\D/g, "");
+    item.inviteMode = ["none", "private_card", "approve_pending"].includes(data.inviteMode) ? data.inviteMode : String(existing?.inviteMode || "none");
+    item.autoInviteConfirmed = Boolean(data.autoInviteConfirmed ?? existing?.autoInviteConfirmed);
+  }
+  if (type === "schedule_template") {
+    item.scheduleSpec = String(data.scheduleSpec || existing?.scheduleSpec || data.description || "").trim().slice(0, 8000);
+    item.defaultGroupId = String(data.defaultGroupId || existing?.defaultGroupId || item.groupId || "").replace(/\D/g, "");
+  }
+  if (type === "draft") {
+    item.text = String(data.text ?? existing?.text ?? data.description ?? "").slice(0, 12000);
+    item.targetGroupId = String(data.targetGroupId || existing?.targetGroupId || item.groupId || "").replace(/\D/g, "");
+    item.mentionIds = [...new Set((Array.isArray(data.mentionIds) ? data.mentionIds : existing?.mentionIds || []).map(value => String(value || "")).filter(value => value === "all" || /^\d{5,}$/.test(value)))].slice(0, 50);
+    item.replyId = String(data.replyId || existing?.replyId || "").slice(0, 100);
+    item.attachments = (Array.isArray(data.attachments) ? data.attachments : existing?.attachments || []).slice(0, 10);
+  }
+  if (["temp_rule", "exception_rule", "rule_version"].includes(type)) {
+    item.priority = Math.max(-1000, Math.min(1000, Number(data.priority ?? existing?.priority ?? 0)));
+    item.startsAt = Number(data.startsAt || existing?.startsAt || 0);
+    item.expiresAt = Number(data.expiresAt || existing?.expiresAt || 0);
+    item.pattern = String(data.pattern ?? existing?.pattern ?? "").slice(0, 1000);
+    item.regex = Boolean(data.regex ?? existing?.regex);
+    item.caseSensitive = Boolean(data.caseSensitive ?? existing?.caseSensitive);
+  }
+  if (["todo", "duty"].includes(type)) {
+    item.assigneeId = String(data.assigneeId || existing?.assigneeId || "").replace(/\D/g, "");
+    item.dueAt = Number(data.dueAt || existing?.dueAt || 0);
+    item.priority = ["low", "normal", "high", "urgent"].includes(data.priority) ? data.priority : String(existing?.priority || "normal");
+  }
+  if (type === "appeal_thread") {
+    item.violationId = String(data.violationId || existing?.violationId || "").slice(0, 160);
+    item.messages = (Array.isArray(data.messages) ? data.messages : existing?.messages || []).slice(-200);
+  }
+  if (["suggestion", "bug", "quality_feedback"].includes(type)) {
+    item.publicCode = existing?.publicCode || `${type === "bug" ? "BUG" : type === "suggestion" ? "SUG" : "QF"}-${opsTaipeiDateKey(now).replace(/-/g, "")}-${String(id).slice(-6).toUpperCase()}`;
+  }
+  await dbPut(env, opsRecordKey(type, id), JSON.stringify(item));
+  if (!existing) await appendIndex(env, opsIndexKey(type), id, 5000);
+  if (previous) {
+    const versions = await readJson(env, opsVersionKey(type, id), []);
+    versions.push({ at: now, actorId: String(actorId || ""), snapshot: previous });
+    await dbPut(env, opsVersionKey(type, id), JSON.stringify(versions.slice(-50)));
+  }
+  await writeSystemAudit(env, { type: `ops_${type}`, groupId: item.groupId, actorId: String(actorId || ""), action: existing ? "update" : "create", recordId: id, title: item.title });
+  return item;
+}
+
+async function opsDeleteRecord(env, type, id, actorId) {
+  const item = await readJson(env, opsRecordKey(type, id), null);
+  if (!item) return false;
+  item.deletedAt = Date.now();
+  item.deletedBy = String(actorId || "");
+  item.status = "deleted";
+  await dbPut(env, opsRecordKey(type, id), JSON.stringify(item));
+  await writeSystemAudit(env, { type: `ops_${type}`, groupId: item.groupId, actorId: String(actorId || ""), action: "delete", recordId: id });
+  return true;
+}
+
+async function opsGetGroupMember(env, groupId, userId) {
+  try {
+    const row = await callOneBotAction(env, { action: "get_group_member_info", params: { group_id: numericId(groupId), user_id: numericId(userId), no_cache: false } }, 10000);
+    return row && (row.user_id || row.qq) ? row : null;
+  } catch {
+    const rows = await readJson(env, `group_members:${groupId}`, []);
+    return rows.find(item => String(item.user_id || item.qq || "") === String(userId)) || null;
+  }
+}
+
+async function opsActivityParticipants(env, activityId) {
+  return await readJson(env, opsParticipantsKey(activityId), []);
+}
+
+async function opsPromoteActivityWaitlist(env, activity) {
+  const rows = await opsActivityParticipants(env, activity.id);
+  const active = rows.filter(item => item.status === "confirmed");
+  const wait = rows.filter(item => item.status === "waitlist").sort((a, b) => Number(a.joinedAt) - Number(b.joinedAt));
+  const capacity = Number(activity.capacity || 0);
+  let slots = capacity > 0 ? Math.max(0, capacity - active.length) : wait.length;
+  const promoted = [];
+  for (const item of wait) {
+    if (slots <= 0) break;
+    item.status = "confirmed";
+    item.promotedAt = Date.now();
+    promoted.push(item);
+    slots -= 1;
+    try {
+      await sendPortalVerificationMessage(env, item.userId, `你报名的活动「${activity.title}」已有名额，已从候补转为正式报名。`);
+    } catch {}
+  }
+
+  // 候补转正后沿用活动建立者当前的目标群邀请权限；权限或配额不足时只保留报名，不越权邀请。
+  const targetGroupId = String(activity.activityGroupId || "").replace(/\D/g, "");
+  if (promoted.length && activity.autoInviteConfirmed && targetGroupId) {
+    const creatorId = String(activity.creatorId || "");
+    const creatorRole = await resolvePortalRole(env, creatorId, targetGroupId);
+    const permission = await opsEffectiveCapability(env, {
+      groupId: targetGroupId, qq: creatorId, role: creatorRole, capability: "activity.invite"
+    });
+    for (const item of promoted) {
+      if (!permission.allowed) {
+        item.inviteStatus = "permission_unavailable";
+        item.inviteUpdatedAt = Date.now();
+        continue;
+      }
+      const quota = await opsConsumeQuota(env, targetGroupId, creatorId, "activityInvite", 1);
+      if (!quota.ok) {
+        item.inviteStatus = "quota_deferred";
+        item.inviteError = String(quota.message || "活动群邀请配额不足").slice(0, 500);
+        item.inviteUpdatedAt = Date.now();
+        continue;
+      }
+      await opsInviteActivityParticipant(env, activity, item, creatorId);
+    }
+  }
+
+  await dbPut(env, opsParticipantsKey(activity.id), JSON.stringify(rows.slice(-10000)));
+  await writeSystemAudit(env, {
+    type: "ops_activity_waitlist_promoted",
+    groupId: String(activity.groupId || promoted[0]?.sourceGroupId || ""),
+    actorId: String(activity.creatorId || ""),
+    action: "promote",
+    activityId: String(activity.id || ""),
+    promotedCount: promoted.length,
+    autoInviteAttempted: Boolean(promoted.length && activity.autoInviteConfirmed && targetGroupId)
+  }).catch(() => {});
+  return rows;
+}
+
+async function opsJoinActivity(env, activity, { userId, userName, sourceGroupId }) {
+  if (!activity || activity.status !== "active") return { ok: false, message: "活动目前不可报名。" };
+  if (activity.signupDeadline && Date.now() > Number(activity.signupDeadline)) return { ok: false, message: "报名已经截止。" };
+  const allowedGroups = Array.isArray(activity.groupIds) ? activity.groupIds.map(String) : [String(activity.groupId || "")];
+  if (!allowedGroups.includes(String(sourceGroupId))) return { ok: false, message: "当前群不在此活动的报名范围。" };
+  const rows = await opsActivityParticipants(env, activity.id);
+  const existing = rows.find(item => String(item.userId) === String(userId));
+  if (existing && ["confirmed", "waitlist"].includes(existing.status)) return { ok: false, message: `你已经${existing.status === "confirmed" ? "报名" : "在候补名单中"}。`, participant: existing };
+  const confirmedCount = rows.filter(item => item.status === "confirmed").length;
+  const capacity = Number(activity.capacity || 0);
+  const status = capacity > 0 && confirmedCount >= capacity ? (activity.waitlistEnabled ? "waitlist" : "full") : "confirmed";
+  if (status === "full") return { ok: false, message: "活动名额已满，且未开放候补。" };
+  const participant = {
+    userId: String(userId),
+    userName: String(userName || userId),
+    sourceGroupId: String(sourceGroupId),
+    status,
+    joinedAt: Date.now(),
+    updatedAt: Date.now(),
+    inviteStatus: "not_requested"
+  };
+  if (existing) Object.assign(existing, participant);
+  else rows.push(participant);
+  await dbPut(env, opsParticipantsKey(activity.id), JSON.stringify(rows.slice(-10000)));
+  let inviteResult = null;
+  if (status === "confirmed" && activity.autoInviteConfirmed && String(activity.activityGroupId || "").replace(/\D/g, "")) {
+    const targetGroupId = String(activity.activityGroupId).replace(/\D/g, "");
+    const creatorId = String(activity.creatorId || "");
+    const creatorRole = await resolvePortalRole(env, creatorId, targetGroupId);
+    const permission = await opsEffectiveCapability(env, { groupId: targetGroupId, qq: creatorId, role: creatorRole, capability: "activity.invite" });
+    if (permission.allowed) {
+      const quota = await opsConsumeQuota(env, targetGroupId, creatorId, "activityInvite", 1);
+      if (quota.ok) inviteResult = await opsInviteActivityParticipant(env, activity, participant, creatorId);
+      else inviteResult = { ok: false, message: quota.message, deferred: true };
+    } else {
+      participant.inviteStatus = "permission_unavailable";
+      participant.inviteUpdatedAt = Date.now();
+      inviteResult = { ok: false, message: "活动建立者目前已没有目标活动群的邀请权限，已保留报名并等待有权限的管理处理。", deferred: true };
+    }
+    await dbPut(env, opsParticipantsKey(activity.id), JSON.stringify(rows.slice(-10000)));
+  }
+  await writeSystemAudit(env, { type: "ops_activity_signup", groupId: String(sourceGroupId), actorId: String(userId), action: status, activityId: activity.id, activityGroupId: activity.activityGroupId || "", autoInvite: inviteResult?.ok || false });
+  const baseMessage = status === "confirmed" ? "报名成功。" : "名额已满，已加入候补名单。";
+  return { ok: true, message: inviteResult ? `${baseMessage}${inviteResult.ok ? ` ${inviteResult.message}` : ` 活动群邀请暂未完成：${inviteResult.message}`}` : baseMessage, participant, inviteResult };
+}
+
+async function opsLeaveActivity(env, activity, userId) {
+  const rows = await opsActivityParticipants(env, activity.id);
+  const row = rows.find(item => String(item.userId) === String(userId) && ["confirmed", "waitlist"].includes(item.status));
+  if (!row) return { ok: false, message: "找不到有效报名。" };
+  row.status = "cancelled";
+  row.cancelledAt = Date.now();
+  await dbPut(env, opsParticipantsKey(activity.id), JSON.stringify(rows));
+  await opsPromoteActivityWaitlist(env, activity);
+  await writeSystemAudit(env, { type: "ops_activity_signup", groupId: row.sourceGroupId || activity.groupId, actorId: String(userId), action: "cancelled", activityId: activity.id });
+  return { ok: true, message: "已取消报名。" };
+}
+
+async function opsInviteActivityParticipant(env, activity, participant, actorId) {
+  const targetGroupId = String(activity.activityGroupId || "").replace(/\D/g, "");
+  if (!targetGroupId) return { ok: false, message: "此活动没有设置额外活动群。" };
+  const inviteMode = String(activity.inviteMode || "none");
+  if (inviteMode === "none") return { ok: false, message: "此活动尚未启用活动群邀请方式。" };
+  const botState = await getBotGroupRole(env, targetGroupId);
+  if (!botState?.exists) return { ok: false, message: "Bot 不在活动群内，无法发送活动群邀请。" };
+  const member = await opsGetGroupMember(env, targetGroupId, participant.userId);
+  if (member) {
+    participant.inviteStatus = "already_member";
+    participant.inviteUpdatedAt = Date.now();
+    return { ok: true, message: "该参与者已经在活动群内。" };
+  }
+  const pending = await readJson(env, `group_join_request:${targetGroupId}:${participant.userId}`, null);
+  if (inviteMode === "approve_pending" && pending?.flag && ["admin", "owner"].includes(String(botState.role || ""))) {
+    try {
+      await callOneBotAction(env, { action: "set_group_add_request", params: { flag: String(pending.flag), sub_type: String(pending.subType || "add"), approve: true, reason: "" } }, 15000);
+      participant.inviteStatus = "pending_request_approved";
+      participant.inviteUpdatedAt = Date.now();
+      participant.invitedBy = String(actorId || "");
+      return { ok: true, message: "已批准该参与者现有的活动群加群申请。" };
+    } catch (error) {
+      participant.inviteError = String(error?.message || error).slice(0, 500);
+    }
+  }
+  try {
+    const message = [
+      { type: "text", data: { text: `你报名的活动「${activity.title}」设有活动群，请通过下方群卡片申请加入。申请后，具有权限的 Bot 可协助批准。\n` } },
+      { type: "contact", data: { type: "group", id: targetGroupId } }
+    ];
+    await callOneBotAction(env, { action: "send_private_msg", params: { user_id: numericId(participant.userId), message, auto_escape: false } }, 15000);
+    participant.inviteStatus = "group_card_sent";
+    participant.inviteUpdatedAt = Date.now();
+    participant.invitedBy = String(actorId || "");
+    return { ok: true, message: "已私讯发送活动群卡片。QQ/NapCat 没有标准接口可强制把任意成员直接加入群；对方仍需申请加入。" };
+  } catch (error) {
+    participant.inviteStatus = "failed";
+    participant.inviteError = String(error?.message || error).slice(0, 500);
+    participant.inviteUpdatedAt = Date.now();
+    return { ok: false, message: `邀请发送失败：${participant.inviteError}` };
+  }
+}
+
+async function opsVotePoll(env, poll, { userId, optionIndexes }) {
+  if (!poll || poll.status !== "active") return { ok: false, message: "投票目前不可用。" };
+  if (poll.deadline && Date.now() > Number(poll.deadline)) return { ok: false, message: "投票已经截止。" };
+  const options = Array.isArray(poll.options) ? poll.options : [];
+  const indexes = [...new Set((Array.isArray(optionIndexes) ? optionIndexes : [optionIndexes]).map(Number).filter(index => Number.isInteger(index) && index >= 0 && index < options.length))];
+  if (!indexes.length) return { ok: false, message: "请选择有效选项。" };
+  if (!poll.multiple && indexes.length > 1) return { ok: false, message: "此投票只能选择一项。" };
+  const votes = await readJson(env, opsPollVotesKey(poll.id), {});
+  if (votes[userId] && poll.allowChange === false) return { ok: false, message: "此投票不允许改票。" };
+  votes[userId] = { indexes, at: Date.now() };
+  await dbPut(env, opsPollVotesKey(poll.id), JSON.stringify(votes));
+  return { ok: true, message: "投票已记录。" };
+}
+
+async function opsPreviewMessage(env, { groupId, text, mentionIds = [], replyId = "", attachments = [] }) {
+  const warnings = [];
+  const segments = [];
+  if (replyId) segments.push({ type: "reply", data: { id: String(replyId) } });
+  const mentionSet = new Set((Array.isArray(mentionIds) ? mentionIds : []).map(String).filter(Boolean));
+  for (const id of mentionSet) {
+    if (id === "all") {
+      segments.push({ type: "at", data: { qq: "all" } });
+      continue;
+    }
+    const member = await opsGetGroupMember(env, groupId, id);
+    if (!member) warnings.push(`QQ ${id} 目前不在目标群，无法保证有效 @。`);
+    segments.push({ type: "at", data: { qq: id } });
+  }
+  if (text) segments.push({ type: "text", data: { text: String(text).slice(0, 12000) } });
+  for (const attachment of Array.isArray(attachments) ? attachments.slice(0, 10) : []) {
+    if (!["image", "record", "video", "file"].includes(attachment?.type)) continue;
+    if (!attachment?.file && !attachment?.url) warnings.push(`${attachment.type} 缺少 file 或 url。`);
+    segments.push({ type: attachment.type, data: { file: attachment.file || attachment.url, url: attachment.url || undefined } });
+  }
+  if (String(text || "").length > 4000) warnings.push("文字较长，QQ 客户端可能折叠或发送失败。");
+  if (/@\d{5,}/.test(String(text || "")) && mentionSet.size === 0) warnings.push("内容中的 @QQ 只是普通文字，没有建立真正的 OneBot at 消息段。");
+  const botRole = await getBotGroupRole(env, groupId);
+  if (!botRole?.exists) warnings.push("Bot 不在目标群。");
+  return { ok: true, segments, warnings, botRole };
+}
+
+async function opsActivitySummary(env, activity, { viewerId = "", canManage = false } = {}) {
+  const participants = await opsActivityParticipants(env, activity.id);
+  const visibleParticipants = canManage
+    ? participants
+    : participants.filter(item => String(item.userId || "") === String(viewerId || "")).map(item => ({ ...item, sourceGroupId: String(item.sourceGroupId || "") }));
+  return {
+    ...activity,
+    confirmedCount: participants.filter(item => item.status === "confirmed").length,
+    waitlistCount: participants.filter(item => item.status === "waitlist").length,
+    cancelledCount: participants.filter(item => item.status === "cancelled").length,
+    participants: visibleParticipants,
+    participantListRestricted: !canManage
+  };
+}
+
+async function opsAnalytics(env, groupId) {
+  const audits = await readJson(env, `audit:system:group:${groupId}`, []);
+  const now = Date.now();
+  const recent = audits.filter(item => now - Date.parse(item.at || 0) <= 7 * 86400000);
+  const count = type => recent.filter(item => String(item.type || "").includes(type)).length;
+  const violationRecords = await listRuleViolations(env, groupId, { limit: 1000 }).catch(() => []);
+  const reviewed = violationRecords.filter(item => item.humanVerdict);
+  const falsePositives = reviewed.filter(item => item.humanVerdict === "not_violation");
+  const categoryMap = new Map();
+  for (const item of reviewed) {
+    const category = String(item.violationType || "其他");
+    if (!categoryMap.has(category)) categoryMap.set(category, { category, reviewed: 0, falsePositives: 0 });
+    const row = categoryMap.get(category);
+    row.reviewed += 1;
+    if (item.humanVerdict === "not_violation") row.falsePositives += 1;
+  }
+  const byCategory = [...categoryMap.values()].map(row => ({ ...row, falsePositiveRate: row.reviewed ? Math.round(row.falsePositives / row.reviewed * 1000) / 10 : 0 })).sort((a, b) => b.reviewed - a.reviewed);
+  const quality = await opsListRecords(env, "quality_feedback", { groupId, role: "developer", limit: 1000 }).catch(() => []);
+  return {
+    ok: true,
+    rangeDays: 7,
+    tasks: {
+      schedules: count("schedule"),
+      activityActions: count("ops_activity"),
+      moderation: count("rule_"),
+      portalOperations: count("ops_"),
+      thinkingResiduals: count("thinking_indicator_residual")
+    },
+    moderation: {
+      reviewed: reviewed.length,
+      falsePositives: falsePositives.length,
+      falsePositiveRate: reviewed.length ? Math.round(falsePositives.length / reviewed.length * 1000) / 10 : 0,
+      byCategory
+    },
+    qualityFeedback: {
+      total: quality.length,
+      open: quality.filter(item => item.status === "open").length,
+      byReason: Object.fromEntries([...new Set(quality.map(item => item.reasonType || "other"))].map(reason => [reason, quality.filter(item => (item.reasonType || "other") === reason).length]))
+    }
+  };
+}
+
+async function opsDependencyCheck(env, groupId) {
+  const bot = await getBotGroupRole(env, groupId);
+  const settings = await opsGetSettings(env, groupId);
+  const checks = [
+    { id: "bot_member", name: "Bot 位于群内", ok: Boolean(bot?.exists), detail: bot?.role || "not_member" },
+    { id: "bot_moderation", name: "群规自动处理", ok: ["admin", "owner"].includes(String(bot?.role || "")), detail: "需要 Bot 为管理员或群主" },
+    { id: "join_approval", name: "AI 同意入群申请", ok: ["admin", "owner"].includes(String(bot?.role || "")), detail: "需要 Bot 可处理群申请" },
+    { id: "d1", name: "D1 储存", ok: Boolean(env.DB), detail: env.DB ? "configured" : "missing" },
+    { id: "durable_object", name: "Durable Object", ok: Boolean(env.ONEBOT_WS), detail: env.ONEBOT_WS ? "configured" : "missing" },
+    { id: "maintenance", name: "维护模式", ok: !settings.maintenanceMode, detail: settings.maintenanceMode ? "enabled" : "disabled" },
+    { id: "emergency_lock", name: "紧急锁定", ok: !settings.emergencyLock, detail: settings.emergencyLock ? "enabled" : "disabled" }
+  ];
+  const weights = { bot_member: 20, bot_moderation: 20, join_approval: 15, d1: 15, durable_object: 15, maintenance: 5, emergency_lock: 10 };
+  const totalWeight = checks.reduce((sum, item) => sum + Number(weights[item.id] || 5), 0);
+  const passedWeight = checks.filter(item => item.ok).reduce((sum, item) => sum + Number(weights[item.id] || 5), 0);
+  const score = totalWeight ? Math.round(passedWeight / totalWeight * 100) : 0;
+  const status = score >= 90 ? "healthy" : score >= 70 ? "attention" : "critical";
+  return { ok: checks.every(item => item.ok), checks, bot, settings, score, status, capabilities: {
+    canSend: Boolean(bot?.exists),
+    canRecallOwn: Boolean(bot?.exists),
+    canModerateMembers: ["admin", "owner"].includes(String(bot?.role || "")),
+    canApproveJoin: ["admin", "owner"].includes(String(bot?.role || "")),
+    canSetAdmins: String(bot?.role || "") === "owner",
+    canCheckIn: bot?.exists ? "unverified" : false
+  } };
+}
+
+async function opsRuleSandbox(env, { groupId, text, context = [], role = "member" }) {
+  const rules = String(await dbGet(env, `group_rules:${groupId}`) || "").trim();
+  if (!rules) return { ok: false, message: "当前群没有设置群规。" };
+  const strictness = normalizeRuleStrictness(await dbGet(env, `rule_strictness:${groupId}`) || DEFAULTS.ruleStrictness);
+  try {
+    const result = await callGemmaText(env, {
+      system: `你是群规测试沙盒。只输出 JSON：{"violation":boolean,"category":string,"reason":string,"confidence":number,"suggestedAction":string,"matchedRule":string}。这是模拟，不执行处罚。严格度：${strictness}。群规：${rules.slice(0, 10000)}`,
+      prompt: JSON.stringify({ currentMessage: String(text || "").slice(0, 4000), recentContext: (Array.isArray(context) ? context : []).slice(-20), senderRole: role }),
+      maxOutputTokens: 400
+    });
+    const parsed = JSON.parse(result.text.match(/\{[\s\S]*\}/)?.[0] || "{}");
+    return { ok: true, result: parsed, provider: result.provider || "gemma", model: result.model || "" };
+  } catch (error) {
+    return { ok: false, message: String(error?.message || error) };
+  }
+}
+
+async function opsImpactPreview(env, groupId, patch) {
+  const logs = (await readJson(env, `recent_logs:${groupId}`, [])).slice(-500);
+  const windowSeconds = Math.max(5, Number(patch.ruleSpamWindowSeconds || await dbGet(env, `rule_spam_window_seconds:${groupId}`) || DEFAULTS.ruleSpamWindowSeconds));
+  const threshold = Math.max(2, Number(patch.ruleSpamThreshold || await dbGet(env, `rule_spam_threshold:${groupId}`) || DEFAULTS.ruleSpamThreshold));
+  const byUser = new Map();
+  for (const raw of logs) {
+    const line = String(raw || "");
+    const match = line.match(/QQ[:：]?(\d{5,}).*?[：:]\s*([\s\S]+)/);
+    if (!match) continue;
+    const key = `${match[1]}:${match[2].trim().toLowerCase()}`;
+    byUser.set(key, (byUser.get(key) || 0) + 1);
+  }
+  const possible = [...byUser.values()].filter(count => count >= threshold).length;
+  return {
+    ok: true,
+    estimateOnly: true,
+    settings: { windowSeconds, threshold },
+    recentMessagesAnalyzed: logs.length,
+    possibleRepeatedClusters: possible,
+    message: "这是根据现有简化日志估算，不会执行任何处罚。"
+  };
+}
+
+async function opsCleanupThinking(env, groupId, messageIds = []) {
+  const audits = await readJson(env, `audit:system:group:${groupId}`, []);
+  const residualIds = audits
+    .filter(item => item.type === "thinking_indicator_residual")
+    .flatMap(item => [item.messageId, ...(Array.isArray(item.failed) ? item.failed.map(x => x.id) : [])])
+    .map(String).filter(Boolean);
+  const ids = [...new Set([...(Array.isArray(messageIds) ? messageIds : []), ...residualIds])].slice(-100);
+  const results = [];
+  for (const id of ids) {
+    try {
+      await callOneBotAction(env, { action: "delete_msg", params: { message_id: numericId(id) } }, 10000);
+      results.push({ id, ok: true });
+    } catch (error) {
+      results.push({ id, ok: false, error: String(error?.message || error).slice(0, 500) });
+    }
+  }
+  return { ok: results.every(item => item.ok), results };
+}
+
+
+function opsTaipeiDateKey(now = Date.now()) {
+  const p = taipeiParts(now);
+  return `${p.year}-${p.month}-${p.day}`;
+}
+
+async function opsGetRecord(env, type, id) {
+  return await readJson(env, opsRecordKey(type, id), null);
+}
+
+function opsNextScheduleRuns(parsed, count = 5) {
+  if (!parsed?.ok || !parsed.nextRunAt) return [];
+  const result = [];
+  const record = { ...parsed };
+  let next = Number(parsed.nextRunAt);
+  for (let index = 0; index < Math.max(1, Math.min(20, Number(count || 5))) && next; index++) {
+    result.push(next);
+    next = computeNextScheduleRun(record, next);
+  }
+  return result;
+}
+
+async function opsSchedulePreview(env, { groupId, scheduleSpec, excludeId = "" }) {
+  const parsed = parseScheduleRequest(String(scheduleSpec || ""), Date.now());
+  if (!parsed.ok) return parsed;
+  const nextRuns = opsNextScheduleRuns(parsed, 5);
+  const ids = await readJson(env, "schedule:index", []);
+  const conflicts = [];
+  for (const id of ids.slice(-5000)) {
+    if (String(id) === String(excludeId || "")) continue;
+    const item = await readJson(env, `schedule:${id}`, null);
+    if (!item || !item.enabled || item.status !== "active" || String(item.groupId || "") !== String(groupId || "")) continue;
+    if (nextRuns.some(at => Math.abs(Number(item.nextRunAt || 0) - Number(at)) <= 60000)) {
+      conflicts.push({ id: item.id, nextRunAt: item.nextRunAt, content: String(item.content || "").slice(0, 200) });
+    }
+  }
+  const mentionIds = extractScheduleMentionIds(parsed.content);
+  const preview = await opsPreviewMessage(env, { groupId, text: parsed.content, mentionIds });
+  return {
+    ok: true,
+    parsed,
+    nextRuns,
+    conflicts,
+    conflictCount: conflicts.length,
+    managementAction: parseManagementScheduleAction(parsed.content),
+    messagePreview: preview,
+    warning: conflicts.length ? `发现 ${conflicts.length} 个一分钟内可能冲突的排程。` : "没有发现一分钟内的排程冲突。"
+  };
+}
+
+async function opsCreateScheduleFromSpec(env, { groupId, actorId, actorRole, scheduleSpec, templateId = "", draftId = "" }) {
+  const preview = await opsSchedulePreview(env, { groupId, scheduleSpec });
+  if (!preview.ok) return preview;
+  const parsed = preview.parsed;
+  const review = await reviewScheduleWithGemma(env, JSON.stringify(parsed));
+  if (review.decision === "reject") return { ok: false, message: `排程已拒绝：${review.reason || "内容不符合要求"}` };
+  const managementAction = parseManagementScheduleAction(parsed.content);
+  const canDirectManage = managementAction ? await canUseBotGroupOperations(env, groupId, actorId) : true;
+  const status = managementAction ? (canDirectManage ? "active" : "pending_owner") : (review.decision === "allow" ? "active" : "pending_owner");
+  const item = await createScheduleRecord(env, {
+    ...parsed,
+    groupId: String(groupId),
+    creatorId: String(actorId),
+    creatorRole: String(actorRole || "member"),
+    scheduleSpec: String(scheduleSpec || "").trim(),
+    mentionIds: extractScheduleMentionIds(parsed.content),
+    managementAction,
+    review,
+    status,
+    enabled: status === "active",
+    sourceTemplateId: String(templateId || ""),
+    sourceDraftId: String(draftId || ""),
+    conflictCountAtCreation: Number(preview.conflictCount || 0)
+  });
+  await writeSystemAudit(env, { type: "ops_schedule", groupId, actorId, action: "create", scheduleId: item.id, templateId, draftId, conflictCount: preview.conflictCount });
+  return { ok: true, message: status === "active" ? "排程已建立。" : "排程已建立并等待授权。", schedule: item, preview };
+}
+
+async function opsSendDraftNow(env, { draft, groupId, actorId }) {
+  if (!draft || draft.status === "deleted") return { ok: false, message: "找不到可发送草稿。" };
+  const targetGroupId = String(draft.targetGroupId || draft.groupId || groupId || "").replace(/\D/g, "");
+  if (!targetGroupId) return { ok: false, message: "草稿缺少目标群。" };
+  const preview = await opsPreviewMessage(env, {
+    groupId: targetGroupId,
+    text: draft.text || draft.description || "",
+    mentionIds: draft.mentionIds || [],
+    replyId: draft.replyId || "",
+    attachments: draft.attachments || []
+  });
+  if (!preview.botRole?.exists) return { ok: false, message: "Bot 不在目标群，无法发送。", preview };
+  try {
+    const result = await callOneBotAction(env, {
+      action: "send_group_msg",
+      params: { group_id: numericId(targetGroupId), message: preview.segments, auto_escape: false }
+    }, 20000);
+    draft.lastSentAt = Date.now();
+    draft.lastSentBy = String(actorId || "");
+    draft.lastSentMessageId = String(extractOneBotMessageId(result) || "");
+    draft.status = "sent";
+    await dbPut(env, opsRecordKey("draft", draft.id), JSON.stringify(draft));
+    await writeSystemAudit(env, { type: "ops_draft", groupId: targetGroupId, actorId, action: "send", recordId: draft.id, messageId: draft.lastSentMessageId });
+    return { ok: true, message: "草稿已发送。", messageId: draft.lastSentMessageId, preview };
+  } catch (error) {
+    draft.lastSendError = String(error?.message || error).slice(0, 1000);
+    draft.lastSendFailedAt = Date.now();
+    await dbPut(env, opsRecordKey("draft", draft.id), JSON.stringify(draft));
+    await writeSystemAudit(env, { type: "ops_draft", groupId: targetGroupId, actorId, action: "send_failed", recordId: draft.id, error: draft.lastSendError });
+    return { ok: false, message: `发送失败：${draft.lastSendError}`, preview };
+  }
+}
+
+async function opsTaskCenter(env, groupId, limit = 300) {
+  const tasks = [];
+  const scheduleIds = await readJson(env, "schedule:index", []);
+  for (const id of scheduleIds.slice(-2000)) {
+    const item = await readJson(env, `schedule:${id}`, null);
+    if (!item || String(item.groupId || "") !== String(groupId || "") || item.status === "deleted") continue;
+    tasks.push({ kind: "schedule", id: item.id, status: item.status, title: String(item.content || "排程").slice(0, 120), at: Number(item.nextRunAt || Date.parse(item.createdAt || 0) || 0), retryable: ["paused", "failed"].includes(item.status) || Number(item.failureCount || 0) > 0, cancellable: !["completed", "deleted"].includes(item.status), detail: item });
+  }
+  for (const [kind, indexKey, prefix] of [
+    ["moderation", `moderation:proposal:index:${groupId}`, "moderation:proposal:"],
+    ["groupwork", `groupwork:index:${groupId}`, "groupwork:"],
+    ["join_request", `joinrequest:index:${groupId}`, "joinrequest:"]
+  ]) {
+    const ids = await readJson(env, indexKey, []);
+    for (const id of ids.slice(-1000)) {
+      const item = await readJson(env, `${prefix}${id}`, null);
+      if (!item) continue;
+      tasks.push({ kind, id: item.id, status: item.status, title: item.title || item.type || item.action || kind, at: Number(item.updatedAt || item.createdAt || item.at || 0), retryable: ["failed", "paused"].includes(item.status), cancellable: ["pending", "pending_owner", "pending_review", "active"].includes(item.status), detail: item });
+    }
+  }
+  const opsTypes = ["activity", "poll", "todo", "duty", "appeal_thread", "bug", "operation_batch"];
+  for (const type of opsTypes) {
+    const rows = await opsListRecords(env, type, { groupId, role: "developer", limit: 500 });
+    for (const item of rows) {
+      if (!["active", "pending", "pending_owner", "failed", "paused", "open", "waiting"].includes(String(item.status || ""))) continue;
+      tasks.push({ kind: `ops:${type}`, id: item.id, status: item.status, title: item.title || type, at: Number(item.updatedAt || item.createdAt || 0), retryable: ["failed", "paused"].includes(item.status), cancellable: true, detail: item });
+    }
+  }
+  tasks.sort((a, b) => Number(b.at || 0) - Number(a.at || 0));
+  return { ok: true, tasks: tasks.slice(0, Math.max(1, Math.min(1000, Number(limit || 300)))) };
+}
+
+async function opsTaskAction(env, { groupId, actorId, kind, id, action }) {
+  if (kind === "schedule") {
+    const item = await readJson(env, `schedule:${id}`, null);
+    if (!item || String(item.groupId || "") !== String(groupId || "")) return { ok: false, message: "找不到排程。" };
+    if (action === "retry") {
+      item.status = "active";
+      item.enabled = true;
+      item.failureCount = 0;
+      item.nextRunAt = Date.now() + 1000;
+      item.lastResult = "manual_retry_queued";
+      await dbPut(env, `schedule:${id}`, JSON.stringify(item));
+      await opsResetFuse(env, groupId, "schedule", actorId);
+      return { ok: true, message: "排程已排入立即重试。" };
+    }
+    if (action === "cancel") return await cancelSchedule(env, id, actorId, true, groupId, false);
+  }
+  if (kind === "groupwork") {
+    const item = await readJson(env, `groupwork:${id}`, null);
+    if (!item || String(item.groupId || "") !== String(groupId || "")) return { ok: false, message: "找不到待确认操作。" };
+    if (action === "cancel" && ["pending_owner", "pending_review"].includes(item.status)) {
+      item.status = "cancelled";
+      item.decidedAt = Date.now();
+      item.decidedBy = String(actorId || "");
+      await dbPut(env, `groupwork:${id}`, JSON.stringify(item));
+      return { ok: true, message: "待确认操作已取消。" };
+    }
+  }
+  if (kind.startsWith("ops:")) {
+    const type = kind.slice(4);
+    const item = await opsGetRecord(env, type, id);
+    if (!item || !(item.groupIds || [item.groupId]).map(String).includes(String(groupId))) return { ok: false, message: "找不到记录。" };
+    if (action === "cancel") {
+      item.status = "cancelled";
+      item.cancelledAt = Date.now();
+      item.cancelledBy = String(actorId || "");
+      await dbPut(env, opsRecordKey(type, id), JSON.stringify(item));
+      return { ok: true, message: "任务已取消。" };
+    }
+    if (action === "retry") {
+      item.status = "active";
+      item.failureCount = 0;
+      item.updatedAt = Date.now();
+      item.updatedBy = String(actorId || "");
+      await dbPut(env, opsRecordKey(type, id), JSON.stringify(item));
+      return { ok: true, message: "任务已恢复。" };
+    }
+  }
+  return { ok: false, message: "此任务不支持该操作。" };
+}
+
+async function opsModelMetrics(env, groupId, days = 7) {
+  const logs = await listAiDecisionLogs(env, { groupId, limit: 2000 }).catch(() => []);
+  const cutoff = Date.now() - Math.max(1, Math.min(90, Number(days || 7))) * 86400000;
+  const rows = logs.filter(item => Number(item.createdAt || Date.parse(item.at || 0) || 0) >= cutoff);
+  const byModel = new Map();
+  for (const row of rows) {
+    const name = String(row.model || row.searchModel || row.provider || "unknown");
+    if (!byModel.has(name)) byModel.set(name, { model: name, requests: 0, success: 0, errors: 0, timeouts: 0, rateLimited: 0, totalLatencyMs: 0, latencySamples: 0, fallbackCount: 0, estimatedTokens: 0 });
+    const item = byModel.get(name);
+    item.requests += 1;
+    const failed = row.decision === "error" || row.sendStatus === "failed" || Boolean(row.error);
+    if (failed) item.errors += 1; else item.success += 1;
+    const text = JSON.stringify(row);
+    if (/timeout|超时|超時/i.test(text)) item.timeouts += 1;
+    if (/429|rate.?limit|限流/i.test(text)) item.rateLimited += 1;
+    if (row.fallbackUsed || row.fallbackModel) item.fallbackCount += 1;
+    const latency = Number(row.latencyMs || row.durationMs || row.elapsedMs || 0);
+    if (latency > 0) { item.totalLatencyMs += latency; item.latencySamples += 1; }
+    item.estimatedTokens += Number(row.usage?.total_tokens || row.totalTokens || row.estimatedTokens || 0);
+  }
+  const models = [...byModel.values()].map(item => ({
+    ...item,
+    successRate: item.requests ? Math.round(item.success / item.requests * 1000) / 10 : 0,
+    averageLatencyMs: item.latencySamples ? Math.round(item.totalLatencyMs / item.latencySamples) : 0
+  })).sort((a, b) => b.requests - a.requests);
+  return { ok: true, rangeDays: Number(days || 7), totalRequests: rows.length, models, note: "Token 与费用仅在日志含用量字段时统计；未记录用量的请求不会被虚构估算。" };
+}
+
+async function opsRecordQualityFeedback(env, { groupId, actorId, actorName, body }) {
+  const allowedReasons = ["wrong_person", "wrong_question", "context_error", "tone", "fact_error", "slow", "thinking_residual", "duplicate", "unsafe", "other"];
+  const reasonType = allowedReasons.includes(String(body.reasonType || "")) ? String(body.reasonType) : "other";
+  const item = await opsSaveRecord(env, {
+    type: "quality_feedback",
+    groupId,
+    actorId,
+    actorName,
+    data: {
+      title: `AI 回复品质回报：${reasonType}`,
+      description: String(body.note || "").slice(0, 4000),
+      reasonType,
+      questionMessageId: String(body.questionMessageId || ""),
+      answerMessageId: String(body.answerMessageId || ""),
+      aiDecisionId: String(body.aiDecisionId || ""),
+      model: String(body.model || ""),
+      status: "open"
+    }
+  });
+  return { ok: true, message: "品质回报已建立。", item };
+}
+
+async function opsActiveRuleRecords(env, groupId, now = Date.now()) {
+  const result = { tempRules: [], exceptions: [], priorities: [] };
+  for (const [type, target] of [["temp_rule", "tempRules"], ["exception_rule", "exceptions"], ["rule_version", "priorities"]]) {
+    const ids = await readJson(env, opsIndexKey(type), []);
+    for (const id of ids.slice(-1000)) {
+      const item = await readJson(env, opsRecordKey(type, id), null);
+      if (!item || item.deletedAt || item.status === "deleted") continue;
+      const groups = (item.groupIds || [item.groupId]).map(String);
+      if (!groups.includes(String(groupId))) continue;
+      if (Number(item.startsAt || 0) && now < Number(item.startsAt)) continue;
+      if (Number(item.expiresAt || item.deadline || 0) && now >= Number(item.expiresAt || item.deadline)) continue;
+      if (["expired", "closed", "cancelled", "disabled"].includes(String(item.status || ""))) continue;
+      result[target].push(item);
+    }
+  }
+  result.tempRules.sort((a, b) => Number(b.priority || 0) - Number(a.priority || 0));
+  return result;
+}
+
+function opsRuleExceptionMatch(content, exceptions) {
+  const text = String(content || "");
+  for (const item of exceptions || []) {
+    const pattern = String(item.pattern || item.matchText || item.description || "").trim();
+    if (!pattern) continue;
+    try {
+      const matched = item.regex === true ? new RegExp(pattern, item.caseSensitive ? "" : "i").test(text) : (item.caseSensitive ? text.includes(pattern) : text.toLowerCase().includes(pattern.toLowerCase()));
+      if (matched) return item;
+    } catch {}
+  }
+  return null;
+}
+
+function opsRuleConflictCheck(records) {
+  const warnings = [];
+  const normalized = records.map(item => ({ id: item.id, title: item.title, text: `${item.title || ""} ${item.description || ""}`.toLowerCase() }));
+  for (let i = 0; i < normalized.length; i++) {
+    for (let j = i + 1; j < normalized.length; j++) {
+      const a = normalized[i], b = normalized[j];
+      if ((/允许|允許|可发送|可發送/.test(a.text) && /禁止|不得|不允许|不允許/.test(b.text)) || (/禁止|不得|不允许|不允許/.test(a.text) && /允许|允許|可发送|可發送/.test(b.text))) {
+        warnings.push({ first: a.id, second: b.id, message: `「${a.title}」与「${b.title}」可能存在允许／禁止冲突。` });
+      }
+    }
+  }
+  return warnings.slice(0, 100);
+}
+
+async function opsFuseState(env, groupId, feature) {
+  return await readJson(env, `ops:fuse:${groupId}:${opsSafeId(feature)}`, { feature, consecutiveFailures: 0, paused: false });
+}
+
+async function opsFuseAllows(env, groupId, feature) {
+  const settings = await opsGetSettings(env, groupId);
+  if (!settings.fuseEnabled) return { allowed: true, state: await opsFuseState(env, groupId, feature) };
+  const state = await opsFuseState(env, groupId, feature);
+  return { allowed: !state.paused, state };
+}
+
+async function opsRecordAutomationResult(env, groupId, feature, ok, error = "") {
+  const settings = await opsGetSettings(env, groupId);
+  const state = await opsFuseState(env, groupId, feature);
+  state.feature = feature;
+  state.updatedAt = Date.now();
+  if (ok) {
+    state.consecutiveFailures = 0;
+    state.lastSuccessAt = Date.now();
+    if (state.paused && state.autoRecover === true) state.paused = false;
+  } else {
+    state.consecutiveFailures = Number(state.consecutiveFailures || 0) + 1;
+    state.lastFailureAt = Date.now();
+    state.lastError = String(error || "").slice(0, 1000);
+    if (settings.fuseEnabled && state.consecutiveFailures >= settings.fuseFailureThreshold) {
+      state.paused = true;
+      state.pausedAt = Date.now();
+      await writeSystemAudit(env, { type: "ops_fuse", groupId, actorId: "system", action: "tripped", feature, failures: state.consecutiveFailures, error: state.lastError });
+    }
+  }
+  await dbPut(env, `ops:fuse:${groupId}:${opsSafeId(feature)}`, JSON.stringify(state));
+  return state;
+}
+
+async function opsResetFuse(env, groupId, feature, actorId) {
+  const state = await opsFuseState(env, groupId, feature);
+  state.paused = false;
+  state.consecutiveFailures = 0;
+  state.resetAt = Date.now();
+  state.resetBy = String(actorId || "");
+  await dbPut(env, `ops:fuse:${groupId}:${opsSafeId(feature)}`, JSON.stringify(state));
+  await writeSystemAudit(env, { type: "ops_fuse", groupId, actorId, action: "reset", feature });
+  return state;
+}
+
+async function opsConsumeQuota(env, groupId, actorId, quotaType, amount = 1) {
+  const settings = await opsGetSettings(env, groupId);
+  const rules = {
+    recall: { limit: settings.operationQuota.recallPerMinute, windowMs: 60000 },
+    kick: { limit: settings.operationQuota.kickPerHour, windowMs: 3600000 },
+    batchMute: { limit: settings.operationQuota.batchMuteMax, windowMs: 60000 },
+    announcement: { limit: settings.operationQuota.announcementPerHour, windowMs: 3600000 },
+    activityInvite: { limit: settings.operationQuota.activityInvitePerHour, windowMs: 3600000 }
+  };
+  const rule = rules[quotaType];
+  if (!rule) return { ok: true };
+  const bucket = Math.floor(Date.now() / rule.windowMs);
+  const key = `ops:quota:${groupId}:${actorId}:${quotaType}:${bucket}`;
+  const used = Number(await dbGet(env, key) || 0);
+  if (used + Number(amount || 1) > rule.limit) return { ok: false, message: `操作配额已达上限：${quotaType} 每个时窗最多 ${rule.limit}。`, used, limit: rule.limit };
+  await dbPut(env, key, String(used + Number(amount || 1)));
+  return { ok: true, used: used + Number(amount || 1), limit: rule.limit };
+}
+
+async function opsRetentionCleanup(env, groupId, now = Date.now()) {
+  const settings = await opsGetSettings(env, groupId);
+  const cutoff = now - Number(settings.retentionDays || 90) * 86400000;
+  let deleted = 0;
+  for (const type of Object.keys(OPS_RECORD_TYPES)) {
+    const ids = await readJson(env, opsIndexKey(type), []);
+    const keep = [];
+    for (const id of ids) {
+      const item = await readJson(env, opsRecordKey(type, id), null);
+      if (!item) continue;
+      const at = Number(item.updatedAt || item.createdAt || 0);
+      const terminal = ["closed", "completed", "cancelled", "deleted", "expired", "resolved", "rejected"].includes(String(item.status || ""));
+      if (terminal && at > 0 && at < cutoff) {
+        await dbDel(env, opsRecordKey(type, id));
+        await dbDel(env, opsVersionKey(type, id));
+        if (type === "activity") await dbDel(env, opsParticipantsKey(id));
+        if (type === "poll") await dbDel(env, opsPollVotesKey(id));
+        deleted += 1;
+      } else keep.push(id);
+    }
+    if (keep.length !== ids.length) await dbPut(env, opsIndexKey(type), JSON.stringify(keep.slice(-5000)));
+  }
+  const aiIds = await readJson(env, `ai_decision_log:index:${groupId}`, []);
+  const aiKeep = [];
+  for (const id of aiIds) {
+    const item = await readJson(env, `ai_decision_log:${id}`, null);
+    const at = Number(item?.createdAt || Date.parse(item?.at || 0) || 0);
+    if (item && at > 0 && at < cutoff) { await dbDel(env, `ai_decision_log:${id}`); deleted += 1; }
+    else if (item) aiKeep.push(id);
+  }
+  if (aiKeep.length !== aiIds.length) await dbPut(env, `ai_decision_log:index:${groupId}`, JSON.stringify(aiKeep.slice(-DEFAULTS.aiDecisionLogLimit)));
+  const auditKey = `audit:system:group:${groupId}`;
+  const audits = await readJson(env, auditKey, []);
+  const auditKeep = audits.filter(item => {
+    const at = Number(item?.createdAt || 0) || Date.parse(item?.at || item?.createdAt || 0) || 0;
+    return !at || at >= cutoff;
+  });
+  const auditDeleted = Math.max(0, audits.length - auditKeep.length);
+  if (auditDeleted) {
+    await dbPut(env, auditKey, JSON.stringify(auditKeep.slice(-5000)));
+    deleted += auditDeleted;
+  }
+  await writeSystemAudit(env, { type: "ops_retention", groupId, actorId: "system", action: "cleanup", deleted, auditDeleted, retentionDays: settings.retentionDays });
+  return { ok: true, deleted, auditDeleted, retentionDays: settings.retentionDays };
+}
+
+async function opsResolveDigestRecipients(env, groupId, settings) {
+  if (settings.dailyDigestRecipientIds?.length) return settings.dailyDigestRecipientIds;
+  try {
+    const members = await callOneBotAction(env, { action: "get_group_member_list", params: { group_id: numericId(groupId), no_cache: false } }, 15000);
+    return (Array.isArray(members) ? members : []).filter(item => item.role === "owner").map(item => String(item.user_id || item.qq || "")).filter(Boolean).slice(0, 5);
+  } catch { return []; }
+}
+
+async function opsSendDailyDigest(env, groupId, now = Date.now()) {
+  const settings = await opsGetSettings(env, groupId);
+  if (!settings.dailyDigestEnabled) return { ok: true, skipped: true, reason: "disabled" };
+  const p = taipeiParts(now);
+  const current = `${p.hour}:${p.minute}`;
+  if (current < settings.dailyDigestTime) return { ok: true, skipped: true, reason: "not_due" };
+  const dateKey = opsTaipeiDateKey(now);
+  const sentKey = `ops:digest:sent:${groupId}:${dateKey}`;
+  if (await dbGet(env, sentKey)) return { ok: true, skipped: true, reason: "already_sent" };
+  const center = await opsTaskCenter(env, groupId, 1000);
+  const counts = center.tasks.reduce((acc, item) => { acc[item.status] = (acc[item.status] || 0) + 1; return acc; }, {});
+  const residuals = center.tasks.filter(item => item.kind === "thinking" || String(item.detail?.type || "").includes("thinking_indicator_residual")).length;
+  const text = `【群务每日摘要】\n群号：${groupId}\n待确认／进行中：${(counts.pending || 0) + (counts.pending_owner || 0) + (counts.active || 0) + (counts.open || 0)}\n失败／暂停：${(counts.failed || 0) + (counts.paused || 0)}\n任务总数：${center.tasks.length}\n疑似思考提示残留：${residuals}\n如需处理，请进入 Portal → 营运与活动中心。`;
+  const recipients = await opsResolveDigestRecipients(env, groupId, settings);
+  let sent = 0;
+  for (const qq of recipients) {
+    try { await sendPortalVerificationMessage(env, qq, text); sent += 1; } catch {}
+  }
+  if (sent > 0) await dbPut(env, sentKey, String(now));
+  return { ok: sent > 0, sent, recipients };
+}
+
+async function opsHandleMemberLeave(env, groupId, userId, now = Date.now()) {
+  let cancelledSchedules = 0;
+  const scheduleIds = await readJson(env, "schedule:index", []);
+  for (const id of scheduleIds.slice(-5000)) {
+    const item = await readJson(env, `schedule:${id}`, null);
+    if (!item || String(item.groupId || "") !== String(groupId) || String(item.creatorId || "") !== String(userId)) continue;
+    if (["active", "pending_owner", "pending_review", "paused"].includes(String(item.status || ""))) {
+      item.status = "cancelled_member_left";
+      item.enabled = false;
+      item.cancelledAt = now;
+      item.lastResult = "creator_left_group";
+      await dbPut(env, `schedule:${id}`, JSON.stringify(item));
+      cancelledSchedules += 1;
+    }
+  }
+  let activityRowsUpdated = 0;
+  const activityIds = await readJson(env, opsIndexKey("activity"), []);
+  for (const id of activityIds.slice(-2000)) {
+    const activity = await opsGetRecord(env, "activity", id);
+    if (!activity || !(activity.groupIds || [activity.groupId]).map(String).includes(String(groupId))) continue;
+    const rows = await opsActivityParticipants(env, id);
+    const participant = rows.find(item => String(item.userId || "") === String(userId) && String(item.sourceGroupId || "") === String(groupId));
+    if (participant) {
+      participant.memberLeftAt = now;
+      participant.notificationsPaused = true;
+      activityRowsUpdated += 1;
+      await dbPut(env, opsParticipantsKey(id), JSON.stringify(rows));
+    }
+  }
+  for (const key of [`thinking_active:group:${groupId}:${userId}`, `question_pending:group:${groupId}:user:${userId}`, `question-inflight:group:${groupId}:user:${userId}`]) await dbDel(env, key).catch(() => {});
+  await writeSystemAudit(env, { type: "ops_member_leave_cleanup", groupId, actorId: String(userId), action: "cleanup", cancelledSchedules, activityRowsUpdated });
+  return { ok: true, cancelledSchedules, activityRowsUpdated };
+}
+
+async function opsMemberSummary(env, groupId, userId) {
+  const member = await opsGetGroupMember(env, groupId, userId);
+  const violations = (await listRuleViolations(env, groupId, { limit: 2000 }).catch(() => [])).filter(item => String(item.userId || "") === String(userId));
+  const appeals = [];
+  const appealIds = await readJson(env, `appeal:index:${groupId}`, []);
+  for (const id of appealIds.slice(-1000)) {
+    const item = await readJson(env, `appeal:${id}`, null);
+    if (item && String(item.userId || item.qq || item.creatorId || "") === String(userId)) appeals.push(item);
+  }
+  const schedules = (await listUserSchedules(env, String(userId), groupId)).length;
+  return {
+    ok: true,
+    userId: String(userId),
+    member: member ? { userId: String(member.user_id || member.qq || userId), name: member.card || member.nickname || member.name || String(userId), role: member.role || "member", joinTime: member.join_time || member.joinTime || 0 } : null,
+    facts: {
+      violationCount: violations.length,
+      reversedCount: violations.filter(item => item.humanVerdict === "not_violation").length,
+      muteCount: violations.filter(item => String(item.actionTaken || "").includes("mute")).length,
+      appealCount: appeals.length,
+      approvedAppeals: appeals.filter(item => item.status === "approved").length,
+      activeSchedules: schedules
+    },
+    recentViolations: violations.slice(-20).reverse(),
+    recentAppeals: appeals.slice(-20).reverse(),
+    note: "这里只呈现事实记录，不产生自动风险分数或自动定罪。"
+  };
+}
+
+async function opsWelcomePreview(env, groupId, { userId, templateId = "", text = "" }) {
+  const member = await opsGetGroupMember(env, groupId, userId);
+  let template = templateId ? await opsGetRecord(env, "welcome_template", templateId) : null;
+  const source = String(text || template?.description || await dbGet(env, `welcome_text:${groupId}`) || "欢迎 {at} 加入本群，请先阅读群规。");
+  const rendered = source.replace(/\{at\}/g, `@${userId}`).replace(/\{name\}/g, member?.card || member?.nickname || String(userId));
+  const preview = await opsPreviewMessage(env, { groupId, text: rendered.replace(new RegExp(`@${userId}`, "g"), ""), mentionIds: [String(userId)] });
+  return { ok: true, source, rendered, member, preview };
+}
+
+async function opsPublishAnnouncement(env, { groupId, actorId, record, asTodo = false }) {
+  if (!record) return { ok: false, message: "找不到公告记录。" };
+  const quota = await opsConsumeQuota(env, groupId, actorId, "announcement", 1);
+  if (!quota.ok) return quota;
+  if (!(await canUseBotGroupOperations(env, groupId, actorId))) return { ok: false, message: "当前账号或 Bot 缺少群操作权限。" };
+  const type = asTodo ? "todo" : "notice";
+  const request = await createGroupWorkRequest(env, { groupId, creatorId: actorId, creatorName: actorId, type, content: record.description || record.title || "" });
+  request.reason = String(record.reason || "").slice(0, 1000);
+  await dbPut(env, `groupwork:${request.id}`, JSON.stringify(request));
+  return { ok: true, message: "已建立待确认操作；确认后才会执行。", request };
+}
+
+async function opsExecuteHandoff(env, { groupId, actorId, actorRole, body }) {
+  const mode = String(body.mode || "portal");
+  const targetQq = String(body.targetQq || "").replace(/\D/g, "");
+  const reason = String(body.reason || "").trim().slice(0, 1000);
+  if (!targetQq || !reason) return { ok: false, message: "目标 QQ 与交接原因都必须填写。" };
+  if (mode === "portal") {
+    const capabilities = [...new Set((Array.isArray(body.capabilities) ? body.capabilities : []).map(String).filter(id => opsCapabilityDef(id)))];
+    if (!capabilities.length) return { ok: false, message: "请至少选择一项 Portal 权限。" };
+    const expiresAt = Number(body.expiresAt || 0);
+    for (const capability of capabilities) {
+      await dbPut(env, opsPermissionKey(groupId, targetQq, capability), JSON.stringify({ allowed: true, reason, expiresAt, actorId, updatedAt: Date.now(), handoff: true }));
+    }
+    const record = await opsSaveRecord(env, { type: "handoff", groupId, actorId, actorName: actorId, data: { title: `Portal 权限交接给 ${targetQq}`, description: reason, mode, targetQq, capabilities, expiresAt, status: "active" } });
+    return { ok: true, message: "Portal 权限交接已生效。", record };
+  }
+  if (mode === "qq_admin") {
+    const bot = await getBotGroupRole(env, groupId);
+    if (String(bot?.role || "") !== "owner") return { ok: false, message: "Bot 必须是当前 QQ 群主，才能新增或撤销真正的 QQ 管理员。" };
+    if (!isDeveloperId(env, actorId) && actorRole !== "owner") return { ok: false, message: "只有当前群主或开发者可以执行 QQ 管理员交接。" };
+    const target = await opsGetGroupMember(env, groupId, targetQq);
+    if (!target) return { ok: false, message: "目标成员目前不在群内。" };
+    const enable = body.enable !== false;
+    try {
+      await callOneBotAction(env, { action: "set_group_admin", params: { group_id: numericId(groupId), user_id: numericId(targetQq), enable } }, 15000);
+      const record = await opsSaveRecord(env, { type: "handoff", groupId, actorId, actorName: actorId, data: { title: `${enable ? "新增" : "撤销"} QQ 管理员 ${targetQq}`, description: reason, mode, targetQq, enable, status: "completed", executedAt: Date.now() } });
+      return { ok: true, message: enable ? "已新增 QQ 管理员。" : "已撤销 QQ 管理员。", record };
+    } catch (error) {
+      return { ok: false, message: `QQ 管理员交接失败：${String(error?.message || error)}` };
+    }
+  }
+  return { ok: false, message: "未知交接模式。" };
+}
+
+async function opsSnapshotConfig(env, groupId, actorId, title = "") {
+  const payload = {
+    schema: "qqai-ops-snapshot-v1",
+    groupId,
+    version: VERSION,
+    at: Date.now(),
+    settings: await opsGetSettings(env, groupId),
+    portalSettings: Object.fromEntries(await Promise.all(PORTAL_SETTING_DEFINITIONS.filter(def => def.scope === "group").map(async def => [def.key, await readPortalSettingValue(env, def, groupId, actorId)])))
+  };
+  const item = await opsSaveRecord(env, { type: "deployment_snapshot", groupId, actorId, actorName: actorId, data: { title: title || `设置快照 ${new Date().toISOString()}`, description: "群设置与营运设置快照", status: "active", payload } });
+  return { ok: true, item };
+}
+
+async function opsRestoreSnapshot(env, groupId, actorId, snapshotId, previewOnly = true) {
+  const item = await opsGetRecord(env, "deployment_snapshot", snapshotId);
+  if (!item?.payload || String(item.payload.groupId || "") !== String(groupId)) return { ok: false, message: "找不到可用快照。" };
+  if (previewOnly) return { ok: true, preview: true, payload: item.payload, message: "这是恢复预览，尚未修改设置。" };
+  await opsSaveSettings(env, groupId, item.payload.settings || {});
+  for (const def of PORTAL_SETTING_DEFINITIONS.filter(def => def.scope === "group")) {
+    if (Object.prototype.hasOwnProperty.call(item.payload.portalSettings || {}, def.key)) await writePortalSettingValue(env, def, groupId, actorId, item.payload.portalSettings[def.key]);
+  }
+  await writeSystemAudit(env, { type: "ops_snapshot", groupId, actorId, action: "restore", snapshotId });
+  return { ok: true, message: "群设置快照已恢复。" };
+}
+
+async function opsHandleActivityCommand(env, { groupId, userId, userName, role, text }) {
+  if (!String(groupId || "")) return { handled: false };
+  const normalized = String(text || "").trim();
+  let match = normalized.match(/^[!！](?:活动|活動)\s*(?:列表)?$/i);
+  if (match) {
+    const rows = await opsListRecords(env, "activity", { groupId, qq: userId, role, limit: 100 });
+    if (!rows.length) return { handled: true, text: "目前没有可报名活动。" };
+    const lines = [];
+    for (const item of rows.slice(0, 20)) {
+      const summary = await opsActivitySummary(env, item);
+      lines.push(`${item.id}｜${item.title}｜正式 ${summary.confirmedCount}${item.capacity ? `/${item.capacity}` : ""}｜候补 ${summary.waitlistCount}`);
+    }
+    return { handled: true, text: lines.join("\n") };
+  }
+  match = normalized.match(/^[!！](?:报名|報名)\s+([a-z0-9:_-]+)$/i);
+  if (match) {
+    const capability = await opsEffectiveCapability(env, { groupId, qq: userId, role, capability: "activity.join" });
+    if (!capability.allowed) return { handled: true, text: "你没有活动报名权限。" };
+    const activity = await readJson(env, opsRecordKey("activity", match[1]), null);
+    const result = await opsJoinActivity(env, activity, { userId, userName, sourceGroupId: groupId });
+    return { handled: true, text: result.message };
+  }
+  match = normalized.match(/^[!！](?:取消报名|取消報名)\s+([a-z0-9:_-]+)$/i);
+  if (match) {
+    const capability = await opsEffectiveCapability(env, { groupId, qq: userId, role, capability: "activity.join" });
+    if (!capability.allowed) return { handled: true, text: "你没有活动报名权限。" };
+    const activity = await readJson(env, opsRecordKey("activity", match[1]), null);
+    const result = activity ? await opsLeaveActivity(env, activity, userId) : { message: "找不到活动。" };
+    return { handled: true, text: result.message };
+  }
+  match = normalized.match(/^[!！](?:活动名單|活动名单|活動名單)\s+([a-z0-9:_-]+)$/i);
+  if (match) {
+    const capability = await opsEffectiveCapability(env, { groupId, qq: userId, role, capability: "activity.manage" });
+    if (!capability.allowed) return { handled: true, text: "你没有查看完整活动名单的权限。" };
+    const activity = await readJson(env, opsRecordKey("activity", match[1]), null);
+    if (!activity) return { handled: true, text: "找不到活动。" };
+    const summary = await opsActivitySummary(env, activity);
+    const lines = summary.participants.filter(item => item.status === "confirmed").map((item, index) => `${index + 1}. ${item.userName}（${item.userId}）｜来源群 ${item.sourceGroupId}`);
+    return { handled: true, text: lines.length ? lines.join("\n") : "目前没有正式报名者。" };
+  }
+  return { handled: false };
+}
+
+async function opsProcessAutomations(env, now = Date.now()) {
+  // 到期活动／投票自动关闭；临时权限、临时群规与维护模式自动失效。
+  for (const type of ["activity", "poll", "temp_rule", "handoff"]) {
+    const ids = await readJson(env, opsIndexKey(type), []);
+    for (const id of ids.slice(-2000)) {
+      const item = await readJson(env, opsRecordKey(type, id), null);
+      if (!item || item.deletedAt) continue;
+      const expiry = Number(item.signupDeadline || item.deadline || item.expiresAt || 0);
+      if (expiry && now >= expiry && item.status === "active") {
+        item.status = type === "temp_rule" ? "expired" : "closed";
+        item.closedAt = now;
+        if (type === "handoff" && item.mode === "portal" && item.targetQq && Array.isArray(item.capabilities)) {
+          for (const capability of item.capabilities) {
+            const current = await readJson(env, opsPermissionKey(item.groupId, item.targetQq, capability), null);
+            if (current?.handoff) await dbDel(env, opsPermissionKey(item.groupId, item.targetQq, capability));
+          }
+          item.revokedAt = now;
+          item.revokedBy = "system:expiry";
+        }
+        await dbPut(env, opsRecordKey(type, id), JSON.stringify(item));
+      }
+    }
+  }
+  const groups = await readJson(env, "known_groups", []);
+  for (const raw of groups.slice(-1000)) {
+    const groupId = String(raw?.group_id || raw?.groupId || raw?.id || raw || "");
+    if (!groupId) continue;
+    const settings = await opsGetSettings(env, groupId);
+    if (settings.maintenanceMode && settings.maintenanceUntil > 0 && now >= settings.maintenanceUntil) {
+      await opsSaveSettings(env, groupId, { maintenanceMode: false, maintenanceUntil: 0 });
+      await writeSystemAudit(env, { type: "ops_maintenance", groupId, actorId: "system", action: "auto_expired" });
+    }
+    await opsSendDailyDigest(env, groupId, now).catch(error => console.warn("营运摘要发送失败", groupId, error));
+    const dateKey = opsTaipeiDateKey(now);
+    const cleanupKey = `ops:retention:done:${groupId}:${dateKey}`;
+    const p = taipeiParts(now);
+    if (p.hour === "03" && !(await dbGet(env, cleanupKey))) {
+      await opsRetentionCleanup(env, groupId, now).catch(error => console.warn("营运资料清理失败", groupId, error));
+      await dbPut(env, cleanupKey, String(now));
+    }
+    if (settings.anomalyDetectionEnabled) {
+      const audits = await readJson(env, `audit:system:group:${groupId}`, []);
+      const recent = audits.filter(item => now - Date.parse(item.at || 0) <= 60000);
+      const failures = recent.filter(item => /failed|error|residual|tripped/i.test(`${item.type || ""} ${item.action || ""} ${item.result || ""}`));
+      if (failures.length >= settings.fuseFailureThreshold * 2) {
+        await writeSystemAudit(env, { type: "ops_anomaly", groupId, actorId: "system", action: "high_failure_burst", count: failures.length });
+      }
+    }
+  }
+}
+
+async function handleOpsPortalApi(request, env, url, path, body, authed) {
+  if (!path.startsWith("/ops/")) return null;
+  const groupId = String(authed.groupId || "");
+  if (!groupId) return jsonResponse({ ok: false, message: "请先选择群组。" }, 400);
+
+  if (request.method === "GET" && path === "/ops/bootstrap") {
+    const gate = await opsRequire(env, authed, "operations.view");
+    if (!gate.ok) return gate.response;
+    const settings = await opsGetSettings(env, groupId);
+    const capabilities = [];
+    for (const def of OPS_CAPABILITIES) {
+      capabilities.push({ ...def, ...(await opsEffectiveCapability(env, { groupId, qq: authed.qq, role: authed.role, capability: def.id })) });
+    }
+    const summaries = {};
+    for (const type of Object.keys(OPS_RECORD_TYPES)) summaries[type] = (await opsListRecords(env, type, { groupId, qq: authed.qq, role: authed.role, limit: 100 })).length;
+    return jsonResponse({ ok: true, version: VERSION, settings, capabilities, recordTypes: OPS_RECORD_TYPES, summaries });
+  }
+
+  if (request.method === "GET" && path === "/ops/records") {
+    const type = String(url.searchParams.get("type") || "");
+    const def = opsTypeDef(type);
+    if (!def) return jsonResponse({ ok: false, message: "未知记录类型。" }, 400);
+    const viewCap = type === "activity" ? "activity.view"
+      : type === "poll" ? "poll.view"
+      : ["faq", "knowledge"].includes(type) ? "knowledge.view"
+      : type === "quality_feedback" ? (opsRoleRank(authed.role) >= opsRoleRank("admin") ? "quality.manage" : "quality.report")
+      : type === "suggestion" ? (opsRoleRank(authed.role) >= opsRoleRank("admin") ? "suggestion.manage" : "suggestion.create")
+      : type === "bug" ? (opsRoleRank(authed.role) >= opsRoleRank("admin") ? "bug.manage" : "bug.create")
+      : def.capability;
+    const gate = await opsRequire(env, authed, viewCap);
+    if (!gate.ok) return gate.response;
+    let records = await opsListRecords(env, type, { groupId, qq: authed.qq, role: authed.role, limit: Number(url.searchParams.get("limit") || 300) });
+    if (type === "activity") {
+      const manageDecision = await opsEffectiveCapability(env, { groupId, qq: authed.qq, role: authed.role, capability: "activity.manage" });
+      const detailed = [];
+      for (const item of records) detailed.push(await opsActivitySummary(env, item, { viewerId: authed.qq, canManage: manageDecision.allowed }));
+      records = detailed;
+    }
+    if (type === "poll") {
+      const detailed = [];
+      for (const item of records) {
+        const votes = await readJson(env, opsPollVotesKey(item.id), {});
+        const counts = (item.options || []).map((_, index) => Object.values(votes).filter(v => (v.indexes || []).includes(index)).length);
+        detailed.push({ ...item, voteCounts: counts, voterCount: Object.keys(votes).length, myVote: votes[authed.qq] || null });
+      }
+      records = detailed;
+    }
+    if (type === "suggestion") {
+      const settings = await opsGetSettings(env, groupId);
+      const canResolveIdentity = isDeveloperId(env, authed.qq) && settings.suggestionDeveloperCanResolveIdentity;
+      records = await Promise.all(records.map(async item => {
+        const mine = String(item.creatorId || "") === String(authed.qq);
+        if (mine || canResolveIdentity) return item;
+        const anonymousId = `匿名-${(await sha256Hex(`${groupId}|${item.creatorId || ""}`)).slice(0, 8)}`;
+        return { ...item, creatorId: undefined, creatorName: anonymousId, anonymousId, identityPolicy: "审核画面不显示真实身份" };
+      }));
+    }
+    return jsonResponse({ ok: true, records });
+  }
+
+  if (request.method === "POST" && path === "/ops/records") {
+    const type = String(body.type || "");
+    const def = opsTypeDef(type);
+    if (!def) return jsonResponse({ ok: false, message: "未知记录类型。" }, 400);
+    const gate = await opsRequire(env, authed, def.capability);
+    if (!gate.ok) return gate.response;
+    const requestedGroups = [...new Set((Array.isArray(body.groupIds) ? body.groupIds : [groupId]).map(value => String(value || "").replace(/\D/g, "")).filter(Boolean))];
+    if (requestedGroups.some(id => id !== groupId)) {
+      const cross = await opsRequire(env, authed, type === "activity" ? "activity.cross_group" : "settings.export_import");
+      if (!cross.ok) return cross.response;
+      for (const targetGroupId of requestedGroups) {
+        const targetGate = await opsRequire(env, authed, type === "activity" ? "activity.manage" : def.capability, targetGroupId);
+        if (!targetGate.ok) return targetGate.response;
+      }
+    }
+    if (type === "activity" && String(body.activityGroupId || "").replace(/\D/g, "")) {
+      const inviteGroupGate = await opsRequire(env, authed, "activity.invite", String(body.activityGroupId).replace(/\D/g, ""));
+      if (!inviteGroupGate.ok) return inviteGroupGate.response;
+    }
+    const existing = body.id ? await readJson(env, opsRecordKey(type, body.id), null) : null;
+    if (body.id && !existing) return jsonResponse({ ok: false, message: "找不到记录。" }, 404);
+    if (existing && ["suggestion", "bug", "quality_feedback"].includes(type) && String(existing.creatorId || "") !== String(authed.qq)) {
+      const manageCap = type === "suggestion" ? "suggestion.manage" : type === "bug" ? "bug.manage" : "quality.manage";
+      const manageGate = await opsRequire(env, authed, manageCap);
+      if (!manageGate.ok) return manageGate.response;
+    }
+    const item = await opsSaveRecord(env, { type, existing, groupId, actorId: authed.qq, actorName: type === "suggestion" ? "匿名提交者" : authed.qq, data: { ...body, groupIds: requestedGroups } });
+    return jsonResponse({ ok: true, message: existing ? "记录已更新。" : "记录已建立。", item });
+  }
+
+  if (request.method === "DELETE" && path === "/ops/records") {
+    const type = String(body.type || "");
+    const id = String(body.id || "");
+    const def = opsTypeDef(type);
+    if (!def) return jsonResponse({ ok: false, message: "未知记录类型。" }, 400);
+    const existing = await readJson(env, opsRecordKey(type, id), null);
+    const deleteCap = ["suggestion", "bug", "quality_feedback"].includes(type) && existing && String(existing.creatorId || "") !== String(authed.qq)
+      ? (type === "suggestion" ? "suggestion.manage" : type === "bug" ? "bug.manage" : "quality.manage")
+      : def.capability;
+    const gate = await opsRequire(env, authed, deleteCap);
+    if (!gate.ok) return gate.response;
+    const ok = await opsDeleteRecord(env, type, id, authed.qq);
+    return jsonResponse({ ok, message: ok ? "记录已删除。" : "找不到记录。" }, ok ? 200 : 404);
+  }
+
+  if (request.method === "GET" && path === "/ops/versions") {
+    const type = String(url.searchParams.get("type") || "");
+    const id = String(url.searchParams.get("id") || "");
+    const def = opsTypeDef(type);
+    if (!def) return jsonResponse({ ok: false, message: "未知记录类型。" }, 400);
+    const gate = await opsRequire(env, authed, def.capability);
+    if (!gate.ok) return gate.response;
+    return jsonResponse({ ok: true, versions: await readJson(env, opsVersionKey(type, id), []) });
+  }
+
+  if (request.method === "POST" && path === "/ops/activity/join") {
+    const gate = await opsRequire(env, authed, "activity.join");
+    if (!gate.ok) return gate.response;
+    const activity = await readJson(env, opsRecordKey("activity", body.id), null);
+    const result = await opsJoinActivity(env, activity, { userId: authed.qq, userName: authed.qq, sourceGroupId: groupId });
+    return jsonResponse(result, result.ok ? 200 : 400);
+  }
+
+  if (request.method === "POST" && path === "/ops/activity/leave") {
+    const gate = await opsRequire(env, authed, "activity.join");
+    if (!gate.ok) return gate.response;
+    const activity = await readJson(env, opsRecordKey("activity", body.id), null);
+    const result = activity ? await opsLeaveActivity(env, activity, authed.qq) : { ok: false, message: "找不到活动。" };
+    return jsonResponse(result, result.ok ? 200 : 404);
+  }
+
+  if (request.method === "POST" && path === "/ops/activity/invite") {
+    const gate = await opsRequire(env, authed, "activity.invite");
+    if (!gate.ok) return gate.response;
+    const activity = await readJson(env, opsRecordKey("activity", body.id), null);
+    if (!activity) return jsonResponse({ ok: false, message: "找不到活动。" }, 404);
+    const targetActivityGroupId = String(activity.activityGroupId || "").replace(/\D/g, "");
+    if (!targetActivityGroupId) return jsonResponse({ ok: false, message: "此活动没有设置额外活动群。" }, 400);
+    const targetGate = await opsRequire(env, authed, "activity.invite", targetActivityGroupId);
+    if (!targetGate.ok) return targetGate.response;
+    const rows = await opsActivityParticipants(env, activity.id);
+    const participant = rows.find(item => String(item.userId) === String(body.userId));
+    if (!participant) return jsonResponse({ ok: false, message: "找不到参与者。" }, 404);
+    if (participant.status !== "confirmed") return jsonResponse({ ok: false, message: "只有正式报名者可以收到活动群邀请。" }, 400);
+    const quota = await opsConsumeQuota(env, targetActivityGroupId, authed.qq, "activityInvite", 1);
+    if (!quota.ok) return jsonResponse(quota, 429);
+    const result = await opsInviteActivityParticipant(env, activity, participant, authed.qq);
+    await dbPut(env, opsParticipantsKey(activity.id), JSON.stringify(rows));
+    await writeSystemAudit(env, { type: "ops_activity_invite", groupId, actorId: authed.qq, targetId: participant.userId, action: participant.inviteStatus, activityId: activity.id, activityGroupId: activity.activityGroupId || "" });
+    return jsonResponse(result, result.ok ? 200 : 502);
+  }
+
+  if (request.method === "POST" && path === "/ops/poll/vote") {
+    const gate = await opsRequire(env, authed, "poll.vote");
+    if (!gate.ok) return gate.response;
+    const poll = await readJson(env, opsRecordKey("poll", body.id), null);
+    const result = await opsVotePoll(env, poll, { userId: authed.qq, optionIndexes: body.optionIndexes });
+    return jsonResponse(result, result.ok ? 200 : 400);
+  }
+
+  if (request.method === "POST" && path === "/ops/message-preview") {
+    const gate = await opsRequire(env, authed, "draft.manage");
+    if (!gate.ok) return gate.response;
+    return jsonResponse(await opsPreviewMessage(env, { groupId, text: body.text, mentionIds: body.mentionIds, replyId: body.replyId, attachments: body.attachments }));
+  }
+
+  if (request.method === "GET" && path === "/ops/settings") {
+    const gate = await opsRequire(env, authed, "operations.view");
+    if (!gate.ok) return gate.response;
+    return jsonResponse({ ok: true, settings: await opsGetSettings(env, groupId) });
+  }
+
+  if (request.method === "POST" && path === "/ops/settings") {
+    const fields = body || {};
+    const capabilityFields = [
+      { cap: "quiet_hours.manage", keys: ["quietHoursEnabled", "quietStart", "quietEnd", "quietPolicy"] },
+      { cap: "retention.manage", keys: ["retentionDays"] },
+      { cap: "maintenance.manage", keys: ["maintenanceMode", "maintenanceUntil", "emergencyLock", "testMode"] },
+      { cap: "automation.fuse.manage", keys: ["fuseEnabled", "fuseFailureThreshold", "anomalyDetectionEnabled", "operationQuota"] },
+      { cap: "schedule.manage", keys: ["scheduleRetryEnabled", "scheduleRetryMax", "scheduleRetryGraceMinutes"] },
+      { cap: "todo.manage", keys: ["dailyDigestEnabled", "dailyDigestTime", "dailyDigestRecipientIds"] },
+      { cap: "rules.manage", keys: ["ruleSampleReviewPercent"] },
+      { cap: "suggestion.manage", keys: ["suggestionDeveloperCanResolveIdentity"] }
+    ];
+    for (const entry of capabilityFields) {
+      if (!entry.keys.some(key => Object.prototype.hasOwnProperty.call(fields, key))) continue;
+      const gate = await opsRequire(env, authed, entry.cap);
+      if (!gate.ok) return gate.response;
+    }
+    if (!Object.keys(fields).length) return jsonResponse({ ok: false, message: "没有可保存的设置。" }, 400);
+    const settings = await opsSaveSettings(env, groupId, fields);
+    await writeSystemAudit(env, { type: "ops_settings", groupId, actorId: authed.qq, action: "update", changedKeys: Object.keys(fields) });
+    return jsonResponse({ ok: true, message: "营运设置已保存。", settings });
+  }
+
+  if (request.method === "GET" && path === "/ops/permissions") {
+    const gate = await opsRequire(env, authed, "permissions.manage");
+    if (!gate.ok) return gate.response;
+    const targetQq = String(url.searchParams.get("qq") || authed.qq).replace(/\D/g, "");
+    const targetRole = await resolvePortalRole(env, targetQq, groupId);
+    const capabilities = [];
+    for (const def of OPS_CAPABILITIES) capabilities.push({ ...def, ...(await opsEffectiveCapability(env, { groupId, qq: targetQq, role: targetRole, capability: def.id })) });
+    return jsonResponse({ ok: true, targetQq, targetRole, capabilities });
+  }
+
+  if (request.method === "POST" && path === "/ops/permissions") {
+    const gate = await opsRequire(env, authed, "permissions.manage");
+    if (!gate.ok) return gate.response;
+    const targetQq = String(body.qq || "").replace(/\D/g, "");
+    const capability = String(body.capability || "");
+    if (!targetQq || !opsCapabilityDef(capability)) return jsonResponse({ ok: false, message: "QQ 或权限项目无效。" }, 400);
+    const expiresAt = body.expiresAt ? Number(body.expiresAt) : 0;
+    await dbPut(env, opsPermissionKey(groupId, targetQq, capability), JSON.stringify({
+      allowed: Boolean(body.allowed),
+      reason: String(body.reason || "").slice(0, 500),
+      expiresAt,
+      actorId: authed.qq,
+      updatedAt: Date.now()
+    }));
+    await writeSystemAudit(env, { type: "ops_permission", groupId, actorId: authed.qq, targetId: targetQq, action: body.allowed ? "allow" : "deny", capability, expiresAt, reason: String(body.reason || "") });
+    return jsonResponse({ ok: true, message: "功能权限已更新。" });
+  }
+
+  if (request.method === "POST" && path === "/ops/rule-sandbox") {
+    const gate = await opsRequire(env, authed, "rules.sandbox");
+    if (!gate.ok) return gate.response;
+    return jsonResponse(await opsRuleSandbox(env, { groupId, text: body.text, context: body.context, role: body.role }));
+  }
+
+  if (request.method === "POST" && path === "/ops/impact-preview") {
+    const gate = await opsRequire(env, authed, "rules.manage");
+    if (!gate.ok) return gate.response;
+    return jsonResponse(await opsImpactPreview(env, groupId, body));
+  }
+
+  if (request.method === "GET" && path === "/ops/timeline") {
+    const gate = await opsRequire(env, authed, "diagnostics.view");
+    if (!gate.ok) return gate.response;
+    const q = String(url.searchParams.get("q") || "").toLowerCase();
+    const logs = await readJson(env, `audit:system:group:${groupId}`, []);
+    return jsonResponse({ ok: true, events: logs.filter(item => !q || JSON.stringify(item).toLowerCase().includes(q)).slice(-500).reverse() });
+  }
+
+  if (request.method === "GET" && path === "/ops/analytics") {
+    const gate = await opsRequire(env, authed, "diagnostics.view");
+    if (!gate.ok) return gate.response;
+    return jsonResponse(await opsAnalytics(env, groupId));
+  }
+
+  if (request.method === "GET" && path === "/ops/dependencies") {
+    const gate = await opsRequire(env, authed, "diagnostics.view");
+    if (!gate.ok) return gate.response;
+    return jsonResponse(await opsDependencyCheck(env, groupId));
+  }
+
+  if (request.method === "POST" && path === "/ops/thinking-cleanup") {
+    const gate = await opsRequire(env, authed, "diagnostics.manage");
+    if (!gate.ok) return gate.response;
+    return jsonResponse(await opsCleanupThinking(env, groupId, body.messageIds));
+  }
+
+
+  if (request.method === "POST" && path === "/ops/versions/restore") {
+    const type = String(body.type || "");
+    const id = String(body.id || "");
+    const def = opsTypeDef(type);
+    if (!def) return jsonResponse({ ok: false, message: "未知记录类型。" }, 400);
+    const gate = await opsRequire(env, authed, def.capability);
+    if (!gate.ok) return gate.response;
+    const current = await opsGetRecord(env, type, id);
+    const versions = await readJson(env, opsVersionKey(type, id), []);
+    const version = versions[Number(body.versionIndex ?? versions.length - 1)];
+    if (!current || !version?.snapshot) return jsonResponse({ ok: false, message: "找不到可恢复版本。" }, 404);
+    const item = await opsSaveRecord(env, { type, existing: current, groupId, actorId: authed.qq, actorName: authed.qq, data: { ...version.snapshot, id: current.id } });
+    await writeSystemAudit(env, { type: "ops_version_restore", groupId, actorId: authed.qq, action: type, recordId: id, versionAt: version.at });
+    return jsonResponse({ ok: true, message: "记录已恢复为指定版本。", item });
+  }
+
+  if (request.method === "POST" && path === "/ops/schedule-preview") {
+    const gate = await opsRequire(env, authed, "schedule.view");
+    if (!gate.ok) return gate.response;
+    return jsonResponse(await opsSchedulePreview(env, { groupId, scheduleSpec: body.scheduleSpec, excludeId: body.excludeId }));
+  }
+
+  if (request.method === "POST" && path === "/ops/schedule-template/apply") {
+    const gate = await opsRequire(env, authed, "schedule.manage");
+    if (!gate.ok) return gate.response;
+    const template = await opsGetRecord(env, "schedule_template", body.id);
+    if (!template) return jsonResponse({ ok: false, message: "找不到排程模板。" }, 404);
+    const targetGroupId = String(body.targetGroupId || template.defaultGroupId || groupId).replace(/\D/g, "");
+    const targetGate = await opsRequire(env, authed, "schedule.manage", targetGroupId);
+    if (!targetGate.ok) return targetGate.response;
+    const spec = String(body.scheduleSpec || template.scheduleSpec || template.description || "").trim();
+    const result = await opsCreateScheduleFromSpec(env, { groupId: targetGroupId, actorId: authed.qq, actorRole: targetGate.role, scheduleSpec: spec, templateId: template.id });
+    return jsonResponse(result, result.ok ? 200 : 400);
+  }
+
+  if (request.method === "POST" && path === "/ops/draft/send") {
+    const gate = await opsRequire(env, authed, "draft.send");
+    if (!gate.ok) return gate.response;
+    const draft = await opsGetRecord(env, "draft", body.id);
+    if (!draft) return jsonResponse({ ok: false, message: "找不到草稿。" }, 404);
+    const targetGroupId = String(draft.targetGroupId || draft.groupId || groupId).replace(/\D/g, "");
+    const targetGate = await opsRequire(env, authed, "draft.send", targetGroupId);
+    if (!targetGate.ok) return targetGate.response;
+    const result = await opsSendDraftNow(env, { draft, groupId: targetGroupId, actorId: authed.qq });
+    return jsonResponse(result, result.ok ? 200 : 502);
+  }
+
+  if (request.method === "POST" && path === "/ops/draft/to-schedule") {
+    const draftGate = await opsRequire(env, authed, "draft.send");
+    if (!draftGate.ok) return draftGate.response;
+    const scheduleGate = await opsRequire(env, authed, "schedule.manage");
+    if (!scheduleGate.ok) return scheduleGate.response;
+    const draft = await opsGetRecord(env, "draft", body.id);
+    if (!draft) return jsonResponse({ ok: false, message: "找不到草稿。" }, 404);
+    const targetGroupId = String(draft.targetGroupId || draft.groupId || groupId).replace(/\D/g, "");
+    const targetGate = await opsRequire(env, authed, "schedule.manage", targetGroupId);
+    if (!targetGate.ok) return targetGate.response;
+    let spec = String(body.scheduleSpec || "").trim();
+    if (!spec && body.when) spec = `${String(body.when).trim()} ${String(draft.text || draft.description || "").trim()}`;
+    const result = await opsCreateScheduleFromSpec(env, { groupId: targetGroupId, actorId: authed.qq, actorRole: targetGate.role, scheduleSpec: spec, draftId: draft.id });
+    return jsonResponse(result, result.ok ? 200 : 400);
+  }
+
+  if (request.method === "GET" && path === "/ops/tasks") {
+    const gate = await opsRequire(env, authed, "task.view");
+    if (!gate.ok) return gate.response;
+    return jsonResponse(await opsTaskCenter(env, groupId, Number(url.searchParams.get("limit") || 300)));
+  }
+
+  if (request.method === "POST" && path === "/ops/tasks/action") {
+    const gate = await opsRequire(env, authed, "task.manage");
+    if (!gate.ok) return gate.response;
+    const result = await opsTaskAction(env, { groupId, actorId: authed.qq, kind: String(body.kind || ""), id: String(body.id || ""), action: String(body.action || "") });
+    await writeSystemAudit(env, { type: "ops_task_action", groupId, actorId: authed.qq, action: String(body.action || ""), taskKind: String(body.kind || ""), taskId: String(body.id || ""), result: result.message });
+    return jsonResponse(result, result.ok ? 200 : 400);
+  }
+
+  if (request.method === "POST" && path === "/ops/quality-feedback") {
+    const gate = await opsRequire(env, authed, "quality.report");
+    if (!gate.ok) return gate.response;
+    return jsonResponse(await opsRecordQualityFeedback(env, { groupId, actorId: authed.qq, actorName: authed.qq, body }));
+  }
+
+  if (request.method === "GET" && path === "/ops/model-metrics") {
+    const gate = await opsRequire(env, authed, "model.analytics.view");
+    if (!gate.ok) return gate.response;
+    return jsonResponse(await opsModelMetrics(env, groupId, Number(url.searchParams.get("days") || 7)));
+  }
+
+  if (request.method === "GET" && path === "/ops/rule-conflicts") {
+    const gate = await opsRequire(env, authed, "rules.manage");
+    if (!gate.ok) return gate.response;
+    const active = await opsActiveRuleRecords(env, groupId);
+    return jsonResponse({ ok: true, conflicts: opsRuleConflictCheck([...active.tempRules, ...active.exceptions, ...active.priorities]), active });
+  }
+
+  if (request.method === "GET" && path === "/ops/fuses") {
+    const gate = await opsRequire(env, authed, "diagnostics.view");
+    if (!gate.ok) return gate.response;
+    const features = ["schedule", "rule_monitor", "join_review", "thinking_cleanup", "bilibili"];
+    const states = [];
+    for (const feature of features) states.push(await opsFuseState(env, groupId, feature));
+    return jsonResponse({ ok: true, states });
+  }
+
+  if (request.method === "POST" && path === "/ops/fuses/reset") {
+    const gate = await opsRequire(env, authed, "automation.fuse.manage");
+    if (!gate.ok) return gate.response;
+    return jsonResponse({ ok: true, state: await opsResetFuse(env, groupId, String(body.feature || "schedule"), authed.qq), message: "保险丝已重置。" });
+  }
+
+  if (request.method === "POST" && path === "/ops/retention/run") {
+    const gate = await opsRequire(env, authed, "retention.manage");
+    if (!gate.ok) return gate.response;
+    return jsonResponse(await opsRetentionCleanup(env, groupId));
+  }
+
+  if (request.method === "POST" && path === "/ops/digest/run") {
+    const gate = await opsRequire(env, authed, "todo.manage");
+    if (!gate.ok) return gate.response;
+    await dbDel(env, `ops:digest:sent:${groupId}:${opsTaipeiDateKey()}`);
+    return jsonResponse(await opsSendDailyDigest(env, groupId));
+  }
+
+  if (request.method === "GET" && path === "/ops/member-summary") {
+    const gate = await opsRequire(env, authed, "member.summary.view");
+    if (!gate.ok) return gate.response;
+    const userId = String(url.searchParams.get("qq") || "").replace(/\D/g, "");
+    if (!userId) return jsonResponse({ ok: false, message: "请提供目标 QQ。" }, 400);
+    return jsonResponse(await opsMemberSummary(env, groupId, userId));
+  }
+
+  if (request.method === "POST" && path === "/ops/welcome-preview") {
+    const gate = await opsRequire(env, authed, "knowledge.manage");
+    if (!gate.ok) return gate.response;
+    const userId = String(body.userId || "").replace(/\D/g, "");
+    if (!userId) return jsonResponse({ ok: false, message: "请提供目标 QQ。" }, 400);
+    return jsonResponse(await opsWelcomePreview(env, groupId, { userId, templateId: body.templateId, text: body.text }));
+  }
+
+  if (request.method === "POST" && path === "/ops/announcement/publish") {
+    const gate = await opsRequire(env, authed, "announcement.publish");
+    if (!gate.ok) return gate.response;
+    const record = await opsGetRecord(env, "announcement_version", body.id);
+    const result = await opsPublishAnnouncement(env, { groupId, actorId: authed.qq, record, asTodo: Boolean(body.asTodo) });
+    return jsonResponse(result, result.ok ? 200 : 400);
+  }
+
+  if (request.method === "POST" && path === "/ops/handoff") {
+    const gate = await opsRequire(env, authed, "handoff.manage");
+    if (!gate.ok) return gate.response;
+    const result = await opsExecuteHandoff(env, { groupId, actorId: authed.qq, actorRole: gate.role, body });
+    return jsonResponse(result, result.ok ? 200 : 400);
+  }
+
+  if (request.method === "POST" && path === "/ops/appeal/message") {
+    const gate = await opsRequire(env, authed, "appeal.manage");
+    if (!gate.ok) return gate.response;
+    const item = await opsGetRecord(env, "appeal_thread", body.id);
+    if (!item) return jsonResponse({ ok: false, message: "找不到申诉对话串。" }, 404);
+    const text = String(body.text || "").trim().slice(0, 4000);
+    if (!text) return jsonResponse({ ok: false, message: "消息不能为空。" }, 400);
+    item.messages = [...(Array.isArray(item.messages) ? item.messages : []), { at: Date.now(), actorId: authed.qq, actorRole: authed.role, text }].slice(-200);
+    item.status = String(body.status || item.status || "pending");
+    item.updatedAt = Date.now();
+    await dbPut(env, opsRecordKey("appeal_thread", item.id), JSON.stringify(item));
+    return jsonResponse({ ok: true, message: "申诉对话已更新。", item });
+  }
+
+  if (request.method === "POST" && path === "/ops/activity/invite-all") {
+    const gate = await opsRequire(env, authed, "activity.invite");
+    if (!gate.ok) return gate.response;
+    const activity = await opsGetRecord(env, "activity", body.id);
+    if (!activity) return jsonResponse({ ok: false, message: "找不到活动。" }, 404);
+    const targetGroupId = String(activity.activityGroupId || "").replace(/\D/g, "");
+    if (!targetGroupId) return jsonResponse({ ok: false, message: "活动没有设置活动群。" }, 400);
+    const targetGate = await opsRequire(env, authed, "activity.invite", targetGroupId);
+    if (!targetGate.ok) return targetGate.response;
+    const settings = await opsGetSettings(env, targetGroupId);
+    const cursor = Math.max(0, Number(body.cursor || 0));
+    const requestedLimit = Math.max(1, Number(body.limit || settings.operationQuota.activityInviteBatchMax));
+    const batchLimit = Math.min(settings.operationQuota.activityInviteBatchMax, requestedLimit);
+    const rows = await opsActivityParticipants(env, activity.id);
+    const eligible = rows.filter(item => item.status === "confirmed" && !["already_member", "pending_request_approved", "group_card_sent"].includes(String(item.inviteStatus || "")));
+    const batch = eligible.slice(cursor, cursor + batchLimit);
+    if (!batch.length) return jsonResponse({ ok: true, results: [], completed: true, remaining: 0, message: "没有尚待邀请的正式报名者。" });
+    const quota = await opsConsumeQuota(env, targetGroupId, authed.qq, "activityInvite", batch.length);
+    if (!quota.ok) return jsonResponse(quota, 429);
+    const results = [];
+    for (const participant of batch) {
+      results.push({ userId: participant.userId, ...(await opsInviteActivityParticipant(env, activity, participant, authed.qq)) });
+    }
+    await dbPut(env, opsParticipantsKey(activity.id), JSON.stringify(rows));
+    const remaining = Math.max(0, eligible.length - cursor - batch.length);
+    const nextCursor = remaining > 0 ? cursor + batch.length : null;
+    return jsonResponse({
+      ok: results.every(item => item.ok),
+      results,
+      completed: remaining === 0,
+      nextCursor,
+      remaining,
+      batchLimit,
+      message: `本批已处理 ${results.length} 位，尚余 ${remaining} 位。为避免 Worker 超时与 QQ 风控，批次上限为 ${batchLimit}。`
+    });
+  }
+
+  if (request.method === "POST" && path === "/ops/poll/close") {
+    const gate = await opsRequire(env, authed, "poll.manage");
+    if (!gate.ok) return gate.response;
+    const poll = await opsGetRecord(env, "poll", body.id);
+    if (!poll) return jsonResponse({ ok: false, message: "找不到投票。" }, 404);
+    poll.status = "closed";
+    poll.closedAt = Date.now();
+    poll.closedBy = authed.qq;
+    await dbPut(env, opsRecordKey("poll", poll.id), JSON.stringify(poll));
+    return jsonResponse({ ok: true, message: "投票已结束。", poll });
+  }
+
+  if (request.method === "POST" && path === "/ops/snapshot") {
+    const gate = await opsRequire(env, authed, "deployment.manage");
+    if (!gate.ok) return gate.response;
+    return jsonResponse(await opsSnapshotConfig(env, groupId, authed.qq, body.title));
+  }
+
+  if (request.method === "POST" && path === "/ops/snapshot/restore") {
+    const gate = await opsRequire(env, authed, "deployment.manage");
+    if (!gate.ok) return gate.response;
+    const result = await opsRestoreSnapshot(env, groupId, authed.qq, String(body.id || ""), body.previewOnly !== false);
+    return jsonResponse(result, result.ok ? 200 : 400);
+  }
+
+  if (request.method === "GET" && path === "/ops/export") {
+    const gate = await opsRequire(env, authed, "settings.export_import");
+    if (!gate.ok) return gate.response;
+    const records = {};
+    for (const type of Object.keys(OPS_RECORD_TYPES)) {
+      if (["suggestion", "bug", "appeal_thread"].includes(type)) continue;
+      records[type] = await opsListRecords(env, type, { groupId, qq: authed.qq, role: authed.role, limit: 2000 });
+    }
+    const payload = {
+      schema: "qqai-ops-v1",
+      version: VERSION,
+      exportedAt: new Date().toISOString(),
+      groupId,
+      settings: await opsGetSettings(env, groupId),
+      records,
+      portalSettings: Object.fromEntries(await Promise.all(PORTAL_SETTING_DEFINITIONS.filter(def => def.scope === "group").map(async def => [def.key, await readPortalSettingValue(env, def, groupId, authed.qq)])))
+    };
+    return jsonResponse({ ok: true, payload });
+  }
+
+  if (request.method === "POST" && path === "/ops/import") {
+    const gate = await opsRequire(env, authed, "settings.export_import");
+    if (!gate.ok) return gate.response;
+    const payload = body.payload || {};
+    if (payload.schema !== "qqai-ops-v1") return jsonResponse({ ok: false, message: "不支持的汇入格式。" }, 400);
+    if (body.previewOnly !== false) {
+      const counts = Object.fromEntries(Object.entries(payload.records || {}).map(([type, rows]) => [type, Array.isArray(rows) ? rows.length : 0]));
+      return jsonResponse({ ok: true, preview: true, counts, settings: payload.settings || {}, message: "这是差异预览，尚未写入。" });
+    }
+    const settings = await opsSaveSettings(env, groupId, payload.settings || {});
+    let imported = 0;
+    for (const [type, rows] of Object.entries(payload.records || {})) {
+      if (!opsTypeDef(type) || !Array.isArray(rows)) continue;
+      for (const row of rows.slice(0, 2000)) {
+        await opsSaveRecord(env, { type, groupId, actorId: authed.qq, actorName: authed.qq, data: { ...row, id: undefined, groupId, groupIds: [groupId], importedFrom: payload.groupId || "" } });
+        imported += 1;
+      }
+    }
+    await writeSystemAudit(env, { type: "ops_import", groupId, actorId: authed.qq, action: "import", imported });
+    return jsonResponse({ ok: true, message: `已汇入 ${imported} 笔记录。`, settings });
+  }
+
+  if (request.method === "POST" && path === "/ops/predeploy") {
+    const gate = await opsRequire(env, authed, "deployment.manage");
+    if (!gate.ok) return gate.response;
+    const dependencies = await opsDependencyCheck(env, groupId);
+    const quickHealth = await runHealthChecks(env, { mode: "quick" });
+    return jsonResponse({ ok: dependencies.ok && quickHealth.ok, dependencies, health: quickHealth, version: VERSION, message: "这里只执行非破坏性检查；不会自动向正式群发送测试消息。" });
+  }
+
+  return jsonResponse({ ok: false, message: "未知营运中心接口。" }, 404);
+}
+
+
 async function handlePortalApi(request, env, url) {
   const body = request.method === "GET" ? {} : await request.json().catch(() => ({}));
   const token = request.headers.get("Authorization")?.replace(/^Bearer\s+/i, "") || readCookie(request, "qqai_session") || body.token || url.searchParams.get("token") || "";
@@ -8507,6 +10513,9 @@ async function handlePortalApi(request, env, url) {
   const permissions = groupId ? await getEffectivePermissions(env, groupId, session.qq, role, role === "developer") : session.permissions || {};
   const authed = { ...session, groupId, role, permissions };
   const portalIsDeveloper = permissions.developer || isDeveloperId(env, authed.qq);
+
+  const operationsResponse = await handleOpsPortalApi(request, env, url, path, body, authed);
+  if (operationsResponse) return operationsResponse;
 
   if (request.method === "GET" && path === "/me") {
     return jsonResponse({
@@ -10090,7 +12099,7 @@ function activeTheme(){return document.documentElement.dataset.theme==='dark'?'d
 function updateThemeButtons(){var dark=activeTheme()==='dark';if($('loginThemeToggle'))$('loginThemeToggle').textContent=dark?'切换白色模式':'切换黑色模式';if($('themeToggle'))$('themeToggle').textContent=dark?'白色模式':'黑色模式'}
 function setTheme(theme){var next=theme==='dark'?'dark':'light';document.documentElement.dataset.theme=next;try{localStorage.setItem('qqai_theme',next)}catch(e){}updateThemeButtons()}
 function toggleTheme(){setTheme(activeTheme()==='dark'?'light':'dark')}
-var titles={overview:'总览',health:'健康检查',tasks:'任务与等待队列',schedules:'排程管理',moderation:'待确认操作',simulator:'事件模拟器',models:'模型中心',quota:'额度与限制',groups:'群组设置',memory:'记忆管理',logs:'操作日志',aidecisions:'AI 回复记录',appeals:'匿名申诉',appealreview:'申诉处理',violationhistory:'历史违规记录',conversations:'对话记录',platform:'功能权限中心'};
+var titles={overview:'总览',health:'健康检查',tasks:'任务与等待队列',schedules:'排程管理',moderation:'待确认操作',simulator:'事件模拟器',models:'模型中心',quota:'额度与限制',groups:'群组设置',memory:'记忆管理',logs:'操作日志',aidecisions:'AI 回复记录',appeals:'匿名申诉',appealreview:'申诉处理',violationhistory:'历史违规记录',conversations:'对话记录',platform:'功能权限中心',operations:'营运与活动中心'};
 function esc(v){return String(v==null?'':v).replace(/[&<>"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]})}
 function toast(msg){$('toast').textContent=String(msg||'');$('toast').classList.remove('hidden');clearTimeout(toast.t);toast.t=setTimeout(function(){$('toast').classList.add('hidden')},3200)}
 async function raw(path,method,data){try{var opt={method:method||'GET',headers:{},credentials:'same-origin',cache:'no-store'};if(data!==undefined){opt.headers['Content-Type']='application/json';opt.body=JSON.stringify(data)}var r=await fetch(path,opt);var j=await r.json().catch(function(){return{ok:false,message:'无法解析服务器响应'}});if(!r.ok&&!j.message)j.message='HTTP '+r.status;return j}catch(e){return{ok:false,message:'网络请求失败：'+String(e&&e.message||e)}}}
@@ -10101,12 +12110,94 @@ function customDialog(message,options){ensureModal();options=options||{};return 
 function confirmModal(message,title,options){return customDialog(message,Object.assign({title:title||'确认操作'},options||{}))}
 function textModal(message,value,title,options){return customDialog(message,Object.assign({title:title||'编辑内容',input:true,value:value||''},options||{}))}
 function portalRoleLabel(role){return({developer:'开发者',owner:'群主',admin:'QQ 管理员',member:'群成员'})[String(role||'member')]||String(role||'群成员')}
-function applyRoleVisibility(){if(!session)return;var p=session.permissions||{},role=session.role||'member';document.querySelectorAll('#nav button').forEach(function(b){var v=b.dataset.view,show=true;if(role==='member'&&!['overview','schedules','models','memory','appeals','violationhistory','settingscenter'].includes(v))show=false;if(role==='admin'&&['quota','health'].includes(v))show=false;if(role==='owner'&&v==='quota')show=false;if(v==='quota'&&!p.developer)show=false;b.style.display=show?'':'none'});refreshSidebarGroupVisibility()}
+function applyRoleVisibility(){if(!session)return;var p=session.permissions||{},role=session.role||'member';document.querySelectorAll('#nav button').forEach(function(b){var v=b.dataset.view,show=true;if(role==='member'&&!['overview','schedules','models','memory','appeals','violationhistory','settingscenter','operations'].includes(v))show=false;if(role==='admin'&&['quota','health'].includes(v))show=false;if(role==='owner'&&v==='quota')show=false;if(v==='quota'&&!p.developer)show=false;b.style.display=show?'':'none'});refreshSidebarGroupVisibility()}
+
+var opsBootstrap=null;var opsCurrentType='activity';
+function ensureOpsView(){
+  if($('v-operations'))return;
+  var b=document.createElement('button');b.dataset.view='operations';b.textContent='营运与活动';$('nav').appendChild(b);b.onclick=function(){showView('operations')};
+  var v=document.createElement('section');v.id='v-operations';v.className='view';
+  v.innerHTML='<div class="section-head"><div><h2>营运与活动中心</h2><p>活动、投票、草稿、排程模板、待办、知识、群规版本、维护、诊断与细分权限统一管理。所有读取、建立、修改、执行和恢复动作都会由后端重新检查对应权限。</p></div><button id="opsReload" class="btn">重新加载</button></div>'
+    +'<div id="opsSummary" class="grid" style="margin-bottom:16px"></div>'
+    +'<div class="grid">'
+    +'<div class="card span-5"><h3>建立／编辑记录</h3><div class="field"><label>类型</label><select id="opsType"></select></div><div class="field"><label>标题</label><input id="opsTitle"></div><div class="field"><label>说明／内容</label><textarea id="opsDescription"></textarea></div><div class="field"><label>跨独立群统整群号（活动可用，逗号分隔）</label><input id="opsGroupIds" placeholder="留空＝当前群"></div><div class="field"><label>额外活动群号（活动可选）</label><input id="opsActivityGroup" inputmode="numeric"></div><div class="row"><div class="field grow"><label>人数上限（0＝不限）</label><input id="opsCapacity" type="number" min="0" value="0"></div><div class="field grow"><label>选项（投票，一行一个）</label><textarea id="opsOptions"></textarea></div></div><details><summary>进阶参数 JSON</summary><div class="field"><textarea id="opsAdvancedJson" placeholder="例如：{&quot;scheduleSpec&quot;:&quot;每天 08:00 早安&quot;,&quot;expiresAt&quot;:1760000000000,&quot;priority&quot;:10}"></textarea></div></details><button id="opsCreate" class="btn primary" style="width:100%">建立记录</button><div class="notice">跨独立群活动会统整到同一活动 ID；建立者必须在所有报名来源群拥有活动管理权限，在额外活动群拥有邀请权限。</div></div>'
+    +'<div class="card span-7"><div class="row"><h3 class="grow">记录列表</h3><select id="opsListType"></select><button id="opsLoadRecords" class="btn">读取</button></div><div id="opsRecordList" class="list"><div class="empty">尚未加载</div></div></div>'
+    +'<div class="card span-6"><h3>安静时段、重试、摘要与保险丝</h3><label class="switch"><input id="opsQuietEnabled" type="checkbox">启用安静时段</label><div class="row"><input id="opsQuietStart" value="23:00"><input id="opsQuietEnd" value="08:00"><select id="opsQuietPolicy"><option value="defer">延后发送</option><option value="skip">略过</option><option value="admin_only">只通知管理</option><option value="send">照常发送</option></select></div><label class="switch"><input id="opsMaintenance" type="checkbox">维护模式</label><label class="switch"><input id="opsEmergency" type="checkbox">群主紧急锁定</label><label class="switch"><input id="opsFuse" type="checkbox">自动化保险丝</label><label class="switch"><input id="opsAnomaly" type="checkbox">大量异常侦测</label><label class="switch"><input id="opsScheduleRetry" type="checkbox">排程失败自动补发</label><div class="row"><div class="field grow"><label>最多重试</label><input id="opsScheduleRetryMax" type="number" min="0" max="10"></div><div class="field grow"><label>最晚补发（分钟）</label><input id="opsScheduleGrace" type="number" min="1" max="1440"></div></div><label class="switch"><input id="opsDigestEnabled" type="checkbox">每日待处理摘要</label><div class="row"><input id="opsDigestTime" value="09:00"><input id="opsDigestRecipients" placeholder="接收者 QQ，逗号分隔"></div><div class="row"><div class="field grow"><label>资料保留天数</label><input id="opsRetention" type="number" min="1" max="3650"></div><div class="field grow"><label>无违规抽样复核％</label><input id="opsSamplePercent" type="number" min="0" max="100"></div></div><button id="opsSaveSettings" class="btn primary">保存设置</button></div>'
+    +'<div class="card span-6"><h3>消息与排程预览</h3><div class="field"><label>文字</label><textarea id="opsPreviewText"></textarea></div><div class="field"><label>真正 @ 的 QQ（逗号分隔）</label><input id="opsPreviewMentions"></div><button id="opsPreviewBtn" class="btn">检查消息</button><div class="field"><label>排程格式</label><textarea id="opsScheduleSpec" placeholder="例如：每天 18:00 @907474476 记得更新"></textarea></div><button id="opsSchedulePreviewBtn" class="btn">预览未来 5 次与冲突</button><pre id="opsPreviewResult" style="white-space:pre-wrap;max-height:360px;overflow:auto"></pre></div>'
+    +'<div class="card span-6"><h3>统一任务中心</h3><div class="row"><button id="opsTaskReload" class="btn">读取任务</button><button id="opsDigestRun" class="btn">立即发送摘要</button><button id="opsRetentionRun" class="btn danger">立即清理过期资料</button></div><div id="opsTaskList" class="list"><div class="empty">尚未加载</div></div></div>'
+    +'<div class="card span-6"><h3>细分权限</h3><div class="row"><input id="opsPermQq" inputmode="numeric" placeholder="目标 QQ"><button id="opsPermLoad" class="btn">读取权限</button></div><div id="opsPermList" class="list"><div class="empty">群主或获授权者可管理。</div></div></div>'
+    +'<div class="card span-6"><h3>成员、交接与快照</h3><div class="row"><input id="opsMemberQq" inputmode="numeric" placeholder="成员 QQ"><button id="opsMemberBtn" class="btn">成员事实摘要</button><button id="opsWelcomeBtn" class="btn">欢迎预览</button></div><div class="row"><select id="opsHandoffMode"><option value="portal">Portal 权限交接</option><option value="qq_admin">QQ 管理员交接（Bot 必须为群主）</option></select><input id="opsHandoffQq" inputmode="numeric" placeholder="目标 QQ"></div><div class="field"><label>交接原因（必填）</label><input id="opsHandoffReason"></div><div class="field"><label>Portal 权限 ID（逗号分隔）</label><input id="opsHandoffCaps" placeholder="例如：activity.manage,todo.manage"></div><div class="row"><button id="opsHandoffGrant" class="btn primary">执行交接／新增管理</button><button id="opsHandoffRevoke" class="btn danger">撤销 QQ 管理员</button></div><div class="row"><button id="opsSnapshotBtn" class="btn">建立设置快照</button><button id="opsModelMetrics" class="btn">模型用量</button><button id="opsRuleConflicts" class="btn">规则冲突</button><button id="opsFuses" class="btn">保险丝状态</button></div></div>'
+    +'<div class="card span-6"><h3>诊断与测试</h3><div class="row"><button id="opsDeps" class="btn">依赖检查</button><button id="opsAnalytics" class="btn">统计</button><button id="opsTimeline" class="btn">事件时间线</button><button id="opsThinking" class="btn danger">清理思考残留</button></div><div class="field"><label>群规沙盒讯息</label><textarea id="opsSandboxText"></textarea></div><button id="opsSandbox" class="btn">测试群规（不处罚）</button><pre id="opsDiagnostics" style="white-space:pre-wrap;max-height:520px;overflow:auto"></pre></div>'
+    +'</div>';
+  document.querySelector('.content').appendChild(v);
+  $('opsReload').onclick=loadOperations;$('opsCreate').onclick=opsCreateRecord;$('opsLoadRecords').onclick=opsLoadRecords;$('opsSaveSettings').onclick=opsSaveSettings;$('opsPreviewBtn').onclick=opsPreviewMessage;$('opsSchedulePreviewBtn').onclick=opsSchedulePreviewUi;$('opsTaskReload').onclick=opsLoadTasks;$('opsDigestRun').onclick=function(){opsUtilityPost('/ops/digest/run',{})};$('opsRetentionRun').onclick=function(){opsUtilityPost('/ops/retention/run',{})};$('opsPermLoad').onclick=opsLoadPermissions;$('opsMemberBtn').onclick=opsMemberSummaryUi;$('opsWelcomeBtn').onclick=opsWelcomePreviewUi;$('opsHandoffGrant').onclick=function(){opsHandoffUi(true)};$('opsHandoffRevoke').onclick=function(){opsHandoffUi(false)};$('opsSnapshotBtn').onclick=opsSnapshotUi;$('opsModelMetrics').onclick=function(){opsDiagnostic('/ops/model-metrics')};$('opsRuleConflicts').onclick=function(){opsDiagnostic('/ops/rule-conflicts')};$('opsFuses').onclick=function(){opsDiagnostic('/ops/fuses')};$('opsDeps').onclick=function(){opsDiagnostic('/ops/dependencies')};$('opsAnalytics').onclick=function(){opsDiagnostic('/ops/analytics')};$('opsTimeline').onclick=function(){opsDiagnostic('/ops/timeline')};$('opsThinking').onclick=opsCleanupThinking;$('opsSandbox').onclick=opsRunSandbox;
+}
+
+function opsTypeOptions(){var defs=(opsBootstrap&&opsBootstrap.recordTypes)||{};return Object.keys(defs).map(function(k){return '<option value="'+esc(k)+'">'+esc(defs[k].name)+'（'+esc(k)+'）</option>'}).join('')}
+function opsHas(cap){var row=((opsBootstrap&&opsBootstrap.capabilities)||[]).find(function(x){return x.id===cap});return !!(row&&row.allowed)}
+async function loadOperations(){
+  if(!currentGroup){$('opsRecordList').innerHTML='<div class="empty">请先选择群组。</div>';return}
+  var r=await api('/ops/bootstrap');if(!r.ok){$('opsSummary').innerHTML='<div class="empty span-12">'+esc(r.message)+'</div>';return}opsBootstrap=r;
+  $('opsType').innerHTML=opsTypeOptions();$('opsListType').innerHTML=opsTypeOptions();$('opsType').value=opsCurrentType;$('opsListType').value=opsCurrentType;
+  var s=r.settings||{};$('opsQuietEnabled').checked=!!s.quietHoursEnabled;$('opsQuietStart').value=s.quietStart||'23:00';$('opsQuietEnd').value=s.quietEnd||'08:00';$('opsQuietPolicy').value=s.quietPolicy||'defer';$('opsMaintenance').checked=!!s.maintenanceMode;$('opsEmergency').checked=!!s.emergencyLock;$('opsFuse').checked=s.fuseEnabled!==false;$('opsAnomaly').checked=s.anomalyDetectionEnabled!==false;$('opsScheduleRetry').checked=s.scheduleRetryEnabled!==false;$('opsScheduleRetryMax').value=Number(s.scheduleRetryMax||3);$('opsScheduleGrace').value=Number(s.scheduleRetryGraceMinutes||30);$('opsDigestEnabled').checked=!!s.dailyDigestEnabled;$('opsDigestTime').value=s.dailyDigestTime||'09:00';$('opsDigestRecipients').value=(s.dailyDigestRecipientIds||[]).join(',');$('opsRetention').value=s.retentionDays||90;$('opsSamplePercent').value=Number(s.ruleSampleReviewPercent||0);
+  var caps=(r.capabilities||[]),allowed=caps.filter(function(x){return x.allowed}).length,total=caps.length,records=Object.values(r.summaries||{}).reduce(function(a,b){return a+Number(b||0)},0);
+  $('opsSummary').innerHTML='<div class="card span-4"><div class="metric-label">可用权限</div><div class="metric-value">'+allowed+'/'+total+'</div></div><div class="card span-4"><div class="metric-label">营运记录</div><div class="metric-value">'+records+'</div></div><div class="card span-4"><div class="metric-label">版本</div><div class="metric-value">'+esc(r.version)+'</div></div>';
+  $('opsCreate').disabled=!opsHas(((r.recordTypes||{})[$('opsType').value]||{}).capability||'operations.view');
+  await opsLoadRecords();
+}
+async function opsCreateRecord(){
+  var type=$('opsType').value,title=$('opsTitle').value.trim(),description=$('opsDescription').value.trim();if(!title)return toast('请填写标题');
+  var advanced={};var raw=$('opsAdvancedJson').value.trim();if(raw){try{advanced=JSON.parse(raw)}catch(e){return toast('进阶参数 JSON 格式错误')}}
+  var data=Object.assign({},advanced,{type:type,title:title,description:description,groupIds:$('opsGroupIds').value.split(/[,，\s]+/).filter(Boolean),activityGroupId:$('opsActivityGroup').value,capacity:Number($('opsCapacity').value||0),options:$('opsOptions').value.split(/\n/).map(function(x){return x.trim()}).filter(Boolean),waitlistEnabled:advanced.waitlistEnabled!==false,inviteMode:$('opsActivityGroup').value?(advanced.inviteMode||'approve_pending'):(advanced.inviteMode||'none')});
+  var r=await api('/ops/records','POST',data);toast(r.message||'完成');if(r.ok){$('opsTitle').value='';$('opsDescription').value='';$('opsOptions').value='';$('opsAdvancedJson').value='';opsCurrentType=type;$('opsListType').value=type;opsLoadRecords()}
+}
+function opsRecordCard(x,type){
+  var meta=(x.id||'')+'｜'+(x.status||'')+'｜'+new Date(Number(x.updatedAt||x.createdAt||0)).toLocaleString();
+  if(type==='activity')meta+='｜正式 '+Number(x.confirmedCount||0)+(x.capacity?'/'+x.capacity:'')+'｜候补 '+Number(x.waitlistCount||0)+'｜统整群 '+(x.groupIds||[]).join(',')+(x.activityGroupId?'｜活动群 '+x.activityGroupId:'');
+  if(type==='poll')meta+='｜投票人数 '+Number(x.voterCount||0);
+  if(x.publicCode)meta+='｜'+x.publicCode;
+  var extra='',buttons=['<button class="btn" data-ops-versions="'+esc(x.id)+'">版本</button>','<button class="btn danger" data-ops-delete="'+esc(x.id)+'">删除</button>'];
+  if(type==='activity'){
+    buttons.unshift('<button class="btn primary" data-ops-join="'+esc(x.id)+'">报名</button>','<button class="btn" data-ops-leave="'+esc(x.id)+'">取消报名</button>');if(x.activityGroupId)buttons.unshift('<button class="btn" data-ops-invite-all="'+esc(x.id)+'">邀请全部正式报名者</button>');
+    extra='<div class="list" style="margin-top:10px">'+(x.participants||[]).map(function(p){return '<div class="item"><div class="row"><div class="grow"><b>'+esc(p.userName||p.userId)+'</b><div class="item-meta">'+esc(p.userId)+'｜'+esc(p.status)+'｜来源群 '+esc(p.sourceGroupId||'')+'｜邀请 '+esc(p.inviteStatus||'未发送')+'</div></div><button class="btn" data-ops-invite="'+esc(x.id)+'" data-user="'+esc(p.userId)+'">邀请活动群</button></div></div>'}).join('')+'</div>';
+  }
+  if(type==='poll'){extra='<div class="row" style="margin-top:10px">'+(x.options||[]).map(function(o,i){var c=(x.voteCounts||[])[i]||0;return '<button class="btn" data-ops-vote="'+esc(x.id)+'" data-option="'+i+'">'+esc(o)+'（'+c+'）</button>'}).join('')+'</div>';buttons.unshift('<button class="btn" data-ops-poll-close="'+esc(x.id)+'">结束投票</button>')}
+  if(type==='schedule_template')buttons.unshift('<button class="btn primary" data-ops-template-apply="'+esc(x.id)+'">套用模板</button>');
+  if(type==='draft')buttons.unshift('<button class="btn primary" data-ops-draft-send="'+esc(x.id)+'">立即发送</button>','<button class="btn" data-ops-draft-schedule="'+esc(x.id)+'">转为排程</button>');
+  if(type==='announcement_version')buttons.unshift('<button class="btn primary" data-ops-announcement="'+esc(x.id)+'">建立公告确认单</button>','<button class="btn" data-ops-todo="'+esc(x.id)+'">建立群待办确认单</button>');
+  if(type==='deployment_snapshot')buttons.unshift('<button class="btn" data-ops-snapshot-restore="'+esc(x.id)+'">恢复快照</button>');
+  return '<div class="item"><div class="item-title">'+esc(x.title||x.id)+'</div><div class="item-meta">'+esc(meta)+'</div><div class="item-body" style="white-space:pre-wrap">'+esc(x.description||x.text||'')+'</div>'+extra+'<details><summary>技术资料</summary><pre>'+esc(JSON.stringify(x,null,2))+'</pre></details><div class="row" style="margin-top:10px">'+buttons.join('')+'</div></div>'
+}
+async function opsLoadRecords(){var type=$('opsListType').value||opsCurrentType;opsCurrentType=type;var r=await api('/ops/records?type='+encodeURIComponent(type));if(!r.ok){$('opsRecordList').innerHTML='<div class="empty">'+esc(r.message)+'</div>';return}$('opsRecordList').innerHTML=(r.records||[]).map(function(x){return opsRecordCard(x,type)}).join('')||'<div class="empty">没有记录</div>';var box=$('opsRecordList');box.querySelectorAll('[data-ops-delete]').forEach(function(b){b.onclick=function(){opsDeleteRecord(type,this.dataset.opsDelete)}});box.querySelectorAll('[data-ops-join]').forEach(function(b){b.onclick=function(){opsActivityAction('/ops/activity/join',this.dataset.opsJoin)}});box.querySelectorAll('[data-ops-leave]').forEach(function(b){b.onclick=function(){opsActivityAction('/ops/activity/leave',this.dataset.opsLeave)}});box.querySelectorAll('[data-ops-invite]').forEach(function(b){b.onclick=function(){opsInviteParticipant(this.dataset.opsInvite,this.dataset.user)}});box.querySelectorAll('[data-ops-invite-all]').forEach(function(b){b.onclick=function(){opsUtilityPost('/ops/activity/invite-all',{id:this.dataset.opsInviteAll},true)}});box.querySelectorAll('[data-ops-vote]').forEach(function(b){b.onclick=function(){opsVote(this.dataset.opsVote,Number(this.dataset.option))}});box.querySelectorAll('[data-ops-poll-close]').forEach(function(b){b.onclick=function(){opsUtilityPost('/ops/poll/close',{id:this.dataset.opsPollClose},true)}});box.querySelectorAll('[data-ops-template-apply]').forEach(function(b){b.onclick=function(){opsApplyTemplate(this.dataset.opsTemplateApply)}});box.querySelectorAll('[data-ops-draft-send]').forEach(function(b){b.onclick=function(){opsUtilityPost('/ops/draft/send',{id:this.dataset.opsDraftSend},true)}});box.querySelectorAll('[data-ops-draft-schedule]').forEach(function(b){b.onclick=function(){opsDraftToSchedule(this.dataset.opsDraftSchedule)}});box.querySelectorAll('[data-ops-announcement]').forEach(function(b){b.onclick=function(){opsUtilityPost('/ops/announcement/publish',{id:this.dataset.opsAnnouncement,asTodo:false},true)}});box.querySelectorAll('[data-ops-todo]').forEach(function(b){b.onclick=function(){opsUtilityPost('/ops/announcement/publish',{id:this.dataset.opsTodo,asTodo:true},true)}});box.querySelectorAll('[data-ops-snapshot-restore]').forEach(function(b){b.onclick=function(){opsRestoreSnapshotUi(this.dataset.opsSnapshotRestore)}});box.querySelectorAll('[data-ops-versions]').forEach(function(b){b.onclick=function(){opsVersionsUi(type,this.dataset.opsVersions)}})}
+async function opsDeleteRecord(type,id){if(!(await confirmModal('删除后不会再显示，但审计记录仍保留。','删除记录',{danger:true})))return;var r=await api('/ops/records','DELETE',{type:type,id:id});toast(r.message||'完成');if(r.ok)opsLoadRecords()}
+async function opsActivityAction(path,id){var r=await api(path,'POST',{id:id});toast(r.message||'完成');if(r.ok)opsLoadRecords()}
+async function opsInviteParticipant(id,userId){var r=await api('/ops/activity/invite','POST',{id:id,userId:userId});toast(r.message||'邀请失败');if(r.ok)opsLoadRecords()}
+async function opsVote(id,index){var r=await api('/ops/poll/vote','POST',{id:id,optionIndexes:[index]});toast(r.message||'投票失败');if(r.ok)opsLoadRecords()}
+async function opsSaveSettings(){var r=await api('/ops/settings','POST',{quietHoursEnabled:$('opsQuietEnabled').checked,quietStart:$('opsQuietStart').value,quietEnd:$('opsQuietEnd').value,quietPolicy:$('opsQuietPolicy').value,maintenanceMode:$('opsMaintenance').checked,emergencyLock:$('opsEmergency').checked,fuseEnabled:$('opsFuse').checked,anomalyDetectionEnabled:$('opsAnomaly').checked,scheduleRetryEnabled:$('opsScheduleRetry').checked,scheduleRetryMax:Number($('opsScheduleRetryMax').value||0),scheduleRetryGraceMinutes:Number($('opsScheduleGrace').value||30),dailyDigestEnabled:$('opsDigestEnabled').checked,dailyDigestTime:$('opsDigestTime').value,dailyDigestRecipientIds:$('opsDigestRecipients').value.split(/[,，\s]+/).filter(Boolean),retentionDays:Number($('opsRetention').value||90),ruleSampleReviewPercent:Number($('opsSamplePercent').value||0)});toast(r.message||'保存失败');if(r.ok)loadOperations()}
+async function opsUtilityPost(path,data,reload){var r=await api(path,'POST',data||{});toast(r.message||((r.ok?'完成':'失败')));$('opsDiagnostics').textContent=JSON.stringify(r,null,2);if(r.ok&&reload)opsLoadRecords();return r}
+async function opsSchedulePreviewUi(){var r=await api('/ops/schedule-preview','POST',{scheduleSpec:$('opsScheduleSpec').value});$('opsPreviewResult').textContent=JSON.stringify(r,null,2);if(!r.ok)toast(r.message||'预览失败')}
+async function opsApplyTemplate(id){var spec=await textModal('可直接使用模板内容，或修改时间与讯息。',$('opsScheduleSpec').value||'','套用排程模板',{placeholder:'每天 08:00 早安'});if(spec===null)return;var r=await api('/ops/schedule-template/apply','POST',{id:id,scheduleSpec:spec});toast(r.message||'套用失败');$('opsDiagnostics').textContent=JSON.stringify(r,null,2)}
+async function opsDraftToSchedule(id){var spec=await textModal('请输入完整排程格式。','','草稿转排程',{placeholder:'2026-08-01 20:00 提醒内容'});if(spec===null)return;var r=await api('/ops/draft/to-schedule','POST',{id:id,scheduleSpec:spec});toast(r.message||'建立失败');$('opsDiagnostics').textContent=JSON.stringify(r,null,2)}
+async function opsLoadTasks(){var r=await api('/ops/tasks?limit=300');if(!r.ok){$('opsTaskList').innerHTML='<div class="empty">'+esc(r.message)+'</div>';return}$('opsTaskList').innerHTML=(r.tasks||[]).map(function(x){return '<div class="item"><div class="item-title">'+esc(x.kind)+'｜'+esc(x.title||x.id)+'</div><div class="item-meta">'+esc(x.id)+'｜'+esc(x.status)+'</div><div class="row">'+(x.retryable?'<button class="btn" data-task-action="retry" data-kind="'+esc(x.kind)+'" data-id="'+esc(x.id)+'">重试</button>':'')+(x.cancellable?'<button class="btn danger" data-task-action="cancel" data-kind="'+esc(x.kind)+'" data-id="'+esc(x.id)+'">取消</button>':'')+'</div></div>'}).join('')||'<div class="empty">没有待处理任务</div>';$('opsTaskList').querySelectorAll('[data-task-action]').forEach(function(b){b.onclick=async function(){var r=await api('/ops/tasks/action','POST',{kind:this.dataset.kind,id:this.dataset.id,action:this.dataset.taskAction});toast(r.message||'操作失败');if(r.ok)opsLoadTasks()}})}
+async function opsMemberSummaryUi(){var qq=$('opsMemberQq').value.replace(/\D/g,'');if(!qq)return toast('请输入成员 QQ');var r=await api('/ops/member-summary?qq='+encodeURIComponent(qq));$('opsDiagnostics').textContent=JSON.stringify(r,null,2);if(!r.ok)toast(r.message||'读取失败')}
+async function opsWelcomePreviewUi(){var qq=$('opsMemberQq').value.replace(/\D/g,'');if(!qq)return toast('请输入成员 QQ');var r=await api('/ops/welcome-preview','POST',{userId:qq});$('opsDiagnostics').textContent=JSON.stringify(r,null,2);if(!r.ok)toast(r.message||'预览失败')}
+async function opsHandoffUi(enable){var mode=$('opsHandoffMode').value,qq=$('opsHandoffQq').value.replace(/\D/g,''),reason=$('opsHandoffReason').value.trim(),caps=$('opsHandoffCaps').value.split(/[,，\s]+/).filter(Boolean);if(!qq||!reason)return toast('目标 QQ 与原因都必须填写');var r=await api('/ops/handoff','POST',{mode:mode,targetQq:qq,reason:reason,capabilities:caps,enable:enable});toast(r.message||'交接失败');$('opsDiagnostics').textContent=JSON.stringify(r,null,2)}
+async function opsSnapshotUi(){var title=await textModal('快照只保存群设置与营运设置，不包含 API Key 或聊天内容。','','建立设置快照');if(title===null)return;var r=await api('/ops/snapshot','POST',{title:title});toast(r.message||'快照建立完成');if(r.ok){opsCurrentType='deployment_snapshot';$('opsListType').value=opsCurrentType;opsLoadRecords()}}
+async function opsRestoreSnapshotUi(id){var preview=await api('/ops/snapshot/restore','POST',{id:id,previewOnly:true});$('opsDiagnostics').textContent=JSON.stringify(preview,null,2);if(!preview.ok)return toast(preview.message||'预览失败');if(!(await confirmModal('确认将当前群设置恢复为此快照？','恢复设置快照',{danger:true})))return;var r=await api('/ops/snapshot/restore','POST',{id:id,previewOnly:false});toast(r.message||'恢复失败');if(r.ok)loadOperations()}
+async function opsVersionsUi(type,id){var r=await api('/ops/versions?type='+encodeURIComponent(type)+'&id='+encodeURIComponent(id));$('opsDiagnostics').textContent=JSON.stringify(r,null,2);if(!r.ok)return toast(r.message||'读取失败');if(!(r.versions||[]).length)return toast('没有旧版本');if(await confirmModal('恢复到最近一个旧版本？','版本恢复',{danger:true})){var x=await api('/ops/versions/restore','POST',{type:type,id:id,versionIndex:(r.versions||[]).length-1});toast(x.message||'恢复失败');if(x.ok)opsLoadRecords()}}
+
+async function opsPreviewMessage(){var r=await api('/ops/message-preview','POST',{text:$('opsPreviewText').value,mentionIds:$('opsPreviewMentions').value.split(/[,，\s]+/).filter(Boolean)});$('opsPreviewResult').textContent=JSON.stringify(r,null,2)}
+async function opsLoadPermissions(){var qq=$('opsPermQq').value.trim();var r=await api('/ops/permissions?qq='+encodeURIComponent(qq));if(!r.ok){$('opsPermList').innerHTML='<div class="empty">'+esc(r.message)+'</div>';return}$('opsPermList').innerHTML=(r.capabilities||[]).map(function(x){return '<div class="item"><div class="row"><div class="grow"><b>'+esc(x.name)+'</b><div class="item-meta">'+esc(x.id)+'｜'+(x.allowed?'允许':'拒绝')+'｜来源 '+esc(x.source||'')+'</div></div><button class="btn '+(x.allowed?'danger':'primary')+'" data-cap="'+esc(x.id)+'" data-next="'+(!x.allowed)+'">'+(x.allowed?'拒绝':'允许')+'</button></div></div>'}).join('');$('opsPermList').querySelectorAll('[data-cap]').forEach(function(b){b.onclick=function(){opsSetPermission(qq,this.dataset.cap,this.dataset.next==='true')}})}
+async function opsSetPermission(qq,cap,allowed){var reason=await textModal('填写授权或拒绝原因（可留空）。','',allowed?'允许功能':'拒绝功能');if(reason===null)return;var r=await api('/ops/permissions','POST',{qq:qq,capability:cap,allowed:allowed,reason:reason});toast(r.message||'完成');if(r.ok)opsLoadPermissions()}
+async function opsDiagnostic(path){var r=await api(path);$('opsDiagnostics').textContent=JSON.stringify(r,null,2)}
+async function opsCleanupThinking(){if(!(await confirmModal('将重试撤回目前群已记录的思考提示残留。','清理残留',{danger:true})))return;var r=await api('/ops/thinking-cleanup','POST',{});$('opsDiagnostics').textContent=JSON.stringify(r,null,2)}
+async function opsRunSandbox(){var r=await api('/ops/rule-sandbox','POST',{text:$('opsSandboxText').value,role:'member',context:[]});$('opsDiagnostics').textContent=JSON.stringify(r,null,2)}
+
 function ensureGroupSettingsExtras(){if($('welcomeEnabled')||!$('v-groups'))return;var grid=$('v-groups').querySelector('.grid');if(!grid)return;var card=document.createElement('div');card.className='card span-12';card.innerHTML='<h3>自动化与安全参数</h3><div class="grid"><div class="card span-6"><div class="notice">自动 QQ 群打卡会在台北时间 23:59 预热群列表，并于 00:00:00～00:01:59 快速重试；成功后立即停止，不受 AI 开关与白名单影响。</div><label class="switch"><input id="welcomeEnabled" type="checkbox">自动欢迎新人</label><label class="switch"><input id="joinAssistEnabled" type="checkbox">入群申请辅助</label><label class="switch"><input id="joinAiApproveEnabled" type="checkbox">Gemma 高置信度审查后自动同意入群</label><label class="switch"><input id="ruleMonitorEnabled" type="checkbox">持续检查群成员是否违反群规</label><div id="ruleMonitorHint" class="notice">机器人不是群主或管理员时，群规监控完全停用且不建立记录。</div><div class="field"><label>欢迎词（支持 {at}、{qq} 与表情符号）</label><textarea id="welcomeText"></textarea></div></div><div class="card span-6"><div class="field"><label>同一对象处置冷却（秒，默认 0＝关闭）</label><input id="moderationCooldown" type="number" min="0"></div><div class="field"><label>新人观察期（天，0＝关闭）</label><input id="newcomerDays" type="number" min="0" max="30"></div><label class="switch"><input id="ruleMuteGuardEnabled" type="checkbox">违规禁言被管理提前解除时，按剩余时间重新禁言</label><div class="notice">此开关默认开启，只有群主或开发者可修改。误判时可在 Portal 复核，或发送「!无违规 @成员 补充说明」。目标和补充均必填。</div></div><div class="card span-12"><h3>刷屏判定（按群独立设置）</h3><div class="grid"><div class="field span-4"><label>时间窗（秒）</label><input id="ruleSpamWindow" type="number" min="5" max="3600"></div><div class="field span-4"><label>重复消息门槛（条）</label><input id="ruleSpamThreshold" type="number" min="2" max="50"></div><div class="field span-4"><label>撤回后保留条数</label><input id="ruleSpamKeep" type="number" min="0" max="49"></div></div><div class="notice">默认是 60 秒内第 4 条触发，执行撤回时保留最早 3 条，只撤回超出的部分。群规模型仍会结合实际上下文判断变体刷屏。</div></div></div>';grid.appendChild(card);ensureGroupBindingPanel();ensureDeveloperPermissionPanel()}
 
 function ensureGroupBindingPanel(){if($('groupBindingPanel')||!$('v-groups'))return;var grid=$('v-groups').querySelector('.grid');if(!grid)return;var card=document.createElement('div');card.id='groupBindingPanel';card.className='card span-12';card.innerHTML='<div class="section-head"><div><h3>多群绑定与总群引导</h3><p>设置总群、分群别名与用途备注；还可以指定私聊排程默认发送到哪个群。</p></div><button id="reloadGroupBinding" class="btn">重新加载</button></div><div class="grid"><div class="card span-5"><div class="field"><label>总群</label><select id="familyHeadGroup"></select></div><div class="field"><label>总群显示名称</label><input id="familyHeadAlias" placeholder="例如：小南大魔头总部"></div><div class="field"><label>总群加入链接（可选）</label><input id="familyJoinUrl" placeholder="QQ 生成的邀请链接；留空时引导页提供群号"></div><div class="field"><label>引导文字</label><textarea id="familyGuideText"></textarea></div><button id="saveGroupBinding" class="btn primary">保存多群绑定</button><div id="familyJoinPreview" class="notice">保存后会生成总群引导链接。</div><div class="field"><label>我的私聊排程默认群</label><select id="familyDefaultGroup"></select></div><button id="saveFamilyDefaultGroup" class="btn">保存默认群</button></div><div class="card span-7"><h3>选择要绑定的分群并设置名称与用途</h3><div id="familyGroupChoices" class="group-binding-list"></div><div class="field"><label>提醒哪个分群中尚未加入总群的成员</label><select id="familyGuideBranch"></select></div><button id="familyGuideMissing" class="btn">@ 未加入总群的群员</button><div id="familyBindingMessage" class="notice">分群备注仅供后台辨识，不会自动公开发送。</div></div></div>';grid.appendChild(card);$('reloadGroupBinding').onclick=loadGroupBindings;$('saveGroupBinding').onclick=saveGroupBindings;$('familyGuideMissing').onclick=guideMissingHeadMembers;$('saveFamilyDefaultGroup').onclick=saveFamilyDefaultGroup}
 
-function ensureR3Views(){
+function ensureR3Views(){ensureOpsView();
   var nav=$('nav');var container=document.querySelector('main .content')||document.querySelector('main')||$('app');if(!nav||!container)return;
   function addView(name,label){if(!$('v-'+name)){var b=document.createElement('button');b.dataset.view=name;b.textContent=label;b.onclick=function(){showView(name)};nav.appendChild(b);var section=document.createElement('section');section.id='v-'+name;section.className='view';container.appendChild(section)}titles[name]=label}
   addView('schedules','排程管理');addView('conversations','对话记录');addView('ruleviolations','群规监控');addView('settingscenter','设置中心');addView('bilibili','B站串接');addView('aidecisions','AI 回复记录');addView('appeals','匿名申诉');addView('violationhistory','历史违规记录');addView('appealreview','申诉处理');
@@ -10122,11 +12213,11 @@ function ensureR3Views(){
   if(!$('v-bilibili').dataset.ready){$('v-bilibili').dataset.ready='1';$('v-bilibili').innerHTML='<div class="section-head"><div><h2>B站监控</h2><p>可选择主动低频检查，或接收外部服务推送的事件。</p></div><button id="biliReload" class="btn">重新加载</button></div><div class="card"><div class="row"><input id="biliCreatorName" placeholder="创作者名称（选填）"><input id="biliCreatorId" inputmode="numeric" placeholder="B站用户 UID（必填）"><select id="biliMode"><option value="automatic_polling" selected>兼容轮询（输入 UID 即可使用）</option><option value="official_webhook">接收 Webhook（高级，需要外部事件来源）</option></select><select id="biliPollInterval"><option value="1800" selected>每 30 分钟</option><option value="3600">每 1 小时</option><option value="7200">每 2 小时</option><option value="21600">每 6 小时</option></select></div><div class="row"><label class="switch"><input id="biliLiveNotify" type="checkbox" checked>开播通知</label><label class="switch"><input id="biliLiveAtAll" type="checkbox">开播 @全体</label><label class="switch"><input id="biliVideoNotify" type="checkbox" checked>新视频通知</label><label class="switch"><input id="biliVideoAtAll" type="checkbox">新视频 @全体</label><button id="biliAdd" class="btn primary">保存监控</button></div><div id="biliModeHelp" class="notice"></div><div class="notice">兼容轮询最低 30 分钟一次；若 B站返回 412／429，系统会自动暂停 12～72 小时。Webhook 不会主动访问 B站，但必须另有开放平台应用或合法事件中继把事件发送到回调地址。</div><div id="biliWebhookResult" class="notice hidden"></div></div><div id="biliList" class="list" style="margin-top:16px"></div>';$('biliReload').onclick=loadBilibili;$('biliAdd').onclick=saveBilibiliConnector;$('biliMode').onchange=function(){var webhook=this.value==='official_webhook';$('biliPollInterval').disabled=webhook;$('biliModeHelp').textContent=webhook?'Webhook 模式：本 Worker 只负责接收事件。仅填写 UID 不会自动检查；保存后请复制回调地址到你的开放平台应用或事件中继。':'兼容轮询：Worker 会按频率主动检查该 UID，可以使用“立即检查”。首次检查只建立当前状态基准。'};$('biliMode').onchange()}
   if(!$('v-platform')){var b=document.createElement('button');b.dataset.view='platform';b.textContent='功能权限中心';b.hidden=true;$('nav').appendChild(b);b.onclick=function(){showView('platform')};var v=document.createElement('section');v.id='v-platform';v.className='view';v.innerHTML='<div class="section-head"><div><h2>功能权限中心</h2><p>这是机器人功能总开关，仅开发者本人可见并可修改全部 300 项。</p></div><button id="pfReload" class="btn">重新加载</button></div><div class="card"><div class="row"><input id="pfSearch" class="grow" placeholder="搜索功能名称、ID、类别"><label id="pfAuditWrap" class="switch"><input id="pfAuditSilent" type="checkbox">不记录操作日志（仅开发者）</label><button id="pfGo" class="btn primary">搜索</button></div><div id="pfSummary" class="notice">尚未加载</div></div><div id="pfList" class="list" style="margin-top:16px"></div>';document.querySelector('.content').appendChild(v);$('pfReload').onclick=loadPlatformFeatures;$('pfGo').onclick=loadPlatformFeatures;$('pfSearch').onkeydown=function(e){if(e.key==='Enter')loadPlatformFeatures()}}
 }
-function organizeSidebarNavigation(){var nav=$('nav');if(!nav||nav.dataset.grouped==='1')return;var groups=[['概览',['overview','health']],['AI 与模型',['tasks','schedules','models','aidecisions','memory']],['群组与安全',['groups','settingscenter','conversations','ruleviolations','moderation','violationhistory','appeals','appealreview','bilibili']],['系统与开发',['simulator','quota','platform','logs']]];groups.forEach(function(g){var wrap=document.createElement('div');wrap.className='nav-group';wrap.dataset.navGroup=g[0];var h=document.createElement('div');h.className='nav-heading';h.textContent=g[0];wrap.appendChild(h);g[1].forEach(function(v){var b=nav.querySelector('button[data-view="'+v+'"]');if(b)wrap.appendChild(b)});nav.appendChild(wrap)});Array.from(nav.children).forEach(function(x){if(x.tagName==='BUTTON'){var misc=nav.querySelector('.nav-group[data-nav-group="系统与开发"]');if(misc)misc.appendChild(x)}});nav.dataset.grouped='1';refreshSidebarGroupVisibility()}
+function organizeSidebarNavigation(){var nav=$('nav');if(!nav||nav.dataset.grouped==='1')return;var groups=[['概览',['overview','health']],['AI 与模型',['tasks','schedules','models','aidecisions','memory']],['营运与活动',['operations']],['群组与安全',['groups','settingscenter','conversations','ruleviolations','moderation','violationhistory','appeals','appealreview','bilibili']],['系统与开发',['simulator','quota','platform','logs']]];groups.forEach(function(g){var wrap=document.createElement('div');wrap.className='nav-group';wrap.dataset.navGroup=g[0];var h=document.createElement('div');h.className='nav-heading';h.textContent=g[0];wrap.appendChild(h);g[1].forEach(function(v){var b=nav.querySelector('button[data-view="'+v+'"]');if(b)wrap.appendChild(b)});nav.appendChild(wrap)});Array.from(nav.children).forEach(function(x){if(x.tagName==='BUTTON'){var misc=nav.querySelector('.nav-group[data-nav-group="系统与开发"]');if(misc)misc.appendChild(x)}});nav.dataset.grouped='1';refreshSidebarGroupVisibility()}
 function refreshSidebarGroupVisibility(){document.querySelectorAll('#nav .nav-group').forEach(function(g){var visible=Array.from(g.querySelectorAll('button')).some(function(b){return !b.hidden&&b.style.display!=='none'});g.style.display=visible?'':'none'})}
 function closeMobileSidebar(){if($('sidebar'))$('sidebar').classList.remove('open');if($('sidebarBackdrop'))$('sidebarBackdrop').classList.remove('open')}
 function toggleMobileSidebar(){var open=!$('sidebar').classList.contains('open');$('sidebar').classList.toggle('open',open);if($('sidebarBackdrop'))$('sidebarBackdrop').classList.toggle('open',open)}
-function applyR3RoleVisibility(){ensureR3Views();organizeSidebarNavigation();applyRoleVisibility();var perms=(session&&session.permissions)||{};var role=(session&&session.role)||'member';var management=!!(perms.aiAdmin||perms.groupOps||perms.nativeAdmin||perms.developer||['admin','owner'].includes(role));var dev=!!perms.developer;document.querySelectorAll('#nav button').forEach(function(b){if(['ruleviolations','bilibili','aidecisions','conversations'].includes(b.dataset.view))b.hidden=!management;if(b.dataset.view==='appealreview')b.hidden=!(perms.appealReviewer||perms.nativeAdmin||perms.developer||['admin','owner'].includes(role));if(b.dataset.view==='settingscenter')b.hidden=false;if(b.dataset.view==='platform')b.hidden=!dev});if($('scDeveloper'))$('scDeveloper').classList.remove('hidden');if($('scTargetQq')){$('scTargetQq').disabled=!dev;if(!dev)$('scTargetQq').value=session.qq}if($('scAuditLog')){$('scAuditLog').disabled=!dev;var auditLabel=$('scAuditLog').closest('label');if(auditLabel)auditLabel.classList.toggle('hidden',!dev)}if($('pfAuditWrap'))$('pfAuditWrap').classList.toggle('hidden',!dev);if($('rvSave'))$('rvSave').disabled=!management;refreshSidebarGroupVisibility()}
+function applyR3RoleVisibility(){ensureR3Views();organizeSidebarNavigation();applyRoleVisibility();var perms=(session&&session.permissions)||{};var role=(session&&session.role)||'member';var management=!!(perms.aiAdmin||perms.groupOps||perms.nativeAdmin||perms.developer||['admin','owner'].includes(role));var dev=!!perms.developer;document.querySelectorAll('#nav button').forEach(function(b){if(['ruleviolations','bilibili','aidecisions','conversations'].includes(b.dataset.view))b.hidden=!management;if(b.dataset.view==='appealreview')b.hidden=!(perms.appealReviewer||perms.nativeAdmin||perms.developer||['admin','owner'].includes(role));if(b.dataset.view==='settingscenter')b.hidden=false;if(b.dataset.view==='platform')b.hidden=!dev;if(b.dataset.view==='operations')b.hidden=false});if($('scDeveloper'))$('scDeveloper').classList.remove('hidden');if($('scTargetQq')){$('scTargetQq').disabled=!dev;if(!dev)$('scTargetQq').value=session.qq}if($('scAuditLog')){$('scAuditLog').disabled=!dev;var auditLabel=$('scAuditLog').closest('label');if(auditLabel)auditLabel.classList.toggle('hidden',!dev)}if($('pfAuditWrap'))$('pfAuditWrap').classList.toggle('hidden',!dev);if($('rvSave'))$('rvSave').disabled=!management;refreshSidebarGroupVisibility()}
 async function loadAiDecisions(){var p=new URLSearchParams({q:$('aiLogSearch').value||'',decision:$('aiLogDecision').value||'',triggerType:$('aiLogTrigger').value||'',limit:'500'});var r=await api('/ai-decisions?'+p.toString());if(!r.ok){$('aiDecisionList').innerHTML='<div class="empty">'+esc(r.message)+'</div>';return}$('aiDecisionList').innerHTML=(r.logs||[]).map(function(x){var title=(x.decision||'unknown')+'｜'+(x.senderName||x.userId||'')+'（'+(x.userId||'')+'）';var meta=(x.at||'')+'｜觸發 '+(x.triggerType||'none')+'｜原因 '+(x.reason||'')+'｜'+(x.provider||'')+((x.model)?'/'+x.model:'')+'｜發送 '+(x.sendStatus||'');var body='來源訊息：'+(x.input||'')+(x.generatedReply?'\nAI 回覆：'+x.generatedReply:'')+'\n關係：'+JSON.stringify({mentionedQqs:x.mentionedQqs||[],quotedMessageId:x.quotedMessageId||'',quotedSenderId:x.quotedSenderId||''})+'\n智能 @ 規劃：'+JSON.stringify(x.mentionRouting||{})+'\n回覆計畫：'+JSON.stringify(x.replyPlan||{})+'\n是否搜索：'+(x.searchPerformed?'有':'無')+'（需要='+(x.searchRequired?'是':'否')+'，嘗試='+(x.searchAttempted?'是':'否')+'）'+'\n搜索查詢：'+(x.searchQuery||'')+'\n搜索關鍵詞：'+JSON.stringify(x.searchQueries||[])+'\n搜索提供者：'+(x.searchProvider||'')+((x.searchModel)?'/'+x.searchModel:'')+'\n搜索錯誤：'+(x.searchError||'')+'\n搜索內容：'+(x.searchContext||'')+'\n搜索來源：'+JSON.stringify(x.searchSources||[])+'\n上下文：原文 '+(x.contextExactMessages||0)+'／摘要 '+(x.contextSummarizedMessages||0)+'／提供者 '+(x.contextSummaryProvider||'');return '<div class="item"><div class="item-title">'+esc(title)+'</div><div class="item-meta">'+esc(meta)+'</div><div class="item-body" style="white-space:pre-wrap">'+esc(body)+'</div></div>'}).join('')||'<div class="empty">沒有符合的紀錄</div>'}
 var ruleCategoryPolicies=[];var progressiveSteps=[];
 function rulePolicyActionText(v){return({record:'仅记录',remind:'友善提醒（不累计）',warn:'正式警告（不累计）',recall:'撤回违规消息',mute:'固定禁言（不累计）',progressive:'使用本群累进规则',kick:'直接踢出',manual:'人工复核'})[v]||v}
@@ -10191,7 +12282,7 @@ async function openMemberPicker(messageId,roles,title){ensureMemberPicker();var 
 function showLogin(){$('login').classList.remove('hidden');$('app').classList.add('hidden')}
 function showApp(){$('login').classList.add('hidden');$('app').classList.remove('hidden')}
 async function loadPlatformFeatures(){var q=$('pfSearch')?$('pfSearch').value:'';var r=await api('/platform/features?q='+encodeURIComponent(q));if(!r.ok){$('pfList').innerHTML='<div class="empty">'+esc(r.message)+'</div>';return}$('pfSummary').textContent='全部功能 '+r.total+' 项；当前权限可见 '+r.visible+' 项。不同权限等级看到的内容不同，开发者可查看全部。';$('pfList').innerHTML='';(r.features||[]).forEach(function(f){var d=document.createElement('div');d.className='item';var sw=document.createElement('input');sw.type='checkbox';sw.checked=!!f.enabled;sw.onchange=async function(){var silent=$('pfAuditSilent')&&$('pfAuditSilent').checked;var x=await api('/platform/features','POST',{id:f.id,enabled:sw.checked,auditMode:silent?'silent':'log'});toast(x.message);if(!x.ok)sw.checked=!sw.checked};d.innerHTML='<div class="item-head"><div><div class="item-title">'+esc(f.id)+'｜'+esc(f.name)+'</div><div class="item-meta">类别：'+esc(f.category)+'｜实现方式：'+esc(f.mode)+'｜最低权限：'+esc(portalRoleLabel(f.minRole))+'</div></div></div>';d.appendChild(sw);$('pfList').appendChild(d)});if(!$('pfList').children.length)$('pfList').innerHTML='<div class="empty">没有符合当前权限或搜索条件的功能</div>'}
-function showView(name){document.querySelectorAll('.view').forEach(function(v){v.classList.remove('active')});document.querySelectorAll('#nav button').forEach(function(b){b.classList.toggle('active',b.dataset.view===name)});$('v-'+name).classList.add('active');$('pageTitle').textContent=titles[name]||name;closeMobileSidebar();if(name==='health'){loadHealth('quick');loadModelCheckCandidates()}if(name==='tasks')loadTasks();if(name==='schedules')loadSchedules();if(name==='moderation')loadProposals();if(name==='models')loadModels();if(name==='quota')loadQuota();if(name==='groups')loadGroupSettings();if(name==='memory')loadMemory();if(name==='logs')loadLogs();if(name==='aidecisions')loadAiDecisions();else if(name==='appeals')loadAppeals();else if(name==='appealreview')loadAppealReviews();if(name==='ruleviolations')loadRuleViolations();if(name==='violationhistory')loadViolationHistory();if(name==='settingscenter')loadSettingsCenter();if(name==='bilibili')loadBilibili();if(name==='platform')loadPlatformFeatures();if(name==='conversations')loadConversations()}
+function showView(name){document.querySelectorAll('.view').forEach(function(v){v.classList.remove('active')});document.querySelectorAll('#nav button').forEach(function(b){b.classList.toggle('active',b.dataset.view===name)});$('v-'+name).classList.add('active');$('pageTitle').textContent=titles[name]||name;closeMobileSidebar();if(name==='health'){loadHealth('quick');loadModelCheckCandidates()}if(name==='tasks')loadTasks();if(name==='schedules')loadSchedules();if(name==='moderation')loadProposals();if(name==='models')loadModels();if(name==='quota')loadQuota();if(name==='groups')loadGroupSettings();if(name==='memory')loadMemory();if(name==='logs')loadLogs();if(name==='aidecisions')loadAiDecisions();else if(name==='appeals')loadAppeals();else if(name==='appealreview')loadAppealReviews();if(name==='ruleviolations')loadRuleViolations();if(name==='violationhistory')loadViolationHistory();if(name==='settingscenter')loadSettingsCenter();if(name==='bilibili')loadBilibili();if(name==='platform')loadPlatformFeatures();if(name==='conversations')loadConversations();if(name==='operations')loadOperations()}
 async function loadGroupBindings(){if(!$('familyGroupChoices'))return;var r=await api('/group-bindings');if(!r.ok){$('familyBindingMessage').textContent=r.message||'加载失败';return}var groups=r.groups||[],family=r.family||null,head=(family&&family.headGroupId)||currentGroup||'';$('familyHeadGroup').innerHTML=groups.map(function(g){return '<option value="'+esc(g.groupId)+'">'+esc(g.displayName||g.groupName||g.groupId)+'（'+esc(g.groupId)+'）</option>'}).join('');$('familyHeadGroup').value=head;$('familyDefaultGroup').innerHTML=groups.map(function(g){return '<option value="'+esc(g.groupId)+'">'+esc(g.displayName||g.groupName||g.groupId)+'（'+esc(g.groupId)+'）</option>'}).join('');$('familyDefaultGroup').value=r.defaultGroupId||currentGroup||head;$('familyHeadAlias').value=family?String(family.headAlias||''):((groups.find(function(g){return g.groupId===head})||{}).displayName||'');$('familyJoinUrl').value=family?String(family.customJoinUrl||''):'';$('familyGuideText').value=family?String(family.guideText||''):'请加入总群，以便接收完整公告、群规与活动通知。';var branchMap=new Map((family&&family.branches||[]).map(function(x){return[String(x.groupId),x]}));$('familyGroupChoices').innerHTML=groups.filter(function(g){return g.groupId!==head}).map(function(g){var b=branchMap.get(String(g.groupId));return '<div class="group-binding-row"><label><input type="checkbox" data-family-group="'+esc(g.groupId)+'" '+(b?'checked':'')+'> '+esc(g.groupName||g.groupId)+'（'+esc(g.groupId)+'）</label><input data-family-alias="'+esc(g.groupId)+'" value="'+esc(b?b.alias:(g.displayName||g.groupName||g.groupId))+'" placeholder="显示名称"><input data-family-note="'+esc(g.groupId)+'" value="'+esc(b?b.note:'')+'" placeholder="用途备注，例如：游戏分群／通知群"></div>'}).join('')||'<div class="empty">没有其他可绑定群组</div>';$('familyGuideBranch').innerHTML=(family&&family.branches||[]).map(function(b){return '<option value="'+esc(b.groupId)+'">'+esc(b.alias||b.groupId)+'（'+esc(b.groupId)+'）'+(b.note?'｜'+esc(b.note):'')+'</option>'}).join('')||'<option value="">暂无分群</option>';$('saveGroupBinding').disabled=!r.canEdit;$('familyGuideMissing').disabled=!r.canEdit||!(family&&family.branches&&family.branches.length);$('familyJoinPreview').innerHTML=r.generatedJoinUrl?'总群引导链接：<a href="'+esc(r.generatedJoinUrl)+'" target="_blank" rel="noreferrer">'+esc(r.generatedJoinUrl)+'</a>':'保存后会生成总群引导链接。';var roleText=family?(String(family.headGroupId)===String(currentGroup)?'当前群是总群':'当前群是分群，所属总群：'+String(family.headAlias||family.headGroupId)):'当前群尚未加入多群绑定。';$('familyBindingMessage').textContent=roleText+' '+(r.canEdit?'你可以编辑绑定并提醒未加入总群的成员。':'只有总群 QQ 管理员、群主或开发者可以修改绑定。');$('familyHeadGroup').onchange=function(){loadGroupBindingsForHeadSelection(groups,this.value)}}
 function loadGroupBindingsForHeadSelection(groups,head){$('familyGroupChoices').innerHTML=groups.filter(function(g){return g.groupId!==head}).map(function(g){return '<div class="group-binding-row"><label><input type="checkbox" data-family-group="'+esc(g.groupId)+'"> '+esc(g.groupName||g.groupId)+'（'+esc(g.groupId)+'）</label><input data-family-alias="'+esc(g.groupId)+'" value="'+esc(g.displayName||g.groupName||g.groupId)+'" placeholder="显示名称"><input data-family-note="'+esc(g.groupId)+'" value="" placeholder="用途备注"></div>'}).join('')||'<div class="empty">没有其他可绑定群组</div>';var selected=groups.find(function(g){return g.groupId===head});$('familyHeadAlias').value=selected?(selected.displayName||selected.groupName||head):head}
 async function saveGroupBindings(){var head=$('familyHeadGroup').value;if(!head){toast('请选择总群');return}var branches=[];$('familyGroupChoices').querySelectorAll('[data-family-group]:checked').forEach(function(c){var id=c.dataset.familyGroup,a=$('familyGroupChoices').querySelector('[data-family-alias="'+id+'"]'),n=$('familyGroupChoices').querySelector('[data-family-note="'+id+'"]');branches.push({groupId:id,alias:a?a.value:id,note:n?n.value:''})});var r=await api('/group-bindings','POST',{headGroupId:head,headAlias:$('familyHeadAlias').value,customJoinUrl:$('familyJoinUrl').value,guideText:$('familyGuideText').value,branches:branches});toast(r.message||'完成');if(r.ok){await loadGroups();await loadGroupBindings()}}
