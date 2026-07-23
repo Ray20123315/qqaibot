@@ -1,0 +1,146 @@
+dlineAt = Date.now() + timeoutMs, maxAttempts = 2, signal = null }) {
+   const keys = apiKeys
+     ? roundRobinKeys(apiKeys, keyProvider)
+     : roundRobinKeys([...new Set([...parseList(env.GEMINI_API_KEYS), ...parseList(env.VECTORIZE_GEMINI_KEYS)])], "gemini");
+@@ -4774,7 +4806,7 @@
+       for (let attempt = 0; attempt < 2; attempt++) {
+         try {
+           const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(key)}`, {
+-            method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body), signal: AbortSignal.timeout(remainingTimeout(deadlineAt, Math.max(3000, Math.min(10000, Number(timeoutMs || 10000))), 1200))
++            method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body), signal: mergeAbortSignal(remainingTimeout(deadlineAt, Math.max(3000, Math.min(10000, Number(timeoutMs || 10000))), 1200), signal)
+           });
+           const data = await response.json().catch(() => ({}));
+           if (response.ok) {
+@@ -4797,7 +4829,7 @@
+   throw new Error(lastError);
+ }
+ 
+-async function buildSharedSearchContext(env, { query, models }) {
++async function buildSharedSearchContext(env, { query, models, signal = null }) {
+   const requirement = searchRequirement(query);
+   const base = {
+     required: requirement.needed,
+@@ -4825,7 +4857,8 @@
+       useSearch: true,
+       requireSearch: true,
+       apiKeys: searchKeys,
+-      keyProvider: "gemini_search"
++      keyProvider: "gemini_search",
++      signal
+     });
+     return {
+       ...base,
+@@ -4869,7 +4902,7 @@
+   let sharedSearchPromise = null;
+   const getSharedSearch = async () => {
+     if (args.hasMedia) return { required: false, explicit: false, attempted: false, performed: false, query: args.cleanText, context: "", sources: [], searchQueries: [], provider: "", model: "", error: "media_request" };
+-    if (!sharedSearchPromise) sharedSearchPromise = buildSharedSearchContext(env, { query: args.cleanText, models: args.chatModels });
++    if (!sharedSearchPromise) sharedSearchPromise = buildSharedSearchContext(env, { query: args.cleanText, models: args.chatModels, signal: args.signal });
+     return sharedSearchPromise;
+   };
+   const mergeSearchPrompt = (prompt, search) => {
+@@ -4905,7 +4938,8 @@
+       temperature: args.fastChat ? 0.9 : 0.82,
+       timeoutMs: args.fastChat ? 5000 : 7000,
+       deadlineAt: overallDeadlineAt,
+-      maxAttempts: 1
++      maxAttempts: 1,
++      signal: args.signal
+     });
+     return finish("gemma", result, search);
+   };
+@@ -4924,7 +4958,8 @@
+       requireSearch: false,
+       timeoutMs: args.fastChat ? 6000 : 8000,
+       deadlineAt: overallDeadlineAt,
+-      maxAttempts: args.fastChat ? 1 : 2
++      maxAttempts: args.fastChat ? 1 : 2,
++      signal: args.signal
+     });
+     return finish("gemini", result, search);
+   };
+@@ -4935,7 +4970,7 @@
+     const result = await callDeepSeek(env, {
+       messages, userId: args.userId, groupId: args.groupId || "private", thinking: "disabled",
+       maxTokens: 1000, model: env.DEEPSEEK_FLASH_MODEL || DEFAULTS.deepseekFlashModel,
+-      deadlineAt: overallDeadlineAt, maxAttempts: 1
++      deadlineAt: overallDeadlineAt, maxAttempts: 1, signal: args.signal
+     });
+     return finish("deepseek", result, search);
+   };
+@@ -4958,6 +4993,7 @@
+ 
+   let lastError = null;
+   for (const attempt of attempts) {
++    if (args.signal?.aborted) throw new DOMException("Question cancelled", "AbortError");
+     if (isDeadlineExceeded(overallDeadlineAt, 1200)) break;
+     try {
+       return await withTimeout(attempt(), remainingTimeout(overallDeadlineAt, 12000, 1200), "MODEL_PROVIDER_TIMEOUT");
+@@ -6405,18 +6441,29 @@
+   let strikeCounted = false;
+   let fallbackNote = "";
+ 
++  const explicitRecallPolicy = normalizeRulePolicyPunishment(policy.punishment) === "recall";
+   if (mode === "warn") {
+     if (eligibleForStrike) {
+       progressiveCount = await addRuleStrike(env, item, progressivePolicy.windowDays);
+       strikeCounted = true;
+-      action = "warn";
++      action = explicitRecallPolicy ? "recall" : "warn";
++    } else if (explicitRecallPolicy) {
++      action = "recall";
++      fallbackNote = "分类规则要求撤回；本次不计入累计次数";
+     } else {
+       action = normalizeProgressiveAction(progressivePolicy.minorAction, "remind");
+       if (!["remind", "warn"].includes(action)) action = "remind";
+       fallbackNote = "影响较轻或缺乏明确恶意，本次只提醒且不计入累计次数";
+     }
+   } else if (mode === "mute") {
+-    if (eligibleForStrike) {
++    if (explicitRecallPolicy) {
++      if (eligibleForStrike) {
++        progressiveCount = await addRuleStrike(env, item, progressivePolicy.windowDays);
++        strikeCounted = true;
++      }
++      action = "recall";
++      fallbackNote = strikeCounted ? "分类规则要求撤回" : "分类规则要求撤回；本次不计入累计次数";
++    } else if (eligibleForStrike) {
+       progressiveCount = await addRuleStrike(env, item, progressivePolicy.windowDays);
+       strikeCounted = true;
+       const step = resolveRuleProgressiveStep(progressivePolicy, progressiveCount);
+@@ -6427,7 +6474,6 @@
+         duration = progressiveMuteFallback(progressivePolicy, progressiveCount, await dbGet(env, `rule_proxy_mute_seconds:${item.groupId}`));
+         fallbackNote = "当前为禁言代理，累进规则中的踢出已自动降级为禁言";
+       }
+-      if (action === "recall") action = "warn";
+     } else {
+       action = normalizeProgressiveAction(progressivePolicy.minorAction, "remind");
+       if (!["remind", "warn"].includes(action)) action = "remind";
+@@ -6473,19 +6519,33 @@
+   }
+ 
+   const appealHint = "如认为判断有误，请登录 Control Center → 历史违规记录，可对单条或多条记录一键申诉。";
+-  const countText = strikeCounted ? `；已计入 ${progressivePolicy.windowDays} 天内第 ${Math.max(1, progressiveCount)} 次违规` : "；本次不计入累计次数";
++  const countLine = strikeCounted
++    ? `累计：已计入 ${progressivePolicy.windowDays} 天内第 ${Math.max(1, progressiveCount)} 次违规。`
++    : "累计：本次不计入累计次数。";
++  const quotedRuleMessage = (title, reasonText, extraLine = "") => {
++    const segments = [];
++    if (item.messageId) segments.push({ type: "reply", data: { id: String(item.messageId) } });
++    segments.push({ type: "at", data: { qq: String(item.userId) } });
++    segments.push({ type: "text", data: { text: `
++${title}
++
++原因：${reasonText || "请遵守群规"}
++${countLine}${extraLine ? `
++${extraLine}` : ""}
++
++${appealHint}` } });
++    return segments;
++  };
+   let result = { ok: false, message: "未执行" };
+   let warningMessageId = "";
+   let actionTaken = action;
+   try {
+     if (action === "remind") {
+-      const sent = await callOneBotAction(env, { action: "send_group_msg", params: { group_id: num
