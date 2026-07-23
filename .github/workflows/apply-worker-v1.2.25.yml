@@ -21,8 +21,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          git apply --check .qqai-patches/worker_v1.2.25.patch
-          git apply .qqai-patches/worker_v1.2.25.patch
+          git apply --recount --check .qqai-patches/worker_v1.2.25.patch
+          git apply --recount .qqai-patches/worker_v1.2.25.patch
           node --check worker.js
           grep -F 'const VERSION = "1.2.25";' worker.js
           grep -F 'cleanMessage.length > 0' worker.js
@@ -35,4 +35,4 @@ jobs:
           git add worker.js
           git commit -m "Update worker.js to v1.2.25"
           git push origin HEAD:main
-# trigger: 2
+# trigger: 3
