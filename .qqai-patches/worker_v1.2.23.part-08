@@ -1,3 +1,0 @@
-action, params }, 15000);
-         const messageId = response?.message_id ?? response?.messageId ?? response?.data?.message_id ?? response?.data?.messageId;
-         await this.recordIngress(body, "sent", { explicit: eventHasBotMention(body), sentMessageId: String(messageId || "") }).catch(() => {});

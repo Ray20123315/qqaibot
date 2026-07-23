@@ -1,4 +1,4 @@
-const VERSION = "1.2.22";
+const VERSION = "1.2.23";
 const QQAI_V1_COMPLETE_MARKER = "QQAI_V1_COMPLETE_MARKER";
 const QQAI_V1_R3_MARKER = "QQAI_V1_R3_MARKER";
 const BUILD_DATE = "2026-07-23";
@@ -12,6 +12,8 @@ const DEFAULTS = Object.freeze({
   conversationHistoryItems: 32,
   aiDecisionLogLimit: 2000,
   thinkingDelayMs: 1200,
+  inputDebounceMs: 3000,
+  inputDebounceMaxMs: 8000,
   scheduleMinIntervalMinutes: 1,
   scheduleMaxActivePerUser: 0,
   scheduleMaxPerGroupHour: 0,
@@ -767,6 +769,12 @@ export default {
         headers: { 'Content-Type': 'application/json; charset=utf-8' }
       });
     };
+    if (request.signal) {
+      request.signal.addEventListener("abort", () => {
+        if (typeof ctx?.waitUntil === "function") ctx.waitUntil(clearThinkingIndicator());
+        else clearThinkingIndicator().catch(() => {});
+      }, { once: true });
+    }
 
     // 【專用小助手】呼叫 Gemini API (用於獨立工具指令)
     const callGeminiDirectly = async (prompt) => {
@@ -1276,7 +1284,7 @@ export default {
         if (nextMode === "auto" && !(await isVerifiedGroupOwner(env, currentGroupId, userId))) return jsonReply(`${atSender}只有 NapCat 即时确认的当前群主可以启用 auto 模式；QQ 管理员可使用 record、warn 或 mute。`);
         await dbPut(env, `rule_proxy_mode:${currentGroupId}`, nextMode);
         await writeSystemAudit(env, { type: "rule_proxy_setting", groupId: currentGroupId, actorId: userId, action: nextMode });
-        return jsonReply(`${atSender}AI 群规代理已设为 ${nextMode}。record 只记录；warn 警告；mute 禁言；auto 由 AI 按分类处理（仅群主可启用）。`);
+        return jsonReply(`${atSender}AI 群规代理已设为 ${nextMode}。record 只记录；warn 以警告为主，但分类明确设为撤回时会执行撤回；mute 以禁言为主并遵守分类撤回；auto 由 AI 按分类处理（仅群主可启用）。`);
       }
 
       if (/^[!！](?:授权AI踢出|授權AI踢出)$/i.test(cleanMessage)) {
@@ -2855,7 +2863,7 @@ ${deepseekContextSummary}`;
             fastChat: isFastAcknowledgement,
             hasMedia: Boolean(loadedImage || voiceUrl || voiceFile || videoUrl || videoFile),
             visionRequest: loadedImage,
-            userId, groupId: currentGroupId, isDeveloper
+            userId, groupId: currentGroupId, isDeveloper, signal: request.signal
           });
           baseText = String(generated?.text || '').trim();
           usedModel = generated?.model || 'unknown';
@@ -2876,6 +2884,11 @@ ${deepseekContextSummary}`;
         } catch (e) {
           console.error('Hybrid generation failed:', e);
         }
+      }
+
+      if (request.signal?.aborted) {
+        await clearThinkingIndicator();
+        return new Response(null, { status: 204 });
       }
 
       if (success) {
@@ -2899,6 +2912,10 @@ ${deepseekContextSummary}`;
       // ==========================================
       
       // 先执行人格与时间防漂移，再把净化后的回复保存进历史，避免错误风格污染下一轮。
+      if (request.signal?.aborted) {
+        await clearThinkingIndicator();
+        return new Response(null, { status: 204 });
+      }
       const replyText = sanitizeAiReply(applyConversationOutputGuards(sanitizeAiReply(baseText), {
         allowRoleplay: allowRoleplayStyle,
         explicitTimeQuestion,
@@ -4531,7 +4548,22 @@ async function recordDeepSeekUsage(env, { userId, groupId, model, usage }) {
   return cost;
 }
 
-async function callDeepSeek(env, { messages, userId, groupId, thinking = "disabled", effort = "high", maxTokens = 1200, model, deadlineAt = Date.now() + 12000, maxAttempts = 1 }) {
+function mergeAbortSignal(timeoutMs, externalSignal = null) {
+  const timeoutSignal = AbortSignal.timeout(Math.max(1, Number(timeoutMs || 1)));
+  if (!externalSignal) return timeoutSignal;
+  if (externalSignal.aborted) return externalSignal;
+  if (typeof AbortSignal.any === "function") return AbortSignal.any([timeoutSignal, externalSignal]);
+  const controller = new AbortController();
+  const forward = signal => {
+    if (controller.signal.aborted) return;
+    try { controller.abort(signal.reason); } catch { controller.abort(); }
+  };
+  timeoutSignal.addEventListener("abort", () => forward(timeoutSignal), { once: true });
+  externalSignal.addEventListener("abort", () => forward(externalSignal), { once: true });
+  return controller.signal;
+}
+
+async function callDeepSeek(env, { messages, userId, groupId, thinking = "disabled", effort = "high", maxTokens = 1200, model, deadlineAt = Date.now() + 12000, maxAttempts = 1, signal = null }) {
   const keys = deepSeekApiKeys(env);
   if (!keys.length) throw new Error("DEEPSEEK_API_KEYS_MISSING");
   const selectedModel = model || env.DEEPSEEK_FLASH_MODEL || DEFAULTS.deepseekFlashModel;
@@ -4551,7 +4583,7 @@ async function callDeepSeek(env, { messages, userId, groupId, thinking = "disabl
         method: "POST",
         headers: { "Content-Type": "application/json", "Authorization": `Bearer ${key}` },
         body: JSON.stringify(payload),
-        signal: AbortSignal.timeout(remainingTimeout(deadlineAt, 10000, 1200))
+        signal: mergeAbortSignal(remainingTimeout(deadlineAt, 10000, 1200), signal)
       });
       const data = await response.json().catch(() => ({}));
       if (!response.ok) {
@@ -4660,7 +4692,7 @@ async function callGemmaDecision(env, { system, prompt, maxOutputTokens = 64, de
   throw new Error(lastError);
 }
 
-async function callGemmaChat(env, { model, system, contents, maxOutputTokens = 1000, temperature = 0.72, timeoutMs = 10000, deadlineAt = Date.now() + timeoutMs, maxAttempts = 1 }) {
+async function callGemmaChat(env, { model, system, contents, maxOutputTokens = 1000, temperature = 0.72, timeoutMs = 10000, deadlineAt = Date.now() + timeoutMs, maxAttempts = 1, signal = null }) {
   const keys = roundRobinKeys([...new Set([...parseList(env.GEMINI_API_KEYS), ...parseList(env.VECTORIZE_GEMINI_KEYS)])], "gemini");
   if (!keys.length) throw new Error("GEMMA_API_KEYS_MISSING");
   const configured = await effectiveRuntimeModels(env, "last_resort");
@@ -4688,7 +4720,7 @@ async function callGemmaChat(env, { model, system, contents, maxOutputTokens = 1
               thinkingConfig: { thinkingLevel: selectedModel.includes("31b") ? "high" : "minimal" }
             }
           }),
-          signal: AbortSignal.timeout(remainingTimeout(deadlineAt, Math.max(3000, Math.min(10000, Number(timeoutMs || 10000))), 1200))
+          signal: mergeAbortSignal(remainingTimeout(deadlineAt, Math.max(3000, Math.min(10000, Number(timeoutMs || 10000))), 1200), signal)
         });
         const data = await response.json().catch(() => ({}));
         if (response.ok) {
@@ -4754,7 +4786,7 @@ function searchRequirement(text) {
   return { needed: explicit || fresh, explicit };
 }
 
-async function callGeminiGenerate(env, { models, system, contents, maxOutputTokens = 1000, temperature = 0.7, useSearch = true, requireSearch = false, timeoutMs = 10000, apiKeys = null, keyProvider = "gemini", deadlineAt = Date.now() + timeoutMs, maxAttempts = 2 }) {
+async function callGeminiGenerate(env, { models, system, contents, maxOutputTokens = 1000, temperature = 0.7, useSearch = true, requireSearch = false, timeoutMs = 10000, apiKeys = null, keyProvider = "gemini", deadlineAt = Date.now() + timeoutMs, maxAttempts = 2, signal = null }) {
   const keys = apiKeys
     ? roundRobinKeys(apiKeys, keyProvider)
     : roundRobinKeys([...new Set([...parseList(env.GEMINI_API_KEYS), ...parseList(env.VECTORIZE_GEMINI_KEYS)])], "gemini");
@@ -4774,7 +4806,7 @@ async function callGeminiGenerate(env, { models, system, contents, maxOutputToke
       for (let attempt = 0; attempt < 2; attempt++) {
         try {
           const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(key)}`, {
-            method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body), signal: AbortSignal.timeout(remainingTimeout(deadlineAt, Math.max(3000, Math.min(10000, Number(timeoutMs || 10000))), 1200))
+            method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body), signal: mergeAbortSignal(remainingTimeout(deadlineAt, Math.max(3000, Math.min(10000, Number(timeoutMs || 10000))), 1200), signal)
           });
           const data = await response.json().catch(() => ({}));
           if (response.ok) {
@@ -4797,7 +4829,7 @@ async function callGeminiGenerate(env, { models, system, contents, maxOutputToke
   throw new Error(lastError);
 }
 
-async function buildSharedSearchContext(env, { query, models }) {
+async function buildSharedSearchContext(env, { query, models, signal = null }) {
   const requirement = searchRequirement(query);
   const base = {
     required: requirement.needed,
@@ -4825,7 +4857,8 @@ async function buildSharedSearchContext(env, { query, models }) {
       useSearch: true,
       requireSearch: true,
       apiKeys: searchKeys,
-      keyProvider: "gemini_search"
+      keyProvider: "gemini_search",
+      signal
     });
     return {
       ...base,
@@ -4869,7 +4902,7 @@ async function generateHybridReply(env, args) {
   let sharedSearchPromise = null;
   const getSharedSearch = async () => {
     if (args.hasMedia) return { required: false, explicit: false, attempted: false, performed: false, query: args.cleanText, context: "", sources: [], searchQueries: [], provider: "", model: "", error: "media_request" };
-    if (!sharedSearchPromise) sharedSearchPromise = buildSharedSearchContext(env, { query: args.cleanText, models: args.chatModels });
+    if (!sharedSearchPromise) sharedSearchPromise = buildSharedSearchContext(env, { query: args.cleanText, models: args.chatModels, signal: args.signal });
     return sharedSearchPromise;
   };
   const mergeSearchPrompt = (prompt, search) => {
@@ -4905,7 +4938,8 @@ async function generateHybridReply(env, args) {
       temperature: args.fastChat ? 0.9 : 0.82,
       timeoutMs: args.fastChat ? 5000 : 7000,
       deadlineAt: overallDeadlineAt,
-      maxAttempts: 1
+      maxAttempts: 1,
+      signal: args.signal
     });
     return finish("gemma", result, search);
   };
@@ -4924,7 +4958,8 @@ async function generateHybridReply(env, args) {
       requireSearch: false,
       timeoutMs: args.fastChat ? 6000 : 8000,
       deadlineAt: overallDeadlineAt,
-      maxAttempts: args.fastChat ? 1 : 2
+      maxAttempts: args.fastChat ? 1 : 2,
+      signal: args.signal
     });
     return finish("gemini", result, search);
   };
@@ -4935,7 +4970,7 @@ async function generateHybridReply(env, args) {
     const result = await callDeepSeek(env, {
       messages, userId: args.userId, groupId: args.groupId || "private", thinking: "disabled",
       maxTokens: 1000, model: env.DEEPSEEK_FLASH_MODEL || DEFAULTS.deepseekFlashModel,
-      deadlineAt: overallDeadlineAt, maxAttempts: 1
+      deadlineAt: overallDeadlineAt, maxAttempts: 1, signal: args.signal
     });
     return finish("deepseek", result, search);
   };
@@ -4958,6 +4993,7 @@ async function generateHybridReply(env, args) {
 
   let lastError = null;
   for (const attempt of attempts) {
+    if (args.signal?.aborted) throw new DOMException("Question cancelled", "AbortError");
     if (isDeadlineExceeded(overallDeadlineAt, 1200)) break;
     try {
       return await withTimeout(attempt(), remainingTimeout(overallDeadlineAt, 12000, 1200), "MODEL_PROVIDER_TIMEOUT");
@@ -6405,18 +6441,29 @@ async function performRuleProxyAction(env, item, review) {
   let strikeCounted = false;
   let fallbackNote = "";
 
+  const explicitRecallPolicy = normalizeRulePolicyPunishment(policy.punishment) === "recall";
   if (mode === "warn") {
     if (eligibleForStrike) {
       progressiveCount = await addRuleStrike(env, item, progressivePolicy.windowDays);
       strikeCounted = true;
-      action = "warn";
+      action = explicitRecallPolicy ? "recall" : "warn";
+    } else if (explicitRecallPolicy) {
+      action = "recall";
+      fallbackNote = "分类规则要求撤回；本次不计入累计次数";
     } else {
       action = normalizeProgressiveAction(progressivePolicy.minorAction, "remind");
       if (!["remind", "warn"].includes(action)) action = "remind";
       fallbackNote = "影响较轻或缺乏明确恶意，本次只提醒且不计入累计次数";
     }
   } else if (mode === "mute") {
-    if (eligibleForStrike) {
+    if (explicitRecallPolicy) {
+      if (eligibleForStrike) {
+        progressiveCount = await addRuleStrike(env, item, progressivePolicy.windowDays);
+        strikeCounted = true;
+      }
+      action = "recall";
+      fallbackNote = strikeCounted ? "分类规则要求撤回" : "分类规则要求撤回；本次不计入累计次数";
+    } else if (eligibleForStrike) {
       progressiveCount = await addRuleStrike(env, item, progressivePolicy.windowDays);
       strikeCounted = true;
       const step = resolveRuleProgressiveStep(progressivePolicy, progressiveCount);
@@ -6427,7 +6474,6 @@ async function performRuleProxyAction(env, item, review) {
         duration = progressiveMuteFallback(progressivePolicy, progressiveCount, await dbGet(env, `rule_proxy_mute_seconds:${item.groupId}`));
         fallbackNote = "当前为禁言代理，累进规则中的踢出已自动降级为禁言";
       }
-      if (action === "recall") action = "warn";
     } else {
       action = normalizeProgressiveAction(progressivePolicy.minorAction, "remind");
       if (!["remind", "warn"].includes(action)) action = "remind";
@@ -6473,19 +6519,33 @@ async function performRuleProxyAction(env, item, review) {
   }
 
   const appealHint = "如认为判断有误，请登录 Control Center → 历史违规记录，可对单条或多条记录一键申诉。";
-  const countText = strikeCounted ? `；已计入 ${progressivePolicy.windowDays} 天内第 ${Math.max(1, progressiveCount)} 次违规` : "；本次不计入累计次数";
+  const countLine = strikeCounted
+    ? `累计：已计入 ${progressivePolicy.windowDays} 天内第 ${Math.max(1, progressiveCount)} 次违规。`
+    : "累计：本次不计入累计次数。";
+  const quotedRuleMessage = (title, reasonText, extraLine = "") => {
+    const segments = [];
+    if (item.messageId) segments.push({ type: "reply", data: { id: String(item.messageId) } });
+    segments.push({ type: "at", data: { qq: String(item.userId) } });
+    segments.push({ type: "text", data: { text: `
+${title}
+
+原因：${reasonText || "请遵守群规"}
+${countLine}${extraLine ? `
+${extraLine}` : ""}
+
+${appealHint}` } });
+    return segments;
+  };
   let result = { ok: false, message: "未执行" };
   let warningMessageId = "";
   let actionTaken = action;
   try {
     if (action === "remind") {
-      const sent = await callOneBotAction(env, { action: "send_group_msg", params: { group_id: numericId(item.groupId), message: `[CQ:at,qq=${item.userId}] 群规提醒：这条消息可能不太合适（${item.violationType}）。${item.reason || item.rule || "请留意群规"}。本次仅提醒，不计入累计次数。
-${appealHint}`, auto_escape: false } }, 15000);
+      const sent = await callOneBotAction(env, { action: "send_group_msg", params: { group_id: numericId(item.groupId), message: quotedRuleMessage(`群规提醒：这条消息可能不太合适（${item.violationType}）。`, item.reason || item.rule || "请留意群规"), auto_escape: false } }, 15000);
       warningMessageId = extractOneBotMessageId(sent);
       result = { ok: true, message: fallbackNote || "已发送友善提醒，不计入累计次数" };
     } else if (action === "warn") {
-      const sent = await callOneBotAction(env, { action: "send_group_msg", params: { group_id: numericId(item.groupId), message: `[CQ:at,qq=${item.userId}] 群规警告：你的消息可能违反“${item.violationType}”。原因：${item.reason || item.rule || "请遵守群规"}${countText}。
-${appealHint}`, auto_escape: false } }, 15000);
+      const sent = await callOneBotAction(env, { action: "send_group_msg", params: { group_id: numericId(item.groupId), message: quotedRuleMessage(`群规警告：你的消息可能违反“${item.violationType}”。`, item.reason || item.rule || "请遵守群规"), auto_escape: false } }, 15000);
       warningMessageId = extractOneBotMessageId(sent);
       actionTaken = strikeCounted ? "progressive_warn" : "warn";
       result = { ok: true, message: fallbackNote || (strikeCounted ? `已发送警告（${progressivePolicy.windowDays} 天内第 ${progressiveCount} 次）` : "已发送警告，本次不计入累计次数") };
@@ -6493,13 +6553,28 @@ ${appealHint}`, auto_escape: false } }, 15000);
       if (!item.messageId) throw new Error("该违规记录没有原消息 ID，无法撤回");
       await callOneBotAction(env, { action: "delete_msg", params: { message_id: String(item.messageId) } }, 15000);
       actionTaken = strikeCounted ? "progressive_recall" : "recall";
-      result = { ok: true, message: `已撤回违规消息${countText}` };
+      try {
+        const sent = await callOneBotAction(env, { action: "send_group_msg", params: { group_id: numericId(item.groupId), message: [
+          { type: "at", data: { qq: String(item.userId) } },
+          { type: "text", data: { text: `
+群规处理：已撤回一条可能违反“${item.violationType}”的消息。
+
+原因：${item.reason || item.rule || "请遵守群规"}
+${countLine}
+
+${appealHint}` } }
+        ], auto_escape: false } }, 15000);
+        warningMessageId = extractOneBotMessageId(sent);
+      } catch (notifyError) {
+        fallbackNote = `${fallbackNote ? fallbackNote + "；" : ""}违规消息已撤回，但公开通知发送失败：${String(notifyError?.message || notifyError).slice(0, 200)}`;
+      }
+      result = { ok: true, message: `${fallbackNote ? fallbackNote + "；" : ""}已撤回违规消息${strikeCounted ? `（第 ${progressiveCount} 次累计）` : "（不计入累计次数）"}` };
     } else if (action === "mute") {
       const configured = parseUnlimitedNonNegativeInteger(await dbGet(env, `rule_proxy_mute_seconds:${item.groupId}`), DEFAULTS.ruleProxyMuteSeconds);
       const suggested = parseUnlimitedNonNegativeInteger(duration || policy.muteSeconds || review?.muteSeconds, configured);
       duration = Math.max(60, Math.min(30 * 24 * 3600, suggested || configured || 600));
-      const sent = await callOneBotAction(env, { action: "send_group_msg", params: { group_id: numericId(item.groupId), message: `[CQ:at,qq=${item.userId}] 群规处理：违反“${item.violationType}”，本次禁言 ${duration >= 60 && duration % 60 === 0 ? `${duration / 60} 分钟` : `${duration} 秒`}${countText}。
-${appealHint}`, auto_escape: false } }, 15000);
+      const durationText = duration >= 60 && duration % 60 === 0 ? `${duration / 60} 分钟` : `${duration} 秒`;
+      const sent = await callOneBotAction(env, { action: "send_group_msg", params: { group_id: numericId(item.groupId), message: quotedRuleMessage(`群规处理：违反“${item.violationType}”，本次禁言 ${durationText}。`, item.reason || item.rule || "请遵守群规"), auto_escape: false } }, 15000);
       warningMessageId = extractOneBotMessageId(sent);
       await callOneBotAction(env, { action: "set_group_ban", params: { group_id: numericId(item.groupId), user_id: numericId(item.userId), duration } }, 15000);
       actionTaken = strikeCounted ? "progressive_mute" : "mute";
@@ -9676,7 +9751,7 @@ function ensureR3Views(){
   addView('schedules','排程管理');addView('conversations','对话记录');addView('ruleviolations','群规监控');addView('settingscenter','设置中心');addView('bilibili','B站串接');addView('aidecisions','AI 回复记录');addView('appeals','匿名申诉');addView('violationhistory','历史违规记录');addView('appealreview','申诉处理');
 
   if(!$('v-schedules').dataset.ready){$('v-schedules').dataset.ready='1';$('v-schedules').innerHTML='<div class="section-head"><div><h2>排程管理</h2><p>在网页建立、查看与取消群消息排程；排程执行依赖 Cloudflare Cron Trigger 定期调用 Worker 的 scheduled()。</p></div><button id="scheduleReload" class="btn">重新加载</button></div><div class="grid"><div class="card span-5"><h3>建立排程</h3><div class="field"><label>排程内容</label><textarea id="scheduleText" placeholder="例如：每天 18:00 记得填写日报&#10;每周一 09:00 本周会议开始&#10;2026-07-30 20:00 活动开始&#10;每隔 2小时 请查看群公告"></textarea></div><button id="scheduleCreate" class="btn primary" style="width:100%">建立排程</button><div id="scheduleCronState" class="notice" style="margin-top:12px">尚未读取 Cron 状态。</div></div><div class="card span-7"><h3>我的排程</h3><div id="scheduleMine" class="list"><div class="empty">尚未加载</div></div></div><div id="scheduleReviewCard" class="card span-6 hidden"><h3>分配给我的审核</h3><div id="scheduleReviewList" class="list"><div class="empty">没有待审核排程</div></div></div><div id="scheduleRootCard" class="card span-6 hidden"><h3>开发者排程总览</h3><div id="scheduleRootList" class="list"><div class="empty">尚未加载</div></div></div></div>';$('scheduleReload').onclick=loadSchedules;$('scheduleCreate').onclick=createScheduleFromPortal}
-  if(!$('v-ruleviolations').dataset.ready){$('v-ruleviolations').dataset.ready='1';$('v-ruleviolations').innerHTML='<div class="section-head"><div><h2>群规监控记录</h2><p>AI 会结合聊天上下文、链接内容、分类备注、严重程度与人工复核结果判断。</p></div><button id="rvReload" class="btn">重新加载</button></div><div class="card"><div class="row"><input id="rvMember" placeholder="群友名称或 QQ"><input id="rvContent" placeholder="消息内容"><select id="rvType"><option value="">全部违规项目</option></select><button id="rvSearch" class="btn primary">搜索</button></div><div class="row" style="margin-top:12px"><select id="rvStrictness" title="群规判断严格度"><option value="loose">宽松</option><option value="low">低</option><option value="medium" selected>中</option><option value="high">高</option><option value="strict">严格</option></select><select id="rvProxyMode"><option value="record">仅记录</option><option value="warn">警告代理（7 天累计，只警告）</option><option value="mute">禁言代理（累计并处罚，不踢人）</option><option value="auto">完全代理（可踢出）</option></select><input id="rvMuteSeconds" type="number" min="0" placeholder="默认禁言秒数"><label class="switch"><input id="rvKickAuth" type="checkbox">授权 AI 踢出</label><button id="rvSave" class="btn primary">保存群规设置</button></div><div class="notice" style="margin-top:12px">警告代理会统计有效期内的违规次数但只警告；禁言代理会按次数处罚但绝不踢人；完全代理才可能按规则踢出。记录、警告、撤回违规消息都可作为分类动作。</div></div><details class="settings-fold" id="rvRulesFold"><summary><span>累进处罚与分类规则</span><span class="muted">关闭时不占用内容空间</span></summary><div class="settings-fold-body"><div class="grid"><div class="card span-4"><h3>本群累进处罚规则</h3><p class="muted">这是当前群独立规则，次数可自由增加。</p><div class="field"><label>累计有效期（天）</label><input id="rvProgressiveWindow" type="number" min="1" max="365"></div><div class="field"><label>轻微或无明显恶意</label><select id="rvMinorAction"><option value="remind">友善提醒，不累计</option><option value="warn">正式警告，不累计</option><option value="manual">交管理复核</option></select></div><button id="rvAddStep" class="btn">增加处罚次数</button></div><div class="card span-8"><h3>次数与动作</h3><div id="rvProgressiveSteps"></div><div class="notice">最后一个步骤会套用于更高次数。例如只设 3 步时，第 4 次以后继续使用第 3 步。</div></div></div><div class="card" style="margin-top:16px"><div class="section-head"><div><h3>群规分类与处罚</h3><p>管理以上可调整分类、处罚和备注；选择“使用本群累进规则”才会依次数处理。</p></div><button id="rvAddPolicy" class="btn">新增分类</button></div><div id="rvPolicyList" class="list"></div></div></div></details><div id="rvList" class="list" style="margin-top:16px"></div>';$('rvReload').onclick=loadRuleViolations;$('rvSearch').onclick=loadRuleViolations;$('rvSave').onclick=saveRuleViolationSettings;$('rvAddPolicy').onclick=addRulePolicyRow;$('rvAddStep').onclick=addProgressiveStep}
+  if(!$('v-ruleviolations').dataset.ready){$('v-ruleviolations').dataset.ready='1';$('v-ruleviolations').innerHTML='<div class="section-head"><div><h2>群规监控记录</h2><p>AI 会结合聊天上下文、链接内容、分类备注、严重程度与人工复核结果判断。</p></div><button id="rvReload" class="btn">重新加载</button></div><div class="card"><div class="row"><input id="rvMember" placeholder="群友名称或 QQ"><input id="rvContent" placeholder="消息内容"><select id="rvType"><option value="">全部违规项目</option></select><button id="rvSearch" class="btn primary">搜索</button></div><div class="row" style="margin-top:12px"><select id="rvStrictness" title="群规判断严格度"><option value="loose">宽松</option><option value="low">低</option><option value="medium" selected>中</option><option value="high">高</option><option value="strict">严格</option></select><select id="rvProxyMode"><option value="record">仅记录</option><option value="warn">警告代理（7 天累计，只警告）</option><option value="mute">禁言代理（累计并处罚，不踢人）</option><option value="auto">完全代理（可踢出）</option></select><input id="rvMuteSeconds" type="number" min="0" placeholder="默认禁言秒数"><label class="switch"><input id="rvKickAuth" type="checkbox">授权 AI 踢出</label><button id="rvSave" class="btn primary">保存群规设置</button></div><div class="notice" style="margin-top:12px">警告代理默认发送警告，但分类明确设为“撤回违规消息”时会执行撤回；禁言代理默认按次数处罚，也会遵守分类撤回，但绝不踢人；完全代理才可能按规则踢出。</div></div><details class="settings-fold" id="rvRulesFold"><summary><span>累进处罚与分类规则</span><span class="muted">关闭时不占用内容空间</span></summary><div class="settings-fold-body"><div class="grid"><div class="card span-4"><h3>本群累进处罚规则</h3><p class="muted">这是当前群独立规则，次数可自由增加。</p><div class="field"><label>累计有效期（天）</label><input id="rvProgressiveWindow" type="number" min="1" max="365"></div><div class="field"><label>轻微或无明显恶意</label><select id="rvMinorAction"><option value="remind">友善提醒，不累计</option><option value="warn">正式警告，不累计</option><option value="manual">交管理复核</option></select></div><button id="rvAddStep" class="btn">增加处罚次数</button></div><div class="card span-8"><h3>次数与动作</h3><div id="rvProgressiveSteps"></div><div class="notice">最后一个步骤会套用于更高次数。例如只设 3 步时，第 4 次以后继续使用第 3 步。</div></div></div><div class="card" style="margin-top:16px"><div class="section-head"><div><h3>群规分类与处罚</h3><p>管理以上可调整分类、处罚和备注；选择“使用本群累进规则”才会依次数处理。</p></div><button id="rvAddPolicy" class="btn">新增分类</button></div><div id="rvPolicyList" class="list"></div></div></div></details><div id="rvList" class="list" style="margin-top:16px"></div>';$('rvReload').onclick=loadRuleViolations;$('rvSearch').onclick=loadRuleViolations;$('rvSave').onclick=saveRuleViolationSettings;$('rvAddPolicy').onclick=addRulePolicyRow;$('rvAddStep').onclick=addProgressiveStep}
   if(!$('v-conversations').dataset.ready){$('v-conversations').dataset.ready='1';$('v-conversations').innerHTML='<div class="section-head"><div><h2>群友对话记录</h2><p>只记录群友原始消息，不记录 AI 回复或系统消息。管理员可直接处理精华、撤回、群待办、公告、提醒与违规流程。</p></div><button id="convReload" class="btn">重新加载</button></div><div class="card conversation-toolbar"><div class="row"><input id="convSearch" class="grow" placeholder="搜索群友、QQ、消息或转发内容"><label class="switch"><input id="convViolationOnly" type="checkbox">只看违规消息</label><button id="convSearchBtn" class="btn primary">搜索</button></div></div><div id="conversationList" class="list"><div class="empty">尚未加载</div></div>';$('convReload').onclick=loadConversations;$('convSearchBtn').onclick=loadConversations;$('convViolationOnly').onchange=loadConversations;$('convSearch').onkeydown=function(e){if(e.key==='Enter')loadConversations()}}
   if(!$('v-settingscenter').dataset.ready){$('v-settingscenter').dataset.ready='1';$('v-settingscenter').innerHTML='<div class="section-head"><div><h2>设置中心</h2><p>集中显示当前账号可修改的全部设置。普通成员、管理员、群主与开发者会看到不同项目；高风险设置仍需真实群主验证。</p></div><div class="row"><button id="scReload" class="btn">重新加载</button><button id="scSaveAll" class="btn primary">保存全部设置</button></div></div><div id="scDeveloper" class="card hidden"><div class="row"><input id="scTargetQq" placeholder="目标 QQ（输入后自动识别权限）"><span id="scResolvedRole" class="status">尚未识别</span><label class="switch"><input id="scAuditLog" type="checkbox" checked>记录操作日志（可选）</label></div></div><div id="scMessage" class="notice">尚未加载设置。</div><div id="scList" class="list" style="margin-top:16px"></div>';$('scReload').onclick=loadSettingsCenter;$('scSaveAll').onclick=saveAllSettings;$('scTargetQq').onchange=loadSettingsCenter;$('scTargetQq').onkeydown=function(e){if(e.key==='Enter')loadSettingsCenter()}}
   if(!$('v-aidecisions').dataset.ready){$('v-aidecisions').dataset.ready='1';$('v-aidecisions').innerHTML='<div class="section-head"><div><h2>AI 回复与未回复记录</h2><p>每則群聊觸發判斷、主動插話來源、模型、智能 @ 規劃、獨立搜索內容與實際發送結果都獨立保存。</p></div><button id="aiLogReload" class="btn">重新加载</button></div><div class="card"><div class="row"><input id="aiLogSearch" class="grow" placeholder="搜索 QQ、訊息、原因、模型"><select id="aiLogDecision"><option value="">全部決策</option><option value="reply_generated">已產生回覆</option><option value="skipped">未回覆</option><option value="blocked">遭阻擋</option><option value="error">錯誤</option></select><select id="aiLogTrigger"><option value="">全部觸發</option><option value="mention">@機器人</option><option value="reply_to_ai">回覆機器人</option><option value="auto_interject">主動插話</option><option value="private">私聊</option><option value="none">未觸發</option></select><button id="aiLogSearchBtn" class="btn primary">搜索</button></div></div><div id="aiDecisionList" class="list" style="margin-top:16px"><div class="empty">尚未加载</div></div>';$('aiLogReload').onclick=loadAiDecisions;$('aiLogSearchBtn').onclick=loadAiDecisions;$('aiLogSearch').onkeydown=function(e){if(e.key==='Enter')loadAiDecisions()}}
@@ -9795,7 +9870,7 @@ async function submitAppeal(){var r=await api('/appeals/submit','POST',{groupId:
 function appealStatusText(v){return({pending_owner:'待处理',pending_review:'审核中',approved:'已通过',rejected:'已驳回'})[v]||v||'待处理'}
 async function loadAppealReviews(){if(!currentGroup){$('appealReviewList').innerHTML='<div class="empty">请先从右上角选择群组。</div>';return}var r=await api('/appeals/review?status='+encodeURIComponent($('appealReviewStatus').value||''));if(!r.ok){$('appealReviewList').innerHTML='<div class="empty">'+esc(r.message)+'</div>';return}$('appealReviewList').innerHTML=(r.appeals||[]).map(function(a){var buttons=a.canDecide&&['pending_owner','pending_review'].includes(a.status)?'<div class="row" style="margin-top:12px"><button class="btn primary appealDecision" data-id="'+esc(a.id)+'" data-decision="approve">通过申诉</button><button class="btn danger appealDecision" data-id="'+esc(a.id)+'" data-decision="reject">驳回申诉</button></div>':'';return '<div class="item"><div class="item-head"><div><div class="item-title">'+esc(a.anonymousLabel||a.id)+'｜'+esc(appealStatusText(a.status))+'</div><div class="item-meta">'+esc(a.identityText||'匿名申诉人')+'｜'+esc(a.type||'其他')+'｜'+esc(a.createdAt||'')+(a.applicantMembership==='former'?'｜前成员申诉':'')+'</div></div></div><div class="item-body">'+esc(a.content||'')+(a.evidenceMessageId?'<br><b>相关消息：</b>'+esc(a.evidenceMessageId):'')+(a.result?'<br><b>处理结果：</b>'+esc(a.result):'')+(a.againstAdmin?'<br><b>注意：</b>该案件涉及管理层，只能由群主或开发者决定。':'')+'</div>'+buttons+'</div>'}).join('')||'<div class="empty">当前群没有符合条件的申诉</div>';$('appealReviewList').querySelectorAll('.appealDecision').forEach(function(btn){btn.onclick=function(){decideAppeal(this.dataset.id,this.dataset.decision)}})}
 async function decideAppeal(id,decision){var note=await textModal(decision==='approve'?'请输入通过原因、需要撤销的处理或其他补救说明。':'请输入驳回原因，让申诉人知道为什么没有通过。','',decision==='approve'?'通过申诉':'驳回申诉',{placeholder:'建议填写清楚的处理说明'});if(note===null)return;if(!String(note).trim()&&!(await confirmModal('没有填写处理说明，仍要继续吗？','未填写说明')))return;var r=await api('/appeals/review','POST',{id:id,decision:decision,note:String(note||'').trim()});toast(r.message||'处理完成');if(r.ok)loadAppealReviews()}
-var logTypeLabels={moderation_proposed:'已建立待确认操作',moderation_cancelled:'已取消待确认操作',moderation_confirmed:'已确认并执行操作',moderation_failed:'待确认操作执行失败',group_operation:'群管理操作成功',group_operation_failed:'群管理操作失败',portal_ai_settings:'群组 AI 设置已保存',ai_settings:'AI 设置已修改',settings_center:'设置中心已修改',bilibili_connector:'B站监控设置已修改',bilibili_auto_monitor:'B站自动监控已修改',bilibili_auto_poll:'B站自动检查',permission:'程序权限已修改',platform_feature:'功能开关已修改',rule_monitor_setting:'群规监控设置已修改',rule_proxy_setting:'AI 群规代理设置已修改',rule_strictness_setting:'群规判断严格度已修改',rule_proxy_action:'AI 群规代理已处理',rule_proxy_portal_settings:'AI 群规代理设置已保存',rule_proxy_kick_auth:'AI 踢出授权已修改',join_reject_auth:'入群拒绝授权已修改',rate_limit_setting:'回复间隔已修改',rate_limit_portal:'回复间隔已保存',quota:'DeepSeek 额度已修改',context:'聊天上下文已处理',group_checkin:'群打卡任务',thinking_indicator_recall:'思考提示已撤回',thinking_indicator_residual:'思考提示残留',groupwork_requested:'已建立群务申请',groupwork_decided:'群务申请已处理',runtime_model_registry:'模型顺序已修改',platform_job:'系统任务',portal_login:'Control Center 登录',appeal_review:'申诉处理',violation_appeal_submitted:'违规记录申诉已提交',rule_violation_reversed:'群规误判已撤销',conversation_action:'对话记录操作',conversation_action_failed:'对话记录操作失败',single_model_health_check:'单一模型健康检查'};
+var logTypeLabels={moderation_proposed:'已建立待确认操作',moderation_cancelled:'已取消待确认操作',moderation_confirmed:'已确认并执行操作',moderation_failed:'待确认操作执行失败',group_operation:'群管理操作成功',group_operation_failed:'群管理操作失败',portal_ai_settings:'群组 AI 设置已保存',ai_settings:'AI 设置已修改',settings_center:'设置中心已修改',bilibili_connector:'B站监控设置已修改',bilibili_auto_monitor:'B站自动监控已修改',bilibili_auto_poll:'B站自动检查',permission:'程序权限已修改',platform_feature:'功能开关已修改',rule_monitor_setting:'群规监控设置已修改',rule_proxy_setting:'AI 群规代理设置已修改',rule_strictness_setting:'群规判断严格度已修改',rule_proxy_action:'AI 群规代理已处理',rule_proxy_portal_settings:'AI 群规代理设置已保存',rule_proxy_kick_auth:'AI 踢出授权已修改',join_reject_auth:'入群拒绝授权已修改',rate_limit_setting:'回复间隔已修改',rate_limit_portal:'回复间隔已保存',quota:'DeepSeek 额度已修改',context:'聊天上下文已处理',group_checkin:'群打卡任务',thinking_indicator_recall:'思考提示已撤回',thinking_indicator_residual:'思考提示残留',question_cancelled_by_recall:'问题因撤回取消',groupwork_requested:'已建立群务申请',groupwork_decided:'群务申请已处理',runtime_model_registry:'模型顺序已修改',platform_job:'系统任务',portal_login:'Control Center 登录',appeal_review:'申诉处理',violation_appeal_submitted:'违规记录申诉已提交',rule_violation_reversed:'群规误判已撤销',conversation_action:'对话记录操作',conversation_action_failed:'对话记录操作失败',single_model_health_check:'单一模型健康检查'};
 var logActionLabels={mute:'禁言',unmute:'解除禁言',kick:'踢出群聊',reject:'拒绝入群',whole_mute:'开启全员禁言',whole_unmute:'解除全员禁言',set_admin:'设为 QQ 管理员',unset_admin:'取消 QQ 管理员',recall:'撤回消息',create:'新增',update:'更新',enabled:'开启',disabled:'关闭',authorized:'已授权',revoked:'已取消授权',ai_on:'开启 AI',ai_off:'关闭 AI',checked:'检查完成',baseline_created:'建立初始状态',failed:'失败',cancelled:'已取消',commands_enabled:'设置型指令开关',interject_rate:'主动插话率',welcome_enabled:'自动欢迎新人'};
 function logCategoryOf(a){var t=String(a.type||'');if(/moderation|group_operation|groupwork|rule_proxy_action/.test(t))return 'moderation';if(/settings|portal_ai|ai_settings|rule_monitor|rule_proxy_setting|rule_strictness|rate_limit|quota|runtime_model|platform_feature|context/.test(t))return 'settings';if(/bilibili/.test(t))return 'bilibili';if(/conversation_action/.test(t))return 'moderation';if(/appeal/.test(t))return 'appeal';if(/permission|auth/.test(t))return 'permission';if(/failed|error/.test(t)||a.error)return 'error';return 'system'}
 function logTone(a){var t=String(a.type||''),r=String(a.result||'');if(/failed|error/.test(t)||a.error||/失败|failed/i.test(r))return 'error';if(/cancelled/.test(t))return 'warn';if(/proposed|requested/.test(t))return 'info';return 'ok'}
@@ -9841,6 +9916,7 @@ export class OneBotHub {
     this.toolCounts = new Map();
     this.userInFlight = new Map();
     this.userQueues = new Map();
+    this.inputBuffers = new Map();
     this.queueSchedulerRunning = false;
 
     // 使用 Durable Objects WebSocket Hibernation API 后，Object 可被回收并重建，
@@ -10018,7 +10094,9 @@ export class OneBotHub {
         pendingRpc: this.pending.size,
         inFlightQuestions: this.userInFlight.size,
         queuedQuestions: [...this.userQueues.values()].reduce((sum, list) => sum + list.length, 0),
-        queuePolicy: "per_user_single_inflight_group_unlimited",
+        bufferedQuestions: this.inputBuffers.size,
+        inputDebounceMs: DEFAULTS.inputDebounceMs,
+        queuePolicy: "per_user_single_inflight_group_unlimited_cancel_and_merge",
         schedulerRunning: this.queueSchedulerRunning,
         reconnectCount: Number(this.socketDiagnostics?.reconnectCount || 0),
         closeCount: Number(this.socketDiagnostics?.closeCount || 0),
@@ -10205,12 +10283,33 @@ export class OneBotHub {
       }
       pending.resolve(body); return;
     }
-    if (!body || body.post_type === "meta_event") return;
+    if (!body) return;
+    if (this.isQuestionRecallNotice(body)) {
+      await this.handleQuestionRecall(body, request.url);
+      return;
+    }
+    if (this.isBotPokeNotice(body)) {
+      await this.flushBufferedQuestion(this.userQueueKey({ message_type: "group", group_id: body.group_id, user_id: body.user_id }), "poke");
+      return;
+    }
+    if (body.post_type === "meta_event") return;
+
+    const answerNowKey = this.answerNowKey(body);
+    if (answerNowKey && this.inputBuffers.has(answerNowKey)) {
+      await this.flushBufferedQuestion(answerNowKey, "answer_now");
+      return;
+    }
+
+    const continuationKey = this.questionContinuationKey(body);
+    if (continuationKey) {
+      await this.receiveUserQuestion(body, request.url);
+      return;
+    }
 
     const explicitGroupQuestion = await this.shouldQueueUserQuestion(body);
     await this.recordIngress(body, "received", { explicit: explicitGroupQuestion }).catch(() => {});
     if (explicitGroupQuestion) {
-      await this.enqueueUserQuestion(body, request.url);
+      await this.receiveUserQuestion(body, request.url);
       return;
     }
     // 普通群消息仍会写入对话记录并执行必要的本地逻辑，但当已有明确 @ 提问正在生成时，
@@ -10242,6 +10341,198 @@ export class OneBotHub {
       ...extra
     };
     await this.state.storage.put(key, next);
+  }
+
+  isQuestionRecallNotice(body) {
+    return body?.post_type === "notice"
+      && ["group_recall", "group_msg_delete", "message_recall"].includes(String(body.notice_type || ""))
+      && Boolean(body.group_id && body.message_id);
+  }
+
+  isBotPokeNotice(body) {
+    return body?.post_type === "notice"
+      && String(body.notice_type || "") === "notify"
+      && String(body.sub_type || "") === "poke"
+      && String(body.target_id || "") === String(body.self_id || "")
+      && Boolean(body.group_id && body.user_id);
+  }
+
+  answerNowKey(body) {
+    if (body?.post_type !== "message" || body?.message_type !== "group") return "";
+    const text = eventPlainText(body).replace(/@\d{5,}\s*/g, "").trim();
+    if (!/^(?:回答吧|回答|可以回答了|开始回答|開始回答|说完了|說完了|好了)$/i.test(text)) return "";
+    return this.userQueueKey(body);
+  }
+
+  questionContinuationKey(body) {
+    if (body?.post_type !== "message" || body?.message_type !== "group") return "";
+    if (String(body.user_id || "") === String(body.self_id || "")) return "";
+    const text = eventPlainText(body).trim();
+    if (!text || /^(?:[!！]|\/!)/.test(text)) return "";
+    const key = this.userQueueKey(body);
+    return this.inputBuffers.has(key) || this.userInFlight.has(key) ? key : "";
+  }
+
+  questionBodies(body) {
+    const list = Array.isArray(body?.__qqai_source_bodies) ? body.__qqai_source_bodies : [body];
+    return list.filter(Boolean).map(item => ({ ...item, __qqai_source_bodies: undefined }));
+  }
+
+  questionMessageIds(body) {
+    return this.questionBodies(body).map(item => String(item?.message_id || "")).filter(Boolean);
+  }
+
+  mergeQuestionBodies(parts) {
+    const clean = (parts || []).filter(Boolean);
+    if (!clean.length) return null;
+    const last = clean[clean.length - 1];
+    const segments = [];
+    clean.forEach((item, index) => {
+      if (index) segments.push({ type: "text", data: { text: "\n" } });
+      if (Array.isArray(item.message)) {
+        for (const segment of item.message) segments.push(segment);
+      } else {
+        segments.push({ type: "text", data: { text: String(item.raw_message || item.message || "") } });
+      }
+    });
+    return {
+      ...last,
+      message: segments,
+      raw_message: clean.map(item => String(item.raw_message || extractMessageText(item.message || ""))).join("\n"),
+      message_id: last.message_id,
+      __qqai_source_message_ids: clean.map(item => String(item.message_id || "")).filter(Boolean),
+      __qqai_source_bodies: clean
+    };
+  }
+
+  uniqueQuestionBodies(parts) {
+    const seen = new Set();
+    const output = [];
+    for (const part of parts || []) {
+      if (!part) continue;
+      const id = String(part.message_id || "");
+      const key = id || `${String(part.time || "")}:${eventPlainText(part)}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      output.push(part);
+    }
+    return output;
+  }
+
+  scheduleInputBuffer(key) {
+    const entry = this.inputBuffers.get(key);
+    if (!entry) return;
+    const token = crypto.randomUUID();
+    entry.token = token;
+    const now = Date.now();
+    const deadline = Number(entry.firstAt || now) + DEFAULTS.inputDebounceMaxMs;
+    const delay = Math.max(0, Math.min(DEFAULTS.inputDebounceMs, deadline - now));
+    entry.fireAt = now + delay;
+    this.inputBuffers.set(key, entry);
+    this.trackEventTask((async () => {
+      await new Promise(resolve => setTimeout(resolve, delay));
+      const current = this.inputBuffers.get(key);
+      if (!current || current.token !== token) return;
+      await this.flushBufferedQuestion(key, "debounce");
+    })().catch(error => console.error("input debounce failed", error)));
+  }
+
+  async bufferQuestionParts(key, parts, requestUrl, { notify = false } = {}) {
+    const now = Date.now();
+    const existing = this.inputBuffers.get(key);
+    const mergedParts = this.uniqueQuestionBodies([...(existing?.parts || []), ...(parts || [])]);
+    const entry = {
+      key,
+      parts: mergedParts,
+      requestUrl: requestUrl || existing?.requestUrl || "https://onebot-hub/onebot",
+      firstAt: Number(existing?.firstAt || now),
+      lastAt: now,
+      notified: Boolean(existing?.notified)
+    };
+    this.inputBuffers.set(key, entry);
+    if (notify && !entry.notified && mergedParts.length >= 2) {
+      entry.notified = true;
+      this.inputBuffers.set(key, entry);
+      const latest = mergedParts[mergedParts.length - 1];
+      await this.sendQueueNotice(latest, "检测到你正在连续补充内容，我会等待 3 秒。说完后可戳一戳我，或发送“回答吧”立即开始。")
+        .catch(error => console.error("multi input notice failed", error));
+    }
+    this.scheduleInputBuffer(key);
+  }
+
+  async cancelActiveQuestion(key, reason) {
+    const active = this.userInFlight.get(key);
+    if (!active) return [];
+    active.cancelled = true;
+    active.cancelledReason = reason;
+    try { active.controller?.abort(new DOMException(reason, "AbortError")); } catch { try { active.controller?.abort(); } catch {} }
+    await this.recordIngress(active.body, reason, { explicit: true, cancelled: true }).catch(() => {});
+    return active.parts || this.questionBodies(active.body);
+  }
+
+  async receiveUserQuestion(body, requestUrl) {
+    const key = this.userQueueKey(body);
+    const incoming = this.questionBodies(body);
+    const activeParts = this.userInFlight.has(key) ? await this.cancelActiveQuestion(key, "cancelled_by_new_input") : [];
+    const existingCount = Number(this.inputBuffers.get(key)?.parts?.length || 0);
+    await this.bufferQuestionParts(key, [...activeParts, ...incoming], requestUrl, { notify: Boolean(activeParts.length || existingCount || incoming.length > 1) });
+    await this.recordIngress(body, activeParts.length ? "restarted_after_new_input" : "buffered", { explicit: true, debounceMs: DEFAULTS.inputDebounceMs }).catch(() => {});
+  }
+
+  async flushBufferedQuestion(key, reason = "manual") {
+    const entry = this.inputBuffers.get(key);
+    if (!entry) return false;
+    if (this.userInFlight.has(key)) {
+      if (reason === "poke" || reason === "answer_now") {
+        entry.forceImmediate = true;
+        this.inputBuffers.set(key, entry);
+      }
+      return false;
+    }
+    this.inputBuffers.delete(key);
+    const body = this.mergeQuestionBodies(entry.parts);
+    if (!body) return false;
+    await this.recordIngress(body, "debounce_complete", { explicit: true, reason, mergedMessages: entry.parts.length }).catch(() => {});
+    this.trackEventTask(this.runQuestion(key, body, entry.requestUrl, { enqueuedAt: entry.firstAt, preview: this.eventPreview(body) }));
+    return true;
+  }
+
+  async handleQuestionRecall(body, requestUrl) {
+    const groupId = String(body.group_id || "");
+    const userId = String(body.user_id || "");
+    const messageId = String(body.message_id || "");
+    if (!groupId || !userId || !messageId) return;
+    const key = this.userQueueKey({ message_type: "group", group_id: groupId, user_id: userId });
+    const buffered = this.inputBuffers.get(key);
+    if (buffered) {
+      buffered.parts = buffered.parts.filter(part => String(part.message_id || "") !== messageId);
+      if (buffered.parts.length) {
+        buffered.firstAt = Date.now();
+        buffered.lastAt = Date.now();
+        this.inputBuffers.set(key, buffered);
+        this.scheduleInputBuffer(key);
+      } else {
+        this.inputBuffers.delete(key);
+      }
+    }
+    const active = this.userInFlight.get(key);
+    if (active && (active.parts || this.questionBodies(active.body)).some(part => String(part.message_id || "") === messageId)) {
+      const remaining = (active.parts || this.questionBodies(active.body)).filter(part => String(part.message_id || "") !== messageId);
+      await this.cancelActiveQuestion(key, String(body.operator_id || "") === userId ? "cancelled_by_author_recall" : "cancelled_by_moderator_recall");
+      if (remaining.length) await this.bufferQuestionParts(key, remaining, requestUrl, { notify: false });
+    }
+    const queue = this.userQueues.get(key) || [];
+    const next = queue.filter(item => !this.questionMessageIds(item.body).includes(messageId));
+    if  (next.length) this.userQueues.set(key, next); else this.userQueues.delete(key);
+    await this.persistUserQueue(key);
+    await writeSystemAudit(this.env, {
+      type: "question_cancelled_by_recall",
+      groupId,
+      actorId: String(body.operator_id || userId),
+      targetId: userId,
+      action: String(body.operator_id || "") === userId ? "author_recall" : "moderator_recall",
+      messageId
+    }).catch(() => {});
   }
 
   shouldQueueUserQuestion(body) {
@@ -10294,8 +10585,10 @@ export class OneBotHub {
   async persistQuestionInFlight(key, active) {
     if (!this.state?.storage) return;
     const storageKey = `question-inflight:${key}`;
-    if (active) await this.state.storage.put(storageKey, active);
-    else await this.state.storage.delete(storageKey);
+    if (active) {
+      const { controller, ...serializable } = active;
+      await this.state.storage.put(storageKey, serializable);
+    } else await this.state.storage.delete(storageKey);
   }
 
   oldestQueuedKey() {
@@ -10310,7 +10603,10 @@ export class OneBotHub {
   }
 
   async runQuestion(key, body, requestUrl, { fromQueue = false, enqueuedAt = Date.now(), preview = "" } = {}) {
+    const controller = new AbortController();
+    const token = crypto.randomUUID();
     const active = {
+      token,
       groupId: String(body.group_id || ""),
       userId: String(body.user_id || ""),
       messageId: String(body.message_id || ""),
@@ -10318,42 +10614,35 @@ export class OneBotHub {
       startedAt: Date.now(),
       enqueuedAt: Number(enqueuedAt || Date.now()),
       body,
-      requestUrl
+      parts: this.questionBodies(body),
+      requestUrl,
+      controller,
+      cancelled: false,
+      cancelledReason: ""
     };
     this.userInFlight.set(key, active);
     await this.persistQuestionInFlight(key, active);
     await this.recordIngress(body, "processing", { explicit: true, fromQueue }).catch(() => {});
     try {
-      await this.processInboundEvent(fromQueue ? { ...body, __qqai_queued: true } : body, requestUrl);
+      await this.processInboundEvent(fromQueue ? { ...body, __qqai_queued: true } : body, requestUrl, { signal: controller.signal, key, token });
     } catch (error) {
-      console.error("user question failed", error);
-      if (fromQueue) await this.sendQueueNotice(body, "排队的问题处理失败，已跳到下一条。请稍后重试。").catch(() => {});
+      if (!controller.signal.aborted) {
+        console.error("user question failed", error);
+        if (fromQueue) await this.sendQueueNotice(body, "排队的问题处理失败，已跳到下一条。请稍后重试。").catch(() => {});
+      }
     } finally {
-      this.userInFlight.delete(key);
+      if (this.userInFlight.get(key)?.token === token) this.userInFlight.delete(key);
       await this.persistQuestionInFlight(key, null);
-      await this.drainUserQueue(key);
+      if (this.inputBuffers.has(key)) {
+        const buffered = this.inputBuffers.get(key);
+        if (buffered?.forceImmediate) await this.flushBufferedQuestion(key, "forced_after_cancel");
+        else this.scheduleInputBuffer(key);
+      } else await this.drainUserQueue(key);
     }
   }
 
   async enqueueUserQuestion(body, requestUrl) {
-    const key = this.userQueueKey(body);
-    const queue = this.userQueues.get(key) || [];
-    const userBusy = this.userInFlight.has(key);
-    if (userBusy) {
-      if (queue.length >= DEFAULTS.userQueueMax) {
-        await this.sendQueueNotice(body, `你的等待列已满（最多 ${DEFAULTS.userQueueMax} 条），请等上一题完成后再问。`).catch(() => {});
-        return;
-      }
-      const entry = { body, requestUrl, enqueuedAt: Date.now(), preview: this.eventPreview(body) };
-      queue.push(entry);
-      this.userQueues.set(key, queue);
-      await this.persistUserQueue(key);
-      await this.recordIngress(body, "queued", { explicit: true, queuePosition: queue.length, userBusy: true }).catch(() => {});
-      await this.sendQueueNotice(body, `你上一题仍在处理，这条已加入个人等待列，目前排第 ${queue.length} 位。`).catch(() => {});
-      await this.scheduleQueueRecoveryAlarm();
-      return;
-    }
-    await this.runQuestion(key, body, requestUrl);
+    return this.receiveUserQuestion(body, requestUrl);
   }
 
   async kickQueueScheduler(preferredKey = "") {
@@ -10405,7 +10694,7 @@ export class OneBotHub {
     await this.sendAction({ action: "send_group_msg", params: { group_id: body.group_id, message, auto_escape: false } }, 10000);
   }
 
-  async processInboundEvent(body, requestUrl) {
+  async processInboundEvent(body, requestUrl, options = {}) {
     const toolTask = this.classifyToolTask(body);
     const lease = toolTask ? this.acquireToolLease(body, toolTask) : { ok: true, key: "", token: "", type: "" };
     if (!lease.ok) {
@@ -10428,9 +10717,13 @@ export class OneBotHub {
             "Authorization": `Bearer ${String(this.env.ONEBOT_ACCESS_TOKEN || "")}`
           },
           body: JSON.stringify(body),
-          signal: AbortSignal.timeout(internalTimeoutMs)
+          signal: mergeAbortSignal(internalTimeoutMs, options.signal)
         });
       } catch (error) {
+        if (options.signal?.aborted) {
+          await this.recordIngress(body, "generation_cancelled", { explicit: eventHasBotMention(body), reason: String(options.signal.reason?.message || options.signal.reason || "cancelled").slice(0, 300) }).catch(() => {});
+          return;
+        }
         console.error("OneBot internal event processing failed", error);
         await this.recordIngress(body, /abort|timeout/i.test(String(error?.message || error)) ? "worker_timeout" : "worker_error", { explicit: eventHasBotMention(body), error: String(error?.message || error).slice(0, 300) }).catch(() => {});
         const timedOut = /abort|timeout/i.test(String(error?.message || error));
@@ -10441,11 +10734,13 @@ export class OneBotHub {
         }
         return;
       }
+      if (options.signal?.aborted) return;
       if (!internalResponse || internalResponse.status === 204) {
         await this.recordIngress(body, "worker_no_reply", { explicit: eventHasBotMention(body), httpStatus: internalResponse?.status || 0 }).catch(() => {});
         return;
       }
       payload = await internalResponse.json().catch(() => null);
+      if (options.signal?.aborted) return;
       if (!payload?.reply) {
         await this.recordIngress(body, "worker_empty_reply", { explicit: eventHasBotMention(body), httpStatus: internalResponse.status }).catch(() => {});
         return;
@@ -10458,6 +10753,7 @@ export class OneBotHub {
       action = isPrivate ? "send_private_msg" : "send_group_msg";
       const params = isPrivate ? { user_id: body.user_id, message, auto_escape: false } : { group_id: body.group_id, message, auto_escape: false };
       try {
+        if (options.signal?.aborted) return;
         const response = await this.sendAction({ action, params }, 15000);
         const messageId = response?.message_id ?? response?.messageId ?? response?.data?.message_id ?? response?.data?.messageId;
         await this.recordIngress(body, "sent", { explicit: eventHasBotMention(body), sentMessageId: String(messageId || "") }).catch(() => {});
