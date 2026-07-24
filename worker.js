@@ -1,4 +1,5 @@
-const VERSION = "1.5.1";
+const VERSION = "1.5.2";
+const QQAI_V1_R52_FINAL_STABILIZATION_MARKER = "QQAI_V1_R52_FINAL_STABILIZATION_MARKER";
 const QQAI_V1_R51_MODEL_ROUTING_ACTIVITY_FIX_MARKER = "QQAI_V1_R51_MODEL_ROUTING_ACTIVITY_FIX_MARKER";
 const QQAI_V1_R50_AUTH_SECURITY_FREEZE_MARKER = "QQAI_V1_R50_AUTH_SECURITY_FREEZE_MARKER";
 const QQAI_V1_R46_ERROR_SEARCH_PROPOSAL_MARKER = "QQAI_V1_R46_ERROR_SEARCH_PROPOSAL_MARKER";
@@ -19,7 +20,7 @@ const QQAI_V1_R32_MARKER = "QQAI_V1_R32_MARKER";
 const QQAI_V1_R31_MARKER = "QQAI_V1_R31_MARKER";
 const QQAI_V1_COMPLETE_MARKER = "QQAI_V1_COMPLETE_MARKER";
 const QQAI_V1_R3_MARKER = "QQAI_V1_R3_MARKER";
-const BUILD_DATE = "2026-07-24";
+const BUILD_DATE = "2026-07-25";
 const DEFAULT_DEVELOPER_ID = "3569028262";
 const DEFAULTS = Object.freeze({
   deepseekFlashModel: "deepseek-v4-flash",
@@ -75,6 +76,8 @@ const DEFAULTS = Object.freeze({
   operationsQuietEnd: "08:00",
   operationsInviteCooldownSeconds: 30,
   operationsFuseFailureThreshold: 5,
+  ingredientAnalysisMinimumMessages: 8,
+  ingredientAnalysisMaximumMessages: 30,
   deepseekEmergencyFailureThreshold: 3,
   deepseekEmergencyFailureWindowMs: 15 * 60 * 1000,
   deepseekEmergencyAccessWindowMs: 10 * 60 * 1000,
@@ -2549,32 +2552,66 @@ const QQAIWorker = {
         activeThinkingMessageId = await sendThinkingIndicator(env, { isGroup, groupId: currentGroupId, userId, text: '正在分析...' }).catch(() => null);
         const prefix = ['!查成分', '!查成份', '!stats', '！查成分', '！查成份', '！stats'].find(p => msgLower.startsWith(p));
         const { targetQq } = parseArgs(userMessage, prefix);
-        // 若未指定目標，則查詢發送者本人的成分
-        let targetUserId = targetQq || userId; 
-        
-        if (!env.VECTORIZE) return jsonReply(`${atSender}⚠️ 向量数据库未绑定，无法进行深度成分分析。`);
-        
+        const targetUserId = targetQq || userId;
+        const minimum = DEFAULTS.ingredientAnalysisMinimumMessages;
+        const maximum = DEFAULTS.ingredientAnalysisMaximumMessages;
         try {
-          // 提取查詢特徵向量，尋找與性格、習慣高度相關的發言
-          const queryVec = await getVector("经常聊什么 兴趣爱好 性格 习惯 说话方式");
-          if (!queryVec || typeof queryVec === 'string') return jsonReply(`${atSender}❌ 提取特征向量失败。`);
-          
-          // 在向量庫中檢索該群組且該作者的歷史發言
-          const matches = await env.VECTORIZE.query(queryVec, { topK: 30, returnMetadata: "all" });
-          const validMatches = matches?.matches?.filter(m => String(m.metadata?.groupId || m.metadata?.group || m.metadata?.group_id || '') === currentGroupId && String(m.metadata?.userId || m.metadata?.author || m.metadata?.qq || '') === targetUserId);
-          
-          if (!validMatches || validMatches.length < 3) {
-            return jsonReply(`${atSender}🔍 数据库中关于 QQ:${targetUserId} 的发言记录太少，无法进行精准分析。多聊聊天吧！`);
+          const records = await recentConversationMessagesForUser(env, currentGroupId, targetUserId, 120);
+          const samples = [];
+          const seen = new Set();
+          const addSample = value => {
+            const text = String(value || "")
+              .replace(/\[CQ:[^\]]+\]/g, " ")
+              .replace(/\s+/g, " ")
+              .trim();
+            if (text.length < 4 || /^[!！/]/.test(text) || /^(?:@\d+\s*)+$/.test(text)) return;
+            if (/^【系统：/.test(text) || /^\[(?:图片|语音|视频|文件|转发消息)\]$/i.test(text)) return;
+            const fingerprint = text.toLowerCase().slice(0, 300);
+            if (seen.has(fingerprint)) return;
+            seen.add(fingerprint);
+            samples.push(text.slice(0, 600));
+          };
+          for (const item of records) addSample(item?.text);
+
+          // D1 是主要资料源；只有样本仍不足时才尝试 Vectorize，避免全库 topK 被其他人占满。
+          if (samples.length < minimum && env.VECTORIZE) {
+            try {
+              const queryVec = await getVector("经常聊什么 兴趣爱好 性格 习惯 说话方式");
+              if (queryVec && typeof queryVec !== "string") {
+                let matches;
+                try {
+                  matches = await env.VECTORIZE.query(queryVec, {
+                    topK: 100,
+                    returnMetadata: "all",
+                    filter: { groupId: currentGroupId, userId: targetUserId }
+                  });
+                } catch {
+                  matches = await env.VECTORIZE.query(queryVec, { topK: 100, returnMetadata: "all" });
+                }
+                for (const match of matches?.matches || []) {
+                  const metadata = match?.metadata || {};
+                  const matchGroup = String(metadata.groupId || metadata.group || metadata.group_id || "");
+                  const matchUser = String(metadata.userId || metadata.author || metadata.qq || "");
+                  if (matchGroup === String(currentGroupId) && matchUser === String(targetUserId)) addSample(metadata.text);
+                }
+              }
+            } catch (vectorError) {
+              console.warn("ingredient vector fallback skipped:", vectorError?.message || vectorError);
+            }
           }
-          
-          // 擷取最多 20 條特徵發言餵給 Gemini 進行心理測寫
-          const logText = validMatches.slice(0, 20).map(m => m.metadata?.text || "").join("\n");
-          const summary = await callGeminiDirectly(`你是一个非常有趣的心理与行为分析师。请根据以下这位群友的历史发言记录，帮他生成一份幽默的「成分分析报告」。\n要求包含：1. 他的主要性格特点（如傲娇、乐子人、话痨、技术宅等） 2. 最常关心或讨论的话题 3. 给出一个好玩的饼状图比例（如 50% 吐槽担当、30% 潜水员...）。直接输出精炼的分析结果，字数300字以内，绝对禁止使用Markdown格式：\n\n聊天记录：\n${logText}`);
-          
-          if (summary) return jsonReply(`${atSender}📊 【QQ:${targetUserId} 的成分分析报告】：\n${summary}`);
-          return jsonReply(`${atSender}❌ 分析失败，AI 分析师罢工了。`);
-        } catch (err) { 
-          return jsonReply(`${atSender}❌ 分析过程出现错误：${err.message}`); 
+
+          if (samples.length < minimum) {
+            return jsonReply(`${atSender}🔍 QQ:${targetUserId} 目前只有 ${samples.length}/${minimum} 条可用发言。至少需要 ${minimum} 条非指令、非纯表情或纯 @ 的有效发言，才会生成娱乐性质的成分分析。`);
+          }
+
+          const selected = samples.slice(-maximum);
+          const member = isGroup ? await getGroupMemberSafe(env, currentGroupId, targetUserId).catch(() => null) : null;
+          const displayName = member?.card || member?.nickname || targetUserId;
+          const summary = await callGeminiDirectly(`你是一个有趣但克制的群聊行为观察员。根据以下群友近期发言，生成娱乐性质的「成分分析报告」。不得进行心理疾病诊断、不得推断敏感身份、不得把玩笑当事实。请包含：1. 常见表达风格 2. 常聊主题 3. 一个好玩的成分比例。直接输出简体中文，300字以内，不使用Markdown。\n\n对象：${displayName}（QQ:${targetUserId}）\n有效样本：${selected.length} 条\n\n${selected.join("\n")}`);
+          if (summary) return jsonReply(`${atSender}📊 【${displayName}（QQ:${targetUserId}）的成分分析】：\n${summary}\n\n样本：${selected.length} 条有效发言（仅供娱乐）`);
+          return jsonReply(`${atSender}❌ 成分分析模型暂时没有返回有效内容。`);
+        } catch (err) {
+          return jsonReply(`${atSender}❌ 成分分析失败：${String(err?.message || err).slice(0, 180)}`);
         }
       }
 
@@ -4494,7 +4531,15 @@ function normalizeModelPreference(value) {
 }
 
 function modelPreferenceLabel(value) {
-  return ({ auto: "自动（Gemini 优先／Gemma 备用／DeepSeek 仅紧急）", gemini: "Gemini 免费池", gemma_26b: "Gemma 4 26B", gemma_31b: "Gemma 4 31B", deepseek: "DeepSeek", deepseek_high: "DeepSeek High", deepseek_max: "DeepSeek Max" })[value] || "自动（Gemini 优先）";
+  return ({
+    auto: "自动（Gemini 优先／Gemma 备用；连续失败时才临时启用 DeepSeek）",
+    gemini: "Gemini 免费聊天池",
+    gemma_26b: "Gemma 4 26B",
+    gemma_31b: "Gemma 4 31B",
+    deepseek: "DeepSeek（仅开发者）",
+    deepseek_high: "DeepSeek High（仅开发者）",
+    deepseek_max: "DeepSeek Max（仅开发者）"
+  })[value] || "自动（Gemini 优先／Gemma 备用）";
 }
 
 function modelHealthStatusLabel(value) {
@@ -6799,10 +6844,13 @@ async function reviewScheduleWithGemma(env, content) {
       maxOutputTokens: 120
     });
     const json = JSON.parse(result.text.match(/\{[\s\S]*\}/)?.[0] || "{}");
-    return ["allow", "uncertain", "reject"].includes(json.decision) ? json : { decision: "uncertain", reason: "无法稳定判断" };
+    const provider = String(result.provider || (String(result.model || "").toLowerCase().startsWith("gemma-") ? "gemma" : "gemini"));
+    return ["allow", "uncertain", "reject"].includes(json.decision)
+      ? { ...json, provider, model: String(result.model || ""), reviewedAt: Date.now() }
+      : { decision: "uncertain", reason: "无法稳定判断", provider, model: String(result.model || ""), reviewedAt: Date.now() };
   } catch (error) {
     console.warn("Gemma schedule review unavailable:", error);
-    return { decision: "uncertain", reason: "审查服务暂时不可用" };
+    return { decision: "uncertain", reason: "审查服务暂时不可用", provider: "unavailable", model: "", reviewedAt: Date.now() };
   }
 }
 
@@ -7015,8 +7063,13 @@ async function processDueSchedules(env, now = Date.now()) {
         if (opsSettings.quietPolicy === "skip") {
           item.lastResult = "skipped_by_quiet_hours";
           if (item.type === "once") {
-            await writeSystemAudit(env, { type: "schedule_quiet_skipped", groupId: item.groupId, actorId: item.creatorId, action: "once_skipped", scheduleId: id });
-            await deleteScheduleRecord(env, id);
+            item.enabled = false;
+            item.status = "completed";
+            item.nextRunAt = null;
+            item.lastRunAt = new Date(now).toISOString();
+            item.lastResult = "skipped_by_quiet_hours";
+            await dbPut(env, `schedule:${id}`, JSON.stringify(item));
+            await writeSystemAudit(env, { type: "schedule_quiet_skipped", groupId: item.groupId, actorId: item.creatorId, action: "once_skipped_kept", scheduleId: id });
           } else {
             item.nextRunAt = computeNextScheduleRun(item, now);
             await dbPut(env, `schedule:${id}`, JSON.stringify(item));
@@ -7034,7 +7087,6 @@ async function processDueSchedules(env, now = Date.now()) {
       await writeSystemAudit(env, { type: "schedule_skipped_once", groupId: item.groupId, actorId: item.skipRequestedBy || item.creatorId, action: "skip_once", scheduleId: id, nextRunAt: item.nextRunAt });
       continue;
     }
-    let deleteAfterSuccess = false;
     // 每个重复排程的执行周期都建立自己的补发宽限起点；重试期间保留同一原始到期时间。
     if (Number(item.failureCount || 0) === 0 || !Number(item.originalNextRunAt || 0)) {
       item.originalNextRunAt = Number(item.nextRunAt || now);
@@ -7066,7 +7118,6 @@ async function processDueSchedules(env, now = Date.now()) {
         item.enabled = false;
         item.status = "completed";
         item.nextRunAt = null;
-        deleteAfterSuccess = item.type === "once";
       }
     } catch (error) {
       item.failureCount = Number(item.failureCount || 0) + 1; item.lastResult = String(error?.message || error);
@@ -7084,11 +7135,9 @@ async function processDueSchedules(env, now = Date.now()) {
         item.lastResult = `retry_${item.failureCount}:${item.lastResult}`;
       }
     }
-    if (deleteAfterSuccess) {
-      await writeSystemAudit(env, { type: "schedule_completed_deleted", groupId: item.groupId, actorId: item.creatorId, action: "completed_and_deleted", scheduleId: id, content: String(item.content || "").slice(0, 500) });
-      await deleteScheduleRecord(env, id);
-    } else {
-      await dbPut(env, `schedule:${id}`, JSON.stringify(item));
+    await dbPut(env, `schedule:${id}`, JSON.stringify(item));
+    if (item.status === "completed") {
+      await writeSystemAudit(env, { type: "schedule_completed", groupId: item.groupId, actorId: item.creatorId, action: "completed_and_kept", scheduleId: id, content: String(item.content || "").slice(0, 500) }).catch(() => {});
     }
   }
   await processActiveSpeaking(env, now);
@@ -7105,11 +7154,20 @@ async function processActiveSpeaking(env, now = Date.now()) {
     const lastMessage = Number(await dbGet(env, `group_last_message:${groupId}`) || 0); if (now - lastMessage < config.quietMinutes * 60000) continue;
     const dayKey = taipeiDateKey(new Date(now)); const countKey = `active_speaking:count:${groupId}:${dayKey}`; const count = Number(await dbGet(env, countKey) || 0); if (count >= config.maxDaily) continue;
     const lastSpeak = Number(await dbGet(env, `active_speaking:last:${groupId}`) || 0); if (now - lastSpeak < config.quietMinutes * 60000) continue;
+    const stateKey = `active_speaking:state:${groupId}`;
     try {
       const result = await callGeminiGenerate(env, { models: parseList(env.GEMINI_CHAT_MODELS, ["gemini-3.1-flash-lite", "gemini-3.5-flash"]), system: "生成一句自然的QQ群开场话题，简体中文，不提AI身份，不引用私人记忆，不@任何人。", contents: [{ role: "user", parts: [{ text: "群里有一段时间没人说话，请自然开启一个轻松话题。" }] }], maxOutputTokens: 120, temperature: 0.9, useSearch: false });
-      await callOneBotAction(env, { action: "send_group_msg", params: { group_id: numericId(groupId), message: result.text, auto_escape: false } }, 12000);
-      await dbPut(env, countKey, String(count + 1)); await dbPut(env, `active_speaking:last:${groupId}`, String(now));
-    } catch {}
+      const sent = await callOneBotAction(env, { action: "send_group_msg", params: { group_id: numericId(groupId), message: result.text, auto_escape: false } }, 12000);
+      const messageId = String(sent?.message_id || sent?.data?.message_id || "");
+      await dbPut(env, countKey, String(count + 1));
+      await dbPut(env, `active_speaking:last:${groupId}`, String(now));
+      await dbPut(env, stateKey, JSON.stringify({ ok: true, at: now, source: "automatic", model: result.model || "Gemini", messageId, preview: String(result.text || "").slice(0, 180) }));
+      await writeSystemAudit(env, { type: "active_speaking", groupId, actorId: "system", action: "automatic_sent", model: result.model || "Gemini", messageId });
+    } catch (error) {
+      const message = String(error?.message || error).slice(0, 500);
+      await dbPut(env, stateKey, JSON.stringify({ ok: false, at: now, source: "automatic", error: message }));
+      await writeSystemAudit(env, { type: "active_speaking", groupId, actorId: "system", action: "automatic_failed", error: message }).catch(() => {});
+    }
   }
 }
 
@@ -10901,7 +10959,7 @@ async function opsRuleSandbox(env, { groupId, text, context = [], role = "member
   if (!rules) return { ok: false, message: "当前群没有设置群规。" };
   const strictness = normalizeRuleStrictness(await dbGet(env, `rule_strictness:${groupId}`) || DEFAULTS.ruleStrictness);
   try {
-    const result = await callGemmaText(env, {
+    const result = await callGemmaDecision(env, {
       system: `你是群规测试沙盒。只输出 JSON：{"violation":boolean,"category":string,"reason":string,"confidence":number,"suggestedAction":string,"matchedRule":string}。这是模拟，不执行处罚。严格度：${strictness}。群规：${rules.slice(0, 10000)}`,
       prompt: JSON.stringify({ currentMessage: String(text || "").slice(0, 4000), recentContext: (Array.isArray(context) ? context : []).slice(-20), senderRole: role }),
       maxOutputTokens: 400
@@ -13317,7 +13375,7 @@ ${summary}`.slice(0, 4000),
     return jsonResponse({
       ok: true,
       connectors: connectors.map(item => { const { webhookSecret, ...safe } = item; return { ...safe, mode: item.mode === "generic_webhook" ? "official_webhook" : "automatic_polling", webhookUrl: item.webhookSecret ? `${url.origin}/api/integrations/bilibili/webhook/${item.webhookSecret}` : "" }; }),
-      note: "推荐使用哔哩哔哩开放平台 Webhook 或经过合法授权的中继。兼容轮询仅使用公开网页接口、最低 30 分钟一次，可能受 412／429 风控影响。"
+      note: "推荐使用哔哩哔哩开放平台 Webhook 或经过合法授权的中继。412／429 属于平台风控，系统不会伪造身份、代理轮换或提高频率绕过；兼容轮询最低 30 分钟一次并自动退避。"
     });
   }
   if (request.method === "POST" && path === "/integrations/bilibili") {
@@ -13376,6 +13434,21 @@ ${summary}`.slice(0, 4000),
           : "已切换为兼容轮询：可以使用检查频率与立即检查。",
         webhookUrl
       });
+    }
+    if (action === "webhook_self_test") {
+      const item = await readJson(env, `bili:connector:${body.id}`, null);
+      if (!item || item.groupId !== groupId) return jsonResponse({ ok: false, message: "找不到监控项目。" }, 404);
+      if (item.mode !== "generic_webhook" || !item.webhookSecret) return jsonResponse({ ok: false, message: "请先切换为 Webhook 模式。" }, 400);
+      const mapped = await dbGet(env, `bili:webhook_secret:${item.webhookSecret}`);
+      if (String(mapped || "") !== String(item.id)) return jsonResponse({ ok: false, message: "Webhook 密钥映射异常，请重新生成回调地址。" }, 409);
+      const testEvent = { type: "video_publish", creatorId: item.creatorId, creatorName: item.creatorName, title: "Webhook 接收自检事件", url: `https://space.bilibili.com/${item.creatorId}`, eventId: `webhook-self-test:${Date.now()}` };
+      const result = await sendBilibiliConnectorNotification(env, item, testEvent);
+      item.lastWebhookTestAt = Date.now();
+      item.lastWebhookTestOk = Boolean(result.ok);
+      item.lastWebhookTestError = result.ok ? "" : String(result.error || "发送失败").slice(0, 500);
+      await dbPut(env, `bili:connector:${item.id}`, JSON.stringify(item));
+      await writeSystemAudit(env, { type: "bilibili_auto_monitor", groupId, actorId: authed.qq, action: "webhook_self_test", connectorId: item.id, ok: result.ok, error: item.lastWebhookTestError });
+      return jsonResponse({ ok: result.ok, message: result.ok ? "Webhook 端点、密钥映射与 QQ 通知发送均通过自检。外部平台仍需实际 POST 事件才能自动通知。" : `Webhook 密钥有效，但 QQ 通知发送失败：${item.lastWebhookTestError}` }, result.ok ? 200 : 502);
     }
     if (action === "test") {
       const item = await readJson(env, `bili:connector:${body.id}`, null);
@@ -14055,6 +14128,19 @@ ${summary}`.slice(0, 4000),
     const result = await cancelSchedule(env, String(body.id || ""), authed.qq, permissions.aiAdmin || permissions.developer, groupId, permissions.developer);
     return jsonResponse(result, result.ok ? 200 : 403);
   }
+if (request.method === "POST" && path === "/schedules/delete") {
+    const id = String(body.id || "");
+    const item = await readJson(env, `schedule:${id}`, null);
+    if (!item) return jsonResponse({ ok: false, message: "找不到该排程。" }, 404);
+    const canDelete = permissions.developer || (String(item.creatorId || "") === String(authed.qq) && String(item.groupId || "") === String(groupId || ""));
+    if (!canDelete) return jsonResponse({ ok: false, message: "你没有删除该排程的权限。" }, 403);
+    if (!permissions.developer && !["completed", "cancelled", "rejected", "paused"].includes(String(item.status || ""))) {
+      return jsonResponse({ ok: false, message: "执行中的排程请先取消，再永久删除。" }, 400);
+    }
+    await deleteScheduleRecord(env, id);
+    await writeSystemAudit(env, { type: "schedule_deleted", groupId: item.groupId, actorId: authed.qq, action: "permanent_delete", scheduleId: id, previousStatus: item.status });
+    return jsonResponse({ ok: true, message: `排程 ${id} 已永久删除。` });
+  }
 
 
   if (path.startsWith("/admin/") && !(permissions.aiAdmin || permissions.developer)) return jsonResponse({ ok: false, message: "Error 403：缺少 AI 管理权限。" }, 403);
@@ -14062,6 +14148,11 @@ ${summary}`.slice(0, 4000),
     const botRuleState = await getBotGroupRole(env, groupId);
     const botRuleRole = String(botRuleState?.role || "unknown");
     const botCanMonitorRules = botCanRunRuleMonitor(botRuleState);
+    const activeSpeakingEnabled = await getFeatureFlag(env, `active_speaking:${groupId}`, false);
+    const activeSpeakingConfig = await readJson(env, `active_speaking:config:${groupId}`, { quietMinutes: 60, startHour: 9, endHour: 23, maxDaily: 3 });
+    const activeSpeakingLast = await readJson(env, `active_speaking:state:${groupId}`, null);
+    const activeSpeakingGroups = await readJson(env, "active_speaking:groups", []);
+    const activeSpeakingTodayCount = Number(await dbGet(env, `active_speaking:count:${groupId}:${taipeiDateKey(new Date())}`) || 0);
     return jsonResponse({
       ok: true,
       ai_on: await dbGet(env, `ai_off:${groupId}`) !== "true",
@@ -14069,7 +14160,16 @@ ${summary}`.slice(0, 4000),
       persona: await dbGet(env, `group_persona:${groupId}`) || "",
       interject_rate: Number(await dbGet(env, `interject_rate:${groupId}`) || DEFAULTS.interjectRate),
       commands_enabled: await dbGet(env, `web_command_off:${groupId}`) !== "true",
-      active_speaking: await getFeatureFlag(env, `active_speaking:${groupId}`, false),
+      active_speaking: activeSpeakingEnabled,
+      active_speaking_status: {
+        enabled: activeSpeakingEnabled,
+        tracked: activeSpeakingGroups.map(String).includes(String(groupId)),
+        config: activeSpeakingConfig,
+        todayCount: activeSpeakingTodayCount,
+        lastSpeakAt: Number(await dbGet(env, `active_speaking:last:${groupId}`) || 0) || null,
+        lastResult: activeSpeakingLast,
+        canTest: Boolean(permissions.developer)
+      },
       keywords: await readJson(env, `keyword_filter:${groupId}`, []),
       blacklist: await readJson(env, `blacklist_group:${groupId}`, []),
       audit_logs: await readJson(env, `audit:system:group:${groupId}`, []),
@@ -14094,6 +14194,28 @@ ${summary}`.slice(0, 4000),
       rule_monitor_available: botCanMonitorRules,
       can_manage_rule_monitor: botCanMonitorRules && Boolean(permissions.developer || permissions.nativeAdmin || role === "owner" || role === "admin")
     });
+  }
+if (request.method === "POST" && path === "/admin/active-speaking-test") {
+    if (!permissions.developer) return jsonResponse({ ok: false, message: "只有开发者可以测试主动发话。" }, 403);
+    if (!groupId) return jsonResponse({ ok: false, message: "请先选择群组。" }, 400);
+    const enabled = await getFeatureFlag(env, `active_speaking:${groupId}`, false);
+    if (!enabled) return jsonResponse({ ok: false, message: "主动发话尚未开启；请先勾选并保存。" }, 400);
+    const now = Date.now();
+    const text = `【主动发话测试】功能已开启，测试时间：${getTaipeiTimeContext().display}`;
+    try {
+      const sent = await callOneBotAction(env, { action: "send_group_msg", params: { group_id: numericId(groupId), message: text, auto_escape: false } }, 12000);
+      const messageId = String(sent?.message_id || sent?.data?.message_id || "");
+      const state = { ok: true, at: now, source: "manual_test", messageId, preview: text };
+      await dbPut(env, `active_speaking:state:${groupId}`, JSON.stringify(state));
+      await writeSystemAudit(env, { type: "active_speaking", groupId, actorId: authed.qq, action: "manual_test_sent", messageId });
+      return jsonResponse({ ok: true, message: "主动发话测试已发送到当前群。", state });
+    } catch (error) {
+      const message = String(error?.message || error).slice(0, 500);
+      const state = { ok: false, at: now, source: "manual_test", error: message };
+      await dbPut(env, `active_speaking:state:${groupId}`, JSON.stringify(state));
+      await writeSystemAudit(env, { type: "active_speaking", groupId, actorId: authed.qq, action: "manual_test_failed", error: message }).catch(() => {});
+      return jsonResponse({ ok: false, message: `测试发送失败：${message}`, state }, 502);
+    }
   }
   if (request.method === "POST" && path === "/admin/state") {
     if (typeof body.ai_on === "boolean") body.ai_on ? await dbDel(env, `ai_off:${groupId}`) : await dbPut(env, `ai_off:${groupId}`, "true");
@@ -14129,8 +14251,11 @@ ${summary}`.slice(0, 4000),
     }
     if (Object.prototype.hasOwnProperty.call(body, "active_speaking")) {
       if (!permissions.developer) return jsonResponse({ ok: false, message: "只有开发者可以开关主动发话。" }, 403);
-      await setFeatureFlag(env, `active_speaking:${groupId}`, Boolean(body.active_speaking));
-      const groups = await readJson(env, "active_speaking:groups", []); if (!groups.includes(groupId)) { groups.push(groupId); await dbPut(env, "active_speaking:groups", JSON.stringify(groups)); }
+      const enabled = Boolean(body.active_speaking);
+      await setFeatureFlag(env, `active_speaking:${groupId}`, enabled);
+      let groups = (await readJson(env, "active_speaking:groups", [])).map(String);
+      groups = enabled ? [...new Set([...groups, String(groupId)])] : groups.filter(id => id !== String(groupId));
+      await dbPut(env, "active_speaking:groups", JSON.stringify(groups));
     }
     await writeSystemAudit(env, { type: "portal_ai_settings", groupId, actorId: authed.qq, action: "update" });
     return jsonResponse({ ok: true, message: "群务设置已保存。" });
@@ -14289,6 +14414,72 @@ ${summary}`.slice(0, 4000),
     const ids = await readJson(env, "schedule:index", []); const schedules = [];
     for (const id of ids.slice(-500).reverse()) { const item = await readJson(env, `schedule:${id}`, null); if (item) schedules.push(item); }
     return jsonResponse({ ok: true, schedules });
+  }
+if (request.method === "POST" && path === "/root/schedule-action") {
+    if (!portalIsDeveloper) return jsonResponse({ ok: false, message: "只有开发者可以管理全部排程。" }, 403);
+    const id = String(body.id || "");
+    const action = String(body.action || "");
+    const item = await readJson(env, `schedule:${id}`, null);
+    if (!item) return jsonResponse({ ok: false, message: "找不到排程。" }, 404);
+    if (action === "delete") {
+      await deleteScheduleRecord(env, id);
+      await writeSystemAudit(env, { type: "schedule_root_action", groupId: item.groupId, actorId: authed.qq, action: "delete", scheduleId: id, previousStatus: item.status });
+      return jsonResponse({ ok: true, message: `排程 ${id} 已永久删除。` });
+    }
+    if (action === "edit") {
+      const result = await reviseScheduleRecord(env, {
+        id,
+        actorId: authed.qq,
+        canManage: true,
+        canDirectManage: true,
+        scheduleText: String(body.schedule || ""),
+        scopeGroupId: "",
+        allowCrossGroup: true
+      });
+      if (result.ok) await writeSystemAudit(env, { type: "schedule_root_action", groupId: result.schedule.groupId, actorId: authed.qq, action: "edit", scheduleId: id, status: result.schedule.status });
+      return jsonResponse(result, result.ok ? 200 : 400);
+    }
+    if (action === "skip_once") {
+      const result = await skipScheduleOnce(env, id, authed.qq, true, "", true);
+      if (result.ok) await writeSystemAudit(env, { type: "schedule_root_action", groupId: item.groupId, actorId: authed.qq, action: "skip_once", scheduleId: id });
+      return jsonResponse(result, result.ok ? 200 : 400);
+    }
+    if (action === "rereview") {
+      const review = await reviewScheduleWithGemma(env, JSON.stringify({
+        scheduleSpec: scheduleSpecFromRecord(item),
+        content: item.content,
+        groupId: item.groupId,
+        type: item.type,
+        managementAction: item.managementAction || null
+      }));
+      item.review = review;
+      item.reviewedAgainAt = Date.now();
+      item.reviewedAgainBy = authed.qq;
+      await dbPut(env, `schedule:${id}`, JSON.stringify(item));
+      await writeSystemAudit(env, { type: "schedule_root_action", groupId: item.groupId, actorId: authed.qq, action: "rereview", scheduleId: id, decision: review.decision, provider: review.provider, model: review.model });
+      return jsonResponse({ ok: true, message: `已重新审查：${review.decision}｜${review.reason || "无说明"}`, schedule: item, review });
+    }
+    if (action === "approve") {
+      if (!Number(item.nextRunAt || 0)) return jsonResponse({ ok: false, message: "此排程没有下次执行时间；请先使用“编辑并更新”设置新时间。" }, 400);
+      item.status = "active";
+      item.enabled = true;
+      item.reviewedAt = new Date().toISOString();
+      item.reviewedBy = authed.qq;
+      item.failureCount = 0;
+      await dbPut(env, `schedule:${id}`, JSON.stringify(item));
+      await writeSystemAudit(env, { type: "schedule_root_action", groupId: item.groupId, actorId: authed.qq, action: "approve", scheduleId: id });
+      return jsonResponse({ ok: true, message: `排程 ${id} 已由开发者确认启用。`, schedule: item });
+    }
+    if (action === "reject") {
+      item.status = "rejected";
+      item.enabled = false;
+      item.reviewedAt = new Date().toISOString();
+      item.reviewedBy = authed.qq;
+      await dbPut(env, `schedule:${id}`, JSON.stringify(item));
+      await writeSystemAudit(env, { type: "schedule_root_action", groupId: item.groupId, actorId: authed.qq, action: "reject", scheduleId: id });
+      return jsonResponse({ ok: true, message: `排程 ${id} 已由开发者拒绝并停用。`, schedule: item });
+    }
+    return jsonResponse({ ok: false, message: "不支持的排程管理动作。" }, 400);
   }
   if (request.method === "POST" && path === "/root/schedule-assign") {
     const item = await readJson(env, `schedule:${body.id}`, null); if (!item) return jsonResponse({ ok: false, message: "找不到排程。" }, 404);
@@ -14623,7 +14814,7 @@ function getPortalHomePage(host) {
       </section>
       <section id="v-groups" class="view">
         <div class="section-head"><div><h2>群组设置</h2><p>修改目前選擇群的 AI、記憶、插話率與人格。</p></div><button id="saveGroup" class="btn primary">儲存設定</button></div>
-        <div class="grid"><div class="card span-6"><h3>功能開關</h3><label class="switch"><input id="groupAi" type="checkbox">啟用 AI</label><label class="switch"><input id="groupMemory" type="checkbox">啟用聊天記憶</label><label class="switch"><input id="activeSpeaking" type="checkbox">允許主動發話（開發者）</label><div class="field"><label>隨機插話率（0–100%）</label><input id="interjectRate" type="number" min="0" max="100"></div></div><div class="card span-6"><h3>人格與關鍵字</h3><div class="field"><label>群組人格</label><textarea id="groupPersona"></textarea></div><div class="field"><label>過濾關鍵字（逗號或換行）</label><textarea id="groupKeywords"></textarea></div></div></div>
+        <div class="grid"><div class="card span-6"><h3>功能開關</h3><label class="switch"><input id="groupAi" type="checkbox">啟用 AI</label><label class="switch"><input id="groupMemory" type="checkbox">啟用聊天記憶</label><label class="switch"><input id="activeSpeaking" type="checkbox">允许主动发话（开发者）</label><div id="activeSpeakingStatus" class="notice">尚未读取主动发话状态。</div><button id="activeSpeakingTest" class="btn hidden" type="button">发送主动发话测试</button><div class="field"><label>随机插话率（0–100%）</label><input id="interjectRate" type="number" min="0" max="100"></div></div><div class="card span-6"><h3>人格與關鍵字</h3><div class="field"><label>群組人格</label><textarea id="groupPersona"></textarea></div><div class="field"><label>過濾關鍵字（逗號或換行）</label><textarea id="groupKeywords"></textarea></div></div></div>
       </section>
       <section id="v-memory" class="view">
         <div class="section-head"><div><h2>记忆管理</h2><p>指令、白名單提示與系統訊息不會進入聊天記憶。</p></div><button id="reloadMemory" class="btn">重新加载</button></div>
@@ -14705,7 +14896,7 @@ async function opsDeleteRecord(type,id,prefix){if(!(await confirmModal('删除�
 async function opsActivityAction(path,id,prefix){var r=await api(path,'POST',{id:id});toast(r.message||'完成');if(r.ok)opsLoadWorkspace(prefix)}
 async function opsInviteParticipant(id,userId,prefix){var r=await api('/ops/activity/invite','POST',{id:id,userId:userId});toast(r.message||'邀请失败');if(r.ok)opsLoadWorkspace(prefix)}
 async function opsVote(id,index,prefix){var r=await api('/ops/poll/vote','POST',{id:id,optionIndexes:[index]});toast(r.message||'投票失败');if(r.ok)opsLoadWorkspace(prefix)}
-async function opsSaveSettings(){await loadOperations();var s=(opsBootstrap&&opsBootstrap.settings)||{};var val=function(id,fallback){return $(id)?$(id).value:fallback},checked=function(id,fallback){return $(id)?$(id).checked:fallback};var r=await api('/ops/settings','POST',{quietHoursEnabled:checked('opsQuietEnabled',s.quietHoursEnabled),quietStart:val('opsQuietStart',s.quietStart),quietEnd:val('opsQuietEnd',s.quietEnd),quietPolicy:val('opsQuietPolicy',s.quietPolicy),maintenanceMode:checked('opsMaintenance',s.maintenanceMode),emergencyLock:checked('opsEmergency',s.emergencyLock),fuseEnabled:checked('opsFuse',s.fuseEnabled),anomalyDetectionEnabled:checked('opsAnomaly',s.anomalyDetectionEnabled),scheduleRetryEnabled:checked('opsScheduleRetry',s.scheduleRetryEnabled),scheduleRetryMax:Number(val('opsScheduleRetryMax',s.scheduleRetryMax||0)),scheduleRetryGraceMinutes:Number(val('opsScheduleGrace',s.scheduleRetryGraceMinutes||30)),dailyDigestEnabled:checked('opsDigestEnabled',s.dailyDigestEnabled),dailyDigestTime:val('opsDigestTime',s.dailyDigestTime),dailyDigestRecipientIds:String(val('opsDigestRecipients',(s.dailyDigestRecipientIds||[]).join(','))).split(/[,，\s]+/).filter(Boolean),retentionDays:Number(val('opsRetention',s.retentionDays||90)),ruleSampleReviewPercent:Number(val('opsSamplePercent',s.ruleSampleReviewPercent||0))});toast(r.message||'保存失败');if(r.ok){opsBootstrap=null;await loadOperations()}}
+async function opsSaveSettings(){var s=(opsBootstrap&&opsBootstrap.settings)||{};var val=function(id,fallback){return $(id)?$(id).value:fallback},checked=function(id,fallback){return $(id)?$(id).checked:fallback};var r=await api('/ops/settings','POST',{quietHoursEnabled:checked('opsQuietEnabled',s.quietHoursEnabled),quietStart:val('opsQuietStart',s.quietStart),quietEnd:val('opsQuietEnd',s.quietEnd),quietPolicy:val('opsQuietPolicy',s.quietPolicy),maintenanceMode:checked('opsMaintenance',s.maintenanceMode),emergencyLock:checked('opsEmergency',s.emergencyLock),fuseEnabled:checked('opsFuse',s.fuseEnabled),anomalyDetectionEnabled:checked('opsAnomaly',s.anomalyDetectionEnabled),scheduleRetryEnabled:checked('opsScheduleRetry',s.scheduleRetryEnabled),scheduleRetryMax:Number(val('opsScheduleRetryMax',s.scheduleRetryMax||0)),scheduleRetryGraceMinutes:Number(val('opsScheduleGrace',s.scheduleRetryGraceMinutes||30)),dailyDigestEnabled:checked('opsDigestEnabled',s.dailyDigestEnabled),dailyDigestTime:val('opsDigestTime',s.dailyDigestTime),dailyDigestRecipientIds:String(val('opsDigestRecipients',(s.dailyDigestRecipientIds||[]).join(','))).split(/[,，\s]+/).filter(Boolean),retentionDays:Number(val('opsRetention',s.retentionDays||90)),ruleSampleReviewPercent:Number(val('opsSamplePercent',s.ruleSampleReviewPercent||0))});toast(r.message||'保存失败');if(r.ok){opsBootstrap=null;await loadOperations()}}
 async function opsUtilityPost(path,data,reload,resultId,prefix){var r=await api(path,'POST',data||{});toast(r.message||(r.ok?'完成':'失败'));var target=$(resultId||'opsDiagnostics');if(target)target.textContent=JSON.stringify(r,null,2);if(r.ok&&reload&&prefix)opsLoadWorkspace(prefix);return r}
 async function opsSchedulePreviewUi(){var r=await api('/ops/schedule-preview','POST',{scheduleSpec:$('opsScheduleSpec').value});$('opsPreviewResult').textContent=JSON.stringify(r,null,2);if(!r.ok)toast(r.message||'预览失败')}
 async function opsLoadTasks(){var r=await api('/ops/tasks?limit=300');if(!$('opsTaskList'))return;if(!r.ok){$('opsTaskList').innerHTML='<div class="empty">'+esc(r.message)+'</div>';return}$('opsTaskList').innerHTML=(r.tasks||[]).map(function(x){return '<div class="item"><div class="item-title">'+esc(x.kind)+'｜'+esc(x.title||x.id)+'</div><div class="item-meta">'+esc(x.id)+'｜'+esc(x.status)+'</div><div class="row">'+(x.retryable?'<button class="btn" data-task-action="retry" data-kind="'+esc(x.kind)+'" data-id="'+esc(x.id)+'">重试</button>':'')+(x.cancellable?'<button class="btn danger" data-task-action="cancel" data-kind="'+esc(x.kind)+'" data-id="'+esc(x.id)+'">取消</button>':'')+'</div></div>'}).join('')||'<div class="empty">没有待处理任务</div>';$('opsTaskList').querySelectorAll('[data-task-action]').forEach(function(b){b.onclick=async function(){var r=await api('/ops/tasks/action','POST',{kind:this.dataset.kind,id:this.dataset.id,action:this.dataset.taskAction});toast(r.message||'操作失败');if(r.ok)opsLoadTasks()}})}
@@ -14772,9 +14963,10 @@ async function saveRuleViolationSettings(){var payload={strictness:$('rvStrictne
 async function loadSettingsCenter(){var dev=session&&(session.permissions||{}).developer;if(!currentGroup){$('scMessage').textContent='请先从右上角选择需要维护的群组。';$('scList').innerHTML='<div class="empty">尚未选择群组</div>';return}$('scMessage').textContent='正在加载设置…';$('scList').innerHTML='<div class="empty">正在读取当前群设置</div>';try{var p=new URLSearchParams();p.set('targetQq',dev?($('scTargetQq').value||session.qq):session.qq);var r=await api('/settings-center?'+p.toString());if(!r.ok){$('scMessage').textContent=r.message||'加载失败';$('scList').innerHTML='<div class="empty">'+esc(r.message)+'</div>';return}if(!$('scTargetQq').value)$('scTargetQq').value=r.targetQq||session.qq;if($('scResolvedRole')){$('scResolvedRole').textContent='识别权限：'+portalRoleLabel(r.targetRole);$('scResolvedRole').className='status ok'}$('scMessage').textContent='已加载 '+(r.settings||[]).length+' 项设置；只会提交实际改动的项目。';$('scList').innerHTML='';(r.settings||[]).forEach(function(s){var d=document.createElement('div');d.className='item';var input;if(s.type==='boolean'){input=document.createElement('input');input.type='checkbox';input.checked=!!s.value}else if(s.type==='select'){input=document.createElement('select');(s.options||[]).forEach(function(v){var o=document.createElement('option');o.value=v;o.textContent=(s.optionLabels&&s.optionLabels[v])||v;input.appendChild(o)});input.value=String(s.value)}else if(s.type==='textarea'){input=document.createElement('textarea');input.value=String(s.value==null?'':s.value)}else{input=document.createElement('input');input.type=s.type==='number'?'number':'text';input.value=String(s.value==null?'':s.value);if(s.min!=null)input.min=s.min;if(s.max!=null)input.max=s.max}input.dataset.settingKey=s.key;input.dataset.initialValue=input.type==='checkbox'?String(input.checked):String(input.value);var roleText=portalRoleLabel(s.minRole);if(s.key==='rule_proxy_mode')roleText+='（auto 仅群主）';d.innerHTML='<div class="item-title">'+esc(s.label)+'</div><div class="item-meta">最低权限：'+esc(roleText)+'｜对应指令：'+esc(s.command||'无')+'</div>';d.appendChild(input);$('scList').appendChild(d)});if(!$('scList').children.length)$('scList').innerHTML='<div class="empty">当前没有可维护的设置项目</div>'}catch(e){$('scMessage').textContent='加载设置时发生错误。';$('scList').innerHTML='<div class="empty">'+esc(String(e&&e.message||e))+'</div>'}}
 async function saveAllSettings(){var dev=session&&(session.permissions||{}).developer;var settings=Array.from(document.querySelectorAll('#scList [data-setting-key]')).filter(function(input){var now=input.type==='checkbox'?String(input.checked):String(input.value);return now!==String(input.dataset.initialValue)}).map(function(input){return{key:input.dataset.settingKey,value:input.type==='checkbox'?input.checked:input.value}});if(!settings.length){toast('没有检测到设置变化');return}var button=$('scSaveAll');button.disabled=true;button.textContent='保存中…';var payload={settings:settings,targetQq:dev?$('scTargetQq').value:session.qq,auditMode:dev&&$('scAuditLog').checked?'log':'silent'};var r=await api('/settings-center','POST',payload);button.disabled=false;button.textContent='保存全部设置';$('scMessage').textContent=r.message||'保存失败';toast(r.message||'保存失败');if(r.ok)loadSettingsCenter()}
 async function copyPortalText(value){var text=String(value||'');if(!text)return false;try{await navigator.clipboard.writeText(text);toast('已复制');return true}catch(e){var input=document.createElement('textarea');input.value=text;input.style.position='fixed';input.style.opacity='0';document.body.appendChild(input);input.select();var ok=false;try{ok=document.execCommand('copy')}catch(x){}input.remove();toast(ok?'已复制':'复制失败，请手动选择地址');return ok}}
-async function loadBilibili(){var r=await api('/integrations/bilibili');if(!r.ok){$('biliList').innerHTML='<div class="empty">'+esc(r.message)+'</div>';return}$('biliList').innerHTML='';(r.connectors||[]).forEach(function(c){var d=document.createElement('div');d.className='item bili-connector';var state=c.pollState||{};var status=c.lastCheckStatus||'等待首次事件';var webhook=c.mode==='official_webhook';var next=webhook?'等待外部事件推送':(c.nextPollAt?new Date(Number(c.nextPollAt)).toLocaleString():'等待定时任务');d.innerHTML='<div class="item-title">'+esc(c.creatorName||('UID '+c.creatorId))+'</div><div class="item-meta">模式：'+(webhook?'接收 Webhook（高级）':'兼容轮询')+'｜UID：'+esc(c.creatorId)+'｜直播：'+(c.liveNotify?'通知':'仅记录')+(c.liveAtAll?'＋@全体':'')+'｜视频：'+(c.videoNotify?'通知':'仅记录')+(c.videoAtAll?'＋@全体':'')+'</div><div class="item-body">状态：'+esc(status)+'｜当前直播：'+(state.live?'是':'否')+'｜最新视频：'+esc(state.latestVideoBvid||'尚未建立基准')+'<br>上次处理：'+esc(c.lastCheckAt?new Date(Number(c.lastCheckAt)).toLocaleString():(c.lastEventAt?new Date(Number(c.lastEventAt)).toLocaleString():'尚未处理'))+'｜下一步：'+esc(next)+(c.lastCheckError?'<br><b>错误：</b>'+esc(c.lastCheckError):'')+'</div>';if(webhook){var info=document.createElement('div');info.className='notice bili-webhook-box';info.style.marginTop='10px';info.innerHTML='<b>这个模式为什么没有“立即检查”？</b><br>因为它不会主动查询 B站，只等待外部服务把“开播／新视频”事件 POST 到下方地址。只填写 UID 不会自动产生事件。<div class="row" style="margin-top:10px"><input class="grow" readonly value="'+esc(c.webhookUrl||'回调地址不可用')+'"><button class="btn" data-copy-webhook>复制回调地址</button><button class="btn" data-rotate-webhook>重新生成地址</button><button class="btn primary" data-switch-polling>改用兼容轮询</button></div>';d.appendChild(info);info.querySelector('[data-copy-webhook]').onclick=function(){copyPortalText(c.webhookUrl)};info.querySelector('[data-rotate-webhook]').onclick=function(){rotateBilibiliWebhook(c.id)};info.querySelector('[data-switch-polling]').onclick=function(){switchBilibiliMode(c.id,'automatic_polling')};}var row=document.createElement('div');row.className='row';row.style.marginTop='10px';if(!webhook){var interval=document.createElement('select');[[1800,'30 分钟'],[3600,'1 小时'],[7200,'2 小时'],[21600,'6 小时']].forEach(function(v){var o=document.createElement('option');o.value=v[0];o.textContent='每 '+v[1];interval.appendChild(o)});interval.value=String(c.pollIntervalSeconds||1800);var saveInterval=document.createElement('button');saveInterval.className='btn';saveInterval.textContent='保存检查频率';saveInterval.onclick=function(){updateBilibiliInterval(c.id,interval.value)};var check=document.createElement('button');check.className='btn primary';check.textContent='立即检查';check.onclick=function(){checkBilibiliNow(c.id)};var toWebhook=document.createElement('button');toWebhook.className='btn';toWebhook.textContent='改为 Webhook';toWebhook.onclick=function(){switchBilibiliMode(c.id,'official_webhook')};row.append(interval,saveInterval,check,toWebhook)}var testLive=document.createElement('button');testLive.className='btn';testLive.textContent='测试发送开播通知';testLive.title='只测试发送到 QQ 群，不代表 B站回调已经配置成功';testLive.onclick=function(){testBilibili(c.id,'live_start')};var testVideo=document.createElement('button');testVideo.className='btn';testVideo.textContent='测试发送新视频通知';testVideo.title='只测试发送到 QQ 群，不代表 B站回调已经配置成功';testVideo.onclick=function(){testBilibili(c.id,'video_publish')};var del=document.createElement('button');del.className='btn danger';del.textContent='删除';del.onclick=async function(){if(!(await confirmModal('删除此 B站监控？','确认删除')))return;var x=await api('/integrations/bilibili','POST',{action:'delete',id:c.id});toast(x.message);if(x.ok)loadBilibili()};row.append(testLive,testVideo,del);d.appendChild(row);$('biliList').appendChild(d)});if(!$('biliList').children.length)$('biliList').innerHTML='<div class="empty">暂无 B站监控</div>'}
+async function loadBilibili(){var r=await api('/integrations/bilibili');if(!r.ok){$('biliList').innerHTML='<div class="empty">'+esc(r.message)+'</div>';return}$('biliList').innerHTML='';(r.connectors||[]).forEach(function(c){var d=document.createElement('div');d.className='item bili-connector';var state=c.pollState||{};var status=c.lastCheckStatus||'等待首次事件';var webhook=c.mode==='official_webhook';var next=webhook?'等待外部事件推送':(c.nextPollAt?new Date(Number(c.nextPollAt)).toLocaleString():'等待定时任务');d.innerHTML='<div class="item-title">'+esc(c.creatorName||('UID '+c.creatorId))+'</div><div class="item-meta">模式：'+(webhook?'开放平台／授权中继 Webhook':'兼容低频轮询')+'｜UID：'+esc(c.creatorId)+'｜直播：'+(c.liveNotify?'通知':'仅记录')+(c.liveAtAll?'＋@全体':'')+'｜视频：'+(c.videoNotify?'通知':'仅记录')+(c.videoAtAll?'＋@全体':'')+'</div><div class="item-body">状态：'+esc(status)+'｜当前直播：'+(state.live?'是':'否')+'｜最新视频：'+esc(state.latestVideoBvid||'尚未建立基准')+'<br>上次处理：'+esc(c.lastCheckAt?new Date(Number(c.lastCheckAt)).toLocaleString():(c.lastEventAt?new Date(Number(c.lastEventAt)).toLocaleString():'尚未处理'))+'｜下一步：'+esc(next)+(c.lastWebhookTestAt?'<br>Webhook 自检：'+(c.lastWebhookTestOk?'通过':'失败')+'｜'+esc(new Date(Number(c.lastWebhookTestAt)).toLocaleString())+(c.lastWebhookTestError?'｜'+esc(c.lastWebhookTestError):''):'')+(c.lastCheckError?'<br><b>错误：</b>'+esc(c.lastCheckError):'')+'</div>';if(webhook){var info=document.createElement('div');info.className='notice bili-webhook-box';info.style.marginTop='10px';info.innerHTML='<b>Webhook 不主动访问 B站</b><br>请将下方地址配置到哔哩哔哩开放平台，或你有权使用的事件中继。自检会验证回调密钥映射与 QQ 通知发送，但外部平台仍必须实际 POST 事件。<div class="row" style="margin-top:10px"><input class="grow" readonly value="'+esc(c.webhookUrl||'回调地址不可用')+'"><button class="btn" data-copy-webhook>复制回调地址</button><button class="btn" data-rotate-webhook>重新生成地址</button><button class="btn primary" data-webhook-self-test>Webhook 接收自检</button><button class="btn" data-switch-polling>改用兼容轮询</button></div>';d.appendChild(info);info.querySelector('[data-copy-webhook]').onclick=function(){copyPortalText(c.webhookUrl)};info.querySelector('[data-rotate-webhook]').onclick=function(){rotateBilibiliWebhook(c.id)};info.querySelector('[data-webhook-self-test]').onclick=function(){testBilibiliWebhook(c.id)};info.querySelector('[data-switch-polling]').onclick=function(){switchBilibiliMode(c.id,'automatic_polling')};}var row=document.createElement('div');row.className='row';row.style.marginTop='10px';if(!webhook){var interval=document.createElement('select');[[1800,'30 分钟'],[3600,'1 小时'],[7200,'2 小时'],[21600,'6 小时']].forEach(function(v){var o=document.createElement('option');o.value=v[0];o.textContent='每 '+v[1];interval.appendChild(o)});interval.value=String(c.pollIntervalSeconds||1800);var saveInterval=document.createElement('button');saveInterval.className='btn';saveInterval.textContent='保存检查频率';saveInterval.onclick=function(){updateBilibiliInterval(c.id,interval.value)};var check=document.createElement('button');check.className='btn primary';check.textContent='立即检查';check.onclick=function(){checkBilibiliNow(c.id)};var toWebhook=document.createElement('button');toWebhook.className='btn';toWebhook.textContent='改为 Webhook（推荐）';toWebhook.onclick=function(){switchBilibiliMode(c.id,'official_webhook')};row.append(interval,saveInterval,check,toWebhook)}var testLive=document.createElement('button');testLive.className='btn';testLive.textContent='测试发送开播通知';testLive.title='只测试发送到 QQ 群';testLive.onclick=function(){testBilibili(c.id,'live_start')};var testVideo=document.createElement('button');testVideo.className='btn';testVideo.textContent='测试发送新视频通知';testVideo.title='只测试发送到 QQ 群';testVideo.onclick=function(){testBilibili(c.id,'video_publish')};var del=document.createElement('button');del.className='btn danger';del.textContent='删除';del.onclick=async function(){if(!(await confirmModal('删除此 B站监控？','确认删除')))return;var x=await api('/integrations/bilibili','POST',{action:'delete',id:c.id});toast(x.message);if(x.ok)loadBilibili()};row.append(testLive,testVideo,del);d.appendChild(row);$('biliList').appendChild(d)});if(!$('biliList').children.length)$('biliList').innerHTML='<div class="empty">暂无 B站监控</div>'}
 async function saveBilibiliConnector(){var uid=String($('biliCreatorId').value||'').replace(/\D/g,'');if(!uid){toast('请输入 B站用户 UID');return}var r=await api('/integrations/bilibili','POST',{action:'save',mode:$('biliMode').value,creatorName:$('biliCreatorName').value,creatorId:uid,pollIntervalSeconds:Number($('biliPollInterval').value||1800),liveNotify:$('biliLiveNotify').checked,liveAtAll:$('biliLiveAtAll').checked,videoNotify:$('biliVideoNotify').checked,videoAtAll:$('biliVideoAtAll').checked});toast(r.message);if(r.ok){if(r.webhookUrl){$('biliWebhookResult').innerHTML='Webhook 回调地址：<code>'+esc(r.webhookUrl)+'</code><br>请复制到你的开放平台应用或事件中继；若没有外部事件来源，请改用兼容轮询。';$('biliWebhookResult').classList.remove('hidden')}else $('biliWebhookResult').classList.add('hidden');$('biliCreatorName').value='';$('biliCreatorId').value='';loadBilibili()}}
 async function rotateBilibiliWebhook(id){if(!(await confirmModal('重新生成后，旧回调地址会立即失效。','重新生成 Webhook 地址')))return;var r=await api('/integrations/bilibili','POST',{action:'rotate_webhook',id:id});toast(r.message);if(r.ok&&r.webhookUrl){await copyPortalText(r.webhookUrl);loadBilibili()}}
+async function testBilibiliWebhook(id){var r=await api('/integrations/bilibili','POST',{action:'webhook_self_test',id:id});toast(r.message||'自检完成');loadBilibili()}
 async function switchBilibiliMode(id,mode){var label=mode==='official_webhook'?'Webhook':'兼容轮询';if(!(await confirmModal('确定切换为'+label+'？切换后会停止原模式。','切换监控模式')))return;var r=await api('/integrations/bilibili','POST',{action:'switch_mode',id:id,mode:mode,pollIntervalSeconds:1800});toast(r.message);if(r.ok){if(r.webhookUrl)await copyPortalText(r.webhookUrl);loadBilibili()}}
 async function updateBilibiliInterval(id,seconds){var r=await api('/integrations/bilibili','POST',{action:'update_interval',id:id,pollIntervalSeconds:Number(seconds)});toast(r.message);if(r.ok)loadBilibili()}
 async function checkBilibiliNow(id){var r=await api('/integrations/bilibili','POST',{action:'check_now',id:id});toast(r.message);loadBilibili()}
@@ -14830,14 +15022,15 @@ async function guideMissingHeadMembers(){var branch=$('familyGuideBranch').value
 function scheduleStatusText(v){return({active:'执行中',pending_owner:'待开发者处理',pending_review:'审核中',cancelled:'已取消',completed:'已完成',paused:'已暂停',rejected:'已拒绝',deleted:'已删除'})[String(v||'')]||String(v||'未知')}
 function scheduleTypeText(x){if(!x)return'未知';if(x.type==='once')return'单次';if(x.type==='daily')return'每天 '+(x.timeOfDay||'');if(x.type==='weekly')return'每周'+('一二三四五六日'[Math.max(0,Number(x.weekday||1)-1)]||'')+' '+(x.timeOfDay||'');if(x.type==='monthly')return'每月 '+(x.dayOfMonth||'')+' 日 '+(x.timeOfDay||'');if(x.type==='interval')return'每隔 '+Math.max(1,Math.round(Number(x.intervalMs||0)/60000))+' 分钟';return String(x.type||'未知')}
 function scheduleTimeText(ms){return ms?new Date(Number(ms)).toLocaleString('zh-CN',{timeZone:'Asia/Taipei'}):'无下次执行时间'}
-function renderScheduleItem(x,mode){var action='';if(mode==='mine'&&!['cancelled','completed','rejected','deleted'].includes(x.status)){action='<button class="btn" data-schedule-edit="'+esc(x.id)+'">编辑</button>';if(x.type!=='once'&&x.enabled&&x.status==='active')action+='<button class="btn" data-schedule-skip="'+esc(x.id)+'">暂停一次</button>';if(x.enabled||['pending_owner','pending_review','paused'].includes(x.status))action+='<button class="btn danger" data-schedule-cancel="'+esc(x.id)+'">取消排程</button>'}if(mode==='review'&&['pending_review','pending_owner'].includes(x.status))action='<button class="btn primary" data-schedule-vote="approve" data-id="'+esc(x.id)+'">通过</button><button class="btn danger" data-schedule-vote="reject" data-id="'+esc(x.id)+'">拒绝</button>';if(mode==='root'&&['pending_owner','pending_review'].includes(x.status))action='<button class="btn primary" data-schedule-root="approve" data-id="'+esc(x.id)+'">开发者通过</button><button class="btn danger" data-schedule-root="reject" data-id="'+esc(x.id)+'">开发者拒绝</button><button class="btn" data-schedule-root="assign" data-id="'+esc(x.id)+'">指定审核人</button>';var meta='编号：'+esc(x.id)+'｜'+esc(scheduleStatusText(x.status))+'｜'+esc(scheduleTypeText(x))+'｜下次：'+esc(scheduleTimeText(x.nextRunAt));if(x.creatorName||x.creatorId)meta+='｜建立者：'+esc(x.creatorName||x.creatorId)+'（'+esc(x.creatorId||'')+'）';var extra='';if(x.skipNextRun)extra+='<br><b>下一次执行将跳过，之后自动恢复。</b>';if(x.lastSkippedAt)extra+='<br>上次跳过：'+esc(new Date(x.lastSkippedAt).toLocaleString());if(x.lastRunAt)extra+='<br>上次执行：'+esc(new Date(x.lastRunAt).toLocaleString())+'｜结果：'+esc(x.lastResult||'成功');if(x.review&&x.review.reason)extra+='<br>Gemma 审查：'+esc(x.review.decision||'')+'｜'+esc(x.review.reason);return '<div class="item"><div class="item-head"><div><div class="item-title">'+esc(x.content||'无内容')+'</div><div class="item-meta">'+meta+'</div></div><span class="status">'+esc(scheduleStatusText(x.status))+'</span></div><div class="item-body">时区：'+esc(x.timezone||'Asia/Taipei')+extra+'</div>'+(action?'<div class="row" style="margin-top:10px">'+action+'</div>':'')+'</div>'}
+function renderScheduleItem(x,mode){var action='';var terminal=['cancelled','completed','rejected','paused'].includes(String(x.status||''));if(mode==='mine'){action='<button class="btn" data-schedule-edit="'+esc(x.id)+'">编辑并更新</button>';if(x.type!=='once'&&x.enabled&&x.status==='active')action+='<button class="btn" data-schedule-skip="'+esc(x.id)+'">暂停一次</button>';if(x.enabled||['pending_owner','pending_review'].includes(x.status))action+='<button class="btn danger" data-schedule-cancel="'+esc(x.id)+'">取消排程</button>';if(terminal)action+='<button class="btn danger" data-schedule-delete="'+esc(x.id)+'">永久删除</button>'}if(mode==='review'&&['pending_review','pending_owner'].includes(x.status))action='<button class="btn primary" data-schedule-vote="approve" data-id="'+esc(x.id)+'">通过</button><button class="btn danger" data-schedule-vote="reject" data-id="'+esc(x.id)+'">拒绝</button>';if(mode==='root'){action='<button class="btn" data-schedule-root="edit" data-id="'+esc(x.id)+'">编辑并更新</button><button class="btn" data-schedule-root="rereview" data-id="'+esc(x.id)+'">重新 AI 审查</button>';if(x.type!=='once'&&x.enabled&&x.status==='active')action+='<button class="btn" data-schedule-root="skip_once" data-id="'+esc(x.id)+'">暂停一次</button>';if(['pending_owner','pending_review'].includes(x.status))action+='<button class="btn primary" data-schedule-root="approve" data-id="'+esc(x.id)+'">开发者通过</button><button class="btn danger" data-schedule-root="reject" data-id="'+esc(x.id)+'">开发者拒绝</button><button class="btn" data-schedule-root="assign" data-id="'+esc(x.id)+'">指定审核人</button>';action+='<button class="btn danger" data-schedule-root="delete" data-id="'+esc(x.id)+'">永久删除</button>'}var meta='编号：'+esc(x.id)+'｜'+esc(scheduleStatusText(x.status))+'｜'+esc(scheduleTypeText(x))+'｜下次：'+esc(scheduleTimeText(x.nextRunAt));if(x.creatorName||x.creatorId)meta+='｜建立者：'+esc(x.creatorName||x.creatorId)+'（'+esc(x.creatorId||'')+'）';var extra='';if(x.skipNextRun)extra+='<br><b>下一次执行将跳过，之后自动恢复。</b>';if(x.lastSkippedAt)extra+='<br>上次跳过：'+esc(new Date(x.lastSkippedAt).toLocaleString());if(x.lastRunAt)extra+='<br>上次执行：'+esc(new Date(x.lastRunAt).toLocaleString())+'｜结果：'+esc(x.lastResult||'成功');if(x.review&&x.review.reason){var provider=x.review.provider?String(x.review.provider).replace(/^./,function(v){return v.toUpperCase()}):'AI';extra+='<br>'+esc(provider)+' 审查：'+esc(x.review.decision||'')+'｜'+esc(x.review.reason)+(x.review.model?'｜模型：'+esc(x.review.model):'')}if(x.reviewedAgainAt)extra+='<br>开发者重新审查：'+esc(new Date(Number(x.reviewedAgainAt)).toLocaleString());return '<div class="item"><div class="item-head"><div><div class="item-title">'+esc(x.content||'无内容')+'</div><div class="item-meta">'+meta+'</div></div><span class="status">'+esc(scheduleStatusText(x.status))+'</span></div><div class="item-body">时区：'+esc(x.timezone||'Asia/Taipei')+extra+'</div>'+(action?'<div class="row" style="margin-top:10px">'+action+'</div>':'')+'</div>'}
 async function createScheduleFromPortal(){if(!currentGroup){toast('请先选择群组');return}var text=String($('scheduleText').value||'').trim();if(!text){toast('请输入排程内容');return}var r=await api('/schedules','POST',{schedule:text});toast(r.message||'完成');if(r.ok){$('scheduleText').value='';loadSchedules()}}
 async function cancelScheduleFromPortal(id){if(!(await confirmModal('取消后不会再执行，已发送的消息不会被撤回。','取消排程',{danger:true})))return;var r=await api('/schedules','DELETE',{id:id});toast(r.message||'完成');if(r.ok)loadSchedules()}
 async function editScheduleFromPortal(id){var r=await api('/schedules');if(!r.ok)return toast(r.message||'读取失败');var x=(r.schedules||[]).find(function(v){return String(v.id)===String(id)});if(!x)return toast('找不到该排程');var spec=await textModal('编辑排程时间与内容',x.scheduleSpec||x.content||'','编辑排程',{placeholder:'例如：每天 18:00 @123456789 提醒内容'});if(spec===null)return;if(!String(spec).trim())return toast('排程内容不能为空');var y=await api('/schedules/edit','POST',{id:id,schedule:String(spec).trim()});toast(y.message||'更新失败');if(y.ok)loadSchedules()}
+async function deleteScheduleFromPortal(id){if(!(await confirmModal('永久删除后无法恢复，确定继续吗？','永久删除排程',{danger:true})))return;var r=await api('/schedules/delete','POST',{id:id});toast(r.message||'删除失败');if(r.ok)loadSchedules()}
 async function skipScheduleOnceFromPortal(id){if(!(await confirmModal('只跳过下一次执行，之后会自动恢复。','暂停一次')))return;var r=await api('/schedules/skip-once','POST',{id:id});toast(r.message||'操作失败');if(r.ok)loadSchedules()}
 async function voteScheduleFromPortal(id,vote){var r=await api('/review/schedule','POST',{id:id,vote:vote});toast(r.message||'审核完成');if(r.ok)loadSchedules()}
-async function rootScheduleAction(id,action){if(action==='assign'){var reviewers=await textModal('输入具有排程审核权限的 QQ，可用逗号或空格分隔。','', '指定排程审核人',{required:true,requiredMessage:'请输入审核人 QQ'});if(reviewers===null)return;var rule=await textModal('审核规则可输入 single、majority 或 all。','single','审核规则',{required:true});if(rule===null)return;var r=await api('/root/schedule-assign','POST',{id:id,reviewerIds:String(reviewers).split(/[,\s]+/).filter(Boolean),approvalRule:String(rule).trim()});toast(r.message||'已指派');if(r.ok)loadSchedules();return}var r=await api('/root/schedule-assign','POST',{id:id,developerDecision:action});toast(r.message||'处理完成');if(r.ok)loadSchedules()}
-async function loadSchedules(){if(!$('scheduleMine'))return;if(!currentGroup){$('scheduleMine').innerHTML='<div class="empty">请先选择群组。</div>';return}var r=await api('/schedules');if(!r.ok){$('scheduleMine').innerHTML='<div class="empty">'+esc(r.message)+'</div>';return}var cron=r.cron||{};$('scheduleCronState').textContent=cron.lastRunAt?'Cron 最近执行：'+new Date(Number(cron.lastRunAt)).toLocaleString()+(cron.recent?'（正常）':'（超过 5 分钟，可能未持续触发）'):(cron.message||'尚未记录 Cron 执行');$('scheduleMine').innerHTML=(r.schedules||[]).map(function(x){return renderScheduleItem(x,'mine')}).join('')||'<div class="empty">目前群没有你建立的排程</div>';$('scheduleMine').querySelectorAll('[data-schedule-cancel]').forEach(function(b){b.onclick=function(){cancelScheduleFromPortal(this.dataset.scheduleCancel)}});$('scheduleMine').querySelectorAll('[data-schedule-edit]').forEach(function(b){b.onclick=function(){editScheduleFromPortal(this.dataset.scheduleEdit)}});$('scheduleMine').querySelectorAll('[data-schedule-skip]').forEach(function(b){b.onclick=function(){skipScheduleOnceFromPortal(this.dataset.scheduleSkip)}});var canReview=!!(r.permissions&&r.permissions.canReview),dev=!!(r.permissions&&r.permissions.developer);$('scheduleReviewCard').classList.toggle('hidden',!canReview);$('scheduleRootCard').classList.toggle('hidden',!dev);if(canReview){var q=await api('/review/schedules');$('scheduleReviewList').innerHTML=q.ok?(q.schedules||[]).map(function(x){return renderScheduleItem(x,'review')}).join('')||'<div class="empty">没有分配给你的排程审核</div>':'<div class="empty">'+esc(q.message||'无法读取审核排程')+'</div>';$('scheduleReviewList').querySelectorAll('[data-schedule-vote]').forEach(function(b){b.onclick=function(){voteScheduleFromPortal(this.dataset.id,this.dataset.scheduleVote)}})}if(dev){var all=await api('/root/schedules');$('scheduleRootList').innerHTML=all.ok?(all.schedules||[]).map(function(x){return renderScheduleItem(x,'root')}).join('')||'<div class="empty">没有排程</div>':'<div class="empty">'+esc(all.message||'无法读取全部排程')+'</div>';$('scheduleRootList').querySelectorAll('[data-schedule-root]').forEach(function(b){b.onclick=function(){rootScheduleAction(this.dataset.id,this.dataset.scheduleRoot)}})}}
+async function rootScheduleAction(id,action){if(action==='assign'){var reviewers=await textModal('输入具有排程审核权限的 QQ，可用逗号或空格分隔。','', '指定排程审核人',{required:true,requiredMessage:'请输入审核人 QQ'});if(reviewers===null)return;var rule=await textModal('审核规则可输入 single、majority 或 all。','single','审核规则',{required:true});if(rule===null)return;var a=await api('/root/schedule-assign','POST',{id:id,reviewerIds:String(reviewers).split(/[,\s]+/).filter(Boolean),approvalRule:String(rule).trim()});toast(a.message||'已指派');if(a.ok)loadSchedules();return}if(action==='edit'){var all=await api('/root/schedules');var x=(all.schedules||[]).find(function(v){return String(v.id)===String(id)});var spec=await textModal('开发者可直接修改时间与内容；已完成的单次排程会据新时间重新启用。',x&&(x.scheduleSpec||x.content)||'','编辑并更新排程',{required:true});if(spec===null)return;var e=await api('/root/schedule-action','POST',{id:id,action:'edit',schedule:String(spec).trim()});toast(e.message||'更新失败');if(e.ok)loadSchedules();return}if(action==='delete'&&!(await confirmModal('永久删除此排程与其记录？','开发者永久删除',{danger:true})))return;if(action==='skip_once'&&!(await confirmModal('只暂停下一次执行，之后自动恢复。','暂停一次')))return;var r=await api('/root/schedule-action','POST',{id:id,action:action});toast(r.message||'处理完成');if(r.ok)loadSchedules()}
+async function loadSchedules(){if(!$('scheduleMine'))return;if(!currentGroup){$('scheduleMine').innerHTML='<div class="empty">请先选择群组。</div>';return}var r=await api('/schedules');if(!r.ok){$('scheduleMine').innerHTML='<div class="empty">'+esc(r.message)+'</div>';return}var cron=r.cron||{};$('scheduleCronState').textContent=cron.lastRunAt?'Cron 最近执行：'+new Date(Number(cron.lastRunAt)).toLocaleString()+(cron.recent?'（正常）':'（超过 5 分钟，可能未持续触发）'):(cron.message||'尚未记录 Cron 执行');$('scheduleMine').innerHTML=(r.schedules||[]).map(function(x){return renderScheduleItem(x,'mine')}).join('')||'<div class="empty">目前群没有你建立的排程</div>';$('scheduleMine').querySelectorAll('[data-schedule-cancel]').forEach(function(b){b.onclick=function(){cancelScheduleFromPortal(this.dataset.scheduleCancel)}});$('scheduleMine').querySelectorAll('[data-schedule-delete]').forEach(function(b){b.onclick=function(){deleteScheduleFromPortal(this.dataset.scheduleDelete)}});$('scheduleMine').querySelectorAll('[data-schedule-edit]').forEach(function(b){b.onclick=function(){editScheduleFromPortal(this.dataset.scheduleEdit)}});$('scheduleMine').querySelectorAll('[data-schedule-skip]').forEach(function(b){b.onclick=function(){skipScheduleOnceFromPortal(this.dataset.scheduleSkip)}});var canReview=!!(r.permissions&&r.permissions.canReview),dev=!!(r.permissions&&r.permissions.developer);$('scheduleReviewCard').classList.toggle('hidden',!canReview);$('scheduleRootCard').classList.toggle('hidden',!dev);if(canReview){var q=await api('/review/schedules');$('scheduleReviewList').innerHTML=q.ok?(q.schedules||[]).map(function(x){return renderScheduleItem(x,'review')}).join('')||'<div class="empty">没有分配给你的排程审核</div>':'<div class="empty">'+esc(q.message||'无法读取审核排程')+'</div>';$('scheduleReviewList').querySelectorAll('[data-schedule-vote]').forEach(function(b){b.onclick=function(){voteScheduleFromPortal(this.dataset.id,this.dataset.scheduleVote)}})}if(dev){var all=await api('/root/schedules');$('scheduleRootList').innerHTML=all.ok?(all.schedules||[]).map(function(x){return renderScheduleItem(x,'root')}).join('')||'<div class="empty">没有排程</div>':'<div class="empty">'+esc(all.message||'无法读取全部排程')+'</div>';$('scheduleRootList').querySelectorAll('[data-schedule-root]').forEach(function(b){b.onclick=function(){rootScheduleAction(this.dataset.id,this.dataset.scheduleRoot)}})}}
 
 async function loadGroups(){var r=await api('/groups');if(!r.ok){toast(r.message);return false}var sel=$('groupSelect'),groups=r.groups||[];sel.innerHTML='<option value="">选择群组</option>';groups.forEach(function(g){var o=document.createElement('option');o.value=g.groupId;o.textContent=(g.displayName||g.groupName||g.groupId)+' ('+g.groupId+')';sel.appendChild(o)});if(r.selectedGroupId){sel.value=r.selectedGroupId;currentGroup=r.selectedGroupId}else if(groups.length===1){sel.value=groups[0].groupId;await selectGroup(groups[0].groupId)}else if(!groups.length){toast('没有找到你已加入且启用 QQAI 的群组；仍可使用匿名申诉与个人功能。')}return true}
 async function selectGroup(id){if(!id){currentGroup='';setNativeAdminVisibility(false);refreshOverview();return}var r=await api('/select-group','POST',{groupId:id});if(!r.ok){toast(r.message);return}currentGroup=id;session=r.session;$('identity').innerHTML='<b>QQ '+esc(session.qq)+'</b><br><span style="color:#98a2b7">'+esc(portalRoleLabel(session.role||'member'))+'</span>';await refreshCapabilities();applyR3RoleVisibility();toast('已切换群组');refreshOverview()}
@@ -14859,7 +15052,7 @@ function proposalStatusText(v){return({pending:'待确认',executed:'已执行',
 async function loadProposals(){await refreshCapabilities();var r=await api('/moderation/proposals');if(!r.ok){$('proposalList').innerHTML='<div class="empty">'+esc(r.message)+'</div>';return}var pending=(r.proposals||[]).filter(function(p){return proposalState(p)==='pending'});$('mProposals').textContent=pending.length;$('proposalList').innerHTML='';(r.proposals||[]).forEach(function(p){var st=proposalState(p);var d=document.createElement('div');d.className='item';d.innerHTML='<div class="item-head"><div><div class="item-title">'+esc(p.id)+'｜'+esc(p.actionLabel||p.action)+'</div><div class="item-meta">提出者：'+esc((p.actorName||p.actorId)+(p.actorId&&String(p.actorName||'').indexOf(String(p.actorId))<0?'（QQ:'+p.actorId+'）':''))+'｜目标：'+esc(p.targetName||p.targetId||'全群')+'｜状态：'+esc(proposalStatusText(st))+'</div></div><span class="status '+(st==='executed'?'ok':st==='pending'?'warning':st==='failed'?'error':'')+'">'+esc(proposalStatusText(st))+'</span></div><div class="item-body">'+esc(p.sourceText||'')+(p.reason?'<br><b>原因：</b>'+esc(p.reason):'')+(p.classifierReason?'<br><b>识别依据：</b>'+esc(p.classifierReason):'')+'</div>';if(st==='pending'){var a=document.createElement('div');a.className='row';a.style.marginTop='10px';var yes=document.createElement('button');yes.className='btn primary';yes.textContent='确认并执行';yes.onclick=async function(){if(!(await confirmModal('确定执行 '+p.id+'？','确认待执行操作')))return;var x=await api('/moderation/confirm','POST',{id:p.id});toast(x.message);loadProposals()};var no=document.createElement('button');no.className='btn danger';no.textContent='取消';no.onclick=async function(){var x=await api('/moderation/cancel','POST',{id:p.id});toast(x.message);loadProposals()};a.append(yes,no);d.appendChild(a)}$('proposalList').appendChild(d)});if(!$('proposalList').children.length)$('proposalList').innerHTML='<div class="empty">暂无待确认操作</div>'}
 async function loadModels(){var r=await api('/models');if(!r.ok){$('modelList').innerHTML='<div class="empty span-12">'+esc(r.message)+'</div>';return}var routing=r.routing||{},lines=Object.keys(routing).map(function(k){var names={decision:'审查判断',chat:'聊天回答',vision:'图片理解',search:'联网搜索',contextSummary:'上下文整理',deepseekChat:'DeepSeek 聊天权限'};return '<div class="item"><div class="item-title">'+esc(names[k]||k)+'</div><div class="item-meta">'+esc(routing[k])+'</div></div>'}).join('');var dev=session&&(session.permissions||{}).developer,windows=dev?(r.deepseekEmergencyWindows||[]):[];if(dev&&windows.length){lines+='<div class="item"><div class="item-title">DeepSeek 临时开放记录（永久保留）</div><div class="item-meta">'+windows.slice(0,20).map(function(w){var start=w.startedAt?new Date(w.startedAt).toLocaleString():'未记录',end=(w.endedAt||w.expiresAt)?new Date(w.endedAt||w.expiresAt).toLocaleString():'进行中',actual=Math.round(Number(w.totalModelCallMs||0)/1000*10)/10;return esc('群 '+(w.groupId||'私聊')+'／QQ '+(w.userId||'未知')+'｜'+start+' ～ '+end+'｜调用 '+Number(w.useCount||0)+' 次｜模型实际耗时 '+actual+' 秒')}).join('<br>')+'</div></div>'}$('modelRoutingSummary').innerHTML=lines||'<div class="empty">没有路由资料</div>';$('modelList').innerHTML=(r.models||[]).map(function(m){return '<div class="card span-4"><div class="item-head"><div><div class="item-title">'+esc(m.id)+'</div><div class="item-meta">'+esc(m.provider)+'／'+esc(m.family)+(m.billing?'／'+esc(m.billing):'')+'</div></div><span class="status '+statusClass(m.status)+'">'+esc(m.statusLabel||m.status)+'</span></div><div style="margin-top:10px">'+(m.capabilities||[]).map(function(x){return'<span class="pill">'+esc(x)+'</span>'}).join('')+'</div></div>'}).join('')||'<div class="empty span-12">没有模型</div>';if(dev){ensureModelRegistryPanel();loadRuntimeModels()}}
 async function loadQuota(){var r=await api('/root/quotas');if(!r.ok){$('quotaStatus').textContent=r.message;$('globalQuota').disabled=true;$('groupQuota').disabled=true;$('saveQuota').disabled=true;return}$('globalQuota').disabled=false;$('groupQuota').disabled=false;$('saveQuota').disabled=false;$('globalQuota').value=r.globalDailyCny||'';$('groupQuota').value=r.groupDailyCny||'';$('quotaStatus').textContent='全站：'+(r.globalDailyCny===''?'無限制':r.globalDailyCny+' CNY／日')+'；目前群：'+(r.groupDailyCny===''?'無限制':r.groupDailyCny+' CNY／日')}
-async function loadGroupSettings(){ensureGroupSettingsExtras();var r=await api('/admin/state');if(!r.ok){toast(r.message);return}$('groupAi').checked=!!r.ai_on;$('groupMemory').checked=!!r.memory_on;$('activeSpeaking').checked=!!r.active_speaking;$('interjectRate').value=r.interject_rate;$('groupPersona').value=r.persona||'';$('groupKeywords').value=(r.keywords||[]).join('\n');$('welcomeEnabled').checked=!!r.welcome_enabled;$('joinAssistEnabled').checked=!!r.join_assist_enabled;$('joinAiApproveEnabled').checked=!!r.join_ai_approve_enabled;$('ruleMonitorEnabled').checked=!!r.rule_monitor_enabled;$('ruleMuteGuardEnabled').checked=!!r.rule_mute_guard_enabled;$('ruleSpamWindow').value=Number(r.rule_spam_window_seconds||60);$('ruleSpamThreshold').value=Number(r.rule_spam_threshold||4);$('ruleSpamKeep').value=Number(r.rule_spam_keep_count||3);$('welcomeText').value=r.welcome_text||'欢迎 {at} 加入本群 🎉 请先阅读群规，有问题可以询问管理员。';$('moderationCooldown').value=Number(r.moderation_target_cooldown_seconds||0);$('newcomerDays').value=Number(r.newcomer_observation_days||0);var canSetCommon=!!(session&&((session.permissions||{}).aiAdmin||(session.permissions||{}).developer));$('joinAssistEnabled').disabled=!canSetCommon;$('joinAiApproveEnabled').disabled=!canSetCommon;['ruleSpamWindow','ruleSpamThreshold','ruleSpamKeep'].forEach(function(id){$(id).disabled=!canSetCommon});var canMonitor=!!r.can_manage_rule_monitor;$('ruleMonitorEnabled').disabled=!canMonitor;$('ruleMonitorHint').textContent=canMonitor?'机器人与当前账号均具备所需权限，可以开关群规监控。':(r.rule_monitor_available===false?'机器人在当前群不是群主或管理员：群规监控完全停用，也不会建立记录。':'你在当前群不是 QQ 管理员或群主，暂不开放群规监控。');var owner=!!(session&&session.role==='owner'),ownerOrDeveloper=!!(session&&(owner||(session.permissions||{}).developer));['welcomeEnabled','welcomeText','moderationCooldown','newcomerDays','ruleMuteGuardEnabled'].forEach(function(id){$(id).disabled=!ownerOrDeveloper});setNativeAdminVisibility(!!r.bot_is_owner);ensureDeveloperPermissionPanel();if(session&&(session.permissions||{}).developer)await loadProgramPermissions();await loadGroupBindings()}
+async function loadGroupSettings(){ensureGroupSettingsExtras();var r=await api('/admin/state');if(!r.ok){toast(r.message);return}$('groupAi').checked=!!r.ai_on;$('groupMemory').checked=!!r.memory_on;$('activeSpeaking').checked=!!r.active_speaking;var as=r.active_speaking_status||{};if($('activeSpeakingStatus')){var last=as.lastResult||{};$('activeSpeakingStatus').innerHTML='<b>状态：</b>'+(as.enabled?'已开启':'已关闭')+'｜今日自动发话 '+esc(as.todayCount||0)+' 次'+(last.at?'<br>最近结果：'+(last.ok?'成功':'失败')+'｜'+esc(new Date(Number(last.at)).toLocaleString())+(last.error?'｜'+esc(last.error):''):'<br>尚无发送记录')};if($('activeSpeakingTest'))$('activeSpeakingTest').classList.toggle('hidden',!as.canTest);$('interjectRate').value=r.interject_rate;$('groupPersona').value=r.persona||'';$('groupKeywords').value=(r.keywords||[]).join('\n');$('welcomeEnabled').checked=!!r.welcome_enabled;$('joinAssistEnabled').checked=!!r.join_assist_enabled;$('joinAiApproveEnabled').checked=!!r.join_ai_approve_enabled;$('ruleMonitorEnabled').checked=!!r.rule_monitor_enabled;$('ruleMuteGuardEnabled').checked=!!r.rule_mute_guard_enabled;$('ruleSpamWindow').value=Number(r.rule_spam_window_seconds||60);$('ruleSpamThreshold').value=Number(r.rule_spam_threshold||4);$('ruleSpamKeep').value=Number(r.rule_spam_keep_count||3);$('welcomeText').value=r.welcome_text||'欢迎 {at} 加入本群 🎉 请先阅读群规，有问题可以询问管理员。';$('moderationCooldown').value=Number(r.moderation_target_cooldown_seconds||0);$('newcomerDays').value=Number(r.newcomer_observation_days||0);var canSetCommon=!!(session&&((session.permissions||{}).aiAdmin||(session.permissions||{}).developer));$('joinAssistEnabled').disabled=!canSetCommon;$('joinAiApproveEnabled').disabled=!canSetCommon;['ruleSpamWindow','ruleSpamThreshold','ruleSpamKeep'].forEach(function(id){$(id).disabled=!canSetCommon});var canMonitor=!!r.can_manage_rule_monitor;$('ruleMonitorEnabled').disabled=!canMonitor;$('ruleMonitorHint').textContent=canMonitor?'机器人与当前账号均具备所需权限，可以开关群规监控。':(r.rule_monitor_available===false?'机器人在当前群不是群主或管理员：群规监控完全停用，也不会建立记录。':'你在当前群不是 QQ 管理员或群主，暂不开放群规监控。');var owner=!!(session&&session.role==='owner'),ownerOrDeveloper=!!(session&&(owner||(session.permissions||{}).developer));['welcomeEnabled','welcomeText','moderationCooldown','newcomerDays','ruleMuteGuardEnabled'].forEach(function(id){$(id).disabled=!ownerOrDeveloper});setNativeAdminVisibility(!!r.bot_is_owner);ensureDeveloperPermissionPanel();if(session&&(session.permissions||{}).developer)await loadProgramPermissions();await loadGroupBindings()}
 async function loadMemory(){var r=await api('/memories');if(!r.ok){$('memoryList').innerHTML='<div class="empty">'+esc(r.message)+'</div>';return}var all=(r.private||[]).map(function(x){return Object.assign({},x,{_scope:'private'})}).concat((r.public||[]).map(function(x){return Object.assign({},x,{_scope:'public'})})).filter(function(x){return x.id&&String(x.text||'').trim()});$('memoryList').innerHTML='';all.forEach(function(m){var d=document.createElement('div');d.className='item';d.innerHTML='<div class="item-head"><div><div class="item-title">'+esc(m.text)+'</div><div class="item-meta">'+esc(m._scope)+'｜'+esc(m.at||m.updatedAt||'')+'</div></div></div>';var row=document.createElement('div');row.className='row';var edit=document.createElement('button');edit.className='btn';edit.textContent='编辑';edit.onclick=async function(){var text=await textModal('修改记忆内容',m.text,'编辑记忆');if(text===null)return;var x=await api('/memories','PUT',{scope:m._scope,id:m.id,text:text});toast(x.message|| (x.ok?'已更新':'更新失败'));loadMemory()};var del=document.createElement('button');del.className='btn danger';del.textContent='删除';del.onclick=async function(){if(!(await confirmModal('删除这条记忆？对应的长期记忆向量也会删除。','删除记忆')))return;var x=await api('/memories','DELETE',{scope:m._scope,id:m.id});toast(x.message||'已删除');loadMemory()};row.append(edit,del);d.appendChild(row);$('memoryList').appendChild(d)});if(!$('memoryList').children.length)$('memoryList').innerHTML='<div class="empty">暂无记忆</div>';ensureSearchTools()}
 function ruleSeverityText(v){return({minor:'轻微',moderate:'一般',severe:'严重',critical:'紧急'})[v]||v||'一般'}
 async function syncViolationGroups(){var r=await api('/appeals/eligible-groups'),sel=$('vhGroup');if(!sel||!r.ok)return;var selected=sel.value;sel.innerHTML='<option value="">全部可申诉群组</option>';(r.groups||[]).forEach(function(g){var o=document.createElement('option');o.value=g.groupId;o.textContent=(g.groupName||g.groupId)+'（'+g.groupId+'）'+(g.former?'｜前成员资格':'');sel.appendChild(o)});sel.value=selected||currentGroup||''}
@@ -14871,8 +15064,8 @@ async function submitAppeal(){var r=await api('/appeals/submit','POST',{groupId:
 function appealStatusText(v){return({pending_owner:'待处理',pending_review:'审核中',approved:'已通过',rejected:'已驳回'})[v]||v||'待处理'}
 async function loadAppealReviews(){if(!currentGroup){$('appealReviewList').innerHTML='<div class="empty">请先从右上角选择群组。</div>';return}var r=await api('/appeals/review?status='+encodeURIComponent($('appealReviewStatus').value||''));if(!r.ok){$('appealReviewList').innerHTML='<div class="empty">'+esc(r.message)+'</div>';return}$('appealReviewList').innerHTML=(r.appeals||[]).map(function(a){var buttons=a.canDecide&&['pending_owner','pending_review'].includes(a.status)?'<div class="row" style="margin-top:12px"><button class="btn primary appealDecision" data-id="'+esc(a.id)+'" data-decision="approve">通过申诉</button><button class="btn danger appealDecision" data-id="'+esc(a.id)+'" data-decision="reject">驳回申诉</button></div>':'';return '<div class="item"><div class="item-head"><div><div class="item-title">'+esc(a.anonymousLabel||a.id)+'｜'+esc(appealStatusText(a.status))+'</div><div class="item-meta">'+esc(a.identityText||'匿名申诉人')+'｜'+esc(a.type||'其他')+'｜'+esc(a.createdAt||'')+(a.applicantMembership==='former'?'｜前成员申诉':'')+'</div></div></div><div class="item-body">'+esc(a.content||'')+(a.evidenceMessageId?'<br><b>相关消息：</b>'+esc(a.evidenceMessageId):'')+(a.result?'<br><b>处理结果：</b>'+esc(a.result):'')+(a.againstAdmin?'<br><b>注意：</b>该案件涉及管理层，只能由群主或开发者决定。':'')+'</div>'+buttons+'</div>'}).join('')||'<div class="empty">当前群没有符合条件的申诉</div>';$('appealReviewList').querySelectorAll('.appealDecision').forEach(function(btn){btn.onclick=function(){decideAppeal(this.dataset.id,this.dataset.decision)}})}
 async function decideAppeal(id,decision){var note=await textModal(decision==='approve'?'请输入通过原因、需要撤销的处理或其他补救说明。':'请输入驳回原因，让申诉人知道为什么没有通过。','',decision==='approve'?'通过申诉':'驳回申诉',{placeholder:'建议填写清楚的处理说明'});if(note===null)return;if(!String(note).trim()&&!(await confirmModal('没有填写处理说明，仍要继续吗？','未填写说明')))return;var r=await api('/appeals/review','POST',{id:id,decision:decision,note:String(note||'').trim()});toast(r.message||'处理完成');if(r.ok)loadAppealReviews()}
-var logTypeLabels={moderation_proposed:'已建立待确认操作',moderation_cancelled:'已取消待确认操作',moderation_confirmed:'已确认并执行操作',moderation_failed:'待确认操作执行失败',group_operation:'群管理操作成功',group_operation_failed:'群管理操作失败',portal_ai_settings:'群组 AI 设置已保存',ai_settings:'AI 设置已修改',settings_center:'设置中心已修改',bilibili_connector:'B站监控设置已修改',bilibili_auto_monitor:'B站自动监控已修改',bilibili_auto_poll:'B站自动检查',permission:'程序权限已修改',platform_feature:'功能开关已修改',rule_monitor_setting:'群规监控设置已修改',rule_proxy_setting:'AI 群规代理设置已修改',rule_strictness_setting:'群规判断严格度已修改',rule_proxy_action:'AI 群规代理已处理',rule_proxy_portal_settings:'AI 群规代理设置已保存',rule_proxy_kick_auth:'AI 踢出授权已修改',join_reject_auth:'入群拒绝授权已修改',rate_limit_setting:'回复间隔已修改',rate_limit_portal:'回复间隔已保存',quota:'DeepSeek 额度已修改',context:'聊天上下文已处理',group_checkin:'群打卡任务',thinking_indicator_recall:'思考提示已撤回',thinking_indicator_residual:'思考提示残留',question_cancelled_by_recall:'问题因撤回取消',groupwork_requested:'已建立群务申请',groupwork_decided:'群务申请已处理',runtime_model_registry:'模型顺序已修改',platform_job:'系统任务',portal_login:'Control Center 登录',appeal_review:'申诉处理',violation_appeal_submitted:'违规记录申诉已提交',rule_violation_reversed:'群规误判已撤销',conversation_action:'对话记录操作',conversation_action_failed:'对话记录操作失败',single_model_health_check:'单一模型健康检查',schedule_skipped_once:'重复排程已跳过一次',schedule_completed_deleted:'单次排程完成后已删除',rule_mute_guard_setting:'违规禁言保护设置已修改',rule_mute_guard_reapplied:'违规禁言已按剩余时间恢复',rule_mute_guard_failed:'违规禁言恢复失败',rule_mute_guard_skipped:'违规禁言保护未执行',join_request_ai_approved:'AI 已同意入群申请'};
-var logActionLabels={mute:'禁言',unmute:'解除禁言',kick:'踢出群聊',reject:'拒绝入群',whole_mute:'开启全员禁言',whole_unmute:'解除全员禁言',set_admin:'设为 QQ 管理员',unset_admin:'取消 QQ 管理员',recall:'撤回消息',create:'新增',update:'更新',enabled:'开启',disabled:'关闭',authorized:'已授权',revoked:'已取消授权',ai_on:'开启 AI',ai_off:'关闭 AI',checked:'检查完成',baseline_created:'建立初始状态',failed:'失败',cancelled:'已取消',commands_enabled:'设置型指令开关',interject_rate:'主动插话率',welcome_enabled:'自动欢迎新人',author_recall:'发送者撤回自己的消息',moderator_recall:'管理撤回成员消息',skip_once:'跳过下一次排程',completed_and_deleted:'完成后自动删除'};
+var logTypeLabels={moderation_proposed:'已建立待确认操作',moderation_cancelled:'已取消待确认操作',moderation_confirmed:'已确认并执行操作',moderation_failed:'待确认操作执行失败',group_operation:'群管理操作成功',group_operation_failed:'群管理操作失败',portal_ai_settings:'群组 AI 设置已保存',ai_settings:'AI 设置已修改',settings_center:'设置中心已修改',bilibili_connector:'B站监控设置已修改',bilibili_auto_monitor:'B站自动监控已修改',bilibili_auto_poll:'B站自动检查',permission:'程序权限已修改',platform_feature:'功能开关已修改',rule_monitor_setting:'群规监控设置已修改',rule_proxy_setting:'AI 群规代理设置已修改',rule_strictness_setting:'群规判断严格度已修改',rule_proxy_action:'AI 群规代理已处理',rule_proxy_portal_settings:'AI 群规代理设置已保存',rule_proxy_kick_auth:'AI 踢出授权已修改',join_reject_auth:'入群拒绝授权已修改',rate_limit_setting:'回复间隔已修改',rate_limit_portal:'回复间隔已保存',quota:'DeepSeek 额度已修改',context:'聊天上下文已处理',group_checkin:'群打卡任务',thinking_indicator_recall:'思考提示已撤回',thinking_indicator_residual:'思考提示残留',question_cancelled_by_recall:'问题因撤回取消',groupwork_requested:'已建立群务申请',groupwork_decided:'群务申请已处理',runtime_model_registry:'模型顺序已修改',platform_job:'系统任务',portal_login:'Control Center 登录',appeal_review:'申诉处理',violation_appeal_submitted:'违规记录申诉已提交',rule_violation_reversed:'群规误判已撤销',conversation_action:'对话记录操作',conversation_action_failed:'对话记录操作失败',single_model_health_check:'单一模型健康检查',schedule_skipped_once:'重复排程已跳过一次',schedule_completed:'单次排程已完成并保留',active_speaking:'主动发话状态',rule_mute_guard_setting:'违规禁言保护设置已修改',rule_mute_guard_reapplied:'违规禁言已按剩余时间恢复',rule_mute_guard_failed:'违规禁言恢复失败',rule_mute_guard_skipped:'违规禁言保护未执行',join_request_ai_approved:'AI 已同意入群申请'};
+var logActionLabels={mute:'禁言',unmute:'解除禁言',kick:'踢出群聊',reject:'拒绝入群',whole_mute:'开启全员禁言',whole_unmute:'解除全员禁言',set_admin:'设为 QQ 管理员',unset_admin:'取消 QQ 管理员',recall:'撤回消息',create:'新增',update:'更新',enabled:'开启',disabled:'关闭',authorized:'已授权',revoked:'已取消授权',ai_on:'开启 AI',ai_off:'关闭 AI',checked:'检查完成',baseline_created:'建立初始状态',failed:'失败',cancelled:'已取消',commands_enabled:'设置型指令开关',interject_rate:'主动插话率',welcome_enabled:'自动欢迎新人',author_recall:'发送者撤回自己的消息',moderator_recall:'管理撤回成员消息',skip_once:'跳过下一次排程',completed_and_kept:'完成并保留',automatic_sent:'自动发话成功',automatic_failed:'自动发话失败',manual_test_sent:'主动发话测试成功',manual_test_failed:'主动发话测试失败'};
 function logCategoryOf(a){var t=String(a.type||'');if(/moderation|group_operation|groupwork|rule_proxy_action/.test(t))return 'moderation';if(/settings|portal_ai|ai_settings|rule_monitor|rule_proxy_setting|rule_strictness|rate_limit|quota|runtime_model|platform_feature|context/.test(t))return 'settings';if(/bilibili/.test(t))return 'bilibili';if(/conversation_action/.test(t))return 'moderation';if(/appeal/.test(t))return 'appeal';if(/permission|auth/.test(t))return 'permission';if(/failed|error/.test(t)||a.error)return 'error';return 'system'}
 function logTone(a){var t=String(a.type||''),r=String(a.result||'');if(/failed|error/.test(t)||a.error||/失败|failed/i.test(r))return 'error';if(/cancelled/.test(t))return 'warn';if(/proposed|requested/.test(t))return 'info';return 'ok'}
 function logStatusText(a){var type=String(a.type||''),action=String(a.action||'');if(type==='appeal_review')return action==='approve'?'已通过':'已驳回';if(type==='violation_appeal_submitted')return '待处理';var tone=logTone(a);if(tone==='error')return '失败';if(type.includes('cancelled'))return '已取消';if(type.includes('proposed'))return '待确认';return '成功'}
@@ -14898,7 +15091,7 @@ $('logout').onclick=async function(){await raw('/api/auth/logout','POST',{});loc
 $('quickHealth').onclick=function(){loadHealth('quick')};$('fullHealth').onclick=function(){loadHealth('full')};$('runModelCheck').onclick=runSingleModelCheck;$('modelCheckProvider').onchange=function(){var p=this.value;$('modelCheckKeyPool').disabled=p!=='gemini'};$('reloadTasks').onclick=loadTasks;$('clearQueue').onclick=async function(){if(!currentGroup){toast('请先选择群组');return}if(!(await confirmModal('清空当前群所有等待中的问题？正在生成的问题不会被强制中断。','清空等待队列')))return;var r=await api('/tasks/clear','POST',{groupId:currentGroup});toast(r.message||'完成');loadTasks()};$('reloadProposals').onclick=loadProposals;
 $('createProposal').onclick=async function(){var r=await api('/ops/action','POST',{action:$('opAction').value,qq:$('opQq').value,duration:$('opDuration').value,reason:$('opReason').value});$('opMessage').textContent=r.message;toast(r.message);if(r.ok)loadProposals()};
 $('runSimulator').onclick=async function(){var r=await api('/simulator','POST',{text:$('simText').value,senderRole:$('simRole').value,mentionsBot:$('simMention').checked,hasImage:$('simImage').checked,currentlyBusy:$('simBusy').checked});if(!r.ok){toast(r.message);return}$('simDecision').textContent=r.decisions.final;$('simSteps').innerHTML=(r.steps||[]).map(function(x){return'<div class="step"><i></i><span>'+esc(x)+'</span></div>'}).join('')};$('reloadModels').onclick=loadModels;$('saveQuota').onclick=async function(){var r=await api('/root/quotas','POST',{globalDailyCny:$('globalQuota').value,groupDailyCny:$('groupQuota').value});toast(r.message);if(r.ok)loadQuota()};
-$('saveGroup').onclick=async function(){ensureGroupSettingsExtras();var payload={ai_on:$('groupAi').checked,memory_on:$('groupMemory').checked,active_speaking:$('activeSpeaking').checked,interject_rate:$('interjectRate').value,persona:$('groupPersona').value,keywords:$('groupKeywords').value};var perms=(session&&session.permissions)||{};if(perms.aiAdmin||perms.developer){payload.join_assist_enabled=$('joinAssistEnabled').checked;payload.join_ai_approve_enabled=$('joinAiApproveEnabled').checked;payload.rule_spam_window_seconds=$('ruleSpamWindow').value;payload.rule_spam_threshold=$('ruleSpamThreshold').value;payload.rule_spam_keep_count=$('ruleSpamKeep').value;}if(!$('ruleMonitorEnabled').disabled)payload.rule_monitor_enabled=$('ruleMonitorEnabled').checked;if(session&&(session.role==='owner'||perms.developer)){payload.welcome_enabled=$('welcomeEnabled').checked;payload.welcome_text=$('welcomeText').value;payload.moderation_target_cooldown_seconds=$('moderationCooldown').value;payload.newcomer_observation_days=$('newcomerDays').value;payload.rule_mute_guard_enabled=$('ruleMuteGuardEnabled').checked}var r=await api('/admin/state','POST',payload);toast(r.message)};$('reloadMemory').onclick=loadMemory;$('addMemory').onclick=async function(){var r=await api('/memories','POST',{scope:$('memoryScope').value,text:$('memoryText').value});toast(r.message||'已新增');if(r.ok){$('memoryText').value='';loadMemory()}};$('reloadLogs').onclick=loadLogs;
+if($('activeSpeakingTest'))$('activeSpeakingTest').onclick=async function(){if(!currentGroup){toast('请先选择群组');return}var r=await api('/admin/active-speaking-test','POST',{});toast(r.message||'测试完成');loadGroupSettings()};$('saveGroup').onclick=async function(){ensureGroupSettingsExtras();var payload={ai_on:$('groupAi').checked,memory_on:$('groupMemory').checked,active_speaking:$('activeSpeaking').checked,interject_rate:$('interjectRate').value,persona:$('groupPersona').value,keywords:$('groupKeywords').value};var perms=(session&&session.permissions)||{};if(perms.aiAdmin||perms.developer){payload.join_assist_enabled=$('joinAssistEnabled').checked;payload.join_ai_approve_enabled=$('joinAiApproveEnabled').checked;payload.rule_spam_window_seconds=$('ruleSpamWindow').value;payload.rule_spam_threshold=$('ruleSpamThreshold').value;payload.rule_spam_keep_count=$('ruleSpamKeep').value;}if(!$('ruleMonitorEnabled').disabled)payload.rule_monitor_enabled=$('ruleMonitorEnabled').checked;if(session&&(session.role==='owner'||perms.developer)){payload.welcome_enabled=$('welcomeEnabled').checked;payload.welcome_text=$('welcomeText').value;payload.moderation_target_cooldown_seconds=$('moderationCooldown').value;payload.newcomer_observation_days=$('newcomerDays').value;payload.rule_mute_guard_enabled=$('ruleMuteGuardEnabled').checked}var r=await api('/admin/state','POST',payload);toast(r.message)};$('reloadMemory').onclick=loadMemory;$('addMemory').onclick=async function(){var r=await api('/memories','POST',{scope:$('memoryScope').value,text:$('memoryText').value});toast(r.message||'已新增');if(r.ok){$('memoryText').value='';loadMemory()}};$('reloadLogs').onclick=loadLogs;
 boot();
 })();
 </script>
