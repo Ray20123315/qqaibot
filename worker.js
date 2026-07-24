@@ -1,4 +1,5 @@
-const VERSION = "1.4.4";
+const VERSION = "1.4.5";
+const QQAI_V1_R45_DIRECT_LOOPBACK_RELIABILITY_MARKER = "QQAI_V1_R45_DIRECT_LOOPBACK_RELIABILITY_MARKER";
 const QQAI_V1_R44_PERSISTENT_LOGIN_PERMISSION_LIST_MOBILE_MARKER = "QQAI_V1_R44_PERSISTENT_LOGIN_PERMISSION_LIST_MOBILE_MARKER";
 const QQAI_V1_R43_MOBILE_COLLAB_INTENT_MARKER = "QQAI_V1_R43_MOBILE_COLLAB_INTENT_MARKER";
 const QQAI_V1_R42_BOT_LOOP_TRANSIENT_RETRY_MARKER = "QQAI_V1_R42_BOT_LOOP_TRANSIENT_RETRY_MARKER";
@@ -75,7 +76,7 @@ const DEFAULTS = Object.freeze({
 
 const EXPLICIT_REPLY_FAILURE_MESSAGES = Object.freeze({
   worker_error: "内部 Worker 处理失败，任务已释放。请到 Portal 的‘健康检查’与‘AI 回复记录’查看最新错误后重试。",
-  worker_http_error: "这次服务连接异常，系统已自动重试一次但仍未恢复，任务已结束且不会继续占用。请稍后重新 @我；技术状态只记录在 Portal 的‘系统维护’。",
+  worker_http_error: "这次内部处理异常，任务已自动结束且不会继续占用。请稍后重新 @我；诊断编号与技术状态只记录在 Portal 的‘系统维护’。",
   worker_empty_reply: "这次服务没有取得有效回应，任务已自动结束，不会继续占用。请重新 @我；技术详情只记录在 Portal 的‘系统维护’。",
   worker_no_reply: "这次处理没有产生回复，任务已结束。开发者可在 Portal 的‘系统维护’查看触发原因。",
   send_failed: "回复已经生成，但 WebSocket 与 HTTP 备用发送都失败。请检查 NapCat 连接、Access Token 与发送权限。",
@@ -618,7 +619,7 @@ function withTimeout(promise, timeoutMs, label = "TASK_TIMEOUT") {
 }
 
 
-export default {
+const QQAIWorker = {
   async fetch(request, env, ctx) {
     const url = new URL(request.url); // 👈 保留此行，避免後續代碼崩潰！
 
@@ -3449,7 +3450,9 @@ ${deepseekContextSummary}`;
     ctx.waitUntil(opsProcessAutomations(env, Number(controller?.scheduledTime || Date.now())));
     ctx.waitUntil(pollAutomaticBilibiliConnectors(env, Number(controller?.scheduledTime || Date.now())));
   }
-}; // 结束 export default
+}; // 结束 QQAIWorker
+
+export default QQAIWorker;
 
 // -----------------------------------------------------------------------------
 // v0.2 core helpers: security, permissions, OneBot RPC, hybrid models, schedules
@@ -15028,16 +15031,53 @@ export class OneBotHub {
       const sourceUrl = new URL(requestUrl);
       const internalTimeoutMs = toolTask ? 60000 : 32000;
       const internalStartedAt = Date.now();
-      const internalFetch = async (eventBody, timeoutMs) => fetch(`${sourceUrl.protocol}//${sourceUrl.host}/__onebot_event`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "X-QQAI-Transport": "websocket-do",
-          "Authorization": `Bearer ${String(this.env.ONEBOT_ACCESS_TOKEN || "")}`
-        },
-        body: JSON.stringify(eventBody),
-        signal: mergeAbortSignal(timeoutMs, options.signal)
-      });
+      // v1.4.5：Durable Object 与同一份 Worker 逻辑在同一模块内直接调用。
+      // 不再通过公开域名重新 fetch 自己，避免同区路由、边缘部署切换与公网子请求产生的偶发 502/503/504。
+      const internalFetch = async (eventBody, timeoutMs) => {
+        const signal = mergeAbortSignal(timeoutMs, options.signal);
+        const internalRequest = new Request(`${sourceUrl.protocol}//${sourceUrl.host}/__onebot_event`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "X-QQAI-Transport": "websocket-do",
+            "X-QQAI-Internal-Mode": "direct-loopback",
+            "Authorization": `Bearer ${String(this.env.ONEBOT_ACCESS_TOKEN || "")}`
+          },
+          body: JSON.stringify(eventBody),
+          signal
+        });
+        const directContext = {
+          waitUntil: promise => {
+            try {
+              if (this.state && typeof this.state.waitUntil === "function") this.state.waitUntil(Promise.resolve(promise));
+              else Promise.resolve(promise).catch(error => console.error("direct loopback waitUntil failed", error));
+            } catch (error) {
+              console.error("direct loopback waitUntil registration failed", error);
+            }
+          }
+        };
+        try {
+          return await QQAIWorker.fetch(internalRequest, this.env, directContext);
+        } catch (directError) {
+          // 公网回环只保留为显式紧急开关，默认绝不启用。
+          if (String(this.env.QQAI_PUBLIC_INTERNAL_FALLBACK || "").toLowerCase() !== "true") throw directError;
+          await this.recordIngress(body, "worker_public_fallback", {
+            explicit: eventHasBotMention(body),
+            force: true,
+            directError: String(directError?.message || directError).slice(0, 300)
+          }).catch(() => {});
+          return fetch(`${sourceUrl.protocol}//${sourceUrl.host}/__onebot_event`, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              "X-QQAI-Transport": "websocket-do",
+              "Authorization": `Bearer ${String(this.env.ONEBOT_ACCESS_TOKEN || "")}`
+            },
+            body: JSON.stringify(eventBody),
+            signal
+          });
+        }
+      };
       let internalResponse;
       let internalRaw = "";
       let retryAttempted = false;
@@ -15051,7 +15091,7 @@ export class OneBotHub {
         if (transientNetworkFailure) {
           retryAttempted = true;
           firstFailure = { type: "network", error: String(error?.message || error).slice(0, 300), elapsedMs };
-          await this.recordIngress(body, "worker_transient_retry", { explicit: true, retryAttempted: true, firstFailure }).catch(() => {});
+          await this.recordIngress(body, "worker_transient_retry", { explicit: true, retryAttempted: true, firstFailure, internalTransportMode: "direct_loopback" }).catch(() => {});
           await new Promise(resolve => setTimeout(resolve, 250));
           const remainingMs = Math.max(5000, internalTimeoutMs - (Date.now() - internalStartedAt));
           try {
@@ -15091,7 +15131,7 @@ export class OneBotHub {
           responsePreview: String(internalRaw || "").replace(/\s+/g, " ").slice(0, 500),
           elapsedMs: Date.now() - internalStartedAt
         };
-        await this.recordIngress(body, "worker_transient_retry", { explicit: true, retryAttempted: true, firstFailure }).catch(() => {});
+        await this.recordIngress(body, "worker_transient_retry", { explicit: true, retryAttempted: true, firstFailure, internalTransportMode: "direct_loopback" }).catch(() => {});
         await new Promise(resolve => setTimeout(resolve, 250));
         const remainingMs = Math.max(5000, internalTimeoutMs - (Date.now() - internalStartedAt));
         try {
@@ -15106,7 +15146,7 @@ export class OneBotHub {
       }
 
       if (internalResponse.status === 204) {
-        await this.recordIngress(body, "worker_skipped", { explicit: false, force: true, httpStatus: 204, retryAttempted }).catch(() => {});
+        await this.recordIngress(body, "worker_skipped", { explicit: false, force: true, httpStatus: 204, retryAttempted, internalTransportMode: "direct_loopback" }).catch(() => {});
         return;
       }
       if (!internalRaw) internalRaw = await internalResponse.text().catch(() => "");
@@ -15118,14 +15158,14 @@ export class OneBotHub {
         await writeSystemError(this.env, new Error(`INTERNAL_WORKER_HTTP_${internalResponse.status}`), {
           failureId, groupId: String(body.group_id || ""), userId: String(body.user_id || ""), messageId: String(body.message_id || ""), responsePreview, retryAttempted, firstFailure
         }).catch(() => {});
-        await this.recordIngress(body, "worker_http_error", { explicit: eventHasBotMention(body), httpStatus: internalResponse.status, responsePreview, retryAttempted, firstFailure, failureId }).catch(() => {});
+        await this.recordIngress(body, "worker_http_error", { explicit: eventHasBotMention(body), httpStatus: internalResponse.status, responsePreview, retryAttempted, firstFailure, failureId, internalTransportMode: "direct_loopback" }).catch(() => {});
         return;
       }
       if (!payload?.reply) {
         await this.recordIngress(body, "worker_empty_reply", { explicit: eventHasBotMention(body), httpStatus: internalResponse.status, responsePreview: String(internalRaw || "").slice(0, 500) }).catch(() => {});
         return;
       }
-      await this.recordIngress(body, "reply_ready", { explicit: eventHasBotMention(body), httpStatus: internalResponse.status }).catch(() => {});
+      await this.recordIngress(body, "reply_ready", { explicit: eventHasBotMention(body), httpStatus: internalResponse.status, internalTransportMode: "direct_loopback" }).catch(() => {});
       const plan = payload.reply_plan || {};
       const isPrivate = body.message_type === "private";
       const simplifiedReply = toSimplifiedChinese(payload.reply);
