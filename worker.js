@@ -1,4 +1,5 @@
-const VERSION = "1.3.8";
+const VERSION = "1.3.9";
+const QQAI_V1_R39_PRIVATE_GATE_SELF_SLASH_BANG_MARKER = "QQAI_V1_R39_PRIVATE_GATE_SELF_SLASH_BANG_MARKER";
 const QQAI_V1_R38_AFFINITY_MANUAL_CHECK_MARKER = "QQAI_V1_R38_AFFINITY_MANUAL_CHECK_MARKER";
 const QQAI_V1_R37_PORTAL_SIMPLIFIED_MARKER = "QQAI_V1_R37_PORTAL_SIMPLIFIED_MARKER";
 const QQAI_V1_R36_MARKER = "QQAI_V1_R36_MARKER";
@@ -970,6 +971,8 @@ export default {
       // ========================================================
       let userMessage = "";
       let aiReplyOptOut = false;
+      let selfSlashBangChat = false;
+      let selfSlashBangRawText = "";
       let imageUrl = null;
       let imageFile = null;
       let voiceUrl = null;
@@ -1033,7 +1036,14 @@ export default {
       forwardIds = [...new Set(forwardIds.filter(Boolean))].slice(0, AI_MEDIA_LIMITS.forwardBundles);
       fileAttachments = fileAttachments.filter(item => item && (item.name || item.file || item.url)).slice(0, 20);
       mentionedQqs = [...new Set([...mentionedQqs, ...eventMentionedQqs(body)].filter(Boolean).map(String))];
-      if (isGroup && !isSelfAccount) {
+      if (isSelfAccount) {
+        const selfSlashBang = stripGroupAiOptOutPrefix(userMessage, botId);
+        if (selfSlashBang.optedOut) {
+          selfSlashBangChat = true;
+          selfSlashBangRawText = userMessage;
+          userMessage = selfSlashBang.text;
+        }
+      } else if (isGroup) {
         const optOut = stripGroupAiOptOutPrefix(userMessage, botId);
         aiReplyOptOut = optOut.optedOut;
         userMessage = optOut.text;
@@ -1060,22 +1070,23 @@ export default {
       }
 
       // 同 QQ 模式：优先识别人工控制前缀。NapCat 标准上报为 message_sent，
-      // 但部分版本／连接配置会把自身消息上报成 message；只有 //、??、!、！前缀才兼容放行，
-      // 其余自身 message 仍静默，避免机器人回复自己形成循环。
+      // 但部分版本／连接配置会把自身消息上报成 message；//、??、/!、!、！前缀可兼容放行。
+      // 群友的 /! 仍代表完全跳过 AI；只有机器人自身账号人工发出的 /! 才作为聊天触发别名。
       if (isSelfAccount) {
-        const explicitSelfChat = cleanMessage.startsWith('//') || cleanMessage.startsWith('??');
+        const explicitSelfSlashBang = selfSlashBangChat;
+        const explicitSelfChat = cleanMessage.startsWith('//') || cleanMessage.startsWith('??') || explicitSelfSlashBang;
         const explicitSelfCommand = /^[!！]/.test(cleanMessage);
         if (!isSentEvent && !explicitSelfChat && !explicitSelfCommand) return new Response(null, { status: 204 });
 
-        // // 与 ?? 是人工同号专用前缀，AI 输出层已禁止生成，因此直接视为人工输入；
-        // 其他自身消息仍用 Message ID／发送前指纹排除 Worker 自己发出的内容。
-        if (!explicitSelfChat) {
+        // Worker 自己通过 API 发出的消息必须继续按 Message ID／发送前指纹排除，避免形成回音循环。
+        // // 与 ?? 保持既有人工同号行为；/! 虽是人工聊天别名，仍额外检查发送指纹。
+        if (!explicitSelfChat || explicitSelfSlashBang) {
           const apiMessage = await isKnownOutboundMessage(env, {
             messageId: replyMessageId,
             isGroup,
             groupId: currentGroupId,
             peerId: String(body.target_id || body.peer_id || rawUserId || userId),
-            text: cleanMessage,
+            text: explicitSelfSlashBang ? selfSlashBangRawText : cleanMessage,
             mediaTypes: [(imageUrl || imageFile) ? 'image' : '', (voiceUrl || voiceFile) ? 'record' : '', (videoUrl || videoFile) ? 'video' : ''].filter(Boolean)
           });
           if (apiMessage) return new Response(null, { status: 204 });
@@ -1086,6 +1097,8 @@ export default {
           sameQqSelfAsk = true;
         } else if (cleanMessage.startsWith('??')) {
           cleanMessage = cleanMessage.slice(2).trim();
+          sameQqSelfAsk = true;
+        } else if (explicitSelfSlashBang) {
           sameQqSelfAsk = true;
         } else if (!explicitSelfCommand) {
           sameQqHumanOnly = true;
@@ -1107,6 +1120,8 @@ export default {
       let isScheduleCommand = /^(排程|定时|定時|schedule)(?:\s|$)/i.test(commandBody);
       let isActivityInteraction = /(?:活动|活動|报名|報名|候补|候補|参加|參加)/i.test(cleanMessage);
       let naturalLanguageIntent = null;
+      let privateAccessMode = "";
+      let privateAccessChecked = false;
 
       // 先解析明确触发关系。非白名单群的普通聊天必须完全静默，不能见人就提示。
       let quotedMessage = null;
@@ -1128,6 +1143,53 @@ export default {
       const botMentioned = Boolean(botId && mentionedQqs.includes(botId));
       const repliedToBot = Boolean(quotedMessage && quotedMessage.source === 'ai');
       const repliedToOwnerHuman = Boolean(quotedMessage && quotedMessage.source === 'owner-human');
+
+      // 私聊权限必须在任何可选模型、图片诊断与自然语言 AI 分类之前完成。
+      // 私聊 AI 未开放时，普通文字、图片、语音与视频全部静默；不会泄露开发者配置状态。
+      // 为保留「所有指令均有自然语言」，此处只运行本地确定性解析器，不调用任何模型。
+      if (isPrivate && !isDeveloper) {
+        privateAccessMode = await getPrivateAccessMode(env, userId);
+        const privateChatEnabled = await getFeatureFlag(env, 'private_chat_enabled', false);
+        const privateScheduleEnabled = await getFeatureFlag(env, 'private_schedule_enabled', false);
+        const appealEnabled = await getFeatureFlag(env, 'private_appeal_enabled', DEFAULTS.appealEnabled);
+
+        if (!isCommandMessage && !aiReplyOptOut) {
+          const privateNaturalSource = stripBotMentionFromConversation(cleanMessage, botId) || cleanMessage;
+          const localPrivateNatural = normalizeNaturalLanguageCommandText(privateNaturalSource, Date.now());
+          if (localPrivateNatural?.commandText) {
+            naturalLanguageIntent = { ...localPrivateNatural, parser: localPrivateNatural.parser || 'local_private_gate' };
+            cleanMessage = localPrivateNatural.commandText;
+            msgLower = cleanMessage.toLowerCase();
+            isCommandMessage = true;
+            commandBody = cleanMessage.replace(/^[!！]+/, '').trim();
+            isAppealCommand = /^(申诉|申訴|appeal)(?:\s|$)/i.test(commandBody);
+            isScheduleCommand = /^(排程|定时|定時|schedule)(?:\s|$)/i.test(commandBody);
+            isActivityInteraction = /(?:活动|活動|报名|報名|候补|候補|参加|參加)/i.test(cleanMessage);
+            ctx.waitUntil(writeSystemAudit(env, {
+              type: 'natural_language_command', groupId: '', actorId: userId,
+              action: String(localPrivateNatural.intent || commandBody).slice(0, 120),
+              parser: naturalLanguageIntent.parser, confidence: Number(localPrivateNatural.confidence || 0),
+              originalText: privateNaturalSource.slice(0, 1000)
+            }).catch(() => {}));
+          }
+        }
+
+        if (isAppealCommand && appealEnabled) {
+          // 放行匿名申诉。
+        } else if (isScheduleCommand && privateScheduleEnabled && privateAccessMode !== 'none') {
+          // 私聊排程与聊天开关分离。
+        } else if (isActivityInteraction && privateAccessMode !== 'none') {
+          // 活动报名、候补、取消与有权限的活动管理可在私聊独立使用。
+        } else if (!privateChatEnabled || privateAccessMode === 'none') {
+          return new Response(null, { status: 204 });
+        } else if (privateAccessMode === 'commands' && !isCommandMessage) {
+          return new Response(null, { status: 204 });
+        }
+        privateAccessChecked = true;
+      } else if (!isGroup && !isPrivate) {
+        return new Response(null, { status: 204 });
+      }
+
       const naturalLanguageTrigger = !aiReplyOptOut && !isCommandMessage && (isPrivate || botMentioned || repliedToBot || sameQqSelfAsk);
       if (naturalLanguageTrigger) {
         const naturalSourceText = stripBotMentionFromConversation(cleanMessage, botId) || cleanMessage;
@@ -1231,26 +1293,8 @@ export default {
         return jsonReply(`${atSender}图片检查目前未启用。开发者配置 GEMINI_VISION_API_KEYS（可填写多个，以逗号分隔）后会自动启用；未配置时系统会自动保持关闭。`);
       }
 
-      // 私聊聊天、私聊排程、匿名申訴各自使用獨立開關。
-      if (isPrivate && !isDeveloper) {
-        const privateMode = await getPrivateAccessMode(env, userId);
-        const privateChatEnabled = await getFeatureFlag(env, 'private_chat_enabled', false);
-        const privateScheduleEnabled = await getFeatureFlag(env, 'private_schedule_enabled', false);
-        const appealEnabled = await getFeatureFlag(env, 'private_appeal_enabled', DEFAULTS.appealEnabled);
-        if (isAppealCommand && appealEnabled) {
-          // 放行匿名申訴。
-        } else if (isScheduleCommand && privateScheduleEnabled && privateMode !== 'none') {
-          // 私聊排程與聊天開關分離。
-        } else if (isActivityInteraction && privateMode !== 'none') {
-          // 活动报名、候补、取消与有权限的活动管理可在私聊独立使用。
-        } else if (!privateChatEnabled || privateMode === 'none') {
-          return new Response(null, { status: 204 });
-        } else if (privateMode === 'commands' && !isCommandMessage) {
-          return new Response(null, { status: 204 });
-        }
-      } else if (!isGroup && !isPrivate) {
-        return new Response(null, { status: 204 });
-      }
+      // 私聊权限已在任何图片诊断与自然语言模型调用之前完成；此处仅保留防御性断言。
+      if (isPrivate && !isDeveloper && !privateAccessChecked) return new Response(null, { status: 204 });
 
       // 引用訊息已在白名单入口前解析，确保普通群消息不会误触发提示。
       const targetMentionQqs = mentionedQqs.filter(q => q !== botId && q !== 'all');
@@ -2090,7 +2134,7 @@ export default {
                       `🎙️ Live：https://qqai.ray2025.com/live\n` +
                       `📝 匿名申诉：请登录 Control Center 后使用“匿名申诉”功能\n\n` +
                       `自然语言优先：@我后可直接说“查看活动”“报名 周末游戏夜”“明天晚上八点提醒我更新”“查一下我的好感度”“检查我回复的消息，原因是持续骚扰”等。固定 ! 指令仅作为兼容与紧急后备。\n` +
-                      `不想触发任何 AI：发送“@我 /!普通聊天内容”，该消息只进入群聊上下文，不调用聊天、群规或插话模型。\n\n` +
+                      `群友不想触发任何 AI：发送“@我 /!普通聊天内容”，该消息只进入群聊上下文，不调用聊天、群规或插话模型。机器人自身账号人工发送“/!普通聊天内容”时则作为同号聊天触发别名。\n\n` +
                       `🔹 [日常与多模态]\n` +
                       `!live (取得即时语音网页)\n` +
                       `!status / !配额 (系统状态)\n` +
