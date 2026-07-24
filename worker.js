@@ -1,4 +1,6 @@
-const VERSION = "1.3.2";
+const VERSION = "1.3.4";
+const QQAI_V1_R34_MARKER = "QQAI_V1_R34_MARKER";
+const QQAI_V1_R33_MARKER = "QQAI_V1_R33_MARKER";
 const QQAI_V1_R32_MARKER = "QQAI_V1_R32_MARKER";
 const QQAI_V1_R31_MARKER = "QQAI_V1_R31_MARKER";
 const QQAI_V1_COMPLETE_MARKER = "QQAI_V1_COMPLETE_MARKER";
@@ -1067,10 +1069,12 @@ export default {
 
       let msgLower = cleanMessage.trim().toLowerCase();
       let atSender = isGroup ? `[CQ:at,qq=${userId}] ` : "";
-      const isCommandMessage = !aiReplyOptOut && /^[!！]/.test(cleanMessage);
-      const commandBody = cleanMessage.replace(/^[!！]+/, '').trim();
-      const isAppealCommand = /^(申诉|申訴|appeal)(?:\s|$)/i.test(commandBody);
-      const isScheduleCommand = /^(排程|定时|定時|schedule)(?:\s|$)/i.test(commandBody);
+      let isCommandMessage = !aiReplyOptOut && /^[!！]/.test(cleanMessage);
+      let commandBody = cleanMessage.replace(/^[!！]+/, '').trim();
+      let isAppealCommand = /^(申诉|申訴|appeal)(?:\s|$)/i.test(commandBody);
+      let isScheduleCommand = /^(排程|定时|定時|schedule)(?:\s|$)/i.test(commandBody);
+      let isActivityInteraction = /(?:活动|活動|报名|報名|候补|候補|参加|參加)/i.test(cleanMessage);
+      let naturalLanguageIntent = null;
 
       // 先解析明确触发关系。非白名单群的普通聊天必须完全静默，不能见人就提示。
       let quotedMessage = null;
@@ -1092,7 +1096,23 @@ export default {
       const botMentioned = Boolean(botId && mentionedQqs.includes(botId));
       const repliedToBot = Boolean(quotedMessage && quotedMessage.source === 'ai');
       const repliedToOwnerHuman = Boolean(quotedMessage && quotedMessage.source === 'owner-human');
-      const explicitlyTriggered = !aiReplyOptOut && (botMentioned || repliedToBot || sameQqSelfAsk || isCommandMessage);
+      const naturalLanguageTrigger = !aiReplyOptOut && !isCommandMessage && (isPrivate || botMentioned || repliedToBot || sameQqSelfAsk);
+      if (naturalLanguageTrigger) {
+        const naturalSourceText = stripBotMentionFromConversation(cleanMessage, botId) || cleanMessage;
+        const normalizedNatural = normalizeNaturalLanguageCommandText(naturalSourceText, Date.now()) || await classifyNaturalLanguageCommandIntent(env, naturalSourceText);
+        if (normalizedNatural?.commandText) {
+          naturalLanguageIntent = normalizedNatural;
+          cleanMessage = normalizedNatural.commandText;
+          msgLower = cleanMessage.toLowerCase();
+          isCommandMessage = true;
+          commandBody = cleanMessage.replace(/^[!！]+/, '').trim();
+          isAppealCommand = /^(申诉|申訴|appeal)(?:\s|$)/i.test(commandBody);
+          isScheduleCommand = /^(排程|定时|定時|schedule)(?:\s|$)/i.test(commandBody);
+          isActivityInteraction = /(?:活动|活動|报名|報名|候补|候補|参加|參加)/i.test(cleanMessage);
+          ctx.waitUntil(writeSystemAudit(env, { type: "natural_language_command", groupId: currentGroupId, actorId: userId, action: String(normalizedNatural.intent || commandBody).slice(0, 120), parser: normalizedNatural.parser || "local", confidence: Number(normalizedNatural.confidence || 0), originalText: naturalSourceText.slice(0, 1000) }).catch(() => {}));
+        }
+      }
+      const explicitlyTriggered = !aiReplyOptOut && (botMentioned || repliedToBot || sameQqSelfAsk || isPrivate || isCommandMessage);
 
       // 只有真实文字或媒体才算有效提问；单独 @、空白、换行、全角空格与零宽字符全部静默丢弃。
       const hasAnyMediaAttachment = Boolean(imageUrl || imageFile || voiceUrl || voiceFile || videoUrl || videoFile || fileAttachments.length || forwardIds.length);
@@ -1189,6 +1209,8 @@ export default {
           // 放行匿名申訴。
         } else if (isScheduleCommand && privateScheduleEnabled && privateMode !== 'none') {
           // 私聊排程與聊天開關分離。
+        } else if (isActivityInteraction && privateMode !== 'none') {
+          // 活动报名、候补、取消与有权限的活动管理可在私聊独立使用。
         } else if (!privateChatEnabled || privateMode === 'none') {
           return new Response(null, { status: 204 });
         } else if (privateMode === 'commands' && !isCommandMessage) {
@@ -1275,14 +1297,18 @@ export default {
         return { targetQq, targetQqs: targetMentionQqs.slice(), restText };
       };
 
-      const opsActivityCommand = await opsHandleActivityCommand(env, {
-        groupId: currentGroupId,
-        userId,
-        userName: senderCard,
-        role: isDeveloper ? "developer" : senderRole,
-        text: cleanMessage
-      });
-      if (opsActivityCommand.handled) return jsonReply(`${atSender}${opsActivityCommand.text}`);
+      const shouldHandleActivityInput = isPrivate || isCommandMessage || botMentioned || repliedToBot || sameQqSelfAsk || /^(?:确认建立活动|確認建立活動|确认创建活动|確認創建活動|取消建立活动|取消建立活動|取消创建活动|取消創建活動)$/i.test(String(cleanMessage || "").trim());
+      if (shouldHandleActivityInput) {
+        const opsActivityCommand = await opsHandleActivityCommand(env, {
+          groupId: currentGroupId,
+          userId,
+          userName: senderCard,
+          role: isDeveloper ? "developer" : senderRole,
+          text: stripBotMentionFromConversation(cleanMessage, botId) || cleanMessage,
+          isPrivate
+        });
+        if (opsActivityCommand.handled) return jsonReply(`${atSender}${opsActivityCommand.text}`);
+      }
 
       const noViolationCommand = cleanMessage.match(/^[!！](?:无违规|無違規)(?:\s|$)/i);
       if (noViolationCommand) {
@@ -1312,7 +1338,7 @@ export default {
       }
 
       const webSettingCommandsDisabledEarly = await dbGet(env, `web_command_off:${currentGroupId}`) === "true";
-      if (webSettingCommandsDisabledEarly && commandChangesWebSettings(userMessage)) {
+      if (webSettingCommandsDisabledEarly && commandChangesWebSettings(cleanMessage)) {
         return jsonReply(`${atSender}本群已關閉設定型 ! 指令。關閉後只能從 Portal 網頁重新開啟或修改設定。`);
       }
 
@@ -1535,7 +1561,7 @@ export default {
       }
 
       const webSettingCommandsDisabled = await dbGet(env, `web_command_off:${currentGroupId}`) === "true";
-      if (webSettingCommandsDisabled && commandChangesWebSettings(userMessage)) {
+      if (webSettingCommandsDisabled && commandChangesWebSettings(cleanMessage)) {
         return jsonReply(`${atSender}本群已关闭设置型 ! 指令。关闭后只能从 Portal 网页重新开启或修改设置。`);
       }
       if (/^[!！]指令(开|開|关|關)\b/.test(msgLower)) {
@@ -1902,6 +1928,7 @@ export default {
                       `🌐 Control Center：https://qqai.ray2025.com/\n` +
                       `🎙️ Live：https://qqai.ray2025.com/live\n` +
                       `📝 匿名申诉：请登录 Control Center 后使用“匿名申诉”功能\n\n` +
+                      `自然语言优先：@我后可直接说“查看活动”“报名 周末游戏夜”“明天晚上八点提醒我更新”“关闭本群 AI”等。固定 ! 指令仅作为兼容与紧急后备。\n\n` +
                       `🔹 [日常与多模态]\n` +
                       `!live (取得即时语音网页)\n` +
                       `!status / !配额 (系统状态)\n` +
@@ -2867,6 +2894,8 @@ ${deepseekContextSummary}`;
 当前只取得文件名称、大小与资源标识，未解析 PDF、Office、压缩包或其他二进制文件正文。不得声称已经读取文件内容。`;
       }
 
+      finalStylePrompt += "\n\n【检索执行纪律】禁止说‘我去查一下’、‘等我检索’、‘稍后回来告诉你’或任何未来会继续处理的承诺。需要查证时，系统会在本轮实际执行搜索；没有取得结果就直接说明无法查证，不能让用户等待不存在的后续回复。";
+
       // ==========================================
       // 📦 上下文与多模态数据最终封装
       // ==========================================
@@ -2972,6 +3001,34 @@ ${deepseekContextSummary}`;
         }
       }
 
+      if (baseText && aiReplyPromisesFutureSearch(baseText)) {
+        const recovered = await enforceExecutedSearchForReply(env, {
+          text: baseText,
+          searchInfo,
+          query: conversationText,
+          models: chatModels,
+          finalStylePrompt,
+          contents,
+          signal: request.signal
+        });
+        baseText = String(recovered.text || "").trim();
+        const recoveredSearch = recovered.searchInfo || {};
+        searchInfo = {
+          required: Boolean(recoveredSearch.required),
+          attempted: Boolean(recoveredSearch.attempted),
+          performed: Boolean(recoveredSearch.performed),
+          query: String(recoveredSearch.query || conversationText || ""),
+          context: String(recoveredSearch.context || ""),
+          sources: Array.isArray(recoveredSearch.sources) ? recoveredSearch.sources : [],
+          queries: Array.isArray(recoveredSearch.searchQueries || recoveredSearch.queries) ? (recoveredSearch.searchQueries || recoveredSearch.queries) : [],
+          provider: String(recoveredSearch.provider || "gemini_google_search"),
+          model: String(recoveredSearch.model || ""),
+          error: String(recoveredSearch.error || recoveredSearch.recoveryError || "")
+        };
+        usedProvider = searchInfo.performed ? `${usedProvider}+grounded_recovery` : `${usedProvider}+search_unavailable_guard`;
+        success = Boolean(baseText);
+      }
+
       if (request.signal?.aborted) {
         await clearThinkingIndicator();
         return new Response(null, { status: 204 });
@@ -3002,7 +3059,7 @@ ${deepseekContextSummary}`;
         await clearThinkingIndicator();
         return new Response(null, { status: 204 });
       }
-      const replyText = sanitizeAiReply(applyConversationOutputGuards(sanitizeAiReply(baseText), {
+      let replyText = sanitizeAiReply(applyConversationOutputGuards(sanitizeAiReply(baseText), {
         allowRoleplay: allowRoleplayStyle,
         explicitTimeQuestion,
         standaloneTimeQuestion,
@@ -3010,6 +3067,11 @@ ${deepseekContextSummary}`;
         currentDayPart: currentTimeContext.dayPart,
         userText: conversationText
       }));
+      if (aiReplyPromisesFutureSearch(replyText)) {
+        replyText = searchInfo.performed && searchInfo.context
+          ? appendSearchSources(searchInfo.context, searchInfo.sources || [])
+          : "这个问题需要查证，但本轮没有成功取得可验证的联网检索结果。我不会假装稍后还会继续处理，请稍后重新提问。";
+      }
 
       // 1. 群聊使用每回合独立行追加，避免同群多人并发时整份历史互相覆盖；私聊仍按单用户顺序保存。
       const userHistoryItem = { role: 'user', parts: aiInputParts };
@@ -4907,9 +4969,49 @@ function isLightweightAcknowledgement(text) {
 
 function searchRequirement(text) {
   const source = String(text || "");
-  const explicit = /(?:帮我|幫我)?(?:上网|上網|联网|聯網|搜索|搜索|查一下|查找|搜一下)|(?:请|請)?(?:查证|查證|验证|驗證)/i.test(source);
+  const explicit = /(?:帮我|幫我)?(?:上网|上網|联网|聯網|搜索|搜尋|查一下|查找|搜一下)|(?:请|請)?(?:查证|查證|验证|驗證)/i.test(source);
   const fresh = /今天|今日|現在|现在|目前|最新|剛剛|刚刚|本週|本周|新聞|新闻|價格|价格|現價|现价|版本|更新|上市|下架|限額|限额|匯率|汇率|天氣|天气|比分|賽程|赛程|政策|法律|規則|规则/i.test(source);
-  return { needed: explicit || fresh, explicit };
+  const factualQuestion = /[?？]|(?:谁|誰|什么|什麼|哪(?:个|個|一|里|裡)|为何|為何|为什么|為什麼|怎么|怎麼|关系|關係|是谁的|是誰的|设定|設定|剧情|劇情|角色)/i.test(source);
+  const namedEntitySignal = /《[^》]{2,}》|[A-Za-z][A-Za-z0-9 _-]{3,}|(?:游戏|遊戲|作品|小说|小說|动漫|動漫|漫画|漫畫|公司|人物|角色|组织|組織|学校|學校|品牌|型号|型號)\s*[「『“"]?[^，。！？!?]{2,}/i.test(source);
+  const nicheRelationship = /(?:在|關於|关于).{0,80}(?:中|裡|里).{0,80}(?:谁|誰|关系|關係|是谁的|是誰的)|(?:谁|誰).{0,30}(?:的谁|的誰|什么关系|什麼關係)/i.test(source);
+  const niche = source.length <= 500 && factualQuestion && (namedEntitySignal || nicheRelationship);
+  return { needed: explicit || fresh || niche, explicit, niche };
+}
+
+function aiReplyPromisesFutureSearch(text) {
+  const source = String(text || "");
+  return /(?:我(?:得|要|会|會|先|需要)(?:赶紧|趕緊)?(?:去)?(?:查一下|查查|搜索一下|搜尋一下|检索一下|檢索一下|翻翻资料|翻翻資料|确认一下|確認一下)|等我(?:一下|查完|检索|檢索)|稍后|稍後|马上回来|馬上回來|查完再告诉你|查完再告訴你|回来告诉你|回來告訴你)/i.test(source);
+}
+
+async function enforceExecutedSearchForReply(env, { text, searchInfo, query, models, finalStylePrompt, contents, signal = null }) {
+  const baseText = String(text || "").trim();
+  if (!aiReplyPromisesFutureSearch(baseText)) return { text: baseText, searchInfo };
+  let search = searchInfo || {};
+  if (!search.performed) search = await buildSharedSearchContext(env, { query, models, signal, force: true });
+  if (!search.performed || !search.context) {
+    return {
+      text: `这个问题需要查证，但我这次没有成功取得可验证的联网检索结果，因此不能假装已经去查，也不会让你空等。请稍后重试。`,
+      searchInfo: { ...search, required: true, attempted: Boolean(search.attempted), performed: false }
+    };
+  }
+  try {
+    const result = await callGeminiGenerate(env, {
+      models,
+      system: `${finalStylePrompt}\n\n【强制检索完成规则】联网检索已经在本轮完成。请直接根据下方资料回答当前问题，禁止说“等我”“我去查”“稍后回来”，禁止承诺未来动作。资料不足时直接指出不足。\n\n【已执行的联网检索结果】\n${search.context}`,
+      contents,
+      maxOutputTokens: 1000,
+      temperature: 0.35,
+      useSearch: false,
+      requireSearch: false,
+      maxAttempts: 3,
+      signal
+    });
+    let groundedText = appendSearchSources(result.text, search.sources || []);
+    if (aiReplyPromisesFutureSearch(groundedText)) groundedText = appendSearchSources(search.context, search.sources || []);
+    return { text: groundedText, searchInfo: { ...search, required: true, performed: true } };
+  } catch (error) {
+    return { text: appendSearchSources(search.context, search.sources || []), searchInfo: { ...search, required: true, performed: true, recoveryError: String(error?.message || error) } };
+  }
 }
 
 async function callGeminiGenerate(env, { models, system, contents, maxOutputTokens = 1000, temperature = 0.7, useSearch = true, requireSearch = false, timeoutMs = 10000, apiKeys = null, keyProvider = "gemini", deadlineAt = Date.now() + timeoutMs, maxAttempts = 2, signal = null }) {
@@ -4919,9 +5021,17 @@ async function callGeminiGenerate(env, { models, system, contents, maxOutputToke
   if (!keys.length) throw new Error(keyProvider === "gemini_search" ? "GEMINI_SEARCH_API_KEYS_MISSING" : "GEMINI_API_KEYS_MISSING");
   let lastError = "GEMINI_FAILED";
   let attempts = 0;
-  for (const model of models) {
-    for (const key of keys) {
-      if (attempts >= Math.max(1, Number(maxAttempts || 2)) || isDeadlineExceeded(deadlineAt, 800)) throw new Error(lastError);
+  const normalizedModels = [...new Set((Array.isArray(models) ? models : []).map(String).filter(Boolean))];
+  const attemptLimit = Math.max(1, Number(maxAttempts || 2));
+  // 先讓不同模型各獲得一次機會，再才輪到同模型的其他金鑰。
+  // 避免第一個模型失效時，被多把 Key 吃完嘗試額度，永遠到不了穩定後備模型。
+  const candidates = [];
+  const keyPasses = Math.max(1, Math.min(keys.length, 2));
+  for (let keyIndex = 0; keyIndex < keyPasses; keyIndex++) {
+    for (const model of normalizedModels) candidates.push({ model, key: keys[keyIndex] });
+  }
+  for (const { model, key } of candidates) {
+      if (attempts >= attemptLimit || isDeadlineExceeded(deadlineAt, 800)) throw new Error(lastError);
       attempts += 1;
       const body = {
         contents,
@@ -4950,16 +5060,15 @@ async function callGeminiGenerate(env, { models, system, contents, maxOutputToke
           break;
         } catch (error) { lastError = String(error?.message || error); break; }
       }
-    }
   }
   throw new Error(lastError);
 }
 
-async function buildSharedSearchContext(env, { query, models, signal = null }) {
+async function buildSharedSearchContext(env, { query, models, signal = null, force = false }) {
   const requirement = searchRequirement(query);
   const base = {
-    required: requirement.needed,
-    explicit: requirement.explicit,
+    required: Boolean(force || requirement.needed),
+    explicit: Boolean(force || requirement.explicit),
     attempted: false,
     performed: false,
     query: String(query || ""),
@@ -4970,7 +5079,7 @@ async function buildSharedSearchContext(env, { query, models, signal = null }) {
     model: "",
     error: ""
   };
-  if (!requirement.needed) return base;
+  if (!force && !requirement.needed) return base;
   const searchKeys = geminiSearchApiKeys(env);
   if (!searchKeys.length) return { ...base, error: "GEMINI_SEARCH_API_KEYS_MISSING" };
   try {
@@ -4984,6 +5093,7 @@ async function buildSharedSearchContext(env, { query, models, signal = null }) {
       requireSearch: true,
       apiKeys: searchKeys,
       keyProvider: "gemini_search",
+      maxAttempts: 4,
       signal
     });
     return {
@@ -5084,7 +5194,7 @@ async function generateHybridReply(env, args) {
       requireSearch: false,
       timeoutMs: args.fastChat ? 6000 : 8000,
       deadlineAt: overallDeadlineAt,
-      maxAttempts: args.fastChat ? 1 : 2,
+      maxAttempts: args.fastChat ? 3 : 6,
       signal: args.signal
     });
     return finish("gemini", result, search);
@@ -7597,8 +7707,12 @@ async function runHealthChecks(env, { mode = "quick" } = {}) {
     if (!env.ONEBOT_HUB) throw new Error("ONEBOT_HUB_NOT_BOUND");
     const state = await (await getOneBotHub(env).fetch("https://onebot-hub/status")).json();
     if (!state.connected) throw new Error("NAPCAT_NOT_CONNECTED");
+    // WebSocket 顯示 OPEN 不代表 OneBot action 能往返；以無副作用的 get_login_info 驗證 RPC。
+    const rpc = await callOneBotAction(env, { action: "get_login_info", params: {} }, 8000);
     return {
       connected: true,
+      rpcRoundTrip: true,
+      botUserId: String(rpc?.user_id || rpc?.userId || ""),
       sockets: state.sockets,
       transportMode: state.transportMode,
       connectionId: state.connectionId,
@@ -7618,12 +7732,26 @@ async function runHealthChecks(env, { mode = "quick" } = {}) {
   }, { timeoutMs: 10000 }));
 
   const keys = roundRobinKeys([...new Set([...parseList(env.GEMINI_API_KEYS), ...parseList(env.VECTORIZE_GEMINI_KEYS)])], "gemini");
-  checks.push(await runTimedHealthCheck("Gemini API 连通性", async () => {
+  checks.push(await runTimedHealthCheck("Gemini 实际生成", async () => {
     if (!keys.length) throw new Error("GEMINI_API_KEY_MISSING");
-    const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${encodeURIComponent(keys[0])}&pageSize=1`, { signal: AbortSignal.timeout(8000) });
-    if (!response.ok) throw new Error(`GEMINI_${response.status}`);
-    return { key: maskSecret(keys[0]), reachable: true, generationTested: false, note: "快速检查仅验证 API 列表端点；请使用单一模型检查验证实际生成。" };
-  }, { timeoutMs: 10000 }));
+    const models = await effectiveRuntimeModels(env, "chat");
+    const result = await callGeminiGenerate(env, {
+      models,
+      apiKeys: [keys[0]],
+      keyProvider: "gemini_health",
+      system: "你是健康检查。只输出 OK。",
+      contents: [{ role: "user", parts: [{ text: "只输出 OK" }] }],
+      maxOutputTokens: 8,
+      temperature: 0,
+      useSearch: false,
+      requireSearch: false,
+      timeoutMs: 9000,
+      deadlineAt: Date.now() + 12000,
+      maxAttempts: Math.min(4, Math.max(1, models.length))
+    });
+    if (!/^ok$/i.test(String(result.text || "").trim())) throw new Error("GEMINI_GENERATION_UNEXPECTED_OUTPUT");
+    return { key: maskSecret(keys[0]), reachable: true, generationTested: true, model: result.model };
+  }, { timeoutMs: 14000 }));
 
   const visionKeys = roundRobinKeys(geminiVisionApiKeys(env), "gemini_vision");
   checks.push(await runTimedHealthCheck("Gemini 图片检查", async () => {
@@ -7720,9 +7848,17 @@ async function buildHealthState(env) {
   const health = await runHealthChecks(env, { mode: "quick" });
   let onebot = null;
   try { onebot = await (await getOneBotHub(env).fetch("https://onebot-hub/status")).json(); } catch {}
+  const latestIngress = Array.isArray(onebot?.recentGroupIngress) ? onebot.recentGroupIngress[0] || null : null;
   return {
     ...health,
     at: new Date().toISOString(),
+    replyPath: latestIngress ? {
+      groupId: latestIngress.groupId || "",
+      status: latestIngress.lastDisposition || "unknown",
+      lastUpdatedAt: latestIngress.lastUpdatedAt || null,
+      preview: latestIngress.preview || "",
+      error: latestIngress.error || ""
+    } : null,
     bindings: { db: Boolean(env.DB), vectorize: Boolean(env.VECTORIZE), ai: Boolean(env.AI), onebotHub: Boolean(env.ONEBOT_HUB) },
     providers: {
       gemini: Boolean(env.GEMINI_API_KEYS || env.VECTORIZE_GEMINI_KEYS),
@@ -8599,6 +8735,8 @@ const OPS_CAPABILITIES = Object.freeze([
   { id: "activity.manage", name: "建立与管理活动", minRole: "admin" },
   { id: "activity.cross_group", name: "跨独立群统整活动", minRole: "owner" },
   { id: "activity.invite", name: "发送活动群邀请／批准待处理申请", minRole: "owner" },
+  { id: "activity.announce", name: "发送活动报名通知", minRole: "admin" },
+  { id: "activity.mention_all", name: "活动通知 @全体成员", minRole: "owner" },
   { id: "poll.view", name: "查看投票", minRole: "member" },
   { id: "poll.vote", name: "参与投票", minRole: "member" },
   { id: "poll.manage", name: "建立与管理投票", minRole: "admin" },
@@ -8846,6 +8984,8 @@ async function opsSaveRecord(env, { type, existing = null, groupId, actorId, act
     item.activityGroupId = String(data.activityGroupId || existing?.activityGroupId || "").replace(/\D/g, "");
     item.inviteMode = ["none", "private_card", "approve_pending"].includes(data.inviteMode) ? data.inviteMode : String(existing?.inviteMode || "none");
     item.autoInviteConfirmed = Boolean(data.autoInviteConfirmed ?? existing?.autoInviteConfirmed);
+    item.announceMode = data.announceMode === "all" ? "all" : String(existing?.announceMode || "none") === "all" ? "all" : "none";
+    item.announceOnCreate = Boolean(data.announceOnCreate ?? existing?.announceOnCreate);
   }
   if (type === "schedule_template") {
     item.scheduleSpec = String(data.scheduleSpec || existing?.scheduleSpec || data.description || "").trim().slice(0, 8000);
@@ -9027,6 +9167,67 @@ async function opsLeaveActivity(env, activity, userId) {
   await writeSystemAudit(env, { type: "ops_activity_signup", groupId: row.sourceGroupId || activity.groupId, actorId: String(userId), action: "cancelled", activityId: activity.id });
   return { ok: true, message: "已取消报名。" };
 }
+
+function opsActivityAnnouncementText(activity) {
+  const start = Number(activity.startAt || 0) ? new Date(Number(activity.startAt)).toLocaleString("zh-CN", { timeZone: "Asia/Taipei", hour12: false }) : "未设置";
+  const deadline = Number(activity.signupDeadline || 0) ? new Date(Number(activity.signupDeadline)).toLocaleString("zh-CN", { timeZone: "Asia/Taipei", hour12: false }) : "未设置";
+  return `【活动报名】\n${activity.title}\n编号：${activity.id}\n${activity.description ? `说明：${activity.description}\n` : ""}开始时间：${start}\n报名截止：${deadline}\n人数上限：${Number(activity.capacity || 0) > 0 ? activity.capacity : "不限"}\n候补：${activity.waitlistEnabled ? "开启" : "关闭"}\n\n报名方式：\n1. 群聊 @Bot 说“报名 ${activity.title}”\n2. 私聊 Bot 说“报名 ${activity.title}”\n3. 登录 Portal 的“活动与协作”页面\n取消时可说“取消报名 ${activity.title}”。`;
+}
+
+async function opsAnnounceActivity(env, activity, { actorId, mode = "none" } = {}) {
+  if (!activity) return { ok: false, message: "找不到活动。", results: [] };
+  const announceMode = mode === "all" ? "all" : "none";
+  const groups = [...new Set((activity.groupIds || [activity.groupId]).map(value => String(value || "").replace(/\D/g, "")).filter(Boolean))];
+  if (!groups.length) return { ok: false, message: "活动没有目标群。", results: [] };
+  const results = [];
+  for (const targetGroupId of groups) {
+    try {
+      const role = await resolvePortalRole(env, actorId, targetGroupId);
+      const announcePermission = await opsEffectiveCapability(env, { groupId: targetGroupId, qq: actorId, role, capability: "activity.announce" });
+      if (!announcePermission.allowed) {
+        results.push({ groupId: targetGroupId, ok: false, error: "没有活动通知权限" });
+        continue;
+      }
+      if (announceMode === "all") {
+        const mentionPermission = await opsEffectiveCapability(env, { groupId: targetGroupId, qq: actorId, role, capability: "activity.mention_all" });
+        if (!mentionPermission.allowed) {
+          results.push({ groupId: targetGroupId, ok: false, error: "没有 @全体权限" });
+          continue;
+        }
+      }
+      const botState = await getBotGroupRole(env, targetGroupId);
+      if (!botState?.exists) {
+        results.push({ groupId: targetGroupId, ok: false, error: "Bot 不在目标群" });
+        continue;
+      }
+      if (announceMode === "all" && !["owner", "admin"].includes(String(botState.role || ""))) {
+        results.push({ groupId: targetGroupId, ok: false, error: "Bot 不是群主或管理员，无法可靠 @全体" });
+        continue;
+      }
+      const message = [];
+      if (announceMode === "all") {
+        message.push({ type: "at", data: { qq: "all" } });
+        message.push({ type: "text", data: { text: "\n" } });
+      }
+      message.push({ type: "text", data: { text: opsActivityAnnouncementText(activity) } });
+      await callOneBotAction(env, { action: "send_group_msg", params: { group_id: numericId(targetGroupId), message, auto_escape: false } }, 15000);
+      results.push({ groupId: targetGroupId, ok: true, mode: announceMode });
+      await writeSystemAudit(env, { type: "ops_activity_announce", groupId: targetGroupId, actorId: String(actorId || ""), action: announceMode, activityId: activity.id });
+    } catch (error) {
+      results.push({ groupId: targetGroupId, ok: false, error: String(error?.message || error).slice(0, 500) });
+    }
+  }
+  const successCount = results.filter(item => item.ok).length;
+  return {
+    ok: successCount === results.length,
+    partial: successCount > 0 && successCount < results.length,
+    results,
+    message: successCount === results.length
+      ? `已向 ${successCount} 个群发送活动报名通知${announceMode === "all" ? "并 @全体" : "，未 @全体"}。`
+      : `活动通知完成 ${successCount}/${results.length} 个群；失败：${results.filter(item => !item.ok).map(item => `${item.groupId}（${item.error}）`).join("、")}`
+  };
+}
+
 
 async function opsInviteActivityParticipant(env, activity, participant, actorId) {
   const targetGroupId = String(activity.activityGroupId || "").replace(/\D/g, "");
@@ -9825,49 +10026,457 @@ async function opsRestoreSnapshot(env, groupId, actorId, snapshotId, previewOnly
   return { ok: true, message: "群设置快照已恢复。" };
 }
 
-async function opsHandleActivityCommand(env, { groupId, userId, userName, role, text }) {
-  if (!String(groupId || "")) return { handled: false };
-  const normalized = String(text || "").trim();
-  let match = normalized.match(/^[!！](?:活动|活動)\s*(?:列表)?$/i);
-  if (match) {
-    const rows = await opsListRecords(env, "activity", { groupId, qq: userId, role, limit: 100 });
-    if (!rows.length) return { handled: true, text: "目前没有可报名活动。" };
-    const lines = [];
-    for (const item of rows.slice(0, 20)) {
-      const summary = await opsActivitySummary(env, item);
-      lines.push(`${item.id}｜${item.title}｜正式 ${summary.confirmedCount}${item.capacity ? `/${item.capacity}` : ""}｜候补 ${summary.waitlistCount}`);
-    }
-    return { handled: true, text: lines.join("\n") };
+function qqaiChineseNumber(value) {
+  const source = String(value || "").trim();
+  if (/^\d+$/.test(source)) return Number(source);
+  const digit = { 零: 0, 〇: 0, 一: 1, 二: 2, 两: 2, 兩: 2, 三: 3, 四: 4, 五: 5, 六: 6, 七: 7, 八: 8, 九: 9 };
+  if (source === "十") return 10;
+  if (source.includes("十")) {
+    const [left, right] = source.split("十");
+    return (left ? digit[left] || 0 : 1) * 10 + (right ? digit[right] || 0 : 0);
   }
-  match = normalized.match(/^[!！](?:报名|報名)\s+([a-z0-9:_-]+)$/i);
-  if (match) {
-    const capability = await opsEffectiveCapability(env, { groupId, qq: userId, role, capability: "activity.join" });
-    if (!capability.allowed) return { handled: true, text: "你没有活动报名权限。" };
-    const activity = await readJson(env, opsRecordKey("activity", match[1]), null);
-    const result = await opsJoinActivity(env, activity, { userId, userName, sourceGroupId: groupId });
-    return { handled: true, text: result.message };
-  }
-  match = normalized.match(/^[!！](?:取消报名|取消報名)\s+([a-z0-9:_-]+)$/i);
-  if (match) {
-    const capability = await opsEffectiveCapability(env, { groupId, qq: userId, role, capability: "activity.join" });
-    if (!capability.allowed) return { handled: true, text: "你没有活动报名权限。" };
-    const activity = await readJson(env, opsRecordKey("activity", match[1]), null);
-    const result = activity ? await opsLeaveActivity(env, activity, userId) : { message: "找不到活动。" };
-    return { handled: true, text: result.message };
-  }
-  match = normalized.match(/^[!！](?:活动名單|活动名单|活動名單)\s+([a-z0-9:_-]+)$/i);
-  if (match) {
-    const capability = await opsEffectiveCapability(env, { groupId, qq: userId, role, capability: "activity.manage" });
-    if (!capability.allowed) return { handled: true, text: "你没有查看完整活动名单的权限。" };
-    const activity = await readJson(env, opsRecordKey("activity", match[1]), null);
-    if (!activity) return { handled: true, text: "找不到活动。" };
-    const summary = await opsActivitySummary(env, activity);
-    const lines = summary.participants.filter(item => item.status === "confirmed").map((item, index) => `${index + 1}. ${item.userName}（${item.userId}）｜来源群 ${item.sourceGroupId}`);
-    return { handled: true, text: lines.length ? lines.join("\n") : "目前没有正式报名者。" };
-  }
-  return { handled: false };
+  return digit[source] ?? NaN;
 }
 
+function qqaiNaturalTimeOfDay(text) {
+  const source = String(text || "");
+  let match = source.match(/(?:凌晨|早上|上午|中午|下午|傍晚|晚上)?\s*(\d{1,2}|[零〇一二两兩三四五六七八九十]{1,3})(?:[:：点點时時](\d{1,2})?|半)\s*(?:分)?/);
+  if (!match) return "";
+  let hour = qqaiChineseNumber(match[1]);
+  const minute = /半/.test(match[0]) ? 30 : Math.max(0, Math.min(59, Number(match[2] || 0)));
+  const period = String(match[0] || "");
+  if (/(?:下午|傍晚|晚上)/.test(period) && hour < 12) hour += 12;
+  if (/中午/.test(period) && hour < 11) hour += 12;
+  if (/凌晨/.test(period) && hour === 12) hour = 0;
+  if (hour < 0 || hour > 23) return "";
+  return `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`;
+}
+
+function qqaiNaturalFutureDateTime(text, now = Date.now()) {
+  const source = String(text || "");
+  const absolute = source.match(/(20\d{2})[\/-](\d{1,2})[\/-](\d{1,2})[^\d]{0,8}((?:凌晨|早上|上午|中午|下午|傍晚|晚上)?\s*\d{1,2}(?:[:：点點时時]\d{0,2})?)/);
+  if (absolute) {
+    const time = qqaiNaturalTimeOfDay(absolute[4]);
+    if (time) return parseTaipeiDateTime(`${absolute[1]}-${String(Number(absolute[2])).padStart(2, "0")}-${String(Number(absolute[3])).padStart(2, "0")} ${time}`);
+  }
+  const compact = source.match(/(20\d{2}-\d{2}-\d{2})\s+(\d{1,2}:\d{2})/);
+  if (compact) return parseTaipeiDateTime(`${compact[1]} ${compact[2]}`);
+  const time = qqaiNaturalTimeOfDay(source);
+  if (!time) return 0;
+  const p = taipeiParts(now);
+  let days = 0;
+  if (/后天|後天/.test(source)) days = 2;
+  else if (/明天|明日/.test(source)) days = 1;
+  else if (/今天|今日/.test(source)) days = 0;
+  else {
+    const week = source.match(/(?:下周|下週|周|週|星期)([一二三四五六日天])/);
+    if (week) {
+      const targetDay = ({ 一: 1, 二: 2, 三: 3, 四: 4, 五: 5, 六: 6, 日: 7, 天: 7 })[week[1]];
+      const weekdayMap = { Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6, Sun: 7 };
+      const current = weekdayMap[p.weekday] || 1;
+      days = (targetDay - current + 7) % 7;
+      if (/下周|下週/.test(source)) days += 7;
+      if (days === 0 && !/今天|今日/.test(source)) days = 7;
+    }
+  }
+  const base = Date.UTC(Number(p.year), Number(p.month) - 1, Number(p.day), 0, 0) + days * 86400000;
+  const targetParts = taipeiParts(base + 12 * 3600000);
+  let target = parseTaipeiDateTime(`${targetParts.year}-${targetParts.month}-${targetParts.day} ${time}`);
+  if (!/(?:今天|今日|明天|明日|后天|後天|下周|下週|周|週|星期)/.test(source) && target <= now) target += 86400000;
+  return target;
+}
+
+function qqaiNaturalScheduleCommand(text, now = Date.now()) {
+  const source = String(text || "").trim();
+  let match = source.match(/^(?:请|請)?(?:帮我|幫我)?\s*(每天|每日)\s*(.+?)\s*(?:提醒|通知)\s*([\s\S]+)$/i);
+  if (match) {
+    const time = qqaiNaturalTimeOfDay(match[2]);
+    if (time) return `!排程 每天 ${time} ${match[3].trim()}`;
+  }
+  match = source.match(/^(?:请|請)?(?:帮我|幫我)?\s*(?:每周|每週|每星期)([一二三四五六日天])\s*(.+?)\s*(?:提醒|通知)\s*([\s\S]+)$/i);
+  if (match) {
+    const time = qqaiNaturalTimeOfDay(match[2]);
+    if (time) return `!排程 每周${match[1]} ${time} ${match[3].trim()}`;
+  }
+  match = source.match(/^(?:请|請)?(?:帮我|幫我)?\s*每隔\s*(\d+)\s*(分钟|分鐘|分|小时|小時|天)\s+(?:提醒|通知)?\s*([\s\S]+)$/i);
+  if (match) return `!排程 每隔 ${match[1]}${match[2]} ${match[3].trim()}`;
+  if (/(?:提醒|通知)/.test(source) && /(?:今天|今日|明天|明日|后天|後天|下周|下週|周|週|星期|20\d{2}[\/-]\d{1,2}[\/-]\d{1,2})/.test(source)) {
+    const at = qqaiNaturalFutureDateTime(source, now);
+    const contentMatch = source.match(/(?:提醒|通知)([\s\S]+)$/);
+    if (at && at > now && contentMatch?.[1]?.trim()) {
+      const p = taipeiParts(at);
+      return `!排程 ${p.year}-${p.month}-${p.day} ${p.hour}:${p.minute} ${contentMatch[1].trim()}`;
+    }
+  }
+  match = source.match(/^(?:请|請)?(?:帮我|幫我)?\s*(?:取消|删除|刪除)\s*(?:编号为|編號為|编号|編號)?\s*([\w-]+)\s*(?:的)?排程$/i);
+  if (match) return `!排程 取消 ${match[1]}`;
+  match = source.match(/^(?:请|請)?(?:帮我|幫我)?\s*(?:把)?\s*排程\s*([\w-]+)\s*(?:暂停一次|暫停一次|跳过一次|跳過一次)$/i);
+  if (match) return `!排程 暂停一次 ${match[1]}`;
+  return "";
+}
+
+function normalizeNaturalLanguageCommandText(text, now = Date.now()) {
+  const source = String(text || "").trim();
+  if (!source || /^[!！/]/.test(source)) return null;
+  if (/(?:建立|创建|創建|举办|舉辦|办|辦|开|開)\s*(?:一个|一個|个|個)?[^。\n]{0,30}(?:活动|活動)/i.test(source)) return null;
+  const mappings = [
+    [/^(?:请|請)?(?:帮我|幫我)?\s*(?:开启|開啟|打开|打開)\s*(?:本群)?\s*AI$/i, "!开启ai"],
+    [/^(?:请|請)?(?:帮我|幫我)?\s*(?:关闭|關閉)\s*(?:本群)?\s*AI$/i, "!关闭ai"],
+    [/^(?:查看|查询|查詢)(?:一下)?\s*(?:系统)?(?:状态|狀態|配额|配額)$/i, "!status"],
+    [/^(?:查看|显示|顯示)(?:一下)?\s*(?:帮助|幫助|指令)$/i, "!帮助"],
+    [/^(?:请|請)?(?:帮我|幫我)?\s*(?:开启|開啟|打开|打開)\s*群规监控$/i, "!群规监控 开"],
+    [/^(?:请|請)?(?:帮我|幫我)?\s*(?:关闭|關閉)\s*群规监控$/i, "!群规监控 关"],
+    [/^(?:查看|查询|查詢)\s*群规监控(?:状态|狀態)?$/i, "!群规监控 状态"],
+    [/^(?:请|請)?(?:帮我|幫我)?\s*(?:开启|開啟|打开|打開)\s*入群(?:辅助|輔助)$/i, "!入群辅助 开"],
+    [/^(?:请|請)?(?:帮我|幫我)?\s*(?:关闭|關閉)\s*入群(?:辅助|輔助)$/i, "!入群辅助 关"],
+    [/^(?:请|請)?(?:帮我|幫我)?\s*(?:开启|開啟|打开|打開)\s*自动欢迎$/i, "!自动欢迎 开"],
+    [/^(?:请|請)?(?:帮我|幫我)?\s*(?:关闭|關閉)\s*自动欢迎$/i, "!自动欢迎 关"],
+    [/^(?:请|請)?(?:帮我|幫我)?\s*(?:开启|開啟|打开|打開)\s*(?:群)?记忆$/i, "!记忆开"],
+    [/^(?:请|請)?(?:帮我|幫我)?\s*(?:关闭|關閉)\s*(?:群)?记忆$/i, "!记忆关"],
+    [/^(?:查看|告诉我|告訴我)(?:一下)?\s*(?:你)?记住了什么$/i, "!你记住了什么"],
+    [/^(?:查看|显示|顯示)(?:一下)?\s*群规$/i, "!群规"],
+    [/^(?:查看|显示|顯示|列出)(?:一下)?\s*(?:我的)?排程(?:列表|清单|清單)?$/i, "!排程 列表"],
+    [/^(?:请|請)?(?:帮我|幫我)?\s*(?:开启|開啟|打开|打開)\s*违规禁言保护$/i, "!违规禁言保护 开"],
+    [/^(?:请|請)?(?:帮我|幫我)?\s*(?:关闭|關閉)\s*违规禁言保护$/i, "!违规禁言保护 关"],
+    [/^(?:查看|查询|查詢)\s*违规禁言保护(?:状态|狀態)?$/i, "!违规禁言保护 状态"],
+    [/^(?:申请|申請)(?:加入)?(?:本群)?白名单$/i, "!申请白名单"]
+  ];
+  for (const [pattern, commandText] of mappings) if (pattern.test(source)) return { commandText, intent: commandText.slice(1), confidence: 1 };
+  let match = source.match(/^(?:请|請)?(?:帮我|幫我)?\s*(?:把)?(?:模型|回答模型)\s*(?:切换到|切換到|改成|设为|設為|使用)\s*([A-Za-z0-9 ._-]+)$/i);
+  if (match) return { commandText: `!模型 ${match[1].trim()}`, intent: "model_preference", confidence: 1 };
+  match = source.match(/^(?:我要|我想|帮我|幫我|请帮我|請幫我)?\s*(?:申诉|申訴)\s+([\s\S]+)$/i);
+  if (match) return { commandText: `!申诉 ${match[1].trim()}`, intent: "appeal_create", confidence: 0.99 };
+  match = source.match(/^(?:查看|查询|查詢)\s*(?:我的)?(?:申诉|申訴)(?:状态|狀態)\s+([a-z0-9:_-]+)$/i);
+  if (match) return { commandText: `!申诉状态 ${match[1]}`, intent: "appeal_status", confidence: 1 };
+  match = source.match(/^(?:请|請)?(?:帮我|幫我)?\s*(?:把)?群规(?:严格度|嚴格度|等级|等級)?\s*(?:改成|设为|設為|调整为|調整為)\s*(宽松|寬鬆|低|中|高|严格|嚴格)$/i);
+  if (match) return { commandText: `!群规严格度 ${match[1]}`, intent: "rule_strictness", confidence: 1 };
+  match = source.match(/^(?:请|請)?(?:帮我|幫我)?\s*(?:把)?欢迎词\s*(?:改成|设为|設為)\s*([\s\S]+)$/i);
+  if (match) return { commandText: `!欢迎词 ${match[1].trim()}`, intent: "welcome_text", confidence: 1 };
+  match = source.match(/^(?:请|請)?(?:帮我|幫我)?\s*(?:把)?(?:主动)?插话率\s*(?:改成|设为|設為|调整为|調整為)\s*(\d{1,3})\s*%?$/i);
+  if (match) return { commandText: `!设置插话率 ${Math.max(0, Math.min(100, Number(match[1])))}`, intent: "interject_rate", confidence: 1 };
+  match = source.match(/^(?:请|請)?(?:帮我|幫我)?\s*记住\s+([\s\S]+)$/i);
+  if (match) return { commandText: `!记住 ${match[1].trim()}`, intent: "memory_remember", confidence: 1 };
+  match = source.match(/^(?:请|請)?(?:帮我|幫我)?\s*忘记\s+([\s\S]+)$/i);
+  if (match) return { commandText: `!忘记 ${match[1].trim()}`, intent: "memory_forget", confidence: 1 };
+  const schedule = qqaiNaturalScheduleCommand(source, now);
+  if (schedule) return { commandText: schedule, intent: "schedule", confidence: 0.98 };
+  return null;
+}
+
+function shouldClassifyNaturalLanguageCommand(text) {
+  const source = String(text || "").trim();
+  if (!/^(?:请|請|帮我|幫我|麻烦|麻煩|把|将|將|设置|設定|开启|開啟|打开|打開|关闭|關閉|查看|查询|查詢|显示|顯示|切换|切換|调整|調整|取消|暂停|暫停|记住|記住|忘记|忘記|申请|申請)/i.test(source)) return false;
+  return /(?:本群\s*AI|群规|群規|排程|定时|定時|提醒|欢迎|歡迎|插话|插話|记忆|記憶|模型|入群辅助|入群輔助|违规禁言保护|違規禁言保護|申诉|申訴|系统状态|系統狀態|配额|配額)/i.test(source);
+}
+
+async function classifyNaturalLanguageCommandIntent(env, text) {
+  if (!shouldClassifyNaturalLanguageCommand(text)) return null;
+  try {
+    const result = await callGemmaDecision(env, {
+      system: `你是 QQ Bot 自然语言操作解析器。只输出 JSON，不回答用户问题。格式：{"intent":"none|ai_on|ai_off|status|help|schedule_list|rule_monitor_on|rule_monitor_off|rule_monitor_status|rule_strictness|join_assist_on|join_assist_off|welcome_on|welcome_off|welcome_text|memory_on|memory_off|memory_list|memory_remember|memory_forget|model_set|interject_rate|mute_guard_on|mute_guard_off|mute_guard_status|appeal_create|appeal_status","confidence":0到1,"value":"参数"}。只有明确要求执行操作时才识别；讨论、假设、引用、抱怨、询问功能原理一律 none。不要输出 ! 指令。`,
+      prompt: String(text || "").slice(0, 2000),
+      maxOutputTokens: 180
+    });
+    const parsed = JSON.parse(String(result.text || "").match(/\{[\s\S]*\}/)?.[0] || "{}");
+    if (Number(parsed.confidence || 0) < 0.9 || !parsed.intent || parsed.intent === "none") return null;
+    const value = String(parsed.value || "").trim();
+    const commandByIntent = {
+      ai_on: "!开启ai", ai_off: "!关闭ai", status: "!status", help: "!帮助",
+      schedule_list: "!排程 列表",
+      rule_monitor_on: "!群规监控 开", rule_monitor_off: "!群规监控 关", rule_monitor_status: "!群规监控 状态",
+      join_assist_on: "!入群辅助 开", join_assist_off: "!入群辅助 关",
+      welcome_on: "!自动欢迎 开", welcome_off: "!自动欢迎 关",
+      memory_on: "!记忆开", memory_off: "!记忆关", memory_list: "!你记住了什么",
+      mute_guard_on: "!违规禁言保护 开", mute_guard_off: "!违规禁言保护 关", mute_guard_status: "!违规禁言保护 状态"
+    };
+    let commandText = commandByIntent[parsed.intent] || "";
+    if (parsed.intent === "rule_strictness" && value) commandText = `!群规严格度 ${value}`;
+    if (parsed.intent === "welcome_text" && value) commandText = `!欢迎词 ${value}`;
+    if (parsed.intent === "memory_remember" && value) commandText = `!记住 ${value}`;
+    if (parsed.intent === "memory_forget" && value) commandText = `!忘记 ${value}`;
+    if (parsed.intent === "model_set" && value) commandText = `!模型 ${value}`;
+    if (parsed.intent === "interject_rate" && value) commandText = `!设置插话率 ${Math.max(0, Math.min(100, Number(value.replace(/\D/g, "")) || 0))}`;
+    if (parsed.intent === "appeal_create" && value) commandText = `!申诉 ${value}`;
+    if (parsed.intent === "appeal_status" && value) commandText = `!申诉状态 ${value}`;
+    return commandText ? { commandText, intent: parsed.intent, confidence: Number(parsed.confidence || 0), parser: "gemma_json" } : null;
+  } catch (error) {
+    console.warn("Natural language command classifier unavailable:", error?.message || error);
+    return null;
+  }
+}
+
+
+function qqaiActivityPendingKey(groupId, userId) {
+  return `ops:natural_activity_pending:${opsSafeId(groupId || "private")}:${opsSafeId(userId)}`;
+}
+
+function qqaiExtractActivityTitle(text) {
+  const source = String(text || "").trim();
+  const named = source.match(/(?:名称|名稱|名字|标题|標題|名为|名為|叫)\s*(?:是|为|為|：|:)?\s*[「『\"“]?([^，。；;\n」』\"”]{1,80})/i);
+  if (named) return named[1].trim().replace(/(?:的)?(?:活动|活動)$/i, "").trim();
+  const after = source.match(/(?:建立|创建|創建|举办|舉辦|办|辦|开|開)\s*(?:一个|一個|个|個)?\s*(?:叫\s*)?[「『\"“]?([^，。；;\n」』\"”]{1,60}?)[」』\"”]?\s*(?:的)?活动/i);
+  if (after) return after[1].trim().replace(/^(?:一个|一個|个|個)\s*/, "").replace(/(?:的)?(?:活动|活動)$/i, "").trim();
+  const generic = source.match(/(?:建立|创建|創建|举办|舉辦|办|辦|开|開)\s*(?:一个|一個|个|個)?\s*活动\s*[「『\"“]?([^，。；;\n」』\"”]{1,80})/i);
+  if (generic) return generic[1].trim();
+  return "";
+}
+
+function qqaiParseNaturalActivityCreate(text, defaultGroupId, now = Date.now()) {
+  const source = String(text || "").trim();
+  if (!/(?:建立|创建|創建|举办|舉辦|办|辦|开|開)\s*(?:一个|一個|个|個)?[^。\n]{0,30}(?:活动|活動)/i.test(source)) return null;
+  const title = qqaiExtractActivityTitle(source);
+  const capacityMatch = source.match(/(?:限|最多|上限|名额|名額)\s*(\d{1,6})\s*人?/i);
+  const capacity = capacityMatch ? Math.max(0, Math.min(100000, Number(capacityMatch[1]))) : 0;
+  const waitlistEnabled = !/(?:不|不要|关闭|關閉|不开|不開)\s*(?:开放|開放|要)?\s*候补/i.test(source) && /候补|候補/i.test(source);
+  const noMentionAll = /(?:不|不要|无需|無需)\s*(?:@|艾特|通知)?\s*(?:全体|全體)/i.test(source);
+  const mentionAll = !noMentionAll && /@\s*(?:全体|全體)|艾特全体|艾特全體|通知全体|通知全體/i.test(source);
+  const announceOnCreate = mentionAll || noMentionAll || /(?:立即|马上|馬上)?\s*(?:发布|發佈|发送|發送|通知|公告)/i.test(source);
+  const groupIds = [];
+  const groupBlock = source.match(/(?:群号|群號|群组|群組|目标群|目標群)\s*[:：]?\s*((?:\d{5,}[,，、和与與\s]*)+)/i);
+  if (groupBlock) groupIds.push(...[...groupBlock[1].matchAll(/\d{5,}/g)].map(m => m[0]));
+  if (!groupIds.length && defaultGroupId) groupIds.push(String(defaultGroupId));
+  let signupDeadline = 0;
+  const deadlineText = source.match(/(?:报名|報名)?\s*(?:截止|截至)\s*([^，。；;\n]+)/i)?.[1] || "";
+  if (deadlineText) signupDeadline = qqaiNaturalFutureDateTime(deadlineText, now);
+  let startAt = 0;
+  const startText = source.match(/(?:活动|活動)?\s*(?:开始|開始|时间|時間)\s*(?:是|为|為|：|:)?\s*([^，。；;\n]+)/i)?.[1] || "";
+  if (startText) startAt = qqaiNaturalFutureDateTime(startText, now);
+  if (!startAt) startAt = qqaiNaturalFutureDateTime(source, now);
+  const description = source.match(/(?:说明|說明|内容|內容|备注|備註)\s*(?:是|为|為|：|:)?\s*([\s\S]+)/i)?.[1]?.trim() || "";
+  return {
+    title,
+    description,
+    groupIds: [...new Set(groupIds)],
+    capacity,
+    waitlistEnabled,
+    signupDeadline,
+    startAt,
+    announceOnCreate,
+    announceMode: mentionAll ? "all" : "none",
+    status: "active"
+  };
+}
+
+async function opsActivityContextGroup(env, activity, userId, preferredGroupId = "") {
+  if (!activity) return "";
+  const groups = [...new Set((activity.groupIds || [activity.groupId]).map(value => String(value || "").replace(/\D/g, "")).filter(Boolean))];
+  const preferred = String(preferredGroupId || "").replace(/\D/g, "");
+  if (preferred && groups.includes(preferred)) return preferred;
+  const saved = String(await dbGet(env, `private_default_group:${userId}`) || "").replace(/\D/g, "");
+  if (saved && groups.includes(saved)) return saved;
+  for (const groupId of groups) {
+    const member = await opsGetGroupMember(env, groupId, userId);
+    if (member) return groupId;
+  }
+  return "";
+}
+
+async function opsResolveActivity(env, { query, groupId = "", userId = "", role = "member", privateMode = false }) {
+  const raw = String(query || "").trim();
+  if (raw && /^[a-z0-9:_-]+$/i.test(raw)) {
+    const exact = await readJson(env, opsRecordKey("activity", raw), null);
+    if (exact) {
+      const contextGroupId = privateMode ? await opsActivityContextGroup(env, exact, userId, groupId) : String(groupId || "");
+      if (contextGroupId && (exact.groupIds || [exact.groupId]).map(String).includes(contextGroupId)) {
+        const contextRole = await resolvePortalRole(env, userId, contextGroupId);
+        const view = await opsEffectiveCapability(env, { groupId: contextGroupId, qq: userId, role: contextRole, capability: "activity.view" });
+        if (view.allowed) return { activity: exact, contextGroupId };
+      }
+    }
+  }
+  let rows = [];
+  if (privateMode) {
+    const ids = await readJson(env, opsIndexKey("activity"), []);
+    for (const id of ids.slice(-500).reverse()) {
+      const item = await readJson(env, opsRecordKey("activity", id), null);
+      if (!item || item.deletedAt) continue;
+      const contextGroupId = await opsActivityContextGroup(env, item, userId, groupId);
+      if (contextGroupId) {
+        const contextRole = await resolvePortalRole(env, userId, contextGroupId);
+        const view = await opsEffectiveCapability(env, { groupId: contextGroupId, qq: userId, role: contextRole, capability: "activity.view" });
+        if (view.allowed) rows.push({ item, contextGroupId });
+      }
+      if (rows.length >= 100) break;
+    }
+  } else {
+    rows = (await opsListRecords(env, "activity", { groupId, qq: userId, role, limit: 100 })).map(item => ({ item, contextGroupId: String(groupId) }));
+  }
+  const active = rows.filter(row => row.item.status === "active");
+  if (!raw) return active.length === 1 ? { activity: active[0].item, contextGroupId: active[0].contextGroupId } : { activity: null, contextGroupId: "", ambiguous: active };
+  const normalized = raw.toLowerCase().replace(/[「」『』\s]/g, "");
+  const exactTitle = active.find(row => String(row.item.title || "").toLowerCase().replace(/[「」『』\s]/g, "") === normalized);
+  if (exactTitle) return { activity: exactTitle.item, contextGroupId: exactTitle.contextGroupId };
+  const matches = active.filter(row => String(row.item.title || "").toLowerCase().includes(raw.toLowerCase()) || raw.toLowerCase().includes(String(row.item.title || "").toLowerCase()));
+  return matches.length === 1 ? { activity: matches[0].item, contextGroupId: matches[0].contextGroupId } : { activity: null, contextGroupId: "", ambiguous: matches };
+}
+
+
+async function opsHandleActivityCommand(env, { groupId, userId, userName, role, text, isPrivate = false }) {
+  const normalized = String(text || "").trim();
+  const looksActivity = /活动|活動|报名|報名|候补|候補|参加|參加|退出报名|退出報名/i.test(normalized);
+  const preferredGroupId = String(groupId || (isPrivate ? await dbGet(env, `private_default_group:${userId}`) : "") || "").replace(/\D/g, "");
+  const effectiveRole = isPrivate && preferredGroupId ? await resolvePortalRole(env, userId, preferredGroupId) : role;
+  const pendingKey = qqaiActivityPendingKey(preferredGroupId || "private", userId);
+
+  if (/^(?:确认建立活动|確認建立活動|确认创建活动|確認創建活動)$/i.test(normalized)) {
+    const pending = await readJson(env, pendingKey, null);
+    if (!pending || Date.now() > Number(pending.expiresAt || 0)) {
+      await dbDel(env, pendingKey);
+      return { handled: true, text: "没有等待确认的活动建立操作，或确认已过期。" };
+    }
+    const payload = pending.payload || {};
+    const targetGroups = [...new Set((payload.groupIds || []).map(value => String(value || "").replace(/\D/g, "")).filter(Boolean))];
+    if (!targetGroups.length) return { handled: true, text: "没有可用的目标群，请先在 Portal 设置私聊默认群，或在群聊中建立。" };
+    for (const targetGroupId of targetGroups) {
+      const targetRole = await resolvePortalRole(env, userId, targetGroupId);
+      const manage = await opsEffectiveCapability(env, { groupId: targetGroupId, qq: userId, role: targetRole, capability: "activity.manage" });
+      if (!manage.allowed) return { handled: true, text: `你没有群 ${targetGroupId} 的活动管理权限。` };
+    }
+    if (targetGroups.length > 1) {
+      const crossRole = await resolvePortalRole(env, userId, targetGroups[0]);
+      const cross = await opsEffectiveCapability(env, { groupId: targetGroups[0], qq: userId, role: crossRole, capability: "activity.cross_group" });
+      if (!cross.allowed) return { handled: true, text: "你没有跨独立群统整活动的权限。" };
+    }
+    if (payload.announceMode === "all") {
+      for (const targetGroupId of targetGroups) {
+        const targetRole = await resolvePortalRole(env, userId, targetGroupId);
+        const mentionAll = await opsEffectiveCapability(env, { groupId: targetGroupId, qq: userId, role: targetRole, capability: "activity.mention_all" });
+        if (!mentionAll.allowed) return { handled: true, text: `你没有群 ${targetGroupId} 的活动通知 @全体权限。` };
+      }
+    }
+    const item = await opsSaveRecord(env, {
+      type: "activity",
+      groupId: targetGroups[0],
+      actorId: userId,
+      actorName: userName,
+      data: { ...payload, groupId: targetGroups[0], groupIds: targetGroups }
+    });
+    await dbDel(env, pendingKey);
+    let announceResult = null;
+    if (payload.announceOnCreate) announceResult = await opsAnnounceActivity(env, item, { actorId: userId, mode: payload.announceMode || "none" });
+    return { handled: true, text: `活动已建立。\n编号：${item.id}\n名称：${item.title}\n名额：${item.capacity || "不限"}\n候补：${item.waitlistEnabled ? "开启" : "关闭"}${announceResult ? `\n通知：${announceResult.message}` : ""}` };
+  }
+
+  if (/^(?:取消建立活动|取消建立活動|取消创建活动|取消創建活動)$/i.test(normalized)) {
+    await dbDel(env, pendingKey);
+    return { handled: true, text: "已取消等待中的活动建立操作。" };
+  }
+
+  let match = normalized.match(/^[!！]?(?:活动|活動)\s*(?:列表)?$/i);
+  if (!match && /^(?:查看|显示|顯示|有哪些|有什么|有什麼)(?:可报名|可報名|目前)?(?:的)?活动(?:列表)?[？?]?$/i.test(normalized)) match = [normalized];
+  if (match) {
+    let rows = [];
+    if (isPrivate) {
+      const ids = await readJson(env, opsIndexKey("activity"), []);
+      for (const id of ids.slice(-500).reverse()) {
+        const item = await readJson(env, opsRecordKey("activity", id), null);
+        if (!item || item.deletedAt || item.status !== "active") continue;
+        const contextGroupId = await opsActivityContextGroup(env, item, userId, preferredGroupId);
+        if (!contextGroupId) continue;
+        const contextRole = await resolvePortalRole(env, userId, contextGroupId);
+        const view = await opsEffectiveCapability(env, { groupId: contextGroupId, qq: userId, role: contextRole, capability: "activity.view" });
+        if (!view.allowed) continue;
+        rows.push(item);
+        if (rows.length >= 30) break;
+      }
+    } else if (preferredGroupId) {
+      const view = await opsEffectiveCapability(env, { groupId: preferredGroupId, qq: userId, role: effectiveRole, capability: "activity.view" });
+      if (!view.allowed) return { handled: true, text: "你没有查看活动的权限。" };
+      rows = await opsListRecords(env, "activity", { groupId: preferredGroupId, qq: userId, role: effectiveRole, limit: 100 });
+    }
+    if (!rows.length) return { handled: true, text: isPrivate && !preferredGroupId ? "没有找到你可访问的活动。可先在 Portal 设置私聊默认群。" : "目前没有可报名活动。" };
+    const lines = [];
+    for (const item of rows.slice(0, 20)) {
+      const summary = await opsActivitySummary(env, item, { viewerId: userId, canManage: false });
+      lines.push(`${item.id}｜${item.title}｜正式 ${summary.confirmedCount}${item.capacity ? `/${item.capacity}` : ""}｜候补 ${summary.waitlistCount}`);
+    }
+    return { handled: true, text: `可报名活动：\n${lines.join("\n")}\n\n可直接说“报名 活动名称”或“取消报名 活动名称”。` };
+  }
+
+  match = normalized.match(/^[!！]?(?:报名|報名)(?:\s+(.+))?$/i)
+    || normalized.match(/^(?:我要|我想|帮我|幫我|请帮我|請幫我)?\s*(?:报名|報名|参加|參加)\s*[「『\"“]?(.+?)[」』\"”]?\s*(?:这个|這個)?(?:活动|活動)?[。！!]?$/i);
+  if (match) {
+    const query = String(match[1] || "").trim();
+    const resolved = await opsResolveActivity(env, { query, groupId: preferredGroupId, userId, role: effectiveRole, privateMode: isPrivate });
+    if (!resolved.activity) {
+      const names = (resolved.ambiguous || []).slice(0, 8).map(row => `${row.item?.title || row.title}（${row.item?.id || row.id}）`);
+      return { handled: true, text: names.length ? `找到多个可能的活动，请说完整名称或编号：\n${names.join("\n")}` : "找不到可报名的活动。" };
+    }
+    const sourceGroupId = resolved.contextGroupId || preferredGroupId;
+    const sourceRole = await resolvePortalRole(env, userId, sourceGroupId);
+    const capability = await opsEffectiveCapability(env, { groupId: sourceGroupId, qq: userId, role: sourceRole, capability: "activity.join" });
+    if (!capability.allowed) return { handled: true, text: "你没有活动报名权限。" };
+    const result = await opsJoinActivity(env, resolved.activity, { userId, userName, sourceGroupId });
+    return { handled: true, text: `${resolved.activity.title}：${result.message}` };
+  }
+
+  match = normalized.match(/^[!！]?(?:取消报名|取消報名)(?:\s+(.+))?$/i)
+    || normalized.match(/^(?:我不参加|我不參加|帮我取消|幫我取消|退出)\s*[「『\"“]?(.+?)[」』\"”]?\s*(?:这个|這個)?(?:活动|活動|的报名|的報名)?[。！!]?$/i);
+  if (match) {
+    const query = String(match[1] || "").trim();
+    const resolved = await opsResolveActivity(env, { query, groupId: preferredGroupId, userId, role: effectiveRole, privateMode: isPrivate });
+    if (!resolved.activity) return { handled: true, text: "找不到要取消的活动；请提供完整名称或编号。" };
+    const sourceGroupId = resolved.contextGroupId || preferredGroupId;
+    const sourceRole = await resolvePortalRole(env, userId, sourceGroupId);
+    const capability = await opsEffectiveCapability(env, { groupId: sourceGroupId, qq: userId, role: sourceRole, capability: "activity.join" });
+    if (!capability.allowed) return { handled: true, text: "你没有活动报名／取消权限。" };
+    const result = await opsLeaveActivity(env, resolved.activity, userId);
+    return { handled: true, text: `${resolved.activity.title}：${result.message}` };
+  }
+
+  match = normalized.match(/^[!！]?(?:活动名单|活動名單)\s+(.+)$/i)
+    || normalized.match(/^(?:查看|显示|顯示)\s*[「『\"“]?(.+?)[」』\"”]?\s*(?:活动|活動)?(?:的)?(?:报名名单|報名名單|名单|名單)$/i);
+  if (match) {
+    const resolved = await opsResolveActivity(env, { query: match[1], groupId: preferredGroupId, userId, role: effectiveRole, privateMode: isPrivate });
+    if (!resolved.activity) return { handled: true, text: "找不到活动。" };
+    const targetGroupId = resolved.contextGroupId || preferredGroupId;
+    const targetRole = await resolvePortalRole(env, userId, targetGroupId);
+    const capability = await opsEffectiveCapability(env, { groupId: targetGroupId, qq: userId, role: targetRole, capability: "activity.manage" });
+    if (!capability.allowed) return { handled: true, text: "你没有查看完整活动名单的权限。" };
+    const summary = await opsActivitySummary(env, resolved.activity, { viewerId: userId, canManage: true });
+    const confirmed = summary.participants.filter(item => item.status === "confirmed").map((item, index) => `${index + 1}. ${item.userName}（${item.userId}）｜来源群 ${item.sourceGroupId}`);
+    const waitlist = summary.participants.filter(item => item.status === "waitlist").map((item, index) => `${index + 1}. ${item.userName}（${item.userId}）`);
+    return { handled: true, text: `【${resolved.activity.title}】\n正式报名：\n${confirmed.join("\n") || "无"}\n\n候补：\n${waitlist.join("\n") || "无"}` };
+  }
+
+  match = normalized.match(/^(?:通知|发布|發佈|发送|發送)\s*[「『\"“]?(.+?)[」』\"”]?\s*(?:活动|活動)?(?:报名|報名)?(?:通知)?\s*(?:并|並)?\s*(@\s*(?:全体|全體)|不\s*@\s*(?:全体|全體)|不艾特全体|不艾特全體)?$/i);
+  if (match) {
+    const resolved = await opsResolveActivity(env, { query: match[1], groupId: preferredGroupId, userId, role: effectiveRole, privateMode: isPrivate });
+    if (!resolved.activity) return { handled: true, text: "找不到要通知的活动。" };
+    const mode = /@\s*(?:全体|全體)|艾特全体|艾特全體/.test(match[2] || "") && !/^不/.test(String(match[2] || "").trim()) ? "all" : "none";
+    const result = await opsAnnounceActivity(env, resolved.activity, { actorId: userId, mode });
+    return { handled: true, text: result.message };
+  }
+
+  const createPayload = qqaiParseNaturalActivityCreate(normalized, preferredGroupId);
+  if (createPayload) {
+    if (!createPayload.title) return { handled: true, text: "请补充活动名称，例如：建立一个叫“周末游戏夜”的活动，限 20 人，可以候补。" };
+    if (!createPayload.groupIds.length) return { handled: true, text: "私聊建立活动前，请先在 Portal 设置默认群；或直接在目标群里 @我 建立。" };
+    for (const targetGroupId of createPayload.groupIds) {
+      const targetRole = await resolvePortalRole(env, userId, targetGroupId);
+      const manage = await opsEffectiveCapability(env, { groupId: targetGroupId, qq: userId, role: targetRole, capability: "activity.manage" });
+      if (!manage.allowed) return { handled: true, text: `你没有群 ${targetGroupId} 的活动管理权限。` };
+    }
+    if (createPayload.groupIds.length > 1) {
+      const targetRole = await resolvePortalRole(env, userId, createPayload.groupIds[0]);
+      const cross = await opsEffectiveCapability(env, { groupId: createPayload.groupIds[0], qq: userId, role: targetRole, capability: "activity.cross_group" });
+      if (!cross.allowed) return { handled: true, text: "你没有跨独立群统整活动的权限。" };
+    }
+    if (createPayload.announceMode === "all") {
+      for (const targetGroupId of createPayload.groupIds) {
+        const targetRole = await resolvePortalRole(env, userId, targetGroupId);
+        const mentionAll = await opsEffectiveCapability(env, { groupId: targetGroupId, qq: userId, role: targetRole, capability: "activity.mention_all" });
+        if (!mentionAll.allowed) return { handled: true, text: `你没有群 ${targetGroupId} 的活动通知 @全体权限。可以改说“不 @全体”。` };
+      }
+    }
+    await dbPut(env, pendingKey, JSON.stringify({ payload: createPayload, createdAt: Date.now(), expiresAt: Date.now() + 2 * 60 * 1000 }));
+    const startText = createPayload.startAt ? new Date(createPayload.startAt).toLocaleString("zh-CN", { timeZone: "Asia/Taipei", hour12: false }) : "未设置";
+    const deadlineText = createPayload.signupDeadline ? new Date(createPayload.signupDeadline).toLocaleString("zh-CN", { timeZone: "Asia/Taipei", hour12: false }) : "未设置";
+    return { handled: true, text: `我理解为：\n建立活动：${createPayload.title}\n目标群：${createPayload.groupIds.join("、")}\n人数上限：${createPayload.capacity || "不限"}\n候补：${createPayload.waitlistEnabled ? "开启" : "关闭"}\n开始时间：${startText}\n报名截止：${deadlineText}\n建立后通知：${createPayload.announceOnCreate ? (createPayload.announceMode === "all" ? "发送并 @全体" : "发送但不 @全体") : "不发送"}\n\n回复“确认建立活动”执行，回复“取消建立活动”放弃。确认有效期 2 分钟。` };
+  }
+
+  return { handled: false, text: looksActivity ? "" : undefined };
+}
 async function opsProcessAutomations(env, now = Date.now()) {
   // 到期活动／投票自动关闭；临时权限、临时群规与维护模式自动失效。
   for (const type of ["activity", "poll", "temp_rule", "handoff"]) {
@@ -9998,6 +10607,16 @@ async function handleOpsPortalApi(request, env, url, path, body, authed) {
       const inviteGroupGate = await opsRequire(env, authed, "activity.invite", String(body.activityGroupId).replace(/\D/g, ""));
       if (!inviteGroupGate.ok) return inviteGroupGate.response;
     }
+    if (type === "activity" && body.announceOnCreate) {
+      for (const targetGroupId of requestedGroups) {
+        const announceGate = await opsRequire(env, authed, "activity.announce", targetGroupId);
+        if (!announceGate.ok) return announceGate.response;
+        if (body.announceMode === "all") {
+          const mentionAllGate = await opsRequire(env, authed, "activity.mention_all", targetGroupId);
+          if (!mentionAllGate.ok) return mentionAllGate.response;
+        }
+      }
+    }
     const existing = body.id ? await readJson(env, opsRecordKey(type, body.id), null) : null;
     if (body.id && !existing) return jsonResponse({ ok: false, message: "找不到记录。" }, 404);
     if (existing && ["suggestion", "bug", "quality_feedback"].includes(type) && String(existing.creatorId || "") !== String(authed.qq)) {
@@ -10006,7 +10625,9 @@ async function handleOpsPortalApi(request, env, url, path, body, authed) {
       if (!manageGate.ok) return manageGate.response;
     }
     const item = await opsSaveRecord(env, { type, existing, groupId, actorId: authed.qq, actorName: type === "suggestion" ? "匿名提交者" : authed.qq, data: { ...body, groupIds: requestedGroups } });
-    return jsonResponse({ ok: true, message: existing ? "记录已更新。" : "记录已建立。", item });
+    let announcement = null;
+    if (type === "activity" && body.announceOnCreate && !existing) announcement = await opsAnnounceActivity(env, item, { actorId: authed.qq, mode: body.announceMode || "none" });
+    return jsonResponse({ ok: true, message: existing ? "记录已更新。" : announcement ? `记录已建立。${announcement.message}` : "记录已建立。", item, announcement });
   }
 
   if (request.method === "DELETE" && path === "/ops/records") {
@@ -10048,6 +10669,23 @@ async function handleOpsPortalApi(request, env, url, path, body, authed) {
     const activity = await readJson(env, opsRecordKey("activity", body.id), null);
     const result = activity ? await opsLeaveActivity(env, activity, authed.qq) : { ok: false, message: "找不到活动。" };
     return jsonResponse(result, result.ok ? 200 : 404);
+  }
+
+  if (request.method === "POST" && path === "/ops/activity/announce") {
+    const activity = await readJson(env, opsRecordKey("activity", body.id), null);
+    if (!activity) return jsonResponse({ ok: false, message: "找不到活动。" }, 404);
+    const mode = body.mode === "all" ? "all" : "none";
+    const targetGroups = [...new Set((activity.groupIds || [activity.groupId]).map(value => String(value || "").replace(/\D/g, "")).filter(Boolean))];
+    for (const targetGroupId of targetGroups) {
+      const announceGate = await opsRequire(env, authed, "activity.announce", targetGroupId);
+      if (!announceGate.ok) return announceGate.response;
+      if (mode === "all") {
+        const mentionAllGate = await opsRequire(env, authed, "activity.mention_all", targetGroupId);
+        if (!mentionAllGate.ok) return mentionAllGate.response;
+      }
+    }
+    const result = await opsAnnounceActivity(env, activity, { actorId: authed.qq, mode });
+    return jsonResponse(result, result.ok ? 200 : result.partial ? 207 : 400);
   }
 
   if (request.method === "POST" && path === "/ops/activity/invite") {
@@ -12117,7 +12755,7 @@ function applyRoleVisibility(){if(!session)return;var p=session.permissions||{},
 var opsBootstrap=null;var opsWorkspaces={};var opsLoading=null;
 function opsAppendCard(viewId,html){var view=$(viewId);if(!view)return null;var wrap=document.createElement('div');wrap.className='ops-integrated-block';wrap.innerHTML=html;view.appendChild(wrap);return wrap}
 function opsWorkspaceOptions(types){var defs=(opsBootstrap&&opsBootstrap.recordTypes)||{};return (types||[]).filter(function(k){return defs[k]}).map(function(k){return '<option value="'+esc(k)+'">'+esc(defs[k].name)+'</option>'}).join('')}
-function opsWorkspaceHtml(prefix,title,description,types,advanced){advanced=advanced||{};return '<div class="section-head"><div><h3>'+esc(title)+'</h3><p>'+esc(description)+'</p></div><button id="'+prefix+'Reload" class="btn">重新加载</button></div><div class="grid"><div class="card span-5"><h3>建立记录</h3><div class="field"><label>类型</label><select id="'+prefix+'Type"></select></div><div class="field"><label>标题</label><input id="'+prefix+'Title"></div><div class="field"><label>说明／内容</label><textarea id="'+prefix+'Description"></textarea></div>'+(advanced.activity?'<div class="field"><label>跨独立群统整群号（逗号分隔）</label><input id="'+prefix+'GroupIds" placeholder="留空＝当前群"></div><div class="field"><label>额外活动群号</label><input id="'+prefix+'ActivityGroup" inputmode="numeric"></div><div class="field"><label>人数上限（0＝不限）</label><input id="'+prefix+'Capacity" type="number" min="0" value="0"></div><div class="field"><label>投票选项（一行一个）</label><textarea id="'+prefix+'Options"></textarea></div>':'')+'<details><summary>进阶参数 JSON</summary><div class="field"><textarea id="'+prefix+'AdvancedJson" placeholder="选填；只接受 JSON"></textarea></div></details><button id="'+prefix+'Create" class="btn primary" style="width:100%">建立</button></div><div class="card span-7"><div class="row"><h3 class="grow">记录列表</h3><select id="'+prefix+'ListType"></select></div><div id="'+prefix+'RecordList" class="list"><div class="empty">尚未加载</div></div></div></div>'}
+function opsWorkspaceHtml(prefix,title,description,types,advanced){advanced=advanced||{};return '<div class="section-head"><div><h3>'+esc(title)+'</h3><p>'+esc(description)+'</p></div><button id="'+prefix+'Reload" class="btn">重新加载</button></div><div class="grid"><div class="card span-5"><h3>建立记录</h3><div class="field"><label>类型</label><select id="'+prefix+'Type"></select></div><div class="field"><label>标题</label><input id="'+prefix+'Title"></div><div class="field"><label>说明／内容</label><textarea id="'+prefix+'Description"></textarea></div>'+(advanced.activity?'<div class="field"><label>跨独立群统整群号（逗号分隔）</label><input id="'+prefix+'GroupIds" placeholder="留空＝当前群"></div><div class="field"><label>额外活动群号</label><input id="'+prefix+'ActivityGroup" inputmode="numeric"></div><div class="field"><label>人数上限（0＝不限）</label><input id="'+prefix+'Capacity" type="number" min="0" value="0"></div><label class="switch"><input id="'+prefix+'AnnounceOnCreate" type="checkbox">建立后立即发送报名通知</label><div class="field"><label>报名通知方式</label><select id="'+prefix+'AnnounceMode"><option value="none">发送但不 @全体</option><option value="all">发送并 @全体（需要额外权限）</option></select></div><div class="field"><label>投票选项（一行一个）</label><textarea id="'+prefix+'Options"></textarea></div>':'')+'<details><summary>进阶参数 JSON</summary><div class="field"><textarea id="'+prefix+'AdvancedJson" placeholder="选填；只接受 JSON"></textarea></div></details><button id="'+prefix+'Create" class="btn primary" style="width:100%">建立</button></div><div class="card span-7"><div class="row"><h3 class="grow">记录列表</h3><select id="'+prefix+'ListType"></select></div><div id="'+prefix+'RecordList" class="list"><div class="empty">尚未加载</div></div></div></div>'}
 function opsRegisterWorkspace(prefix,viewId,title,description,types,advanced){if(opsWorkspaces[prefix])return;var holder=opsAppendCard(viewId,opsWorkspaceHtml(prefix,title,description,types,advanced));if(!holder)return;opsWorkspaces[prefix]={prefix:prefix,types:types,advanced:advanced||{}};$(prefix+'Reload').onclick=function(){opsLoadWorkspace(prefix)};$(prefix+'Create').onclick=function(){opsCreateRecordFrom(prefix)};$(prefix+'ListType').onchange=function(){opsLoadWorkspace(prefix)};}
 function ensureOperationsViews(){
   if($('opsIntegratedMarker'))return;
@@ -12155,9 +12793,9 @@ async function loadOperations(){
   opsLoading=api('/ops/bootstrap').then(function(r){if(!r.ok){toast(r.message||'营运资料加载失败');return r}opsBootstrap=r;var s=r.settings||{};opsSetChecked('opsQuietEnabled',s.quietHoursEnabled);opsSetValue('opsQuietStart',s.quietStart||'23:00');opsSetValue('opsQuietEnd',s.quietEnd||'08:00');opsSetValue('opsQuietPolicy',s.quietPolicy||'defer');opsSetChecked('opsMaintenance',s.maintenanceMode);opsSetChecked('opsEmergency',s.emergencyLock);opsSetChecked('opsFuse',s.fuseEnabled!==false);opsSetChecked('opsAnomaly',s.anomalyDetectionEnabled!==false);opsSetChecked('opsScheduleRetry',s.scheduleRetryEnabled!==false);opsSetValue('opsScheduleRetryMax',Number(s.scheduleRetryMax||3));opsSetValue('opsScheduleGrace',Number(s.scheduleRetryGraceMinutes||30));opsSetChecked('opsDigestEnabled',s.dailyDigestEnabled);opsSetValue('opsDigestTime',s.dailyDigestTime||'09:00');opsSetValue('opsDigestRecipients',(s.dailyDigestRecipientIds||[]).join(','));opsSetValue('opsRetention',s.retentionDays||90);opsSetValue('opsSamplePercent',Number(s.ruleSampleReviewPercent||0));Object.keys(opsWorkspaces).forEach(function(prefix){var ws=opsWorkspaces[prefix],opts=opsTypeOptionsFor(ws.types),type=$(prefix+'Type'),list=$(prefix+'ListType');if(type){var old=type.value;type.innerHTML=opts;if(old&&ws.types.includes(old))type.value=old}if(list){var oldList=list.value;list.innerHTML=opts;if(oldList&&ws.types.includes(oldList))list.value=oldList}});var caps=(r.capabilities||[]),allowed=caps.filter(function(x){return x.allowed}).length,total=caps.length,records=Object.values(r.summaries||{}).reduce(function(a,b){return a+Number(b||0)},0);if($('opsSummary'))$('opsSummary').innerHTML='<div class="card span-4"><div class="metric-label">可用权限</div><div class="metric-value">'+allowed+'/'+total+'</div></div><div class="card span-4"><div class="metric-label">营运记录</div><div class="metric-value">'+records+'</div></div><div class="card span-4"><div class="metric-label">版本</div><div class="metric-value">'+esc(r.version)+'</div></div>';return r}).finally(function(){opsLoading=null});return opsLoading
 }
 async function opsLoadWorkspace(prefix){var ws=opsGetWorkspace(prefix),box=$(prefix+'RecordList');if(!ws||!box)return;if(!currentGroup){box.innerHTML='<div class="empty">请先选择群组。</div>';return}var boot=await loadOperations();if(!boot||!boot.ok){box.innerHTML='<div class="empty">无法加载营运资料。</div>';return}var type=$(prefix+'ListType').value||ws.types[0];var r=await api('/ops/records?type='+encodeURIComponent(type));if(!r.ok){box.innerHTML='<div class="empty">'+esc(r.message)+'</div>';return}box.innerHTML=(r.records||[]).map(function(x){return opsRecordCard(x,type)}).join('')||'<div class="empty">没有记录</div>';opsBindRecordActions(box,type,prefix)}
-async function opsCreateRecordFrom(prefix){var ws=opsGetWorkspace(prefix);if(!ws)return;await loadOperations();var type=$(prefix+'Type').value,title=$(prefix+'Title').value.trim(),description=$(prefix+'Description').value.trim();if(!title)return toast('请填写标题');var advanced={},raw=$(prefix+'AdvancedJson').value.trim();if(raw){try{advanced=JSON.parse(raw)}catch(e){return toast('进阶参数 JSON 格式错误')}}var data=Object.assign({},advanced,{type:type,title:title,description:description});if(ws.advanced.activity){data.groupIds=($(prefix+'GroupIds').value||'').split(/[,，\s]+/).filter(Boolean);data.activityGroupId=$(prefix+'ActivityGroup').value;data.capacity=Number($(prefix+'Capacity').value||0);data.options=($(prefix+'Options').value||'').split(/\n/).map(function(x){return x.trim()}).filter(Boolean);data.waitlistEnabled=advanced.waitlistEnabled!==false;data.inviteMode=data.activityGroupId?(advanced.inviteMode||'approve_pending'):(advanced.inviteMode||'none')}var r=await api('/ops/records','POST',data);toast(r.message||'完成');if(r.ok){$(prefix+'Title').value='';$(prefix+'Description').value='';$(prefix+'AdvancedJson').value='';if($(prefix+'Options'))$(prefix+'Options').value='';$(prefix+'ListType').value=type;opsLoadWorkspace(prefix)}}
-function opsRecordCard(x,type){var meta=(x.id||'')+'｜'+(x.status||'')+'｜'+new Date(Number(x.updatedAt||x.createdAt||0)).toLocaleString();if(type==='activity')meta+='｜正式 '+Number(x.confirmedCount||0)+(x.capacity?'/'+x.capacity:'')+'｜候补 '+Number(x.waitlistCount||0)+'｜统整群 '+(x.groupIds||[]).join(',')+(x.activityGroupId?'｜活动群 '+x.activityGroupId:'');if(type==='poll')meta+='｜投票人数 '+Number(x.voterCount||0);if(x.publicCode)meta+='｜'+x.publicCode;var extra='',buttons=['<button class="btn" data-ops-versions="'+esc(x.id)+'">版本</button>','<button class="btn danger" data-ops-delete="'+esc(x.id)+'">删除</button>'];if(type==='activity'){buttons.unshift('<button class="btn primary" data-ops-join="'+esc(x.id)+'">报名</button>','<button class="btn" data-ops-leave="'+esc(x.id)+'">取消报名</button>');if(x.activityGroupId)buttons.unshift('<button class="btn" data-ops-invite-all="'+esc(x.id)+'">邀请全部正式报名者</button>');extra='<div class="list" style="margin-top:10px">'+(x.participants||[]).map(function(p){return '<div class="item"><div class="row"><div class="grow"><b>'+esc(p.userName||p.userId)+'</b><div class="item-meta">'+esc(p.userId)+'｜'+esc(p.status)+'｜来源群 '+esc(p.sourceGroupId||'')+'｜邀请 '+esc(p.inviteStatus||'未发送')+'</div></div><button class="btn" data-ops-invite="'+esc(x.id)+'" data-user="'+esc(p.userId)+'">邀请活动群</button></div></div>'}).join('')+'</div>'}if(type==='poll'){extra='<div class="row" style="margin-top:10px">'+(x.options||[]).map(function(o,i){var c=(x.voteCounts||[])[i]||0;return '<button class="btn" data-ops-vote="'+esc(x.id)+'" data-option="'+i+'">'+esc(o)+'（'+c+'）</button>'}).join('')+'</div>';buttons.unshift('<button class="btn" data-ops-poll-close="'+esc(x.id)+'">结束投票</button>')}if(type==='schedule_template')buttons.unshift('<button class="btn primary" data-ops-template-apply="'+esc(x.id)+'">套用模板</button>');if(type==='draft')buttons.unshift('<button class="btn primary" data-ops-draft-send="'+esc(x.id)+'">立即发送</button>','<button class="btn" data-ops-draft-schedule="'+esc(x.id)+'">转为排程</button>');if(type==='announcement_version')buttons.unshift('<button class="btn primary" data-ops-announcement="'+esc(x.id)+'">建立公告确认单</button>','<button class="btn" data-ops-todo="'+esc(x.id)+'">建立群待办确认单</button>');if(type==='deployment_snapshot')buttons.unshift('<button class="btn" data-ops-snapshot-restore="'+esc(x.id)+'">恢复快照</button>');return '<div class="item"><div class="item-title">'+esc(x.title||x.id)+'</div><div class="item-meta">'+esc(meta)+'</div><div class="item-body" style="white-space:pre-wrap">'+esc(x.description||x.text||'')+'</div>'+extra+'<details><summary>技术资料</summary><pre>'+esc(JSON.stringify(x,null,2))+'</pre></details><div class="row" style="margin-top:10px">'+buttons.join('')+'</div></div>'}
-function opsBindRecordActions(box,type,prefix){box.querySelectorAll('[data-ops-delete]').forEach(function(b){b.onclick=function(){opsDeleteRecord(type,this.dataset.opsDelete,prefix)}});box.querySelectorAll('[data-ops-join]').forEach(function(b){b.onclick=function(){opsActivityAction('/ops/activity/join',this.dataset.opsJoin,prefix)}});box.querySelectorAll('[data-ops-leave]').forEach(function(b){b.onclick=function(){opsActivityAction('/ops/activity/leave',this.dataset.opsLeave,prefix)}});box.querySelectorAll('[data-ops-invite]').forEach(function(b){b.onclick=function(){opsInviteParticipant(this.dataset.opsInvite,this.dataset.user,prefix)}});box.querySelectorAll('[data-ops-invite-all]').forEach(function(b){b.onclick=function(){opsUtilityPost('/ops/activity/invite-all',{id:this.dataset.opsInviteAll},true,null,prefix)}});box.querySelectorAll('[data-ops-vote]').forEach(function(b){b.onclick=function(){opsVote(this.dataset.opsVote,Number(this.dataset.option),prefix)}});box.querySelectorAll('[data-ops-poll-close]').forEach(function(b){b.onclick=function(){opsUtilityPost('/ops/poll/close',{id:this.dataset.opsPollClose},true,null,prefix)}});box.querySelectorAll('[data-ops-template-apply]').forEach(function(b){b.onclick=function(){opsApplyTemplate(this.dataset.opsTemplateApply)}});box.querySelectorAll('[data-ops-draft-send]').forEach(function(b){b.onclick=function(){opsUtilityPost('/ops/draft/send',{id:this.dataset.opsDraftSend},true,null,prefix)}});box.querySelectorAll('[data-ops-draft-schedule]').forEach(function(b){b.onclick=function(){opsDraftToSchedule(this.dataset.opsDraftSchedule)}});box.querySelectorAll('[data-ops-announcement]').forEach(function(b){b.onclick=function(){opsUtilityPost('/ops/announcement/publish',{id:this.dataset.opsAnnouncement,asTodo:false},true,null,prefix)}});box.querySelectorAll('[data-ops-todo]').forEach(function(b){b.onclick=function(){opsUtilityPost('/ops/announcement/publish',{id:this.dataset.opsTodo,asTodo:true},true,null,prefix)}});box.querySelectorAll('[data-ops-snapshot-restore]').forEach(function(b){b.onclick=function(){opsRestoreSnapshotUi(this.dataset.opsSnapshotRestore,prefix)}});box.querySelectorAll('[data-ops-versions]').forEach(function(b){b.onclick=function(){opsVersionsUi(type,this.dataset.opsVersions,prefix)}})}
+async function opsCreateRecordFrom(prefix){var ws=opsGetWorkspace(prefix);if(!ws)return;await loadOperations();var type=$(prefix+'Type').value,title=$(prefix+'Title').value.trim(),description=$(prefix+'Description').value.trim();if(!title)return toast('请填写标题');if(type==='activity'&&!opsHas('activity.manage'))return toast('你没有建立活动的权限');var advanced={},raw=$(prefix+'AdvancedJson').value.trim();if(raw){try{advanced=JSON.parse(raw)}catch(e){return toast('进阶参数 JSON 格式错误')}}var data=Object.assign({},advanced,{type:type,title:title,description:description});if(ws.advanced.activity){data.groupIds=($(prefix+'GroupIds').value||'').split(/[,，\s]+/).filter(Boolean);data.activityGroupId=$(prefix+'ActivityGroup').value;data.capacity=Number($(prefix+'Capacity').value||0);data.options=($(prefix+'Options').value||'').split(/\n/).map(function(x){return x.trim()}).filter(Boolean);data.waitlistEnabled=advanced.waitlistEnabled!==false;data.inviteMode=data.activityGroupId?(advanced.inviteMode||'approve_pending'):(advanced.inviteMode||'none');data.announceOnCreate=!!($(prefix+'AnnounceOnCreate')&&$(prefix+'AnnounceOnCreate').checked);data.announceMode=$(prefix+'AnnounceMode')?$(prefix+'AnnounceMode').value:'none';if(data.announceOnCreate&&!opsHas('activity.announce'))return toast('你没有发送活动通知的权限');if(data.announceMode==='all'&&!opsHas('activity.mention_all'))return toast('你没有活动通知 @全体权限')}var r=await api('/ops/records','POST',data);toast(r.message||'完成');if(r.ok){$(prefix+'Title').value='';$(prefix+'Description').value='';$(prefix+'AdvancedJson').value='';if($(prefix+'Options'))$(prefix+'Options').value='';$(prefix+'ListType').value=type;opsLoadWorkspace(prefix)}}
+function opsRecordCard(x,type){var meta=(x.id||'')+'｜'+(x.status||'')+'｜'+new Date(Number(x.updatedAt||x.createdAt||0)).toLocaleString();if(type==='activity')meta+='｜正式 '+Number(x.confirmedCount||0)+(x.capacity?'/'+x.capacity:'')+'｜候补 '+Number(x.waitlistCount||0)+'｜统整群 '+(x.groupIds||[]).join(',')+(x.activityGroupId?'｜活动群 '+x.activityGroupId:'');if(type==='poll')meta+='｜投票人数 '+Number(x.voterCount||0);if(x.publicCode)meta+='｜'+x.publicCode;var extra='',buttons=['<button class="btn" data-ops-versions="'+esc(x.id)+'">版本</button>','<button class="btn danger" data-ops-delete="'+esc(x.id)+'">删除</button>'];if(type==='activity'){if(opsHas('activity.join'))buttons.unshift('<button class="btn primary" data-ops-join="'+esc(x.id)+'">报名</button>','<button class="btn" data-ops-leave="'+esc(x.id)+'">取消报名</button>');if(opsHas('activity.announce'))buttons.unshift('<button class="btn" data-ops-announce-none="'+esc(x.id)+'">发送通知（不 @全体）</button>');if(opsHas('activity.mention_all'))buttons.unshift('<button class="btn" data-ops-announce-all="'+esc(x.id)+'">发送通知（@全体）</button>');if(x.activityGroupId&&opsHas('activity.invite'))buttons.unshift('<button class="btn" data-ops-invite-all="'+esc(x.id)+'">邀请全部正式报名者</button>');extra='<div class="list" style="margin-top:10px">'+(x.participants||[]).map(function(p){return '<div class="item"><div class="row"><div class="grow"><b>'+esc(p.userName||p.userId)+'</b><div class="item-meta">'+esc(p.userId)+'｜'+esc(p.status)+'｜来源群 '+esc(p.sourceGroupId||'')+'｜邀请 '+esc(p.inviteStatus||'未发送')+'</div></div>'+(opsHas('activity.invite')?'<button class="btn" data-ops-invite="'+esc(x.id)+'" data-user="'+esc(p.userId)+'">邀请活动群</button>':'')+'</div></div>'}).join('')+'</div>'}if(type==='poll'){extra='<div class="row" style="margin-top:10px">'+(x.options||[]).map(function(o,i){var c=(x.voteCounts||[])[i]||0;return '<button class="btn" data-ops-vote="'+esc(x.id)+'" data-option="'+i+'">'+esc(o)+'（'+c+'）</button>'}).join('')+'</div>';buttons.unshift('<button class="btn" data-ops-poll-close="'+esc(x.id)+'">结束投票</button>')}if(type==='schedule_template')buttons.unshift('<button class="btn primary" data-ops-template-apply="'+esc(x.id)+'">套用模板</button>');if(type==='draft')buttons.unshift('<button class="btn primary" data-ops-draft-send="'+esc(x.id)+'">立即发送</button>','<button class="btn" data-ops-draft-schedule="'+esc(x.id)+'">转为排程</button>');if(type==='announcement_version')buttons.unshift('<button class="btn primary" data-ops-announcement="'+esc(x.id)+'">建立公告确认单</button>','<button class="btn" data-ops-todo="'+esc(x.id)+'">建立群待办确认单</button>');if(type==='deployment_snapshot')buttons.unshift('<button class="btn" data-ops-snapshot-restore="'+esc(x.id)+'">恢复快照</button>');return '<div class="item"><div class="item-title">'+esc(x.title||x.id)+'</div><div class="item-meta">'+esc(meta)+'</div><div class="item-body" style="white-space:pre-wrap">'+esc(x.description||x.text||'')+'</div>'+extra+'<details><summary>技术资料</summary><pre>'+esc(JSON.stringify(x,null,2))+'</pre></details><div class="row" style="margin-top:10px">'+buttons.join('')+'</div></div>'}
+function opsBindRecordActions(box,type,prefix){box.querySelectorAll('[data-ops-delete]').forEach(function(b){b.onclick=function(){opsDeleteRecord(type,this.dataset.opsDelete,prefix)}});box.querySelectorAll('[data-ops-join]').forEach(function(b){b.onclick=function(){opsActivityAction('/ops/activity/join',this.dataset.opsJoin,prefix)}});box.querySelectorAll('[data-ops-leave]').forEach(function(b){b.onclick=function(){opsActivityAction('/ops/activity/leave',this.dataset.opsLeave,prefix)}});box.querySelectorAll('[data-ops-announce-none]').forEach(function(b){b.onclick=function(){opsUtilityPost('/ops/activity/announce',{id:this.dataset.opsAnnounceNone,mode:'none'},true,null,prefix)}});box.querySelectorAll('[data-ops-announce-all]').forEach(function(b){b.onclick=function(){opsUtilityPost('/ops/activity/announce',{id:this.dataset.opsAnnounceAll,mode:'all'},true,null,prefix)}});box.querySelectorAll('[data-ops-invite]').forEach(function(b){b.onclick=function(){opsInviteParticipant(this.dataset.opsInvite,this.dataset.user,prefix)}});box.querySelectorAll('[data-ops-invite-all]').forEach(function(b){b.onclick=function(){opsUtilityPost('/ops/activity/invite-all',{id:this.dataset.opsInviteAll},true,null,prefix)}});box.querySelectorAll('[data-ops-vote]').forEach(function(b){b.onclick=function(){opsVote(this.dataset.opsVote,Number(this.dataset.option),prefix)}});box.querySelectorAll('[data-ops-poll-close]').forEach(function(b){b.onclick=function(){opsUtilityPost('/ops/poll/close',{id:this.dataset.opsPollClose},true,null,prefix)}});box.querySelectorAll('[data-ops-template-apply]').forEach(function(b){b.onclick=function(){opsApplyTemplate(this.dataset.opsTemplateApply)}});box.querySelectorAll('[data-ops-draft-send]').forEach(function(b){b.onclick=function(){opsUtilityPost('/ops/draft/send',{id:this.dataset.opsDraftSend},true,null,prefix)}});box.querySelectorAll('[data-ops-draft-schedule]').forEach(function(b){b.onclick=function(){opsDraftToSchedule(this.dataset.opsDraftSchedule)}});box.querySelectorAll('[data-ops-announcement]').forEach(function(b){b.onclick=function(){opsUtilityPost('/ops/announcement/publish',{id:this.dataset.opsAnnouncement,asTodo:false},true,null,prefix)}});box.querySelectorAll('[data-ops-todo]').forEach(function(b){b.onclick=function(){opsUtilityPost('/ops/announcement/publish',{id:this.dataset.opsTodo,asTodo:true},true,null,prefix)}});box.querySelectorAll('[data-ops-snapshot-restore]').forEach(function(b){b.onclick=function(){opsRestoreSnapshotUi(this.dataset.opsSnapshotRestore,prefix)}});box.querySelectorAll('[data-ops-versions]').forEach(function(b){b.onclick=function(){opsVersionsUi(type,this.dataset.opsVersions,prefix)}})}
 async function opsDeleteRecord(type,id,prefix){if(!(await confirmModal('删除后不会再显示，但审计记录仍保留。','删除记录',{danger:true})))return;var r=await api('/ops/records','DELETE',{type:type,id:id});toast(r.message||'完成');if(r.ok)opsLoadWorkspace(prefix)}
 async function opsActivityAction(path,id,prefix){var r=await api(path,'POST',{id:id});toast(r.message||'完成');if(r.ok)opsLoadWorkspace(prefix)}
 async function opsInviteParticipant(id,userId,prefix){var r=await api('/ops/activity/invite','POST',{id:id,userId:userId});toast(r.message||'邀请失败');if(r.ok)opsLoadWorkspace(prefix)}
@@ -13275,9 +13913,29 @@ export class OneBotHub {
           });
         }
       } catch (error) {
-        console.error("send reply failed", error);
-        await this.recordIngress(body, "send_failed", { explicit: eventHasBotMention(body), error: String(error?.message || error).slice(0, 300) }).catch(() => {});
-        if (payload?.ai_log_id) await updateAiDecisionLog(this.env, payload.ai_log_id, { sendStatus: "failed", sendError: String(error?.message || error), sendFailedAt: Date.now() }).catch(() => null);
+        console.error("send reply over websocket failed", error);
+        let httpError = null;
+        try {
+          const response = await sendOneBotHttpAction(this.env, action, params, 12000);
+          const messageId = response?.message_id ?? response?.messageId ?? response?.data?.message_id ?? response?.data?.messageId;
+          await this.recordIngress(body, "sent_http_fallback", { explicit: eventHasBotMention(body), sentMessageId: String(messageId || ""), websocketError: String(error?.message || error).slice(0, 300) }).catch(() => {});
+          if (payload?.ai_log_id) await updateAiDecisionLog(this.env, payload.ai_log_id, { sendStatus: "sent_http_fallback", sentMessageId: String(messageId || ""), sentAt: Date.now(), websocketSendError: String(error?.message || error) }).catch(() => null);
+          if (messageId && payload.record_reply === true) {
+            await recordStructuredMessage(this.env, {
+              messageId: String(messageId), groupId: String(body.group_id || ""), senderId: String(body.self_id || ""), senderName: "QQAI",
+              text: extractMessageText(message), mentions: plan.mentionIds || [], replyId: plan.quoteMessageId || plan.replyId || "", media: [],
+              source: "ai", createdAt: Date.now()
+            }).catch(() => null);
+          }
+        } catch (fallbackError) {
+          httpError = fallbackError;
+          console.error("send reply http fallback failed", fallbackError);
+        }
+        if (httpError) {
+          const combinedError = `websocket=${String(error?.message || error)}; http=${String(httpError?.message || httpError)}`;
+          await this.recordIngress(body, "send_failed", { explicit: eventHasBotMention(body), error: combinedError.slice(0, 500) }).catch(() => {});
+          if (payload?.ai_log_id) await updateAiDecisionLog(this.env, payload.ai_log_id, { sendStatus: "failed", sendError: combinedError, sendFailedAt: Date.now() }).catch(() => null);
+        }
       } finally {
         if (payload.thinking_message_id) await this.retractThinkingIndicator(body, payload.thinking_message_id).catch(() => {});
       }
