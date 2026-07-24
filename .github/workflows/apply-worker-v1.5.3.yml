@@ -4,6 +4,9 @@ on:
   push:
     branches: [worker-v1.5.3-rule-actions]
     paths: ['.qqai-v1.5.3-trigger']
+  pull_request:
+    branches: [main]
+    paths: ['.qqai-v1.5.3-trigger']
 
 permissions:
   contents: write
@@ -19,6 +22,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
 
       - name: Reconstruct and apply exact patch
         shell: bash
