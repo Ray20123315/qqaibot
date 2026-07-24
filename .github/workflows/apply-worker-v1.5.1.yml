@@ -1,0 +1,143 @@
+name: Apply worker v1.5.1
+
+on:
+  pull_request:
+    branches: [main]
+    paths: ['.qqai-pr-trigger-v1.5.1']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: apply-worker-v1.5.1
+  cancel-in-progress: false
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Reconstruct and apply exact patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          grep -F 'const VERSION = "1.5.0";' worker.js
+          echo 'c3190291fa2c0e40cb482da43b5bcf8a1318fc0c838f0ec40f8b931b8bdbe14d  worker.js' | sha256sum -c -
+          cat .qqai-patches/v1.5.1/chunk-* >/tmp/worker-v1.5.1.patch.gz.b64
+          echo 'b931701553e5ae6823d4cdaca18a701328f69f5050b81fc0c3b558099a640efe  /tmp/worker-v1.5.1.patch.gz.b64' | sha256sum -c -
+          base64 -d /tmp/worker-v1.5.1.patch.gz.b64 | gzip -d >/tmp/worker-v1.5.1.patch
+          echo '5ab8adba9c267e2ca49bea2aaa562aa6867a7ab59ce278c8966175d39999c14e  /tmp/worker-v1.5.1.patch' | sha256sum -c -
+          git apply --check /tmp/worker-v1.5.1.patch
+          git apply /tmp/worker-v1.5.1.patch
+          echo 'dbb0fe773b663c61281d13b32397d08b595e4d291e3725430d0139488d5d6ca1  worker.js' | sha256sum -c -
+
+      - name: Validate standalone module and Portal
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --check worker.js
+          cp worker.js /tmp/worker-v1.5.1.mjs
+          node -e "import('/tmp/worker-v1.5.1.mjs').then(m=>{if(!m.default||!m.OneBotHub)throw Error('missing exports')})"
+          ! grep -Eq '^[[:space:]]*import[[:space:]]' worker.js
+          for token in \
+            'const VERSION = "1.5.1";' \
+            'QQAI_V1_R51_MODEL_ROUTING_ACTIVITY_FIX_MARKER' \
+            'function partitionGoogleApiKeys' \
+            'function modelHealthStatusLabel' \
+            'function modelCapabilityLabel' \
+            'async function callGoogleDecision' \
+            'async function callDeepSeekSummaryTask' \
+            'deepseek_emergency_window:index' \
+            'recordsNeverAutoDeleted: true' \
+            'verifiedBy: "send_group_msg"' \
+            '不 @全体时，以 send_group_msg 的实际结果为准'; do
+            grep -F "$token" worker.js
+          done
+          python - <<'PY'
+          from pathlib import Path
+          from html.parser import HTMLParser
+          import re
+          s=Path('worker.js').read_text()
+          a=s.index('function getPortalHomePage(host)')
+          a=s.index('String.raw`',a)+10
+          h=s[a:s.index('`);\n}',a)]
+          js=re.findall(r'<script(?: [^>]*)?>(.*?)</script>',h,re.S)
+          assert len(js)>=2
+          for i,x in enumerate(js): Path(f'/tmp/portal-{i}.js').write_text(x)
+          class P(HTMLParser):
+            def __init__(self): super().__init__(); self.ids=[]
+            def handle_starttag(self,t,a): self.ids += [v for k,v in a if k=='id']
+          p=P(); p.feed(h)
+          assert len(p.ids)==len(set(p.ids)), 'duplicate portal ids'
+          assert '审查判断' in h and '上下文整理' in h and '尚未检查' in s
+          assert "var names={decision:'审查判断',chat:'聊天回答'" in h
+          assert "m.statusLabel||m.status" in h
+          assert 'const byId = new Map()' in s
+          block=s[s.index('async function opsAnnounceActivity'):s.index('async function opsInviteActivityParticipant')]
+          assert 'announceMode === "all" && !botState?.exists' in block
+          assert 'announceMode === "none" && !botState?.exists' not in block
+          assert 'send_group_msg' in block and 'verifiedBy: "send_group_msg"' in block
+          PY
+          for f in /tmp/portal-*.js; do node --check "$f"; done
+
+      - name: Test key routing and activity notification
+        shell: bash
+        run: |
+          set -euo pipefail
+          cp worker.js /tmp/w151test.mjs
+          cat >>/tmp/w151test.mjs <<'EOF'
+          export { partitionGoogleApiKeys, modelHealthStatusLabel, modelCapabilityLabel, getBotGroupRole, opsAnnounceActivity };
+          EOF
+          cat >/tmp/test-v151.mjs <<'EOF'
+          import cryptoModule from 'node:crypto';
+          if (!globalThis.crypto) globalThis.crypto = cryptoModule.webcrypto;
+          const m = await import('file:///tmp/w151test.mjs');
+          const assert = (x,msg) => { if(!x) throw new Error(msg); };
+          const p = m.partitionGoogleApiKeys({GEMINI_API_KEYS:'k1,k2,k3'});
+          assert(JSON.stringify(p.gemmaDecision)==='["k1","k2"]','gemma decision pool');
+          assert(JSON.stringify(p.gemmaChat)==='["k3"]','gemma chat pool');
+          assert(JSON.stringify(p.geminiDecision)==='["k1"]','gemini decision pool');
+          assert(JSON.stringify(p.geminiChat)==='["k2","k3"]','gemini chat pool');
+          assert(m.modelHealthStatusLabel('ok')==='正常','status label');
+          assert(m.modelHealthStatusLabel('unknown')==='尚未检查','unknown label');
+          assert(m.modelCapabilityLabel('context_summary')==='上下文整理','capability label');
+          class Stmt {
+            constructor(db, sql){this.db=db;this.sql=sql;this.args=[];}
+            bind(...args){this.args=args;return this;}
+            async first(){const key=String(this.args[0]??'');if(/SELECT\s+value/i.test(this.sql))return this.db.map.has(key)?{value:this.db.map.get(key)}:null;return null;}
+            async run(){const key=String(this.args[0]??'');if(/INSERT/i.test(this.sql))this.db.map.set(key,String(this.args[1]??''));if(/DELETE/i.test(this.sql))this.db.map.delete(key);return{success:true};}
+            async all(){return{results:[]};}
+          }
+          class D1 {constructor(){this.map=new Map();}prepare(sql){return new Stmt(this,sql);}}
+          const db=new D1();
+          db.map.set('onebot:self_identity',JSON.stringify({userId:'999999',nickname:'bot',at:Date.now()}));
+          let sent=0;
+          const hub={idFromName:n=>n,get:()=>({fetch:async(_url,init)=>{const body=JSON.parse(init.body||'{}');if(body.action==='get_group_member_info')return new Response(JSON.stringify({ok:false,error:'probe failed'}),{status:500,headers:{'content-type':'application/json'}});if(body.action==='get_group_list')return new Response(JSON.stringify({ok:true,data:[]}),{headers:{'content-type':'application/json'}});if(body.action==='send_group_msg'){sent++;return new Response(JSON.stringify({ok:true,data:{message_id:1}}),{headers:{'content-type':'application/json'}});}return new Response(JSON.stringify({ok:true,data:{}}),{headers:{'content-type':'application/json'}});}})};
+          const env={DB:db,ONEBOT_HUB:hub,DEVELOPER_QQ:'3569028262'};
+          const role=await m.getBotGroupRole(env,'808882936');
+          assert(role.exists===false,'probe should be unconfirmed before send');
+          const activity={id:'a1',title:'测试活动',groupId:'808882936',groupIds:['808882936'],description:'',startAt:0,signupDeadline:0,capacity:0,waitlistEnabled:true};
+          const out=await m.opsAnnounceActivity(env,activity,{actorId:'3569028262',mode:'none'});
+          assert(out.ok===true&&sent===1,'non-all notification must use actual send result');
+          const healed=JSON.parse(db.map.get('onebot:self_group_role:808882936'));
+          assert(healed.exists===true&&healed.verifiedBy==='send_group_msg','group cache healing');
+          console.log('v1.5.1 runtime PASS');
+          EOF
+          node /tmp/test-v151.mjs
+
+      - name: Commit worker v1.5.1 to main
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -f .qqai-pr-trigger-v1.5.1
+          rm -rf .qqai-patches/v1.5.1
+          rm -f .github/workflows/apply-worker-v1.5.1.yml
+          git config user.name qqai-updater
+          git config user.email actions@users.noreply.github.com
+          git add -A
+          git commit -m 'Localize model routing and fix activity notice v1.5.1'
+          git push origin HEAD:main
