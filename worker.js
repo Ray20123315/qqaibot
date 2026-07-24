@@ -1,4 +1,5 @@
-const VERSION = "1.4.6";
+const VERSION = "1.5.0";
+const QQAI_V1_R50_AUTH_SECURITY_FREEZE_MARKER = "QQAI_V1_R50_AUTH_SECURITY_FREEZE_MARKER";
 const QQAI_V1_R46_ERROR_SEARCH_PROPOSAL_MARKER = "QQAI_V1_R46_ERROR_SEARCH_PROPOSAL_MARKER";
 const QQAI_V1_R45_DIRECT_LOOPBACK_RELIABILITY_MARKER = "QQAI_V1_R45_DIRECT_LOOPBACK_RELIABILITY_MARKER";
 const QQAI_V1_R44_PERSISTENT_LOGIN_PERMISSION_LIST_MOBILE_MARKER = "QQAI_V1_R44_PERSISTENT_LOGIN_PERMISSION_LIST_MOBILE_MARKER";
@@ -749,13 +750,17 @@ const QQAIWorker = {
 
       const code = generateSixDigitCode();
       const authKey = `portal_auth_code:${qq}`;
-      await dbPut(env, authKey, JSON.stringify({
-        code,
-        group,
-        qq,
-        expiresAt: Date.now() + 5 * 60 * 1000,
-        attempts: 0
-      }));
+      try {
+        await authDbPutStrict(env, authKey, JSON.stringify({
+          code,
+          group,
+          qq,
+          expiresAt: Date.now() + 5 * 60 * 1000,
+          attempts: 0
+        }));
+      } catch (error) {
+        return jsonResponse({ ok: false, code: "AUTH_STORAGE_UNAVAILABLE", message: "登录资料库暂时不可用，验证码尚未建立。请稍后重试。" }, 503);
+      }
 
       const verificationMessage = `【QQAIbot Portal 登入驗證碼】\n驗證碼：${code}\n有效期：5 分鐘。\n若非本人操作，請忽略。`;
       const delivery = await sendPortalVerificationMessage(env, qq, verificationMessage);
@@ -769,7 +774,7 @@ const QQAIWorker = {
       }).catch(() => {});
 
       if (!delivery.ok) {
-        await dbDel(env, authKey);
+        await authDbDelStrict(env, authKey).catch(() => {});
         const httpConfigured = Boolean(String(env.ONEBOT_HTTP_ACTION_URL || env.ONEBOT_HTTP_URL || env.NAPCAT_HTTP_URL || "").trim());
         return jsonResponse({
           ok: false,
@@ -793,26 +798,22 @@ const QQAIWorker = {
       try { payload = await request.json(); } catch (e) {}
       const qq = String(payload.qq || "").replace(/\D/g, "");
       const code = String(payload.code || "").replace(/\D/g, "");
-      const raw = await dbGet(env, `portal_auth_code:${qq}`);
-      if (!raw) return jsonResponse({ ok: false, message: "验证码不存在或已过期，请重新发送。" }, 400);
-
-      let record;
-      try { record = JSON.parse(raw); } catch (e) { record = null; }
-      if (!record || Date.now() > record.expiresAt) {
-        await dbDel(env, `portal_auth_code:${qq}`);
-        return jsonResponse({ ok: false, message: "验证码已过期，请重新发送。" }, 400);
+      if (!/^\d{5,12}$/.test(qq) || !/^\d{6}$/.test(code)) return jsonResponse({ ok: false, message: "请输入正确的 QQ 号和六位验证码。" }, 400);
+      let verified;
+      try {
+        verified = await verifyPortalVerificationCode(env, qq, code, { consume: false });
+      } catch (error) {
+        return jsonResponse({ ok: false, code: "AUTH_STORAGE_UNAVAILABLE", message: "登录资料库暂时不可用，验证码没有被消耗。请稍后重试。" }, 503);
       }
-
-      if (record.code !== code) {
-        record.attempts = (record.attempts || 0) + 1;
-        if (record.attempts >= 5) await dbDel(env, `portal_auth_code:${qq}`);
-        else await dbPut(env, `portal_auth_code:${qq}`, JSON.stringify(record));
-        return jsonResponse({ ok: false, message: "验证码错误。" }, 400);
-      }
-
-      await dbDel(env, `portal_auth_code:${qq}`);
+      if (!verified.ok) return jsonResponse(verified, 400);
       const remember = payload.remember !== false;
-      const session = await createPortalSession(env, { qq, group: "", groupId: "", persistent: remember });
+      let session;
+      try {
+        session = await createPortalSession(env, { qq, group: "", groupId: "", persistent: remember, authMethod: "qq_code" });
+        await authDbDelStrict(env, `portal_auth_code:${qq}`);
+      } catch (error) {
+        return jsonResponse({ ok: false, code: "SESSION_STORAGE_UNAVAILABLE", message: "验证码正确，但登录会话无法安全保存。验证码仍可再次使用，请稍后重试。" }, 503);
+      }
       return jsonResponse({
         ok: true,
         message: "登录成功，正在进入 Control Center。",
@@ -820,13 +821,74 @@ const QQAIWorker = {
         group: "",
         groupId: "",
         role: session.role,
-        permissions: session.permissions || {}
+        permissions: session.permissions || {},
+        passwordSetupAvailable: !(await authDbGetStrict(env, `portal_auth_password:${qq}`).catch(() => null))
       }, 200, { "Set-Cookie": portalSessionCookie(session.token, session.persistent ? DEFAULTS.portalSessionCookieSeconds : null) });
+    }
+
+    if (request.method === 'POST' && url.pathname === '/api/auth/login-password') {
+      let payload = {};
+      try { payload = await request.json(); } catch (e) {}
+      const qq = String(payload.qq || "").replace(/\D/g, "");
+      const password = String(payload.password || "");
+      if (!/^\d{5,12}$/.test(qq) || !password) return jsonResponse({ ok: false, message: "请输入正确的 QQ 号和密码。" }, 400);
+      try {
+        const guard = await readPasswordLoginGuard(env, qq);
+        if (Number(guard.lockUntil || 0) > Date.now()) {
+          return jsonResponse({ ok: false, code: "PASSWORD_LOGIN_LOCKED", message: `密码登录尝试过多，请在 ${Math.ceil((guard.lockUntil - Date.now()) / 60000)} 分钟后重试，或改用 QQ 验证码。` }, 429);
+        }
+        const passwordRecord = await readPortalAuthJson(env, `portal_auth_password:${qq}`, null);
+        if (!passwordRecord) return jsonResponse({ ok: false, code: "PASSWORD_NOT_SET", message: "此 QQ 尚未设置密码，请先使用 QQ 验证码登录。" }, 404);
+        if (!(await verifyPortalPassword(password, passwordRecord))) {
+          await notePasswordLoginFailure(env, qq);
+          return jsonResponse({ ok: false, code: "PASSWORD_INVALID", message: "QQ 号或密码错误。" }, 401);
+        }
+        const twoFactor = await readPortalAuthJson(env, `portal_auth_2fa:${qq}`, null);
+        let factorResult = { ok: true, method: "password" };
+        if (twoFactor?.enabled) {
+          const factorType = String(payload.factorType || "").toLowerCase();
+          const factorCode = String(payload.factorCode || "").trim();
+          if (!factorType || !factorCode) {
+            return jsonResponse({ ok: false, code: "TWO_FACTOR_REQUIRED", requiresTwoFactor: true, methods: ["totp", "backup", "qq_code"], message: "密码正确，请输入验证器动态码、备用码，或发送 QQ 验证码。" }, 202);
+          }
+          if (factorType === "totp") {
+            const secret = await decryptPortalAuthSecret(env, twoFactor.secret);
+            factorResult = { ok: await verifyTotpCode(secret, factorCode), method: "totp" };
+          } else if (factorType === "backup") {
+            const hash = await hashBackupCode(env, factorCode);
+            const index = Array.isArray(twoFactor.backupCodeHashes) ? twoFactor.backupCodeHashes.findIndex(item => constantTimeEqual(item, hash)) : -1;
+            factorResult = { ok: index >= 0, method: "backup", index };
+          } else if (factorType === "qq_code") {
+            const result = await verifyPortalVerificationCode(env, qq, factorCode, { consume: false });
+            factorResult = { ok: result.ok, method: "qq_code", message: result.message };
+          } else {
+            factorResult = { ok: false, method: factorType };
+          }
+          if (!factorResult.ok) {
+            await notePasswordLoginFailure(env, qq);
+            return jsonResponse({ ok: false, code: "TWO_FACTOR_INVALID", message: factorResult.message || "双因数验证码或备用码错误。" }, 401);
+          }
+        }
+        const remember = payload.remember !== false;
+        const session = await createPortalSession(env, { qq, group: "", groupId: "", persistent: remember, authMethod: twoFactor?.enabled ? `password_${factorResult.method}` : "password" });
+        if (twoFactor?.enabled && factorResult.method === "backup") {
+          twoFactor.backupCodeHashes.splice(factorResult.index, 1);
+          twoFactor.updatedAt = Date.now();
+          await authDbPutStrict(env, `portal_auth_2fa:${qq}`, JSON.stringify(twoFactor));
+        } else if (twoFactor?.enabled && factorResult.method === "qq_code") {
+          await authDbDelStrict(env, `portal_auth_code:${qq}`);
+        }
+        await clearPasswordLoginGuard(env, qq);
+        return jsonResponse({ ok: true, message: "密码登录成功。", qq, role: session.role, permissions: session.permissions || {} }, 200, { "Set-Cookie": portalSessionCookie(session.token, session.persistent ? DEFAULTS.portalSessionCookieSeconds : null) });
+      } catch (error) {
+        const secretMissing = error?.code === "PORTAL_AUTH_SECRET_MISSING";
+        return jsonResponse({ ok: false, code: secretMissing ? "TWO_FACTOR_CONFIGURATION_ERROR" : "AUTH_STORAGE_UNAVAILABLE", message: secretMissing ? "双因数验证密钥配置缺失，请管理员设置 PORTAL_AUTH_SECRET。" : "登录资料库暂时不可用，请稍后重试。" }, 503);
+      }
     }
 
     if (request.method === 'POST' && url.pathname === '/api/auth/logout') {
       const token = readCookie(request, "qqai_session");
-      if (token) await dbDel(env, `portal_session:${token}`);
+      if (token) await authDbDelStrict(env, `portal_session:${token}`).catch(() => {});
       return jsonResponse({ ok: true, message: "已退出登录。" }, 200, { "Set-Cookie": portalSessionCookie("", 0) });
     }
 
@@ -8773,10 +8835,255 @@ function readCookie(request, name) {
 }
 
 function portalSessionCookie(token, maxAgeSeconds = DEFAULTS.portalSessionCookieSeconds) {
-  const maxAge = maxAgeSeconds === null || maxAgeSeconds === undefined
-    ? ""
-    : `; Max-Age=${Math.max(0, Number(maxAgeSeconds) || 0)}`;
-  return `qqai_session=${encodeURIComponent(token || "")}; Path=/${maxAge}; HttpOnly; Secure; SameSite=Lax; Priority=High`;
+  const hasLifetime = maxAgeSeconds !== null && maxAgeSeconds !== undefined;
+  const seconds = hasLifetime ? Math.max(0, Number(maxAgeSeconds) || 0) : null;
+  const maxAge = hasLifetime ? `; Max-Age=${seconds}` : "";
+  const expires = hasLifetime ? `; Expires=${new Date(seconds === 0 ? 0 : Date.now() + seconds * 1000).toUTCString()}` : "";
+  return `qqai_session=${encodeURIComponent(token || "")}; Path=/${maxAge}${expires}; HttpOnly; Secure; SameSite=Lax; Priority=High`;
+}
+
+function authStorageError(message, cause) {
+  const error = new Error(message || "Portal authentication storage unavailable");
+  error.code = "PORTAL_AUTH_STORAGE_UNAVAILABLE";
+  if (cause) error.cause = cause;
+  return error;
+}
+
+async function authDbRetry(label, operation, attempts = 3) {
+  let lastError = null;
+  for (let index = 0; index < attempts; index += 1) {
+    try {
+      return await operation();
+    } catch (error) {
+      lastError = error;
+      if (index + 1 < attempts) await new Promise(resolve => setTimeout(resolve, 60 * (index + 1)));
+    }
+  }
+  throw authStorageError(`${label} failed after ${attempts} attempts`, lastError);
+}
+
+async function authDbGetStrict(env, key) {
+  if (!env?.DB) throw authStorageError("Missing D1 binding for Portal authentication");
+  return authDbRetry(`auth read ${key}`, async () => {
+    const result = await env.DB.prepare("SELECT value FROM kv_store WHERE key = ?").bind(key).first();
+    return result ? result.value : null;
+  });
+}
+
+async function authDbPutStrict(env, key, value) {
+  if (!env?.DB) throw authStorageError("Missing D1 binding for Portal authentication");
+  await authDbRetry(`auth write ${key}`, async () => {
+    const result = await env.DB.prepare("INSERT INTO kv_store (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value").bind(key, value).run();
+    if (result && result.success === false) throw new Error("D1 write reported failure");
+    return result;
+  });
+}
+
+async function authDbDelStrict(env, key) {
+  if (!env?.DB) throw authStorageError("Missing D1 binding for Portal authentication");
+  await authDbRetry(`auth delete ${key}`, async () => {
+    const result = await env.DB.prepare("DELETE FROM kv_store WHERE key = ?").bind(key).run();
+    if (result && result.success === false) throw new Error("D1 delete reported failure");
+    return result;
+  });
+}
+
+function randomBytes(length) {
+  const bytes = new Uint8Array(length);
+  crypto.getRandomValues(bytes);
+  return bytes;
+}
+
+function bytesToBase64Url(bytes) {
+  let binary = "";
+  for (const value of bytes) binary += String.fromCharCode(value);
+  return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
+}
+
+function base64UrlToBytes(value) {
+  const normalized = String(value || "").replace(/-/g, "+").replace(/_/g, "/");
+  const padded = normalized + "=".repeat((4 - normalized.length % 4) % 4);
+  const binary = atob(padded);
+  return Uint8Array.from(binary, char => char.charCodeAt(0));
+}
+
+function bytesToHex(bytes) {
+  return Array.from(bytes, value => value.toString(16).padStart(2, "0")).join("");
+}
+
+function constantTimeEqual(left, right) {
+  const a = typeof left === "string" ? new TextEncoder().encode(left) : new Uint8Array(left || []);
+  const b = typeof right === "string" ? new TextEncoder().encode(right) : new Uint8Array(right || []);
+  let mismatch = a.length ^ b.length;
+  const length = Math.max(a.length, b.length);
+  for (let index = 0; index < length; index += 1) mismatch |= (a[index % Math.max(1, a.length)] || 0) ^ (b[index % Math.max(1, b.length)] || 0);
+  return mismatch === 0;
+}
+
+function validatePortalPassword(password) {
+  const value = String(password || "");
+  if (value.length < 10) return { ok: false, message: "密码至少需要 10 个字符。" };
+  if (value.length > 128) return { ok: false, message: "密码不能超过 128 个字符。" };
+  if (/^\s+$/.test(value)) return { ok: false, message: "密码不能全部为空白字符。" };
+  return { ok: true, value };
+}
+
+async function derivePortalPassword(password, salt, iterations = 120000) {
+  const material = await crypto.subtle.importKey("raw", new TextEncoder().encode(String(password || "")), "PBKDF2", false, ["deriveBits"]);
+  const bits = await crypto.subtle.deriveBits({ name: "PBKDF2", hash: "SHA-256", salt, iterations }, material, 256);
+  return new Uint8Array(bits);
+}
+
+async function createPortalPasswordRecord(password) {
+  const validation = validatePortalPassword(password);
+  if (!validation.ok) throw Object.assign(new Error(validation.message), { code: "PASSWORD_POLICY" });
+  const salt = randomBytes(16);
+  const iterations = 120000;
+  const hash = await derivePortalPassword(validation.value, salt, iterations);
+  return { version: 1, algorithm: "PBKDF2-SHA-256", iterations, salt: bytesToBase64Url(salt), hash: bytesToBase64Url(hash), updatedAt: Date.now() };
+}
+
+async function verifyPortalPassword(password, record) {
+  if (!record || record.algorithm !== "PBKDF2-SHA-256") return false;
+  const actual = await derivePortalPassword(String(password || ""), base64UrlToBytes(record.salt), Number(record.iterations || 120000));
+  return constantTimeEqual(actual, base64UrlToBytes(record.hash));
+}
+
+function portalAuthEncryptionMaterial(env) {
+  const secret = String(env.PORTAL_AUTH_SECRET || env.ONEBOT_ACCESS_TOKEN || env.ONEBOT_TOKEN || env.NAPCAT_ACCESS_TOKEN || "").trim();
+  if (secret.length < 16) {
+    const error = new Error("PORTAL_AUTH_SECRET must be configured with at least 16 characters before enabling 2FA");
+    error.code = "PORTAL_AUTH_SECRET_MISSING";
+    throw error;
+  }
+  return secret;
+}
+
+async function portalAuthEncryptionKey(env) {
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(portalAuthEncryptionMaterial(env)));
+  return crypto.subtle.importKey("raw", digest, { name: "AES-GCM" }, false, ["encrypt", "decrypt"]);
+}
+
+async function encryptPortalAuthSecret(env, value) {
+  const iv = randomBytes(12);
+  const encrypted = await crypto.subtle.encrypt({ name: "AES-GCM", iv }, await portalAuthEncryptionKey(env), new TextEncoder().encode(String(value || "")));
+  return { version: 1, iv: bytesToBase64Url(iv), data: bytesToBase64Url(new Uint8Array(encrypted)) };
+}
+
+async function decryptPortalAuthSecret(env, payload) {
+  const decrypted = await crypto.subtle.decrypt({ name: "AES-GCM", iv: base64UrlToBytes(payload.iv) }, await portalAuthEncryptionKey(env), base64UrlToBytes(payload.data));
+  return new TextDecoder().decode(decrypted);
+}
+
+const BASE32_ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
+function base32Encode(bytes) {
+  let output = "", buffer = 0, bits = 0;
+  for (const value of bytes) {
+    buffer = (buffer << 8) | value;
+    bits += 8;
+    while (bits >= 5) {
+      output += BASE32_ALPHABET[(buffer >>> (bits - 5)) & 31];
+      bits -= 5;
+    }
+  }
+  if (bits > 0) output += BASE32_ALPHABET[(buffer << (5 - bits)) & 31];
+  return output;
+}
+
+function base32Decode(value) {
+  const clean = String(value || "").toUpperCase().replace(/[^A-Z2-7]/g, "");
+  let buffer = 0, bits = 0;
+  const output = [];
+  for (const char of clean) {
+    const index = BASE32_ALPHABET.indexOf(char);
+    if (index < 0) continue;
+    buffer = (buffer << 5) | index;
+    bits += 5;
+    if (bits >= 8) {
+      output.push((buffer >>> (bits - 8)) & 255);
+      bits -= 8;
+    }
+  }
+  return new Uint8Array(output);
+}
+
+async function generateTotpCode(secret, timestamp = Date.now(), stepSeconds = 30) {
+  const counter = Math.floor(timestamp / 1000 / stepSeconds);
+  const message = new Uint8Array(8);
+  let value = BigInt(counter);
+  for (let index = 7; index >= 0; index -= 1) { message[index] = Number(value & 255n); value >>= 8n; }
+  const key = await crypto.subtle.importKey("raw", base32Decode(secret), { name: "HMAC", hash: "SHA-1" }, false, ["sign"]);
+  const signature = new Uint8Array(await crypto.subtle.sign("HMAC", key, message));
+  const offset = signature[signature.length - 1] & 15;
+  const binary = ((signature[offset] & 127) << 24) | (signature[offset + 1] << 16) | (signature[offset + 2] << 8) | signature[offset + 3];
+  return String(binary % 1000000).padStart(6, "0");
+}
+
+async function verifyTotpCode(secret, code) {
+  const normalized = String(code || "").replace(/\D/g, "");
+  if (!/^\d{6}$/.test(normalized)) return false;
+  const now = Date.now();
+  for (const offset of [-30000, 0, 30000]) if (constantTimeEqual(await generateTotpCode(secret, now + offset), normalized)) return true;
+  return false;
+}
+
+function generateBackupCodes(count = 10) {
+  return Array.from({ length: count }, () => {
+    const raw = bytesToHex(randomBytes(4)).toUpperCase();
+    return `QQAI-${raw.slice(0, 4)}-${raw.slice(4, 8)}`;
+  });
+}
+
+function normalizeBackupCode(value) {
+  const clean = String(value || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
+  return clean.startsWith("QQAI") ? `QQAI-${clean.slice(4, 8)}-${clean.slice(8, 12)}` : String(value || "").trim().toUpperCase();
+}
+
+async function hashBackupCode(env, code) {
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(`${portalAuthEncryptionMaterial(env)}:${normalizeBackupCode(code)}`));
+  return bytesToBase64Url(new Uint8Array(digest));
+}
+
+async function readPortalAuthJson(env, key, fallback = null) {
+  const raw = await authDbGetStrict(env, key);
+  if (!raw) return fallback;
+  try { return JSON.parse(raw); } catch (error) { throw authStorageError(`Invalid authentication record ${key}`, error); }
+}
+
+async function verifyPortalVerificationCode(env, qq, code, { consume = false } = {}) {
+  const key = `portal_auth_code:${qq}`;
+  const record = await readPortalAuthJson(env, key, null);
+  if (!record) return { ok: false, message: "验证码不存在或已过期，请重新发送。" };
+  if (Date.now() > Number(record.expiresAt || 0)) {
+    await authDbDelStrict(env, key);
+    return { ok: false, message: "验证码已过期，请重新发送。" };
+  }
+  if (!constantTimeEqual(String(record.code || ""), String(code || "").replace(/\D/g, ""))) {
+    record.attempts = Number(record.attempts || 0) + 1;
+    if (record.attempts >= 5) await authDbDelStrict(env, key);
+    else await authDbPutStrict(env, key, JSON.stringify(record));
+    return { ok: false, message: "验证码错误。" };
+  }
+  if (consume) await authDbDelStrict(env, key);
+  return { ok: true, record };
+}
+
+async function readPasswordLoginGuard(env, qq) {
+  return readPortalAuthJson(env, `portal_auth_guard:${qq}`, { failures: 0, lockUntil: 0 });
+}
+
+async function notePasswordLoginFailure(env, qq) {
+  const key = `portal_auth_guard:${qq}`;
+  const guard = await readPasswordLoginGuard(env, qq);
+  guard.failures = Number(guard.failures || 0) + 1;
+  guard.lastFailureAt = Date.now();
+  if (guard.failures >= 5) { guard.lockUntil = Date.now() + 15 * 60 * 1000; guard.failures = 0; }
+  await authDbPutStrict(env, key, JSON.stringify(guard));
+  return guard;
+}
+
+async function clearPasswordLoginGuard(env, qq) {
+  await authDbDelStrict(env, `portal_auth_guard:${qq}`).catch(() => {});
 }
 
 function generateSixDigitCode() {
@@ -8908,15 +9215,20 @@ async function createPortalSession(env, data) {
     createdAt: now,
     lastActivityAt: now,
     expiresAt: now + idleTtlMs,
-    absoluteExpiresAt: now + absoluteTtlMs
+    absoluteExpiresAt: now + absoluteTtlMs,
+    authenticatedAt: now,
+    authMethod: String(data.authMethod || "qq_code")
   };
-  await dbPut(env, `portal_session:${token}`, JSON.stringify(session));
+  const key = `portal_session:${token}`;
+  await authDbPutStrict(env, key, JSON.stringify(session));
+  const confirmed = await authDbGetStrict(env, key);
+  if (!confirmed) throw authStorageError("Portal session write could not be verified");
   return session;
 }
 
 async function getPortalSession(env, token, { touch = true } = {}) {
   if (!token) return null;
-  const raw = await dbGet(env, `portal_session:${token}`);
+  const raw = await authDbGetStrict(env, `portal_session:${token}`);
   if (!raw) return null;
   try {
     const session = JSON.parse(raw);
@@ -8927,7 +9239,7 @@ async function getPortalSession(env, token, { touch = true } = {}) {
     const absoluteExpiresAt = Number(session.absoluteExpiresAt || (Number(session.createdAt || now) + absoluteTtlMs));
     const idleExpiresAt = Number(session.expiresAt || 0);
     if ((idleExpiresAt && now > idleExpiresAt) || now > absoluteExpiresAt) {
-      await dbDel(env, `portal_session:${token}`);
+      await authDbDelStrict(env, `portal_session:${token}`);
       return null;
     }
     session.persistent = persistent;
@@ -8937,7 +9249,7 @@ async function getPortalSession(env, token, { touch = true } = {}) {
     if (touch) {
       session.lastActivityAt = now;
       session.expiresAt = Math.min(now + idleTtlMs, absoluteExpiresAt);
-      await dbPut(env, `portal_session:${token}`, JSON.stringify(session));
+      await authDbPutStrict(env, `portal_session:${token}`, JSON.stringify(session));
     }
     return session;
   } catch (e) {
@@ -12223,8 +12535,13 @@ async function handleOpsPortalApi(request, env, url, path, body, authed) {
 async function handlePortalApi(request, env, url) {
   const body = request.method === "GET" ? {} : await request.json().catch(() => ({}));
   const token = request.headers.get("Authorization")?.replace(/^Bearer\s+/i, "") || readCookie(request, "qqai_session") || body.token || url.searchParams.get("token") || "";
-  let session = await getPortalSession(env, token);
-  if (!session) return jsonResponse({ ok: false, message: "未登录或登录已过期。" }, 401);
+  let session;
+  try {
+    session = await getPortalSession(env, token);
+  } catch (error) {
+    return jsonResponse({ ok: false, code: "SESSION_STORAGE_UNAVAILABLE", retryable: true, message: "登录会话资料库暂时不可用，系统没有将你登出。请稍后重试。" }, 503);
+  }
+  if (!session) return jsonResponse({ ok: false, code: "SESSION_INVALID", message: "未登录或登录已过期。" }, 401);
   const path = url.pathname.replace("/api/portal", "");
 
   if (request.method === "POST" && path === "/heartbeat") {
@@ -12234,6 +12551,114 @@ async function handlePortalApi(request, env, url) {
       expiresAt: session.expiresAt,
       absoluteExpiresAt: session.absoluteExpiresAt
     }, 200, { "Set-Cookie": portalSessionCookie(token, session.persistent ? DEFAULTS.portalSessionCookieSeconds : null) });
+  }
+
+  if (request.method === "GET" && path === "/security/auth-state") {
+    try {
+      const passwordRecord = await readPortalAuthJson(env, `portal_auth_password:${session.qq}`, null);
+      const twoFactor = await readPortalAuthJson(env, `portal_auth_2fa:${session.qq}`, null);
+      let encryptionReady = true;
+      try { portalAuthEncryptionMaterial(env); } catch (error) { encryptionReady = false; }
+      return jsonResponse({ ok: true, passwordSet: Boolean(passwordRecord), twoFactorEnabled: Boolean(twoFactor?.enabled), backupCodesRemaining: Array.isArray(twoFactor?.backupCodeHashes) ? twoFactor.backupCodeHashes.length : 0, encryptionReady, recentAuthentication: Date.now() - Number(session.authenticatedAt || 0) <= 15 * 60 * 1000, authMethod: session.authMethod || "unknown" });
+    } catch (error) {
+      return jsonResponse({ ok: false, code: "AUTH_STORAGE_UNAVAILABLE", message: "无法读取登录安全设置，请稍后重试。" }, 503);
+    }
+  }
+
+  if (request.method === "POST" && path === "/security/password") {
+    const newPassword = String(body.newPassword || "");
+    const currentPassword = String(body.currentPassword || "");
+    const verificationCode = String(body.verificationCode || "").replace(/\D/g, "");
+    const validation = validatePortalPassword(newPassword);
+    if (!validation.ok) return jsonResponse({ ok: false, message: validation.message }, 400);
+    try {
+      const existing = await readPortalAuthJson(env, `portal_auth_password:${session.qq}`, null);
+      const recent = Date.now() - Number(session.authenticatedAt || 0) <= 15 * 60 * 1000;
+      let authorized = !existing && recent;
+      if (existing && currentPassword) authorized = await verifyPortalPassword(currentPassword, existing);
+      if (!authorized && verificationCode) authorized = (await verifyPortalVerificationCode(env, session.qq, verificationCode, { consume: false })).ok;
+      if (!authorized) return jsonResponse({ ok: false, code: "REAUTHENTICATION_REQUIRED", message: existing ? "请输入当前密码，或发送 QQ 验证码后再修改。" : "登录时间已超过 15 分钟，请发送 QQ 验证码后再设置密码。" }, 403);
+      const record = await createPortalPasswordRecord(newPassword);
+      await authDbPutStrict(env, `portal_auth_password:${session.qq}`, JSON.stringify(record));
+      if (verificationCode) await authDbDelStrict(env, `portal_auth_code:${session.qq}`);
+      await writeSystemAudit(env, { type: "portal_auth_security", actorId: session.qq, action: existing ? "password_changed" : "password_created" }).catch(() => {});
+      return jsonResponse({ ok: true, message: existing ? "密码已更新。" : "密码已设置，之后可使用 QQ 号和密码登录。" });
+    } catch (error) {
+      return jsonResponse({ ok: false, code: error?.code || "AUTH_STORAGE_UNAVAILABLE", message: error?.code === "PASSWORD_POLICY" ? error.message : "密码无法安全保存，请稍后重试。" }, error?.code === "PASSWORD_POLICY" ? 400 : 503);
+    }
+  }
+
+  if (request.method === "POST" && path === "/security/2fa/setup") {
+    try {
+      portalAuthEncryptionMaterial(env);
+      const passwordRecord = await readPortalAuthJson(env, `portal_auth_password:${session.qq}`, null);
+      if (!passwordRecord) return jsonResponse({ ok: false, code: "PASSWORD_REQUIRED", message: "请先设置登录密码，再启用双因数验证。" }, 400);
+      const currentPassword = String(body.currentPassword || "");
+      const recent = Date.now() - Number(session.authenticatedAt || 0) <= 15 * 60 * 1000;
+      if (!recent && !(await verifyPortalPassword(currentPassword, passwordRecord))) return jsonResponse({ ok: false, code: "REAUTHENTICATION_REQUIRED", message: "请输入当前密码后再设置双因数验证。" }, 403);
+      const secret = base32Encode(randomBytes(20));
+      const pending = { secret: await encryptPortalAuthSecret(env, secret), createdAt: Date.now(), expiresAt: Date.now() + 10 * 60 * 1000 };
+      await authDbPutStrict(env, `portal_auth_2fa_pending:${session.qq}`, JSON.stringify(pending));
+      const issuer = "QQAIbot";
+      const label = `${issuer}:${session.qq}`;
+      const uri = `otpauth://totp/${encodeURIComponent(label)}?secret=${encodeURIComponent(secret)}&issuer=${encodeURIComponent(issuer)}&algorithm=SHA1&digits=6&period=30`;
+      return jsonResponse({ ok: true, secret, uri, message: "请将密钥加入验证器，然后输入当前六位动态码完成启用。此设置请求 10 分钟后失效。" });
+    } catch (error) {
+      return jsonResponse({ ok: false, code: error?.code || "AUTH_STORAGE_UNAVAILABLE", message: error?.code === "PORTAL_AUTH_SECRET_MISSING" ? "请管理员先设置至少 16 字符的 PORTAL_AUTH_SECRET，再启用 2FA。" : "无法建立双因数验证设置，请稍后重试。" }, 503);
+    }
+  }
+
+  if (request.method === "POST" && path === "/security/2fa/enable") {
+    try {
+      const pending = await readPortalAuthJson(env, `portal_auth_2fa_pending:${session.qq}`, null);
+      if (!pending || Date.now() > Number(pending.expiresAt || 0)) return jsonResponse({ ok: false, message: "双因数设置请求不存在或已过期，请重新开始。" }, 400);
+      const secret = await decryptPortalAuthSecret(env, pending.secret);
+      if (!(await verifyTotpCode(secret, body.code))) return jsonResponse({ ok: false, message: "动态验证码错误，请确认手机时间与验证器设置。" }, 400);
+      const backupCodes = generateBackupCodes(10);
+      const backupCodeHashes = [];
+      for (const code of backupCodes) backupCodeHashes.push(await hashBackupCode(env, code));
+      const record = { enabled: true, secret: pending.secret, backupCodeHashes, createdAt: Date.now(), updatedAt: Date.now() };
+      await authDbPutStrict(env, `portal_auth_2fa:${session.qq}`, JSON.stringify(record));
+      await authDbDelStrict(env, `portal_auth_2fa_pending:${session.qq}`);
+      await writeSystemAudit(env, { type: "portal_auth_security", actorId: session.qq, action: "two_factor_enabled" }).catch(() => {});
+      return jsonResponse({ ok: true, backupCodes, message: "双因数验证已启用。请立即保存以下 10 组单次备用码；关闭页面后不会再次显示原文。" });
+    } catch (error) {
+      return jsonResponse({ ok: false, code: error?.code || "AUTH_STORAGE_UNAVAILABLE", message: "双因数验证无法安全启用，请稍后重试。" }, 503);
+    }
+  }
+
+  if (request.method === "POST" && path === "/security/2fa/backup-codes") {
+    try {
+      const record = await readPortalAuthJson(env, `portal_auth_2fa:${session.qq}`, null);
+      if (!record?.enabled) return jsonResponse({ ok: false, message: "尚未启用双因数验证。" }, 400);
+      const secret = await decryptPortalAuthSecret(env, record.secret);
+      if (!(await verifyTotpCode(secret, body.code))) return jsonResponse({ ok: false, message: "请输入验证器当前六位动态码。" }, 403);
+      const backupCodes = generateBackupCodes(10);
+      record.backupCodeHashes = [];
+      for (const code of backupCodes) record.backupCodeHashes.push(await hashBackupCode(env, code));
+      record.updatedAt = Date.now();
+      await authDbPutStrict(env, `portal_auth_2fa:${session.qq}`, JSON.stringify(record));
+      return jsonResponse({ ok: true, backupCodes, message: "已重新生成 10 组备用码，旧备用码全部失效。" });
+    } catch (error) {
+      return jsonResponse({ ok: false, code: error?.code || "AUTH_STORAGE_UNAVAILABLE", message: "无法重新生成备用码，请稍后重试。" }, 503);
+    }
+  }
+
+  if (request.method === "POST" && path === "/security/2fa/disable") {
+    try {
+      const passwordRecord = await readPortalAuthJson(env, `portal_auth_password:${session.qq}`, null);
+      const record = await readPortalAuthJson(env, `portal_auth_2fa:${session.qq}`, null);
+      if (!record?.enabled) return jsonResponse({ ok: true, message: "双因数验证本来就是关闭状态。" });
+      if (!passwordRecord || !(await verifyPortalPassword(String(body.currentPassword || ""), passwordRecord))) return jsonResponse({ ok: false, message: "当前密码错误。" }, 403);
+      const secret = await decryptPortalAuthSecret(env, record.secret);
+      if (!(await verifyTotpCode(secret, body.code))) return jsonResponse({ ok: false, message: "验证器动态码错误。" }, 403);
+      await authDbDelStrict(env, `portal_auth_2fa:${session.qq}`);
+      await authDbDelStrict(env, `portal_auth_2fa_pending:${session.qq}`).catch(() => {});
+      await writeSystemAudit(env, { type: "portal_auth_security", actorId: session.qq, action: "two_factor_disabled" }).catch(() => {});
+      return jsonResponse({ ok: true, message: "双因数验证已关闭，所有备用码同时失效。" });
+    } catch (error) {
+      return jsonResponse({ ok: false, code: error?.code || "AUTH_STORAGE_UNAVAILABLE", message: "无法关闭双因数验证，请稍后重试。" }, 503);
+    }
   }
 
   if (request.method === "GET" && path === "/groups") {
@@ -12259,7 +12684,7 @@ async function handlePortalApi(request, env, url) {
       lastActivityAt: now,
       expiresAt: Math.min(now + Number(session.idleTtlMs || DEFAULTS.portalSessionTtlMs), Number(session.absoluteExpiresAt || now + Number(session.absoluteTtlMs || DEFAULTS.portalSessionAbsoluteTtlMs)))
     };
-    await dbPut(env, `portal_session:${token}`, JSON.stringify(session));
+    await authDbPutStrict(env, `portal_session:${token}`, JSON.stringify(session));
     await dbPut(env, `private_default_group:${session.qq}`, groupId);
     return jsonResponse({ ok: true, message: "群组已切换。", session });
   }
@@ -12285,7 +12710,7 @@ async function handlePortalApi(request, env, url) {
         privateSchedule: await getFeatureFlag(env, "private_schedule_enabled", false),
         privateAppeal: await getFeatureFlag(env, "private_appeal_enabled", true)
       }
-    });
+    }, 200, { "Set-Cookie": portalSessionCookie(token, session.persistent ? DEFAULTS.portalSessionCookieSeconds : null) });
   }
 
 
@@ -13706,7 +14131,7 @@ function getPortalHomePage(host) {
 .login{min-height:100vh;display:grid;place-items:center;padding:24px;background:radial-gradient(circle at 15% 10%,rgba(91,91,214,.15),transparent 38%),radial-gradient(circle at 90% 90%,rgba(23,132,95,.11),transparent 40%),var(--bg)}
 .login-card{width:min(450px,100%);background:var(--login-panel);border:1px solid var(--line);border-radius:26px;padding:30px;box-shadow:var(--shadow);backdrop-filter:blur(14px)}.brand{display:flex;align-items:center;gap:12px;margin-bottom:24px}.logo{width:46px;height:46px;border-radius:15px;display:grid;place-items:center;background:linear-gradient(135deg,var(--primary),#8a69e8);color:#fff;font-weight:800}.brand h1{font-size:22px;margin:0}.brand p{margin:4px 0 0;color:var(--muted);font-size:14px}
 .field{display:grid;gap:7px;margin:14px 0}.field label{font-size:13px;font-weight:700}.field input,.field select,.field textarea{width:100%;border:1px solid var(--line);border-radius:12px;background:var(--panel);color:var(--text);padding:11px 12px;outline:none}.field input:focus,.field select:focus,.field textarea:focus{border-color:var(--primary);box-shadow:0 0 0 3px rgba(91,91,214,.12)}.field textarea{min-height:100px;resize:vertical}.row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}.grow{flex:1;min-width:160px}
-.btn{border:0;border-radius:11px;padding:10px 14px;font-weight:700;cursor:pointer;background:var(--panel2);color:var(--text)}.btn:hover{filter:brightness(.98)}.btn.primary{background:var(--primary);color:#fff}.btn.danger{background:#fde9ec;color:var(--bad)}.btn.ghost{background:transparent;border:1px solid var(--line)}.btn:disabled{opacity:.55;cursor:not-allowed}.notice{margin-top:14px;padding:11px 13px;border-radius:11px;background:var(--panel2);color:var(--muted);font-size:14px;line-height:1.55}
+.btn{border:0;border-radius:11px;padding:10px 14px;font-weight:700;cursor:pointer;background:var(--panel2);color:var(--text)}.btn:hover{filter:brightness(.98)}.btn.primary{background:var(--primary);color:#fff}.btn.danger{background:#fde9ec;color:var(--bad)}.btn.ghost{background:transparent;border:1px solid var(--line)}.btn:disabled{opacity:.55;cursor:not-allowed}.notice{margin-top:14px;padding:11px 13px;border-radius:11px;background:var(--panel2);color:var(--muted);font-size:14px;line-height:1.55}.login-methods{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:0 0 14px}.login-methods .btn.active{background:var(--primary);color:#fff}.backup-codes{font-family:ui-monospace,SFMono-Regular,Consolas,monospace;white-space:pre-wrap;line-height:1.8}.security-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px}.security-grid>.card{box-shadow:none}@media(max-width:720px){.security-grid{grid-template-columns:1fr}}
 .app{min-height:100dvh;display:block}.sidebar{position:fixed;inset:0 auto 0 0;width:250px;height:100dvh;min-height:100svh;background:#171b2b;color:#e9ecf4;padding:18px 14px;display:flex;flex-direction:column;overflow:hidden;z-index:30}.side-brand{display:flex;align-items:center;gap:10px;padding:8px 8px 18px;flex:0 0 auto}.side-brand .logo{width:38px;height:38px;border-radius:12px}.side-brand b{display:block}.side-brand small{color:#98a2b7}.nav{display:grid;gap:8px;overflow:auto;overscroll-behavior:contain;flex:1 1 auto;min-height:0;padding-right:3px}.nav-group{display:grid;gap:4px;border-radius:12px}.nav-heading{width:100%;border:0;background:transparent;color:#77839a;padding:7px 10px;border-radius:9px;display:flex;align-items:center;justify-content:space-between;gap:8px;text-align:left;cursor:pointer;font-size:11px;font-weight:850;letter-spacing:.08em;text-transform:uppercase}.nav-heading:hover,.nav-heading:focus-visible{background:rgba(255,255,255,.07);color:#cbd3e2;outline:none}.nav-heading-label{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.nav-chevron{font-size:14px;line-height:1;transition:transform .18s ease;color:#8f9ab0}.nav-items{display:grid;gap:4px}.nav-group.collapsed .nav-items{display:none}.nav-group.collapsed .nav-chevron{transform:rotate(-90deg)}.nav-group.has-active .nav-heading{color:#dfe5f2}.nav button:not(.nav-heading){border:0;background:transparent;color:#aeb7c9;padding:10px 12px;border-radius:10px;text-align:left;cursor:pointer;font-weight:650}.nav button:not(.nav-heading):hover,.nav button:not(.nav-heading).active{background:rgba(255,255,255,.1);color:#fff}.side-bottom{margin-top:0;padding:12px 8px 2px;border-top:1px solid rgba(255,255,255,.1);flex:0 0 auto;background:inherit;position:relative;z-index:2}
 .main{min-width:0;min-height:100dvh;margin-left:250px}.topbar{height:72px;display:flex;align-items:center;justify-content:space-between;gap:16px;padding:0 24px;border-bottom:1px solid var(--line);background:var(--topbar-bg);backdrop-filter:blur(12px);position:sticky;top:0;z-index:5}.topbar h2{margin:0;font-size:20px}.top-actions{display:flex;align-items:center;gap:10px}.top-actions select{max-width:320px;border:1px solid var(--line);border-radius:10px;padding:9px 10px;background:var(--panel);color:var(--text);color-scheme:light dark}select option{background:var(--panel);color:var(--text)}.content{padding:24px;max-width:1500px;margin:auto}.view{display:none}.view.active{display:block}.section-head{display:flex;justify-content:space-between;gap:16px;align-items:flex-start;margin-bottom:18px}.section-head h2{margin:0 0 5px;font-size:25px}.section-head p{margin:0;color:var(--muted)}
 .grid{display:grid;grid-template-columns:repeat(12,minmax(0,1fr));gap:16px}.card{background:var(--panel);border:1px solid var(--line);border-radius:17px;padding:18px;box-shadow:0 8px 28px rgba(38,49,76,.045);min-width:0}.span-3{grid-column:span 3}.span-4{grid-column:span 4}.span-5{grid-column:span 5}.span-6{grid-column:span 6}.span-7{grid-column:span 7}.span-8{grid-column:span 8}.span-12{grid-column:1/-1}.metric-label{font-size:13px;color:var(--muted);margin-bottom:8px}.metric-value{font-size:27px;font-weight:800;letter-spacing:-.03em}.metric-sub{font-size:12px;color:var(--muted);margin-top:7px}.card h3{margin:0 0 13px;font-size:16px}.status{display:inline-flex;align-items:center;gap:7px;border-radius:999px;padding:5px 9px;font-size:12px;font-weight:800;background:#edf1f7}.status:before{content:"";width:7px;height:7px;border-radius:50%;background:#8390a5}.status.ok{background:#e5f5ee;color:var(--ok)}.status.ok:before{background:var(--ok)}.status.warning{background:#fff2d9;color:var(--warn)}.status.warning:before{background:var(--warn)}.status.error{background:#fde9ec;color:var(--bad)}.status.error:before{background:var(--bad)}
@@ -13745,14 +14170,26 @@ function getPortalHomePage(host) {
 <body>
 <section id="login" class="login">
   <div class="login-card">
-    <div class="brand"><div class="logo">AI</div><div><h1>QQAIbot 控制台</h1><p>用 QQ 验证码登录，不需要另外注册账号。</p></div></div>
+    <div class="brand"><div class="logo">AI</div><div><h1>QQAIbot 控制台</h1><p>可使用 QQ 验证码或已设置的密码登录。</p></div></div>
     <div class="row"><button id="loginThemeToggle" type="button" class="btn ghost theme-toggle">切换黑色模式</button></div>
-    <div class="field"><label for="loginQq">QQ 号</label><input id="loginQq" inputmode="numeric" placeholder="輸入你的 QQ 号"></div>
-    <div class="row"><button id="sendCode" type="button" class="btn ghost grow">发送验证码</button></div>
-    <div class="field"><label for="loginCode">六位验证码</label><input id="loginCode" inputmode="numeric" maxlength="6" placeholder="验证码"></div>
+    <div class="field"><label for="loginQq">QQ 号</label><input id="loginQq" inputmode="numeric" autocomplete="username" placeholder="输入你的 QQ 号"></div>
+    <div class="login-methods"><button id="loginMethodCode" type="button" class="btn active">QQ 验证码</button><button id="loginMethodPassword" type="button" class="btn">密码登录</button></div>
+    <div id="loginCodePane">
+      <div class="row"><button id="sendCode" type="button" class="btn ghost grow">发送验证码</button></div>
+      <div class="field"><label for="loginCode">六位验证码</label><input id="loginCode" inputmode="numeric" maxlength="6" autocomplete="one-time-code" placeholder="验证码"></div>
+      <button id="verifyCode" type="button" class="btn primary" style="width:100%">使用验证码登录</button>
+    </div>
+    <div id="loginPasswordPane" class="hidden">
+      <div class="field"><label for="loginPassword">密码</label><input id="loginPassword" type="password" maxlength="128" autocomplete="current-password" placeholder="输入密码"></div>
+      <div id="loginFactorWrap" class="hidden">
+        <div class="field"><label for="loginFactorType">第二因素</label><select id="loginFactorType"><option value="totp">验证器动态码</option><option value="backup">单次备用码</option><option value="qq_code">QQ 私信验证码</option></select></div>
+        <div class="field"><label for="loginFactorCode">动态码／备用码／QQ 验证码</label><input id="loginFactorCode" autocomplete="one-time-code" placeholder="输入第二因素"></div>
+        <button id="passwordSendFactorCode" type="button" class="btn ghost" style="width:100%">发送 QQ 验证码作为第二因素</button>
+      </div>
+      <button id="verifyPassword" type="button" class="btn primary" style="width:100%;margin-top:12px">使用密码登录</button>
+    </div>
     <label class="switch"><input id="rememberLogin" type="checkbox" checked>在这台设备保持登录（最长 180 天）</label>
-    <button id="verifyCode" type="button" class="btn primary" style="width:100%">登录管理中心</button>
-    <div id="loginNotice" class="notice">验证码会由已连接的 NapCat 私信发送至你的 QQ。保持登录采用安全的 HttpOnly Cookie，不保存验证码。</div>
+    <div id="loginNotice" class="notice">QQ 验证码由 NapCat 私信发送。密码和备用码只保存加盐杂凑；持久登录使用安全的 HttpOnly Cookie。</div>
   </div>
 </section>
 <div id="app" class="app hidden">
@@ -13861,8 +14298,8 @@ function bindDashboardActions(){document.querySelectorAll('[data-open-view]').fo
 var titles={overview:'首页',health:'系统诊断',tasks:'任务队列',schedules:'排程提醒',moderation:'待确认操作',simulator:'事件模拟器',models:'AI 模型',quota:'额度管理',groups:'群组设置',memory:'AI 记忆',logs:'操作日志',aidecisions:'AI 回复记录',appeals:'我的申诉',appealreview:'申诉处理',violationhistory:'违规记录',conversations:'对话记录',platform:'功能权限',collaboration:'活动与投票',settingscenter:'更多设置',ruleviolations:'群规与复核',bilibili:'B站监控'};
 function esc(v){return String(v==null?'':v).replace(/[&<>"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]})}
 function toast(msg){$('toast').textContent=String(msg||'');$('toast').classList.remove('hidden');clearTimeout(toast.t);toast.t=setTimeout(function(){$('toast').classList.add('hidden')},3200)}
-async function raw(path,method,data){try{var opt={method:method||'GET',headers:{},credentials:'same-origin',cache:'no-store'};if(data!==undefined){opt.headers['Content-Type']='application/json';opt.body=JSON.stringify(data)}var r=await fetch(path,opt);var j=await r.json().catch(function(){return{ok:false,message:'无法解析服务器响应'}});if(!r.ok&&!j.message)j.message='HTTP '+r.status;return j}catch(e){return{ok:false,message:'网络请求失败：'+String(e&&e.message||e)}}}
-async function api(path,method,data){var opt={method:method||'GET',headers:{},credentials:'same-origin'};if(data!==undefined){opt.headers['Content-Type']='application/json';opt.body=JSON.stringify(data)}var r=await fetch('/api/portal'+path,opt);var j=await r.json().catch(function(){return{ok:false,message:'无法解析服务器响应'}});if(r.status===401){showLogin()}return j}
+async function raw(path,method,data){try{var opt={method:method||'GET',headers:{},credentials:'include',cache:'no-store'};if(data!==undefined){opt.headers['Content-Type']='application/json';opt.body=JSON.stringify(data)}var r=await fetch(path,opt);var j=await r.json().catch(function(){return{ok:false,message:'无法解析服务器响应'}});if(!r.ok&&!j.message)j.message='HTTP '+r.status;return j}catch(e){return{ok:false,message:'网络请求失败：'+String(e&&e.message||e)}}}
+async function api(path,method,data){var opt={method:method||'GET',headers:{},credentials:'include'};if(data!==undefined){opt.headers['Content-Type']='application/json';opt.body=JSON.stringify(data)}var r=await fetch('/api/portal'+path,opt);var j=await r.json().catch(function(){return{ok:false,message:'无法解析服务器响应'}});if(r.status===401){showLogin()}return j}
 function statusClass(s){return s==='ok'?'ok':s==='warning'?'warning':s==='error'?'error':''}
 function ensureModal(){if($('qqaiModal'))return;var d=document.createElement('div');d.id='qqaiModal';d.className='qqai-modal hidden';d.setAttribute('role','dialog');d.setAttribute('aria-modal','true');d.innerHTML='<div class="qqai-modal-card"><h3 id="qqaiModalTitle">确认操作</h3><div id="qqaiModalText" class="qqai-modal-text"></div><textarea id="qqaiModalInput" class="qqai-modal-input hidden"></textarea><div class="qqai-modal-actions"><button id="qqaiModalCancel" class="btn">取消</button><button id="qqaiModalOk" class="btn primary">确认</button></div></div>';document.body.appendChild(d)}
 function customDialog(message,options){ensureModal();options=options||{};return new Promise(function(resolve){var d=$('qqaiModal'),input=$('qqaiModalInput'),ok=$('qqaiModalOk'),cancel=$('qqaiModalCancel');$('qqaiModalTitle').textContent=options.title||'确认操作';$('qqaiModalText').textContent=String(message||'');input.classList.toggle('hidden',!options.input);input.value=options.value||'';input.placeholder=options.placeholder||'';ok.textContent=options.okText||'确认';cancel.textContent=options.cancelText||'取消';ok.className='btn '+(options.danger?'danger':'primary');d.classList.remove('hidden');if(options.input)setTimeout(function(){input.focus()},0);var done=function(value){d.classList.add('hidden');ok.onclick=null;cancel.onclick=null;d.onclick=null;document.removeEventListener('keydown',onKey);resolve(value)};var onKey=function(e){if(e.key==='Escape')done(options.input?null:false);if(e.key==='Enter'&&!options.input){e.preventDefault();done(true)}};document.addEventListener('keydown',onKey);ok.onclick=function(){var value=options.input?input.value:true;if(options.required&&options.input&&!String(value).trim()){toast(options.requiredMessage||'请填写内容');input.focus();return}done(value)};cancel.onclick=function(){done(options.input?null:false)};d.onclick=function(e){if(e.target===d)done(options.input?null:false)}})}
@@ -14048,7 +14485,16 @@ async function loadSchedules(){if(!$('scheduleMine'))return;if(!currentGroup){$(
 
 async function loadGroups(){var r=await api('/groups');if(!r.ok){toast(r.message);return false}var sel=$('groupSelect'),groups=r.groups||[];sel.innerHTML='<option value="">选择群组</option>';groups.forEach(function(g){var o=document.createElement('option');o.value=g.groupId;o.textContent=(g.displayName||g.groupName||g.groupId)+' ('+g.groupId+')';sel.appendChild(o)});if(r.selectedGroupId){sel.value=r.selectedGroupId;currentGroup=r.selectedGroupId}else if(groups.length===1){sel.value=groups[0].groupId;await selectGroup(groups[0].groupId)}else if(!groups.length){toast('没有找到你已加入且启用 QQAI 的群组；仍可使用匿名申诉与个人功能。')}return true}
 async function selectGroup(id){if(!id){currentGroup='';setNativeAdminVisibility(false);refreshOverview();return}var r=await api('/select-group','POST',{groupId:id});if(!r.ok){toast(r.message);return}currentGroup=id;session=r.session;$('identity').innerHTML='<b>QQ '+esc(session.qq)+'</b><br><span style="color:#98a2b7">'+esc(portalRoleLabel(session.role||'member'))+'</span>';await refreshCapabilities();applyR3RoleVisibility();toast('已切换群组');refreshOverview()}
-async function boot(){migratePortalMaintenanceV140();ensureR3Views();organizeSidebarNavigation();bindDashboardActions();var me=await api('/me');if(!me.ok){setNativeAdminVisibility(false);showLogin();return}showApp();session=me.session;$('identity').innerHTML='<b>QQ '+esc(session.qq)+'</b><br><span style="color:#98a2b7">'+esc(portalRoleLabel(session.role||'member'))+'</span>';var loaded=await loadGroups();if(!loaded)return;await refreshCapabilities();applyR3RoleVisibility();var hash=String(location.hash||'').replace(/^#/,'');if(hash&&$('v-'+hash)){var b=document.querySelector('#nav button[data-view="'+hash+'"]');if(b&&!b.hidden&&b.style.display!=='none')showView(hash);else showView('overview')}else showView('overview')}
+function ensureAccountSecurityPanel(){var view=$('v-settingscenter');if(!view||$('accountSecurityPanel'))return;var panel=document.createElement('div');panel.id='accountSecurityPanel';panel.className='card';panel.style.marginBottom='16px';panel.innerHTML='<div class="section-head" style="margin-bottom:12px"><div><h3>登录与双因数验证</h3><p>验证码登录永远保留；密码为可选。启用 2FA 后，密码登录还需要验证器动态码、单次备用码或 QQ 私信验证码。</p></div><button id="authSecurityReload" class="btn">刷新状态</button></div><div id="authSecurityStatus" class="notice">尚未加载。</div><div class="security-grid" style="margin-top:14px"><div class="card"><h3>设置或修改密码</h3><div class="field"><label>当前密码（首次设置可留空）</label><input id="authCurrentPassword" type="password" autocomplete="current-password"></div><div class="field"><label>新密码（至少 10 个字符）</label><input id="authNewPassword" type="password" maxlength="128" autocomplete="new-password"></div><div class="field"><label>确认新密码</label><input id="authConfirmPassword" type="password" maxlength="128" autocomplete="new-password"></div><div class="field"><label>QQ 验证码（登录超过 15 分钟或忘记当前密码时使用）</label><input id="authVerificationCode" inputmode="numeric" maxlength="6" autocomplete="one-time-code"></div><div class="row"><button id="authSendCode" class="btn ghost">发送 QQ 验证码</button><button id="authSavePassword" class="btn primary">保存密码</button></div></div><div class="card"><h3>双因数验证（TOTP）</h3><div class="field"><label>当前密码</label><input id="auth2faPassword" type="password" autocomplete="current-password"></div><div class="row"><button id="auth2faSetup" class="btn primary">开始设置 2FA</button><button id="auth2faDisable" class="btn danger">关闭 2FA</button></div><div id="auth2faSetupArea" class="hidden"><div class="field"><label>验证器密钥</label><input id="auth2faSecret" readonly></div><div class="field"><label>otpauth URI</label><textarea id="auth2faUri" readonly></textarea></div><div class="field"><label>验证器当前六位动态码</label><input id="auth2faCode" inputmode="numeric" maxlength="6" autocomplete="one-time-code"></div><div class="row"><button id="auth2faEnable" class="btn primary">验证并启用</button><button id="authBackupRegenerate" class="btn">重新生成备用码</button></div></div></div></div><div id="authBackupCodes" class="notice hidden backup-codes"></div>';var anchor=$('scMessage');view.insertBefore(panel,anchor||view.firstChild);$('authSecurityReload').onclick=loadAccountSecurity;$('authSendCode').onclick=sendAccountSecurityCode;$('authSavePassword').onclick=saveAccountPassword;$('auth2faSetup').onclick=setupAccount2fa;$('auth2faEnable').onclick=enableAccount2fa;$('auth2faDisable').onclick=disableAccount2fa;$('authBackupRegenerate').onclick=regenerateBackupCodes}
+async function loadAccountSecurity(){if(!$('authSecurityStatus'))return;var r=await api('/security/auth-state');if(!r.ok){$('authSecurityStatus').textContent=r.message||'读取失败';return}$('authSecurityStatus').textContent='密码：'+(r.passwordSet?'已设置':'未设置')+'；双因数验证：'+(r.twoFactorEnabled?'已启用':'未启用')+(r.twoFactorEnabled?'；剩余备用码 '+Number(r.backupCodesRemaining||0)+' 组':'')+(r.encryptionReady?'':'；管理员尚未设置 PORTAL_AUTH_SECRET，暂时不能启用 2FA');$('auth2faSetup').disabled=!r.passwordSet||!r.encryptionReady||r.twoFactorEnabled;$('auth2faDisable').disabled=!r.twoFactorEnabled;$('authBackupRegenerate').disabled=!r.twoFactorEnabled;$('auth2faSetupArea').classList.toggle('hidden',!r.twoFactorEnabled)}
+async function sendAccountSecurityCode(){if(!session)return;var r=await raw('/api/auth/request-code','POST',{qq:session.qq});toast(r.message||'发送失败')}
+async function saveAccountPassword(){var next=$('authNewPassword').value,confirm=$('authConfirmPassword').value;if(next!==confirm){toast('两次输入的新密码不一致');return}var r=await api('/security/password','POST',{currentPassword:$('authCurrentPassword').value,newPassword:next,verificationCode:$('authVerificationCode').value});toast(r.message||'保存失败');if(r.ok){$('authCurrentPassword').value='';$('authNewPassword').value='';$('authConfirmPassword').value='';$('authVerificationCode').value='';loadAccountSecurity()}}
+async function setupAccount2fa(){var r=await api('/security/2fa/setup','POST',{currentPassword:$('auth2faPassword').value});toast(r.message||'设置失败');if(!r.ok)return;$('auth2faSetupArea').classList.remove('hidden');$('auth2faSecret').value=r.secret||'';$('auth2faUri').value=r.uri||'';$('auth2faCode').focus()}
+function showBackupCodes(codes,message){var box=$('authBackupCodes');box.classList.remove('hidden');box.textContent=String(message||'请保存备用码')+'\n\n'+(codes||[]).join('\n')+'\n\n每组备用码只能使用一次。关闭或刷新页面后不会再次显示原文。'}
+async function enableAccount2fa(){var r=await api('/security/2fa/enable','POST',{code:$('auth2faCode').value});toast(r.message||'启用失败');if(r.ok){showBackupCodes(r.backupCodes,r.message);$('auth2faPassword').value='';$('auth2faCode').value='';loadAccountSecurity()}}
+async function regenerateBackupCodes(){var code=$('auth2faCode').value;if(!code){toast('请先输入验证器当前六位动态码');return}if(!(await confirmModal('旧备用码会立即全部失效，确定重新生成吗？','重新生成备用码')))return;var r=await api('/security/2fa/backup-codes','POST',{code:code});toast(r.message||'生成失败');if(r.ok)showBackupCodes(r.backupCodes,r.message)}
+async function disableAccount2fa(){var password=$('auth2faPassword').value,code=$('auth2faCode').value;if(!password||!code){toast('关闭 2FA 需要当前密码和验证器动态码');return}if(!(await confirmModal('关闭后所有备用码都会失效，确定继续吗？','关闭双因数验证')))return;var r=await api('/security/2fa/disable','POST',{currentPassword:password,code:code});toast(r.message||'关闭失败');if(r.ok){$('auth2faPassword').value='';$('auth2faCode').value='';$('auth2faSetupArea').classList.add('hidden');$('authBackupCodes').classList.add('hidden');loadAccountSecurity()}}
+async function boot(attempt){attempt=Number(attempt||0);migratePortalMaintenanceV140();ensureR3Views();ensureAccountSecurityPanel();organizeSidebarNavigation();bindDashboardActions();var me=await api('/me');if(!me.ok){if(me.retryable||me.code==='SESSION_STORAGE_UNAVAILABLE'){setNativeAdminVisibility(false);$('loginNotice').textContent=me.message||'登录会话资料库暂时不可用，正在重试…';if(attempt<3){setTimeout(function(){boot(attempt+1)},500*(attempt+1));return}showLogin();return}setNativeAdminVisibility(false);showLogin();return}showApp();session=me.session;loadAccountSecurity();$('identity').innerHTML='<b>QQ '+esc(session.qq)+'</b><br><span style="color:#98a2b7">'+esc(portalRoleLabel(session.role||'member'))+'</span>';var loaded=await loadGroups();if(!loaded)return;await refreshCapabilities();applyR3RoleVisibility();var hash=String(location.hash||'').replace(/^#/,'');if(hash&&$('v-'+hash)){var b=document.querySelector('#nav button[data-view="'+hash+'"]');if(b&&!b.hidden&&b.style.display!=='none')showView(hash);else showView('overview')}else showView('overview')}
 async function loadHealth(mode){$('healthList').innerHTML='<div class="empty">检查中…</div>';var r=await api('/health?mode='+encodeURIComponent(mode||'quick'));if(!r.checks){$('healthList').innerHTML='<div class="empty">'+esc(r.message||'检查失败')+'</div>';return}renderHealth(r)}
 function renderHealth(r){$('healthSummary').innerHTML='<div class="card span-4"><div class="metric-label">正常</div><div class="metric-value">'+esc(r.counts.ok)+'</div></div><div class="card span-4"><div class="metric-label">警告</div><div class="metric-value">'+esc(r.counts.warning)+'</div></div><div class="card span-4"><div class="metric-label">错误</div><div class="metric-value">'+esc(r.counts.error)+'</div></div>';$('healthList').innerHTML=(r.checks||[]).map(function(c){var detail=c.error||humanizeHealthDetail(c.detail);return '<div class="health-card"><div class="item-head"><div class="item-title">'+esc(c.name)+'</div><span class="status '+statusClass(c.status)+'">'+esc(healthStatusText(c.status))+'</span></div><div class="latency">耗时：'+esc(c.latencyMs)+' ms</div><div class="detail">'+esc(detail)+'</div></div>'}).join('')||'<div class="empty">没有检查项目</div>';var issues=(r.checks||[]).filter(function(c){return c.status!=='ok'});$('overviewIssues').innerHTML=issues.map(function(c){return '<div class="item"><div class="item-head"><div class="item-title">'+esc(c.name)+'</div><span class="status '+statusClass(c.status)+'">'+esc(healthStatusText(c.status))+'</span></div><div class="item-meta">'+esc(c.error||humanizeHealthDetail(c.detail))+'</div></div>'}).join('')||'<div class="empty">所有检查项目正常</div>';$('overallStatus').className='status '+(r.ok?'ok':'error');$('overallStatus').textContent=r.ok?'系统正常':'需要处理'}
 async function loadTasks(){var r=await api('/tasks');if(!r.ok){$('taskList').innerHTML='<div class="empty">'+esc(r.message)+'</div>';return}$('mActive').textContent=r.inFlightQuestions||0;$('mQueued').textContent=r.queuedQuestions||0;$('taskStats').innerHTML='<div class="card span-6"><div class="metric-label">執行中</div><div class="metric-value">'+esc(r.inFlightQuestions||0)+'</div></div><div class="card span-6"><div class="metric-label">等待中</div><div class="metric-value">'+esc(r.queuedQuestions||0)+'</div></div>';$('taskList').innerHTML='';(r.queues||[]).forEach(function(q){var d=document.createElement('div');d.className='item';d.innerHTML='<div class="item-head"><div><div class="item-title">群 '+esc(q.groupId)+'／QQ '+esc(q.userId)+'</div><div class="item-meta">執行中：'+esc(q.preview||'無')+'<br>排隊：'+esc((q.queued||[]).length)+' 題</div></div></div>';(q.queued||[]).forEach(function(x){var p=document.createElement('div');p.className='item-body';p.textContent='等待：'+x.preview;d.appendChild(p)});var b=document.createElement('button');b.className='btn danger';b.textContent='取消此使用者等待列';b.addEventListener('click',async function(){var x=await api('/tasks/cancel','POST',{groupId:q.groupId,userId:q.userId});toast(x.message||'完成');loadTasks()});d.appendChild(b);$('taskList').appendChild(d)});if(!$('taskList').children.length)$('taskList').innerHTML='<div class="empty">目前沒有執行中或等待中的問題</div>'}
@@ -14086,9 +14532,12 @@ function renderReadableLog(a){var type=String(a.type||''),title=logTypeLabels[ty
 async function loadLogs(){ensureSearchTools();var q=$('logSearch')?$('logSearch').value.trim():'',category=$('logCategory')?$('logCategory').value:'';var r=await api('/admin/logs?q='+encodeURIComponent(q));if(!r.ok){$('logList').innerHTML='<div class="empty">'+esc(r.message)+'</div>';if($('logSummary'))$('logSummary').textContent='加载失败：'+String(r.message||'未知错误');return}var all=r.logs||[],logs=category?all.filter(function(a){return logCategoryOf(a)===category}):all;if($('logSummary'))$('logSummary').textContent='共显示 '+logs.length+' 条日志'+(q?'，搜索内容：“'+q+'”':'')+(category?'，已按类别筛选':'')+'。时间已换算为台北时间。';$('logList').innerHTML=logs.map(renderReadableLog).join('')||'<div class="empty">没有符合条件的操作日志</div>'}
 async function refreshOverview(){if(!$('mNapcat'))return;var selected=$('groupSelect')&&$('groupSelect').selectedOptions&&$('groupSelect').selectedOptions[0],groupName=selected&&selected.value?selected.textContent:'尚未选择群组';$('overviewGreeting').textContent=selected&&selected.value?groupName:'先选择一个群组';$('overviewSummary').textContent=selected&&selected.value?'这里会用简单文字告诉你机器人是否正常，以及有没有需要处理的事情。':'请从右上角选择群组；个人申诉与个人记录仍可直接使用。';var h=await api('/health?mode=quick');if(h.checks)renderHealth(h);var t=await api('/tasks'),active=0,queued=0;if(t.ok){active=Number(t.inFlightQuestions||0);queued=Number(t.queuedQuestions||0);$('mActive').textContent=active;$('mQueued').textContent=queued}var p=await api('/moderation/proposals'),pending=0;if(p.ok){pending=(p.proposals||[]).filter(function(x){return proposalState(x)==='pending'}).length;$('mProposals').textContent=pending}var doCheck=(h.checks||[]).find(function(c){return c.name==='Durable Object／NapCat'}),connected=!!(doCheck&&doCheck.status==='ok');$('mNapcat').textContent=connected?'连接正常':'连接异常';$('mNapcatSub').textContent=doCheck?(connected?'回应 '+String(doCheck.latencyMs)+' ms':'请检查 NapCat 连接'):'暂时没有连接资料';var issueCount=(h.checks||[]).filter(function(c){return c.status!=='ok'}).length;var parts=[];if(!selected||!selected.value)parts.push('尚未选择群组');if(!connected)parts.push('机器人连接需要检查');if(pending)parts.push(pending+' 项操作等待确认');if(queued)parts.push(queued+' 个问题正在排队');$('overviewSummary').textContent=parts.length?parts.join('；')+'。':groupName+' 目前运作正常，没有需要立即处理的事项。'}
 var lastPortalInteractionAt=Date.now();['pointerdown','keydown','input','change','touchstart'].forEach(function(eventName){document.addEventListener(eventName,function(){lastPortalInteractionAt=Date.now()},{passive:true})});function renewPortalSession(force){if(!session||document.hidden)return;if(!force&&Date.now()-lastPortalInteractionAt>5*60*1000)return;api('/heartbeat','POST',{}).then(function(r){if(!r.ok&&r.message)console.warn('会话续期失败：'+r.message)})}var portalHeartbeatTimer=setInterval(function(){renewPortalSession(false)},4*60*1000);document.addEventListener('visibilitychange',function(){if(!document.hidden){lastPortalInteractionAt=Date.now();renewPortalSession(true)}});
-async function requestLoginCode(){var qq=String($('loginQq').value||'').replace(/\D/g,'');if(!/^\d{5,12}$/.test(qq)){$('loginNotice').textContent='请输入正确的 QQ 号。';return}try{localStorage.setItem('qqai_last_login_qq',qq)}catch(e){}var b=$('sendCode');b.disabled=true;b.textContent='发送中…';$('loginNotice').textContent='正在透過 NapCat 发送验证码…';var r=await raw('/api/auth/request-code','POST',{qq:qq});$('loginNotice').textContent=r.message||'验证码发送失败。';b.disabled=false;b.textContent=r.ok?'重新发送验证码':'发送验证码'}
-async function verifyLoginCode(){var qq=String($('loginQq').value||'').replace(/\D/g,''),code=String($('loginCode').value||'').replace(/\D/g,'');if(!/^\d{5,12}$/.test(qq)||!/^\d{6}$/.test(code)){$('loginNotice').textContent='请输入正确的 QQ 号和六位验证码。';return}var b=$('verifyCode');b.disabled=true;b.textContent='验证中…';var r=await raw('/api/auth/verify-code','POST',{qq:qq,code:code,remember:!$('rememberLogin')||$('rememberLogin').checked});$('loginNotice').textContent=r.message||'验证失败。';b.disabled=false;b.textContent='登录管理中心';if(r.ok){boot()}}
-try{var lastLoginQq=localStorage.getItem('qqai_last_login_qq');if(lastLoginQq)$('loginQq').value=lastLoginQq}catch(e){}$('sendCode').addEventListener('click',requestLoginCode);$('verifyCode').addEventListener('click',verifyLoginCode);$('loginQq').addEventListener('keydown',function(e){if(e.key==='Enter')requestLoginCode()});$('loginCode').addEventListener('keydown',function(e){if(e.key==='Enter')verifyLoginCode()});$('loginThemeToggle').addEventListener('click',toggleTheme);$('themeToggle').addEventListener('click',toggleTheme);updateThemeButtons();
+function setLoginMethod(method){var password=method==='password';$('loginCodePane').classList.toggle('hidden',password);$('loginPasswordPane').classList.toggle('hidden',!password);$('loginMethodCode').classList.toggle('active',!password);$('loginMethodPassword').classList.toggle('active',password);$('loginNotice').textContent=password?'输入已设置的密码。启用 2FA 的账号还需要动态码、备用码或 QQ 验证码。':'验证码会由已连接的 NapCat 私信发送至你的 QQ。'}
+async function requestLoginCode(){var qq=String($('loginQq').value||'').replace(/\D/g,'');if(!/^\d{5,12}$/.test(qq)){$('loginNotice').textContent='请输入正确的 QQ 号。';return}try{localStorage.setItem('qqai_last_login_qq',qq)}catch(e){}var b=$('sendCode');b.disabled=true;b.textContent='发送中…';$('loginNotice').textContent='正在通过 NapCat 发送验证码…';var r=await raw('/api/auth/request-code','POST',{qq:qq});$('loginNotice').textContent=r.message||'验证码发送失败。';b.disabled=false;b.textContent=r.ok?'重新发送验证码':'发送验证码'}
+async function verifyLoginCode(){var qq=String($('loginQq').value||'').replace(/\D/g,''),code=String($('loginCode').value||'').replace(/\D/g,'');if(!/^\d{5,12}$/.test(qq)||!/^\d{6}$/.test(code)){$('loginNotice').textContent='请输入正确的 QQ 号和六位验证码。';return}var b=$('verifyCode');b.disabled=true;b.textContent='验证中…';var r=await raw('/api/auth/verify-code','POST',{qq:qq,code:code,remember:!$('rememberLogin')||$('rememberLogin').checked});$('loginNotice').textContent=r.message||'验证失败。';b.disabled=false;b.textContent='使用验证码登录';if(r.ok){await boot()}}
+async function verifyPasswordLogin(){var qq=String($('loginQq').value||'').replace(/\D/g,''),password=$('loginPassword').value;if(!/^\d{5,12}$/.test(qq)||!password){$('loginNotice').textContent='请输入正确的 QQ 号和密码。';return}var b=$('verifyPassword');b.disabled=true;b.textContent='验证中…';var factorVisible=!$('loginFactorWrap').classList.contains('hidden');var r=await raw('/api/auth/login-password','POST',{qq:qq,password:password,remember:!$('rememberLogin')||$('rememberLogin').checked,factorType:factorVisible?$('loginFactorType').value:'',factorCode:factorVisible?$('loginFactorCode').value:''});b.disabled=false;b.textContent='使用密码登录';$('loginNotice').textContent=r.message||'登录失败。';if(r.requiresTwoFactor||r.code==='TWO_FACTOR_REQUIRED'){$('loginFactorWrap').classList.remove('hidden');$('loginFactorCode').focus();return}if(r.ok){await boot()}}
+async function requestPasswordFactorCode(){var qq=String($('loginQq').value||'').replace(/\D/g,'');if(!/^\d{5,12}$/.test(qq)){toast('请先输入正确的 QQ 号');return}var r=await raw('/api/auth/request-code','POST',{qq:qq});$('loginNotice').textContent=r.message||'验证码发送失败。';if(r.ok){$('loginFactorType').value='qq_code';$('loginFactorWrap').classList.remove('hidden')}}
+try{var lastLoginQq=localStorage.getItem('qqai_last_login_qq');if(lastLoginQq)$('loginQq').value=lastLoginQq}catch(e){}$('loginMethodCode').addEventListener('click',function(){setLoginMethod('code')});$('loginMethodPassword').addEventListener('click',function(){setLoginMethod('password')});$('sendCode').addEventListener('click',requestLoginCode);$('verifyCode').addEventListener('click',verifyLoginCode);$('verifyPassword').addEventListener('click',verifyPasswordLogin);$('passwordSendFactorCode').addEventListener('click',requestPasswordFactorCode);$('loginQq').addEventListener('keydown',function(e){if(e.key==='Enter'){if($('loginPasswordPane').classList.contains('hidden'))requestLoginCode();else verifyPasswordLogin()}});$('loginCode').addEventListener('keydown',function(e){if(e.key==='Enter')verifyLoginCode()});$('loginPassword').addEventListener('keydown',function(e){if(e.key==='Enter')verifyPasswordLogin()});$('loginFactorCode').addEventListener('keydown',function(e){if(e.key==='Enter')verifyPasswordLogin()});$('loginThemeToggle').addEventListener('click',toggleTheme);$('themeToggle').addEventListener('click',toggleTheme);updateThemeButtons();
 $('logout').onclick=async function(){await raw('/api/auth/logout','POST',{});location.reload()};if($('advancedToggle'))$('advancedToggle').onclick=function(){setPortalAdvanced(!portalAdvancedEnabled())};bindDashboardActions();$('menu').onclick=toggleMobileSidebar;if($('sidebarBackdrop'))$('sidebarBackdrop').onclick=closeMobileSidebar;document.addEventListener('keydown',function(e){if(e.key==='Escape')closeMobileSidebar()});window.addEventListener('resize',syncResponsivePortal,{passive:true});syncResponsivePortal();$('refresh').onclick=function(){var active=document.querySelector('#nav button[data-view].active');showView(active?active.dataset.view:'overview')};$('groupSelect').onchange=function(){selectGroup(this.value)};document.querySelectorAll('#nav button[data-view]').forEach(function(b){b.onclick=function(){showView(b.dataset.view)}});
 $('quickHealth').onclick=function(){loadHealth('quick')};$('fullHealth').onclick=function(){loadHealth('full')};$('runModelCheck').onclick=runSingleModelCheck;$('modelCheckProvider').onchange=function(){var p=this.value;$('modelCheckKeyPool').disabled=p!=='gemini'};$('reloadTasks').onclick=loadTasks;$('clearQueue').onclick=async function(){if(!currentGroup){toast('请先选择群组');return}if(!(await confirmModal('清空当前群所有等待中的问题？正在生成的问题不会被强制中断。','清空等待队列')))return;var r=await api('/tasks/clear','POST',{groupId:currentGroup});toast(r.message||'完成');loadTasks()};$('reloadProposals').onclick=loadProposals;
 $('createProposal').onclick=async function(){var r=await api('/ops/action','POST',{action:$('opAction').value,qq:$('opQq').value,duration:$('opDuration').value,reason:$('opReason').value});$('opMessage').textContent=r.message;toast(r.message);if(r.ok)loadProposals()};
