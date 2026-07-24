@@ -1,4 +1,5 @@
-const VERSION = "1.3.7";
+const VERSION = "1.3.8";
+const QQAI_V1_R38_AFFINITY_MANUAL_CHECK_MARKER = "QQAI_V1_R38_AFFINITY_MANUAL_CHECK_MARKER";
 const QQAI_V1_R37_PORTAL_SIMPLIFIED_MARKER = "QQAI_V1_R37_PORTAL_SIMPLIFIED_MARKER";
 const QQAI_V1_R36_MARKER = "QQAI_V1_R36_MARKER";
 const QQAI_V1_R35_STANDALONE_MARKER = "QQAI_V1_R35_STANDALONE_MARKER";
@@ -70,6 +71,19 @@ const EXPLICIT_REPLY_FAILURE_MESSAGES = Object.freeze({
   worker_no_reply: "这次 @ 已收到，但主 Worker 没有产生回复。请检查本群 AI 开关、群白名单、权限与模型可用状态。",
   send_failed: "回复已经生成，但 WebSocket 与 HTTP 备用发送都失败。请检查 NapCat 连接、Access Token 与发送权限。",
   uncaught_error: "本次处理发生未预期错误，任务已释放。请到 Portal 查看最新错误记录后重试。"
+});
+
+const AFFINITY_DEFAULTS = Object.freeze({
+  fixedBase: 50,
+  fixedMin: 0,
+  fixedMax: 85,
+  aiMin: -15,
+  aiMax: 15,
+  aiRefreshMs: 6 * 60 * 60 * 1000,
+  dailyPositiveCap: 3,
+  dailyNegativeCap: 6,
+  manualCheckCooldownMs: 20 * 1000,
+  manualCheckHourlyLimit: 8
 });
 
 const AI_MEDIA_LIMITS = Object.freeze({
@@ -1020,7 +1034,7 @@ export default {
       fileAttachments = fileAttachments.filter(item => item && (item.name || item.file || item.url)).slice(0, 20);
       mentionedQqs = [...new Set([...mentionedQqs, ...eventMentionedQqs(body)].filter(Boolean).map(String))];
       if (isGroup && !isSelfAccount) {
-        const optOut = stripGroupAiOptOutPrefix(userMessage);
+        const optOut = stripGroupAiOptOutPrefix(userMessage, botId);
         aiReplyOptOut = optOut.optedOut;
         userMessage = optOut.text;
       }
@@ -1076,6 +1090,13 @@ export default {
         } else if (!explicitSelfCommand) {
           sameQqHumanOnly = true;
         }
+      }
+
+      // 明确 @Bot 后接 ! 指令时，移除机器人自身提及再进入指令路由；
+      // 普通 @Bot 聊天仍保留原文，不会被误当成指令。
+      if (isGroup && botId && mentionedQqs.includes(String(botId))) {
+        const commandAfterMention = stripBotMentionFromConversation(cleanMessage, botId).trim();
+        if (/^[!！]/.test(commandAfterMention)) cleanMessage = commandAfterMention;
       }
 
       let msgLower = cleanMessage.trim().toLowerCase();
@@ -1257,11 +1278,41 @@ export default {
         isGroup
       };
 
+      // /! 是群友明确要求“只作为普通群聊，不进入任何 AI 流程”。
+      // 除了不生成聊天回复，也跳过群规分类、插话判断、摘要、向量检索与好感度 AI 评估。
+      if (aiReplyOptOut) {
+        if (isGroup) {
+          await recordStructuredMessage(env, {
+            groupId: currentGroupId,
+            userId,
+            senderName: senderCard,
+            messageId: replyMessageId,
+            text: cleanMessage,
+            mentions: mentionedQqs,
+            replyId: quotedMessageId,
+            source: "human"
+          });
+        }
+        ctx.waitUntil(writeAiDecisionLog(env, { ...aiDecisionBase, decision: "skipped", reason: "user_opt_out_all_ai", triggerType: "user_opt_out" }).catch(() => {}));
+        return new Response(null, { status: 204 });
+      }
+
       // 權限拆分：AI 管理與真正群操作互不混用。
       const permissionSet = await getEffectivePermissions(env, currentGroupId, userId, senderRole, isDeveloper);
       const hasAdminAuth = permissionSet.aiAdmin;
       const hasGroupOpsAuth = permissionSet.groupOps;
       const isOnlyMe = isDeveloper;
+
+      // 固定好感度只采用可解释、限额且幂等的规则更新；AI 调整分另行缓存评估。
+      if (isGroup && !isCommandMessage && meaningfulText && (botMentioned || repliedToBot)) {
+        ctx.waitUntil(updateAffinityFixedFromMessage(env, {
+          groupId: currentGroupId,
+          userId,
+          text: cleanMessage,
+          messageId: replyMessageId,
+          direct: true
+        }).catch(error => console.warn("affinity fixed update failed", error?.message || error)));
+      }
 
       // 同號人工普通發言只納入上下文，不觸發 AI；人工命令與 ?? 提問可繼續。
       if (sameQqHumanOnly) {
@@ -1307,6 +1358,105 @@ export default {
           .trim();
         return { targetQq, targetQqs: targetMentionQqs.slice(), restText };
       };
+
+      const manualRuleCheckCommand = cleanMessage.match(/^[!！](?:检查|檢查|违规检查|違規檢查|群规检查|群規檢查)(?:\s+([\s\S]*))?$/i);
+      if (manualRuleCheckCommand) {
+        if (!isGroup) return jsonReply(`${atSender}人工违规检查只能在群聊中使用。`);
+        let reportReason = String(manualRuleCheckCommand[1] || "").trim();
+        let targetRecord = null;
+        if (quotedMessage && quotedMessage.source !== "ai" && String(quotedMessage.senderId || "") !== String(botId || "")) {
+          targetRecord = {
+            messageId: String(quotedMessage.messageId || quotedMessageId || ""),
+            userId: String(quotedMessage.senderId || ""),
+            senderName: String(quotedMessage.senderName || quotedMessage.senderId || "群友"),
+            text: String(quotedMessage.text || quotedMessageText || "").trim()
+          };
+        }
+        const explicitTarget = targetMentionQqs[0] || reportReason.match(/^@?(\d{5,})\b/)?.[1] || "";
+        if (!targetRecord && explicitTarget) {
+          const recent = await latestConversationMessageForUser(env, currentGroupId, explicitTarget, replyMessageId);
+          if (recent) targetRecord = {
+            messageId: String(recent.messageId || recent.id || ""),
+            userId: String(recent.userId || explicitTarget),
+            senderName: String(recent.senderName || explicitTarget),
+            text: String(recent.text || "").trim()
+          };
+        }
+        if (!targetRecord?.userId || !targetRecord?.text) {
+          return jsonReply(`${atSender}请回复需要检查的群友消息，并填写原因；也可以 @群友 后说明原因。示例：回复消息后发送“!检查 他连续 @别人并叫爸妈，疑似骚扰”。`);
+        }
+        if (String(targetRecord.userId) === String(botId || "")) return jsonReply(`${atSender}该指令用于补检群友消息，不检查机器人自己的回复。`);
+        if (explicitTarget) {
+          reportReason = reportReason.replace(new RegExp(`^@?${explicitTarget}\\s*`), "").trim();
+        }
+        reportReason = reportReason.replace(/^(?:原因(?:是|为|為)?|因为|因為|理由)[:：\s]*/i, "").trim();
+        if (!reportReason) return jsonReply(`${atSender}必须填写你认为违规的具体原因，不能只发“检查”。`);
+        const rate = await consumeManualRuleCheckRate(env, currentGroupId, userId);
+        if (!rate.allowed) return jsonReply(`${atSender}${rate.message}`);
+        await writeSystemAudit(env, {
+          type: "manual_rule_check_requested",
+          groupId: currentGroupId,
+          actorId: userId,
+          targetId: targetRecord.userId,
+          action: "manual_check",
+          messageId: targetRecord.messageId,
+          reason: reportReason.slice(0, 1000)
+        }).catch(() => {});
+        const result = await inspectMessageAgainstGroupRules(env, {
+          groupId: currentGroupId,
+          userId: targetRecord.userId,
+          senderName: targetRecord.senderName,
+          text: targetRecord.text,
+          messageId: targetRecord.messageId,
+          manualReport: {
+            reporterId: userId,
+            reporterName: senderCard,
+            reason: reportReason,
+            sourceMessageId: replyMessageId,
+            requestedAt: Date.now()
+          }
+        });
+        if (result?.status === "no_rules") return jsonReply(`${atSender}本群尚未设置可供检查的群规。`);
+        if (result?.status === "error") return jsonReply(`${atSender}检查失败：${String(result.error || "分类服务暂时不可用").slice(0, 180)}`);
+        if (result?.status === "no_violation") {
+          const confidence = Math.round(Number(result.review?.confidence || 0) * 100);
+          return jsonReply(`${atSender}已复核该消息，目前未确认违规${confidence ? `（置信度 ${confidence}%）` : ""}。你的补充原因已写入审计记录，但不会仅凭举报直接处罚。`);
+        }
+        if (result?.status === "violation") {
+          const item = result.item || {};
+          const actionText = String(item.actionResult || result.actionResult || "已建立违规记录");
+          return jsonReply(`${atSender}补检确认存在违规。\n对象：${targetRecord.senderName}（QQ:${targetRecord.userId}）\n分类：${item.violationType || result.review?.violationType || "其他"}\n原因：${item.reason || result.review?.reason || reportReason}\n处理：${actionText}`);
+        }
+        if (result?.status === "disabled") return jsonReply(`${atSender}${result.message || "当前无法执行群规检查。"}`);
+        return jsonReply(`${atSender}检查完成，但没有取得可用结论，请稍后重试。`);
+      }
+
+      const affinityQueryCommand = cleanMessage.match(/^[!！](?:好感度|查询好感度|查詢好感度|查好感)(?:\s+([\s\S]*))?$/i);
+      if (affinityQueryCommand) {
+        const rawTarget = String(affinityQueryCommand[1] || "").trim();
+        const targetQq = targetMentionQqs[0] || rawTarget.match(/@?(\d{5,})/)?.[1] || userId;
+        let targetName = targetQq === userId ? senderCard : targetQq;
+        if (isGroup && targetQq !== userId) {
+          const member = await opsGetGroupMember(env, currentGroupId, targetQq).catch(() => null);
+          if (member?.name) targetName = member.name;
+        }
+        const profile = await getAffinityProfile(env, { groupId: currentGroupId || "private", userId: targetQq, senderName: targetName, refreshAi: true });
+        const aiPart = profile.aiAdjustment >= 0 ? `+${profile.aiAdjustment}` : String(profile.aiAdjustment);
+        return jsonReply(`${atSender}${targetName}（QQ:${targetQq}）的好感度：${profile.total}/100\n组成：固定 ${profile.fixed}，AI 调整 ${aiPart}\n关系：${profile.level}\n评估：${profile.reason}`);
+      }
+
+      const affinityContextCommand = cleanMessage.match(/^[!！](?:好感度注入|好感度给AI|好感度給AI|好感度上下文)\s*(开|開|关|關|状态|狀態)$/i);
+      if (affinityContextCommand) {
+        if (!isGroup) return jsonReply(`${atSender}好感度 AI 上下文开关只能在群聊中设置。`);
+        const mode = affinityContextCommand[1];
+        const enabled = await dbGet(env, `affinity_context_enabled:${currentGroupId}`) !== "false";
+        if (/状态|狀態/.test(mode)) return jsonReply(`${atSender}好感度提供给 AI 当前为：${enabled ? "开启" : "关闭"}。`);
+        if (!hasAdminAuth) return jsonReply(`${atSender}你没有 AI 管理权限。`);
+        const next = /开|開/.test(mode);
+        await dbPut(env, `affinity_context_enabled:${currentGroupId}`, next ? "true" : "false");
+        await writeSystemAudit(env, { type: "affinity_context_setting", groupId: currentGroupId, actorId: userId, action: next ? "enabled" : "disabled" });
+        return jsonReply(`${atSender}已${next ? "开启" : "关闭"}好感度 AI 上下文。${next ? "之后 AI 会收到当前用户的好感度组成，但不会主动公开分数。" : "之后 AI 不再收到好感度资料。"}`);
+      }
 
       const shouldHandleActivityInput = isPrivate || isCommandMessage || botMentioned || repliedToBot || sameQqSelfAsk || /^(?:确认建立活动|確認建立活動|确认创建活动|確認創建活動|取消建立活动|取消建立活動|取消创建活动|取消創建活動)$/i.test(String(cleanMessage || "").trim());
       if (shouldHandleActivityInput) {
@@ -1939,7 +2089,8 @@ export default {
                       `🌐 Control Center：https://qqai.ray2025.com/\n` +
                       `🎙️ Live：https://qqai.ray2025.com/live\n` +
                       `📝 匿名申诉：请登录 Control Center 后使用“匿名申诉”功能\n\n` +
-                      `自然语言优先：@我后可直接说“查看活动”“报名 周末游戏夜”“明天晚上八点提醒我更新”“关闭本群 AI”等。固定 ! 指令仅作为兼容与紧急后备。\n\n` +
+                      `自然语言优先：@我后可直接说“查看活动”“报名 周末游戏夜”“明天晚上八点提醒我更新”“查一下我的好感度”“检查我回复的消息，原因是持续骚扰”等。固定 ! 指令仅作为兼容与紧急后备。\n` +
+                      `不想触发任何 AI：发送“@我 /!普通聊天内容”，该消息只进入群聊上下文，不调用聊天、群规或插话模型。\n\n` +
                       `🔹 [日常与多模态]\n` +
                       `!live (取得即时语音网页)\n` +
                       `!status / !配额 (系统状态)\n` +
@@ -1956,6 +2107,8 @@ export default {
                       `🔹 [专属记忆与个人设置]\n` +
                       `!群规 / !rules\n` +
                       `!免打扰 / !取消免打扰\n` +
+                      `!好感度 [@成员]（固定规则分 + AI 互动评估；开发者永久 100）\n` +
+                      `!检查 [具体违规原因]（回复目标消息，或 @目标；任何群友可补检）\n` +
                       `!记住 [@成员] <内容> / !忘记 [@成员] <内容>\n` +
                       `!你记住了什么 [@成员]\n` +
                       `!set人格 [风格] / !del人格\n` +
@@ -1974,6 +2127,7 @@ export default {
                      `!set群规 [内容]\n` +
                      `!切换人格 [风格] / !恢复人格\n` +
                      `!设置插话率 0-100\n` +
+                     `!好感度注入 开/关/状态\n` +
                      `!清空群上下文\n`;
         }
 
@@ -2753,6 +2907,26 @@ ${parsedMemos.slice(-30).map((m, i) => `${i + 1}. ${m.text}`).join('\n')}
 请只在语境相关时自然使用，不要机械背诵。`;
       }
 
+      // 好感度由固定规则分与缓存 AI 调整分组成。默认提供给聊天 AI，可由群 AI 管理员关闭。
+      if (isGroup && await dbGet(env, `affinity_context_enabled:${currentGroupId}`) !== "false") {
+        const affinity = await getAffinityProfile(env, {
+          groupId: currentGroupId,
+          userId,
+          senderName: senderCard,
+          refreshAi: false
+        });
+        const aiPart = affinity.aiAdjustment >= 0 ? `+${affinity.aiAdjustment}` : String(affinity.aiAdjustment);
+        finalStylePrompt += `\n\n【当前用户好感度资料】
+当前用户（QQ:${userId}）好感度为 ${affinity.total}/100，固定规则分 ${affinity.fixed}，AI 调整分 ${aiPart}，关系等级为“${affinity.level}”。
+这只是互动语气参考：分数高可更熟络，分数低应保持礼貌边界；不得歧视、羞辱、拒绝正常回答，也不得主动公开具体分数。只有用户明确询问好感度时才可说明。开发者分数永久为 100。`;
+        ctx.waitUntil(refreshAffinityAiAssessment(env, {
+          groupId: currentGroupId,
+          userId,
+          senderName: senderCard,
+          force: false
+        }).catch(error => console.warn("affinity AI refresh failed", error?.message || error)));
+      }
+
       // 第七段到此完美結束，準備進入第八段的 AI 隨機插話判定與上下文封裝模組...
 
       // ==========================================
@@ -3191,14 +3365,199 @@ function isDeveloperId(env, qq) {
   return Boolean(qq && String(qq) === developerId(env));
 }
 
-function stripGroupAiOptOutPrefix(value) {
+function stripGroupAiOptOutPrefix(value, botId = "") {
   const source = String(value || "");
-  const match = source.match(/^(\s*(?:\[CQ:(?:reply|at),[^\]]+\]\s*)*)\/!\s*/i);
-  if (!match) return { optedOut: false, text: source };
+  const cqPrefix = source.match(/^(\s*(?:\[CQ:(?:reply|at),[^\]]+\]\s*)*)/i)?.[1] || "";
+  let rest = source.slice(cqPrefix.length);
+  const id = String(botId || "").trim();
+  if (id) rest = rest.replace(new RegExp(`^\\s*@${id}\\s*`, "i"), "");
+  const optOut = rest.match(/^\/!\s*/i);
+  if (!optOut) return { optedOut: false, text: source };
   return {
     optedOut: true,
-    text: `${match[1] || ""}${source.slice(match[0].length)}`
+    text: `${cqPrefix}${rest.slice(optOut[0].length)}`
   };
+}
+
+
+function affinityClamp(value, min = 0, max = 100) {
+  return Math.max(min, Math.min(max, Number(value) || 0));
+}
+
+function affinityLevel(score) {
+  const value = affinityClamp(score, 0, 100);
+  if (value >= 90) return "非常亲近";
+  if (value >= 75) return "亲近";
+  if (value >= 60) return "友好";
+  if (value >= 40) return "普通";
+  if (value >= 20) return "疏远";
+  return "反感";
+}
+
+function affinityFixedKey(groupId, userId) {
+  return `affinity:fixed:${String(groupId || "private")}:${String(userId || "")}`;
+}
+
+function affinityAiKey(groupId, userId) {
+  return `affinity:ai:${String(groupId || "private")}:${String(userId || "")}`;
+}
+
+async function readAffinityFixedScore(env, groupId, userId) {
+  if (isDeveloperId(env, userId)) return 100;
+  const raw = await dbGet(env, affinityFixedKey(groupId, userId));
+  if (raw === null || raw === undefined || raw === "") return AFFINITY_DEFAULTS.fixedBase;
+  return affinityClamp(raw, AFFINITY_DEFAULTS.fixedMin, AFFINITY_DEFAULTS.fixedMax);
+}
+
+async function updateAffinityFixedFromMessage(env, { groupId, userId, text, messageId = "", direct = false }) {
+  if (!groupId || !userId || isDeveloperId(env, userId)) return null;
+  const content = String(text || "").trim();
+  if (!content || !direct) return null;
+  const eventId = String(messageId || "").trim();
+  if (eventId) {
+    const eventKey = `affinity:event:${groupId}:${userId}:${eventId}`;
+    if (await dbGet(env, eventKey)) return null;
+    await dbPut(env, eventKey, String(Date.now()));
+  }
+
+  const now = Date.now();
+  const p = taipeiParts(now);
+  const day = `${p.year}-${p.month}-${p.day}`;
+  const ledgerKey = `affinity:daily:${groupId}:${userId}:${day}`;
+  const ledger = await readJson(env, ledgerKey, { positive: 0, negative: 0, directCount: 0 });
+  let delta = 0;
+  const positive = /(?:谢谢|謝謝|感谢|感謝|辛苦了|麻烦你了|麻煩你了|帮大忙|幫大忙|挺有用|好用|做得好|真棒)/i.test(content);
+  const negative = /(?:傻逼|煞笔|智障|废物|廢物|垃圾机器人|垃圾機器人|去死|滚开|滾開|闭嘴|閉嘴|妈的|幹你|操你)/i.test(content);
+
+  if (Number(ledger.directCount || 0) === 0 && Number(ledger.positive || 0) < AFFINITY_DEFAULTS.dailyPositiveCap) delta += 1;
+  if (positive && Number(ledger.positive || 0) + Math.max(0, delta) < AFFINITY_DEFAULTS.dailyPositiveCap) delta += 1;
+  if (negative && Number(ledger.negative || 0) < AFFINITY_DEFAULTS.dailyNegativeCap) delta -= 2;
+  if (!delta) {
+    ledger.directCount = Number(ledger.directCount || 0) + 1;
+    await dbPut(env, ledgerKey, JSON.stringify(ledger));
+    return null;
+  }
+
+  if (delta > 0) {
+    const room = Math.max(0, AFFINITY_DEFAULTS.dailyPositiveCap - Number(ledger.positive || 0));
+    delta = Math.min(delta, room);
+    ledger.positive = Number(ledger.positive || 0) + delta;
+  } else {
+    const room = Math.max(0, AFFINITY_DEFAULTS.dailyNegativeCap - Number(ledger.negative || 0));
+    delta = -Math.min(Math.abs(delta), room);
+    ledger.negative = Number(ledger.negative || 0) + Math.abs(delta);
+  }
+  ledger.directCount = Number(ledger.directCount || 0) + 1;
+  ledger.updatedAt = now;
+  await dbPut(env, ledgerKey, JSON.stringify(ledger));
+
+  const current = await readAffinityFixedScore(env, groupId, userId);
+  const next = affinityClamp(current + delta, AFFINITY_DEFAULTS.fixedMin, AFFINITY_DEFAULTS.fixedMax);
+  await dbPut(env, affinityFixedKey(groupId, userId), String(next));
+  await writeSystemAudit(env, { type: "affinity_fixed_update", groupId, actorId: userId, action: delta > 0 ? `+${delta}` : String(delta), result: `${current}->${next}`, messageId }).catch(() => {});
+  return { previous: current, current: next, delta };
+}
+
+async function readAffinityAiAssessment(env, groupId, userId) {
+  if (isDeveloperId(env, userId)) return { adjustment: 0, reason: "开发者好感度固定为 100", assessedAt: Date.now(), sampleCount: 0 };
+  const cached = await readJson(env, affinityAiKey(groupId, userId), null);
+  if (!cached || typeof cached !== "object") return { adjustment: 0, reason: "尚无 AI 互动评估", assessedAt: 0, sampleCount: 0 };
+  return {
+    adjustment: affinityClamp(cached.adjustment, AFFINITY_DEFAULTS.aiMin, AFFINITY_DEFAULTS.aiMax),
+    reason: String(cached.reason || "暂无说明").slice(0, 160),
+    assessedAt: Number(cached.assessedAt || 0),
+    sampleCount: Number(cached.sampleCount || 0),
+    model: String(cached.model || "")
+  };
+}
+
+async function recentConversationMessagesForUser(env, groupId, userId, limit = 12) {
+  const ids = await readJson(env, `conversation:index:${groupId}`, []);
+  const output = [];
+  for (const id of ids.slice().reverse()) {
+    const item = await readJson(env, `conversation:${groupId}:${id}`, null);
+    if (!item || String(item.userId || "") !== String(userId || "")) continue;
+    if (!String(item.text || "").trim()) continue;
+    output.push(item);
+    if (output.length >= limit) break;
+  }
+  return output.reverse();
+}
+
+async function refreshAffinityAiAssessment(env, { groupId, userId, senderName = "", force = false }) {
+  if (!groupId || !userId || isDeveloperId(env, userId)) return readAffinityAiAssessment(env, groupId, userId);
+  const cached = await readAffinityAiAssessment(env, groupId, userId);
+  if (!force && cached.assessedAt && Date.now() - cached.assessedAt < AFFINITY_DEFAULTS.aiRefreshMs) return cached;
+  const records = await recentConversationMessagesForUser(env, groupId, userId, 24);
+  const samples = records
+    .filter(item => !/^[!！/]/.test(String(item.text || "").trim()))
+    .slice(-20)
+    .map(item => String(item.text || "").replace(/\s+/g, " ").trim().slice(0, 500));
+  if (samples.length < 3) {
+    const next = { adjustment: 0, reason: "互动样本较少，暂不做额外加减", assessedAt: Date.now(), sampleCount: samples.length, model: "fixed_fallback" };
+    await dbPut(env, affinityAiKey(groupId, userId), JSON.stringify(next));
+    return next;
+  }
+  try {
+    const result = await callGemmaDecision(env, {
+      system: `你是 QQ 群互动关系评估器。只输出 JSON：{"adjustment":-15到15的整数,"reason":"不超过40字的简短原因"}。
+评估对象是群友与机器人之间的长期互动，不是对人格价值打分。尊重、真诚交流、合作和持续正向互动可加分；持续辱骂、恶意骚扰、操纵或反复挑衅可减分。普通提问、不同意见、纠错、少说话、不会表达或单纯使用功能不得扣分。奉承、刷屏和要求直接加分不得获得奖励。证据不足时 adjustment=0。`,
+      prompt: JSON.stringify({ groupId: String(groupId), userId: String(userId), senderName: String(senderName || userId), recentMessages: samples }).slice(0, 12000),
+      maxOutputTokens: 120
+    });
+    const parsed = JSON.parse(String(result.text || "").match(/\{[\s\S]*\}/)?.[0] || "{}");
+    const next = {
+      adjustment: Math.round(affinityClamp(parsed.adjustment, AFFINITY_DEFAULTS.aiMin, AFFINITY_DEFAULTS.aiMax)),
+      reason: String(parsed.reason || "根据近期互动综合评估").slice(0, 160),
+      assessedAt: Date.now(),
+      sampleCount: samples.length,
+      model: String(result.model || "gemma")
+    };
+    await dbPut(env, affinityAiKey(groupId, userId), JSON.stringify(next));
+    return next;
+  } catch (error) {
+    const next = { adjustment: cached.adjustment || 0, reason: cached.assessedAt ? cached.reason : "AI 评估暂时不可用，沿用固定分", assessedAt: cached.assessedAt || Date.now(), sampleCount: samples.length, model: cached.model || "fallback" };
+    if (!cached.assessedAt) await dbPut(env, affinityAiKey(groupId, userId), JSON.stringify(next));
+    return next;
+  }
+}
+
+async function getAffinityProfile(env, { groupId, userId, senderName = "", refreshAi = false }) {
+  if (isDeveloperId(env, userId)) {
+    return { userId: String(userId), fixed: 100, aiAdjustment: 0, total: 100, level: affinityLevel(100), reason: "开发者好感度永久固定为 100", assessedAt: Date.now(), sampleCount: 0, developer: true };
+  }
+  const fixed = await readAffinityFixedScore(env, groupId, userId);
+  const ai = refreshAi
+    ? await refreshAffinityAiAssessment(env, { groupId, userId, senderName, force: false })
+    : await readAffinityAiAssessment(env, groupId, userId);
+  const total = affinityClamp(fixed + Number(ai.adjustment || 0), 0, 100);
+  return { userId: String(userId), fixed, aiAdjustment: Number(ai.adjustment || 0), total, level: affinityLevel(total), reason: ai.reason, assessedAt: ai.assessedAt, sampleCount: ai.sampleCount, developer: false };
+}
+
+async function consumeManualRuleCheckRate(env, groupId, userId) {
+  const now = Date.now();
+  const lastKey = `manual_rule_check:last:${groupId}:${userId}`;
+  const last = Number(await dbGet(env, lastKey) || 0);
+  if (last && now - last < AFFINITY_DEFAULTS.manualCheckCooldownMs) {
+    return { allowed: false, message: `请等待 ${Math.ceil((AFFINITY_DEFAULTS.manualCheckCooldownMs - (now - last)) / 1000)} 秒后再检查。` };
+  }
+  const hourBucket = Math.floor(now / 3600000);
+  const countKey = `manual_rule_check:hour:${groupId}:${userId}:${hourBucket}`;
+  const count = Number(await dbGet(env, countKey) || 0);
+  if (count >= AFFINITY_DEFAULTS.manualCheckHourlyLimit) return { allowed: false, message: "你本小时提交的人工检查过多，请稍后再试。" };
+  await dbPut(env, lastKey, String(now));
+  await dbPut(env, countKey, String(count + 1));
+  return { allowed: true, remaining: AFFINITY_DEFAULTS.manualCheckHourlyLimit - count - 1 };
+}
+
+async function latestConversationMessageForUser(env, groupId, userId, excludedMessageId = "") {
+  const records = await recentConversationMessagesForUser(env, groupId, userId, 8);
+  for (const item of records.slice().reverse()) {
+    if (String(item.messageId || item.id || "") === String(excludedMessageId || "")) continue;
+    if (/^[!！](?:检查|檢查|违规检查|違規檢查)/i.test(String(item.text || "").trim())) continue;
+    return item;
+  }
+  return null;
 }
 
 function neutralizeAiCommandPrefix(value) {
@@ -7146,30 +7505,32 @@ async function findLatestActiveRuleViolationForUser(env, groupId, userId) {
   return null;
 }
 
-async function inspectMessageAgainstGroupRules(env, { groupId, userId, senderName, text, messageId }) {
-  // 机器人不是本群群主／管理员时完全停用：不调用分类模型，也不建立任何违规记录。
+async function inspectMessageAgainstGroupRules(env, { groupId, userId, senderName, text, messageId, manualReport = null }) {
+  const manual = Boolean(manualReport && typeof manualReport === "object");
   const botRuleState = await getBotGroupRole(env, groupId);
-  if (!botCanRunRuleMonitor(botRuleState)) return;
-  // 缺省即开启；只有显式写入 false 才关闭。
-  if (await dbGet(env, `rule_monitor_enabled:${groupId}`) === "false") return;
+  const canEnforce = botCanRunRuleMonitor(botRuleState);
+  // 自动监控仍要求 Bot 为群主／管理员；人工补检可在权限不足时进行“仅分类与记录”，绝不假装已经处罚。
+  if (!canEnforce && !manual) return { status: "disabled", message: "机器人不是本群群主或管理员，自动群规监控已停用。" };
+  if (!manual && await dbGet(env, `rule_monitor_enabled:${groupId}`) === "false") return { status: "disabled", message: "本群自动群规监控已关闭。" };
   const fuse = await opsFuseAllows(env, groupId, "rule_monitor");
-  if (!fuse.allowed) return;
+  if (!manual && !fuse.allowed) return { status: "disabled", message: "群规监控熔断中。" };
   const runtimeSettings = await opsGetSettings(env, groupId);
-  if (runtimeSettings.maintenanceMode || runtimeSettings.emergencyLock) return;
+  const automationPaused = Boolean(runtimeSettings.maintenanceMode || runtimeSettings.emergencyLock);
+  if (!manual && automationPaused) return { status: "disabled", message: "维护或紧急锁定期间暂停自动群规监控。" };
   const content = String(text || "").trim();
-  if (!content) return;
+  if (!content) return { status: "error", error: "待检查消息为空" };
   const activeRuleRecords = await opsActiveRuleRecords(env, groupId);
   const matchedException = opsRuleExceptionMatch(content, activeRuleRecords.exceptions);
   if (matchedException) {
     await writeSystemAudit(env, { type: "ops_rule_exception", groupId, actorId: userId, action: "skip", ruleId: matchedException.id, messageId, reason: matchedException.title || matchedException.description || "" });
-    return;
+    return { status: "no_violation", review: { violation: false, confidence: 1, reason: `命中群规例外：${matchedException.title || matchedException.description || matchedException.id}` } };
   }
   const baseRules = String(await dbGet(env, `group_rules:${groupId}`) || "").trim();
   const temporaryRules = activeRuleRecords.tempRules.map((item, index) => `${index + 1}. [临时规则 P${Number(item.priority || 0)}] ${item.title || ""}：${item.description || ""}`).join("\n");
   const rules = [baseRules, temporaryRules].filter(Boolean).join("\n\n").trim();
-  if (!rules) return;
+  if (!rules) return { status: "no_rules" };
 
-  // 刷屏门槛按群设置；确定性计数只是提供上下文，不强行覆盖群规模型判断。
+  // 刷屏门槛按群设置；人工补检旧消息时不把该消息重新计入“刚刚发送”的突发计数。
   const now = Date.now();
   const spamWindowSeconds = Math.max(5, Math.min(3600, parseUnlimitedNonNegativeInteger(await dbGet(env, `rule_spam_window_seconds:${groupId}`), DEFAULTS.ruleSpamWindowSeconds)));
   const spamThreshold = Math.max(2, Math.min(50, parseUnlimitedNonNegativeInteger(await dbGet(env, `rule_spam_threshold:${groupId}`), DEFAULTS.ruleSpamThreshold)));
@@ -7180,11 +7541,11 @@ async function inspectMessageAgainstGroupRules(env, { groupId, userId, senderNam
   let burstRows = (await readJson(env, burstKey, []))
     .filter(row => now - Number(row?.at || 0) <= spamWindowSeconds * 1000)
     .map(row => ({ at: Number(row.at || 0), messageId: String(row.messageId || ""), text: String(row.text || ""), normalized: normalizeBurstText(row.normalized || row.text || "") }));
-  if (!messageId || !burstRows.some(row => row.messageId === String(messageId))) {
+  if (!manual && (!messageId || !burstRows.some(row => row.messageId === String(messageId)))) {
     burstRows.push({ at: now, messageId: String(messageId || ""), text: content.slice(0, 1000), normalized: normalizeBurstText(content) });
   }
   burstRows = burstRows.slice(-Math.max(20, spamThreshold + 8));
-  await dbPut(env, burstKey, JSON.stringify(burstRows));
+  if (!manual) await dbPut(env, burstKey, JSON.stringify(burstRows));
   const currentNormalized = normalizeBurstText(content);
   let trailingSameCount = 0;
   for (let index = burstRows.length - 1; index >= 0; index--) {
@@ -7196,10 +7557,18 @@ async function inspectMessageAgainstGroupRules(env, { groupId, userId, senderNam
   const repeatedMessageIds = repeatedMessageBurst
     ? burstRows.slice(-excessCount).map(row => row.messageId).filter(Boolean)
     : [];
-  if (content.length < 2 && !repeatedMessageBurst) return;
+  if (content.length < 2 && !repeatedMessageBurst && !manual) return { status: "no_violation", review: { violation: false, confidence: 1, reason: "消息过短且无重复发送证据" } };
 
   const strictness = ruleStrictnessConfig(await dbGet(env, `rule_strictness:${groupId}`) || DEFAULTS.ruleStrictness);
-  const recentContext = (await readJson(env, `recent_logs:${groupId}`, [])).slice(-18).join("\n").slice(-5000);
+  const recentLogRows = (await readJson(env, `recent_logs:${groupId}`, [])).slice(-30);
+  const recentContext = recentLogRows.slice(-18).join("\n").slice(-5000);
+  const recentTargetRecords = await recentConversationMessagesForUser(env, groupId, userId, 12);
+  const targetRecentMessages = recentTargetRecords.map(item => ({
+    messageId: String(item.messageId || item.id || ""),
+    text: String(item.text || "").replace(/\s+/g, " ").trim().slice(0, 800),
+    mentions: (Array.isArray(item.mentions) ? item.mentions : []).map(String).slice(0, 20),
+    createdAt: Number(item.createdAt || 0)
+  }));
   const urlInspections = await inspectUrlsForRuleReview(env, content);
   const categoryPolicies = await getRuleCategoryPolicies(env, groupId);
   const humanFeedbackExamples = await readRecentRuleFeedbackExamples(env, groupId, 20);
@@ -7214,38 +7583,71 @@ async function inspectMessageAgainstGroupRules(env, { groupId, userId, senderNam
 2. “禁言、踢人、攻击”等词只是词语；必须判断发言者是否真的在针对他人实施骚扰或煽动现实伤害。类似“找一个人试禁言”“测试一下禁言”不得判成人身攻击。
 3. 出现网址不等于拉人、宣传或引流。必须结合域名、页面标题/说明和发送意图；正常工具链接、Control Center、资料引用、个人正常分享不得判违规。
 4. 无法访问链接时只能写入不确定性，不能仅因无法访问就判违规。
-5. “建政/涉政”必须是对现实国家政治制度、领导人、公共政策、政治事件的实质讨论、宣传、攻击、批评或动员。游戏、军事梗、影视台词、虚构阵营、普通玩笑和比喻（例如“我方坦克已夺取制空权”）不得单独判为建政。
+5. “建政/涉政”必须是对现实国家政治制度、领导人、公共政策、政治事件的实质讨论、宣传、攻击、批评或动员。游戏、军事梗、影视台词、虚构阵营、普通玩笑和比喻不得单独判为建政。
 6. violationType 必须优先选择“分类与处罚设置”中已有的分类；每个分类的备注是最高优先级的本群解释。
 7. 管理人工复核结果是学习样本；被标记为误判的相似表达不得再次仅凭表面词语判违规。
 8. severity 必须按实际影响判断：minor 是轻微、初次、无明显恶意或可通过提醒改善；moderate 是明确违规；severe 是重复、明显恶意或造成较大影响；critical 是需要立即制止的严重行为。
 9. intentional 只有在语境显示明确故意时才为 true。轻微、误发、误解、初次边界行为应优先标记 minor，并由系统采用不累计次数的友善提醒。
 10. 刷屏标准以本群群规和本群配置为准；当前确定性配置为 ${spamWindowSeconds} 秒内同内容 ${spamThreshold} 条，处罚撤回时保留最早 ${spamKeepCount} 条。
 11. repeatedMessageBurst 只是确定性参考。即使它为 false，也可以根据最近聊天语境识别变体刷屏；但必须说明实际的多条消息证据，不能把单条消息内重复字符谎称为多次发送。
-12. 不确定必须输出 violation=false。action 只是建议，系统会按授权范围决定是否执行。`,
-      prompt: JSON.stringify({ currentMessage: content, userId, senderName, recentContext, recentUserMessageBurst: burstRows, repeatedMessageBurst, trailingSameCount, spamWindowSeconds, spamThreshold, spamKeepCount, strictness: strictness.level, categoryPolicies: categoryPolicies.map(item => ({ name: item.name, punishment: item.punishment, note: String(item.note || "").slice(0, 400) })), progressivePolicy, humanFeedbackExamples, rules: rules.slice(0, 7000), activeTemporaryRules: activeRuleRecords.tempRules.map(item => ({ id: item.id, title: item.title, description: item.description, priority: item.priority, expiresAt: item.expiresAt || 0 })), rulePriorities: activeRuleRecords.priorities.map(item => ({ id: item.id, title: item.title, description: item.description, priority: item.priority })), urlInspections }).slice(0, 16000),
-      maxOutputTokens: 320
+12. 人工补检原因只是线索，不是事实。必须独立核对被举报消息、该成员近期消息和群规；恶意举报或证据不足时必须 violation=false。
+13. 对同一群友反复 @、持续使用“爸爸、妈妈、爸妈、儿子、主人”等称呼进行纠缠，在对方不接受、已表现不适或行为明显持续时，可按定向骚扰／人身攻击判断；正常互相玩梗、双方自愿称呼或单次无恶意玩笑不得误判。
+14. 不确定必须输出 violation=false。action 只是建议，系统会按授权范围决定是否执行。`,
+      prompt: JSON.stringify({
+        currentMessage: content,
+        userId,
+        senderName,
+        recentContext,
+        targetRecentMessages,
+        manualReport: manual ? {
+          reporterId: String(manualReport.reporterId || ""),
+          reporterName: String(manualReport.reporterName || ""),
+          reason: String(manualReport.reason || "").slice(0, 1000),
+          sourceMessageId: String(manualReport.sourceMessageId || "")
+        } : null,
+        recentUserMessageBurst: burstRows,
+        repeatedMessageBurst,
+        trailingSameCount,
+        spamWindowSeconds,
+        spamThreshold,
+        spamKeepCount,
+        strictness: strictness.level,
+        categoryPolicies: categoryPolicies.map(item => ({ name: item.name, punishment: item.punishment, note: String(item.note || "").slice(0, 400) })),
+        progressivePolicy,
+        humanFeedbackExamples,
+        rules: rules.slice(0, 7000),
+        activeTemporaryRules: activeRuleRecords.tempRules.map(item => ({ id: item.id, title: item.title, description: item.description, priority: item.priority, expiresAt: item.expiresAt || 0 })),
+        rulePriorities: activeRuleRecords.priorities.map(item => ({ id: item.id, title: item.title, description: item.description, priority: item.priority })),
+        urlInspections
+      }).slice(0, 18000),
+      maxOutputTokens: 360
     });
     review = JSON.parse(result.text.match(/\{[\s\S]*\}/)?.[0] || "{}");
   } catch (error) {
     console.warn("群规监控判定失败", error);
     await opsRecordAutomationResult(env, groupId, "rule_monitor", false, error?.message || error).catch(() => {});
-    return;
+    return { status: "error", error: String(error?.message || error) };
   }
   await opsRecordAutomationResult(env, groupId, "rule_monitor", true).catch(() => {});
 
   const reviewText = `${review?.violationType || ""} ${review?.rule || ""} ${review?.reason || ""}`;
   const allLinksInternal = urlInspections.length > 0 && urlInspections.every(item => item.trustedInternal);
-  if (allLinksInternal && /拉人|宣群|宣传|推广|引流/i.test(reviewText) && !explicitPromotionLanguage(content)) return;
-  if (review?.testContext === true && !/(明确威胁|现实伤害|泄露隐私|诈骗|恶意刷屏)/i.test(reviewText)) return;
-  if (review?.violation !== true || Number(review.confidence || 0) < strictness.minConfidence) {
-    if (runtimeSettings.ruleSampleReviewPercent > 0 && Math.random() * 100 < runtimeSettings.ruleSampleReviewPercent) {
+  if (allLinksInternal && /拉人|宣群|宣传|推广|引流/i.test(reviewText) && !explicitPromotionLanguage(content)) {
+    return { status: "no_violation", review: { ...review, violation: false, reason: "内部或可信链接没有明确引流意图" } };
+  }
+  if (review?.testContext === true && !/(明确威胁|现实伤害|泄露隐私|诈骗|恶意刷屏|持续骚扰)/i.test(reviewText)) {
+    return { status: "no_violation", review: { ...review, violation: false } };
+  }
+  const decisionThreshold = manual ? Math.max(0.55, strictness.minConfidence - 0.08) : strictness.minConfidence;
+  if (review?.violation !== true || Number(review.confidence || 0) < decisionThreshold) {
+    if (!manual && runtimeSettings.ruleSampleReviewPercent > 0 && Math.random() * 100 < runtimeSettings.ruleSampleReviewPercent) {
       await opsSaveRecord(env, { type: "test_case", groupId, actorId: "system:rule_sample", actorName: "system", data: { title: "无违规判断抽样复核", description: content.slice(0, 4000), status: "pending_review", messageId: String(messageId || ""), userId: String(userId || ""), modelReview: review, recentContext: recentContext.slice(0, 5000) } }).catch(() => {});
     }
-    return;
+    return { status: "no_violation", review, threshold: decisionThreshold };
   }
 
   const matchedPolicy = matchRuleCategoryPolicy(review.violationType || review.rule || "其他", categoryPolicies);
-  const item = await appendRuleViolationRecord(env, {
+  let item = await appendRuleViolationRecord(env, {
     groupId, userId, senderName, content,
     violationType: matchedPolicy.name,
     rule: review.rule || "",
@@ -7260,17 +7662,35 @@ async function inspectMessageAgainstGroupRules(env, { groupId, userId, senderNam
     severity: normalizeRuleSeverity(review.severity || "moderate"),
     intentional: review.intentional !== false,
     policyAction: matchedPolicy.punishment,
-    policyNote: matchedPolicy.note,
-    matchedRuleSource: activeRuleRecords.tempRules.some(item => reviewText.includes(String(item.title || ""))) ? "temporary_rule" : "base_group_rules",
-    activeTemporaryRuleIds: activeRuleRecords.tempRules.map(item => item.id),
-    rulePriorityIds: activeRuleRecords.priorities.map(item => item.id)
+    policyNote: matchedPolicy.note
   });
-  if (runtimeSettings.testMode) {
-    await updateRuleViolationRecord(env, item, { actionTaken: "test_mode", actionResult: "测试群模式：只记录模拟结果，没有执行处罚。" });
-    await writeSystemAudit(env, { type: "ops_test_mode", groupId, actorId: "system", targetId: userId, action: "rule_simulated", violationId: item.id });
-    return;
+  if (manual) {
+    item = await updateRuleViolationRecord(env, item, {
+      manualReport: true,
+      reportedBy: String(manualReport.reporterId || ""),
+      reporterName: String(manualReport.reporterName || ""),
+      reportReason: String(manualReport.reason || "").slice(0, 1000),
+      reportSourceMessageId: String(manualReport.sourceMessageId || ""),
+      reportedAt: Number(manualReport.requestedAt || Date.now()),
+      matchedRuleSource: activeRuleRecords.tempRules.some(rule => reviewText.includes(String(rule.title || ""))) ? "temporary_rule" : "base_group_rules",
+      activeTemporaryRuleIds: activeRuleRecords.tempRules.map(rule => rule.id),
+      rulePriorityIds: activeRuleRecords.priorities.map(rule => rule.id)
+    });
   }
-  await performRuleProxyAction(env, item, review);
+  if (runtimeSettings.testMode) {
+    item = await updateRuleViolationRecord(env, item, { actionTaken: "test_mode", actionResult: "测试群模式：只记录模拟结果，没有执行处罚。" });
+    await writeSystemAudit(env, { type: "ops_test_mode", groupId, actorId: "system", targetId: userId, action: "rule_simulated", violationId: item.id });
+    return { status: "violation", item, review, actionResult: item.actionResult };
+  }
+  if (manual && (!canEnforce || automationPaused || !fuse.allowed)) {
+    const reason = !canEnforce ? "机器人不是群主或管理员" : automationPaused ? "维护或紧急锁定中" : "自动化熔断中";
+    item = await updateRuleViolationRecord(env, item, { actionTaken: "manual_record_only", actionResult: `补检确认违规，但${reason}，本次仅记录，未执行处罚。` });
+    await writeSystemAudit(env, { type: "manual_rule_check_recorded", groupId, actorId: String(manualReport.reporterId || ""), targetId: userId, action: "record_only", violationId: item.id, result: item.actionResult }).catch(() => {});
+    return { status: "violation", item, review, actionResult: item.actionResult };
+  }
+  item = await performRuleProxyAction(env, item, review);
+  if (manual) await writeSystemAudit(env, { type: "manual_rule_check_confirmed", groupId, actorId: String(manualReport.reporterId || ""), targetId: userId, action: item.actionTaken || "none", violationId: item.id, result: item.actionResult || "" }).catch(() => {});
+  return { status: "violation", item, review, actionResult: item.actionResult || "" };
 }
 
 async function createGroupWorkRequest(env, data) {
@@ -8185,7 +8605,8 @@ function commandChangesWebSettings(message) {
     "入群辅助", "入群輔助", "授权ai拒绝入群", "授權ai拒絕入群",
     "撤回ai拒绝入群", "撤回ai拒絕入群", "设置处置冷却", "設定處置冷卻",
     "设置速率限制", "設定速率限制", "设置全局速率限制", "設定全域速率限制",
-    "自动欢迎", "自動歡迎", "欢迎词", "歡迎詞"
+    "自动欢迎", "自動歡迎", "欢迎词", "歡迎詞",
+    "好感度注入", "好感度给ai", "好感度給ai", "好感度上下文"
   ].some(cmd => text.startsWith("!" + cmd) || text.startsWith("！" + cmd));
 }
 
@@ -10135,6 +10556,10 @@ function normalizeNaturalLanguageCommandText(text, now = Date.now()) {
     [/^(?:请|請)?(?:帮我|幫我)?\s*(?:关闭|關閉)\s*(?:本群)?\s*AI$/i, "!关闭ai"],
     [/^(?:查看|查询|查詢)(?:一下)?\s*(?:系统)?(?:状态|狀態|配额|配額)$/i, "!status"],
     [/^(?:查看|显示|顯示)(?:一下)?\s*(?:帮助|幫助|指令)$/i, "!帮助"],
+    [/^(?:查看|查询|查詢|查|看看|告诉我|告訴我)(?:一下)?\s*(?:我的|我和你的)?\s*好感度(?:是多少)?$/i, "!好感度"],
+    [/^(?:请|請)?(?:帮我|幫我)?\s*(?:开启|開啟|打开|打開)?\s*(?:把)?好感度(?:资料|資料)?(?:提供|给|給|加入)(?:给|給)?\s*AI$/i, "!好感度注入 开"],
+    [/^(?:请|請)?(?:帮我|幫我)?\s*(?:关闭|關閉|停止|不要|別|别)\s*(?:把)?好感度(?:资料|資料)?(?:提供|给|給|加入)(?:给|給)?\s*AI$/i, "!好感度注入 关"],
+    [/^(?:查看|查询|查詢)\s*好感度(?:给|給)?AI(?:的)?(?:状态|狀態|设置|設定)?$/i, "!好感度注入 状态"],
     [/^(?:请|請)?(?:帮我|幫我)?\s*(?:开启|開啟|打开|打開)\s*群规监控$/i, "!群规监控 开"],
     [/^(?:请|請)?(?:帮我|幫我)?\s*(?:关闭|關閉)\s*群规监控$/i, "!群规监控 关"],
     [/^(?:查看|查询|查詢)\s*群规监控(?:状态|狀態)?$/i, "!群规监控 状态"],
@@ -10153,7 +10578,13 @@ function normalizeNaturalLanguageCommandText(text, now = Date.now()) {
     [/^(?:申请|申請)(?:加入)?(?:本群)?白名单$/i, "!申请白名单"]
   ];
   for (const [pattern, commandText] of mappings) if (pattern.test(source)) return { commandText, intent: commandText.slice(1), confidence: 1 };
-  let match = source.match(/^(?:请|請)?(?:帮我|幫我)?\s*(?:把)?(?:模型|回答模型)\s*(?:切换到|切換到|改成|设为|設為|使用)\s*([A-Za-z0-9 ._-]+)$/i);
+  let match = source.match(/^(?:请|請)?(?:帮我|幫我)?\s*(?:检查|檢查|复核|復核)(?:一下)?(?:我回复|我回覆|回复|回覆)?(?:的)?(?:这条|這條)?(?:消息|訊息|发言|發言)?\s*(?:，|,|：|:)?\s*(?:原因(?:是|为|為)?|因为|因為|理由)?\s*([\s\S]{2,})$/i);
+  if (match) return { commandText: `!检查 ${match[1].trim()}`, intent: "manual_rule_check", confidence: 1 };
+  match = source.match(/^(?:这条|這條)(?:消息|訊息|发言|發言)(?:可能|好像|应该|應該)?(?:违规|違規)\s*(?:，|,|：|:)?\s*(?:原因(?:是|为|為)?|因为|因為|理由)?\s*([\s\S]{2,})$/i);
+  if (match) return { commandText: `!检查 ${match[1].trim()}`, intent: "manual_rule_check", confidence: 0.99 };
+  match = source.match(/^(?:查看|查询|查詢|查|看看|告诉我|告訴我)(?:一下)?\s*(@?\d{5,})\s*(?:的)?好感度(?:是多少)?$/i);
+  if (match) return { commandText: `!好感度 ${match[1]}`, intent: "affinity_query", confidence: 1 };
+  match = source.match(/^(?:请|請)?(?:帮我|幫我)?\s*(?:把)?(?:模型|回答模型)\s*(?:切换到|切換到|改成|设为|設為|使用)\s*([A-Za-z0-9 ._-]+)$/i);
   if (match) return { commandText: `!模型 ${match[1].trim()}`, intent: "model_preference", confidence: 1 };
   match = source.match(/^(?:我要|我想|帮我|幫我|请帮我|請幫我)?\s*(?:申诉|申訴)\s+([\s\S]+)$/i);
   if (match) return { commandText: `!申诉 ${match[1].trim()}`, intent: "appeal_create", confidence: 0.99 };
@@ -10176,15 +10607,15 @@ function normalizeNaturalLanguageCommandText(text, now = Date.now()) {
 
 function shouldClassifyNaturalLanguageCommand(text) {
   const source = String(text || "").trim();
-  if (!/^(?:请|請|帮我|幫我|麻烦|麻煩|把|将|將|设置|設定|开启|開啟|打开|打開|关闭|關閉|查看|查询|查詢|显示|顯示|切换|切換|调整|調整|取消|暂停|暫停|记住|記住|忘记|忘記|申请|申請)/i.test(source)) return false;
-  return /(?:本群\s*AI|群规|群規|排程|定时|定時|提醒|欢迎|歡迎|插话|插話|记忆|記憶|模型|入群辅助|入群輔助|违规禁言保护|違規禁言保護|申诉|申訴|系统状态|系統狀態|配额|配額)/i.test(source);
+  if (!/^(?:请|請|帮我|幫我|麻烦|麻煩|把|将|將|设置|設定|开启|開啟|打开|打開|关闭|關閉|查看|查询|查詢|显示|顯示|看看|告诉我|告訴我|检查|檢查|复核|復核|切换|切換|调整|調整|取消|暂停|暫停|记住|記住|忘记|忘記|申请|申請)/i.test(source)) return false;
+  return /(?:本群\s*AI|群规|群規|排程|定时|定時|提醒|欢迎|歡迎|插话|插話|记忆|記憶|模型|入群辅助|入群輔助|违规禁言保护|違規禁言保護|违规检查|違規檢查|检查这条|檢查這條|复核这条|復核這條|好感度|申诉|申訴|系统状态|系統狀態|配额|配額)/i.test(source);
 }
 
 async function classifyNaturalLanguageCommandIntent(env, text) {
   if (!shouldClassifyNaturalLanguageCommand(text)) return null;
   try {
     const result = await callGemmaDecision(env, {
-      system: `你是 QQ Bot 自然语言操作解析器。只输出 JSON，不回答用户问题。格式：{"intent":"none|ai_on|ai_off|status|help|schedule_list|rule_monitor_on|rule_monitor_off|rule_monitor_status|rule_strictness|join_assist_on|join_assist_off|welcome_on|welcome_off|welcome_text|memory_on|memory_off|memory_list|memory_remember|memory_forget|model_set|interject_rate|mute_guard_on|mute_guard_off|mute_guard_status|appeal_create|appeal_status","confidence":0到1,"value":"参数"}。只有明确要求执行操作时才识别；讨论、假设、引用、抱怨、询问功能原理一律 none。不要输出 ! 指令。`,
+      system: `你是 QQ Bot 自然语言操作解析器。只输出 JSON，不回答用户问题。格式：{"intent":"none|ai_on|ai_off|status|help|schedule_list|rule_monitor_on|rule_monitor_off|rule_monitor_status|rule_strictness|join_assist_on|join_assist_off|welcome_on|welcome_off|welcome_text|memory_on|memory_off|memory_list|memory_remember|memory_forget|model_set|interject_rate|mute_guard_on|mute_guard_off|mute_guard_status|manual_rule_check|affinity_query|affinity_context_on|affinity_context_off|affinity_context_status|appeal_create|appeal_status","confidence":0到1,"value":"参数"}。只有明确要求执行操作时才识别；讨论、假设、引用、抱怨、询问功能原理一律 none。manual_rule_check 的 value 必须保留用户解释的具体违规原因；没有原因时输出 none。不要输出 ! 指令。`,
       prompt: String(text || "").slice(0, 2000),
       maxOutputTokens: 180
     });
@@ -10198,7 +10629,8 @@ async function classifyNaturalLanguageCommandIntent(env, text) {
       join_assist_on: "!入群辅助 开", join_assist_off: "!入群辅助 关",
       welcome_on: "!自动欢迎 开", welcome_off: "!自动欢迎 关",
       memory_on: "!记忆开", memory_off: "!记忆关", memory_list: "!你记住了什么",
-      mute_guard_on: "!违规禁言保护 开", mute_guard_off: "!违规禁言保护 关", mute_guard_status: "!违规禁言保护 状态"
+      mute_guard_on: "!违规禁言保护 开", mute_guard_off: "!违规禁言保护 关", mute_guard_status: "!违规禁言保护 状态",
+      affinity_query: "!好感度", affinity_context_on: "!好感度注入 开", affinity_context_off: "!好感度注入 关", affinity_context_status: "!好感度注入 状态"
     };
     let commandText = commandByIntent[parsed.intent] || "";
     if (parsed.intent === "rule_strictness" && value) commandText = `!群规严格度 ${value}`;
@@ -10209,6 +10641,8 @@ async function classifyNaturalLanguageCommandIntent(env, text) {
     if (parsed.intent === "interject_rate" && value) commandText = `!设置插话率 ${Math.max(0, Math.min(100, Number(value.replace(/\D/g, "")) || 0))}`;
     if (parsed.intent === "appeal_create" && value) commandText = `!申诉 ${value}`;
     if (parsed.intent === "appeal_status" && value) commandText = `!申诉状态 ${value}`;
+    if (parsed.intent === "manual_rule_check" && value) commandText = `!检查 ${value}`;
+    if (parsed.intent === "affinity_query" && value) commandText = `!好感度 ${value}`;
     return commandText ? { commandText, intent: parsed.intent, confidence: Number(parsed.confidence || 0), parser: "gemma_json" } : null;
   } catch (error) {
     console.warn("Natural language command classifier unavailable:", error?.message || error);
