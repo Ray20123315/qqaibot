@@ -85,9 +85,9 @@ jobs:
           ]
           assert all(token not in html for token in removed)
           assert '活动与投票' in html
-          assert 'opsCreateActivity' in html
-          assert 'opsCreatePoll' in html
-          assert 'opsVotePoll' in html
+          assert "opsRegisterWorkspace('opsCollab'" in html
+          assert '/ops/activity' in html
+          assert '/ops/poll' in html
 
           desktop = html.rfind('.topbar{height:68px}')
           mobile = html.rfind('@media(max-width:1024px)')
