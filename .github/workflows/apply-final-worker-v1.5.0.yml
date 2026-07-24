@@ -1,0 +1,66 @@
+name: Apply final worker v1.5.0
+on:
+  pull_request:
+    branches: [main]
+    paths: ['.qqai-final-v150-trigger']
+permissions:
+  contents: write
+concurrency:
+  group: apply-final-worker-v1.5.0
+  cancel-in-progress: false
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Reconstruct and validate final standalone worker
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat .qqai-final-v150/chunk-* > /tmp/worker.b64
+          echo '052587bcb260911b315692cf3f21750ecf3646cb899eb527a91573c04f39cc7e  /tmp/worker.b64' | sha256sum -c -
+          base64 -d /tmp/worker.b64 | gzip -d > worker.js
+          echo '6dc70c4757f91ba27ad45b0ec12492d44983296aa32750bcf59e4dc234b078dd  worker.js' | sha256sum -c -
+          node --check worker.js
+          cp worker.js /tmp/worker.mjs
+          node -e "import('/tmp/worker.mjs').then(m=>{if(!m.default||typeof m.default.fetch!=='function'||!m.OneBotHub)throw Error('exports')})"
+          ! grep -Eq '^[[:space:]]*import[[:space:]]' worker.js
+          grep -F 'const VERSION = "1.5.0";' worker.js
+          grep -F 'QQAI_V1_R50_FINAL_PERSISTENCE_ROUTING_MARKER' worker.js
+          grep -F 'OPS_SETTINGS_STORAGE_UNAVAILABLE' worker.js
+          grep -F 'source: "successful_group_send"' worker.js
+          ! grep -F 'callGemmaText(' worker.js
+          python - <<'PY'
+          from pathlib import Path
+          from html.parser import HTMLParser
+          import re, subprocess
+          s=Path('worker.js').read_text()
+          a=s.index('function getPortalHomePage(host)')
+          a=s.index('String.raw`',a)+10
+          h=s[a:s.index('`);\n}',a)]
+          scripts=re.findall(r'<script(?: [^>]*)?>(.*?)</script>',h,re.S)
+          assert len(scripts)>=2
+          class P(HTMLParser):
+            def __init__(self): super().__init__(); self.ids=[]
+            def handle_starttag(self,t,a): self.ids += [v for k,v in a if k=='id']
+          p=P(); p.feed(h); assert len(p.ids)==len(set(p.ids))
+          for i,x in enumerate(scripts):
+            f=Path(f'/tmp/portal-{i}.js'); f.write_text(x); subprocess.run(['node','--check',str(f)],check=True)
+          for x in ["opsSaveSettings('schedule')","opsSaveSettings('rules')","opsSaveSettings('safety')",'Gemma 判断 2、Gemma 聊天 1','Gemini 判断 1、Gemini 聊天 2','DeepSeek 临时开放永久记录','测试主动发话']:
+            assert x in s, x
+          print('portal and feature validation PASS')
+          PY
+      - name: Commit final worker to main and clean staging files
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -f .qqai-final-v150-trigger
+          rm -rf .qqai-final-v150
+          rm -f .github/workflows/apply-final-worker-v1.5.0.yml
+          git config user.name qqai-updater
+          git config user.email actions@users.noreply.github.com
+          git add -A
+          git commit -m 'Finalize stabilized standalone worker v1.5.0'
+          git push origin HEAD:main
