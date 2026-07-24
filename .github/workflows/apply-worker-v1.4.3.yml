@@ -1,0 +1,112 @@
+name: Apply worker v1.4.3
+
+on:
+  workflow_dispatch:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.qqai-pr-trigger-v1.4.3'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: apply-worker-v1.4.3
+  cancel-in-progress: false
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Apply and validate standalone worker
+        shell: bash
+        run: |
+          set -euo pipefail
+          grep -F 'const VERSION = "1.4.1";' worker.js
+          cat \
+            .qqai-patches/v1.4.3/chunk-00 \
+            .qqai-patches/v1.4.3/chunk-01 \
+            .qqai-patches/v1.4.3/chunk-02 \
+            .qqai-patches/v1.4.3/chunk-03 \
+            .qqai-patches/v1.4.3/chunk-04 \
+            .qqai-patches/v1.4.3/chunk-05 \
+            .qqai-patches/v1.4.3/chunk-06 \
+            > /tmp/worker-v1.4.3.patch.gz.b64
+          echo 'fe00344d933fc8003d726bc1488e0d98986b588b95360a2802efe0a41349f9eb  /tmp/worker-v1.4.3.patch.gz.b64' | sha256sum -c -
+          base64 -d /tmp/worker-v1.4.3.patch.gz.b64 | gzip -d > /tmp/worker-v1.4.3.patch
+          echo '2cf30c9482b0c386bf96841face6837785f0568448389fdbaa2742e4922d520a  /tmp/worker-v1.4.3.patch' | sha256sum -c -
+          git apply --check /tmp/worker-v1.4.3.patch
+          git apply /tmp/worker-v1.4.3.patch
+          echo 'e7274941f4b793eac80f614317f916c95116ca2dfa55f760635e4f3dd61b0c7b  worker.js' | sha256sum -c -
+          node --check worker.js
+          cp worker.js /tmp/worker-v1.4.3.mjs
+          node -e "import('/tmp/worker-v1.4.3.mjs').then(m=>{if(!m.default||!m.OneBotHub)throw new Error('exports missing')})"
+          if grep -Eq '^[[:space:]]*import[[:space:]]' worker.js; then exit 1; fi
+          grep -F 'const VERSION = "1.4.3";' worker.js
+          grep -F 'QQAI_V1_R43_MOBILE_COLLAB_INTENT_MARKER' worker.js
+          grep -F 'QQAI_V1_R42_BOT_LOOP_TRANSIENT_RETRY_MARKER' worker.js
+          grep -F 'worker_transient_retry' worker.js
+          grep -F 'bot_sender_ignored' worker.js
+          grep -F 'classifyCollaborationNaturalIntent' worker.js
+          grep -F 'opsPurgeRemovedRecordTypes' worker.js
+          grep -F 'confidence < 0.93' worker.js
+          python - <<'PY'
+          from pathlib import Path
+          from html.parser import HTMLParser
+          import re
+
+          source = Path('worker.js').read_text(encoding='utf-8')
+          start = source.index('function getPortalHomePage(host)')
+          start = source.index('String.raw`', start) + len('String.raw`')
+          end = source.index('`);\n}', start)
+          html = source[start:end]
+
+          scripts = re.findall(r'<script(?: [^>]*)?>(.*?)</script>', html, re.S)
+          assert len(scripts) >= 2
+          for i, script in enumerate(scripts):
+              Path(f'/tmp/portal-v143-{i}.js').write_text(script, encoding='utf-8')
+
+          class P(HTMLParser):
+              def __init__(self):
+                  super().__init__(); self.ids=[]
+              def handle_starttag(self, tag, attrs):
+                  self.ids += [v for k,v in attrs if k == 'id']
+          p=P(); p.feed(html)
+          assert len(p.ids) == len(set(p.ids))
+
+          removed = [
+              '消息草稿', '排程模板', '欢迎词模板', '入群模板',
+              '品质回报', '部署快照', 'opsDrafts', 'opsJoinTemplate',
+              'opsQuality', 'opsDeploy'
+          ]
+          assert all(token not in html for token in removed)
+          assert '活动与投票' in html
+          assert 'opsCreateActivity' in html
+          assert 'opsCreatePoll' in html
+          assert 'opsVotePoll' in html
+
+          desktop = html.rfind('.topbar{height:68px}')
+          mobile = html.rfind('@media(max-width:1024px)')
+          assert desktop >= 0 and mobile > desktop
+          mobile_block = html[mobile:]
+          assert '.topbar{' in mobile_block and 'height:auto' in mobile_block
+          assert 'grid-template-columns:minmax(0,1fr)' in mobile_block
+          PY
+          for script in /tmp/portal-v143-*.js; do node --check "$script"; done
+
+      - name: Commit worker v1.4.3 to main
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -f .qqai-pr-trigger-v1.4.3
+          rm -rf .qqai-patches/v1.4.3
+          rm -f .github/workflows/apply-worker-v1.4.3.yml
+          git config user.name 'qqai-updater'
+          git config user.email 'actions@users.noreply.github.com'
+          git add -A
+          git commit -m 'Fix bot loops mobile portal and collaboration v1.4.3'
+          git push origin HEAD:main
