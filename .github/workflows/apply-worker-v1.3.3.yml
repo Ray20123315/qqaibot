@@ -1,0 +1,74 @@
+name: Apply worker v1.3.3 emergency reply hotfix
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.qqai-run-v1.3.3'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: apply-worker-v1.3.3
+  cancel-in-progress: false
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Rebuild patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          cp .qqai-patches/v1.3.3/reply-hotfix.patch.gz.b64 /tmp/worker-v1.3.3.patch.gz.b64
+          echo 'b640a84842f962e99e3abe648e94132f9420ba086d898e448a9cecbc5ac8d593  /tmp/worker-v1.3.3.patch.gz.b64' | sha256sum -c -
+          base64 -d /tmp/worker-v1.3.3.patch.gz.b64 | gzip -d > /tmp/worker-v1.3.3.patch
+          echo 'c429ee1ed8d39fceeb66c19e97b0dad20dfacb50900ff5ad59aa5416c89daf86  /tmp/worker-v1.3.3.patch' | sha256sum -c -
+
+      - name: Apply and validate worker
+        shell: bash
+        run: |
+          set -euo pipefail
+          grep -F 'const VERSION = "1.3.2";' worker.js
+          patch --dry-run -p1 < /tmp/worker-v1.3.3.patch
+          patch -p1 < /tmp/worker-v1.3.3.patch
+          node --check worker.js
+          python - <<'PY'
+          from pathlib import Path
+          import re
+          s = Path('worker.js').read_text(encoding='utf-8')
+          start = s.index('function getPortalHomePage(host)')
+          start = s.index('String.raw`', start) + len('String.raw`')
+          end = s.index('`);\n}', start)
+          html = s[start:end]
+          scripts = re.findall(r'<script(?: [^>]*)?>(.*?)</script>', html, re.S)
+          assert len(scripts) >= 2
+          for i, script in enumerate(scripts):
+              Path(f'/tmp/portal-script-{i}.js').write_text(script, encoding='utf-8')
+          PY
+          for f in /tmp/portal-script-*.js; do node --check "$f"; done
+          grep -F 'const VERSION = "1.3.3";' worker.js
+          grep -F 'QQAI_V1_R33_MARKER' worker.js
+          grep -F 'Gemini 实际生成' worker.js
+          grep -F 'rpcRoundTrip: true' worker.js
+          grep -F 'sent_http_fallback' worker.js
+          grep -F 'maxAttempts: args.fastChat ? 3 : 6' worker.js
+          echo '9a63659f6c785e6eaf105f5c7469ff075dd664990c21b5fdc7a4be803d75b00b  worker.js' | sha256sum -c -
+
+      - name: Commit worker and remove temporary files
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf .qqai-patches/v1.3.3
+          rm -f .qqai-run-v1.3.3
+          rm -f .github/workflows/apply-worker-v1.3.3.yml
+          git config user.name 'qqai-updater'
+          git config user.email 'actions@users.noreply.github.com'
+          git add -A worker.js .qqai-patches .qqai-run-v1.3.3 .github/workflows
+          git commit -m 'Update worker.js to v1.3.3 emergency reply hotfix'
+          git push origin HEAD:main
