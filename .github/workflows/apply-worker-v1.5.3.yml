@@ -1,0 +1,95 @@
+name: Apply worker v1.5.3 adaptive multi-action rules
+
+on:
+  push:
+    branches: [worker-v1.5.3-rule-actions]
+    paths: ['.qqai-v1.5.3-trigger']
+
+permissions:
+  contents: write
+
+concurrency:
+  group: apply-worker-v1.5.3
+  cancel-in-progress: false
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Reconstruct and apply exact patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          grep -F 'const VERSION = "1.5.2";' worker.js
+          echo '0c854a29a71992901362ad30b680cd46ba84b30fcf4e322434e2ab062bbc9aa7  worker.js' | sha256sum -c -
+          echo '886c6b600b98d4cfbc8d214a9e3891a782a5c8adf67774d3c49d4a929c22b154  .qqai-patches/v1.5.3/worker.patch.gz.b64' | sha256sum -c -
+          base64 -d .qqai-patches/v1.5.3/worker.patch.gz.b64 | gzip -d > /tmp/worker-v1.5.3.patch
+          echo '1d0e375751f9d3cf8f188aa2b6c59de64e5920a2687f5ec03ffca9e23e70bd8a  /tmp/worker-v1.5.3.patch' | sha256sum -c -
+          git apply --check /tmp/worker-v1.5.3.patch
+          git apply /tmp/worker-v1.5.3.patch
+          echo '5e19cfaa3c4049cb4d8884e04b5f68c68463c0b8377f244ffc7e047100a24c29  worker.js' | sha256sum -c -
+
+      - name: Validate standalone module and Portal
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --check worker.js
+          cp worker.js /tmp/worker-v153-ci.mjs
+          node -e "import('file:///tmp/worker-v153-ci.mjs').then(m=>{if(!m.default||typeof m.default.fetch!=='function'||!m.OneBotHub)throw Error('missing exports')})"
+          ! grep -Eq '^[[:space:]]*import[[:space:]]' worker.js
+          python - <<'PY'
+          from pathlib import Path
+          from html.parser import HTMLParser
+          import re, subprocess
+          s=Path('worker.js').read_text()
+          assert 'const VERSION = "1.5.3";' in s
+          assert 'QQAI_V1_R53_ADAPTIVE_MULTI_ACTION_RULE_MARKER' in s
+          a=s.index('function getPortalHomePage(host)')
+          a=s.index('String.raw`',a)+10
+          h=s[a:s.index('`);\n}',a)]
+          scripts=re.findall(r'<script(?: [^>]*)?>(.*?)</script>',h,re.S)
+          assert len(scripts)>=2
+          class P(HTMLParser):
+            def __init__(self): super().__init__(); self.ids=[]
+            def handle_starttag(self,t,a): self.ids += [v for k,v in a if k=='id']
+          p=P(); p.feed(h); assert len(p.ids)==len(set(p.ids)), 'duplicate portal ids'
+          for i,x in enumerate(scripts):
+            f=Path(f'/tmp/portal153-{i}.js'); f.write_text(x); subprocess.run(['node','--check',str(f)],check=True)
+          required=[
+            '智慧（自动校准）','增加动作','有违规（追加处分）','分类备注（AI 判断时优先遵守）',
+            'appendHumanCorrectionToRulePolicy','requestRuleManagerClarification','violation_additional',
+            'gemini_vision','gemini_search','GOOGLE_VISION_DECISION_KEYS_MISSING',
+            '群规与临时规则 > 明确例外 > 当前图片证据 > 分类备注与人工纠错'
+          ]
+          for token in required: assert token in s, token
+          block=s[s.index('async function evaluateRuleViolation'):s.index('async function handleRuleViolationFeedback')]
+          assert 'DeepSeek' not in block and 'callDeepSeek' not in block
+          print('Portal and rule feature validation PASS')
+          PY
+
+      - name: Run adaptive multi-action regression tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat >> /tmp/worker-v153-ci.mjs <<'JS'
+          export { normalizeRuleStrictness, ruleStrictnessConfig, normalizeRuleCategoryPolicies, normalizeRulePolicyActions, ruleContentNeedsWebVerification, resolveAdaptiveRuleStrictness, performRuleAdditionalActions, recordRuleViolationFeedback, getRuleCategoryPolicies, findLatestActiveRuleViolationForUser, requestRuleManagerClarification, callGoogleDecision };
+          JS
+          node .qqai-tests/v1.5.3/runtime.mjs
+
+      - name: Commit worker to main and keep run receipt
+        shell: bash
+        run: |
+          set -euo pipefail
+          printf '%s\n' '${{ github.run_id }}' > .qqai-v153-run-id
+          rm -f .qqai-v1.5.3-trigger
+          rm -rf .qqai-patches/v1.5.3 .qqai-tests/v1.5.3
+          rm -f .github/workflows/apply-worker-v1.5.3.yml
+          git config user.name qqai-updater
+          git config user.email actions@users.noreply.github.com
+          git add -A
+          git commit -m 'Add adaptive multi-action group rules v1.5.3'
+          git push origin HEAD:main
