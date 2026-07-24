@@ -45,7 +45,6 @@ jobs:
           node -e "import('file:///tmp/worker-v153-ci.mjs').then(m=>{if(!m.default||typeof m.default.fetch!=='function'||!m.OneBotHub)throw Error('missing exports')})"
           ! grep -Eq '^[[:space:]]*import[[:space:]]' worker.js
           python - <<'PY'
-          from pathlib import import_module
           from pathlib import Path
           from html.parser import HTMLParser
           import re, subprocess
