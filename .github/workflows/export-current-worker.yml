@@ -1,6 +1,6 @@
 name: Export current worker
 on:
-  pull_request:
+  push:
     branches: [main]
     paths: ['.qqai-export-current-worker']
 permissions:
