@@ -6,6 +6,10 @@ on:
     branches: [main]
     paths:
       - '.qqai-run-v1.3.7'
+  pull_request:
+    branches: [main]
+    paths:
+      - '.qqai-run-v1.3.7'
 
 permissions:
   contents: write
