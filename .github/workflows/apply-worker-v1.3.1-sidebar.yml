@@ -1,0 +1,73 @@
+name: Apply worker v1.3.1 sidebar
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.qqai-run-v1.3.1-sidebar'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: apply-worker-v1.3.1-sidebar
+  cancel-in-progress: false
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Rebuild patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          cp .qqai-patches/v1.3.1/sidebar.patch.gz.b64 /tmp/worker-v1.3.1.patch.gz.b64
+          echo 'd019a6f0f187466660dd630063c2ac04d5e94442cec4b5a3f660faea718a09ed  /tmp/worker-v1.3.1.patch.gz.b64' | sha256sum -c -
+          base64 -d /tmp/worker-v1.3.1.patch.gz.b64 | gzip -d > /tmp/worker-v1.3.1.patch
+          echo '5c6880d686910941c606bbf46e9fe9e1cc46f8695d326665b98c74e3f8db08ca  /tmp/worker-v1.3.1.patch' | sha256sum -c -
+
+      - name: Apply and validate worker
+        shell: bash
+        run: |
+          set -euo pipefail
+          grep -F 'const VERSION = "1.3.0";' worker.js
+          patch --dry-run -p1 < /tmp/worker-v1.3.1.patch
+          patch -p1 < /tmp/worker-v1.3.1.patch
+          node --check worker.js
+          python - <<'PY'
+          from pathlib import Path
+          import re
+          s = Path('worker.js').read_text(encoding='utf-8')
+          start = s.index('function getPortalHomePage(host)')
+          start = s.index('String.raw`', start) + len('String.raw`')
+          end = s.index('`);\n}', start)
+          html = s[start:end]
+          scripts = re.findall(r'<script(?: [^>]*)?>(.*?)</script>', html, re.S)
+          assert len(scripts) >= 2
+          for i, script in enumerate(scripts):
+              Path(f'/tmp/portal-script-{i}.js').write_text(script, encoding='utf-8')
+          PY
+          for f in /tmp/portal-script-*.js; do node --check "$f"; done
+          grep -F 'const VERSION = "1.3.1";' worker.js
+          grep -F 'qqai_sidebar_collapsed_v1' worker.js
+          grep -F 'function organizeSidebarNavigation' worker.js
+          grep -F '.nav-group.collapsed .nav-items{display:none}' worker.js
+          grep -F 'expandSidebarGroupForView(name)' worker.js
+          echo 'e0bd32fa91d275c39f00589920040369e01e10cc5884eb1ec32eba5cd2fb77f2  worker.js' | sha256sum -c -
+
+      - name: Commit worker and remove temporary files
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf .qqai-patches/v1.3.1
+          rm -f .qqai-run-v1.3.1-sidebar
+          rm -f .github/workflows/apply-worker-v1.3.1-sidebar.yml
+          git config user.name 'qqai-updater'
+          git config user.email 'actions@users.noreply.github.com'
+          git add -A worker.js .qqai-patches .qqai-run-v1.3.1-sidebar .github/workflows
+          git commit -m 'Update worker.js to v1.3.1 collapsible sidebar'
+          git push origin HEAD:main
