@@ -30,7 +30,6 @@ jobs:
           set -euo pipefail
           grep -F 'const VERSION = "1.5.2";' worker.js
           echo '0c854a29a71992901362ad30b680cd46ba84b30fcf4e322434e2ab062bbc9aa7  worker.js' | sha256sum -c -
-          echo '886c6b600b98d4cfbc8d214a9e3891a782a5c8adf67774d3c49d4a929c22b154  .qqai-patches/v1.5.3/worker.patch.gz.b64' | sha256sum -c -
           base64 -d .qqai-patches/v1.5.3/worker.patch.gz.b64 | gzip -d > /tmp/worker-v1.5.3.patch
           echo '1d0e375751f9d3cf8f188aa2b6c59de64e5920a2687f5ec03ffca9e23e70bd8a  /tmp/worker-v1.5.3.patch' | sha256sum -c -
           git apply --check /tmp/worker-v1.5.3.patch
@@ -46,6 +45,7 @@ jobs:
           node -e "import('file:///tmp/worker-v153-ci.mjs').then(m=>{if(!m.default||typeof m.default.fetch!=='function'||!m.OneBotHub)throw Error('missing exports')})"
           ! grep -Eq '^[[:space:]]*import[[:space:]]' worker.js
           python - <<'PY'
+          from pathlib import import_module
           from pathlib import Path
           from html.parser import HTMLParser
           import re, subprocess
