@@ -32,7 +32,7 @@ jobs:
           set -euo pipefail
           grep -F 'const VERSION = "1.3.6";' worker.js
           grep -F 'QQAI_V1_R36_MARKER' worker.js
-          cat .qqai-patches/v1.3.7/part-* > /tmp/worker-v1.3.7.patch.gz.b64
+          cat .qqai-patches/v1.3.7b/chunk-* > /tmp/worker-v1.3.7.patch.gz.b64
           echo '3749a8e1c11677f660eae97d8db1a9d862fff091518164781219fd0b7e4b9d16  /tmp/worker-v1.3.7.patch.gz.b64' | sha256sum -c -
           base64 -d /tmp/worker-v1.3.7.patch.gz.b64 | gzip -d > /tmp/worker-v1.3.7.patch
           echo '939fa8ed764c64f00374351437ce35e44119322293af3c7e206065b32472fcd1  /tmp/worker-v1.3.7.patch' | sha256sum -c -
@@ -94,11 +94,11 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          rm -f .qqai-run-v1.3.7
-          rm -rf .qqai-patches/v1.3.7
+          rm -f .qqai-run-v1.3.7 .qqai-pr-trigger-v1.3.7
+          rm -rf .qqai-patches/v1.3.7 .qqai-patches/v1.3.7b
           rm -f .github/workflows/apply-worker-v1.3.7.yml
           git config user.name 'qqai-updater'
           git config user.email 'actions@users.noreply.github.com'
-          git add -A worker.js .qqai-run-v1.3.7 .qqai-patches/v1.3.7 .github/workflows/apply-worker-v1.3.7.yml
+          git add -A
           git commit -m 'Simplify logged-in portal UI in worker v1.3.7'
           git push origin HEAD:main
