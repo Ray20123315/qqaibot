@@ -19,9 +19,9 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          cat .qqai-final-v150/chunk-* > /tmp/worker.b64
-          echo '052587bcb260911b315692cf3f21750ecf3646cb899eb527a91573c04f39cc7e  /tmp/worker.b64' | sha256sum -c -
-          base64 -d /tmp/worker.b64 | gzip -d > worker.js
+          cat .qqai-final-v150/chunk-* > /tmp/worker.xz.b64
+          echo 'dd49a80ac3bd0649dd2b4ee79ef89d370825c9d9f87a178e86d5ab50757a5387  /tmp/worker.xz.b64' | sha256sum -c -
+          base64 -d /tmp/worker.xz.b64 | xz -d > worker.js
           echo '6dc70c4757f91ba27ad45b0ec12492d44983296aa32750bcf59e4dc234b078dd  worker.js' | sha256sum -c -
           node --check worker.js
           cp worker.js /tmp/worker.mjs
@@ -58,6 +58,8 @@ jobs:
           set -euo pipefail
           rm -f .qqai-final-v150-trigger
           rm -rf .qqai-final-v150
+          rm -f .qqai-export-current-worker .qqai-export-current-worker-meta .qqai-export-current-worker-ready .qqai-export-current-worker-note
+          rm -f .github/workflows/export-current-worker.yml
           rm -f .github/workflows/apply-final-worker-v1.5.0.yml
           git config user.name qqai-updater
           git config user.email actions@users.noreply.github.com
