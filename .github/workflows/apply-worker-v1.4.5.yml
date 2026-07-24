@@ -1,0 +1,98 @@
+name: Apply worker v1.4.5
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.qqai-pr-trigger-v1.4.5'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: apply-worker-v1.4.5
+  cancel-in-progress: false
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Apply and validate direct loopback reliability patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          grep -F 'const VERSION = "1.4.4";' worker.js
+          cp worker.js /tmp/worker-v1.4.4.js
+          cp .qqai-patches/v1.4.5/patch.gz.b64 /tmp/worker-v1.4.5.patch.gz.b64
+          echo '0d4708739e7d41bd82254e62ac6bccaf591d6a8bb28d4b12e645635b9e53d8d7  /tmp/worker-v1.4.5.patch.gz.b64' | sha256sum -c -
+          base64 -d /tmp/worker-v1.4.5.patch.gz.b64 | gzip -d > /tmp/worker-v1.4.5.patch
+          echo '7517aea4faa12e18f8cd88807f62002ec4eadedb6516f73127aa111b2ba46dba  /tmp/worker-v1.4.5.patch' | sha256sum -c -
+          git apply --check /tmp/worker-v1.4.5.patch
+          git apply /tmp/worker-v1.4.5.patch
+          echo '2ce54ad81ccbb3d7fb8c0aaafdc6f33e6ab0f0f8cc4fd9519725539a54351c35  worker.js' | sha256sum -c -
+          node --check worker.js
+          cp worker.js /tmp/worker-v1.4.5.mjs
+          node -e "import('/tmp/worker-v1.4.5.mjs').then(m=>{if(!m.default||!m.OneBotHub)throw new Error('exports missing');if(typeof m.default.fetch!=='function')throw new Error('default fetch missing')})"
+          if grep -Eq '^[[:space:]]*import[[:space:]]' worker.js; then exit 1; fi
+          grep -F 'const VERSION = "1.4.5";' worker.js
+          grep -F 'QQAI_V1_R45_DIRECT_LOOPBACK_RELIABILITY_MARKER' worker.js
+          grep -F 'const QQAIWorker = {' worker.js
+          grep -F 'export default QQAIWorker;' worker.js
+          grep -F 'return await QQAIWorker.fetch(internalRequest, this.env, directContext);' worker.js
+          grep -F 'X-QQAI-Internal-Mode": "direct-loopback"' worker.js
+          grep -F 'QQAI_PUBLIC_INTERNAL_FALLBACK' worker.js
+          python - <<'PY'
+          from pathlib import Path
+          source = Path('worker.js').read_text(encoding='utf-8')
+          direct = source.index('return await QQAIWorker.fetch(internalRequest, this.env, directContext);')
+          gated_fallback = source.index('QQAI_PUBLIC_INTERNAL_FALLBACK', direct)
+          public_fetch = source.index('return fetch(`${sourceUrl.protocol}//${sourceUrl.host}/__onebot_event`', gated_fallback)
+          assert direct < gated_fallback < public_fetch
+          assert '!== "true") throw directError' in source[gated_fallback-200:gated_fallback+300]
+          assert source.count('return await QQAIWorker.fetch(internalRequest, this.env, directContext);') == 1
+          PY
+          cat >/tmp/direct-loopback-smoke.mjs <<'JS'
+          import worker, { OneBotHub } from '/tmp/worker-v1.4.5.mjs';
+          const env = { ONEBOT_ACCESS_TOKEN: 'token' };
+          const ctx = { waitUntil(p) { Promise.resolve(p).catch(() => {}); } };
+          const request = new Request('https://qqai.example/__onebot_event', {
+            method: 'POST',
+            headers: {
+              'content-type': 'application/json',
+              'x-qqai-transport': 'websocket-do',
+              'authorization': 'Bearer token'
+            },
+            body: JSON.stringify({ post_type: 'meta_event', meta_event_type: 'heartbeat' })
+          });
+          const response = await worker.fetch(request, env, ctx);
+          if (response.status !== 204) throw new Error(`direct handler status ${response.status}`);
+          const state = {
+            getWebSockets() { return []; },
+            waitUntil(p) { Promise.resolve(p).catch(() => {}); },
+            storage: null
+          };
+          const hub = new OneBotHub(state, env);
+          const originalFetch = globalThis.fetch;
+          globalThis.fetch = async () => { throw new Error('PUBLIC_FETCH_MUST_NOT_RUN'); };
+          await hub.processInboundEvent({ post_type: 'meta_event', meta_event_type: 'heartbeat' }, 'https://qqai.example/onebot');
+          globalThis.fetch = originalFetch;
+          JS
+          node /tmp/direct-loopback-smoke.mjs
+
+      - name: Commit worker v1.4.5 to main
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -f .qqai-pr-trigger-v1.4.5
+          rm -rf .qqai-patches/v1.4.5
+          rm -f .github/workflows/apply-worker-v1.4.5.yml
+          git config user.name 'qqai-updater'
+          git config user.email 'actions@users.noreply.github.com'
+          git add -A
+          git commit -m 'Replace public internal fetch with direct loopback v1.4.5'
+          git push origin HEAD:main
