@@ -1,0 +1,130 @@
+name: Apply worker v1.3.9
+
+on:
+  workflow_dispatch:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.qqai-pr-trigger-v1.3.9'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: apply-worker-v1.3.9
+  cancel-in-progress: false
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Apply and validate standalone worker
+        shell: bash
+        run: |
+          set -euo pipefail
+          grep -F 'const VERSION = "1.3.8";' worker.js
+          grep -F 'QQAI_V1_R38_AFFINITY_MANUAL_CHECK_MARKER' worker.js
+          cat .qqai-patches/v1.3.9/chunk-00 > /tmp/worker-v1.3.9.patch.gz.b64
+          echo 'ed45a2b83a6e9e66766eb6a255905bbd5c6c2fbd07637c47b52a70a0bbd6e9a0  /tmp/worker-v1.3.9.patch.gz.b64' | sha256sum -c -
+          base64 -d /tmp/worker-v1.3.9.patch.gz.b64 | gzip -d > /tmp/worker-v1.3.9.patch
+          echo '0ac6a40f8295b2f14b82bd15ea4024d1abc0fec72e86532de42a091315dd3664  /tmp/worker-v1.3.9.patch' | sha256sum -c -
+          patch --dry-run -p1 < /tmp/worker-v1.3.9.patch
+          patch -p1 < /tmp/worker-v1.3.9.patch
+          echo 'e8574b6e465b1fb5a6d401d9f3d0f50e12201f28b0921cb92b3ffee7e435c0fb  worker.js' | sha256sum -c -
+          node --check worker.js
+          cp worker.js /tmp/worker-v1.3.9.mjs
+          node -e "import('/tmp/worker-v1.3.9.mjs').then(m=>{if(!m.default||!m.OneBotHub)throw new Error('exports missing')})"
+          if grep -Eq '^[[:space:]]*import[[:space:]]' worker.js; then
+            echo 'worker.js contains an import statement' >&2
+            exit 1
+          fi
+          if grep -F 'worker_v1.3.8_previous.js' worker.js; then
+            echo 'worker.js references another JavaScript file' >&2
+            exit 1
+          fi
+          grep -F 'const VERSION = "1.3.9";' worker.js
+          grep -F 'QQAI_V1_R39_PRIVATE_GATE_SELF_SLASH_BANG_MARKER' worker.js
+          grep -F 'privateAccessChecked' worker.js
+          grep -F 'selfSlashBangChat' worker.js
+          grep -F '私聊权限必须在任何可选模型、图片诊断与自然语言 AI 分类之前完成' worker.js
+
+          python - <<'PY'
+          from pathlib import Path
+          from html.parser import HTMLParser
+          import re
+          source = Path('worker.js').read_text(encoding='utf-8')
+          start = source.index('function getPortalHomePage(host)')
+          start = source.index('String.raw`', start) + len('String.raw`')
+          end = source.index('`);\n}', start)
+          html = source[start:end]
+          scripts = re.findall(r'<script(?: [^>]*)?>(.*?)</script>', html, re.S)
+          assert len(scripts) >= 2
+          for index, script in enumerate(scripts):
+              Path(f'/tmp/portal-v139-{index}.js').write_text(script, encoding='utf-8')
+          class IdParser(HTMLParser):
+              def __init__(self):
+                  super().__init__(); self.ids = []
+              def handle_starttag(self, tag, attrs):
+                  for key, value in attrs:
+                      if key == 'id': self.ids.append(value)
+          parser = IdParser(); parser.feed(html)
+          assert len(parser.ids) == len(set(parser.ids)), 'duplicate HTML ids'
+          PY
+          for script in /tmp/portal-v139-*.js; do node --check "$script"; done
+
+          cat > /tmp/test-v139.mjs <<'JS'
+          import worker from '/tmp/worker-v1.3.9.mjs';
+          class MockStmt {
+            constructor(db, sql){ this.db=db; this.sql=sql; this.args=[]; }
+            bind(...args){ this.args=args; return this; }
+            async first(){
+              if (/SELECT value FROM kv_store WHERE key = \?/i.test(this.sql)) {
+                const key=String(this.args[0]);
+                return this.db.store.has(key) ? {value:this.db.store.get(key)} : null;
+              }
+              return null;
+            }
+            async run(){
+              if (/INSERT INTO kv_store/i.test(this.sql)) this.db.store.set(String(this.args[0]), String(this.args[1]));
+              else if (/DELETE FROM kv_store WHERE key = \?/i.test(this.sql)) this.db.store.delete(String(this.args[0]));
+              return {success:true};
+            }
+            async all(){ return {results:[]}; }
+          }
+          class MockDB { constructor(seed={}){ this.store=new Map(Object.entries(seed)); } prepare(sql){ return new MockStmt(this, sql); } }
+          const ctx={waitUntil(p){Promise.resolve(p).catch(()=>{});}};
+          async function send(body, env){
+            const req=new Request('https://example.com/event?token=t',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)});
+            return worker.fetch(req,env,ctx);
+          }
+          let fetchCalls=0;
+          globalThis.fetch=async()=>{fetchCalls++; throw new Error('unexpected external model call');};
+          const privateBody={post_type:'message',message_type:'private',self_id:10001,user_id:20002,message_id:1,message:[{type:'image',data:{file:'x.jpg',url:'https://example.invalid/x.jpg'}}]};
+          let response=await send(privateBody,{ONEBOT_ACCESS_TOKEN:'t',ENABLE_ONEBOT_HTTP_EVENTS:'true',DB:new MockDB()});
+          if(response.status!==204||fetchCalls!==0) throw new Error('private none image gate failed');
+          response=await send({...privateBody,message_id:2},{ONEBOT_ACCESS_TOKEN:'t',ENABLE_ONEBOT_HTTP_EVENTS:'true',DB:new MockDB({'private_access:20002':'full'})});
+          if(response.status!==204||fetchCalls!==0) throw new Error('private feature-off image gate failed');
+          response=await send({post_type:'message',message_type:'group',self_id:10001,user_id:20002,group_id:30003,message_id:3,sender:{nickname:'member',role:'member'},message:[{type:'at',data:{qq:'10001'}},{type:'text',data:{text:' /!普通聊天内容'}}]},{ONEBOT_ACCESS_TOKEN:'t',ENABLE_ONEBOT_HTTP_EVENTS:'true',DB:new MockDB({'group_whitelist:30003':'true'})});
+          if(response.status!==204) throw new Error('member /! opt-out failed');
+          response=await send({post_type:'message_sent',message_type:'group',self_id:10001,user_id:10001,group_id:30003,target_id:30003,message_id:4,sender:{nickname:'bot-owner',role:'owner'},message:[{type:'text',data:{text:'/!普通聊天内容'}}]},{ONEBOT_ACCESS_TOKEN:'t',ENABLE_ONEBOT_HTTP_EVENTS:'true',DEVELOPER_ID:'10001',DB:new MockDB({'group_whitelist:30003':'true'})});
+          if(response.status===204) throw new Error('self /! chat alias was rejected');
+          console.log('runtime behavior PASS');
+          JS
+          node /tmp/test-v139.mjs
+
+      - name: Commit worker v1.3.9 to main
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -f .qqai-pr-trigger-v1.3.9
+          rm -rf .qqai-patches/v1.3.9
+          rm -f .github/workflows/apply-worker-v1.3.9.yml
+          git config user.name 'qqai-updater'
+          git config user.email 'actions@users.noreply.github.com'
+          git add -A
+          git commit -m 'Fix private media gating and self slash-bang chat v1.3.9'
+          git push origin HEAD:main
