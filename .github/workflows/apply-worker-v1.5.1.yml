@@ -76,7 +76,7 @@ jobs:
           assert '审查判断' in h and '上下文整理' in h and '尚未检查' in s
           assert "var names={decision:'审查判断',chat:'聊天回答'" in h
           assert "m.statusLabel||m.status" in h
-          assert 'const byId = new Map()' in s
+          assert 'const registryMap = new Map()' in s
           block=s[s.index('async function opsAnnounceActivity'):s.index('async function opsInviteActivityParticipant')]
           assert 'announceMode === "all" && !botState?.exists' in block
           assert 'announceMode === "none" && !botState?.exists' not in block
