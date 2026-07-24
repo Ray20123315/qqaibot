@@ -1,4 +1,5 @@
-const VERSION = "1.5.2";
+const VERSION = "1.5.3";
+const QQAI_V1_R53_ADAPTIVE_MULTI_ACTION_RULE_MARKER = "QQAI_V1_R53_ADAPTIVE_MULTI_ACTION_RULE_MARKER";
 const QQAI_V1_R52_FINAL_STABILIZATION_MARKER = "QQAI_V1_R52_FINAL_STABILIZATION_MARKER";
 const QQAI_V1_R51_MODEL_ROUTING_ACTIVITY_FIX_MARKER = "QQAI_V1_R51_MODEL_ROUTING_ACTIVITY_FIX_MARKER";
 const QQAI_V1_R50_AUTH_SECURITY_FREEZE_MARKER = "QQAI_V1_R50_AUTH_SECURITY_FREEZE_MARKER";
@@ -1523,9 +1524,9 @@ const QQAIWorker = {
 
       const operationsRuntimeSettings = isGroup ? await opsGetSettings(env, currentGroupId) : null;
       const operationsHighRiskPaused = Boolean(operationsRuntimeSettings?.maintenanceMode || operationsRuntimeSettings?.emergencyLock);
-      if (isGroup && !operationsHighRiskPaused && !isCommandMessage && !isSelfAccount && cleanMessage.length > 0 && await dbGet(env, `rule_monitor_enabled:${currentGroupId}`) !== "false") {
-        // 在后台检查；检查器会先即时确认机器人为群主／管理员，否则直接返回且不建立记录。
-        ctx.waitUntil(inspectMessageAgainstGroupRules(env, { groupId: currentGroupId, userId, senderName: senderCard, text: cleanMessage, messageId: replyMessageId }));
+      if (isGroup && !operationsHighRiskPaused && !isCommandMessage && !isSelfAccount && (cleanMessage.length > 0 || ((imageUrl || imageFile) && imageInspectionConfigured)) && await dbGet(env, `rule_monitor_enabled:${currentGroupId}`) !== "false") {
+        // 在后台检查；群规文字优先，图片作为直接证据一并送入 Google 判断链。检查器会先即时确认机器人为群主／管理员。
+        ctx.waitUntil(inspectMessageAgainstGroupRules(env, { groupId: currentGroupId, userId, senderName: senderCard, text: cleanMessage || ((imageUrl || imageFile) ? "[图片]" : ""), messageId: replyMessageId, imageUrl, imageFile }));
       }
 
       // 维护／紧急锁定时暂停主动插话，但保留群友主动 @Bot 的一般聊天。
@@ -1607,6 +1608,7 @@ const QQAIWorker = {
         });
         if (result?.status === "no_rules") return jsonReply(`${atSender}本群尚未设置可供检查的群规。`);
         if (result?.status === "error") return jsonReply(`${atSender}检查失败：${String(result.error || "分类服务暂时不可用").slice(0, 180)}`);
+        if (result?.status === "pending_review") return jsonReply(`${atSender}目前证据不足，已保留记录并礼貌询问本群管理协助确认；系统不会因为模型暂时无法判断而停止群规流程。`);
         if (result?.status === "no_violation") {
           const confidence = Math.round(Number(result.review?.confidence || 0) * 100);
           return jsonReply(`${atSender}已复核该消息，目前未确认违规${confidence ? `（置信度 ${confidence}%）` : ""}。你的补充原因已写入审计记录，但不会仅凭举报直接处罚。`);
@@ -1713,7 +1715,7 @@ const QQAIWorker = {
         return jsonReply(`${atSender}群规持续监控已${enabled ? "开启" : "关闭"}。开启后默认只记录到网页，不会自动处罚。`);
       }
 
-      const ruleStrictnessSetting = cleanMessage.match(/^[!！](?:群规严格度|群規嚴格度|群规等级|群規等級|rule\s*(?:strictness|level))\s*(宽松|寬鬆|低|中|高|严格|嚴格|loose|low|medium|high|strict|状态|狀態|status)$/i);
+      const ruleStrictnessSetting = cleanMessage.match(/^[!！](?:群规严格度|群規嚴格度|群规等级|群規等級|rule\s*(?:strictness|level))\s*(智慧|智能|自适应|自適應|smart|adaptive|宽松|寬鬆|低|中|高|严格|嚴格|loose|low|medium|high|strict|状态|狀態|status)$/i);
       if (ruleStrictnessSetting) {
         if (!hasAdminAuth) return jsonReply(`${atSender}⚠️ 权限不足\n当前权限等级：${isDeveloper ? "开发者" : senderRole === "owner" ? "群主" : senderRole === "admin" ? "QQ 管理员" : "普通成员"}\n需要权限等级：QQ 管理员或以上`);
         const rawLevel = ruleStrictnessSetting[1];
@@ -5913,7 +5915,7 @@ async function runtimeModelRegistryState(env) {
   return categories;
 }
 
-async function callGemmaDecision(env, { system, prompt, maxOutputTokens = 64, deadlineAt = Date.now() + 12000, maxAttempts = 4 }) {
+async function callGemmaDecision(env, { system, prompt, inputParts = null, maxOutputTokens = 64, deadlineAt = Date.now() + 12000, maxAttempts = 4 }) {
   const keys = roundRobinKeys(googleApiKeysFor(env, "gemma_decision"), "gemma_decision");
   if (!keys.length) throw new Error("GEMMA_DECISION_API_KEYS_MISSING");
   const models = await effectiveRuntimeModels(env, "decision");
@@ -5928,7 +5930,7 @@ async function callGemmaDecision(env, { system, prompt, maxOutputTokens = 64, de
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            contents: [{ role: "user", parts: [{ text: String(prompt || "") }] }],
+            contents: [{ role: "user", parts: [{ text: String(prompt || "") }, ...(Array.isArray(inputParts) ? inputParts : [])].map(part => part?.inlineData ? { inlineData: { mimeType: String(part.inlineData.mimeType || "image/jpeg"), data: String(part.inlineData.data || "") } } : { text: String(part?.text || "") }).filter(part => part.text || part.inlineData?.data) }],
             systemInstruction: { parts: [{ text: String(system || "只输出分类结果。") }] },
             generationConfig: {
               maxOutputTokens,
@@ -5954,11 +5956,38 @@ async function callGemmaDecision(env, { system, prompt, maxOutputTokens = 64, de
 }
 
 async function callGoogleDecision(env, options = {}) {
+  const prompt = String(options.prompt || "");
+  const system = String(options.system || "只输出分类结果。");
+  const inputParts = Array.isArray(options.inputParts) ? options.inputParts : [];
+  const hasInlineImage = inputParts.some(part => Boolean(part?.inlineData?.data));
+  // 图片群规判断必须使用独立视觉 Key 池，避免占用或混用聊天、审查与搜索配额。
+  if (hasInlineImage) {
+    const visionKeys = geminiVisionApiKeys(env);
+    if (!visionKeys.length) throw new Error("GOOGLE_VISION_DECISION_KEYS_MISSING");
+    try {
+      const result = await callGeminiGenerate(env, {
+        models: parseList(env.GEMINI_VISION_MODELS, ["gemini-3.5-flash", "gemini-3.1-flash-lite"]),
+        apiKeys: visionKeys,
+        keyProvider: "gemini_vision",
+        system,
+        contents: [{ role: "user", parts: [{ text: prompt }, ...inputParts] }],
+        maxOutputTokens: Math.max(8, Number(options.maxOutputTokens || 64)),
+        temperature: 0,
+        useSearch: false,
+        requireSearch: false,
+        deadlineAt: Number(options.deadlineAt || (Date.now() + 12000)),
+        maxAttempts: Math.max(1, Math.min(4, Number(options.maxAttempts || 4)))
+      });
+      return { ...result, decisionProvider: "gemini_vision", imageEvidenceUsed: true };
+    } catch (visionError) {
+      const combined = new Error(`GOOGLE_VISION_DECISION_FAILED: ${String(visionError?.message || visionError)}`);
+      combined.visionError = visionError;
+      throw combined;
+    }
+  }
   try {
     return await callGemmaDecision(env, options);
   } catch (gemmaError) {
-    const prompt = String(options.prompt || "");
-    const system = String(options.system || "只输出分类结果。");
     try {
       const result = await callGeminiGenerate(env, {
         models: parseList(env.GEMINI_DECISION_MODELS, ["gemini-3.1-flash-lite", "gemini-3.5-flash"]),
@@ -7715,6 +7744,7 @@ function normalizeRuleProxyMode(value) {
 function normalizeRuleStrictness(value) {
   const raw = String(value || "").trim().toLowerCase();
   const aliases = {
+    "智慧": "smart", "智能": "smart", "自适应": "smart", "自適應": "smart", smart: "smart", adaptive: "smart",
     "宽松": "loose", "寬鬆": "loose", loose: "loose",
     "低": "low", low: "low",
     "中": "medium", medium: "medium", normal: "medium",
@@ -7725,18 +7755,48 @@ function normalizeRuleStrictness(value) {
 }
 
 function ruleStrictnessLabel(value) {
-  return ({ loose: "宽松", low: "低", medium: "中", high: "高", strict: "严格" })[normalizeRuleStrictness(value)] || "中";
+  return ({ smart: "智慧", loose: "宽松", low: "低", medium: "中", high: "高", strict: "严格" })[normalizeRuleStrictness(value)] || "中";
 }
 
 function ruleStrictnessConfig(value) {
-  const level = normalizeRuleStrictness(value);
-  return ({
+  const normalized = normalizeRuleStrictness(value);
+  const level = normalized === "smart" ? "medium" : normalized;
+  const config = ({
     loose: { level, minConfidence: 0.95, instruction: "只记录极其明确、严重且具有现实伤害或明显恶意推广目的的违规；玩笑、测试、引用、讨论管理功能、普通链接一律不要判违规。" },
     low: { level, minConfidence: 0.90, instruction: "仅记录证据清楚的直接违规；测试、引用、反讽、讨论禁言或群规功能、无招揽目的的链接不要判违规。" },
     medium: { level, minConfidence: 0.82, instruction: "保持平衡，必须有完整语境证据；不能因为出现敏感词、@某人、禁言字样或链接就判违规。" },
     high: { level, minConfidence: 0.74, instruction: "可记录较明显的边界违规，但仍必须排除测试、引用、转述、管理功能讨论和正常分享链接。" },
     strict: { level, minConfidence: 0.66, instruction: "对轻微但真实的违规也可记录；即使如此仍禁止仅凭关键词或链接存在进行判定，必须说明实际违规行为。" }
   })[level];
+  return { ...config, configuredLevel: normalized, adaptive: normalized === "smart" };
+}
+
+async function resolveAdaptiveRuleStrictness(env, groupId, recentContext, feedbackExamples = []) {
+  const configured = normalizeRuleStrictness(await dbGet(env, `rule_strictness:${groupId}`) || DEFAULTS.ruleStrictness);
+  if (configured !== "smart") return { ...ruleStrictnessConfig(configured), adaptiveReason: "使用管理员固定等级" };
+  const feedback = Array.isArray(feedbackExamples) ? feedbackExamples.slice(0, 30) : [];
+  const audits = (await readJson(env, `audit:system:group:${groupId}`, [])).slice(-120);
+  const recentCutoff = Date.now() - 7 * 24 * 60 * 60 * 1000;
+  const recentAudits = audits.filter(item => Date.parse(item.at || 0) >= recentCutoff);
+  const auditReversals = recentAudits.filter(item => item.type === "rule_violation_reversed").length;
+  const auditEnforcements = recentAudits.filter(item => item.type === "rule_proxy_action" && !/record|manual|cooldown/.test(String(item.action || ""))).length;
+  const moderationSignals = recentAudits.filter(item => /moderation_confirmed|group_operation|conversation_action/.test(String(item.type || ""))).length;
+  const falsePositives = feedback.filter(item => item.verdict === "not_violation").length + auditReversals;
+  const confirmed = feedback.filter(item => item.verdict === "violation" || item.verdict === "violation_additional").length + auditEnforcements;
+  const context = String(recentContext || "");
+  const driftSignals = (context.match(/(?:滚|闭嘴|垃圾|废物|智障|傻逼|去死|开盒|广告|加群|刷屏|连续@|骚扰)/gi) || []).length;
+  const managerSignals = (context.match(/(?:管理员|群主|警告|提醒|别刷|不要吵|停止|群规)/gi) || []).length + moderationSignals;
+  let effective = "medium";
+  let reason = "近期没有明显偏差，维持平衡判断";
+  if (falsePositives >= 3 && falsePositives > confirmed * 1.4) {
+    effective = falsePositives >= 6 ? "loose" : "low";
+    reason = `近期人工复核或撤销发现 ${falsePositives} 次误判，自动放宽以降低误伤`;
+  } else if (driftSignals >= 5 || (confirmed >= 4 && confirmed > falsePositives * 1.5) || managerSignals >= 5) {
+    effective = driftSignals >= 9 || confirmed >= 8 ? "strict" : "high";
+    reason = `近期群聊边界行为、实际处置或管理干预较多（漂移 ${driftSignals}、确认处置 ${confirmed}、管理信号 ${managerSignals}），暂时提高敏感度`;
+  }
+  const config = ruleStrictnessConfig(effective);
+  return { ...config, configuredLevel: "smart", adaptive: true, effectiveLevel: effective, adaptiveReason: reason };
 }
 
 function defaultRuleCategoryPolicies(groupId = "") {
@@ -7772,20 +7832,47 @@ function normalizeRulePolicyPunishment(value) {
   return ["record", "remind", "warn", "recall", "mute", "progressive", "kick", "manual"].includes(action) ? action : "manual";
 }
 
+function normalizeRulePolicyActionSpec(value, fallbackAction = "manual") {
+  const raw = value && typeof value === "object" ? value : { action: value };
+  const action = normalizeRulePolicyPunishment(raw?.action || raw?.punishment || fallbackAction);
+  return {
+    action,
+    muteSeconds: Math.max(0, Math.min(30 * 24 * 3600, parseUnlimitedNonNegativeInteger(raw?.muteSeconds, 0)))
+  };
+}
+
+function normalizeRulePolicyActions(value, fallbackPunishment = "manual", fallbackMuteSeconds = 0) {
+  const source = Array.isArray(value) && value.length ? value : [{ action: fallbackPunishment, muteSeconds: fallbackMuteSeconds }];
+  const output = [];
+  for (const raw of source.slice(0, 8)) {
+    const item = normalizeRulePolicyActionSpec(raw, fallbackPunishment);
+    const duplicate = output.some(existing => existing.action === item.action && existing.muteSeconds === item.muteSeconds);
+    if (!duplicate) output.push(item);
+  }
+  return output.length ? output : [{ action: "manual", muteSeconds: 0 }];
+}
+
 function normalizeRuleCategoryPolicies(value, fallbackPolicies = null) {
   const source = Array.isArray(value) ? value : [];
   const output = [];
   for (const raw of source.slice(0, 50)) {
     const name = String(raw?.name || "").trim().slice(0, 80);
     if (!name || output.some(item => item.name === name)) continue;
+    const actions = normalizeRulePolicyActions(raw?.actions, raw?.punishment, raw?.muteSeconds);
     output.push({
       name,
-      punishment: normalizeRulePolicyPunishment(raw?.punishment),
-      note: String(raw?.note || "").trim().slice(0, 1000),
-      muteSeconds: parseUnlimitedNonNegativeInteger(raw?.muteSeconds, 0)
+      punishment: actions[0].action,
+      actions,
+      note: String(raw?.note || "").trim().slice(0, 2000),
+      muteSeconds: actions.find(item => item.action === "mute")?.muteSeconds || parseUnlimitedNonNegativeInteger(raw?.muteSeconds, 0)
     });
   }
-  return output.length ? output : (Array.isArray(fallbackPolicies) && fallbackPolicies.length ? fallbackPolicies : defaultRuleCategoryPolicies());
+  if (output.length) return output;
+  const fallback = Array.isArray(fallbackPolicies) && fallbackPolicies.length ? fallbackPolicies : defaultRuleCategoryPolicies();
+  return fallback.map(raw => {
+    const actions = normalizeRulePolicyActions(raw?.actions, raw?.punishment, raw?.muteSeconds);
+    return { ...raw, punishment: actions[0].action, actions, note: String(raw?.note || "").slice(0, 2000), muteSeconds: actions.find(item => item.action === "mute")?.muteSeconds || parseUnlimitedNonNegativeInteger(raw?.muteSeconds, 0) };
+  });
 }
 
 async function getRuleCategoryPolicies(env, groupId) {
@@ -7798,7 +7885,7 @@ function matchRuleCategoryPolicy(name, policies) {
   return list.find(item => item.name.toLowerCase() === text)
     || list.find(item => text.includes(item.name.toLowerCase()) || item.name.toLowerCase().includes(text))
     || list.find(item => item.name === "其他")
-    || { name: "其他", punishment: "manual", note: "交由管理复核。", muteSeconds: 0 };
+    || { name: "其他", punishment: "manual", actions: [{ action: "manual", muteSeconds: 0 }], note: "交由管理复核。", muteSeconds: 0 };
 }
 
 function normalizeRuleSeverity(value) {
@@ -7985,6 +8072,87 @@ async function inspectUrlsForRuleReview(env, text) {
   return results;
 }
 
+function ruleContentNeedsWebVerification(text) {
+  const source = String(text || "");
+  return /(?:新闻|新聞|快讯|快訊|刚刚|剛剛|最新|今日|今天|昨日|昨天|本周|本週|网传|網傳|据说|據說|消息称|消息稱|官方通报|官方通報|辟谣|闢謠|谣言|謠言|热搜|熱搜|时事|時事|政策|选举|選舉|战争|戰爭|地震|台风|颱風|事故|发布会|發布會)/i.test(source);
+}
+
+async function verifyRuleNewsContext(env, text) {
+  if (!ruleContentNeedsWebVerification(text)) return null;
+  try {
+    const result = await callGeminiGenerate(env, {
+      models: parseList(env.GEMINI_SEARCH_MODELS, ["gemini-3.5-flash", "gemini-3.1-flash-lite"]),
+      apiKeys: geminiSearchApiKeys(env),
+      keyProvider: "gemini_search",
+      system: "你是群规判断的事实核查辅助。只核对消息中的时效性新闻或公共事件说法，简短说明可验证事实、不确定处和来源；不要替代群规作出处罚决定。",
+      contents: [{ role: "user", parts: [{ text: String(text || "").slice(0, 4000) }] }],
+      maxOutputTokens: 420,
+      temperature: 0,
+      useSearch: true,
+      requireSearch: false,
+      deadlineAt: Date.now() + 12000,
+      maxAttempts: 2
+    });
+    return { ok: true, text: String(result.text || "").slice(0, 3000), sources: Array.isArray(result.sources) ? result.sources.slice(0, 5) : [], model: result.model || "" };
+  } catch (error) {
+    return { ok: false, error: String(error?.message || error).slice(0, 500), sources: [] };
+  }
+}
+
+async function requestRuleManagerClarification(env, { groupId, userId, senderName, content, messageId, reason, review = null }) {
+  const fingerprint = (await sha256Hex(`${groupId}|${messageId || ""}|${userId}|${String(content || "").slice(0, 500)}`)).slice(0, 24);
+  const cooldownKey = `rule_manager_clarification:${groupId}:${fingerprint}`;
+  if (Date.now() - Number(await dbGet(env, cooldownKey) || 0) < 30 * 60 * 1000) return { requested: false, reason: "cooldown" };
+  let members = [];
+  try {
+    const data = await callOneBotAction(env, { action: "get_group_member_list", params: { group_id: numericId(groupId), no_cache: false } }, 12000);
+    members = Array.isArray(data) ? data : [];
+  } catch {
+    members = await readJson(env, `group_members:${groupId}`, []);
+  }
+  const managers = members.filter(member => ["owner", "admin"].includes(String(member.role || ""))).map(member => ({
+    id: String(member.user_id || member.qq || ""),
+    role: String(member.role || "admin"),
+    name: String(member.card || member.nickname || member.name || member.user_id || member.qq || "管理员")
+  })).filter(member => member.id);
+  if (!managers.length) {
+    await notifyDeveloper(env, `【群规判断待人工确认】
+群号：${groupId}
+成员：${senderName || userId}（${userId}）
+原因：${reason}
+内容：${String(content || "").slice(0, 1000)}`).catch(() => null);
+    return { requested: false, reason: "no_manager" };
+  }
+  const owners = managers.filter(member => member.role === "owner");
+  const admins = managers.filter(member => member.role === "admin");
+  const pickRandom = list => list.length ? list[Math.floor(Math.random() * list.length)] : null;
+  const selected = [];
+  const owner = pickRandom(owners);
+  if (owner) selected.push(owner);
+  const admin = pickRandom(admins.filter(member => !selected.some(chosen => chosen.id === member.id)));
+  if (admin) selected.push(admin);
+  if (!selected.length) selected.push(pickRandom(managers));
+  const segments = [];
+  if (messageId) segments.push({ type: "reply", data: { id: String(messageId) } });
+  for (const manager of selected.filter(Boolean)) segments.push({ type: "at", data: { qq: manager.id } });
+  segments.push({ type: "text", data: { text: ` 群规判断目前证据不足，想请管理协助确认。
+对象：${senderName || userId}（QQ:${userId}）
+疑点：${String(reason || "模型无法稳定判断").slice(0, 500)}
+请到 Control Center 的“群规监控记录”选择“有违规”“无违规（撤销处罚）”或“有违规（追加处分）”。` } });
+  try {
+    await callOneBotAction(env, { action: "send_group_msg", params: { group_id: numericId(groupId), message: segments, auto_escape: false } }, 15000);
+    await dbPut(env, cooldownKey, String(Date.now()));
+    await writeSystemAudit(env, { type: "rule_manager_clarification", groupId, actorId: "system:rule_monitor", targetId: userId, action: "ask_managers", messageId, managerIds: selected.filter(Boolean).map(item => item.id), reason: String(reason || "").slice(0, 1000), modelReview: review });
+    return { requested: true, managerIds: selected.filter(Boolean).map(item => item.id) };
+  } catch (error) {
+    await notifyDeveloper(env, `【群规询问管理失败】
+群号：${groupId}
+原因：${String(error?.message || error)}
+待确认内容：${String(content || "").slice(0, 1000)}`).catch(() => null);
+    return { requested: false, reason: String(error?.message || error) };
+  }
+}
+
 function explicitPromotionLanguage(text) {
   return /(?:加入|进|進|加)(?:我们|我們|这个|這個)?(?:群|频道|頻道)|群号|群號|招募|宣传|宣傳|推广|推廣|引流|点(?:击)?链接|點(?:擊)?連結|邀请码|邀請碼|关注我|關注我/i.test(String(text || ""));
 }
@@ -8021,7 +8189,11 @@ async function appendRuleViolationRecord(env, data) {
     intentional: data.intentional !== false,
     strikeCounted: Boolean(data.strikeCounted),
     policyAction: String(data.policyAction || ""),
-    policyNote: String(data.policyNote || "").slice(0, 1000),
+    policyActions: normalizeRulePolicyActions(data.policyActions, data.policyAction || "manual", data.actionDurationSeconds || 0),
+    actionsTaken: Array.isArray(data.actionsTaken) ? data.actionsTaken.map(String).slice(0, 12) : [],
+    actionResults: Array.isArray(data.actionResults) ? data.actionResults.map(String).slice(0, 20) : [],
+    warningMessageIds: Array.isArray(data.warningMessageIds) ? data.warningMessageIds.map(String).filter(Boolean).slice(0, 20) : [],
+    policyNote: String(data.policyNote || "").slice(0, 2000),
     humanVerdict: String(data.humanVerdict || ""),
     createdAt: Date.now()
   };
@@ -8045,6 +8217,86 @@ async function ruleProxyCooldownRemaining(env, groupId, userId) {
   return remaining > 0 ? Math.ceil(remaining / 1000) : 0;
 }
 
+function ruleBaseActionName(value) {
+  const text = String(value || "");
+  if (text.includes("recall")) return "recall";
+  if (text.includes("mute")) return "mute";
+  if (text.includes("warn")) return "warn";
+  if (text.includes("remind")) return "remind";
+  if (text.includes("kick")) return "kick";
+  return text;
+}
+
+async function performRuleAdditionalActions(env, item, actionSpecs, options = {}) {
+  const mode = String(options.mode || "auto");
+  const humanOverride = Boolean(options.humanOverride);
+  const allowKick = Boolean(options.allowKick);
+  const primaryAction = ruleBaseActionName(options.primaryAction || "");
+  const specs = normalizeRulePolicyActions(actionSpecs, "manual", options.defaultMuteSeconds || 0);
+  const taken = [];
+  const results = [];
+  const warningMessageIds = [];
+  let muteDurationSeconds = 0;
+  const botRole = (await getBotGroupRole(env, item.groupId)).role;
+  const botCanModerate = botRole === "owner" || botRole === "admin";
+  const kickAuthorized = humanOverride ? allowKick : (await dbGet(env, `rule_proxy_kick_authorized:${item.groupId}`) === "true");
+  const allowedByMode = action => humanOverride
+    || mode === "auto"
+    || (mode === "mute" && ["remind", "warn", "recall", "mute"].includes(action))
+    || (mode === "warn" && ["remind", "warn", "recall"].includes(action));
+  for (const spec of specs) {
+    const action = normalizeRulePolicyPunishment(spec.action);
+    if (["record", "manual", "progressive"].includes(action)) {
+      if (action === "progressive") results.push("追加动作“累进处罚”需设为分类的第一动作，本次未重复计算次数");
+      continue;
+    }
+    if (action === primaryAction || taken.includes(action)) continue;
+    if (!allowedByMode(action)) {
+      results.push(`当前代理模式不允许追加“${action}”`);
+      continue;
+    }
+    if (["recall", "mute", "kick"].includes(action) && !botCanModerate) {
+      results.push(`机器人没有群管理权限，无法追加“${action}”`);
+      continue;
+    }
+    try {
+      if (action === "recall") {
+        const ids = [...new Set([item.messageId, ...(Array.isArray(item.relatedMessageIds) ? item.relatedMessageIds : [])].map(String).filter(Boolean))].slice(-12);
+        let recalled = 0;
+        for (const id of ids) {
+          try { await callOneBotAction(env, { action: "delete_msg", params: { message_id: numericId(id) } }, 15000); recalled += 1; } catch {}
+        }
+        if (!recalled) throw new Error("没有可成功撤回的消息");
+        taken.push("recall"); results.push(`追加撤回 ${recalled} 条消息`);
+      } else if (action === "mute") {
+        const fallback = parseUnlimitedNonNegativeInteger(await dbGet(env, `rule_proxy_mute_seconds:${item.groupId}`), DEFAULTS.ruleProxyMuteSeconds);
+        const duration = Math.max(60, Math.min(30 * 24 * 3600, parseUnlimitedNonNegativeInteger(spec.muteSeconds, fallback || 600)));
+        await callOneBotAction(env, { action: "set_group_ban", params: { group_id: numericId(item.groupId), user_id: numericId(item.userId), duration } }, 15000);
+        const startedAt = Date.now();
+        await dbPut(env, `rule_mute_enforcement:${item.groupId}:${item.userId}`, JSON.stringify({ violationId: item.id, groupId: item.groupId, userId: item.userId, startedAt, durationSeconds: duration, expiresAt: startedAt + duration * 1000, active: true }));
+        muteDurationSeconds = Math.max(muteDurationSeconds, duration);
+        taken.push("mute"); results.push(`追加禁言 ${duration} 秒`);
+      } else if (action === "kick") {
+        if (!kickAuthorized) throw new Error(humanOverride ? "追加踢出必须由群主或开发者确认" : "群主尚未授权 AI 踢出");
+        await callOneBotAction(env, { action: "set_group_kick", params: { group_id: numericId(item.groupId), user_id: numericId(item.userId), reject_add_request: false } }, 15000);
+        taken.push("kick"); results.push("追加踢出群聊");
+      } else if (action === "warn" || action === "remind") {
+        const label = action === "warn" ? "追加警告" : "追加提醒";
+        const message = [];
+        if (item.messageId) message.push({ type: "reply", data: { id: String(item.messageId) } });
+        message.push({ type: "at", data: { qq: String(item.userId) } });
+        message.push({ type: "text", data: { text: ` ${label}：${String(options.reasonText || item.reason || item.rule || "请遵守群规").slice(0, 1000)}` } });
+        const sent = await callOneBotAction(env, { action: "send_group_msg", params: { group_id: numericId(item.groupId), message, auto_escape: false } }, 15000);
+        const id = extractOneBotMessageId(sent); if (id) warningMessageIds.push(id);
+        taken.push(action); results.push(`已发送${label}`);
+      }
+    } catch (error) {
+      results.push(`追加“${action}”失败：${String(error?.message || error).slice(0, 300)}`);
+    }
+  }
+  return { ok: taken.length > 0, taken, results, warningMessageIds, muteDurationSeconds };
+}
+
 async function performRuleProxyAction(env, item, review) {
   const mode = normalizeRuleProxyMode(await dbGet(env, `rule_proxy_mode:${item.groupId}`) || DEFAULTS.ruleProxyMode);
   const policies = await getRuleCategoryPolicies(env, item.groupId);
@@ -8052,7 +8304,7 @@ async function performRuleProxyAction(env, item, review) {
   const progressivePolicy = await getRuleProgressivePolicy(env, item.groupId);
   const severity = normalizeRuleSeverity(review?.severity || item.severity || "moderate");
   const intentional = review?.intentional !== false;
-  item = await updateRuleViolationRecord(env, item, { policyAction: policy.punishment, policyNote: policy.note, severity, intentional, proxyMode: mode });
+  item = await updateRuleViolationRecord(env, item, { policyAction: policy.punishment, policyActions: policy.actions, policyNote: policy.note, severity, intentional, proxyMode: mode });
   if (mode === "record") return updateRuleViolationRecord(env, item, { actionTaken: "record_only", actionResult: "仅记录，未启用警告或处罚代理", strikeCounted: false, progressiveCount: 0 });
 
   const remaining = await ruleProxyCooldownRemaining(env, item.groupId, item.userId);
@@ -8235,30 +8487,42 @@ ${appealHint}`).catch(() => null);
     result = { ok: false, message: String(error?.message || error) };
   }
 
-  if (result.ok) await dbPut(env, `rule_proxy_last_action:${item.groupId}:${item.userId}`, String(Date.now()));
-  await writeSystemAudit(env, { type: "rule_proxy_action", groupId: item.groupId, actorId: "system:rule_proxy", targetId: item.userId, action: actionTaken, result: result.message, violationId: item.id, progressiveCount, strikeCounted, severity, proxyMode: mode });
-  return updateRuleViolationRecord(env, item, { actionTaken, actionResult: result.message, actionOk: result.ok, actionDurationSeconds: duration, warningMessageId, progressiveCount, strikeCounted, severity, intentional, proxyMode: mode });
+  const additional = result.ok ? await performRuleAdditionalActions(env, item, (policy.actions || []).slice(1), {
+    mode,
+    primaryAction: actionTaken,
+    defaultMuteSeconds: policy.muteSeconds || duration,
+    reasonText: item.reason || item.rule
+  }) : { ok: false, taken: [], results: [], warningMessageIds: [], muteDurationSeconds: 0 };
+  const actionsTaken = [...new Set([ruleBaseActionName(actionTaken), ...(additional.taken || [])].filter(Boolean))];
+  const actionResults = [result.message, ...(additional.results || [])].filter(Boolean);
+  const warningMessageIds = [...new Set([warningMessageId, ...(additional.warningMessageIds || [])].filter(Boolean))];
+  const combinedResult = actionResults.join("；");
+  if (result.ok || additional.ok) await dbPut(env, `rule_proxy_last_action:${item.groupId}:${item.userId}`, String(Date.now()));
+  await writeSystemAudit(env, { type: "rule_proxy_action", groupId: item.groupId, actorId: "system:rule_proxy", targetId: item.userId, action: actionsTaken.join("+"), result: combinedResult, violationId: item.id, progressiveCount, strikeCounted, severity, proxyMode: mode });
+  return updateRuleViolationRecord(env, item, { actionTaken, actionsTaken, actionResult: combinedResult, actionResults, actionOk: result.ok || additional.ok, actionDurationSeconds: Math.max(duration, Number(additional.muteDurationSeconds || 0)), warningMessageId: warningMessageIds[0] || "", warningMessageIds, progressiveCount, strikeCounted, severity, intentional, proxyMode: mode });
 }
 
 async function reverseRuleViolationAction(env, item, actorId) {
   const results = [];
-  if (item.warningMessageId) {
+  const warningIds = [...new Set([item.warningMessageId, ...(Array.isArray(item.warningMessageIds) ? item.warningMessageIds : [])].map(String).filter(Boolean))];
+  for (const warningId of warningIds) {
     try {
-      await callOneBotAction(env, { action: "delete_msg", params: { message_id: numericId(item.warningMessageId) } }, 12000);
+      await callOneBotAction(env, { action: "delete_msg", params: { message_id: numericId(warningId) } }, 12000);
       results.push("已撤回机器人警告消息");
     } catch (error) { results.push(`警告消息撤回失败：${String(error?.message || error)}`); }
   }
-  if (["mute", "progressive_mute"].includes(String(item.actionTaken || ""))) {
+  const allActions = [...new Set([String(item.actionTaken || ""), ...(Array.isArray(item.actionsTaken) ? item.actionsTaken : [])].map(ruleBaseActionName).filter(Boolean))];
+  if (allActions.includes("mute")) {
     try {
       await dbDel(env, `rule_mute_enforcement:${item.groupId}:${item.userId}`);
       await callOneBotAction(env, { action: "set_group_ban", params: { group_id: numericId(item.groupId), user_id: numericId(item.userId), duration: 0 } }, 15000);
       results.push("已解除禁言");
     } catch (error) { results.push(`解除禁言失败：${String(error?.message || error)}`); }
   }
-  if (String(item.actionTaken || "").includes("recall")) results.push("原违规消息已撤回，QQ 接口无法恢复被撤回的原消息");
-  if (String(item.actionTaken || "").includes("kick")) results.push("成员已被踢出，QQ 接口无法自动恢复群成员，需要人工重新邀请");
+  if (allActions.includes("recall")) results.push("原违规消息已撤回，QQ 接口无法恢复被撤回的原消息");
+  if (allActions.includes("kick")) results.push("成员已被踢出，QQ 接口无法自动恢复群成员，需要人工重新邀请");
   if (item.strikeCounted || Number(item.progressiveCount || 0) > 0) await removeRuleStrike(env, item);
-  const hadPublicAction = ["remind", "warn", "progressive_warn", "mute", "progressive_mute", "kick"].includes(String(item.actionTaken || "")) || Boolean(item.warningMessageId);
+  const hadPublicAction = allActions.some(action => ["remind", "warn", "mute", "kick", "recall"].includes(action)) || warningIds.length > 0;
   const correctionNoticeKey = `rule_reversal_notice:${item.groupId}:${item.userId}`;
   const correctionNoticeRecent = Date.now() - Number(await dbGet(env, correctionNoticeKey) || 0) < 30000;
   if (hadPublicAction && !correctionNoticeRecent) {
@@ -8278,11 +8542,45 @@ async function reverseRuleViolationAction(env, item, actorId) {
   return results.join("；") || "没有可自动撤销的处罚";
 }
 
-async function recordRuleViolationFeedback(env, item, actorId, verdict, note = "") {
-  const normalizedVerdict = verdict === "not_violation" ? "not_violation" : "violation";
-  if (String(item?.humanVerdict || "") === normalizedVerdict && Number(item?.humanReviewedAt || 0) > 0) return item;
+async function appendHumanCorrectionToRulePolicy(env, item, actorId, note) {
+  const text = String(note || "").trim().slice(0, 800);
+  if (!text) return { updated: false, note: "" };
+  const policies = await getRuleCategoryPolicies(env, item.groupId);
+  const matched = matchRuleCategoryPolicy(item.violationType || item.rule || "其他", policies);
+  const index = Math.max(0, policies.findIndex(policy => policy.name === matched.name));
+  const target = policies[index] || matched;
+  const date = new Date().toISOString().slice(0, 10);
+  const correction = `人工纠错 ${date}（QQ:${actorId}）：${text}`;
+  const current = String(target.note || "").trim();
+  if (current.includes(text)) return { updated: false, note: current };
+  const combined = [current, correction].filter(Boolean).join("\n");
+  target.note = combined.length > 2000 ? combined.slice(combined.length - 2000) : combined;
+  policies[index] = target;
+  await dbPut(env, `rule_category_policies:${item.groupId}`, JSON.stringify(normalizeRuleCategoryPolicies(policies, defaultRuleCategoryPolicies(item.groupId))));
+  await writeSystemAudit(env, { type: "rule_policy_human_correction", groupId: item.groupId, actorId: String(actorId), targetId: item.id, action: target.name, reason: text });
+  return { updated: true, note: target.note, category: target.name };
+}
+
+async function recordRuleViolationFeedback(env, item, actorId, verdict, note = "", options = {}) {
+  const normalizedVerdict = verdict === "not_violation" ? "not_violation" : verdict === "violation_additional" ? "violation_additional" : "violation";
+  if (normalizedVerdict !== "violation_additional" && String(item?.humanVerdict || "") === normalizedVerdict && Number(item?.humanReviewedAt || 0) > 0) return item;
   let reversalResult = "";
-  if (normalizedVerdict === "not_violation") reversalResult = await reverseRuleViolationAction(env, item, actorId);
+  let policyCorrection = null;
+  let additionalResult = null;
+  if (normalizedVerdict === "not_violation") {
+    reversalResult = await reverseRuleViolationAction(env, item, actorId);
+    policyCorrection = await appendHumanCorrectionToRulePolicy(env, item, actorId, note);
+  }
+  if (normalizedVerdict === "violation_additional") {
+    additionalResult = await performRuleAdditionalActions(env, item, options.actions || [], {
+      mode: "human",
+      humanOverride: true,
+      allowKick: Boolean(options.allowKick),
+      defaultMuteSeconds: options.defaultMuteSeconds || item.actionDurationSeconds || DEFAULTS.ruleProxyMuteSeconds,
+      reasonText: note,
+      primaryAction: ""
+    });
+  }
   const feedbackId = `rf_${Date.now().toString(36)}_${crypto.randomUUID().slice(0, 8)}`;
   const feedback = {
     id: feedbackId,
@@ -8294,16 +8592,34 @@ async function recordRuleViolationFeedback(env, item, actorId, verdict, note = "
     note: String(note || "").slice(0, 1000),
     actorId: String(actorId),
     at: Date.now(),
-    reversalResult
+    reversalResult,
+    policyCorrection,
+    additionalActions: normalizeRulePolicyActions(options.actions || [], "manual"),
+    additionalResult
   };
   await dbPut(env, `rulefeedback:${feedbackId}`, JSON.stringify(feedback));
   await appendIndex(env, `rulefeedback:index:${item.groupId}`, feedbackId, 2000);
+  const existingActions = Array.isArray(item.actionsTaken) ? item.actionsTaken : [ruleBaseActionName(item.actionTaken || "")].filter(Boolean);
+  const nextActions = [...new Set([...existingActions, ...(additionalResult?.taken || [])])];
+  const existingResults = Array.isArray(item.actionResults) ? item.actionResults : [item.actionResult].filter(Boolean);
+  const nextResults = [...existingResults, ...(additionalResult?.results || [])].filter(Boolean);
+  const warningMessageIds = [...new Set([item.warningMessageId, ...(Array.isArray(item.warningMessageIds) ? item.warningMessageIds : []), ...(additionalResult?.warningMessageIds || [])].map(String).filter(Boolean))];
   return updateRuleViolationRecord(env, item, {
     humanVerdict: normalizedVerdict,
     humanFeedbackNote: feedback.note,
     humanReviewedBy: String(actorId),
     humanReviewedAt: Date.now(),
-    reversalResult
+    reversalResult,
+    policyCorrectionApplied: Boolean(policyCorrection?.updated),
+    policyCorrectionCategory: policyCorrection?.category || "",
+    actionsTaken: nextActions,
+    actionResults: nextResults,
+    actionResult: nextResults.join("；") || item.actionResult || "",
+    actionOk: normalizedVerdict === "violation_additional" ? Boolean(additionalResult?.ok) : item.actionOk,
+    actionDurationSeconds: Math.max(Number(item.actionDurationSeconds || 0), Number(additionalResult?.muteDurationSeconds || 0)),
+    warningMessageId: warningMessageIds[0] || "",
+    warningMessageIds,
+    lastAdditionalPunishmentAt: normalizedVerdict === "violation_additional" ? Date.now() : Number(item.lastAdditionalPunishmentAt || 0)
   });
 }
 
@@ -8318,12 +8634,13 @@ async function findLatestActiveRuleViolationForUser(env, groupId, userId) {
     const item = await readJson(env, `ruleviolation:${id}`, null);
     if (!item || String(item.userId || "") !== String(userId || "")) continue;
     if (String(item.humanVerdict || "") === "not_violation") continue;
-    if (["mute", "progressive_mute", "warn", "progressive_warn", "remind", "recall", "progressive_recall"].includes(String(item.actionTaken || ""))) return item;
+    const activeActions = [...new Set([String(item.actionTaken || ""), ...(Array.isArray(item.actionsTaken) ? item.actionsTaken : [])].map(ruleBaseActionName).filter(Boolean))];
+    if (activeActions.some(action => ["mute", "warn", "remind", "recall", "kick"].includes(action))) return item;
   }
   return null;
 }
 
-async function inspectMessageAgainstGroupRules(env, { groupId, userId, senderName, text, messageId, manualReport = null }) {
+async function inspectMessageAgainstGroupRules(env, { groupId, userId, senderName, text, messageId, manualReport = null, imageUrl = null, imageFile = null }) {
   const manual = Boolean(manualReport && typeof manualReport === "object");
   const botRuleState = await getBotGroupRole(env, groupId);
   const canEnforce = botCanRunRuleMonitor(botRuleState);
@@ -8377,7 +8694,6 @@ async function inspectMessageAgainstGroupRules(env, { groupId, userId, senderNam
     : [];
   if (content.length < 2 && !repeatedMessageBurst && !manual) return { status: "no_violation", review: { violation: false, confidence: 1, reason: "消息过短且无重复发送证据" } };
 
-  const strictness = ruleStrictnessConfig(await dbGet(env, `rule_strictness:${groupId}`) || DEFAULTS.ruleStrictness);
   const recentLogRows = (await readJson(env, `recent_logs:${groupId}`, [])).slice(-30);
   const recentContext = recentLogRows.slice(-18).join("\n").slice(-5000);
   const recentTargetRecords = await recentConversationMessagesForUser(env, groupId, userId, 12);
@@ -8389,20 +8705,37 @@ async function inspectMessageAgainstGroupRules(env, { groupId, userId, senderNam
   }));
   const urlInspections = await inspectUrlsForRuleReview(env, content);
   const categoryPolicies = await getRuleCategoryPolicies(env, groupId);
-  const humanFeedbackExamples = await readRecentRuleFeedbackExamples(env, groupId, 20);
+  const humanFeedbackExamples = await readRecentRuleFeedbackExamples(env, groupId, 30);
+  const strictness = await resolveAdaptiveRuleStrictness(env, groupId, recentContext, humanFeedbackExamples);
   const progressivePolicy = await getRuleProgressivePolicy(env, groupId);
+  const newsVerification = await verifyRuleNewsContext(env, content);
+  const imageDecisionParts = [];
+  let imageInspection = null;
+  if (imageUrl || imageFile) {
+    try {
+      const imageData = await fetchImageAsBase64({ url: imageUrl, file: imageFile });
+      if (imageData?.base64) {
+        imageDecisionParts.push({ inlineData: { mimeType: imageData.mimeType || "image/jpeg", data: imageData.base64 } });
+        imageInspection = { ok: true, mimeType: imageData.mimeType || "image/jpeg", directEvidence: true };
+      } else imageInspection = { ok: false, error: "图片下载未返回内容" };
+    } catch (error) {
+      imageInspection = { ok: false, error: String(error?.message || error).slice(0, 500) };
+    }
+  }
   let review;
   try {
     const result = await callGoogleDecision(env, {
       system: `你是 QQ 群规合规分类器。只能输出 JSON：{"violation":true|false,"confidence":0到1,"violationType":"违规项目分类","rule":"涉及群规","reason":"简短且具体的原因","severity":"minor|moderate|severe|critical","intentional":true|false,"action":"record|warn|mute|kick","muteSeconds":整数,"testContext":true|false,"linkAssessment":"无链接或简短判断"}。
-当前判断等级：${strictness.level}（${ruleStrictnessLabel(strictness.level)}）。${strictness.instruction}
+当前判断等级：${strictness.configuredLevel === "smart" ? `智慧→${ruleStrictnessLabel(strictness.level)}` : ruleStrictnessLabel(strictness.level)}。${strictness.instruction}
+智慧校准原因：${strictness.adaptiveReason || "无"}
+证据优先级（不得颠倒）：明确群规与有效临时规则 > 群规例外 > 图片直接内容证据 > 分类备注与人工纠错 > 最近语境与模型常识。
 强制规则：
 1. 必须结合最近聊天语境，测试机器人、测试禁言、测试群规、引用他人、转述、反讽、角色扮演、讨论管理操作，不等于真实违规。
 2. “禁言、踢人、攻击”等词只是词语；必须判断发言者是否真的在针对他人实施骚扰或煽动现实伤害。类似“找一个人试禁言”“测试一下禁言”不得判成人身攻击。
 3. 出现网址不等于拉人、宣传或引流。必须结合域名、页面标题/说明和发送意图；正常工具链接、Control Center、资料引用、个人正常分享不得判违规。
 4. 无法访问链接时只能写入不确定性，不能仅因无法访问就判违规。
 5. “建政/涉政”必须是对现实国家政治制度、领导人、公共政策、政治事件的实质讨论、宣传、攻击、批评或动员。游戏、军事梗、影视台词、虚构阵营、普通玩笑和比喻不得单独判为建政。
-6. violationType 必须优先选择“分类与处罚设置”中已有的分类；每个分类的备注是最高优先级的本群解释。
+6. violationType 必须优先选择“分类与处罚设置”中已有的分类。群规正文与有效临时规则具有最高优先级；分类备注和人工纠错用于解释群规，不得反过来覆盖明确群规。
 7. 管理人工复核结果是学习样本；被标记为误判的相似表达不得再次仅凭表面词语判违规。
 8. severity 必须按实际影响判断：minor 是轻微、初次、无明显恶意或可通过提醒改善；moderate 是明确违规；severe 是重复、明显恶意或造成较大影响；critical 是需要立即制止的严重行为。
 9. intentional 只有在语境显示明确故意时才为 true。轻微、误发、误解、初次边界行为应优先标记 minor，并由系统采用不累计次数的友善提醒。
@@ -8410,7 +8743,9 @@ async function inspectMessageAgainstGroupRules(env, { groupId, userId, senderNam
 11. repeatedMessageBurst 只是确定性参考。即使它为 false，也可以根据最近聊天语境识别变体刷屏；但必须说明实际的多条消息证据，不能把单条消息内重复字符谎称为多次发送。
 12. 人工补检原因只是线索，不是事实。必须独立核对被举报消息、该成员近期消息和群规；恶意举报或证据不足时必须 violation=false。
 13. 对同一群友反复 @、持续使用“爸爸、妈妈、爸妈、儿子、主人”等称呼进行纠缠，在对方不接受、已表现不适或行为明显持续时，可按定向骚扰／人身攻击判断；正常互相玩梗、双方自愿称呼或单次无恶意玩笑不得误判。
-14. 不确定必须输出 violation=false。action 只是建议，系统会按授权范围决定是否执行。`,
+14. 图片存在时必须直接检查图片内容，不得只看“[图片]”占位文字；图片直接证据的优先级高于普通语言猜测，但仍受明确群规和例外约束。
+15. 时效性新闻或公共事件若提供了联网核查结果，必须优先采用核查事实；核查失败只能标记不确定，不能编造。
+16. 不确定必须输出 violation=false，并在 reason 明确写“需要管理确认”。action 只是建议，系统会按授权范围决定是否执行。`,
       prompt: JSON.stringify({
         currentMessage: content,
         userId,
@@ -8429,22 +8764,28 @@ async function inspectMessageAgainstGroupRules(env, { groupId, userId, senderNam
         spamWindowSeconds,
         spamThreshold,
         spamKeepCount,
-        strictness: strictness.level,
-        categoryPolicies: categoryPolicies.map(item => ({ name: item.name, punishment: item.punishment, note: String(item.note || "").slice(0, 400) })),
+        strictness: { configured: strictness.configuredLevel, effective: strictness.level, reason: strictness.adaptiveReason },
+        categoryPolicies: categoryPolicies.map(item => ({ name: item.name, punishment: item.punishment, actions: item.actions, note: String(item.note || "").slice(0, 800) })),
         progressivePolicy,
         humanFeedbackExamples,
         rules: rules.slice(0, 7000),
         activeTemporaryRules: activeRuleRecords.tempRules.map(item => ({ id: item.id, title: item.title, description: item.description, priority: item.priority, expiresAt: item.expiresAt || 0 })),
         rulePriorities: activeRuleRecords.priorities.map(item => ({ id: item.id, title: item.title, description: item.description, priority: item.priority })),
-        urlInspections
-      }).slice(0, 18000),
-      maxOutputTokens: 360
+        urlInspections,
+        newsVerification,
+        imageInspection
+      }).slice(0, 22000),
+      inputParts: imageDecisionParts,
+      maxOutputTokens: 420
     });
     review = JSON.parse(result.text.match(/\{[\s\S]*\}/)?.[0] || "{}");
   } catch (error) {
     console.warn("群规监控判定失败", error);
     await opsRecordAutomationResult(env, groupId, "rule_monitor", false, error?.message || error).catch(() => {});
-    return { status: "error", error: String(error?.message || error) };
+    const reason = `Google 判断链暂时无法稳定分类：${String(error?.message || error).slice(0, 300)}`;
+    await opsSaveRecord(env, { type: "test_case", groupId, actorId: "system:rule_monitor", actorName: "system", data: { title: "群规判断待人工确认", description: content.slice(0, 4000), status: "pending_review", messageId: String(messageId || ""), userId: String(userId || ""), reason, imageInspection, newsVerification } }).catch(() => {});
+    const clarification = await requestRuleManagerClarification(env, { groupId, userId, senderName, content, messageId, reason });
+    return { status: "pending_review", reason, clarification };
   }
   await opsRecordAutomationResult(env, groupId, "rule_monitor", true).catch(() => {});
 
@@ -8458,6 +8799,15 @@ async function inspectMessageAgainstGroupRules(env, { groupId, userId, senderNam
   }
   const decisionThreshold = manual ? Math.max(0.55, strictness.minConfidence - 0.08) : strictness.minConfidence;
   if (review?.violation !== true || Number(review.confidence || 0) < decisionThreshold) {
+    const confidence = Number(review?.confidence || 0);
+    const explicitlyUncertain = /(?:不确定|不確定|需要管理|证据不足|證據不足|无法判断|無法判斷|需人工)/i.test(String(review?.reason || ""));
+    const borderline = confidence >= Math.max(0.45, decisionThreshold - 0.18) && confidence < decisionThreshold;
+    if (explicitlyUncertain || borderline) {
+      const reason = String(review?.reason || `置信度 ${confidence.toFixed(2)} 未达到 ${decisionThreshold.toFixed(2)}`).slice(0, 500);
+      await opsSaveRecord(env, { type: "test_case", groupId, actorId: "system:rule_monitor", actorName: "system", data: { title: "边界群规判断待管理确认", description: content.slice(0, 4000), status: "pending_review", messageId: String(messageId || ""), userId: String(userId || ""), modelReview: review, recentContext: recentContext.slice(0, 5000), imageInspection, newsVerification } }).catch(() => {});
+      const clarification = await requestRuleManagerClarification(env, { groupId, userId, senderName, content, messageId, reason, review });
+      return { status: "pending_review", review, threshold: decisionThreshold, clarification };
+    }
     if (!manual && runtimeSettings.ruleSampleReviewPercent > 0 && Math.random() * 100 < runtimeSettings.ruleSampleReviewPercent) {
       await opsSaveRecord(env, { type: "test_case", groupId, actorId: "system:rule_sample", actorName: "system", data: { title: "无违规判断抽样复核", description: content.slice(0, 4000), status: "pending_review", messageId: String(messageId || ""), userId: String(userId || ""), modelReview: review, recentContext: recentContext.slice(0, 5000) } }).catch(() => {});
     }
@@ -8474,12 +8824,17 @@ async function inspectMessageAgainstGroupRules(env, { groupId, userId, senderNam
     recommendedAction: review.action || "record",
     messageId,
     relatedMessageIds: repeatedMessageIds,
-    strictness: strictness.level,
+    strictness: strictness.configuredLevel === "smart" ? "smart" : strictness.level,
+    effectiveStrictness: strictness.level,
+    strictnessReason: strictness.adaptiveReason,
     urlInspections,
+    newsVerification,
+    imageInspection,
     testContext: Boolean(review.testContext),
     severity: normalizeRuleSeverity(review.severity || "moderate"),
     intentional: review.intentional !== false,
     policyAction: matchedPolicy.punishment,
+    policyActions: matchedPolicy.actions,
     policyNote: matchedPolicy.note
   });
   if (manual) {
@@ -9833,7 +10188,7 @@ const PORTAL_SETTING_DEFINITIONS = Object.freeze([
   { key: "welcome_text", label: "欢迎词", command: "!欢迎词", minRole: "owner", scope: "group", type: "textarea", defaultValue: DEFAULTS.welcomeText },
   { key: "rule_monitor_enabled", label: "群规持续监控", command: "!群规监控", minRole: "owner", scope: "group", type: "boolean", defaultValue: true },
   { key: "rule_proxy_mode", label: "AI 群规代理模式", command: "!AI群规代理（auto 仅群主）", minRole: "admin", scope: "group", type: "select", options: ["record", "warn", "mute", "auto"], defaultValue: "record" },
-  { key: "rule_strictness", label: "群规判断严格度", command: "!群规严格度 宽松/低/中/高/严格", minRole: "admin", scope: "group", type: "select", options: ["loose", "low", "medium", "high", "strict"], defaultValue: "medium" },
+  { key: "rule_strictness", label: "群规判断严格度", command: "!群规严格度 智慧/宽松/低/中/高/严格", minRole: "admin", scope: "group", type: "select", options: ["smart", "loose", "low", "medium", "high", "strict"], optionLabels: { smart: "智慧（自动校准）", loose: "宽松", low: "低", medium: "中", high: "高", strict: "严格" }, defaultValue: "medium" },
   { key: "rule_proxy_mute_seconds", label: "AI 代理禁言秒数", command: "网页 / AI代理设置", minRole: "admin", scope: "group", type: "number", min: 0, defaultValue: 600 },
   { key: "rule_spam_window_seconds", label: "刷屏判定时间窗（秒）", command: "网页设置", minRole: "admin", scope: "group", type: "number", min: 5, max: 3600, defaultValue: DEFAULTS.ruleSpamWindowSeconds },
   { key: "rule_spam_threshold", label: "重复消息刷屏门槛（条）", command: "网页设置", minRole: "admin", scope: "group", type: "number", min: 2, max: 50, defaultValue: DEFAULTS.ruleSpamThreshold },
@@ -11715,7 +12070,7 @@ function normalizeNaturalLanguageCommandText(text, now = Date.now()) {
   if (match) return { commandText: `!申诉 ${match[1].trim()}`, intent: "appeal_create", confidence: 0.99 };
   match = source.match(/^(?:查看|查询|查詢)\s*(?:我的)?(?:申诉|申訴)(?:状态|狀態)\s+([a-z0-9:_-]+)$/i);
   if (match) return { commandText: `!申诉状态 ${match[1]}`, intent: "appeal_status", confidence: 1 };
-  match = source.match(/^(?:请|請)?(?:帮我|幫我)?\s*(?:把)?群规(?:严格度|嚴格度|等级|等級)?\s*(?:改成|设为|設為|调整为|調整為)\s*(宽松|寬鬆|低|中|高|严格|嚴格)$/i);
+  match = source.match(/^(?:请|請)?(?:帮我|幫我)?\s*(?:把)?群规(?:严格度|嚴格度|等级|等級)?\s*(?:改成|设为|設為|调整为|調整為)\s*(智慧|智能|自适应|自適應|宽松|寬鬆|低|中|高|严格|嚴格)$/i);
   if (match) return { commandText: `!群规严格度 ${match[1]}`, intent: "rule_strictness", confidence: 1 };
   match = source.match(/^(?:请|請)?(?:帮我|幫我)?\s*(?:把)?欢迎词\s*(?:改成|设为|設為)\s*([\s\S]+)$/i);
   if (match) return { commandText: `!欢迎词 ${match[1].trim()}`, intent: "welcome_text", confidence: 1 };
@@ -13980,11 +14335,20 @@ ${summary}`.slice(0, 4000),
     if (!(permissions.aiAdmin || permissions.nativeAdmin || role === "admin" || role === "owner" || portalIsDeveloper)) return jsonResponse({ ok: false, message: "需要 QQ 管理员或以上权限。" }, 403);
     const item = await readJson(env, `ruleviolation:${String(body.id || "")}`, null);
     if (!item || String(item.groupId) !== groupId) return jsonResponse({ ok: false, message: "找不到当前群的群规记录。" }, 404);
-    const verdict = body.verdict === "not_violation" ? "not_violation" : "violation";
+    const verdict = body.verdict === "not_violation" ? "not_violation" : body.verdict === "violation_additional" ? "violation_additional" : "violation";
     const feedbackNote = String(body.note || "").trim();
-    if (verdict === "not_violation" && !feedbackNote) return jsonResponse({ ok: false, message: "标记为误判时必须填写复核说明。" }, 400);
-    const updated = await recordRuleViolationFeedback(env, item, authed.qq, verdict, feedbackNote);
-    return jsonResponse({ ok: true, message: verdict === "not_violation" ? `已标记为误判。${updated.reversalResult ? ` ${updated.reversalResult}` : ""}` : "已确认存在违规，结果会作为后续判断参考。", item: updated });
+    if ((verdict === "not_violation" || verdict === "violation_additional") && !feedbackNote) return jsonResponse({ ok: false, message: verdict === "not_violation" ? "标记为误判时必须填写复核说明。" : "追加处分时必须填写原因。" }, 400);
+    const requestedActions = verdict === "violation_additional" ? normalizeRulePolicyActions(body.actions, "manual", body.muteSeconds) : [];
+    if (verdict === "violation_additional" && !requestedActions.some(action => !["record", "manual"].includes(action.action))) return jsonResponse({ ok: false, message: "请至少选择一个可执行的追加处分动作。" }, 400);
+    const canKick = portalIsDeveloper || await isVerifiedGroupOwner(env, groupId, authed.qq);
+    if (verdict === "violation_additional" && requestedActions.some(action => action.action === "kick") && !canKick) return jsonResponse({ ok: false, message: "追加踢出只能由当前真实群主或开发者确认。" }, 403);
+    const updated = await recordRuleViolationFeedback(env, item, authed.qq, verdict, feedbackNote, { actions: requestedActions, allowKick: canKick, defaultMuteSeconds: body.muteSeconds });
+    const message = verdict === "not_violation"
+      ? `已标记为误判，复核说明已写入该分类备注供 AI 优先遵守。${updated.reversalResult ? ` ${updated.reversalResult}` : ""}`
+      : verdict === "violation_additional"
+        ? `已确认违规并处理追加处分：${(updated.actionResults || []).slice(-8).join("；") || "没有动作成功执行"}`
+        : "已确认存在违规，结果会作为后续判断参考。";
+    return jsonResponse({ ok: true, message, item: updated });
   }
 
   if (request.method === "GET" && path === "/moderation/proposals") {
@@ -14921,7 +15285,7 @@ function ensureR3Views(){
 
   if(!$('v-maintenance').dataset.ready){$('v-maintenance').dataset.ready='1';$('v-maintenance').innerHTML='<div class="section-head"><div><h2>系统维护</h2><p>开发者专用维护入口，只保留诊断、队列、模型、权限、日志、群规与申诉资料。</p></div><button id="maintenanceReload" class="btn">重新加载</button></div>';$('maintenanceReload').onclick=function(){loadOperations();Object.keys(opsWorkspaces).filter(function(x){return /^ops(?:Rules|Appeal)$/.test(x)}).forEach(opsLoadWorkspace)}}
   if(!$('v-schedules').dataset.ready){$('v-schedules').dataset.ready='1';$('v-schedules').innerHTML='<div class="section-head"><div><h2>排程提醒</h2><p>直接用自然语言建立提醒，例如「每天 18:00 提醒填日报」。</p></div><button id="scheduleReload" class="btn">重新加载</button></div><div class="grid"><div class="card span-5"><h3>建立排程</h3><div class="field"><label>排程内容</label><textarea id="scheduleText" placeholder="例如：每天 18:00 记得填写日报&#10;每周一 09:00 本周会议开始&#10;2026-07-30 20:00 活动开始&#10;每隔 2小时 请查看群公告"></textarea></div><button id="scheduleCreate" class="btn primary" style="width:100%">建立排程</button><div id="scheduleCronState" class="notice" style="margin-top:12px">尚未读取 Cron 状态。</div></div><div class="card span-7"><h3>我的排程</h3><div id="scheduleMine" class="list"><div class="empty">尚未加载</div></div></div><div id="scheduleReviewCard" class="card span-6 hidden"><h3>分配给我的审核</h3><div id="scheduleReviewList" class="list"><div class="empty">没有待审核排程</div></div></div><div id="scheduleRootCard" class="card span-6 hidden"><h3>开发者排程总览</h3><div id="scheduleRootList" class="list"><div class="empty">尚未加载</div></div></div></div>';$('scheduleReload').onclick=loadSchedules;$('scheduleCreate').onclick=createScheduleFromPortal}
-  if(!$('v-ruleviolations').dataset.ready){$('v-ruleviolations').dataset.ready='1';$('v-ruleviolations').innerHTML='<div class="section-head"><div><h2>群规监控记录</h2><p>AI 会结合聊天上下文、链接内容、分类备注、严重程度与人工复核结果判断。</p></div><button id="rvReload" class="btn">重新加载</button></div><div class="card"><div class="row"><input id="rvMember" placeholder="群友名称或 QQ"><input id="rvContent" placeholder="消息内容"><select id="rvType"><option value="">全部违规项目</option></select><button id="rvSearch" class="btn primary">搜索</button></div><div class="row" style="margin-top:12px"><select id="rvStrictness" title="群规判断严格度"><option value="loose">宽松</option><option value="low">低</option><option value="medium" selected>中</option><option value="high">高</option><option value="strict">严格</option></select><select id="rvProxyMode"><option value="record">仅记录</option><option value="warn">警告代理（7 天累计，只警告）</option><option value="mute">禁言代理（累计并处罚，不踢人）</option><option value="auto">完全代理（可踢出）</option></select><input id="rvMuteSeconds" type="number" min="0" placeholder="默认禁言秒数"><label class="switch"><input id="rvKickAuth" type="checkbox">授权 AI 踢出</label><button id="rvSave" class="btn primary">保存群规设置</button></div><div class="notice" style="margin-top:12px">警告代理默认发送警告，但分类明确设为“撤回违规消息”时会执行撤回；禁言代理默认按次数处罚，也会遵守分类撤回，但绝不踢人；完全代理才可能按规则踢出。</div></div><details class="settings-fold" id="rvRulesFold"><summary><span>累进处罚与分类规则</span><span class="muted">关闭时不占用内容空间</span></summary><div class="settings-fold-body"><div class="grid"><div class="card span-4"><h3>本群累进处罚规则</h3><p class="muted">这是当前群独立规则，次数可自由增加。</p><div class="field"><label>累计有效期（天）</label><input id="rvProgressiveWindow" type="number" min="1" max="365"></div><div class="field"><label>轻微或无明显恶意</label><select id="rvMinorAction"><option value="remind">友善提醒，不累计</option><option value="warn">正式警告，不累计</option><option value="manual">交管理复核</option></select></div><button id="rvAddStep" class="btn">增加处罚次数</button></div><div class="card span-8"><h3>次数与动作</h3><div id="rvProgressiveSteps"></div><div class="notice">最后一个步骤会套用于更高次数。例如只设 3 步时，第 4 次以后继续使用第 3 步。</div></div></div><div class="card" style="margin-top:16px"><div class="section-head"><div><h3>群规分类与处罚</h3><p>管理以上可调整分类、处罚和备注；选择“使用本群累进规则”才会依次数处理。</p></div><button id="rvAddPolicy" class="btn">新增分类</button></div><div id="rvPolicyList" class="list"></div></div></div></details><div id="rvList" class="list" style="margin-top:16px"></div>';$('rvReload').onclick=loadRuleViolations;$('rvSearch').onclick=loadRuleViolations;$('rvSave').onclick=saveRuleViolationSettings;$('rvAddPolicy').onclick=addRulePolicyRow;$('rvAddStep').onclick=addProgressiveStep}
+  if(!$('v-ruleviolations').dataset.ready){$('v-ruleviolations').dataset.ready='1';$('v-ruleviolations').innerHTML='<div class="section-head"><div><h2>群规监控记录</h2><p>AI 会结合聊天上下文、链接内容、分类备注、严重程度与人工复核结果判断。</p></div><button id="rvReload" class="btn">重新加载</button></div><div class="card"><div class="row"><input id="rvMember" placeholder="群友名称或 QQ"><input id="rvContent" placeholder="消息内容"><select id="rvType"><option value="">全部违规项目</option></select><button id="rvSearch" class="btn primary">搜索</button></div><div class="row" style="margin-top:12px"><select id="rvStrictness" title="群规判断严格度"><option value="smart">智慧（自动校准）</option><option value="loose">宽松</option><option value="low">低</option><option value="medium" selected>中</option><option value="high">高</option><option value="strict">严格</option></select><select id="rvProxyMode"><option value="record">仅记录</option><option value="warn">警告代理（7 天累计，只警告）</option><option value="mute">禁言代理（累计并处罚，不踢人）</option><option value="auto">完全代理（可踢出）</option></select><input id="rvMuteSeconds" type="number" min="0" placeholder="默认禁言秒数"><label class="switch"><input id="rvKickAuth" type="checkbox">授权 AI 踢出</label><button id="rvSave" class="btn primary">保存群规设置</button></div><div class="notice" style="margin-top:12px">警告代理默认发送警告，但分类明确设为“撤回违规消息”时会执行撤回；禁言代理默认按次数处罚，也会遵守分类撤回，但绝不踢人；完全代理才可能按规则踢出。</div></div><details class="settings-fold" id="rvRulesFold"><summary><span>累进处罚与分类规则</span><span class="muted">关闭时不占用内容空间</span></summary><div class="settings-fold-body"><div class="grid"><div class="card span-4"><h3>本群累进处罚规则</h3><p class="muted">这是当前群独立规则，次数可自由增加。</p><div class="field"><label>累计有效期（天）</label><input id="rvProgressiveWindow" type="number" min="1" max="365"></div><div class="field"><label>轻微或无明显恶意</label><select id="rvMinorAction"><option value="remind">友善提醒，不累计</option><option value="warn">正式警告，不累计</option><option value="manual">交管理复核</option></select></div><button id="rvAddStep" class="btn">增加处罚次数</button></div><div class="card span-8"><h3>次数与动作</h3><div id="rvProgressiveSteps"></div><div class="notice">最后一个步骤会套用于更高次数。例如只设 3 步时，第 4 次以后继续使用第 3 步。</div></div></div><div class="card" style="margin-top:16px"><div class="section-head"><div><h3>群规分类与处罚</h3><p>管理以上可调整分类、处罚和备注；选择“使用本群累进规则”才会依次数处理。</p></div><button id="rvAddPolicy" class="btn">新增分类</button></div><div id="rvPolicyList" class="list"></div></div></div></details><div id="rvList" class="list" style="margin-top:16px"></div>';$('rvReload').onclick=loadRuleViolations;$('rvSearch').onclick=loadRuleViolations;$('rvSave').onclick=saveRuleViolationSettings;$('rvAddPolicy').onclick=addRulePolicyRow;$('rvAddStep').onclick=addProgressiveStep}
   if(!$('v-conversations').dataset.ready){$('v-conversations').dataset.ready='1';$('v-conversations').innerHTML='<div class="section-head"><div><h2>群友对话记录</h2><p>只记录群友原始消息，不记录 AI 回复或系统消息。管理员可直接处理精华、撤回、群待办、公告、提醒与违规流程。</p></div><button id="convReload" class="btn">重新加载</button></div><div class="card conversation-toolbar"><div class="row"><input id="convSearch" class="grow" placeholder="搜索群友、QQ、消息或转发内容"><label class="switch"><input id="convViolationOnly" type="checkbox">只看违规消息</label><button id="convSearchBtn" class="btn primary">搜索</button></div></div><div id="conversationList" class="list"><div class="empty">尚未加载</div></div>';$('convReload').onclick=loadConversations;$('convSearchBtn').onclick=loadConversations;$('convViolationOnly').onchange=loadConversations;$('convSearch').onkeydown=function(e){if(e.key==='Enter')loadConversations()}}
   if(!$('v-settingscenter').dataset.ready){$('v-settingscenter').dataset.ready='1';$('v-settingscenter').innerHTML='<div class="section-head"><div><h2>更多设置</h2><p>这里只显示当前账号可以修改的项目；没有权限的设置不会出现。</p></div><div class="row"><button id="scReload" class="btn">重新加载</button><button id="scSaveAll" class="btn primary">保存全部设置</button></div></div><div id="scDeveloper" class="card hidden"><div class="row"><input id="scTargetQq" placeholder="目标 QQ（输入后自动识别权限）"><span id="scResolvedRole" class="status">尚未识别</span><label class="switch"><input id="scAuditLog" type="checkbox" checked>记录操作日志（可选）</label></div></div><div id="scMessage" class="notice">尚未加载设置。</div><div id="scList" class="list" style="margin-top:16px"></div>';$('scReload').onclick=loadSettingsCenter;$('scSaveAll').onclick=saveAllSettings;$('scTargetQq').onchange=loadSettingsCenter;$('scTargetQq').onkeydown=function(e){if(e.key==='Enter')loadSettingsCenter()}}
   if(!$('v-aidecisions').dataset.ready){$('v-aidecisions').dataset.ready='1';$('v-aidecisions').innerHTML='<div class="section-head"><div><h2>AI 回复与未回复记录</h2><p>每則群聊觸發判斷、主動插話來源、模型、智能 @ 規劃、獨立搜索內容與實際發送結果都獨立保存。</p></div><button id="aiLogReload" class="btn">重新加载</button></div><div class="card"><div class="row"><input id="aiLogSearch" class="grow" placeholder="搜索 QQ、訊息、原因、模型"><select id="aiLogDecision"><option value="">全部決策</option><option value="reply_generated">已產生回覆</option><option value="skipped">未回覆</option><option value="blocked">遭阻擋</option><option value="error">錯誤</option></select><select id="aiLogTrigger"><option value="">全部觸發</option><option value="mention">@機器人</option><option value="reply_to_ai">回覆機器人</option><option value="auto_interject">主動插話</option><option value="private">私聊</option><option value="none">未觸發</option></select><button id="aiLogSearchBtn" class="btn primary">搜索</button></div></div><div id="aiDecisionList" class="list" style="margin-top:16px"><div class="empty">尚未加载</div></div>';$('aiLogReload').onclick=loadAiDecisions;$('aiLogSearchBtn').onclick=loadAiDecisions;$('aiLogSearch').onkeydown=function(e){if(e.key==='Enter')loadAiDecisions()}}
@@ -14946,18 +15310,22 @@ function applyR3RoleVisibility(){ensureR3Views();organizeSidebarNavigation();app
 async function loadAiDecisions(){var p=new URLSearchParams({q:$('aiLogSearch').value||'',decision:$('aiLogDecision').value||'',triggerType:$('aiLogTrigger').value||'',limit:'500'});var r=await api('/ai-decisions?'+p.toString());if(!r.ok){$('aiDecisionList').innerHTML='<div class="empty">'+esc(r.message)+'</div>';return}$('aiDecisionList').innerHTML=(r.logs||[]).map(function(x){var title=(x.decision||'unknown')+'｜'+(x.senderName||x.userId||'')+'（'+(x.userId||'')+'）';var meta=(x.at||'')+'｜觸發 '+(x.triggerType||'none')+'｜原因 '+(x.reason||'')+'｜'+(x.provider||'')+((x.model)?'/'+x.model:'')+'｜發送 '+(x.sendStatus||'');var body='來源訊息：'+(x.input||'')+(x.generatedReply?'\nAI 回覆：'+x.generatedReply:'')+'\n關係：'+JSON.stringify({mentionedQqs:x.mentionedQqs||[],quotedMessageId:x.quotedMessageId||'',quotedSenderId:x.quotedSenderId||''})+'\n智能 @ 規劃：'+JSON.stringify(x.mentionRouting||{})+'\n回覆計畫：'+JSON.stringify(x.replyPlan||{})+'\n是否搜索：'+(x.searchPerformed?'有':'無')+'（需要='+(x.searchRequired?'是':'否')+'，嘗試='+(x.searchAttempted?'是':'否')+'）'+'\n搜索查詢：'+(x.searchQuery||'')+'\n搜索關鍵詞：'+JSON.stringify(x.searchQueries||[])+'\n搜索提供者：'+(x.searchProvider||'')+((x.searchModel)?'/'+x.searchModel:'')+'\n搜索錯誤：'+(x.searchError||'')+'\n搜索內容：'+(x.searchContext||'')+'\n搜索來源：'+JSON.stringify(x.searchSources||[])+'\n上下文：原文 '+(x.contextExactMessages||0)+'／摘要 '+(x.contextSummarizedMessages||0)+'／提供者 '+(x.contextSummaryProvider||'');return '<div class="item"><div class="item-title">'+esc(title)+'</div><div class="item-meta">'+esc(meta)+'</div><div class="item-body" style="white-space:pre-wrap">'+esc(body)+'</div></div>'}).join('')||'<div class="empty">沒有符合的紀錄</div>'}
 var ruleCategoryPolicies=[];var progressiveSteps=[];
 function rulePolicyActionText(v){return({record:'仅记录',remind:'友善提醒（不累计）',warn:'正式警告（不累计）',recall:'撤回违规消息',mute:'固定禁言（不累计）',progressive:'使用本群累进规则',kick:'直接踢出',manual:'人工复核'})[v]||v}
-function ruleStrictnessText(v){return({loose:'宽松',low:'低',medium:'中',high:'高',strict:'严格'})[v]||v}
+function rulePolicyActionsText(list,fallback){var a=Array.isArray(list)&&list.length?list:[{action:fallback||'manual'}];return a.map(function(x){return rulePolicyActionText(x.action||x.punishment||x)+(String(x.action||x.punishment||x)==='mute'&&Number(x.muteSeconds||0)?' '+Number(x.muteSeconds)+' 秒':'')}).join('＋')}
+function ruleStrictnessText(v){return({smart:'智慧',loose:'宽松',low:'低',medium:'中',high:'高',strict:'严格'})[v]||v}
 function ruleActionText(v){return({record_only:'仅记录',remind:'已友善提醒',warn:'已警告，不累计',progressive_warn:'已警告并计入累计',recall:'已撤回违规消息',progressive_recall:'已撤回并计入累计',mute:'已禁言，不累计',progressive_mute:'已禁言并计入累计',kick:'已踢出',manual_review:'等待人工复核',cooldown:'冷却中',none:'未处理'})[v]||v}
-function renderRulePolicyRows(){var box=$('rvPolicyList');if(!box)return;box.innerHTML=ruleCategoryPolicies.map(function(p,i){return '<div class="item"><div class="row"><input class="grow rvPolicyName" data-i="'+i+'" value="'+esc(p.name||'')+'" placeholder="分类名称"><select class="rvPolicyPunishment" data-i="'+i+'"><option value="record">仅记录</option><option value="remind">友善提醒（不累计）</option><option value="warn">正式警告（不累计）</option><option value="recall">撤回违规消息</option><option value="mute">固定禁言（不累计）</option><option value="progressive">使用本群累进规则</option><option value="kick">直接踢出</option><option value="manual">人工复核</option></select><button class="btn danger rvPolicyDelete" data-i="'+i+'">删除</button></div><div class="field"><label>分类备注（AI 判断时优先遵守）</label><textarea class="rvPolicyNote" data-i="'+i+'" placeholder="说明哪些情况算违规、哪些玩笑、测试、误发或轻微情况需要排除">'+esc(p.note||'')+'</textarea></div></div>'}).join('')||'<div class="empty">暂无分类</div>';box.querySelectorAll('.rvPolicyPunishment').forEach(function(el){el.value=ruleCategoryPolicies[Number(el.dataset.i)].punishment||'manual'});box.querySelectorAll('.rvPolicyDelete').forEach(function(el){el.onclick=function(){ruleCategoryPolicies.splice(Number(this.dataset.i),1);renderRulePolicyRows()}})}
-function collectRulePolicies(){var rows=[];document.querySelectorAll('.rvPolicyName').forEach(function(el){var i=Number(el.dataset.i),name=el.value.trim();if(!name)return;var punishment=document.querySelector('.rvPolicyPunishment[data-i="'+i+'"]'),note=document.querySelector('.rvPolicyNote[data-i="'+i+'"]');rows.push({name:name,punishment:punishment?punishment.value:'manual',note:note?note.value.trim():''})});return rows}
-function addRulePolicyRow(){ruleCategoryPolicies.push({name:'新分类',punishment:'remind',note:''});renderRulePolicyRows()}
+function rulePolicyActionOptions(){return '<option value="record">仅记录</option><option value="remind">友善提醒（不累计）</option><option value="warn">正式警告（不累计）</option><option value="recall">撤回违规消息</option><option value="mute">固定禁言（不累计）</option><option value="progressive">使用本群累进规则</option><option value="kick">直接踢出</option><option value="manual">人工复核</option>'}
+function normalizeClientRuleActions(p){var a=Array.isArray(p.actions)&&p.actions.length?p.actions:[{action:p.punishment||'manual',muteSeconds:Number(p.muteSeconds||0)}];return a.slice(0,8).map(function(x){return{action:x.action||x.punishment||'manual',muteSeconds:Number(x.muteSeconds||0)}})}
+function renderRulePolicyRows(){var box=$('rvPolicyList');if(!box)return;ruleCategoryPolicies.forEach(function(p){p.actions=normalizeClientRuleActions(p)});box.innerHTML=ruleCategoryPolicies.map(function(p,i){var actionRows=p.actions.map(function(a,j){return '<div class="row" style="margin-top:8px"><select class="rvPolicyAction" data-i="'+i+'" data-a="'+j+'">'+rulePolicyActionOptions()+'</select><input class="rvPolicyActionMute" data-i="'+i+'" data-a="'+j+'" type="number" min="0" value="'+esc(Number(a.muteSeconds||0))+'" placeholder="禁言秒数"><button class="btn danger rvPolicyActionDelete" data-i="'+i+'" data-a="'+j+'" '+(p.actions.length<=1?'disabled':'')+'>删除动作</button></div>'}).join('');return '<div class="item"><div class="row"><input class="grow rvPolicyName" data-i="'+i+'" value="'+esc(p.name||'')+'" placeholder="分类名称"><button class="btn rvPolicyActionAdd" data-i="'+i+'">增加动作</button><button class="btn danger rvPolicyDelete" data-i="'+i+'">删除分类</button></div><div class="field"><label>动作（按顺序执行，可同时撤回＋禁言等）</label>'+actionRows+'</div><div class="field"><label>分类备注（AI 判断时优先遵守）</label><textarea class="rvPolicyNote" data-i="'+i+'" placeholder="说明哪些情况算违规、哪些玩笑、测试、误发或轻微情况需要排除；误判复核说明会自动追加到这里">'+esc(p.note||'')+'</textarea></div></div>'}).join('')||'<div class="empty">暂无分类</div>';box.querySelectorAll('.rvPolicyAction').forEach(function(el){el.value=ruleCategoryPolicies[Number(el.dataset.i)].actions[Number(el.dataset.a)].action||'manual';el.onchange=function(){ruleCategoryPolicies[Number(this.dataset.i)].actions[Number(this.dataset.a)].action=this.value}});box.querySelectorAll('.rvPolicyActionMute').forEach(function(el){el.oninput=function(){ruleCategoryPolicies[Number(this.dataset.i)].actions[Number(this.dataset.a)].muteSeconds=Math.max(0,Number(this.value||0))}});box.querySelectorAll('.rvPolicyActionAdd').forEach(function(el){el.onclick=function(){var p=ruleCategoryPolicies[Number(this.dataset.i)];if(p.actions.length>=8){toast('每个分类最多 8 个动作');return}p.actions.push({action:'remind',muteSeconds:0});renderRulePolicyRows()}});box.querySelectorAll('.rvPolicyActionDelete').forEach(function(el){el.onclick=function(){var p=ruleCategoryPolicies[Number(this.dataset.i)];p.actions.splice(Number(this.dataset.a),1);if(!p.actions.length)p.actions.push({action:'manual',muteSeconds:0});renderRulePolicyRows()}});box.querySelectorAll('.rvPolicyDelete').forEach(function(el){el.onclick=function(){ruleCategoryPolicies.splice(Number(this.dataset.i),1);renderRulePolicyRows()}})}
+function collectRulePolicies(){var rows=[];document.querySelectorAll('.rvPolicyName').forEach(function(el){var i=Number(el.dataset.i),name=el.value.trim();if(!name)return;var note=document.querySelector('.rvPolicyNote[data-i="'+i+'"]'),actions=normalizeClientRuleActions(ruleCategoryPolicies[i]);rows.push({name:name,punishment:(actions[0]||{}).action||'manual',actions:actions,note:note?note.value.trim():''})});return rows}
+function addRulePolicyRow(){ruleCategoryPolicies.push({name:'新分类',punishment:'remind',actions:[{action:'remind',muteSeconds:0}],note:''});renderRulePolicyRows()}
 function progressiveActionOptions(){return '<option value="remind">提醒</option><option value="warn">警告</option><option value="recall">撤回违规消息</option><option value="mute">禁言</option><option value="kick">踢出</option><option value="manual">人工复核</option>'}
 function renderProgressiveSteps(){var box=$('rvProgressiveSteps');if(!box)return;box.innerHTML=progressiveSteps.map(function(step,i){return '<div class="progressive-step"><div class="field"><label>第 '+(i+1)+' 次'+(i===progressiveSteps.length-1?'及以后':'')+'</label><input value="'+(i+1)+'" disabled></div><div class="field"><label>动作</label><select class="rvStepAction" data-i="'+i+'">'+progressiveActionOptions()+'</select></div><div class="field"><label>禁言秒数</label><input class="rvStepMute" data-i="'+i+'" type="number" min="0" value="'+esc(Number(step.muteSeconds||0))+'"></div><button class="btn danger rvStepDelete" data-i="'+i+'" '+(progressiveSteps.length<=1?'disabled':'')+'>删除</button></div>'}).join('');box.querySelectorAll('.rvStepAction').forEach(function(el){el.value=progressiveSteps[Number(el.dataset.i)].action||'warn';el.onchange=function(){progressiveSteps[Number(this.dataset.i)].action=this.value}});box.querySelectorAll('.rvStepMute').forEach(function(el){el.oninput=function(){progressiveSteps[Number(this.dataset.i)].muteSeconds=Math.max(0,Number(this.value||0))}});box.querySelectorAll('.rvStepDelete').forEach(function(el){el.onclick=function(){progressiveSteps.splice(Number(this.dataset.i),1);renderProgressiveSteps()}})}
 function addProgressiveStep(){var last=progressiveSteps[progressiveSteps.length-1]||{action:'warn',muteSeconds:0};progressiveSteps.push({action:last.action,muteSeconds:Number(last.muteSeconds||0)});renderProgressiveSteps()}
 function loadProgressivePolicy(p){p=p||{};$('rvProgressiveWindow').value=p.windowDays||7;$('rvMinorAction').value=p.minorAction||'remind';if(Array.isArray(p.steps)&&p.steps.length)progressiveSteps=p.steps.map(function(x){return{action:x.action||'warn',muteSeconds:Number(x.muteSeconds||0)}});else progressiveSteps=[{action:p.firstAction||'mute',muteSeconds:Number(p.firstMuteSeconds||60)},{action:p.secondAction||'mute',muteSeconds:Number(p.secondMuteSeconds||600)},{action:p.thirdAction||'kick',muteSeconds:Number(p.thirdMuteSeconds||0)}];renderProgressiveSteps()}
 function collectProgressivePolicy(){document.querySelectorAll('.rvStepAction').forEach(function(el){progressiveSteps[Number(el.dataset.i)].action=el.value});document.querySelectorAll('.rvStepMute').forEach(function(el){progressiveSteps[Number(el.dataset.i)].muteSeconds=Math.max(0,Number(el.value||0))});return{windowDays:$('rvProgressiveWindow').value,minorAction:$('rvMinorAction').value,steps:progressiveSteps.slice(0,20)}}
-async function loadRuleViolations(){var p=new URLSearchParams({member:$('rvMember').value||'',content:$('rvContent').value||'',type:$('rvType').value||''});var r=await api('/rule-violations?'+p.toString());if(!r.ok){$('rvList').innerHTML='<div class="empty">'+esc(r.message)+'</div>';return}$('rvStrictness').value=r.settings.strictness||'medium';$('rvProxyMode').value=r.settings.proxyMode||'record';$('rvMuteSeconds').value=r.settings.muteSeconds||600;$('rvKickAuth').checked=!!r.settings.kickAuthorized;loadProgressivePolicy(r.settings.progressivePolicy);var ownerControls=!!r.settings.canOwnerControls;$('rvKickAuth').disabled=!ownerControls;var autoOption=Array.from($('rvProxyMode').options).find(function(o){return o.value==='auto'});if(autoOption)autoOption.disabled=!ownerControls;ruleCategoryPolicies=(r.settings.categoryPolicies||[]).map(function(x){return{name:x.name||'',punishment:x.punishment||'manual',note:x.note||''}});renderRulePolicyRows();var selected=$('rvType').value;$('rvType').innerHTML='<option value="">全部违规项目</option>'+(r.violationTypes||[]).map(function(x){return'<option value="'+esc(x)+'">'+esc(x)+'</option>'}).join('');$('rvType').value=selected;var canFeedback=!!((session&&session.permissions||{}).aiAdmin||(session&&session.permissions||{}).nativeAdmin||(session&&session.permissions||{}).developer||['admin','owner'].includes((session&&session.role)||''));$('rvList').innerHTML=(r.items||[]).map(function(x){var links=(x.urlInspections||[]).map(function(u){return esc(u.hostname||u.url||'链接')+(u.title?'｜'+esc(u.title):'')+(u.ok===false?'（检查失败）':'')}).join('<br>');var verdict=x.humanVerdict==='violation'?'<span class="status ok">人工确认违规</span>':x.humanVerdict==='not_violation'?'<span class="status error">人工判定误判</span>':'';var actions=canFeedback&&!x.humanVerdict?'<div class="row" style="margin-top:12px"><button class="btn primary rvFeedback" data-id="'+esc(x.id)+'" data-verdict="violation">有违规</button><button class="btn danger rvFeedback" data-id="'+esc(x.id)+'" data-verdict="not_violation">无违规（撤销处罚）</button></div>':'';return '<div class="item"><div class="item-head"><div><div class="item-title">'+esc(x.senderName||x.userId)+'（'+esc(x.userId)+'）｜'+esc(x.violationType||'其他')+'</div><div class="item-meta">'+new Date(Number(x.createdAt||0)).toLocaleString()+'｜判断等级 '+esc(ruleStrictnessText(x.strictness||'medium'))+'｜影响程度 '+esc(ruleSeverityText(x.severity||'moderate'))+'｜置信度 '+esc(x.confidence)+'｜处理 '+esc(ruleActionText(x.actionTaken||'none'))+(x.strikeCounted?'｜已计入累计次数':'｜未计入累计次数')+'</div></div>'+verdict+'</div><div class="item-body">'+esc(x.content)+'<br><b>分类：</b>'+esc(x.violationType||'')+'<br><b>分类处罚：</b>'+esc(rulePolicyActionText(x.policyAction||'manual'))+(x.policyNote?'<br><b>分类备注：</b>'+esc(x.policyNote):'')+'<br><b>AI 原因：</b>'+esc(x.reason||'')+'<br><b>结果：</b>'+esc(x.actionResult||'')+(x.humanFeedbackNote?'<br><b>人工备注：</b>'+esc(x.humanFeedbackNote):'')+(x.reversalResult?'<br><b>撤销结果：</b>'+esc(x.reversalResult):'')+(links?'<br><b>链接检查：</b><br>'+links:'')+'</div>'+actions+'</div>'}).join('')||'<div class="empty">暂无违规记录</div>';$('rvList').querySelectorAll('.rvFeedback').forEach(function(btn){btn.onclick=function(){submitRuleFeedback(this.dataset.id,this.dataset.verdict)}})}
-async function submitRuleFeedback(id,verdict){var note=await textModal(verdict==='not_violation'?'请说明为什么这是误判。系统会尝试撤回机器人警告、解除禁言并移除累计次数。复核说明必填。':'确认存在违规。可以填写分类调整、语境或判断备注。','',verdict==='not_violation'?'标记为误判':'确认违规',{placeholder:'请输入复核说明'});if(note===null)return;note=String(note||'').trim();if(verdict==='not_violation'&&!note){toast('标记为误判时必须填写复核说明');return}if(verdict==='not_violation'&&!(await confirmModal('确定标记为误判，并撤销目前可以自动撤销的处罚吗？','撤销错误处罚',{danger:true,okText:'确认撤销'})))return;var r=await api('/rule-violations/feedback','POST',{id:id,verdict:verdict,note:note});toast(r.message||'处理完成');if(r.ok)loadRuleViolations()}
+async function loadRuleViolations(){var p=new URLSearchParams({member:$('rvMember').value||'',content:$('rvContent').value||'',type:$('rvType').value||''});var r=await api('/rule-violations?'+p.toString());if(!r.ok){$('rvList').innerHTML='<div class="empty">'+esc(r.message)+'</div>';return}$('rvStrictness').value=r.settings.strictness||'medium';$('rvProxyMode').value=r.settings.proxyMode||'record';$('rvMuteSeconds').value=r.settings.muteSeconds||600;$('rvKickAuth').checked=!!r.settings.kickAuthorized;loadProgressivePolicy(r.settings.progressivePolicy);var ownerControls=!!r.settings.canOwnerControls;$('rvKickAuth').disabled=!ownerControls;var autoOption=Array.from($('rvProxyMode').options).find(function(o){return o.value==='auto'});if(autoOption)autoOption.disabled=!ownerControls;ruleCategoryPolicies=(r.settings.categoryPolicies||[]).map(function(x){return{name:x.name||'',punishment:x.punishment||'manual',actions:Array.isArray(x.actions)?x.actions:[],note:x.note||''}});renderRulePolicyRows();var selected=$('rvType').value;$('rvType').innerHTML='<option value="">全部违规项目</option>'+(r.violationTypes||[]).map(function(x){return'<option value="'+esc(x)+'">'+esc(x)+'</option>'}).join('');$('rvType').value=selected;var canFeedback=!!((session&&session.permissions||{}).aiAdmin||(session&&session.permissions||{}).nativeAdmin||(session&&session.permissions||{}).developer||['admin','owner'].includes((session&&session.role)||''));$('rvList').innerHTML=(r.items||[]).map(function(x){var links=(x.urlInspections||[]).map(function(u){return esc(u.hostname||u.url||'链接')+(u.title?'｜'+esc(u.title):'')+(u.ok===false?'（检查失败）':'')}).join('<br>');var verdict=x.humanVerdict==='violation'?'<span class="status ok">人工确认违规</span>':x.humanVerdict==='violation_additional'?'<span class="status warning">人工确认并追加处分</span>':x.humanVerdict==='not_violation'?'<span class="status error">人工判定误判</span>':'';var reviewButtons=canFeedback&&!x.humanVerdict?'<button class="btn primary rvFeedback" data-id="'+esc(x.id)+'" data-verdict="violation">有违规</button><button class="btn danger rvFeedback" data-id="'+esc(x.id)+'" data-verdict="not_violation">无违规（撤销处罚）</button>':'';var additionalButton=canFeedback&&x.humanVerdict!=='not_violation'?'<button class="btn warning rvFeedback" data-id="'+esc(x.id)+'" data-verdict="violation_additional">有违规（追加处分）</button>':'';var actions=(reviewButtons||additionalButton)?'<div class="row" style="margin-top:12px">'+reviewButtons+additionalButton+'</div>':'';return '<div class="item"><div class="item-head"><div><div class="item-title">'+esc(x.senderName||x.userId)+'（'+esc(x.userId)+'）｜'+esc(x.violationType||'其他')+'</div><div class="item-meta">'+new Date(Number(x.createdAt||0)).toLocaleString()+'｜判断等级 '+esc(ruleStrictnessText(x.strictness||'medium'))+'｜影响程度 '+esc(ruleSeverityText(x.severity||'moderate'))+'｜置信度 '+esc(x.confidence)+'｜处理 '+esc(Array.isArray(x.actionsTaken)&&x.actionsTaken.length?x.actionsTaken.map(ruleActionText).join('＋'):ruleActionText(x.actionTaken||'none'))+(x.strikeCounted?'｜已计入累计次数':'｜未计入累计次数')+'</div></div>'+verdict+'</div><div class="item-body">'+esc(x.content)+'<br><b>分类：</b>'+esc(x.violationType||'')+'<br><b>分类动作：</b>'+esc(rulePolicyActionsText(x.policyActions,x.policyAction||'manual'))+(x.policyNote?'<br><b>分类备注：</b>'+esc(x.policyNote):'')+'<br><b>AI 原因：</b>'+esc(x.reason||'')+'<br><b>结果：</b>'+esc(x.actionResult||'')+(x.humanFeedbackNote?'<br><b>人工备注：</b>'+esc(x.humanFeedbackNote):'')+(x.reversalResult?'<br><b>撤销结果：</b>'+esc(x.reversalResult):'')+(links?'<br><b>链接检查：</b><br>'+links:'')+'</div>'+actions+'</div>'}).join('')||'<div class="empty">暂无违规记录</div>';$('rvList').querySelectorAll('.rvFeedback').forEach(function(btn){btn.onclick=function(){submitRuleFeedback(this.dataset.id,this.dataset.verdict)}})}
+function parseRuleAdditionalActions(value){return String(value||'').split(/[,，、+＋;；\n]+/).map(function(x){x=x.trim();if(!x)return null;var lower=x.toLowerCase(),action='';if(/撤回|recall/.test(lower))action='recall';else if(/禁言|mute/.test(lower))action='mute';else if(/踢出|移出|kick/.test(lower))action='kick';else if(/警告|warn/.test(lower))action='warn';else if(/提醒|remind/.test(lower))action='remind';if(!action)return null;var n=Number((x.match(/\d+(?:\.\d+)?/)||[])[0]||0),seconds=0;if(action==='mute'){if(/天/.test(x))seconds=n*86400;else if(/小时|小時|时|時/.test(x))seconds=n*3600;else if(/分/.test(x))seconds=n*60;else seconds=n||600}return{action:action,muteSeconds:Math.max(0,Math.round(seconds))}}).filter(Boolean).slice(0,8)}
+async function submitRuleFeedback(id,verdict){var additional=verdict==='violation_additional';var prompt=verdict==='not_violation'?'请说明为什么这是误判。系统会撤销可撤销处罚，并把你的原话自动追加到对应“分类备注”，供 AI 后续优先遵守。':additional?'请填写追加处分原因；该原因会写入永久复核记录。':'确认存在违规。可以填写分类调整、语境或判断备注。';var title=verdict==='not_violation'?'标记为误判':additional?'有违规（追加处分）':'确认违规';var note=await textModal(prompt,'',title,{placeholder:'请输入复核说明或追加处分原因'});if(note===null)return;note=String(note||'').trim();if((verdict==='not_violation'||additional)&&!note){toast(additional?'追加处分时必须填写原因':'标记为误判时必须填写复核说明');return}var actions=[];if(additional){var raw=await textModal('输入一个或多个动作，以逗号分隔。示例：撤回, 禁言10分钟；也支持警告、提醒、踢出。踢出仅群主或开发者可确认。','撤回, 禁言10分钟','追加处分动作',{required:true,requiredMessage:'请输入至少一个动作'});if(raw===null)return;actions=parseRuleAdditionalActions(raw);if(!actions.length){toast('没有识别到可执行动作');return}if(!(await confirmModal('将按顺序执行：'+actions.map(function(x){return rulePolicyActionText(x.action)+(x.action==='mute'?' '+x.muteSeconds+' 秒':'')}).join('＋')+'。确定继续吗？','确认追加处分',{danger:true,okText:'执行追加处分'})))return}if(verdict==='not_violation'&&!(await confirmModal('确定标记为误判、撤销目前可以自动撤销的处罚，并把复核说明写入分类备注吗？','撤销错误处罚',{danger:true,okText:'确认撤销'})))return;var r=await api('/rule-violations/feedback','POST',{id:id,verdict:verdict,note:note,actions:actions});toast(r.message||'处理完成');if(r.ok)loadRuleViolations()}
 async function saveRuleViolationSettings(){var payload={strictness:$('rvStrictness').value,proxyMode:$('rvProxyMode').value,muteSeconds:$('rvMuteSeconds').value,categoryPolicies:collectRulePolicies(),progressivePolicy:collectProgressivePolicy()};if(!$('rvKickAuth').disabled)payload.kickAuthorized=$('rvKickAuth').checked;var r=await api('/rule-violations/settings','POST',payload);toast(r.message);if(r.ok)loadRuleViolations()}
 
 async function loadSettingsCenter(){var dev=session&&(session.permissions||{}).developer;if(!currentGroup){$('scMessage').textContent='请先从右上角选择需要维护的群组。';$('scList').innerHTML='<div class="empty">尚未选择群组</div>';return}$('scMessage').textContent='正在加载设置…';$('scList').innerHTML='<div class="empty">正在读取当前群设置</div>';try{var p=new URLSearchParams();p.set('targetQq',dev?($('scTargetQq').value||session.qq):session.qq);var r=await api('/settings-center?'+p.toString());if(!r.ok){$('scMessage').textContent=r.message||'加载失败';$('scList').innerHTML='<div class="empty">'+esc(r.message)+'</div>';return}if(!$('scTargetQq').value)$('scTargetQq').value=r.targetQq||session.qq;if($('scResolvedRole')){$('scResolvedRole').textContent='识别权限：'+portalRoleLabel(r.targetRole);$('scResolvedRole').className='status ok'}$('scMessage').textContent='已加载 '+(r.settings||[]).length+' 项设置；只会提交实际改动的项目。';$('scList').innerHTML='';(r.settings||[]).forEach(function(s){var d=document.createElement('div');d.className='item';var input;if(s.type==='boolean'){input=document.createElement('input');input.type='checkbox';input.checked=!!s.value}else if(s.type==='select'){input=document.createElement('select');(s.options||[]).forEach(function(v){var o=document.createElement('option');o.value=v;o.textContent=(s.optionLabels&&s.optionLabels[v])||v;input.appendChild(o)});input.value=String(s.value)}else if(s.type==='textarea'){input=document.createElement('textarea');input.value=String(s.value==null?'':s.value)}else{input=document.createElement('input');input.type=s.type==='number'?'number':'text';input.value=String(s.value==null?'':s.value);if(s.min!=null)input.min=s.min;if(s.max!=null)input.max=s.max}input.dataset.settingKey=s.key;input.dataset.initialValue=input.type==='checkbox'?String(input.checked):String(input.value);var roleText=portalRoleLabel(s.minRole);if(s.key==='rule_proxy_mode')roleText+='（auto 仅群主）';d.innerHTML='<div class="item-title">'+esc(s.label)+'</div><div class="item-meta">最低权限：'+esc(roleText)+'｜对应指令：'+esc(s.command||'无')+'</div>';d.appendChild(input);$('scList').appendChild(d)});if(!$('scList').children.length)$('scList').innerHTML='<div class="empty">当前没有可维护的设置项目</div>'}catch(e){$('scMessage').textContent='加载设置时发生错误。';$('scList').innerHTML='<div class="empty">'+esc(String(e&&e.message||e))+'</div>'}}
@@ -15064,9 +15432,9 @@ async function submitAppeal(){var r=await api('/appeals/submit','POST',{groupId:
 function appealStatusText(v){return({pending_owner:'待处理',pending_review:'审核中',approved:'已通过',rejected:'已驳回'})[v]||v||'待处理'}
 async function loadAppealReviews(){if(!currentGroup){$('appealReviewList').innerHTML='<div class="empty">请先从右上角选择群组。</div>';return}var r=await api('/appeals/review?status='+encodeURIComponent($('appealReviewStatus').value||''));if(!r.ok){$('appealReviewList').innerHTML='<div class="empty">'+esc(r.message)+'</div>';return}$('appealReviewList').innerHTML=(r.appeals||[]).map(function(a){var buttons=a.canDecide&&['pending_owner','pending_review'].includes(a.status)?'<div class="row" style="margin-top:12px"><button class="btn primary appealDecision" data-id="'+esc(a.id)+'" data-decision="approve">通过申诉</button><button class="btn danger appealDecision" data-id="'+esc(a.id)+'" data-decision="reject">驳回申诉</button></div>':'';return '<div class="item"><div class="item-head"><div><div class="item-title">'+esc(a.anonymousLabel||a.id)+'｜'+esc(appealStatusText(a.status))+'</div><div class="item-meta">'+esc(a.identityText||'匿名申诉人')+'｜'+esc(a.type||'其他')+'｜'+esc(a.createdAt||'')+(a.applicantMembership==='former'?'｜前成员申诉':'')+'</div></div></div><div class="item-body">'+esc(a.content||'')+(a.evidenceMessageId?'<br><b>相关消息：</b>'+esc(a.evidenceMessageId):'')+(a.result?'<br><b>处理结果：</b>'+esc(a.result):'')+(a.againstAdmin?'<br><b>注意：</b>该案件涉及管理层，只能由群主或开发者决定。':'')+'</div>'+buttons+'</div>'}).join('')||'<div class="empty">当前群没有符合条件的申诉</div>';$('appealReviewList').querySelectorAll('.appealDecision').forEach(function(btn){btn.onclick=function(){decideAppeal(this.dataset.id,this.dataset.decision)}})}
 async function decideAppeal(id,decision){var note=await textModal(decision==='approve'?'请输入通过原因、需要撤销的处理或其他补救说明。':'请输入驳回原因，让申诉人知道为什么没有通过。','',decision==='approve'?'通过申诉':'驳回申诉',{placeholder:'建议填写清楚的处理说明'});if(note===null)return;if(!String(note).trim()&&!(await confirmModal('没有填写处理说明，仍要继续吗？','未填写说明')))return;var r=await api('/appeals/review','POST',{id:id,decision:decision,note:String(note||'').trim()});toast(r.message||'处理完成');if(r.ok)loadAppealReviews()}
-var logTypeLabels={moderation_proposed:'已建立待确认操作',moderation_cancelled:'已取消待确认操作',moderation_confirmed:'已确认并执行操作',moderation_failed:'待确认操作执行失败',group_operation:'群管理操作成功',group_operation_failed:'群管理操作失败',portal_ai_settings:'群组 AI 设置已保存',ai_settings:'AI 设置已修改',settings_center:'设置中心已修改',bilibili_connector:'B站监控设置已修改',bilibili_auto_monitor:'B站自动监控已修改',bilibili_auto_poll:'B站自动检查',permission:'程序权限已修改',platform_feature:'功能开关已修改',rule_monitor_setting:'群规监控设置已修改',rule_proxy_setting:'AI 群规代理设置已修改',rule_strictness_setting:'群规判断严格度已修改',rule_proxy_action:'AI 群规代理已处理',rule_proxy_portal_settings:'AI 群规代理设置已保存',rule_proxy_kick_auth:'AI 踢出授权已修改',join_reject_auth:'入群拒绝授权已修改',rate_limit_setting:'回复间隔已修改',rate_limit_portal:'回复间隔已保存',quota:'DeepSeek 额度已修改',context:'聊天上下文已处理',group_checkin:'群打卡任务',thinking_indicator_recall:'思考提示已撤回',thinking_indicator_residual:'思考提示残留',question_cancelled_by_recall:'问题因撤回取消',groupwork_requested:'已建立群务申请',groupwork_decided:'群务申请已处理',runtime_model_registry:'模型顺序已修改',platform_job:'系统任务',portal_login:'Control Center 登录',appeal_review:'申诉处理',violation_appeal_submitted:'违规记录申诉已提交',rule_violation_reversed:'群规误判已撤销',conversation_action:'对话记录操作',conversation_action_failed:'对话记录操作失败',single_model_health_check:'单一模型健康检查',schedule_skipped_once:'重复排程已跳过一次',schedule_completed:'单次排程已完成并保留',active_speaking:'主动发话状态',rule_mute_guard_setting:'违规禁言保护设置已修改',rule_mute_guard_reapplied:'违规禁言已按剩余时间恢复',rule_mute_guard_failed:'违规禁言恢复失败',rule_mute_guard_skipped:'违规禁言保护未执行',join_request_ai_approved:'AI 已同意入群申请'};
+var logTypeLabels={moderation_proposed:'已建立待确认操作',moderation_cancelled:'已取消待确认操作',moderation_confirmed:'已确认并执行操作',moderation_failed:'待确认操作执行失败',group_operation:'群管理操作成功',group_operation_failed:'群管理操作失败',portal_ai_settings:'群组 AI 设置已保存',ai_settings:'AI 设置已修改',settings_center:'设置中心已修改',bilibili_connector:'B站监控设置已修改',bilibili_auto_monitor:'B站自动监控已修改',bilibili_auto_poll:'B站自动检查',permission:'程序权限已修改',platform_feature:'功能开关已修改',rule_monitor_setting:'群规监控设置已修改',rule_proxy_setting:'AI 群规代理设置已修改',rule_strictness_setting:'群规判断严格度已修改',rule_proxy_action:'AI 群规代理已处理',rule_proxy_portal_settings:'AI 群规代理设置已保存',rule_proxy_kick_auth:'AI 踢出授权已修改',rule_manager_clarification:'群规判断已询问管理',rule_policy_human_correction:'群规分类备注已记录人工纠错',rule_violation_feedback:'群规记录已人工复核',join_reject_auth:'入群拒绝授权已修改',rate_limit_setting:'回复间隔已修改',rate_limit_portal:'回复间隔已保存',quota:'DeepSeek 额度已修改',context:'聊天上下文已处理',group_checkin:'群打卡任务',thinking_indicator_recall:'思考提示已撤回',thinking_indicator_residual:'思考提示残留',question_cancelled_by_recall:'问题因撤回取消',groupwork_requested:'已建立群务申请',groupwork_decided:'群务申请已处理',runtime_model_registry:'模型顺序已修改',platform_job:'系统任务',portal_login:'Control Center 登录',appeal_review:'申诉处理',violation_appeal_submitted:'违规记录申诉已提交',rule_violation_reversed:'群规误判已撤销',conversation_action:'对话记录操作',conversation_action_failed:'对话记录操作失败',single_model_health_check:'单一模型健康检查',schedule_skipped_once:'重复排程已跳过一次',schedule_completed:'单次排程已完成并保留',active_speaking:'主动发话状态',rule_mute_guard_setting:'违规禁言保护设置已修改',rule_mute_guard_reapplied:'违规禁言已按剩余时间恢复',rule_mute_guard_failed:'违规禁言恢复失败',rule_mute_guard_skipped:'违规禁言保护未执行',join_request_ai_approved:'AI 已同意入群申请'};
 var logActionLabels={mute:'禁言',unmute:'解除禁言',kick:'踢出群聊',reject:'拒绝入群',whole_mute:'开启全员禁言',whole_unmute:'解除全员禁言',set_admin:'设为 QQ 管理员',unset_admin:'取消 QQ 管理员',recall:'撤回消息',create:'新增',update:'更新',enabled:'开启',disabled:'关闭',authorized:'已授权',revoked:'已取消授权',ai_on:'开启 AI',ai_off:'关闭 AI',checked:'检查完成',baseline_created:'建立初始状态',failed:'失败',cancelled:'已取消',commands_enabled:'设置型指令开关',interject_rate:'主动插话率',welcome_enabled:'自动欢迎新人',author_recall:'发送者撤回自己的消息',moderator_recall:'管理撤回成员消息',skip_once:'跳过下一次排程',completed_and_kept:'完成并保留',automatic_sent:'自动发话成功',automatic_failed:'自动发话失败',manual_test_sent:'主动发话测试成功',manual_test_failed:'主动发话测试失败'};
-function logCategoryOf(a){var t=String(a.type||'');if(/moderation|group_operation|groupwork|rule_proxy_action/.test(t))return 'moderation';if(/settings|portal_ai|ai_settings|rule_monitor|rule_proxy_setting|rule_strictness|rate_limit|quota|runtime_model|platform_feature|context/.test(t))return 'settings';if(/bilibili/.test(t))return 'bilibili';if(/conversation_action/.test(t))return 'moderation';if(/appeal/.test(t))return 'appeal';if(/permission|auth/.test(t))return 'permission';if(/failed|error/.test(t)||a.error)return 'error';return 'system'}
+function logCategoryOf(a){var t=String(a.type||'');if(/moderation|group_operation|groupwork|rule_proxy_action|rule_manager_clarification|rule_policy_human_correction|rule_violation_feedback/.test(t))return 'moderation';if(/settings|portal_ai|ai_settings|rule_monitor|rule_proxy_setting|rule_strictness|rate_limit|quota|runtime_model|platform_feature|context/.test(t))return 'settings';if(/bilibili/.test(t))return 'bilibili';if(/conversation_action/.test(t))return 'moderation';if(/appeal/.test(t))return 'appeal';if(/permission|auth/.test(t))return 'permission';if(/failed|error/.test(t)||a.error)return 'error';return 'system'}
 function logTone(a){var t=String(a.type||''),r=String(a.result||'');if(/failed|error/.test(t)||a.error||/失败|failed/i.test(r))return 'error';if(/cancelled/.test(t))return 'warn';if(/proposed|requested/.test(t))return 'info';return 'ok'}
 function logStatusText(a){var type=String(a.type||''),action=String(a.action||'');if(type==='appeal_review')return action==='approve'?'已通过':'已驳回';if(type==='violation_appeal_submitted')return '待处理';var tone=logTone(a);if(tone==='error')return '失败';if(type.includes('cancelled'))return '已取消';if(type.includes('proposed'))return '待确认';return '成功'}
 function logActionText(a){var raw=String(a.action||'').trim(),type=String(a.type||'');if(type==='appeal_review')return raw==='approve'?'通过申诉':raw==='reject'?'驳回申诉':'处理申诉';if(type==='violation_appeal_submitted')return '提交违规记录申诉';if(!raw)return '';if(logActionLabels[raw])return logActionLabels[raw];if(raw.indexOf(':')>0){var parts=raw.split(':');return (logActionLabels[parts[0]]||parts[0])+'：'+parts.slice(1).join(':')}return raw}
