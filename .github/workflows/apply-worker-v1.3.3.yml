@@ -1,6 +1,7 @@
 name: Apply worker v1.3.3 emergency reply hotfix
 
 on:
+  workflow_dispatch:
   push:
     branches: [main]
     paths:
