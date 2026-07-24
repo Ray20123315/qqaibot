@@ -1,14 +1,16 @@
 {
-  "name": "qqai-bot-worker",
-  "version": "0.2.5",
+  "name": "qqaibot-single-worker-300-free",
+  "version": "1.1.0",
   "private": true,
   "type": "module",
+  "description": "QQAIbot single Cloudflare Worker with 300 capabilities, role-based portal, rule monitoring, Bilibili webhooks and free-first model routing.",
   "scripts": {
-    "check": "node verify-config.mjs && node verify-migration.mjs && node verify-model-routing.mjs && node --check worker.js",
+    "check": "node --check worker.js",
+    "dry-run": "wrangler deploy --config wrangler.toml --dry-run --no-assets",
     "deploy": "wrangler deploy --config wrangler.toml --no-assets"
   },
-  "dependencies": {
-    "@cloudflare/puppeteer": "^1.1.0"
+  "engines": {
+    "node": ">=20"
   },
   "devDependencies": {
     "wrangler": "4.112.0"
