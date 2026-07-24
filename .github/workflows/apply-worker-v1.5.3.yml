@@ -75,10 +75,10 @@ jobs:
             '智慧（自动校准）','增加动作','有违规（追加处分）','分类备注（AI 判断时优先遵守）',
             'appendHumanCorrectionToRulePolicy','requestRuleManagerClarification','violation_additional',
             'gemini_vision','gemini_search','GOOGLE_VISION_DECISION_KEYS_MISSING',
-            '群规与临时规则 > 明确例外 > 当前图片证据 > 分类备注与人工纠错'
+            '证据优先级（不得颠倒）：明确群规与有效临时规则 > 群规例外 > 图片直接内容证据 > 分类备注与人工纠错 > 最近语境与模型常识。'
           ]
           for token in required: assert token in s, token
-          block=s[s.index('async function evaluateRuleViolation'):s.index('async function handleRuleViolationFeedback')]
+          block=s[s.index('async function inspectMessageAgainstGroupRules'):s.index('async function createGroupWorkRequest')]
           assert 'DeepSeek' not in block and 'callDeepSeek' not in block
           print('Portal and rule feature validation PASS')
           PY
