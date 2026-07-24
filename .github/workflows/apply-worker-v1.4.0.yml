@@ -1,0 +1,96 @@
+name: Apply worker v1.4.0
+
+on:
+  workflow_dispatch:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.qqai-pr-trigger-v1.4.0'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: apply-worker-v1.4.0
+  cancel-in-progress: false
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Apply and validate standalone worker
+        shell: bash
+        run: |
+          set -euo pipefail
+          grep -F 'const VERSION = "1.3.9";' worker.js
+          cat \
+            .qqai-patches/v1.4.0/chunk-00 \
+            .qqai-patches/v1.4.0/chunk-01 \
+            .qqai-patches/v1.4.0/chunk-02 \
+            .qqai-patches/v1.4.0/chunk-03 \
+            .qqai-patches/v1.4.0/chunk-04 \
+            .qqai-patches/v1.4.0/chunk-05 \
+            > /tmp/worker-v1.4.0.patch.gz.b64
+          echo '058ca2c48b2aea1343cea2963c018c27cd00feca43efd8c1d404d3dccb50000b  /tmp/worker-v1.4.0.patch.gz.b64' | sha256sum -c -
+          base64 -d /tmp/worker-v1.4.0.patch.gz.b64 | gzip -d > /tmp/worker-v1.4.0.patch
+          echo 'b8ac5536dc9e64b40ddd6baaf9e6e8e88560b02190cf3ada0ec21a53028ff0ab  /tmp/worker-v1.4.0.patch' | sha256sum -c -
+          patch --dry-run -p1 < /tmp/worker-v1.4.0.patch
+          patch -p1 < /tmp/worker-v1.4.0.patch
+          echo 'e346174bc5aea9888a698393ad2ae6238e66d50f919267f216b1bd3c32652097  worker.js' | sha256sum -c -
+          node --check worker.js
+          cp worker.js /tmp/worker-v1.4.0.mjs
+          node -e "import('/tmp/worker-v1.4.0.mjs').then(m=>{if(!m.default||!m.OneBotHub)throw new Error('exports missing')})"
+          if grep -Eq '^[[:space:]]*import[[:space:]]' worker.js; then exit 1; fi
+          grep -F 'const VERSION = "1.4.0";' worker.js
+          grep -F 'QQAI_V1_R40_MAINTENANCE_LATENCY_INVITE_MARKER' worker.js
+          grep -F 'worker_skipped' worker.js
+          grep -F 'worker_http_error' worker.js
+          grep -F 'ai_disabled' worker.js
+          grep -F 'oneBotSnapshotMentionIds' worker.js
+          grep -F 'fallbackResent' worker.js
+          grep -F 'selectedJoinUrl' worker.js
+          grep -F 'migratePortalMaintenanceV140' worker.js
+          grep -F 'opsDrafts' worker.js
+          grep -F '系统维护' worker.js
+          grep -F 'const internalTimeoutMs = toolTask ? 60000 : 32000;' worker.js
+          python - <<'PY'
+          from pathlib import Path
+          from html.parser import HTMLParser
+          import re
+          source = Path('worker.js').read_text(encoding='utf-8')
+          start = source.index('function getPortalHomePage(host)')
+          start = source.index('String.raw`', start) + len('String.raw`')
+          end = source.index('`);\n}', start)
+          html = source[start:end]
+          scripts = re.findall(r'<script(?: [^>]*)?>(.*?)</script>', html, re.S)
+          assert len(scripts) >= 2
+          for i, script in enumerate(scripts):
+              Path(f'/tmp/portal-v140-{i}.js').write_text(script, encoding='utf-8')
+          class P(HTMLParser):
+              def __init__(self): super().__init__(); self.ids=[]
+              def handle_starttag(self, tag, attrs):
+                  self.ids += [v for k,v in attrs if k == 'id']
+          p=P(); p.feed(html)
+          assert len(p.ids) == len(set(p.ids))
+          assert all(x in html for x in ['系统维护','familyJoinUrl','opsDrafts'])
+          i = source.index('if (internalResponse.status === 204)')
+          assert i < source.index('if (!internalResponse.ok)', i)
+          PY
+          for script in /tmp/portal-v140-*.js; do node --check "$script"; done
+
+      - name: Commit worker v1.4.0 to main
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -f .qqai-pr-trigger-v1.4.0
+          rm -rf .qqai-patches/v1.4.0
+          rm -f .github/workflows/apply-worker-v1.4.0.yml
+          git config user.name 'qqai-updater'
+          git config user.email 'actions@users.noreply.github.com'
+          git add -A
+          git commit -m 'Restore maintenance and fix AI message flow v1.4.0'
+          git push origin HEAD:main
