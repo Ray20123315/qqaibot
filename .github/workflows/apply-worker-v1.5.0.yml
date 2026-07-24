@@ -15,7 +15,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with: {fetch-depth: 0}
-      - name: Apply and validate standalone worker
+      - name: Reconstruct and apply exact patch
         shell: bash
         run: |
           set -euo pipefail
@@ -27,18 +27,22 @@ jobs:
           echo 'c8a9eac77d13e562e2b1e82c5bd7b536a929b5de1afd3a1436aef141e6b9c41f  /tmp/p.patch' | sha256sum -c -
           git apply --check /tmp/p.patch && git apply /tmp/p.patch
           echo 'c3190291fa2c0e40cb482da43b5bcf8a1318fc0c838f0ec40f8b931b8bdbe14d  worker.js' | sha256sum -c -
+      - name: Validate standalone module and Portal
+        shell: bash
+        run: |
+          set -euo pipefail
           node --check worker.js
           cp worker.js /tmp/w.mjs
           node -e "import('/tmp/w.mjs').then(m=>{if(!m.default||!m.OneBotHub)throw Error('exports')})"
           ! grep -Eq '^[[:space:]]*import[[:space:]]' worker.js
-          for x in 'const VERSION = "1.5.0";' QQAI_V1_R50_AUTH_SECURITY_FREEZE_MARKER SESSION_STORAGE_UNAVAILABLE /api/auth/login-password /security/2fa/setup 'generateBackupCodes(10)' PBKDF2 AES-GCM "credentials:'include'"; do grep -F "$x" worker.js; done
+          for x in 'const VERSION = "1.5.0";' QQAI_V1_R50_AUTH_SECURITY_FREEZE_MARKER SESSION_STORAGE_UNAVAILABLE /api/auth/login-password /security/2fa/setup 'generateBackupCodes(10)' PBKDF2 AES-GCM "credentials:'include'"; do grep -F "$x" worker.js >/dev/null; done
           python - <<'PY'
           from pathlib import Path
           from html.parser import HTMLParser
           import re
-          s=Path('worker.js').read_text(); a=s.index('function getPortalHomePage(host)'); a=s.index('String.raw`',a)+10; h=s[a:s.index('`);\n}',a)]
+          s=Path('worker.js').read_text(); a=s.index('function getPortalHomePage(host)'); a=s.index('String.raw`',a)+len('String.raw`'); h=s[a:s.index('`);\n}',a)]
           js=re.findall(r'<script(?: [^>]*)?>(.*?)</script>',h,re.S); assert len(js)>=2
-          for i,x in enumerate(js): Path(f'/tmp/p{i}.js').write_text(x)
+          for i,x in enumerate(js): Path(f'/tmp/portal-v150-{i}.js').write_text(x)
           class P(HTMLParser):
             def __init__(self): super().__init__(); self.ids=[]
             def handle_starttag(self,t,a): self.ids += [v for k,v in a if k=='id']
@@ -46,7 +50,11 @@ jobs:
           for x in ['loginPasswordPane','loginPassword','loginFactorWrap','rememberLogin']: assert x in p.ids
           assert '登录与双因数验证' in h and 'accountSecurityPanel' in h and '在这台设备保持登录（最长 180 天）' in h
           PY
-          for f in /tmp/p*.js; do node --check "$f"; done
+          for f in /tmp/portal-v150-*.js; do node --check "$f"; done
+      - name: Test session password and 2FA flows
+        shell: bash
+        run: |
+          set -euo pipefail
           cat >/tmp/t.mjs <<'JS'
           import w from '/tmp/w.mjs';import c from'node:crypto';if(!globalThis.crypto)globalThis.crypto=c.webcrypto;
           class S{constructor(d,s){this.d=d;this.s=s;this.a=[]}bind(...a){this.a=a;return this}async first(){if(this.d.r-->0)throw Error('D1 read');let k=String(this.a[0]);return this.d.m.has(k)?{value:this.d.m.get(k)}:null}async run(){if(this.d.w-->0)throw Error('D1 write');let k=String(this.a[0]);if(this.s.startsWith('INSERT'))this.d.m.set(k,String(this.a[1]));if(this.s.startsWith('DELETE'))this.d.m.delete(k);return{success:true}}async all(){return{results:[]}}}class D{constructor(){this.m=new Map;this.r=0;this.w=0}prepare(s){return new S(this,s)}}
