@@ -1,4 +1,5 @@
-const VERSION = "1.4.5";
+const VERSION = "1.4.6";
+const QQAI_V1_R46_ERROR_SEARCH_PROPOSAL_MARKER = "QQAI_V1_R46_ERROR_SEARCH_PROPOSAL_MARKER";
 const QQAI_V1_R45_DIRECT_LOOPBACK_RELIABILITY_MARKER = "QQAI_V1_R45_DIRECT_LOOPBACK_RELIABILITY_MARKER";
 const QQAI_V1_R44_PERSISTENT_LOGIN_PERMISSION_LIST_MOBILE_MARKER = "QQAI_V1_R44_PERSISTENT_LOGIN_PERMISSION_LIST_MOBILE_MARKER";
 const QQAI_V1_R43_MOBILE_COLLAB_INTENT_MARKER = "QQAI_V1_R43_MOBILE_COLLAB_INTENT_MARKER";
@@ -75,13 +76,65 @@ const DEFAULTS = Object.freeze({
 });
 
 const EXPLICIT_REPLY_FAILURE_MESSAGES = Object.freeze({
-  worker_error: "内部 Worker 处理失败，任务已释放。请到 Portal 的‘健康检查’与‘AI 回复记录’查看最新错误后重试。",
-  worker_http_error: "这次内部处理异常，任务已自动结束且不会继续占用。请稍后重新 @我；诊断编号与技术状态只记录在 Portal 的‘系统维护’。",
-  worker_empty_reply: "这次服务没有取得有效回应，任务已自动结束，不会继续占用。请重新 @我；技术详情只记录在 Portal 的‘系统维护’。",
+  worker_error: "内部执行异常，任务已释放。请到 Portal 的‘系统维护’查看诊断记录。",
+  worker_http_error: "内部处理接口返回非成功状态，任务已结束。请到 Portal 的‘系统维护’查看诊断记录。",
+  worker_timeout: "处理链路响应超时，任务已释放；不会继续占用。请稍后重试。",
+  worker_empty_reply: "模型或处理链没有返回有效内容，任务已结束。请重新 @我。",
   worker_no_reply: "这次处理没有产生回复，任务已结束。开发者可在 Portal 的‘系统维护’查看触发原因。",
-  send_failed: "回复已经生成，但 WebSocket 与 HTTP 备用发送都失败。请检查 NapCat 连接、Access Token 与发送权限。",
+  send_failed: "回答已经生成，但 NapCat／OneBot 的 WebSocket 与 HTTP 备用发送都失败。请检查连接、Token 与群发送权限。",
   uncaught_error: "本次处理发生未预期错误，任务已释放。请到 Portal 查看最新错误记录后重试。"
 });
+
+function classifyOperationalFailure(errorLike, options = {}) {
+  const status = Number(options.status || 0);
+  const disposition = String(options.disposition || "");
+  const source = [
+    String(errorLike?.message || errorLike || ""),
+    String(options.preview || ""),
+    String(options.code || ""),
+    String(status || "")
+  ].join(" ");
+  const lower = source.toLowerCase();
+  let code = "INTERNAL_EXECUTION_ERROR";
+  let userText = EXPLICIT_REPLY_FAILURE_MESSAGES[disposition] || EXPLICIT_REPLY_FAILURE_MESSAGES.uncaught_error;
+  if (/api_keys?_missing|未配置.{0,20}(?:api|模型).{0,10}(?:key|金钥|密钥)|missing.{0,20}(?:api.?key|credential)/i.test(source)) {
+    code = "MODEL_CREDENTIALS_MISSING";
+    userText = "模型配置缺失：当前没有可用的 API Key，任务已停止。管理员请检查 Portal 的模型中心。";
+  } else if (status === 429 || /resource_exhausted|rate.?limit|too many requests|quota|额度不足|配额/i.test(source)) {
+    code = "MODEL_RATE_LIMITED";
+    userText = "模型服务触发限流或额度不足，当前请求已结束。请稍后重试；管理员可在 Portal 查看具体提供者。";
+  } else if (/abort|timeout|timed out|deadline|超时|超过时限/i.test(source) || disposition === "worker_timeout") {
+    code = "PROCESSING_TIMEOUT";
+    userText = "模型或内部处理响应超时，任务已释放，不会继续占用。请稍后重试。";
+  } else if (/d1|database|sqlite|sql_|sql error|资料库|数据库|db_get|db_put/i.test(source)) {
+    code = "DATABASE_ERROR";
+    userText = "资料库读写异常，系统无法安全完成这次处理，任务已停止。管理员请检查 Portal 的 D1 状态。";
+  } else if (/napcat|onebot|websocket|no active websocket|rpc.*(?:fail|error)|send_(?:group|private)_msg/i.test(source) || disposition === "send_failed") {
+    code = "NAPCAT_CONNECTION_ERROR";
+    userText = disposition === "send_failed"
+      ? EXPLICIT_REPLY_FAILURE_MESSAGES.send_failed
+      : "NapCat／OneBot 连接异常，系统无法完成消息收发。请检查 WebSocket、Access Token 与机器人在线状态。";
+  } else if (/gemini|gemma|deepseek|workers.?ai|model|generatecontent/i.test(source)) {
+    code = "MODEL_PROVIDER_ERROR";
+    userText = "模型服务当前不可用，且后备模型也未成功完成回答。请稍后重试；具体提供者错误只记录在 Portal。";
+  } else if ([401, 403].includes(status) || /unauthorized|forbidden|鉴权|权限验证失败/i.test(source)) {
+    code = "INTERNAL_AUTH_ERROR";
+    userText = "内部鉴权或权限配置异常，系统已拒绝继续处理。管理员请检查 Worker 与 Durable Object 配置。";
+  } else if (disposition === "worker_empty_reply") {
+    code = "EMPTY_MODEL_REPLY";
+    userText = EXPLICIT_REPLY_FAILURE_MESSAGES.worker_empty_reply;
+  } else if ([502, 503, 504].includes(status)) {
+    code = "UPSTREAM_UNAVAILABLE";
+    userText = "上游服务暂时不可用，系统已结束本次任务。请稍后重试；具体上游与状态记录在 Portal。";
+  } else if (status >= 500) {
+    code = "INTERNAL_HTTP_ERROR";
+    userText = "内部处理接口发生服务器错误，任务已结束。管理员可在 Portal 查看对应诊断记录。";
+  }
+  const failureId = String(options.failureId || "").trim();
+  if (failureId) userText += `
+诊断编号：${failureId}`;
+  return { code, userText, raw: source.slice(0, 1000), lower };
+}
 
 const AFFINITY_DEFAULTS = Object.freeze({
   fixedBase: 50,
@@ -3240,11 +3293,19 @@ ${deepseekContextSummary}`;
       // ==========================================
       // 🔄 Gemini / DeepSeek 混合路由
       // ==========================================
+      const replaceThinkingStatus = async phase => {
+        if (!botMentioned || isAutoInterject) return;
+        const labels = { searching: "正在搜索...", organizing: "正在整理...", thinking: "正在思考..." };
+        const text = labels[String(phase || "")] || "正在思考...";
+        await clearRegisteredThinkingIndicators(env, { isGroup, groupId: currentGroupId, userId }, activeThinkingMessageId ? [activeThinkingMessageId] : []).catch(() => null);
+        activeThinkingMessageId = await sendThinkingIndicator(env, { isGroup, groupId: currentGroupId, userId, text }).catch(() => null);
+      };
       let finalReply = "";
       let success = false;
       let baseText = "";
       let usedModel = "";
       let usedProvider = "";
+      let generationError = null;
       let searchInfo = { required: false, attempted: false, performed: false, query: "", context: "", sources: [], queries: [], provider: "", model: "", error: "" };
       const modelPref = await dbGet(env, `model_pref:${currentGroupId || 'private'}:${userId}`) || 'auto';
       if (standaloneTimeQuestion) {
@@ -3259,7 +3320,8 @@ ${deepseekContextSummary}`;
             fastChat: isFastAcknowledgement,
             hasMedia: Boolean(loadedImage || voiceUrl || voiceFile || videoUrl || videoFile),
             visionRequest: loadedImage,
-            userId, groupId: currentGroupId, isDeveloper, signal: request.signal
+            userId, groupId: currentGroupId, isDeveloper, signal: request.signal,
+            onSearchStatus: replaceThinkingStatus
           });
           baseText = String(generated?.text || '').trim();
           usedModel = generated?.model || 'unknown';
@@ -3277,12 +3339,15 @@ ${deepseekContextSummary}`;
             error: String(generated?.searchError || "")
           };
           success = Boolean(baseText);
+          if (searchInfo.required || searchInfo.attempted) await replaceThinkingStatus("thinking");
         } catch (e) {
+          generationError = e;
           console.error('Hybrid generation failed:', e);
         }
       }
 
-      if (baseText && aiReplyPromisesFutureSearch(baseText)) {
+      const replyNeedsSearchRecovery = baseText && (aiReplyPromisesFutureSearch(baseText) || (!searchInfo.performed && aiReplySignalsUncertainty(baseText)));
+      if (replyNeedsSearchRecovery) {
         const recovered = await enforceExecutedSearchForReply(env, {
           text: baseText,
           searchInfo,
@@ -3290,7 +3355,9 @@ ${deepseekContextSummary}`;
           models: chatModels,
           finalStylePrompt,
           contents,
-          signal: request.signal
+          signal: request.signal,
+          force: aiReplySignalsUncertainty(baseText),
+          onSearchStatus: replaceThinkingStatus
         });
         baseText = String(recovered.text || "").trim();
         const recoveredSearch = recovered.searchInfo || {};
@@ -3321,9 +3388,10 @@ ${deepseekContextSummary}`;
         ctx.waitUntil(dbPut(env, 'STAT_TOTAL_CALLS', String(totalCalls + 1)));
         ctx.waitUntil(dbPut(env, 'STAT_LAST_MODEL', `${usedProvider}:${usedModel}`));
       } else {
-        ctx.waitUntil(writeAiDecisionLog(env, { ...aiDecisionBase, decision: "error", reason: "all_models_failed", triggerType, interjectJudgement, contextMessageCount: groupConversationLogs.length, contextSummaryProvider: longGroupContext?.summaryProvider || "" }));
+        const classified = classifyOperationalFailure(generationError || searchInfo.error || "ALL_MODELS_FAILED", { disposition: "worker_error" });
+        ctx.waitUntil(writeAiDecisionLog(env, { ...aiDecisionBase, decision: "error", reason: "all_models_failed", triggerType, interjectJudgement, failureCode: classified.code, failureDetail: String(generationError?.message || generationError || searchInfo.error || "ALL_MODELS_FAILED").slice(0, 500), contextMessageCount: groupConversationLogs.length, contextSummaryProvider: longGroupContext?.summaryProvider || "" }));
         if (isAutoInterject) return new Response(null, { status: 204 });
-        return jsonReply(`${atSender}暂时无法完成回复，请稍后再试。`);
+        return jsonReply(`${atSender}${classified.userText}`);
       }
 
       if (isAutoInterject && /^\s*\[SKIP\]\s*$/i.test(baseText)) {
@@ -3430,9 +3498,10 @@ ${deepseekContextSummary}`;
       console.error("全局严重错误:", err);
       await clearThinkingIndicator();
       ctx.waitUntil(writeSystemError(env, err, { url: request.url }));
+      const classified = classifyOperationalFailure(err, { disposition: "uncaught_error" });
       const fallbackText = body?.message_type === "group"
-        ? `[CQ:at,qq=${String(body?.user_id || "")}] 处理这条消息时出现异常，请稍后再试。`
-        : "处理这条消息时出现异常，请稍后再试。";
+        ? `[CQ:at,qq=${String(body?.user_id || "")}] ${classified.userText}`
+        : classified.userText;
       return new Response(JSON.stringify({ reply: toSimplifiedChinese(fallbackText), record_reply: false, reply_kind: "system_error" }), {
         status: 200,
         headers: { "Content-Type": "application/json; charset=utf-8" }
@@ -5646,7 +5715,8 @@ function searchRequirement(text) {
   const namedEntitySignal = /《[^》]{2,}》|[A-Za-z][A-Za-z0-9 _-]{3,}|(?:游戏|遊戲|作品|小说|小說|动漫|動漫|漫画|漫畫|公司|人物|角色|组织|組織|学校|學校|品牌|型号|型號)\s*[「『“"]?[^，。！？!?]{2,}/i.test(source);
   const nicheRelationship = /(?:在|關於|关于).{0,80}(?:中|裡|里).{0,80}(?:谁|誰|关系|關係|是谁的|是誰的)|(?:谁|誰).{0,30}(?:的谁|的誰|什么关系|什麼關係)/i.test(source);
   const niche = source.length <= 500 && factualQuestion && (namedEntitySignal || nicheRelationship);
-  return { needed: explicit || fresh || niche, explicit, niche };
+  const versionSensitiveMechanic = source.length <= 500 && factualQuestion && /(?:Minecraft|我的世界|Java\s*版|基岩版|附魔|药水|藥水|装备|裝備|伤害|傷害|燃烧|燃燒|持续时间|持續時間|游戏机制|遊戲機制|版本差异|版本差異|模组|模組|技能机制|技能機制)/i.test(source);
+  return { needed: explicit || fresh || niche || versionSensitiveMechanic, explicit, niche, versionSensitiveMechanic };
 }
 
 function aiReplyPromisesFutureSearch(text) {
@@ -5654,11 +5724,20 @@ function aiReplyPromisesFutureSearch(text) {
   return /(?:我(?:得|要|会|會|先|需要)(?:赶紧|趕緊)?(?:去)?(?:查一下|查查|搜索一下|搜尋一下|检索一下|檢索一下|翻翻资料|翻翻資料|确认一下|確認一下)|等我(?:一下|查完|检索|檢索)|稍后|稍後|马上回来|馬上回來|查完再告诉你|查完再告訴你|回来告诉你|回來告訴你)/i.test(source);
 }
 
-async function enforceExecutedSearchForReply(env, { text, searchInfo, query, models, finalStylePrompt, contents, signal = null }) {
+function aiReplySignalsUncertainty(text) {
+  const source = String(text || "");
+  return /(?:我不确定|我不確定|无法确定|無法確定|资料不足|資料不足|没有可靠资料|沒有可靠資料|据我所知|據我所知|印象中|我记得|我記得|可能需要查证|可能需要查證|需要进一步确认|需要進一步確認|不敢确定|不敢確定)/i.test(source);
+}
+
+async function enforceExecutedSearchForReply(env, { text, searchInfo, query, models, finalStylePrompt, contents, signal = null, force = false, onSearchStatus = null }) {
   const baseText = String(text || "").trim();
-  if (!aiReplyPromisesFutureSearch(baseText)) return { text: baseText, searchInfo };
+  if (!force && !aiReplyPromisesFutureSearch(baseText)) return { text: baseText, searchInfo };
   let search = searchInfo || {};
-  if (!search.performed) search = await buildSharedSearchContext(env, { query, models, signal, force: true });
+  if (!search.performed) {
+    if (typeof onSearchStatus === "function") await onSearchStatus("searching").catch(() => null);
+    search = await buildSharedSearchContext(env, { query, models, signal, force: true });
+    if (typeof onSearchStatus === "function") await onSearchStatus("organizing").catch(() => null);
+  }
   if (!search.performed || !search.context) {
     return {
       text: `这个问题需要查证，但我这次没有成功取得可验证的联网检索结果，因此不能假装已经去查，也不会让你空等。请稍后重试。`,
@@ -5679,6 +5758,7 @@ async function enforceExecutedSearchForReply(env, { text, searchInfo, query, mod
     });
     let groundedText = appendSearchSources(result.text, search.sources || []);
     if (aiReplyPromisesFutureSearch(groundedText)) groundedText = appendSearchSources(search.context, search.sources || []);
+    if (typeof onSearchStatus === "function") await onSearchStatus("thinking").catch(() => null);
     return { text: groundedText, searchInfo: { ...search, required: true, performed: true } };
   } catch (error) {
     return { text: appendSearchSources(search.context, search.sources || []), searchInfo: { ...search, required: true, performed: true, recoveryError: String(error?.message || error) } };
@@ -5807,10 +5887,21 @@ async function generateHybridReply(env, args) {
   const allowPaidEmergencyFallback = envFlag(env.DEEPSEEK_EMERGENCY_FALLBACK, true);
   const searchState = searchRequirement(args.cleanText);
   let sharedSearchPromise = null;
+  let searchStatusStarted = false;
+  let searchStatusFinished = false;
+  const reportSearchStatus = async phase => {
+    if (typeof args.onSearchStatus !== "function") return;
+    try { await args.onSearchStatus(phase); } catch (error) { console.warn("search status update skipped:", error?.message || error); }
+  };
   const getSharedSearch = async () => {
     if (args.hasMedia) return { required: false, explicit: false, attempted: false, performed: false, query: args.cleanText, context: "", sources: [], searchQueries: [], provider: "", model: "", error: "media_request" };
-    if (!sharedSearchPromise) sharedSearchPromise = buildSharedSearchContext(env, { query: args.cleanText, models: args.chatModels, signal: args.signal });
-    return sharedSearchPromise;
+    if (!sharedSearchPromise) {
+      if (searchState.needed && !searchStatusStarted) { searchStatusStarted = true; await reportSearchStatus("searching"); }
+      sharedSearchPromise = buildSharedSearchContext(env, { query: args.cleanText, models: args.chatModels, signal: args.signal });
+    }
+    const result = await sharedSearchPromise;
+    if (searchState.needed && !searchStatusFinished) { searchStatusFinished = true; await reportSearchStatus("organizing"); }
+    return result;
   };
   const mergeSearchPrompt = (prompt, search) => {
     if (search?.context) return `${prompt}\n\n【独立联网搜索结果】\n${search.context}\n\n回答时只能将以上检索结果当作实时事实依据；无法由资料支持的部分必须说明不确定。`;
@@ -11516,6 +11607,48 @@ async function handleOpsPortalApi(request, env, url, path, body, authed) {
   const groupId = String(authed.groupId || "");
   if (!groupId) return jsonResponse({ ok: false, message: "请先选择群组。" }, 400);
 
+  if (request.method === "POST" && path === "/ops/action") {
+    if (!(authed.permissions?.groupOps || authed.permissions?.nativeAdmin || authed.permissions?.developer || isDeveloperId(env, authed.qq))) {
+      return jsonResponse({ ok: false, message: "缺少群操作权限。" }, 403);
+    }
+    const action = String(body.action || "");
+    const target = String(body.qq || "").replace(/\D/g, "");
+    const proposedActions = ["mute", "unmute", "kick", "whole_mute", "whole_unmute", "set_admin", "unset_admin"];
+    if (!proposedActions.includes(action)) return jsonResponse({ ok: false, message: "不支持的待确认操作。" }, 400);
+    if (["set_admin", "unset_admin"].includes(action) && !(await isBotVerifiedGroupOwner(env, groupId))) {
+      return jsonResponse({ ok: false, message: "机器人账号当前不是本群群主，真正 QQ 管理员任免功能不可用。" }, 403);
+    }
+    if (moderationActionNeedsTarget(action) && !target) return jsonResponse({ ok: false, message: "请输入目标 QQ。" }, 400);
+    const member = target ? await getGroupMemberSafe(env, groupId, target) : null;
+    const actorMember = await getGroupMemberSafe(env, groupId, authed.qq);
+    const actorName = actorMember?.card || actorMember?.nickname || actorMember?.name || authed.qq;
+    const proposal = await createModerationProposal(env, {
+      groupId,
+      actorId: authed.qq,
+      actorName,
+      actorRole: isDeveloperId(env, authed.qq) ? "developer" : authed.role,
+      action,
+      targetId: target,
+      targetName: member?.card || member?.nickname || target,
+      targetRole: member?.role || "member",
+      durationSeconds: action === "mute" ? Math.max(60, parseDurationSeconds(String(body.duration || "10分"))) : 0,
+      sourceText: `Portal 提出 ${moderationActionLabel(action)}`,
+      classifierReason: "Portal 手动确认单",
+      reason: String(body.reason || "").trim(),
+      messageId: ""
+    });
+    const notification = await notifyModerationProposalGroup(env, proposal);
+    return jsonResponse({
+      ok: true,
+      pendingConfirmation: true,
+      proposal: await readJson(env, `moderation:proposal:${proposal.id}`, proposal),
+      notification,
+      message: notification.ok
+        ? `已建立待确认操作 ${proposal.id}，并已通知当前群。尚未执行。`
+        : `已建立待确认操作 ${proposal.id}，但群内通知发送失败：${notification.error}`
+    });
+  }
+
   if (request.method === "GET" && path === "/ops/bootstrap") {
     const gate = await opsRequire(env, authed, "operations.view");
     if (!gate.ok) return gate.response;
@@ -13142,51 +13275,6 @@ ${summary}`.slice(0, 4000),
     return jsonResponse(result, result.ok ? 200 : 403);
   }
 
-  if (request.method === "POST" && path === "/ops/action") {
-    if (!(permissions.groupOps || portalIsDeveloper)) return jsonResponse({ ok: false, message: "缺少群操作权限。" }, 403);
-    const action = String(body.action || "");
-    const target = String(body.qq || "").replace(/\D/g, "");
-    const proposedActions = ["mute", "unmute", "kick", "whole_mute", "whole_unmute", "set_admin", "unset_admin"];
-    if (proposedActions.includes(action)) {
-      if (["set_admin", "unset_admin"].includes(action) && !(await isBotVerifiedGroupOwner(env, groupId))) {
-        return jsonResponse({ ok: false, message: "机器人账号当前不是本群群主，真正 QQ 管理员任免功能不可用。" }, 403);
-      }
-      if (moderationActionNeedsTarget(action) && !target) return jsonResponse({ ok: false, message: "请输入目标 QQ。" }, 400);
-      const member = target ? await getGroupMemberSafe(env, groupId, target) : null;
-      const actorMember = await getGroupMemberSafe(env, groupId, authed.qq);
-      const actorName = actorMember?.card || actorMember?.nickname || actorMember?.name || authed.qq;
-      const proposal = await createModerationProposal(env, {
-        groupId,
-        actorId: authed.qq,
-        actorName,
-        actorRole: portalIsDeveloper ? "developer" : role,
-        action,
-        targetId: target,
-        targetName: member?.card || member?.nickname || target,
-        targetRole: member?.role || "member",
-        durationSeconds: action === "mute" ? Math.max(60, parseDurationSeconds(String(body.duration || "10分"))) : 0,
-        sourceText: `Portal 提出 ${moderationActionLabel(action)}`,
-        classifierReason: "Portal 手动确认单",
-        reason: String(body.reason || "").trim(),
-        messageId: ""
-      });
-      const notification = await notifyModerationProposalGroup(env, proposal);
-      return jsonResponse({
-        ok: true,
-        pendingConfirmation: true,
-        proposal: await readJson(env, `moderation:proposal:${proposal.id}`, proposal),
-        notification,
-        message: notification.ok
-          ? `已建立待确认操作 ${proposal.id}，并已通知当前群。尚未执行。`
-          : `已建立待确认操作 ${proposal.id}，但群内通知发送失败：${notification.error}`
-      });
-    }
-    let result;
-    if (action === "rename_group" && String(body.value || "").trim()) result = await runOneBotGroupOperation(env, "set_group_name", { group_id: numericId(groupId), group_name: String(body.value).trim().slice(0, 60) }, { actorId: authed.qq, groupId, action: "网页改群名" });
-    else if (action === "set_card" && target) result = await runOneBotGroupOperation(env, "set_group_card", { group_id: numericId(groupId), user_id: numericId(target), card: String(body.value || "").trim().slice(0, 60) }, { actorId: authed.qq, groupId, targetId: target, action: "网页改名片" });
-    else return jsonResponse({ ok: false, message: "参数不完整或不支持的操作。" }, 400);
-    return jsonResponse({ ok: result.ok, message: result.ok ? "操作已执行。" : `操作失败：${result.error}` }, result.ok ? 200 : 502);
-  }
 
   if (path.startsWith("/admin/") && !(permissions.aiAdmin || permissions.developer)) return jsonResponse({ ok: false, message: "Error 403：缺少 AI 管理权限。" }, 403);
   if (request.method === "GET" && path === "/admin/state") {
@@ -14537,11 +14625,14 @@ export class OneBotHub {
     const key = `${this.explicitReplyQuestionId(body)}:${String(disposition || "unknown")}`;
     if (this.explicitReplyFailureNotified.has(key)) return;
 
-    let text = EXPLICIT_REPLY_FAILURE_MESSAGES[disposition] || EXPLICIT_REPLY_FAILURE_MESSAGES.uncaught_error;
-    // HTTP 状态只写入系统维护记录，不向普通群友暴露技术码或环境细节。
-    if ((disposition === "worker_error" || disposition === "uncaught_error") && extra.error) {
-      text += `（${String(extra.error).slice(0, 160)}）`;
-    }
+    const classified = classifyOperationalFailure(extra.error || extra.responsePreview || disposition, {
+      disposition,
+      status: extra.httpStatus,
+      preview: extra.responsePreview,
+      code: extra.errorCode,
+      failureId: extra.failureId
+    });
+    let text = classified.userText;
 
     this.explicitReplyFailureNotified.add(key);
     if (this.explicitReplyFailureNotified.size > 300) this.explicitReplyFailureNotified.clear();
@@ -14569,7 +14660,7 @@ export class OneBotHub {
       ...extra
     };
     await this.state.storage.put(key, next);
-    if (["worker_error", "worker_http_error", "worker_empty_reply", "worker_no_reply", "send_failed"].includes(String(disposition))) {
+    if (["worker_error", "worker_http_error", "worker_timeout", "worker_empty_reply", "worker_no_reply", "send_failed"].includes(String(disposition))) {
       await this.notifyExplicitReplyFailureOnce(body, String(disposition), extra)
         .catch(error => console.error("explicit reply failure notice failed", error));
     }
@@ -15158,7 +15249,8 @@ export class OneBotHub {
         await writeSystemError(this.env, new Error(`INTERNAL_WORKER_HTTP_${internalResponse.status}`), {
           failureId, groupId: String(body.group_id || ""), userId: String(body.user_id || ""), messageId: String(body.message_id || ""), responsePreview, retryAttempted, firstFailure
         }).catch(() => {});
-        await this.recordIngress(body, "worker_http_error", { explicit: eventHasBotMention(body), httpStatus: internalResponse.status, responsePreview, retryAttempted, firstFailure, failureId, internalTransportMode: "direct_loopback" }).catch(() => {});
+        const classifiedFailure = classifyOperationalFailure(payload?.message || payload?.error || responsePreview, { disposition: "worker_http_error", status: internalResponse.status, preview: responsePreview, failureId });
+        await this.recordIngress(body, "worker_http_error", { explicit: eventHasBotMention(body), httpStatus: internalResponse.status, responsePreview, retryAttempted, firstFailure, failureId, errorCode: classifiedFailure.code, internalTransportMode: "direct_loopback" }).catch(() => {});
         return;
       }
       if (!payload?.reply) {
