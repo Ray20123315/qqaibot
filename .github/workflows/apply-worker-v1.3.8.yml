@@ -29,12 +29,14 @@ jobs:
           grep -F 'const VERSION = "1.3.7";' worker.js
           grep -F 'QQAI_V1_R37_PORTAL_SIMPLIFIED_MARKER' worker.js
           cat \
-            .qqai-patches/v1.3.8/chunk-00 \
-            .qqai-patches/v1.3.8/chunk-01 \
+            .qqai-patches/v1.3.8b/chunk-00 \
+            .qqai-patches/v1.3.8b/chunk-01 \
+            .qqai-patches/v1.3.8b/chunk-02 \
+            .qqai-patches/v1.3.8b/chunk-03 \
             > /tmp/worker-v1.3.8.patch.gz.b64
-          echo '27a81dc4100c153c21ca91715a249a31a714db6b33d9e944da22e8db9b83752d  /tmp/worker-v1.3.8.patch.gz.b64' | sha256sum -c -
+          echo 'e83c912b371b5e8ae2a35662cdda416644091f9059a33b804acbe843d6b77dbe  /tmp/worker-v1.3.8.patch.gz.b64' | sha256sum -c -
           base64 -d /tmp/worker-v1.3.8.patch.gz.b64 | gzip -d > /tmp/worker-v1.3.8.patch
-          echo 'e30511293cf6e0049683246c6c1e9dbd18be7888c5b9f89194675758b9baf9d3  /tmp/worker-v1.3.8.patch' | sha256sum -c -
+          echo '5f039a5243113b401accfa16c90901ee639fe6e129aaffb99fb97af38c97c5f6  /tmp/worker-v1.3.8.patch' | sha256sum -c -
           patch --dry-run -p1 < /tmp/worker-v1.3.8.patch
           patch -p1 < /tmp/worker-v1.3.8.patch
           echo 'efad511bcf761cbeb7e6b9e38ac747c2fa90b092a0c3a19333a3d3a6568d6531  worker.js' | sha256sum -c -
@@ -87,7 +89,7 @@ jobs:
         run: |
           set -euo pipefail
           rm -f .qqai-pr-trigger-v1.3.8
-          rm -rf .qqai-patches/v1.3.8
+          rm -rf .qqai-patches/v1.3.8 .qqai-patches/v1.3.8b
           rm -f .github/workflows/apply-worker-v1.3.8.yml
           git config user.name 'qqai-updater'
           git config user.email 'actions@users.noreply.github.com'
