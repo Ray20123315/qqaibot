@@ -1,6 +1,9 @@
 name: Apply worker v1.5.2 final stabilization
 
 on:
+  push:
+    branches: [worker-v1.5.2-final-trigger]
+    paths: ['.qqai-pr-trigger-v1.5.2']
   pull_request:
     branches: [main]
     paths: ['.qqai-pr-trigger-v1.5.2']
