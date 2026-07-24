@@ -24,39 +24,25 @@ jobs:
           fetch-depth: 0
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
 
-      - name: Verify v1.5.2 baseline
+      - name: Reconstruct exact v1.5.3 worker
         shell: bash
         run: |
           set -euo pipefail
           grep -F 'const VERSION = "1.5.2";' worker.js
           echo '0c854a29a71992901362ad30b680cd46ba84b30fcf4e322434e2ab062bbc9aa7  worker.js' | sha256sum -c -
-
-      - name: Decode Base64 patch wrapper
-        shell: bash
-        run: |
-          set -euo pipefail
-          wc -c .qqai-patches/v1.5.3/worker.patch.gz.b64
-          base64 -d .qqai-patches/v1.5.3/worker.patch.gz.b64 > /tmp/worker-v1.5.3.patch.gz
-
-      - name: Validate gzip patch wrapper
-        shell: bash
-        run: |
-          set -euo pipefail
-          gzip -t /tmp/worker-v1.5.3.patch.gz
-          gzip -dc /tmp/worker-v1.5.3.patch.gz > /tmp/worker-v1.5.3.patch
-
-      - name: Verify decoded patch hash
-        shell: bash
-        run: |
-          set -euo pipefail
-          echo '1d0e375751f9d3cf8f188aa2b6c59de64e5920a2687f5ec03ffca9e23e70bd8a  /tmp/worker-v1.5.3.patch' | sha256sum -c -
-
-      - name: Apply exact v1.5.3 patch
-        shell: bash
-        run: |
-          set -euo pipefail
-          git apply --check /tmp/worker-v1.5.3.patch
-          git apply /tmp/worker-v1.5.3.patch
+          cat .qqai-patches/v1.5.3/lineops-* > /tmp/worker-v1.5.3.lineops.json.gz.b64
+          echo '0ecfde1cdf5ef6691e575108e673d3a5fbca04ef9f43f7b34e943b85402b87f3  /tmp/worker-v1.5.3.lineops.json.gz.b64' | sha256sum -c -
+          python - <<'PY'
+          from pathlib import Path
+          import base64, gzip, hashlib, json
+          source=Path('worker.js').read_text().splitlines(keepends=True)
+          payload=json.loads(gzip.decompress(base64.b64decode(Path('/tmp/worker-v1.5.3.lineops.json.gz.b64').read_bytes())))
+          assert hashlib.sha256(''.join(source).encode()).hexdigest()==payload['baseline_sha256']
+          for i1,i2,new_lines in reversed(payload['ops']): source[i1:i2]=new_lines
+          output=''.join(source)
+          assert hashlib.sha256(output.encode()).hexdigest()==payload['final_sha256']
+          Path('worker.js').write_text(output)
+          PY
           echo '5e19cfaa3c4049cb4d8884e04b5f68c68463c0b8377f244ffc7e047100a24c29  worker.js' | sha256sum -c -
 
       - name: Validate standalone module and Portal
