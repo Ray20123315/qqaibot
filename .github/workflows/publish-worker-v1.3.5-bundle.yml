@@ -1,0 +1,60 @@
+name: Publish worker v1.3.5 delivery bundle
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - '.qqai-publish-v1.3.5'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: publish-worker-v1.3.5-bundle
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Validate and package workers
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --check worker.js
+          node --check worker_v1.3.4_previous.js
+          grep -F 'HOTFIX_VERSION = "1.3.5"' worker.js
+          grep -F 'const VERSION = "1.3.4";' worker_v1.3.4_previous.js
+          tar -czf qqaibot_worker_v1.3.5_bundle.tar.gz worker.js worker_v1.3.4_previous.js
+          sha256sum worker.js worker_v1.3.4_previous.js qqaibot_worker_v1.3.5_bundle.tar.gz > qqaibot_worker_v1.3.5_SHA256SUMS.txt
+
+      - name: Publish GitHub release asset
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh release delete worker-v1.3.5-hotfix --cleanup-tag -y || true
+          gh release create worker-v1.3.5-hotfix \
+            qqaibot_worker_v1.3.5_bundle.tar.gz \
+            qqaibot_worker_v1.3.5_SHA256SUMS.txt \
+            --target "$GITHUB_SHA" \
+            --title 'QQAIBot worker v1.3.5 hotfix bundle' \
+            --notes 'Contains the active worker.js v1.3.5 wrapper and the preserved worker_v1.3.4_previous.js.'
+
+      - name: Remove one-shot publisher
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -f .qqai-publish-v1.3.5
+          rm -f .github/workflows/publish-worker-v1.3.5-bundle.yml
+          git config user.name 'qqai-updater'
+          git config user.email 'actions@users.noreply.github.com'
+          git add -A .qqai-publish-v1.3.5 .github/workflows/publish-worker-v1.3.5-bundle.yml
+          git commit -m 'Remove worker v1.3.5 bundle publisher'
+          git push origin HEAD:main
