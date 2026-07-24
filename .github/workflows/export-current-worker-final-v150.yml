@@ -1,0 +1,26 @@
+name: Export current worker final merge base
+on:
+  push:
+    branches: [main]
+    paths: ['.qqai-export-current-final-trigger']
+permissions:
+  contents: read
+jobs:
+  export:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify and stage source
+        run: |
+          set -euo pipefail
+          node --check worker.js
+          sha256sum worker.js > worker.sha256
+          git hash-object worker.js > worker.gitblob
+      - uses: actions/upload-artifact@v4
+        with:
+          name: current-worker-final-merge-base
+          path: |
+            worker.js
+            worker.sha256
+            worker.gitblob
+          retention-days: 1
