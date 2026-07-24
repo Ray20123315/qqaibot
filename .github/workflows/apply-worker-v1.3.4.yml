@@ -1,25 +1,26 @@
 name: Apply worker v1.3.4 search activities natural commands
 
 on:
-  workflow_dispatch:
-  push:
+  pull_request:
     branches: [main]
-    paths:
-      - '.qqai-run-v1.3.4'
+    types: [opened, synchronize, reopened]
+  workflow_dispatch:
 
 permissions:
   contents: write
 
 concurrency:
-  group: apply-worker-v1.3.4
+  group: apply-worker-v1.3.4-pr
   cancel-in-progress: false
 
 jobs:
   apply:
+    if: github.event_name == 'workflow_dispatch' || github.head_ref == 'v1.3.4-apply'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
+          ref: v1.3.4-apply
           fetch-depth: 0
 
       - name: Rebuild final patch
@@ -51,19 +52,7 @@ jobs:
           assert len(scripts) >= 2
           for i, script in enumerate(scripts):
               Path(f'/tmp/portal-script-{i}.js').write_text(script, encoding='utf-8')
-          required = [
-              'const VERSION = "1.3.4";',
-              'QQAI_V1_R34_MARKER',
-              'enforceExecutedSearchForReply',
-              '检索执行纪律',
-              'activity.announce',
-              'activity.mention_all',
-              'classifyNaturalLanguageCommandIntent',
-              'normalizeNaturalLanguageCommandText',
-              '/ops/activity/announce',
-              'announceOnCreate',
-              'announceMode'
-          ]
+          required = ['const VERSION = "1.3.4";', 'QQAI_V1_R34_MARKER', 'enforceExecutedSearchForReply', '检索执行纪律', 'activity.announce', 'activity.mention_all', 'classifyNaturalLanguageCommandIntent', 'normalizeNaturalLanguageCommandText', '/ops/activity/announce', 'announceOnCreate', 'announceMode']
           missing = [item for item in required if item not in s]
           assert not missing, missing
           assert '在LimbusCompany中李恩是良秀的谁' in s
@@ -71,19 +60,16 @@ jobs:
           for f in /tmp/portal-script-*.js; do node --check "$f"; done
           echo '04a71c196877c0344020f0a18ca854a3ee4112e8f3f25f4dd5f676d60a8e236b  worker.js' | sha256sum -c -
 
-      - name: Commit worker and remove temporary files
+      - name: Commit worker on update branch
         shell: bash
         run: |
           set -euo pipefail
-          rm -rf .qqai-patches/v1.3.3
-          rm -rf .qqai-patches/v1.3.4
-          rm -rf .qqai-patches/v1.3.4-final
-          rm -f .qqai-run-v1.3.3
-          rm -f .qqai-run-v1.3.4
+          rm -rf .qqai-patches/v1.3.3 .qqai-patches/v1.3.4 .qqai-patches/v1.3.4-final
+          rm -f .qqai-run-v1.3.3 .qqai-run-v1.3.4
           rm -f .github/workflows/apply-worker-v1.3.3.yml
           rm -f .github/workflows/apply-worker-v1.3.4.yml
           git config user.name 'qqai-updater'
           git config user.email 'actions@users.noreply.github.com'
           git add -A worker.js .qqai-patches .qqai-run-v1.3.3 .qqai-run-v1.3.4 .github/workflows
           git commit -m 'Update worker.js to v1.3.4 search activities natural commands'
-          git push origin HEAD:main
+          git push origin HEAD:v1.3.4-apply
