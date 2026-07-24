@@ -1,4 +1,5 @@
-const VERSION = "1.4.0";
+const VERSION = "1.4.1";
+const QQAI_V1_R41_REPLY_SEMANTICS_RESTORE_MARKER = "QQAI_V1_R41_REPLY_SEMANTICS_RESTORE_MARKER";
 const QQAI_V1_R40_MAINTENANCE_LATENCY_INVITE_MARKER = "QQAI_V1_R40_MAINTENANCE_LATENCY_INVITE_MARKER";
 const QQAI_V1_R39_PRIVATE_GATE_SELF_SLASH_BANG_MARKER = "QQAI_V1_R39_PRIVATE_GATE_SELF_SLASH_BANG_MARKER";
 const QQAI_V1_R38_AFFINITY_MANUAL_CHECK_MARKER = "QQAI_V1_R38_AFFINITY_MANUAL_CHECK_MARKER";
@@ -5030,20 +5031,15 @@ function removeTextMentionTokens(text) {
 
 function buildReplyPlan({ isGroup, isAutoInterject, botMentioned, quotedMessageId, messageId, userId, selfId, selectedMentionIds = [], senderDnd, text }) {
   if (!isGroup) return { mode: "plain", text, mentionIds: [], replyId: "" };
-  let mentionIds = [...new Set((selectedMentionIds || []).map(String))]
+  const mentionIds = [...new Set((selectedMentionIds || []).map(String))]
     .filter(id => id && id !== String(selfId || "") && !(senderDnd && id === String(userId || "")));
   let replyId = "";
   let mode = mentionIds.length ? "mention_targets" : "plain";
 
-  if (!isAutoInterject && quotedMessageId) {
-    // 只有用户实际引用／回复消息时才发送 OneBot reply 段，避免部分 QQ 客户端显示「不支持的元素类型」。
-    replyId = String(messageId || quotedMessageId || "");
+  if (!isAutoInterject && (quotedMessageId || botMentioned)) {
+    // 保留原有 OneBot 引用回复语义；QQ 批量复制产生的“不支持的元素类型”只是复制占位文本。
+    replyId = String(messageId || "");
     mode = mentionIds.length ? "reply_targets" : "reply_only";
-  } else if (!isAutoInterject && botMentioned && !senderDnd) {
-    // 普通 @机器人提问改用真正的 @发送者，不再伪装成引用回复。
-    const senderId = String(userId || "");
-    if (senderId && senderId !== String(selfId || "") && !mentionIds.includes(senderId)) mentionIds.unshift(senderId);
-    mode = mentionIds.length ? "mention_targets" : "plain";
   }
   return { mode, text, mentionIds, replyId, quoteMessageId: replyId };
 }
@@ -14010,7 +14006,9 @@ export class OneBotHub {
     if (!text || /^(?:[!！]|\/!)/.test(text)) return "";
 
     const message = [];
-    // 思考提示只使用真正的 @，不附加 reply 段，避免部分客户端显示不支持元素。
+    if (body.message_id !== undefined && body.message_id !== null) {
+      message.push({ type: "reply", data: { id: String(body.message_id) } });
+    }
     if (body.user_id !== undefined && body.user_id !== null) {
       message.push({ type: "at", data: { qq: String(body.user_id) } });
       message.push({ type: "text", data: { text: " " } });
@@ -14507,8 +14505,8 @@ export class OneBotHub {
   }
 
   async sendQueueNotice(body, text) {
-    // 状态／错误提示使用真正的 @，不发送兼容性较差的 reply 消息段。
     const message = [
+      ...(body.message_id !== undefined && body.message_id !== null ? [{ type: "reply", data: { id: String(body.message_id) } }] : []),
       { type: "at", data: { qq: String(body.user_id || "") } },
       { type: "text", data: { text: ` ${toSimplifiedChinese(text)}` } }
     ];
