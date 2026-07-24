@@ -1,0 +1,29 @@
+name: Export worker inspect
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.qqai-inspect-trigger'
+
+permissions:
+  contents: read
+
+github-token: read
+
+jobs:
+  export:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Export current worker
+        run: |
+          cp worker.js worker-current.js
+          sha256sum worker-current.js > worker-current.SHA256SUMS.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: worker-current-source
+          path: |
+            worker-current.js
+            worker-current.SHA256SUMS.txt
+          retention-days: 1
