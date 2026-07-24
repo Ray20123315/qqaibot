@@ -1,0 +1,94 @@
+name: Apply worker v1.5.2 final stabilization
+
+on:
+  pull_request:
+    branches: [main]
+    paths: ['.qqai-pr-trigger-v1.5.2']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: apply-worker-v1.5.2
+  cancel-in-progress: false
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Reconstruct and apply exact patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          grep -F 'const VERSION = "1.5.1";' worker.js
+          echo 'dbb0fe773b663c61281d13b32397d08b595e4d291e3725430d0139488d5d6ca1  worker.js' | sha256sum -c -
+          cat .qqai-patches/v1.5.2/chunk-* >/tmp/worker-v1.5.2.patch.gz.b64
+          echo '6b615a715c119484a39ee4e63c66ad8c5a873260f21af064c18f3e3c68da391b  /tmp/worker-v1.5.2.patch.gz.b64' | sha256sum -c -
+          base64 -d /tmp/worker-v1.5.2.patch.gz.b64 | gzip -d >/tmp/worker-v1.5.2.patch
+          echo 'c660bc341c1fcadf1a231e878b6dc9590145d35ce2764ec6f154523f7046a310  /tmp/worker-v1.5.2.patch' | sha256sum -c -
+          git apply --check /tmp/worker-v1.5.2.patch
+          git apply /tmp/worker-v1.5.2.patch
+          echo '0c854a29a71992901362ad30b680cd46ba84b30fcf4e322434e2ab062bbc9aa7  worker.js' | sha256sum -c -
+
+      - name: Validate standalone module and Portal
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --check worker.js
+          cp worker.js /tmp/worker-v1.5.2.mjs
+          node -e "import('file:///tmp/worker-v1.5.2.mjs').then(m=>{if(!m.default||!m.OneBotHub)throw Error('missing exports')})"
+          ! grep -Eq '^[[:space:]]*import[[:space:]]' worker.js
+          python - <<'PY'
+          from pathlib import Path
+          from html.parser import HTMLParser
+          import re
+          s=Path('worker.js').read_text()
+          a=s.index('function getPortalHomePage(host)');a=s.index('String.raw`',a)+10;h=s[a:s.index('`);\n}',a)]
+          js=re.findall(r'<script(?: [^>]*)?>(.*?)</script>',h,re.S)
+          assert len(js)>=2
+          for i,x in enumerate(js):Path(f'/tmp/portal152-{i}.js').write_text(x)
+          class P(HTMLParser):
+            def __init__(self):super().__init__();self.ids=[]
+            def handle_starttag(self,t,a):self.ids += [v for k,v in a if k=='id']
+          p=P();p.feed(h)
+          assert len(p.ids)==len(set(p.ids)), 'duplicate portal ids'
+          for token in ['activeSpeakingStatus','activeSpeakingTest','loginPasswordPane','rememberLogin']:
+            assert token in p.ids, token
+          for token in ['const VERSION = "1.5.2";','QQAI_V1_R52_FINAL_STABILIZATION_MARKER','callGemmaDecision','/root/schedule-action','/schedules/delete','webhook_self_test','/admin/active-speaking-test','recordsNeverAutoDeleted: true','目前只有 ${samples.length}/${minimum} 条可用发言','Gemini 聊天优先','Gemma 审查优先']:
+            assert token in s, token
+          assert 'callGemmaText' not in s
+          assert s.count('async function deleteScheduleFromPortal(id)')==1
+          assert 'async function opsSaveSettings(){await loadOperations()' not in s
+          assert 'completed_and_deleted' not in s
+          PY
+          for f in /tmp/portal152-*.js; do node --check "$f"; done
+
+      - name: Run routing and regression tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          cp worker.js /tmp/worker-v1.5.2-ci.mjs
+          cat >>/tmp/worker-v1.5.2-ci.mjs <<'JS'
+          export { partitionGoogleApiKeys, modelHealthStatusLabel, modelCapabilityLabel, getBotGroupRole, opsAnnounceActivity, handlePortalApi, processDueSchedules, opsRuleSandbox };
+          JS
+          node .qqai-tests/v1.5.2/runtime.mjs
+
+      - name: Commit worker v1.5.2 to main
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -f .qqai-pr-trigger-v1.5.2
+          rm -rf .qqai-patches/v1.5.2 .qqai-tests/v1.5.2
+          rm -f .github/workflows/apply-worker-v1.5.2.yml
+          rm -f .qqai-export-current-final-trigger
+          rm -f .github/workflows/export-current-worker-final-v150.yml
+          git config user.name qqai-updater
+          git config user.email actions@users.noreply.github.com
+          git add -A
+          git commit -m 'Finalize schedules maintenance and diagnostics v1.5.2'
+          git push origin HEAD:main
