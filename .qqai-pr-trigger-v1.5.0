@@ -1,1 +1,1 @@
-validate worker v1.5.0 auth
+validate worker v1.5.0 auth retry 2
