@@ -38,6 +38,10 @@ jobs:
             echo 'apply=false' >> "$GITHUB_OUTPUT"
           fi
 
+      - name: Repair nested patch templates
+        if: steps.gate.outputs.apply == 'true'
+        run: node .qqai-meme-members/fix-patch.mjs
+
       - name: Apply meme and member console changes
         if: steps.gate.outputs.apply == 'true'
         shell: bash
