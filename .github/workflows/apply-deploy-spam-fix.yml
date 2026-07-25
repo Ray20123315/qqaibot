@@ -36,6 +36,10 @@ jobs:
             echo 'apply=false' >> "$GITHUB_OUTPUT"
           fi
 
+      - name: Repair patch insertion helpers
+        if: steps.gate.outputs.apply == 'true'
+        run: node .qqai-fix-deploy-spam/fix-patchers.mjs
+
       - name: Apply deployment fallback
         if: steps.gate.outputs.apply == 'true'
         run: node .qqai-fix-deploy-spam/patch-deploy.mjs
