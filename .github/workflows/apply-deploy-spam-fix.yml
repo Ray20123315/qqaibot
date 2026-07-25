@@ -44,6 +44,10 @@ jobs:
         if: steps.gate.outputs.apply == 'true'
         run: node .qqai-fix-deploy-spam/patch-spam.mjs
 
+      - name: Fix spam test scope
+        if: steps.gate.outputs.apply == 'true'
+        run: node .qqai-fix-deploy-spam/patch-test-fix.mjs
+
       - name: Apply release metadata
         if: steps.gate.outputs.apply == 'true'
         run: node .qqai-fix-deploy-spam/patch-meta.mjs
