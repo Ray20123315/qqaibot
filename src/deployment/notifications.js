@@ -214,7 +214,6 @@ async function processBuildEvent(env, event) {
 
   const seenKey = `deployment:seen:${record.buildUuid}:${record.kind}`;
   if (await kvGet(env, seenKey)) return { ignored: true, reason: "duplicate" };
-  await kvPut(env, seenKey, String(Date.now()));
 
   const latestStarted = parseJson(await kvGet(env, LATEST_STARTED_KEY), null);
   let stale = false;
