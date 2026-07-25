@@ -42,14 +42,26 @@ jobs:
       - name: Install dependencies
         run: npm install --ignore-scripts
       - name: Run regression checks
-        run: npm run check
+        id: regression
+        continue-on-error: true
+        run: npm run check > regression.log 2>&1
+      - name: Upload regression log
+        if: steps.regression.outcome == 'failure'
+        uses: actions/upload-artifact@v4
+        with:
+          name: v230-regression-log
+          path: regression.log
+          retention-days: 1
+      - name: Stop on regression failure
+        if: steps.regression.outcome == 'failure'
+        run: exit 1
       - name: Build the single Worker bundle
         run: npm run check:bundle
       - name: Commit clean validated candidate
         env:
           BRANCH: feature/portal-moderation-partner-v2.3.0
         run: |
-          rm -rf node_modules dist package-lock.json
+          rm -rf node_modules dist package-lock.json regression.log
           rm -f tools/apply-v230.mjs tools/fix-v230-script.mjs
           git show origin/main:.github/workflows/validate.yml > .github/workflows/validate.yml
           git config user.name github-actions[bot]
