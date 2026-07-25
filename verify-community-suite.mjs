@@ -19,8 +19,14 @@ assert(html.includes('AI 决策回放'), 'Decision replay UI must be present');
 const scripts = [...html.matchAll(/<script[^>]*>([\s\S]*?)<\/script>/gi)].map(match => match[1]);
 assert(scripts.length >= 2, 'Both member console and community suite browser clients must be generated');
 for (const [index, script] of scripts.entries()) {
-  try { new vm.Script(script, { filename: `portal-script-${index}.js` }); }
-  catch (error) { throw new Error(`Generated Portal script ${index} is invalid: ${error.message}`); }
+  try {
+    new vm.Script(script, { filename: `portal-script-${index}.js` });
+  } catch (error) {
+    fs.writeFileSync('portal-generated.html', html);
+    fs.writeFileSync(`portal-script-${index}.js`, script);
+    fs.writeFileSync('portal-script-error.log', `script=${index}\n${error.stack || error.message}\n`);
+    throw new Error(`Generated Portal script ${index} is invalid: ${error.message}`);
+  }
 }
 
 const members = fs.readFileSync('src/portal/members.js', 'utf8');
