@@ -1,15 +1,14 @@
 {
-  "version": "2.0.3",
+  "version": "2.0.4",
   "notificationPolicy": "latest-main-only-with-runtime-success-fallback",
   "queueDelivery": "mark-processed-after-success",
   "added": [
-    "部署成功通知的运行时自检备援",
-    "重复与高度相似消息的确定性刷屏检测"
+    "群规判断的联网流行梗、接龙与群内梗核查",
+    "管理员人工纠错后的群内梗学习记录",
+    "Portal 群友列表、历史消息、按秒禁言与管理解禁"
   ],
   "fixed": [
-    "未配置 Cloudflare Build Event Queue 时完全没有成功通知",
-    "群规为空时刷屏检测被提前跳过",
-    "单条变体消息重置连续计数导致漏判刷屏",
-    "确定性刷屏仍受 AI 置信度影响"
+    "达到重复门槛后直接处罚，导致流行梗和多人接龙被当作刷屏",
+    "管理员无法从 Portal 快速查看成员历史消息并直接解禁"
   ]
 }

@@ -95,7 +95,7 @@ const fallbackSuccess = await announceDeployedVersionFallback(fallbackEnv, t0 + 
 assert.equal(fallbackSuccess.ok, true, "Runtime fallback must announce a live version when Queue events are absent");
 const fallbackStatus = await getDeploymentStatusForViewer(fallbackEnv, viewer);
 assert.equal(fallbackStatus.status.kind, "succeeded");
-assert.equal(fallbackStatus.status.releaseVersion, "2.0.3");
+assert.equal(fallbackStatus.status.releaseVersion, "2.0.4");
 const fallbackDuplicate = await announceDeployedVersionFallback(fallbackEnv, t0 + 90000);
 assert.equal(fallbackDuplicate.reason, "already_announced");
 

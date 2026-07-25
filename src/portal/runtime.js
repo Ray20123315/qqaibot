@@ -15,6 +15,7 @@ import { fetchConversationAttachmentResponse, getForwardMessageSnapshot, getTaip
 import { OPS_CAPABILITIES, OPS_RECORD_TYPES, opsActiveRuleRecords, opsActivityParticipants, opsActivitySummary, opsAnalytics, opsAnnounceActivity, opsCapabilityDef, opsCleanupThinking, opsConsumeQuota, opsCreateScheduleFromSpec, opsDeleteRecord, opsDependencyCheck, opsEffectiveCapability, opsExecuteHandoff, opsFuseState, opsGetRecord, opsGetSettings, opsImpactPreview, opsInviteActivityParticipant, opsJoinActivity, opsLeaveActivity, opsListRecords, opsMemberSummary, opsModelMetrics, opsParticipantsKey, opsPermissionKey, opsPollVotesKey, opsPreviewMessage, opsPublishAnnouncement, opsPurgeRemovedRecordTypes, opsRecordKey, opsRecordQualityFeedback, opsRemovedType, opsRequire, opsResetFuse, opsRestoreSnapshot, opsRetentionCleanup, opsRoleRank, opsRuleConflictCheck, opsRuleSandbox, opsSaveRecord, opsSaveSettings, opsSchedulePreview, opsSendDailyDigest, opsSendDraftNow, opsSnapshotConfig, opsTaipeiDateKey, opsTaskAction, opsTaskCenter, opsTypeDef, opsVersionKey, opsVotePoll, opsWelcomePreview } from "../operations/runtime.js";
 import { appendPlatformTrace, enqueuePlatformJob, listPlatformFeatures, listPlatformJobs, listPlatformTraces, platformFeatureById, setPlatformFeature } from "../platform/runtime.js";
 import { PORTAL_SETTING_DEFINITIONS, authDbDelStrict, authDbPutStrict, base32Encode, createPortalPasswordRecord, decryptPortalAuthSecret, deleteMemoryVector, encryptPortalAuthSecret, extractGroupId, generateBackupCodes, generateSixDigitCode, getOneBotHub, getPortalSession, getUserQuota, hashBackupCode, isMemoryBanned, jsonResponse, migratePortalMemories, portalAuthEncryptionMaterial, portalRoleRank, portalSessionCookie, randomBytes, readCookie, readJson, readPortalAuthJson, readPortalSettingValue, resolvePortalRole, searchPortalVectors, sendOneBotAction, sendPortalVerificationMessage, sha256Hex, upsertMemoryVector, validatePortalPassword, verifyPortalPassword, verifyPortalVerificationCode, verifyTotpCode, writeMemoryAudit, writePortalSettingValue } from "./auth.js";
+import { handlePortalMemberApi } from "./members.js";
 import { cancelSchedule, countActiveSchedulesForUser, createScheduleRecord, deleteScheduleRecord, extractScheduleMentionIds, listUserSchedules, parseManagementScheduleAction, parseScheduleRequest, reviewScheduleWithGemma, reviseScheduleRecord, sanitizeAppealForReviewer, scheduleSpecFromRecord, skipScheduleOnce, voteAppeal, voteSchedule } from "../scheduler/runtime.js";
 import { envFlag, getFeatureFlag, getPrivateAccessMode, isGroupWhitelisted, numericId, setFeatureFlag } from "../security/network.js";
 
@@ -807,6 +808,9 @@ async function handlePortalApi(request, env, url) {
 
   const operationsResponse = await handleOpsPortalApi(request, env, url, path, body, authed);
   if (operationsResponse) return operationsResponse;
+
+  const memberResponse = await handlePortalMemberApi(request, env, url, path, body, authed);
+  if (memberResponse) return memberResponse;
 
   if (request.method === "GET" && path === "/me") {
     return jsonResponse({

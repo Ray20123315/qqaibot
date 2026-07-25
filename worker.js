@@ -14,6 +14,7 @@ import { classifyCollaborationNaturalIntent, classifyNaturalLanguageCommandInten
 import { processPlatformJobs } from "./src/platform/runtime.js";
 import { authDbDelStrict, authDbGetStrict, authDbPutStrict, clearPasswordLoginGuard, commandChangesWebSettings, constantTimeEqual, createPortalSession, decryptPortalAuthSecret, deleteMemoryVector, generateSixDigitCode, getOneBotHub, getPortalSession, getPublicNebulaSeed, hashBackupCode, isMemoryBanned, jsonResponse, markGroupMemberLeft, notePasswordLoginFailure, portalSessionCookie, readCookie, readJson, readPasswordLoginGuard, readPortalAuthJson, sendOneBotAction, sendOneBotHttpAction, sendPortalVerificationMessage, upsertGroupMember, upsertMemoryVector, verifyPortalPassword, verifyPortalVerificationCode, verifyTotpCode, writeMemoryAudit, writeSystemError } from "./src/portal/auth.js";
 import { getLiveHtmlPage, getPortalHomePage, handleGeminiLiveUpgrade, handlePortalApi } from "./src/portal/runtime.js";
+import { injectPortalMembersClient } from "./src/portal/members.js";
 import { cancelSchedule, cleanupExpiredModerationProposals, cleanupTransientState, countActiveSchedulesForUser, createAppealFromText, createScheduleRecord, extractScheduleMentionIds, formatScheduleLine, listUserSchedules, parseManagementScheduleAction, parseScheduleRequest, performManualGroupCheckins, processConflictSignal, processDueSchedules, reviewScheduleWithGemma, reviseScheduleRecord, runAutomaticGroupCheckins, skipScheduleOnce } from "./src/scheduler/runtime.js";
 import { fetchPublicUrl, getFeatureFlag, getPrivateAccessMode, isGroupWhitelisted, numericId, verifyOneBotAccess } from "./src/security/network.js";
 
@@ -118,7 +119,7 @@ const QQAIWorker = {
     // 🌌 公共首頁與記憶矩陣中心
     // ==========================================
     if (request.method === 'GET' && ['/', '/portal', '/matrix'].includes(url.pathname)) {
-      const portalHtml = injectDeploymentPortalClient(toSimplifiedChinese(getPortalHomePage(url.host)));
+      const portalHtml = injectPortalMembersClient(injectDeploymentPortalClient(toSimplifiedChinese(getPortalHomePage(url.host))));
       return new Response(portalHtml, {
         headers: { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store" }
       });

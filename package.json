@@ -1,10 +1,10 @@
 {
   "name": "qqai-bot-worker",
-  "version": "2.0.3",
+  "version": "2.0.4",
   "private": true,
   "type": "module",
   "scripts": {
-    "check": "node verify-config.mjs && node verify-migration.mjs && node verify-model-routing.mjs && node verify-modules.mjs && node verify-routes.mjs && node verify-deployment-notifications.mjs && node verify-subgroup-join.mjs && node verify-spam-detection.mjs",
+    "check": "node verify-config.mjs && node verify-migration.mjs && node verify-model-routing.mjs && node verify-modules.mjs && node verify-routes.mjs && node verify-deployment-notifications.mjs && node verify-subgroup-join.mjs && node verify-spam-detection.mjs && node verify-meme-member-console.mjs",
     "check:bundle": "wrangler deploy --config wrangler.toml --dry-run --outdir dist --no-assets",
     "deploy": "wrangler deploy --config wrangler.toml --no-assets"
   },
