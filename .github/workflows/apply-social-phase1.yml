@@ -65,31 +65,33 @@ jobs:
         shell: bash
         run: |
           set +e
-          : > publish-diagnostic.log
-          rm -f tools/apply-social-phase1.mjs .github/workflows/apply-social-phase1.yml patch-diagnostic.log >> publish-diagnostic.log 2>&1
-          rmdir tools >> publish-diagnostic.log 2>&1 || true
-          git config user.name "github-actions[bot]" >> publish-diagnostic.log 2>&1
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com" >> publish-diagnostic.log 2>&1
-          git status --short >> publish-diagnostic.log 2>&1
-          git add -A >> publish-diagnostic.log 2>&1
+          log=/tmp/social-publish-diagnostic.log
+          : > "$log"
+          rm -f tools/apply-social-phase1.mjs .github/workflows/apply-social-phase1.yml patch-diagnostic.log >> "$log" 2>&1
+          rmdir tools >> "$log" 2>&1 || true
+          rm -rf node_modules dist package-lock.json >> "$log" 2>&1
+          git config user.name "github-actions[bot]" >> "$log" 2>&1
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com" >> "$log" 2>&1
+          git status --short >> "$log" 2>&1
+          git add -A >> "$log" 2>&1
           status=$?
           if [ "$status" -eq 0 ] && ! git diff --cached --quiet; then
-            git commit -m "Add social digital twin phase one" >> publish-diagnostic.log 2>&1
+            git commit -m "Add social digital twin phase one" >> "$log" 2>&1
             status=$?
           fi
           if [ "$status" -eq 0 ]; then
-            git push origin HEAD:${{ github.head_ref }} >> publish-diagnostic.log 2>&1
+            git push origin HEAD:${{ github.head_ref }} >> "$log" 2>&1
             status=$?
           fi
           echo "status=$status" >> "$GITHUB_OUTPUT"
-          cat publish-diagnostic.log
+          cat "$log"
           exit 0
       - name: Upload publish diagnostic
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: social-publish-diagnostic
-          path: publish-diagnostic.log
+          path: /tmp/social-publish-diagnostic.log
           if-no-files-found: error
       - name: Stop on publish failure
         if: steps.publish.outputs.status != '0'
