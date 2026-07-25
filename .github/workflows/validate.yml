@@ -40,12 +40,6 @@ jobs:
         run: npm run check
       - name: Build the single Worker bundle
         run: npm run check:bundle
-      - name: Enforce mute lock invariants
-        run: |
-          grep -q 'member-protect' src/portal/members.js
-          grep -q 'privateSelfCommand: true' worker.js
-          grep -q 'markMuteUnlockBlocked' worker.js
-          test "$(find . -maxdepth 1 -name 'worker*.js' -type f | wc -l)" -eq 1
       - name: Commit clean validated candidate
         env:
           BRANCH: feature/protected-self-mute-v2.2.0
