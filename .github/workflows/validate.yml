@@ -34,6 +34,21 @@ jobs:
         run: |
           node --check src/portal/members.js
           node --check verify-portal-members-client.mjs
+      - name: Run generated Portal client parse check
+        id: portal_client_check
+        continue-on-error: true
+        run: node verify-portal-members-client.mjs > portal-members-client-check.log 2>&1
+      - name: Upload Portal client diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: portal-members-client-check
+          path: portal-members-client-check.log
+          if-no-files-found: error
+      - name: Require Portal client parse check
+        run: |
+          cat portal-members-client-check.log
+          test "${{ steps.portal_client_check.outcome }}" = "success"
       - name: Install dependencies
         run: npm install --ignore-scripts
       - name: Run regression checks
@@ -43,7 +58,7 @@ jobs:
       - name: Commit clean validated candidate
         if: github.event_name == 'push' && github.ref == 'refs/heads/fix/portal-members-client-v2.4.2'
         run: |
-          rm -rf node_modules dist package-lock.json tools/apply-portal-members-hotfix-v2.4.2.mjs
+          rm -rf node_modules dist package-lock.json tools/apply-portal-members-hotfix-v2.4.2.mjs portal-members-client-check.log
           git checkout origin/main -- .github/workflows/validate.yml
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
