@@ -7,6 +7,14 @@ function replaceOnce(source, search, replacement, label) {
   return source.slice(0, first) + replacement + source.slice(first + search.length);
 }
 
+function replaceRegexOnce(source, regex, replacement, label) {
+  const flags = regex.flags.includes('g') ? regex.flags : `${regex.flags}g`;
+  const matcher = new RegExp(regex.source, flags);
+  const matches = [...source.matchAll(matcher)];
+  if (matches.length !== 1) throw new Error(`Regex patch anchor ${label} expected 1 match, got ${matches.length}`);
+  return source.replace(regex, replacement);
+}
+
 let worker = fs.readFileSync('worker.js', 'utf8');
 
 worker = replaceOnce(
@@ -52,10 +60,10 @@ worker = replaceOnce(
   'interject judge prompt'
 );
 
-worker = replaceOnce(
+worker = replaceRegexOnce(
   worker,
-  '                 system: "你是严格的 QQ 群聊插话门控器。只有机器人能明确理解当前多人对话、知道自己要回应谁、且确实能增加价值时输出 REPLY。纯数字、短问号、单个词、只有群友之间才懂的暗号、私人对话、关系不明、可能认错人或只能尬聊时输出 SKIP。只能输出 REPLY 或 SKIP。DeepSeek 不得用于此判断。",',
-  '                 system: "你是 QQ 粉丝群的插话门控器。机器人可以像普通群友一样接一句、问一句‘你们在说啥／哪个游戏／给我看看’，或做极短标点反应，不要求每次提供知识价值。但不能抢正在进行的两人私密对话、认错对象、重复别人、强行解释群梗或突然发长文。适合自然短插话输出 REPLY，否则输出 SKIP。只能输出 REPLY 或 SKIP。DeepSeek 不得用于此判断。",',
+  /system:\s*"你是严格的 QQ 群聊插话门控器。[\s\S]*?DeepSeek 不得用于此判断。",/,
+  'system: "你是 QQ 粉丝群的插话门控器。机器人可以像普通群友一样接一句、问一句‘你们在说啥／哪个游戏／给我看看’，或做极短标点反应，不要求每次提供知识价值。但不能抢正在进行的两人私密对话、认错对象、重复别人、强行解释群梗或突然发长文。适合自然短插话输出 REPLY，否则输出 SKIP。只能输出 REPLY 或 SKIP。DeepSeek 不得用于此判断。",',
   'interject judge system'
 );
 
@@ -123,6 +131,15 @@ worker = replaceOnce(
 );
 
 fs.writeFileSync('worker.js', worker);
+
+let social = fs.readFileSync('src/social/runtime.js', 'utf8');
+social = replaceOnce(
+  social,
+  '  if (effectivePersonaFact(profile, found.key) !== null) return null;',
+  '  const existingFact = effectivePersonaFact(profile, found.key);\n  if (existingFact !== null && existingFact !== "") return null;',
+  'generated persona empty fact guard'
+);
+fs.writeFileSync('src/social/runtime.js', social);
 
 const pkg = JSON.parse(fs.readFileSync('package.json', 'utf8'));
 pkg.version = '2.1.0';
