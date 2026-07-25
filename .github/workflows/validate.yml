@@ -27,10 +27,14 @@ jobs:
           node-version: 22
           cache: npm
           cache-dependency-path: package.json
-      - name: Check integration patcher
-        run: node --check tools/apply-community-suite-v2.5.0.mjs
+      - name: Check integration patchers
+        run: |
+          node --check tools/apply-community-suite-v2.5.0.mjs
+          node --check tools/fix-community-suite-sticker-help.mjs
       - name: Apply community suite
-        run: node tools/apply-community-suite-v2.5.0.mjs
+        run: |
+          node tools/apply-community-suite-v2.5.0.mjs
+          node tools/fix-community-suite-sticker-help.mjs
       - name: Check syntax
         run: |
           node --check src/portal/community-suite.js
@@ -67,7 +71,7 @@ jobs:
       - name: Commit clean validated candidate
         if: github.event_name == 'push' && github.ref == 'refs/heads/feature/community-suite-v2.5.0'
         run: |
-          rm -rf node_modules dist package-lock.json tools/apply-community-suite-v2.5.0.mjs community-suite-check.log portal-generated.html portal-script-*.js portal-script-error.log
+          rm -rf node_modules dist package-lock.json tools/apply-community-suite-v2.5.0.mjs tools/fix-community-suite-sticker-help.mjs community-suite-check.log portal-generated.html portal-script-*.js portal-script-error.log
           git checkout origin/main -- .github/workflows/validate.yml
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
