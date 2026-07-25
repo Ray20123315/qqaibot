@@ -11,10 +11,6 @@ workers_dev = true
 pattern = "qqai.ray2025.com"
 custom_domain = true
 
-# Cloudflare Browser Rendering
-[browser]
-binding = "BROWSER"
-
 # Cloudflare Workers AI
 [ai]
 binding = "AI"
