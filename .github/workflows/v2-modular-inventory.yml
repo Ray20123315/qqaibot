@@ -34,21 +34,30 @@ jobs:
           node-version: 22
 
       - name: Build top-level declaration inventory
+        id: inventory
+        continue-on-error: true
         shell: bash
         run: |
-          set -euo pipefail
-          npm install --no-save --ignore-scripts acorn@8
+          set -o pipefail
+          npm install --no-save --ignore-scripts @babel/parser@7
           cat > /tmp/inventory.mjs <<'NODE'
           import fs from 'node:fs';
           import crypto from 'node:crypto';
-          import { parse } from 'acorn';
+          import { parse } from '@babel/parser';
 
           const source = fs.readFileSync('worker.js', 'utf8');
           const ast = parse(source, {
-            ecmaVersion: 'latest',
             sourceType: 'module',
-            locations: true,
-            allowHashBang: true,
+            allowAwaitOutsideFunction: true,
+            allowReturnOutsideFunction: true,
+            errorRecovery: false,
+            plugins: [
+              'classProperties',
+              'classPrivateProperties',
+              'classPrivateMethods',
+              'importAttributes',
+              'topLevelAwait'
+            ],
           });
 
           function namesFor(node) {
@@ -77,7 +86,7 @@ jobs:
             return [];
           }
 
-          const declarations = ast.body.map((node, index) => ({
+          const declarations = ast.program.body.map((node, index) => ({
             index,
             type: node.type,
             declarationType: node.declaration?.type || null,
@@ -100,11 +109,13 @@ jobs:
           };
           fs.writeFileSync('refactor-inventory.json', `${JSON.stringify(result, null, 2)}\n`);
           NODE
-          node /tmp/inventory.mjs
-          node --check worker.js
+          {
+            node /tmp/inventory.mjs
+            node --check worker.js
+          } 2>&1 | tee inventory-run.log
 
       - name: Commit inventory
-        if: github.event_name == 'push'
+        if: github.event_name == 'push' && steps.inventory.outcome == 'success'
         shell: bash
         run: |
           set -euo pipefail
@@ -117,9 +128,19 @@ jobs:
           git commit -m "Inventory worker.js for v2 modularization"
           git push origin HEAD:refactor/v2-modular-worker
 
-      - name: Upload inventory artifact
+      - name: Upload inventory diagnostics
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: v2-worker-inventory
-          path: refactor-inventory.json
-          if-no-files-found: error
+          path: |
+            inventory-run.log
+            refactor-inventory.json
+          if-no-files-found: warn
+
+      - name: Fail when inventory failed
+        if: steps.inventory.outcome == 'failure'
+        shell: bash
+        run: |
+          cat inventory-run.log || true
+          exit 1
