@@ -15,6 +15,7 @@ import { processPlatformJobs } from "./src/platform/runtime.js";
 import { authDbDelStrict, authDbGetStrict, authDbPutStrict, clearPasswordLoginGuard, commandChangesWebSettings, constantTimeEqual, createPortalSession, decryptPortalAuthSecret, deleteMemoryVector, generateSixDigitCode, getOneBotHub, getPortalSession, getPublicNebulaSeed, hashBackupCode, isMemoryBanned, jsonResponse, markGroupMemberLeft, notePasswordLoginFailure, portalSessionCookie, readCookie, readJson, readPasswordLoginGuard, readPortalAuthJson, sendOneBotAction, sendOneBotHttpAction, sendPortalVerificationMessage, upsertGroupMember, upsertMemoryVector, verifyPortalPassword, verifyPortalVerificationCode, verifyTotpCode, writeMemoryAudit, writeSystemError } from "./src/portal/auth.js";
 import { getLiveHtmlPage, getPortalHomePage, handleGeminiLiveUpgrade, handlePortalApi } from "./src/portal/runtime.js";
 import { injectPortalMembersClient } from "./src/portal/members.js";
+import { applySocialOutputPolicy, buildSocialDecision, buildSocialPromptBlock, capturePersonaContinuity, oneBotEventHasMedia, oneBotEventIsBareMention, observeSocialStyle, shouldSendSocialBufferNotice, socialInputDelayMs, waitForSocialTyping } from "./src/social/runtime.js";
 import { cancelSchedule, cleanupExpiredModerationProposals, cleanupTransientState, countActiveSchedulesForUser, createAppealFromText, createScheduleRecord, extractScheduleMentionIds, formatScheduleLine, listUserSchedules, parseManagementScheduleAction, parseScheduleRequest, performManualGroupCheckins, processConflictSignal, processDueSchedules, reviewScheduleWithGemma, reviseScheduleRecord, runAutomaticGroupCheckins, skipScheduleOnce } from "./src/scheduler/runtime.js";
 import { fetchPublicUrl, getFeatureFlag, getPrivateAccessMode, isGroupWhitelisted, numericId, verifyOneBotAccess } from "./src/security/network.js";
 
@@ -681,6 +682,16 @@ const QQAIWorker = {
       let naturalLanguageIntent = null;
       let privateAccessMode = "";
       let privateAccessChecked = false;
+
+      // 只学习群体结构统计，不保存原句或复制单一群友的私人表达。
+      if (isGroup && !isSelfAccount && cleanMessage) {
+        ctx.waitUntil(observeSocialStyle(env, {
+          groupId: currentGroupId,
+          text: cleanMessage,
+          isCommand: isCommandMessage,
+          isRobot: false
+        }).catch(error => console.warn("social style observation failed", error?.message || error)));
+      }
 
       // 先解析明确触发关系。非白名单群的普通聊天必须完全静默，不能见人就提示。
       let quotedMessage = null;
@@ -2616,12 +2627,36 @@ ${parsedMemos.slice(-30).map((m, i) => `${i + 1}. ${m.text}`).join('\n')}
         }).catch(error => console.warn("affinity AI refresh failed", error?.message || error)));
       }
 
+      // 社交决策层只决定场景、行为和输出形态，不直接生成公开措辞。
+      const socialDirectTrigger = !aiReplyOptOut && (isAtMeOrAi || isPrivate);
+      const socialDecision = await buildSocialDecision(env, {
+        groupId: currentGroupId,
+        userId,
+        senderName: senderCard,
+        text: conversationText,
+        recentContext: groupConversationLogs.slice(-24).join("\n"),
+        direct: socialDirectTrigger,
+        hasMedia: Boolean(imageUrl || imageFile || voiceUrl || voiceFile || videoUrl || videoFile || fileAttachments.length || forwardIds.length),
+        isPrivate
+      }).catch(error => ({
+        sceneType: "casual", outputType: "micro_chat", action: "reply", maxChars: 80, confidence: 0,
+        shouldReply: socialDirectTrigger, mayInterject: false, allowLowContextInterject: false,
+        reason: "social_layer_fallback", profile: null, relationship: null, managerMentionId: "",
+        error: String(error?.message || error).slice(0, 300)
+      }));
+      finalStylePrompt += "\n\n" + buildSocialPromptBlock({
+        decision: socialDecision,
+        profile: socialDecision.profile,
+        relationship: socialDecision.relationship,
+        direct: socialDirectTrigger
+      });
+
       // 第七段到此完美結束，準備進入第八段的 AI 隨機插話判定與上下文封裝模組...
 
       // ==========================================
       // 🎲 核心机制：随机触发 + AI 智慧插话判定
       // ==========================================
-      let shouldReply = !aiReplyOptOut && (isAtMeOrAi || isPrivate);
+      let shouldReply = socialDirectTrigger;
       let isAutoInterject = false;
       let triggerType = aiReplyOptOut ? "user_opt_out" : botMentioned ? "mention" : repliedToBot ? "reply_to_ai" : sameQqSelfAsk ? "self_ask" : isPrivate ? "private" : "none";
       let noReplyReason = aiReplyOptOut ? "user_opt_out" : "not_triggered";
@@ -2634,7 +2669,7 @@ ${parsedMemos.slice(-30).map((m, i) => `${i + 1}. ${m.text}`).join('\n')}
         const targetDnd = await dbGet(env, `dnd:${currentGroupId}:${userId}`);
         if (targetDnd === "true") {
           noReplyReason = "sender_dnd";
-        } else if (lowContextFragment) {
+        } else if (lowContextFragment && !socialDecision.allowLowContextInterject) {
           noReplyReason = "low_context_fragment";
         } else if (Math.random() >= interjectChance) {
           noReplyReason = "interject_probability_not_selected";
@@ -2646,10 +2681,10 @@ ${parsedMemos.slice(-30).map((m, i) => `${i + 1}. ${m.text}`).join('\n')}
             noReplyReason = "interject_cooldown";
           } else if (requiresAiJudgment) {
             const recentForJudge = (groupConversationLogs.length ? groupConversationLogs : await readJson(env, `recent_logs:${currentGroupId}`, [])).slice(-14).join("\n");
-            const judgePrompt = `最近群聊：\n${recentForJudge}\n\n候选插话触发句：${cleanMessage}\n判断机器人此刻插话是否能明确接上正在讨论的话题。`;
+            const judgePrompt = `最近群聊：\n${recentForJudge}\n\n候选插话触发句：${cleanMessage}\n社交层判断：场景=${socialDecision.sceneType}，建议形态=${socialDecision.outputType}，建议动作=${socialDecision.action}。\n判断此刻是否适合像真人群友一样接一句、问一句或做极短反应。`;
             try {
               const judged = await callGoogleDecision(env, {
-                system: "你是严格的 QQ 群聊插话门控器。只有机器人能明确理解当前多人对话、知道自己要回应谁、且确实能增加价值时输出 REPLY。纯数字、短问号、单个词、只有群友之间才懂的暗号、私人对话、关系不明、可能认错人或只能尬聊时输出 SKIP。只能输出 REPLY 或 SKIP。DeepSeek 不得用于此判断。",
+                system: "你是 QQ 粉丝群的插话门控器。机器人可以像普通群友一样接一句、问一句‘你们在说啥／哪个游戏／给我看看’，或做极短标点反应，不要求每次提供知识价值。但不能抢正在进行的两人私密对话、认错对象、重复别人、强行解释群梗或突然发长文。适合自然短插话输出 REPLY，否则输出 SKIP。只能输出 REPLY 或 SKIP。DeepSeek 不得用于此判断。",
                 prompt: judgePrompt,
                 maxOutputTokens: 12
               });
@@ -2733,7 +2768,7 @@ ${parsedMemos.slice(-30).map((m, i) => `${i + 1}. ${m.text}`).join('\n')}
       }
 
       // 只有明确 @ 机器人时显示临时状态；随机插话、回复触发与普通私聊均不显示“正在思考”。
-      if (botMentioned && !isAutoInterject && !activeThinkingMessageId && body.__qqai_transport_thinking !== true) {
+      if (botMentioned && !isAutoInterject && !activeThinkingMessageId && body.__qqai_transport_thinking !== true && (!isGroup || await dbGet(env, `social_thinking_indicator_enabled:${currentGroupId}`) === "true")) {
         activeThinkingMessageId = await sendThinkingIndicator(env, { isGroup, groupId: currentGroupId, userId, text: (imageUrl || imageFile) ? '正在读图...' : (voiceUrl || voiceFile) ? '正在听语音...' : (videoUrl || videoFile) ? '正在分析视频...' : '正在思考...' }).catch(() => null);
       }
 
@@ -2956,6 +2991,20 @@ ${deepseekContextSummary}`;
         currentDayPart: currentTimeContext.dayPart,
         userText: conversationText
       }));
+      const explicitLongReply = /(?:详细|詳細|展开|展開|长文|長文|解释清楚|解釋清楚|完整说明|完整說明|仔细说|仔細說)/i.test(conversationText);
+      replyText = applySocialOutputPolicy({
+        text: replyText,
+        userText: conversationText,
+        decision: socialDecision,
+        profile: socialDecision.profile,
+        isGroup,
+        explicitLong: explicitLongReply
+      });
+      ctx.waitUntil(capturePersonaContinuity(env, {
+        groupId: currentGroupId,
+        userText: conversationText,
+        replyText
+      }).catch(error => console.warn("persona continuity capture failed", error?.message || error)));
       if (aiReplyPromisesFutureSearch(replyText)) {
         replyText = searchInfo.performed && searchInfo.context
           ? appendSearchSources(searchInfo.context, searchInfo.sources || [])
@@ -2980,7 +3029,7 @@ ${deepseekContextSummary}`;
       // ==========================================
       // 🚀 最終回覆計畫：可引用、@、純文字或插話
       // ==========================================
-      const generatedMentionIds = extractTextMentionIds(replyText);
+      const generatedMentionIds = [...new Set([...extractTextMentionIds(replyText), ...(socialDecision.managerMentionId ? [String(socialDecision.managerMentionId)] : [])])];
       const visibleReplyText = removeTextMentionTokens(replyText);
       const senderDndCheck = await dbGet(env, `dnd:${currentGroupId}:${userId}`) === "true";
       const mentionRouting = await decideReplyMentionRouting(env, {
@@ -2997,6 +3046,16 @@ ${deepseekContextSummary}`;
         userId, selfId: botId, selectedMentionIds: safeMentionIds, senderDnd: senderDndCheck,
         text: visibleReplyText
       });
+      const typingDelayMs = await waitForSocialTyping({
+        text: visibleReplyText,
+        decision: socialDecision,
+        isGroup,
+        direct: !isAutoInterject
+      });
+      if (request.signal?.aborted) {
+        await clearThinkingIndicator();
+        return new Response(null, { status: 204 });
+      }
       const aiDecision = await writeAiDecisionLog(env, {
         ...aiDecisionBase,
         decision: "reply_generated",
@@ -3005,6 +3064,12 @@ ${deepseekContextSummary}`;
         interjectChance,
         interjectJudgement,
         lowContextFragment,
+        socialSceneType: socialDecision.sceneType,
+        socialAction: socialDecision.action,
+        socialOutputType: socialDecision.outputType,
+        socialConfidence: Number(socialDecision.confidence || 0),
+        socialReason: String(socialDecision.reason || ""),
+        typingDelayMs,
         provider: usedProvider,
         model: usedModel,
         generatedReply: visibleReplyText,
@@ -3557,6 +3622,7 @@ export class OneBotHub {
     if (!eventHasBotMention(body)) return "";
     const groupId = String(body.group_id || "");
     if (!groupId || !(await isGroupWhitelisted(this.env, groupId))) return "";
+    if (await dbGet(this.env, `social_thinking_indicator_enabled:${groupId}`) !== "true") return "";
     if (await dbGet(this.env, `ai_off:${groupId}`) === "true") return "";
     const text = eventPlainText(body);
     if (!text || /^(?:[!！]|\/!)/.test(text)) return "";
@@ -3771,7 +3837,7 @@ export class OneBotHub {
     entry.token = token;
     const now = Date.now();
     const deadline = Number(entry.firstAt || now) + DEFAULTS.inputDebounceMaxMs;
-    const delay = Math.max(0, Math.min(DEFAULTS.inputDebounceMs, deadline - now));
+    const delay = Math.max(0, Math.min(socialInputDelayMs(entry.parts), deadline - now));
     entry.fireAt = now + delay;
     this.inputBuffers.set(key, entry);
     this.trackEventTask((async () => {
@@ -3795,7 +3861,9 @@ export class OneBotHub {
       notified: Boolean(existing?.notified)
     };
     this.inputBuffers.set(key, entry);
-    if (notify && !entry.notified && mergedParts.length >= 2) {
+    const latestPart = mergedParts[mergedParts.length - 1];
+    const bufferNoticeEnabled = await shouldSendSocialBufferNotice(this.env, String(latestPart?.group_id || ""));
+    if (notify && bufferNoticeEnabled && !entry.notified && mergedParts.length >= 2) {
       entry.notified = true;
       this.inputBuffers.set(key, entry);
       const latest = mergedParts[mergedParts.length - 1];
@@ -3896,7 +3964,8 @@ export class OneBotHub {
     if (await dbGet(this.env, `ai_off:${groupId}`) === "true") return false;
     const mentioned = eventHasBotMention(body);
     const text = eventPlainText(body);
-    if (!mentioned || !text || /^(?:[!！]|\/!)/.test(text)) return false;
+    const hasPayload = Boolean(text || oneBotEventHasMedia(body) || oneBotEventIsBareMention(body));
+    if (!mentioned || !hasPayload || /^(?:[!！]|\/!)/.test(text)) return false;
     return true;
   }
 

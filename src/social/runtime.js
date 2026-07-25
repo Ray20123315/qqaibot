@@ -534,7 +534,8 @@ async function capturePersonaContinuity(env, { groupId, userText, replyText }) {
   const found = extractGeneratedFact(userText, replyText);
   if (!found) return null;
   const profile = await getSocialProfile(env, groupId);
-  if (effectivePersonaFact(profile, found.key) !== null) return null;
+  const existingFact = effectivePersonaFact(profile, found.key);
+  if (existingFact !== null && existingFact !== "") return null;
   profile.generatedCanon[found.key] = { value: found.value, source: "first_generated_answer", createdAt: Date.now() };
   await saveSocialProfile(env, groupId, profile);
   return found;
