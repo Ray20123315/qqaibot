@@ -15,7 +15,7 @@ import { processPlatformJobs } from "./src/platform/runtime.js";
 import { authDbDelStrict, authDbGetStrict, authDbPutStrict, clearPasswordLoginGuard, commandChangesWebSettings, constantTimeEqual, createPortalSession, decryptPortalAuthSecret, deleteMemoryVector, generateSixDigitCode, getOneBotHub, getPortalSession, getPublicNebulaSeed, hashBackupCode, isMemoryBanned, jsonResponse, markGroupMemberLeft, notePasswordLoginFailure, portalSessionCookie, readCookie, readJson, readPasswordLoginGuard, readPortalAuthJson, sendOneBotAction, sendOneBotHttpAction, sendPortalVerificationMessage, upsertGroupMember, upsertMemoryVector, verifyPortalPassword, verifyPortalVerificationCode, verifyTotpCode, writeMemoryAudit, writeSystemError } from "./src/portal/auth.js";
 import { getLiveHtmlPage, getPortalHomePage, handleGeminiLiveUpgrade, handlePortalApi } from "./src/portal/runtime.js";
 import { injectPortalMembersClient } from "./src/portal/members.js";
-import { applySocialOutputPolicy, buildSocialDecision, buildSocialPromptBlock, capturePersonaContinuity, oneBotEventHasMedia, oneBotEventIsBareMention, observeSocialStyle, shouldSendSocialBufferNotice, socialInputDelayMs, waitForSocialTyping } from "./src/social/runtime.js";
+import { applySocialOutputPolicy, buildSocialDecision, buildSocialPromptBlock, capturePersonaContinuity, oneBotBotMentionCount, oneBotEventHasMedia, oneBotEventIsBareMention, oneBotEventIsPunctuationOnly, observeSocialStyle, shouldSendSocialBufferNotice, socialInputDelayMs, waitForSocialTyping } from "./src/social/runtime.js";
 import { cancelSchedule, cleanupExpiredModerationProposals, cleanupTransientState, countActiveSchedulesForUser, createAppealFromText, createScheduleRecord, extractScheduleMentionIds, formatScheduleLine, listUserSchedules, parseManagementScheduleAction, parseScheduleRequest, performManualGroupCheckins, processConflictSignal, processDueSchedules, reviewScheduleWithGemma, reviseScheduleRecord, runAutomaticGroupCheckins, skipScheduleOnce } from "./src/scheduler/runtime.js";
 import { fetchPublicUrl, getFeatureFlag, getPrivateAccessMode, isGroupWhitelisted, numericId, verifyOneBotAccess } from "./src/security/network.js";
 
@@ -711,6 +711,15 @@ const QQAIWorker = {
         }
       }
       const botMentioned = Boolean(botId && mentionedQqs.includes(botId));
+      const duplicateMentionNoise = isGroup && botMentioned && oneBotBotMentionCount(body) > 1 && (!eventPlainText(body).trim() || oneBotEventIsPunctuationOnly(body));
+      if (duplicateMentionNoise) {
+        ctx.waitUntil(writeAiDecisionLog(env, {
+          groupId: currentGroupId, userId, senderName: senderCard, sourceMessageId: replyMessageId,
+          input: cleanMessage, mentionedQqs, botMentioned: true, isGroup: true,
+          decision: "skipped", reason: "duplicate_mention_noise", triggerType: "mention"
+        }));
+        return new Response(null, { status: 204 });
+      }
       const repliedToBot = Boolean(quotedMessage && quotedMessage.source === 'ai');
       const repliedToOwnerHuman = Boolean(quotedMessage && quotedMessage.source === 'owner-human');
 
@@ -779,7 +788,7 @@ const QQAIWorker = {
       const explicitlyTriggered = !aiReplyOptOut && (botMentioned || repliedToBot || sameQqSelfAsk || isPrivate || isCommandMessage);
 
       // 只有真实文字或媒体才算有效提问；单独 @、空白、换行、全角空格与零宽字符全部静默丢弃。
-      const hasAnyMediaAttachment = Boolean(imageUrl || imageFile || voiceUrl || voiceFile || videoUrl || videoFile || fileAttachments.length || forwardIds.length);
+      const hasAnyMediaAttachment = Boolean(imageUrl || imageFile || voiceUrl || voiceFile || videoUrl || videoFile || fileAttachments.length || forwardIds.length || oneBotEventHasMedia(body));
       const meaningfulText = String(userMessage || "")
         .replace(/\[CQ:(?:at|reply),[^\]]+\]/gi, "")
         .replace(/\[CQ:[^\]]+\]/g, "")
@@ -2628,7 +2637,7 @@ ${parsedMemos.slice(-30).map((m, i) => `${i + 1}. ${m.text}`).join('\n')}
       }
 
       // 社交决策层只决定场景、行为和输出形态，不直接生成公开措辞。
-      const socialDirectTrigger = !aiReplyOptOut && (isAtMeOrAi || isPrivate);
+      const socialDirectTrigger = !aiReplyOptOut && (isAtMeOrAi || isPrivate || body.__qqai_explicit_question === true || body.__qqai_force_explicit_reply === true);
       const socialDecision = await buildSocialDecision(env, {
         groupId: currentGroupId,
         userId,
@@ -3578,6 +3587,11 @@ export class OneBotHub {
       }
     }
 
+    if (body.post_type === "message" && body.message_type === "group" && eventHasBotMention(body) && oneBotBotMentionCount(body) > 1 && (!eventPlainText(body).trim() || oneBotEventIsPunctuationOnly(body))) {
+      await this.recordIngress(body, "duplicate_mention_noise", { explicit: false, force: true, botMentionCount: oneBotBotMentionCount(body) }).catch(() => {});
+      return;
+    }
+
     const answerNowKey = this.answerNowKey(body);
     if (answerNowKey && this.inputBuffers.has(answerNowKey)) {
       await this.flushBufferedQuestion(answerNowKey, "answer_now");
@@ -3621,12 +3635,14 @@ export class OneBotHub {
     ].join(":");
   }
 
-  async sendImmediateThinkingIndicator(body) {
+  async sendImmediateThinkingIndicator(body, options = {}) {
     if (body?.post_type !== "message" || body?.message_type !== "group") return "";
     if (!eventHasBotMention(body)) return "";
     const groupId = String(body.group_id || "");
     if (!groupId || !(await isGroupWhitelisted(this.env, groupId))) return "";
-    if (await dbGet(this.env, `social_thinking_indicator_enabled:${groupId}`) !== "true") return "";
+    const indicatorSetting = await dbGet(this.env, `social_thinking_indicator_enabled:${groupId}`);
+    if (indicatorSetting === "false" || (!options.allowDefault && indicatorSetting !== "true")) return "";
+    if (oneBotEventIsPunctuationOnly(body)) return "";
     if (await dbGet(this.env, `ai_off:${groupId}`) === "true") return "";
     const text = eventPlainText(body);
     if (!text || /^(?:[!！]|\/!)/.test(text)) return "";
@@ -3663,7 +3679,7 @@ export class OneBotHub {
   }
 
   async notifyExplicitReplyFailureOnce(body, disposition, extra = {}) {
-    if (!eventHasBotMention(body)) return;
+    if (!eventHasBotMention(body) && body?.__qqai_explicit_question !== true) return;
     const key = `${this.explicitReplyQuestionId(body)}:${String(disposition || "unknown")}`;
     if (this.explicitReplyFailureNotified.has(key)) return;
 
@@ -3684,7 +3700,7 @@ export class OneBotHub {
   async recordIngress(body, disposition, extra = {}) {
     const groupId = String(body?.group_id || "");
     if (!groupId || !["message", "message_sent"].includes(String(body?.post_type || ""))) return;
-    const explicit = Boolean(extra.explicit || eventHasBotMention(body) || /^[!！]/.test(eventPlainText(body)));
+    const explicit = Boolean(extra.explicit || body?.__qqai_explicit_question === true || eventHasBotMention(body) || /^[!！]/.test(eventPlainText(body)));
     if (!explicit && !extra.force) return;
     const key = `ingress:${groupId}`;
     const previous = await this.state.storage.get(key) || {};
@@ -3970,6 +3986,7 @@ export class OneBotHub {
     const mentioned = eventHasBotMention(body);
     const text = eventPlainText(body);
     const hasPayload = Boolean(text || oneBotEventHasMedia(body) || oneBotEventIsBareMention(body));
+    if (oneBotBotMentionCount(body) > 1 && (!text || oneBotEventIsPunctuationOnly(body))) return false;
     if (!mentioned || !hasPayload || /^(?:[!！]|\/!)/.test(text)) return false;
     return true;
   }
@@ -4038,12 +4055,6 @@ export class OneBotHub {
         return;
       }
     }
-    try {
-      immediateThinkingMessageId = await this.sendImmediateThinkingIndicator(body);
-    } catch (error) {
-      console.error("immediate thinking indicator failed", error);
-    }
-
     const controller = new AbortController();
     const token = crypto.randomUUID();
     const active = {
@@ -4064,17 +4075,38 @@ export class OneBotHub {
     this.userInFlight.set(key, active);
     await this.persistQuestionInFlight(key, active);
     await this.recordIngress(body, "processing", { explicit: true, fromQueue }).catch(() => {});
+    let processingFinished = false;
+    const semanticQuestion = !oneBotEventIsPunctuationOnly(body);
+    if (body?.message_type === "group" && semanticQuestion) {
+      this.trackEventTask((async () => {
+        await new Promise(resolve => setTimeout(resolve, 1800));
+        if (processingFinished || controller.signal.aborted || this.userInFlight.get(key)?.token !== token) return;
+        const indicatorId = await this.sendImmediateThinkingIndicator(body, { allowDefault: true }).catch(() => "");
+        if (!indicatorId) return;
+        if (processingFinished || controller.signal.aborted || this.userInFlight.get(key)?.token !== token) {
+          await this.retractThinkingIndicator(body, indicatorId).catch(() => {});
+          return;
+        }
+        immediateThinkingMessageId = indicatorId;
+      })().catch(error => console.error("delayed thinking indicator failed", error)));
+    }
     try {
-      const processingBody = immediateThinkingMessageId
-        ? { ...body, __qqai_transport_thinking: true }
-        : body;
-      await this.processInboundEvent(fromQueue ? { ...processingBody, __qqai_queued: true } : processingBody, requestUrl, { signal: controller.signal, key, token });
+      const processingBody = {
+        ...body,
+        __qqai_transport_thinking: true,
+        __qqai_explicit_question: true,
+        __qqai_semantic_question: semanticQuestion,
+        ...(fromQueue ? { __qqai_queued: true } : {})
+      };
+      await this.processInboundEvent(processingBody, requestUrl, { signal: controller.signal, key, token });
     } catch (error) {
       if (!controller.signal.aborted) {
         console.error("user question failed", error);
+        await this.notifyExplicitReplyFailureOnce({ ...body, __qqai_explicit_question: true }, "uncaught_error", { error: String(error?.message || error).slice(0, 300) }).catch(() => {});
         if (fromQueue) await this.sendQueueNotice(body, "排队的问题处理失败，已跳到下一条。请稍后重试。").catch(() => {});
       }
     } finally {
+      processingFinished = true;
       if (immediateThinkingMessageId) {
         await this.retractThinkingIndicator(body, immediateThinkingMessageId)
           .catch(error => console.error("immediate thinking cleanup failed", error));
@@ -4146,7 +4178,7 @@ export class OneBotHub {
   isSafeTransientRetryChat(body) {
     if (!body || body.post_type !== "message" || body.message_type !== "group") return false;
     if (String(body.user_id || "") === String(body.self_id || "")) return false;
-    if (!eventHasBotMention(body)) return false;
+    if (!eventHasBotMention(body) && body?.__qqai_explicit_question !== true) return false;
     const text = eventPlainText(body).trim();
     if (!text || /^(?:[!！]|\/!)/.test(text)) return false;
     // 只重试没有副作用的普通聊天；设置、群务、活动、排程与审核类请求绝不自动重放。
@@ -4168,6 +4200,8 @@ export class OneBotHub {
       const sourceUrl = new URL(requestUrl);
       const internalTimeoutMs = toolTask ? 60000 : 32000;
       const internalStartedAt = Date.now();
+      const explicitQuestion = body?.__qqai_explicit_question === true || eventHasBotMention(body);
+      const semanticQuestion = body?.__qqai_semantic_question !== false && !oneBotEventIsPunctuationOnly(body);
       // v1.4.5：Durable Object 与同一份 Worker 逻辑在同一模块内直接调用。
       // 不再通过公开域名重新 fetch 自己，避免同区路由、边缘部署切换与公网子请求产生的偶发 502/503/504。
       const internalFetch = async (eventBody, timeoutMs) => {
@@ -4282,8 +4316,27 @@ export class OneBotHub {
         }
       }
 
+      if (internalResponse.status === 204 && explicitQuestion && semanticQuestion && !options.signal?.aborted && body?.__qqai_force_explicit_reply !== true) {
+        retryAttempted = true;
+        firstFailure = { type: "explicit_204", httpStatus: 204, elapsedMs: Date.now() - internalStartedAt };
+        await this.recordIngress(body, "worker_explicit_retry", { explicit: true, force: true, retryAttempted: true, firstFailure }).catch(() => {});
+        const remainingMs = Math.max(5000, internalTimeoutMs - (Date.now() - internalStartedAt));
+        try {
+          internalResponse = await internalFetch({ ...body, __qqai_force_explicit_reply: true, __qqai_internal_retry: 1 }, remainingMs);
+          internalRaw = "";
+        } catch (retryError) {
+          await this.recordIngress(body, /abort|timeout/i.test(String(retryError?.message || retryError)) ? "worker_timeout" : "worker_error", {
+            explicit: true, force: true, error: String(retryError?.message || retryError).slice(0, 300), retryAttempted: true, firstFailure
+          }).catch(() => {});
+          return;
+        }
+      }
       if (internalResponse.status === 204) {
-        await this.recordIngress(body, "worker_skipped", { explicit: false, force: true, httpStatus: 204, retryAttempted, internalTransportMode: "direct_loopback" }).catch(() => {});
+        if (explicitQuestion && semanticQuestion) {
+          await this.recordIngress(body, "worker_no_reply", { explicit: true, force: true, httpStatus: 204, retryAttempted, firstFailure, internalTransportMode: "direct_loopback" }).catch(() => {});
+        } else {
+          await this.recordIngress(body, "worker_skipped", { explicit: false, force: true, httpStatus: 204, retryAttempted, internalTransportMode: "direct_loopback" }).catch(() => {});
+        }
         return;
       }
       if (!internalRaw) internalRaw = await internalResponse.text().catch(() => "");

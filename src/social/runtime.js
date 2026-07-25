@@ -172,6 +172,18 @@ function eventMentionIds(body) {
   return [...new Set(ids.filter(Boolean))];
 }
 
+function oneBotBotMentionCount(body) {
+  const selfId = String(body?.self_id || "");
+  if (!selfId || body?.message_type !== "group") return 0;
+  if (Array.isArray(body?.message)) {
+    return body.message.filter(part => String(part?.type || "").toLowerCase() === "at" && String(part?.data?.qq ?? part?.data?.user_id ?? "") === selfId).length;
+  }
+  const raw = String(body?.raw_message || (typeof body?.message === "string" ? body.message : ""));
+  let count = 0;
+  for (const match of raw.matchAll(/\[CQ:at,[^\]]*qq=([^,\]]+)/gi)) if (String(match[1] || "") === selfId) count += 1;
+  return count;
+}
+
 function eventVisibleText(body) {
   if (Array.isArray(body?.message)) {
     return body.message.map(part => {
@@ -200,20 +212,27 @@ function eventVisibleText(body) {
     .trim();
 }
 
+function oneBotEventIsPunctuationOnly(body) {
+  const text = eventVisibleText(body).replace(/[\s\u00A0\u200B-\u200D\u2060\u3000\uFEFF]+/g, "");
+  return /^[.。…?？!！~～]{1,8}$/.test(text);
+}
+
 function oneBotEventIsBareMention(body) {
   const selfId = String(body?.self_id || "");
-  if (!selfId || body?.message_type !== "group" || !eventMentionIds(body).includes(selfId)) return false;
+  if (!selfId || body?.message_type !== "group" || oneBotBotMentionCount(body) !== 1 || !eventMentionIds(body).includes(selfId)) return false;
   return !eventVisibleText(body) && !oneBotEventHasMedia(body);
 }
 
 function socialInputDelayMs(parts) {
   const list = Array.isArray(parts) ? parts.filter(Boolean) : [];
-  if (!list.length) return 1200;
+  if (!list.length) return 900;
   const latest = list[list.length - 1];
   if (oneBotEventIsBareMention(latest)) return 3400;
-  if (oneBotEventHasMedia(latest)) return list.length > 1 ? 1500 : 2200;
-  if (list.length > 1) return 1100;
-  return 1300;
+  if (oneBotEventHasMedia(latest)) return list.length > 1 ? 900 : 1500;
+  if (oneBotEventIsPunctuationOnly(latest)) return list.length > 1 ? 900 : 1500;
+  if (oneBotBotMentionCount(latest) === 1 && eventVisibleText(latest)) return 450;
+  if (list.length > 1) return 650;
+  return 900;
 }
 
 async function shouldSendSocialBufferNotice(env, groupId) {
@@ -633,8 +652,10 @@ export {
   effectivePersonaFact,
   getSocialProfile,
   getSocialRelationship,
+  oneBotBotMentionCount,
   oneBotEventHasMedia,
   oneBotEventIsBareMention,
+  oneBotEventIsPunctuationOnly,
   observeSocialStyle,
   shouldSendSocialBufferNotice,
   socialInputDelayMs,
