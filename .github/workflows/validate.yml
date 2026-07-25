@@ -5,51 +5,27 @@ on:
     branches:
       - main
       - refactor/v2-modular-worker
-      - feature/community-suite-v2.5.0
   pull_request:
     branches:
       - main
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   validate:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-          ref: ${{ github.event.pull_request.head.sha || github.sha }}
       - uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: npm
           cache-dependency-path: package.json
-      - name: Apply final AI profile context
-        run: |
-          node --check tools/finalize-community-suite-v2.5.0.mjs
-          node tools/finalize-community-suite-v2.5.0.mjs
-      - name: Check syntax
-        run: |
-          node --check worker.js
-          node --check verify-community-suite.mjs
-      - name: Parse generated Portal clients
-        run: node verify-community-suite.mjs
       - name: Install dependencies
         run: npm install --ignore-scripts
       - name: Run regression checks
         run: npm run check
       - name: Build the single Worker bundle
         run: npm run check:bundle
-      - name: Commit clean validated candidate
-        if: github.event_name == 'push' && github.ref == 'refs/heads/feature/community-suite-v2.5.0'
-        run: |
-          rm -rf node_modules dist package-lock.json tools/finalize-community-suite-v2.5.0.mjs
-          git checkout origin/main -- .github/workflows/validate.yml
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add -A
-          git commit -m "Integrate approved member notes into AI context"
-          git push origin HEAD:feature/community-suite-v2.5.0

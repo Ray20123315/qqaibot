@@ -56,6 +56,8 @@ assert(worker.includes('!表情'), 'Worker must expose the manual sticker comman
 assert(worker.includes('主人权限未开放禁言'), 'Worker must enforce master mute permission');
 assert(worker.includes('主人权限未开放踢出'), 'Worker must enforce master kick permission');
 assert(worker.includes('maxMuteSeconds'), 'Worker must enforce the master mute duration limit');
+assert(worker.includes('【管理层群友资料｜仅供内部判断，严禁公开】'), 'Approved member notes must reach the AI context');
+assert(worker.includes('memberProfile.aiUseAllowed !== false'), 'The AI context must honor the member-note opt-out');
 
 const pkg = JSON.parse(fs.readFileSync('package.json', 'utf8'));
 assert(pkg.version === '2.5.0', 'Package version must be 2.5.0');
