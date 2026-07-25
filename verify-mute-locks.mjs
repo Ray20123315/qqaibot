@@ -32,6 +32,13 @@ assert(portal.includes('member-owner-unlock'), 'Portal must expose the owner-can
 assert(portal.includes('member-skip-confirm'), 'Portal must expose the skip-confirmation checkbox');
 assert(portal.includes('createManualMuteLock'), 'Portal mute action must persist the protection lock');
 assert(portal.includes('canUnlockMute'), 'Portal unmute action must enforce the lock');
+assert(portal.includes('isVerifiedGroupOwner'), 'Portal owner release must be verified against the live group role');
+const portalMuteBlock = portal.slice(portal.indexOf('path === "/members/mute"'), portal.indexOf('path === "/members/unmute"'));
+assert(portalMuteBlock.indexOf('createManualMuteLock') < portalMuteBlock.indexOf('action: "set_group_ban"'), 'Protected mute lock must be stored before the OneBot mute action');
+
+const moderation = fs.readFileSync('src/moderation/runtime.js', 'utf8');
+assert(moderation.includes('const permission = canUnlockMute(env, lock'), 'Confirmed unmute proposals must enforce the same lock permission matrix');
+assert(moderation.includes('if (!result.ok && releasedLock) await putMuteLock'), 'Failed confirmed unmute actions must restore the lock');
 
 const worker = fs.readFileSync('worker.js', 'utf8');
 assert(worker.includes('createSelfMuteLock'), 'Worker must support member self mute');
@@ -39,6 +46,7 @@ assert(worker.includes('listActiveSelfMuteLocks'), 'Private unmute must find act
 assert(worker.includes('privateSelfCommand: true'), 'Private unmute must be the only self-mute release path');
 assert(worker.includes('markMuteUnlockBlocked'), 'Unauthorized release attempts must be counted and deduplicated');
 assert(worker.includes('shouldNotify'), 'Blocked release warning must be emitted only once');
+assert(worker.includes('const permission = canUnlockMute(env, protectedLock'), 'Authorized developer or owner group commands must reach the normal confirmation flow');
 assert(worker.includes('!解除禁言'), 'Worker must document the private silent self-unmute command in the guard message');
 
 const pkg = JSON.parse(fs.readFileSync('package.json', 'utf8'));

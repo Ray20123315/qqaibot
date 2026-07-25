@@ -6,6 +6,7 @@ import { DEFAULTS, DEFAULT_DEVELOPER_ID, VERSION } from "../config/runtime.js";
 import { developerId, isDeveloperId, recentConversationMessagesForUser } from "../core/identity.js";
 import { appendIndex, callOneBotAction, getEffectivePermissions, writeSystemAudit } from "../core/permissions.js";
 import { dbDel, dbGet, dbPut } from "../data/store.js";
+import { canUnlockMute, clearMuteLock, getMuteLock, putMuteLock } from "./mute-locks.js";
 import { botCanRunRuleMonitor, canUseBotGroupOperations, getBotGroupRole, isBotVerifiedGroupOwner } from "../group/runtime.js";
 import { formatDuration, parseDurationSeconds, runOneBotGroupOperation } from "../onebot/messages.js";
 import { opsActiveRuleRecords, opsFuseAllows, opsGetSettings, opsRecordAutomationResult, opsRuleExceptionMatch, opsSaveRecord } from "../operations/runtime.js";
@@ -2122,13 +2123,41 @@ async function executeModerationProposal(env, proposal, confirmer) {
   else if (proposal.action === "set_admin") { action = "set_group_admin"; params = { group_id, user_id, enable: true }; }
   else if (proposal.action === "unset_admin") { action = "set_group_admin"; params = { group_id, user_id, enable: false }; }
   else return { ok: false, message: "未知群操作。" };
-  const result = await runOneBotGroupOperation(env, action, params, {
-    actorId: confirmer.id,
-    groupId: proposal.groupId,
-    targetId: proposal.targetId,
-    action: moderationActionLabel(proposal.action),
-    proposalId: proposal.id
-  });
+  let releasedLock = null;
+  if (proposal.action === "unmute") {
+    const lock = await getMuteLock(env, proposal.groupId, proposal.targetId);
+    const permission = canUnlockMute(env, lock, {
+      actorId: confirmer.id,
+      actorRole: confirmer.role,
+      isDeveloper: confirmer.role === "developer"
+    });
+    if (!permission.allowed) {
+      const message = lock?.source === "self"
+        ? "该成员为自我禁言，只能本人私讯机器人发送 !解除禁言。"
+        : lock?.allowOwnerUnmute
+          ? "该禁言只能由开发者或群主解除。"
+          : "该禁言只能由开发者解除。";
+      return { ok: false, message };
+    }
+    if (lock) {
+      releasedLock = lock;
+      await clearMuteLock(env, proposal.groupId, proposal.targetId);
+    }
+  }
+  let result;
+  try {
+    result = await runOneBotGroupOperation(env, action, params, {
+      actorId: confirmer.id,
+      groupId: proposal.groupId,
+      targetId: proposal.targetId,
+      action: moderationActionLabel(proposal.action),
+      proposalId: proposal.id
+    });
+  } catch (error) {
+    if (releasedLock) await putMuteLock(env, releasedLock).catch(() => {});
+    throw error;
+  }
+  if (!result.ok && releasedLock) await putMuteLock(env, releasedLock).catch(() => {});
   return result.ok ? { ok: true, message: `已执行：${moderationActionLabel(proposal.action)}。` } : { ok: false, message: `操作失败：${result.error}` };
 }
 

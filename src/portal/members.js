@@ -1,6 +1,7 @@
 import { recentConversationMessagesForUser } from "../core/identity.js";
 import { canUnlockMute, clearMuteLock, createManualMuteLock, getMuteLock, listGroupMuteLocks, putMuteLock } from "../moderation/mute-locks.js";
 import { callOneBotAction, writeSystemAudit } from "../core/permissions.js";
+import { isVerifiedGroupOwner } from "../group/runtime.js";
 import { dbPut } from "../data/store.js";
 import { jsonResponse, readJson } from "./auth.js";
 import { numericId } from "../security/network.js";
@@ -164,32 +165,45 @@ async function handlePortalMemberApi(request, env, url, path, body, authed) {
     if (protectedReason) return jsonResponse({ ok: false, message: protectedReason }, 403);
     const previousLock = await getMuteLock(env, groupId, qq);
     if (previousLock?.source === "self") return jsonResponse({ ok: false, message: "该成员正在自我禁言，管理入口不能覆盖或解除。" }, 423);
+    if (protect) {
+      try {
+        await createManualMuteLock(env, { groupId, userId: qq, actorId: authed.qq, durationSeconds: duration, allowOwnerUnmute, reason: String(body?.reason || "Portal 群友列表手动禁言").slice(0, 500) });
+      } catch (error) {
+        return jsonResponse({ ok: false, message: `无法建立防解除锁，未执行禁言：${String(error?.message || error).slice(0, 500)}` }, 503);
+      }
+    }
     try {
       await callOneBotAction(env, {
         action: "set_group_ban",
         params: { group_id: numericId(groupId), user_id: numericId(qq), duration }
       }, 15000);
-      if (protect) {
-        await createManualMuteLock(env, { groupId, userId: qq, actorId: authed.qq, durationSeconds: duration, allowOwnerUnmute, reason: String(body?.reason || "Portal 群友列表手动禁言").slice(0, 500) });
-      } else if (previousLock?.source === "manual") {
-        await clearMuteLock(env, groupId, qq);
-      }
-      await writeSystemAudit(env, {
-        type: "portal_member_mute",
-        groupId,
-        actorId: authed.qq,
-        targetId: qq,
-        targetName: member?.name || qq,
-        action: "mute",
-        durationSeconds: duration,
-        preventUnmute: protect,
-        allowOwnerUnmute,
-        reason: String(body?.reason || "Portal 群友列表手动禁言").slice(0, 500)
-      });
-      return jsonResponse({ ok: true, message: `已禁言 ${member?.name || qq} ${duration} 秒${protect ? `，并启用防解除（${allowOwnerUnmute ? "开发者或群主可解除" : "仅开发者可解除"}）` : ""}。`, qq, durationSeconds: duration, preventUnmute: protect, allowOwnerUnmute });
     } catch (error) {
+      if (protect) {
+        if (previousLock?.active) await putMuteLock(env, previousLock).catch(() => {});
+        else await clearMuteLock(env, groupId, qq).catch(() => {});
+      }
       return jsonResponse({ ok: false, message: `禁言失败：${String(error?.message || error).slice(0, 500)}` }, 502);
     }
+    if (!protect && previousLock?.source === "manual") {
+      try {
+        await clearMuteLock(env, groupId, qq);
+      } catch (error) {
+        return jsonResponse({ ok: false, message: `禁言已执行，但旧防解除锁未能清除：${String(error?.message || error).slice(0, 500)}` }, 500);
+      }
+    }
+    await writeSystemAudit(env, {
+      type: "portal_member_mute",
+      groupId,
+      actorId: authed.qq,
+      targetId: qq,
+      targetName: member?.name || qq,
+      action: "mute",
+      durationSeconds: duration,
+      preventUnmute: protect,
+      allowOwnerUnmute,
+      reason: String(body?.reason || "Portal 群友列表手动禁言").slice(0, 500)
+    }).catch(() => {});
+    return jsonResponse({ ok: true, message: `已禁言 ${member?.name || qq} ${duration} 秒${protect ? `，并启用防解除（${allowOwnerUnmute ? "开发者或群主可解除" : "仅开发者可解除"}）` : ""}。`, qq, durationSeconds: duration, preventUnmute: protect, allowOwnerUnmute });
   }
 
   if (request.method === "POST" && path === "/members/unmute") {
@@ -199,7 +213,9 @@ async function handlePortalMemberApi(request, env, url, path, body, authed) {
     const protectedReason = protectedTargetReason(member, authed, "unmute");
     if (protectedReason) return jsonResponse({ ok: false, message: protectedReason }, 403);
     const lock = await getMuteLock(env, groupId, qq);
-    const permission = canUnlockMute(env, lock, { actorId: authed.qq, actorRole: authed.role, isDeveloper: Boolean(authed?.permissions?.developer) });
+    const developer = Boolean(authed?.permissions?.developer);
+    const liveOwner = !developer && Boolean(lock?.allowOwnerUnmute) && await isVerifiedGroupOwner(env, groupId, authed.qq).catch(() => false);
+    const permission = canUnlockMute(env, lock, { actorId: authed.qq, actorRole: liveOwner ? "owner" : authed.role, isDeveloper: developer });
     if (!permission.allowed) {
       const message = lock?.source === "self" ? "该成员为自我禁言，只能本人私讯机器人发送 !解除禁言。" : lock?.allowOwnerUnmute ? "该禁言只能由开发者或群主解除。" : "该禁言只能由开发者解除。";
       return jsonResponse({ ok: false, message }, 423);
@@ -219,7 +235,7 @@ async function handlePortalMemberApi(request, env, url, path, body, authed) {
         action: "unmute",
         durationSeconds: 0,
         reason: String(body?.reason || "Portal 群友列表手动解禁").slice(0, 500)
-      });
+      }).catch(() => {});
       return jsonResponse({ ok: true, message: `已解除 ${member?.name || qq} 的禁言。`, qq });
     } catch (error) {
       if (lock) await putMuteLock(env, lock).catch(() => {});

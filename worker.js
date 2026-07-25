@@ -692,12 +692,14 @@ const QQAIWorker = {
         for (const lock of locks) {
           const permission = canUnlockMute(env, lock, { actorId: userId, privateSelfCommand: true });
           if (!permission.allowed) continue;
-          await clearMuteLock(env, lock.groupId, userId);
+          let cleared = false;
           try {
+            await clearMuteLock(env, lock.groupId, userId);
+            cleared = true;
             await callOneBotAction(env, { action: "set_group_ban", params: { group_id: numericId(lock.groupId), user_id: numericId(userId), duration: 0 } }, 15000);
-            await writeSystemAudit(env, { type: "self_mute_private_release", groupId: lock.groupId, actorId: userId, targetId: userId, action: "unmute", silent: true });
+            await writeSystemAudit(env, { type: "self_mute_private_release", groupId: lock.groupId, actorId: userId, targetId: userId, action: "unmute", silent: true }).catch(() => {});
           } catch (error) {
-            await putMuteLock(env, lock).catch(() => {});
+            if (cleared) await putMuteLock(env, lock).catch(() => {});
             await writeSystemAudit(env, { type: "self_mute_private_release_failed", groupId: lock.groupId, actorId: userId, targetId: userId, action: "unmute_failed", silent: true, error: String(error?.message || error) }).catch(() => {});
           }
         }
@@ -1656,15 +1658,20 @@ const QQAIWorker = {
         const duration = Math.max(1, Math.min(MUTE_LOCK_MAX_SECONDS, parseDurationSeconds(requested) || 600));
         const existingLock = await getMuteLock(env, currentGroupId, userId);
         if (existingLock?.source === "manual") return jsonReply(`${atSender}当前禁言由管理防解除锁保护，不能改成自我禁言。`);
-        const lock = await createSelfMuteLock(env, { groupId: currentGroupId, userId, durationSeconds: duration });
+        try {
+          await createSelfMuteLock(env, { groupId: currentGroupId, userId, durationSeconds: duration });
+        } catch (error) {
+          return jsonReply(`${atSender}无法建立自我禁言锁，未执行禁言：${String(error?.message || error).slice(0, 300)}`);
+        }
         try {
           await callOneBotAction(env, { action: "set_group_ban", params: { group_id: numericId(currentGroupId), user_id: numericId(userId), duration } }, 15000);
-          await writeSystemAudit(env, { type: "self_mute_started", groupId: currentGroupId, actorId: userId, targetId: userId, action: "mute", durationSeconds: duration });
-          return jsonReply(`${atSender}已自我禁言 ${duration} 秒。只能由你本人私讯机器人发送「!解除禁言」静默解除，管理入口不能解除。`);
         } catch (error) {
-          await clearMuteLock(env, currentGroupId, userId).catch(() => {});
+          if (existingLock?.active) await putMuteLock(env, existingLock).catch(() => {});
+          else await clearMuteLock(env, currentGroupId, userId).catch(() => {});
           return jsonReply(`${atSender}自我禁言失败：${String(error?.message || error).slice(0, 300)}`);
         }
+        await writeSystemAudit(env, { type: "self_mute_started", groupId: currentGroupId, actorId: userId, targetId: userId, action: "mute", durationSeconds: duration }).catch(() => {});
+        return jsonReply(`${atSender}已自我禁言 ${duration} 秒。只能由你本人私讯机器人发送「!解除禁言」静默解除，管理入口不能解除。`);
       }
 
       // 高影响群操作统一建立待确认提案；任何模型或指令都不能直接踢人／禁言。
@@ -1686,16 +1693,19 @@ const QQAIWorker = {
         if (!targetQq) return jsonReply(`${atSender}格式：!解禁 @成员`);
         const protectedLock = await getMuteLock(env, currentGroupId, targetQq);
         if (protectedLock) {
-          const blocked = await markMuteUnlockBlocked(env, protectedLock, userId);
-          if (blocked.shouldNotify) {
-            const hint = protectedLock.source === "self"
-              ? "该成员为自我禁言，只能本人私讯机器人发送「!解除禁言」；群聊管理指令不能解除。"
-              : protectedLock.allowOwnerUnmute
-                ? "该禁言已启用防解除，仅开发者或群主可从 Portal／QQ 管理入口解除。"
-                : "该禁言已启用防解除，仅开发者可从 Portal／QQ 管理入口解除。";
-            return jsonReply(`${atSender}${hint} 后续重复尝试不再提示。`);
+          const permission = canUnlockMute(env, protectedLock, { actorId: userId, actorRole: senderRole, isDeveloper });
+          if (!permission.allowed) {
+            const blocked = await markMuteUnlockBlocked(env, protectedLock, userId);
+            if (blocked.shouldNotify) {
+              const hint = protectedLock.source === "self"
+                ? "该成员为自我禁言，只能本人私讯机器人发送「!解除禁言」；群聊管理指令不能解除。"
+                : protectedLock.allowOwnerUnmute
+                  ? "该禁言已启用防解除，仅开发者或群主可以解除。"
+                  : "该禁言已启用防解除，仅开发者可以解除。";
+              return jsonReply(`${atSender}${hint} 后续重复尝试不再提示。`);
+            }
+            return new Response(null, { status: 204 });
           }
-          return new Response(null, { status: 204 });
         }
         const member = await getGroupMemberSafe(env, currentGroupId, targetQq);
         const proposal = await createModerationProposal(env, { groupId: currentGroupId, actorId: userId, actorName: senderCard, actorRole: isDeveloper ? 'developer' : senderRole, action: 'unmute', targetId: targetQq, targetName: member?.card || member?.nickname || targetQq, targetRole: member?.role || 'member', sourceText: cleanMessage, classifierReason: '明确解禁指令', messageId: replyMessageId });
