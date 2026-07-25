@@ -32,6 +32,7 @@ assert(bindings.includes('PARTNER_REQUEST_TTL_MS'), 'Partner requests must expir
 
 const worker = fs.readFileSync('worker.js', 'utf8');
 assert(worker.includes('createPartnerBindingRequest'), 'Worker must expose partner binding requests');
+assert(worker.includes('群主与核心开发者不能建立对象绑定'), 'Owner and core developer accounts must be excluded from partner binding');
 assert(worker.includes('decidePartnerBindingRequest'), 'Worker must require target consent');
 assert(worker.includes('createPartnerMuteLock'), 'Partner mute must use a distinct lock source');
 assert(worker.includes('partnerCommand: true'), 'Partner unmute must use the restricted partner permission path');
@@ -40,6 +41,7 @@ assert(worker.includes('只能解除由对象关系产生的禁言'), 'Partner u
 const portal = fs.readFileSync('src/portal/runtime.js', 'utf8');
 assert(portal.includes("members:'群友列表'"), 'Portal title map must include the member list');
 assert(portal.includes("'groups','moderation','members','ruleviolations'"), 'Portal management visibility must include the member list');
+assert(portal.includes('data-open-view="members"'), 'Portal dashboard must expose a member-list shortcut when the navigation permission is available');
 assert(portal.includes('id="opProtect"'), 'Pending moderation form must expose prevent-unmute');
 assert(portal.includes('id="opOwnerUnlock"'), 'Pending moderation form must expose owner-can-unmute');
 assert(portal.includes('id="opSkipConfirm"'), 'Pending moderation form must expose skip-confirmation');

@@ -2580,6 +2580,7 @@ function getPortalHomePage(host) {
             <button class="action-card" data-open-view="schedules"><span class="action-icon">时</span><span><b>排程提醒</b><small>建立、查看或取消提醒</small></span></button>
             <button class="action-card" data-open-view="memory"><span class="action-icon">记</span><span><b>AI 记忆</b><small>查看或补充群组知识</small></span></button>
             <button class="action-card" data-open-view="groups"><span class="action-icon">群</span><span><b>群组设置</b><small>AI 开关、人格与安全设置</small></span></button>
+            <button class="action-card" data-open-view="members"><span class="action-icon">友</span><span><b>群友列表</b><small>历史消息、禁言与防解除</small></span></button>
             <button class="action-card" data-open-view="appeals"><span class="action-icon">诉</span><span><b>我的申诉</b><small>提交申诉与查看处理结果</small></span></button>
             <button class="action-card" data-open-view="settingscenter"><span class="action-icon">设</span><span><b>更多设置</b><small>只显示当前账号可以修改的项目</small></span></button>
           </div></div>

@@ -3,50 +3,29 @@ name: Validate single-Worker build
 on:
   push:
     branches:
-      - feature/portal-moderation-partner-v2.3.0
+      - main
+      - refactor/v2-modular-worker
   pull_request:
     branches:
       - main
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   validate:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
-        with:
-          ref: feature/portal-moderation-partner-v2.3.0
-          fetch-depth: 0
       - uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: npm
           cache-dependency-path: package.json
-      - name: Apply final review patch
-        run: node tools/finalize-v230-review.mjs
-      - name: Check syntax
-        run: |
-          node --check worker.js
-          node --check src/portal/runtime.js
-          node --check verify-partner-bindings.mjs
       - name: Install dependencies
         run: npm install --ignore-scripts
       - name: Run regression checks
         run: npm run check
       - name: Build the single Worker bundle
         run: npm run check:bundle
-      - name: Commit clean reviewed candidate
-        env:
-          BRANCH: feature/portal-moderation-partner-v2.3.0
-        run: |
-          rm -rf node_modules dist package-lock.json
-          rm -f tools/finalize-v230-review.mjs
-          git show origin/main:.github/workflows/validate.yml > .github/workflows/validate.yml
-          git config user.name github-actions[bot]
-          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
-          git add -A
-          git commit -m 'Finalize Portal member access and partner safety'
-          git push origin HEAD:$BRANCH

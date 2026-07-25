@@ -1683,6 +1683,8 @@ const QQAIWorker = {
       const partnerBindCommand = cleanMessage.match(/^[!！](?:绑定对象|綁定對象)(?:\s+@?(\d{5,}))?$/i);
       if (partnerBindCommand) {
         if (!isGroup) return new Response(null, { status: 204 });
+        const requester = await getGroupMemberSafe(env, currentGroupId, userId);
+        if (userId === String(env.DEVELOPER_ID || "") || String(requester?.role || "") === "owner") return jsonReply(`${atSender}群主与核心开发者不能建立对象绑定。`);
         const targetId = String(targetMentionQqs[0] || partnerBindCommand[1] || "").replace(/\D/g, "");
         if (!targetId) return jsonReply(`${atSender}格式：!绑定对象 @群友`);
         if (targetId === userId || targetId === botId || targetId === String(env.DEVELOPER_ID || "")) return jsonReply(`${atSender}不能绑定这个账号。`);
