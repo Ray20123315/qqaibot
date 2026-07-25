@@ -1,6 +1,14 @@
 name: V2 modularization inventory
 
 on:
+  pull_request:
+    branches:
+      - main
+    types: [opened, synchronize, reopened]
+    paths:
+      - worker.js
+      - .github/workflows/v2-modular-inventory.yml
+      - .v2-inventory-trigger
   push:
     branches:
       - refactor/v2-modular-worker
@@ -96,6 +104,7 @@ jobs:
           node --check worker.js
 
       - name: Commit inventory
+        if: github.event_name == 'push'
         shell: bash
         run: |
           set -euo pipefail
@@ -107,3 +116,10 @@ jobs:
           fi
           git commit -m "Inventory worker.js for v2 modularization"
           git push origin HEAD:refactor/v2-modular-worker
+
+      - name: Upload inventory artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: v2-worker-inventory
+          path: refactor-inventory.json
+          if-no-files-found: error
