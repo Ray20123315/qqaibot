@@ -190,3 +190,17 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
 2. **修改需經原作者同意**：預設情況下，您**無權修改**本專案的任何程式碼。若您有修改需求，必須主動聯繫原作者 (ray20123315) 請求授權。
 3. **禁止公開發布改版（絕對禁令）**：即使您獲得了原作者的同意進行了修改，這些**修改後的程式碼僅限於您私下使用，絕對禁止以任何形式公開發布或散佈**（包含但不限於推送到公開的 GitHub 倉庫、論壇等）。
 4. **免責聲明**：本軟體按「現狀」提供，不附帶任何明示或暗示的保證。
+
+
+## 部署通知（單一 Worker）
+
+程式已支援 Cloudflare Workers Builds Event Subscriptions，仍由原本的 `qqai` Worker 消費事件，不會新增第二個 Worker。
+
+啟用方式：
+
+1. 在 Cloudflare Queues 建立 `qqai-deploy-events`。
+2. 將該 Queue 的 Consumer 指向現有 Worker `qqai`。
+3. 在 Queue 的 Subscriptions 訂閱 Workers Builds，Worker 選擇 `qqai`，事件勾選 `build.started`、`build.succeeded`、`build.failed`、`build.canceled`。
+4. 可選：設定 Secret `CLOUDFLARE_BUILDS_API_TOKEN`（Workers CI Read），失敗時會私訊開發者更完整的 Build Logs；未設定時仍會提供 Build UUID、Commit 與事件附帶錯誤。
+
+防洗版規則：只處理 `main`、依 Build UUID 去重、部署中通知預設十分鐘冷卻、只通知最新 Build 的最終結果。白名單群只收到簡短成功／失敗；失敗詳細資料只提供給 `DEPLOY_NOTIFY_DEVELOPER_ID`、`DEVELOPER_ID` 或預設開發者 QQ。
