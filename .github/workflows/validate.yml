@@ -21,13 +21,14 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
       - uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: npm
           cache-dependency-path: package.json
       - name: Apply Portal member console hotfix
-        if: github.ref == 'refs/heads/fix/portal-members-client-v2.4.2'
+        if: github.ref == 'refs/heads/fix/portal-members-client-v2.4.2' || github.head_ref == 'fix/portal-members-client-v2.4.2'
         run: node tools/apply-portal-members-hotfix-v2.4.2.mjs
       - name: Check syntax
         run: |
@@ -40,7 +41,7 @@ jobs:
       - name: Build the single Worker bundle
         run: npm run check:bundle
       - name: Commit clean validated candidate
-        if: github.ref == 'refs/heads/fix/portal-members-client-v2.4.2'
+        if: github.event_name == 'push' && github.ref == 'refs/heads/fix/portal-members-client-v2.4.2'
         run: |
           rm -rf node_modules dist package-lock.json tools/apply-portal-members-hotfix-v2.4.2.mjs
           git checkout origin/main -- .github/workflows/validate.yml
