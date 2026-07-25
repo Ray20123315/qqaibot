@@ -40,7 +40,11 @@ jobs:
 
       - name: Apply meme and member console changes
         if: steps.gate.outputs.apply == 'true'
-        run: node .qqai-meme-members/patch.mjs
+        shell: bash
+        run: |
+          set -o pipefail
+          node --check .qqai-meme-members/patch.mjs 2>&1 | tee qqai-meme-patch.log
+          node .qqai-meme-members/patch.mjs 2>&1 | tee -a qqai-meme-patch.log
 
       - name: Install dependencies
         if: steps.gate.outputs.apply == 'true'
@@ -59,7 +63,9 @@ jobs:
         with:
           name: qqai-meme-members-diagnostics
           path: |
+            qqai-meme-patch.log
             qqai-meme-members-check.log
+            .qqai-meme-members/patch.mjs
             src/moderation/runtime.js
             src/portal/runtime.js
             src/portal/members.js
@@ -94,7 +100,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          rm -rf node_modules dist package-lock.json qqai-meme-members-check.log .qqai-meme-members .github/workflows/apply-meme-members.yml
+          rm -rf node_modules dist package-lock.json qqai-meme-patch.log qqai-meme-members-check.log .qqai-meme-members .github/workflows/apply-meme-members.yml
           git config user.name qqai-meme-members
           git config user.email actions@users.noreply.github.com
           git add -A
