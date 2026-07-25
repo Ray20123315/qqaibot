@@ -1,5 +1,6 @@
 {
   "version": "2.0.1",
+  "notificationPolicy": "latest-main-only",
   "added": [
     "部署开始、成功与失败通知",
     "Portal 部署状态弹窗",
