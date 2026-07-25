@@ -19,6 +19,7 @@ assert(bindings.includes('request.targetId'), 'Only the invited target may appro
 const worker = fs.readFileSync('worker.js', 'utf8');
 assert(worker.includes('!同意主人绑定'), 'Master binding must require an explicit approval command');
 assert(worker.includes('所属成员必须是当前普通群成员'), 'Subordinate eligibility must exclude management and system accounts');
+assert(worker.includes('masterId === String(botId || "")'), 'The bot account must be rejected before a master relationship request is created');
 assert(worker.includes('no_cache: true'), 'Master relationship roles must use live OneBot checks');
 assert(worker.includes('createMasterMuteLock'), 'Master mute must use a distinct lock source');
 assert(worker.includes('masterCommand: true'), 'Master unmute must use the restricted master permission path');

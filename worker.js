@@ -1835,7 +1835,8 @@ const QQAIWorker = {
         if (targetId === userId || targetId === String(botId || "")) return jsonReply(`${atSender}不能与自己或机器人建立主人关系。`);
         const masterId = takeMemberCommand ? userId : targetId;
         const memberId = takeMemberCommand ? targetId : userId;
-        if (memberId === relationshipDeveloperId || memberId === String(botId || "")) return jsonReply(`${atSender}核心开发者与机器人不能成为所属成员。`);
+        if (masterId === String(botId || "") || memberId === String(botId || "")) return jsonReply(`${atSender}机器人不能成为主人关系的任何一方。`);
+        if (memberId === relationshipDeveloperId) return jsonReply(`${atSender}核心开发者不能成为所属成员，但可以成为主人。`);
         const [liveMaster, liveMember] = await Promise.all([
           loadLiveRelationshipMember(masterId),
           loadLiveRelationshipMember(memberId)
