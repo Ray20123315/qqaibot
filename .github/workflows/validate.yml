@@ -41,6 +41,16 @@ jobs:
           node --check verify-community-suite.mjs
       - name: Parse generated Portal clients
         run: node verify-community-suite.mjs
+      - name: Upload generated Portal diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: community-suite-portal-diagnostics
+          path: |
+            portal-generated.html
+            portal-script-*.js
+            portal-script-error.log
+          if-no-files-found: ignore
       - name: Install dependencies
         run: npm install --ignore-scripts
       - name: Run regression checks
@@ -50,7 +60,7 @@ jobs:
       - name: Commit clean validated candidate
         if: github.event_name == 'push' && github.ref == 'refs/heads/feature/community-suite-v2.5.0'
         run: |
-          rm -rf node_modules dist package-lock.json tools/apply-community-suite-v2.5.0.mjs
+          rm -rf node_modules dist package-lock.json tools/apply-community-suite-v2.5.0.mjs portal-generated.html portal-script-*.js portal-script-error.log
           git checkout origin/main -- .github/workflows/validate.yml
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
