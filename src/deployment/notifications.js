@@ -9,6 +9,8 @@ const HISTORY_KEY = "deployment:history";
 const LATEST_STARTED_KEY = "deployment:latest_started";
 const LAST_GROUP_STARTED_AT_KEY = "deployment:last_group_started_at";
 const MAX_HISTORY = 60;
+const SELF_FALLBACK_SEEN_PREFIX = "deployment:self_fallback_seen:";
+const SELF_FALLBACK_ANNOUNCED_PREFIX = "deployment:self_fallback_announced:";
 
 function parseJson(raw, fallback = null) {
   if (!raw) return fallback;
@@ -253,7 +255,9 @@ async function processBuildEvent(env, event) {
     }
   } else {
     const terminalKey = `deployment:terminal_notified:${record.commitHash || record.buildUuid}:${record.kind}`;
-    if (!await kvGet(env, terminalKey)) {
+    const selfFallbackAlreadyAnnounced = record.kind === "succeeded"
+      && Boolean(await kvGet(env, `${SELF_FALLBACK_ANNOUNCED_PREFIX}${summary.version}`));
+    if (!selfFallbackAlreadyAnnounced && !await kvGet(env, terminalKey)) {
       const text = record.kind === "succeeded"
         ? `${publicMessage(record)}${compactSummary(summary) ? `\n${compactSummary(summary)}` : ""}`
         : publicMessage(record);
@@ -266,8 +270,43 @@ async function processBuildEvent(env, event) {
   if (record.kind === "failed") developerNotification = await notifyDeveloperFailure(env, portalRecord, String(event?.metadata?.accountId || ""));
 
   await kvPut(env, STATUS_KEY, JSON.stringify({ ...portalRecord, groupNotification, developerNotification }));
+  if (record.kind === "succeeded") await kvPut(env, `${SELF_FALLBACK_ANNOUNCED_PREFIX}${summary.version}`, String(Date.now()));
   await kvPut(env, seenKey, String(Date.now()));
   return { ok: true, record: portalRecord, groupNotification, developerNotification };
+}
+
+async function announceDeployedVersionFallback(env, now = Date.now()) {
+  const announcedKey = `${SELF_FALLBACK_ANNOUNCED_PREFIX}${VERSION}`;
+  if (await kvGet(env, announcedKey)) return { ignored: true, reason: "already_announced" };
+  const seenKey = `${SELF_FALLBACK_SEEN_PREFIX}${VERSION}`;
+  const firstSeenAt = Number(await kvGet(env, seenKey) || 0);
+  if (!firstSeenAt) {
+    await kvPut(env, seenKey, String(now));
+    return { pending: true, reason: "grace_started" };
+  }
+  const graceMs = envNumber(env?.DEPLOY_NOTIFY_SELF_GRACE_SECONDS, 90, 30, 900) * 1000;
+  if (now - firstSeenAt < graceMs) return { pending: true, reason: "grace_wait", remainingMs: graceMs - (now - firstSeenAt) };
+  const current = parseJson(await kvGet(env, STATUS_KEY), null);
+  if (current?.kind === "succeeded" && String(current.releaseVersion || "") === VERSION) {
+    await kvPut(env, announcedKey, String(now));
+    return { ignored: true, reason: "queue_event_already_announced" };
+  }
+  const summary = releaseSummary();
+  const text = `${publicMessage({ kind: "succeeded" })}${compactSummary(summary) ? `\n${compactSummary(summary)}` : ""}`;
+  const groupNotification = await notifyGroups(env, text);
+  if (groupNotification.length && groupNotification.every(item => !item.ok)) throw new Error("Deployment self-fallback could not notify any whitelisted group");
+  const record = {
+    kind: "succeeded", buildUuid: `self:${VERSION}`, workerName: String(env?.DEPLOY_NOTIFY_WORKER_NAME || "qqai"),
+    branch: String(env?.DEPLOY_NOTIFY_BRANCH || "main"), commitHash: "", commitMessage: "Worker runtime version self-check",
+    author: "system:self_fallback", buildCommand: "", deployCommand: "", repoName: "Ray20123315/qqaibot",
+    createdAt: firstSeenAt, stoppedAt: now, outcome: "success", failureDetail: "", raw: "", stale: false,
+    noticeId: `self:${VERSION}:succeeded`, releaseVersion: summary.version, summary, publicMessage: publicMessage({ kind: "succeeded" }),
+    processedAt: now, source: "runtime_self_fallback", groupNotification, developerNotification: null
+  };
+  await appendHistory(env, record);
+  await kvPut(env, STATUS_KEY, JSON.stringify(record));
+  await kvPut(env, announcedKey, String(now));
+  return { ok: true, record, groupNotification, source: "runtime_self_fallback" };
 }
 
 async function handleDeploymentBuildQueue(batch, env) {
@@ -336,4 +375,4 @@ function injectDeploymentPortalClient(html) {
   return source.includes("</body>") ? source.replace("</body>", `${addition}\n</body>`) : `${source}${addition}`;
 }
 
-export { getDeploymentStatusForViewer, handleDeploymentBuildQueue, injectDeploymentPortalClient, processBuildEvent };
+export { announceDeployedVersionFallback, getDeploymentStatusForViewer, handleDeploymentBuildQueue, injectDeploymentPortalClient, processBuildEvent };

@@ -1,9 +1,15 @@
 {
-  "version": "2.0.2",
-  "notificationPolicy": "latest-main-only",
+  "version": "2.0.3",
+  "notificationPolicy": "latest-main-only-with-runtime-success-fallback",
   "queueDelivery": "mark-processed-after-success",
-  "added": [],
+  "added": [
+    "部署成功通知的运行时自检备援",
+    "重复与高度相似消息的确定性刷屏检测"
+  ],
   "fixed": [
-    "分群申请不再经过 AI 审核，符合分群绑定的申请直接同意"
+    "未配置 Cloudflare Build Event Queue 时完全没有成功通知",
+    "群规为空时刷屏检测被提前跳过",
+    "单条变体消息重置连续计数导致漏判刷屏",
+    "确定性刷屏仍受 AI 置信度影响"
   ]
 }

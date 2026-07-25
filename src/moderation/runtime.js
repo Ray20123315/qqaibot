@@ -1427,6 +1427,65 @@ async function findLatestActiveRuleViolationForUser(env, groupId, userId) {
 
 
 
+function normalizeSpamBurstText(value) {
+  return String(value || "")
+    .normalize("NFKC")
+    .toLowerCase()
+    .replace(/[\s\u200B-\u200D\uFEFF.,!?，。！？、~～\"'“”‘’（）()【】{}<>《》:：;；_\-]/g, "")
+    .slice(0, 1000);
+}
+
+function spamTextSimilarity(left, right) {
+  const a = normalizeSpamBurstText(left);
+  const b = normalizeSpamBurstText(right);
+  if (!a || !b) return 0;
+  if (a === b) return 1;
+  const minLength = Math.min(a.length, b.length);
+  const maxLength = Math.max(a.length, b.length);
+  if (minLength < 4 || maxLength - minLength > Math.max(2, Math.floor(minLength * 0.35))) return 0;
+  let prefix = 0;
+  while (prefix < minLength && a[prefix] === b[prefix]) prefix += 1;
+  let suffix = 0;
+  while (suffix < minLength - prefix && a[a.length - 1 - suffix] === b[b.length - 1 - suffix]) suffix += 1;
+  const edgeRatio = Math.max(prefix, suffix) / minLength;
+  const grams = value => {
+    const set = new Set();
+    for (let index = 0; index < value.length - 1; index++) set.add(value.slice(index, index + 2));
+    return set;
+  };
+  const leftGrams = grams(a);
+  const rightGrams = grams(b);
+  let intersection = 0;
+  for (const gram of leftGrams) if (rightGrams.has(gram)) intersection += 1;
+  const union = new Set([...leftGrams, ...rightGrams]).size || 1;
+  return Math.max(edgeRatio, intersection / union);
+}
+
+function detectRepeatedMessageBurst(rows, currentText, threshold = DEFAULTS.ruleSpamThreshold, keepCount = DEFAULTS.ruleSpamKeepCount) {
+  const safeThreshold = Math.max(2, Math.min(50, Number(threshold || DEFAULTS.ruleSpamThreshold)));
+  const safeKeepCount = Math.max(0, Math.min(safeThreshold - 1, Number(keepCount || 0)));
+  const currentNormalized = normalizeSpamBurstText(currentText);
+  const prepared = (Array.isArray(rows) ? rows : []).map(row => ({
+    ...row,
+    normalized: normalizeSpamBurstText(row?.normalized || row?.text || "")
+  })).filter(row => row.normalized);
+  const exactRows = prepared.filter(row => row.normalized === currentNormalized);
+  const similarRows = prepared.filter(row => spamTextSimilarity(row.normalized, currentNormalized) >= 0.8);
+  let trailingSameCount = 0;
+  for (let index = prepared.length - 1; index >= 0; index--) {
+    if (prepared[index].normalized !== currentNormalized) break;
+    trailingSameCount += 1;
+  }
+  const repeatedMessageBurst = exactRows.length >= safeThreshold || similarRows.length >= safeThreshold + 1;
+  const evidenceRows = exactRows.length >= safeThreshold ? exactRows : similarRows;
+  return {
+    currentNormalized, exactSameCount: exactRows.length, similarMessageCount: similarRows.length, trailingSameCount, repeatedMessageBurst,
+    repeatedMessageIds: repeatedMessageBurst
+      ? evidenceRows.slice(Math.min(safeKeepCount, evidenceRows.length)).map(row => String(row.messageId || "")).filter(Boolean)
+      : []
+  };
+}
+
 async function inspectMessageAgainstGroupRules(env, { groupId, userId, senderName, text, messageId, manualReport = null, imageUrl = null, imageFile = null }) {
   const manual = Boolean(manualReport && typeof manualReport === "object");
   const botRuleState = await getBotGroupRole(env, groupId);
@@ -1450,7 +1509,6 @@ async function inspectMessageAgainstGroupRules(env, { groupId, userId, senderNam
   const baseRules = String(await dbGet(env, `group_rules:${groupId}`) || "").trim();
   const temporaryRules = activeRuleRecords.tempRules.map((item, index) => `${index + 1}. [临时规则 P${Number(item.priority || 0)}] ${item.title || ""}：${item.description || ""}`).join("\n");
   const rules = [baseRules, temporaryRules].filter(Boolean).join("\n\n").trim();
-  if (!rules) return { status: "no_rules" };
 
   // 刷屏门槛按群设置；人工补检旧消息时不把该消息重新计入“刚刚发送”的突发计数。
   const now = Date.now();
@@ -1459,7 +1517,7 @@ async function inspectMessageAgainstGroupRules(env, { groupId, userId, senderNam
   const configuredKeepCount = Math.max(0, Math.min(49, parseUnlimitedNonNegativeInteger(await dbGet(env, `rule_spam_keep_count:${groupId}`), DEFAULTS.ruleSpamKeepCount)));
   const spamKeepCount = Math.min(configuredKeepCount, spamThreshold - 1);
   const burstKey = `rule_message_burst:${groupId}:${userId}`;
-  const normalizeBurstText = value => String(value || "").replace(/\s+/g, " ").trim().toLowerCase();
+  const normalizeBurstText = normalizeSpamBurstText;
   let burstRows = (await readJson(env, burstKey, []))
     .filter(row => now - Number(row?.at || 0) <= spamWindowSeconds * 1000)
     .map(row => ({ at: Number(row.at || 0), messageId: String(row.messageId || ""), text: String(row.text || ""), normalized: normalizeBurstText(row.normalized || row.text || "") }));
@@ -1468,17 +1526,22 @@ async function inspectMessageAgainstGroupRules(env, { groupId, userId, senderNam
   }
   burstRows = burstRows.slice(-Math.max(20, spamThreshold + 8));
   if (!manual) await dbPut(env, burstKey, JSON.stringify(burstRows));
-  const currentNormalized = normalizeBurstText(content);
-  let trailingSameCount = 0;
-  for (let index = burstRows.length - 1; index >= 0; index--) {
-    if (burstRows[index].normalized !== currentNormalized) break;
-    trailingSameCount += 1;
-  }
-  const repeatedMessageBurst = trailingSameCount >= spamThreshold;
-  const excessCount = repeatedMessageBurst ? Math.max(1, trailingSameCount - spamKeepCount) : 0;
-  const repeatedMessageIds = repeatedMessageBurst
-    ? burstRows.slice(-excessCount).map(row => row.messageId).filter(Boolean)
-    : [];
+  const burstDecision = detectRepeatedMessageBurst(burstRows, content, spamThreshold, spamKeepCount);
+  const currentNormalized = burstDecision.currentNormalized;
+  const trailingSameCount = burstDecision.trailingSameCount;
+  const exactSameCount = burstDecision.exactSameCount;
+  const similarMessageCount = burstDecision.similarMessageCount;
+  const repeatedMessageBurst = burstDecision.repeatedMessageBurst;
+  const repeatedMessageIds = burstDecision.repeatedMessageIds;
+  const deterministicSpamCount = Math.max(exactSameCount, similarMessageCount);
+  const deterministicSpamReview = repeatedMessageBurst ? {
+    violation: true, confidence: 1, violationType: "公共秩序",
+    rule: rules ? "本群刷屏规则" : "系统默认反刷屏规则",
+    reason: `${spamWindowSeconds} 秒内同一成员发送相同或高度相似内容 ${deterministicSpamCount} 次，达到刷屏门槛 ${spamThreshold} 次。`,
+    severity: deterministicSpamCount >= spamThreshold + 3 ? "severe" : "moderate",
+    intentional: true, action: "recall", muteSeconds: 0, testContext: false, linkAssessment: "无链接", deterministic: true
+  } : null;
+  if (!rules && !deterministicSpamReview) return { status: "no_rules" };
   if (content.length < 2 && !repeatedMessageBurst && !manual) return { status: "no_violation", review: { violation: false, confidence: 1, reason: "消息过短且无重复发送证据" } };
 
   const recentLogRows = (await readJson(env, `recent_logs:${groupId}`, [])).slice(-30);
@@ -1510,6 +1573,9 @@ async function inspectMessageAgainstGroupRules(env, { groupId, userId, senderNam
     }
   }
   let review;
+  if (deterministicSpamReview) {
+    review = deterministicSpamReview;
+  } else {
   try {
     const result = await callGoogleDecision(env, {
       system: `你是 QQ 群规合规分类器。只能输出 JSON：{"violation":true|false,"confidence":0到1,"violationType":"违规项目分类","rule":"涉及群规","reason":"简短且具体的原因","severity":"minor|moderate|severe|critical","intentional":true|false,"action":"record|warn|mute|kick","muteSeconds":整数,"testContext":true|false,"linkAssessment":"无链接或简短判断"}。
@@ -1548,6 +1614,8 @@ async function inspectMessageAgainstGroupRules(env, { groupId, userId, senderNam
         recentUserMessageBurst: burstRows,
         repeatedMessageBurst,
         trailingSameCount,
+        exactSameCount,
+        similarMessageCount,
         spamWindowSeconds,
         spamThreshold,
         spamKeepCount,
@@ -1573,6 +1641,7 @@ async function inspectMessageAgainstGroupRules(env, { groupId, userId, senderNam
     await opsSaveRecord(env, { type: "test_case", groupId, actorId: "system:rule_monitor", actorName: "system", data: { title: "群规判断待人工确认", description: content.slice(0, 4000), status: "pending_review", messageId: String(messageId || ""), userId: String(userId || ""), reason, imageInspection, newsVerification } }).catch(() => {});
     const clarification = await requestRuleManagerClarification(env, { groupId, userId, senderName, content, messageId, reason });
     return { status: "pending_review", reason, clarification };
+  }
   }
   await opsRecordAutomationResult(env, groupId, "rule_monitor", true).catch(() => {});
 
@@ -1999,4 +2068,4 @@ async function listModerationProposals(env, groupId, { limit = 100 } = {}) {
   return items;
 }
 
-export { addRuleStrike, appendHumanCorrectionToRulePolicy, appendRuleViolationRecord, attachModerationProposalMessage, classifyNaturalModerationIntent, createGroupWorkRequest, createJoinRequestAssist, createModerationProposal, decideJoinRequestAssist, defaultRuleCategoryPolicies, defaultRuleProgressivePolicy, detectNaturalModerationProposal, executeGroupWorkRequest, executeModerationProposal, explicitPromotionLanguage, extractHtmlMetadata, extractOneBotMessageId, extractRuleReviewUrls, findLatestActiveRuleViolationForUser, findLatestPendingModerationProposalId, formatModerationPermissionDenied, formatModerationProposal, getGroupMemberSafe, getRuleCategoryPolicies, getRuleProgressivePolicy, handleGroupWorkDecision, handleModerationConfirmation, inspectMessageAgainstGroupRules, inspectUrlsForRuleReview, joinRequestPatternHash, listModerationProposals, localModerationIntent, matchRuleCategoryPolicy, moderationActionLabel, moderationActionNeedsTarget, moderationPermissionLevelLabel, normalizeProgressiveAction, normalizeProgressiveActionSpecs, normalizeRuleCategoryPolicies, normalizeRulePolicyActionSpec, normalizeRulePolicyActions, normalizeRulePolicyPunishment, normalizeRuleProgressivePolicy, normalizeRuleProxyMode, normalizeRuleSeverity, normalizeRuleStrictness, parseModerationConfirmation, parseUnlimitedNonNegativeInteger, performRuleAdditionalActions, performRuleProxyAction, progressiveMuteFallback, readJoinPattern, readRecentRuleFeedbackExamples, readResponseTextPrefix, recordJoinPatternDecision, recordRuleViolationFeedback, removeRuleStrike, requestRuleManagerClarification, resolveAdaptiveRuleStrictness, resolveModerationTarget, resolveSubgroupJoinFamily, resolveRuleProgressiveStep, retractModerationProposalMessage, reverseRuleViolationAction, reviewGroupWorkWithGemma, reviewJoinRequestAssist, ruleBaseActionName, ruleContentNeedsWebVerification, ruleProxyCooldownRemaining, ruleStrictnessConfig, ruleStrictnessLabel, updateRuleViolationRecord, validateModerationProposalTarget, verifyRuleNewsContext };
+export { addRuleStrike, detectRepeatedMessageBurst, appendHumanCorrectionToRulePolicy, appendRuleViolationRecord, attachModerationProposalMessage, classifyNaturalModerationIntent, createGroupWorkRequest, createJoinRequestAssist, createModerationProposal, decideJoinRequestAssist, defaultRuleCategoryPolicies, defaultRuleProgressivePolicy, detectNaturalModerationProposal, executeGroupWorkRequest, executeModerationProposal, explicitPromotionLanguage, extractHtmlMetadata, extractOneBotMessageId, extractRuleReviewUrls, findLatestActiveRuleViolationForUser, findLatestPendingModerationProposalId, formatModerationPermissionDenied, formatModerationProposal, getGroupMemberSafe, getRuleCategoryPolicies, getRuleProgressivePolicy, handleGroupWorkDecision, handleModerationConfirmation, inspectMessageAgainstGroupRules, inspectUrlsForRuleReview, joinRequestPatternHash, listModerationProposals, localModerationIntent, matchRuleCategoryPolicy, moderationActionLabel, moderationActionNeedsTarget, moderationPermissionLevelLabel, normalizeProgressiveAction, normalizeProgressiveActionSpecs, normalizeRuleCategoryPolicies, normalizeRulePolicyActionSpec, normalizeRulePolicyActions, normalizeRulePolicyPunishment, normalizeRuleProgressivePolicy, normalizeRuleProxyMode, normalizeRuleSeverity, normalizeRuleStrictness, parseModerationConfirmation, parseUnlimitedNonNegativeInteger, performRuleAdditionalActions, performRuleProxyAction, progressiveMuteFallback, readJoinPattern, readRecentRuleFeedbackExamples, readResponseTextPrefix, recordJoinPatternDecision, recordRuleViolationFeedback, removeRuleStrike, requestRuleManagerClarification, resolveAdaptiveRuleStrictness, resolveModerationTarget, resolveSubgroupJoinFamily, resolveRuleProgressiveStep, retractModerationProposalMessage, reverseRuleViolationAction, reviewGroupWorkWithGemma, reviewJoinRequestAssist, ruleBaseActionName, ruleContentNeedsWebVerification, ruleProxyCooldownRemaining, ruleStrictnessConfig, ruleStrictnessLabel, updateRuleViolationRecord, validateModerationProposalTarget, verifyRuleNewsContext };

@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { getDeploymentStatusForViewer, processBuildEvent } from "./src/deployment/notifications.js";
+import { announceDeployedVersionFallback, getDeploymentStatusForViewer, processBuildEvent } from "./src/deployment/notifications.js";
 
 class MockD1 {
   constructor() {
@@ -86,5 +86,17 @@ const retried = await processBuildEvent(retryEnv, retryEvent);
 assert.equal(retried.ok, true, "A partially processed Queue event must be retryable");
 const retryDuplicate = await processBuildEvent(retryEnv, retryEvent);
 assert.equal(retryDuplicate.reason, "duplicate", "A successfully retried event must then be deduplicated");
+
+const fallbackDb = new MockD1();
+const fallbackEnv = { DB: fallbackDb, DEPLOY_NOTIFY_DEVELOPER_ID: "", DEPLOY_NOTIFY_SELF_GRACE_SECONDS: "30" };
+const fallbackFirst = await announceDeployedVersionFallback(fallbackEnv, t0 + 20000);
+assert.equal(fallbackFirst.reason, "grace_started");
+const fallbackSuccess = await announceDeployedVersionFallback(fallbackEnv, t0 + 51000);
+assert.equal(fallbackSuccess.ok, true, "Runtime fallback must announce a live version when Queue events are absent");
+const fallbackStatus = await getDeploymentStatusForViewer(fallbackEnv, viewer);
+assert.equal(fallbackStatus.status.kind, "succeeded");
+assert.equal(fallbackStatus.status.releaseVersion, "2.0.3");
+const fallbackDuplicate = await announceDeployedVersionFallback(fallbackEnv, t0 + 90000);
+assert.equal(fallbackDuplicate.reason, "already_announced");
 
 console.log("deployment notification checks passed");

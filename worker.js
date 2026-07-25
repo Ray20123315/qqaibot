@@ -3,7 +3,7 @@ import { AI_MEDIA_LIMITS, DEFAULTS, VERSION, classifyOperationalFailure } from "
 import { consumeManualRuleCheckRate, getAffinityProfile, latestConversationMessageForUser, recentConversationMessagesForUser, refreshAffinityAiAssessment, stripGroupAiOptOutPrefix, updateAffinityFixedFromMessage } from "./src/core/identity.js";
 import { appendIndex, buildLongGroupConversationContext, callOneBotAction, checkRuntimeRateLimit, getEffectivePermissions, isKnownOutboundMessage, markOutboundPending, modelPreferenceLabel, normalizeMemoryItems, normalizeModelPreference, normalizePermissionName, permissionLabel, removeFromIndex, setExplicitPermission, updateAiDecisionLog, writeAiDecisionLog, writeSystemAudit } from "./src/core/permissions.js";
 import { appendChatHistoryTurn, clearChatSessionHistory, dbDel, dbGet, dbPut, readChatHistory, withTimeout } from "./src/data/store.js";
-import { getDeploymentStatusForViewer, handleDeploymentBuildQueue, injectDeploymentPortalClient } from "./src/deployment/notifications.js";
+import { announceDeployedVersionFallback, getDeploymentStatusForViewer, handleDeploymentBuildQueue, injectDeploymentPortalClient } from "./src/deployment/notifications.js";
 import { botCanRunRuleMonitor, getBotGroupRole, getGroupFamilyForGroup, getGroupJoinPage, isVerifiedGroupOwner } from "./src/group/runtime.js";
 import { buildHealthState } from "./src/health/runtime.js";
 import { normalizeMultilingualCommand, toSimplifiedChinese } from "./src/i18n/commands.js";
@@ -3050,6 +3050,7 @@ ${deepseekContextSummary}`;
 
   async scheduled(controller, env, ctx) {
     ctx.waitUntil(dbPut(env, "system:last_cron", String(Number(controller?.scheduledTime || Date.now()))));
+    ctx.waitUntil(announceDeployedVersionFallback(env).catch(error => console.error("deployment self-fallback failed", error)));
     ctx.waitUntil(processDueSchedules(env, Number(controller?.scheduledTime || Date.now())));
     ctx.waitUntil(cleanupTransientState(env));
     ctx.waitUntil(cleanupExpiredModerationProposals(env));
