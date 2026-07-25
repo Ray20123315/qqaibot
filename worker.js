@@ -4316,7 +4316,7 @@ export class OneBotHub {
         }
       }
 
-      if (internalResponse.status === 204 && explicitQuestion && semanticQuestion && !options.signal?.aborted && body?.__qqai_force_explicit_reply !== true) {
+      if (internalResponse.status === 204 && explicitQuestion && semanticQuestion && safeRetry && !options.signal?.aborted && body?.__qqai_force_explicit_reply !== true) {
         retryAttempted = true;
         firstFailure = { type: "explicit_204", httpStatus: 204, elapsedMs: Date.now() - internalStartedAt };
         await this.recordIngress(body, "worker_explicit_retry", { explicit: true, force: true, retryAttempted: true, firstFailure }).catch(() => {});

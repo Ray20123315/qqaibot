@@ -48,6 +48,7 @@ assert(socialInputDelayMs([semanticQuestion]) <= 600, 'Semantic direct questions
 const worker = fs.readFileSync('worker.js', 'utf8');
 assert(worker.includes('__qqai_explicit_question: true'), 'Durable Object must mark validated explicit questions');
 assert(worker.includes('__qqai_force_explicit_reply: true'), 'Explicit 204 responses must trigger a forced retry');
+assert(worker.includes('explicitQuestion && semanticQuestion && safeRetry'), 'Forced 204 retry must be limited to side-effect-free chat');
 assert(worker.includes('worker_no_reply'), 'A second explicit 204 must produce a visible failure path');
 assert(worker.includes('duplicate_mention_noise'), 'Duplicate mention noise must be rejected before model processing');
 assert(worker.includes('setTimeout(resolve, 1800)'), 'Slow semantic questions must receive delayed visible progress');
