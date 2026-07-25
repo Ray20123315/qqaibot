@@ -1,6 +1,14 @@
 name: Apply validated v2 modular refactor
 
 on:
+  pull_request:
+    branches:
+      - main
+    types: [opened, synchronize, reopened]
+    paths:
+      - .qqai-v2-refactor/**
+      - .github/workflows/apply-v2-modular-refactor.yml
+      - .v2-apply-trigger
   push:
     branches:
       - refactor/v2-modular-worker
@@ -14,6 +22,7 @@ permissions:
 
 jobs:
   apply:
+    if: github.event_name == 'push' || github.head_ref == 'refactor/v2-modular-worker'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
