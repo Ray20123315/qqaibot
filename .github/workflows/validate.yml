@@ -30,8 +30,12 @@ jobs:
         shell: bash
         run: |
           set +e
-          node tools/apply-v231.mjs > apply-v231.log 2>&1
+          node tools/fix-v231-patcher.mjs > apply-v231.log 2>&1
           status=$?
+          if [ "$status" -eq 0 ]; then
+            node tools/apply-v231.mjs >> apply-v231.log 2>&1
+            status=$?
+          fi
           cat apply-v231.log
           echo "status=$status" >> "$GITHUB_OUTPUT"
           exit 0
