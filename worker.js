@@ -7916,9 +7916,9 @@ function defaultRuleProgressivePolicy(groupId = "") {
   const rayGroup = String(groupId || "") === "808882936";
   const steps = rayGroup
     ? [
-        { actions: [{ action: "recall", muteSeconds: 0 }, { action: "mute", muteSeconds: 60 }] },
-        { actions: [{ action: "recall", muteSeconds: 0 }, { action: "mute", muteSeconds: 600 }] },
-        { actions: [{ action: "recall", muteSeconds: 0 }, { action: "kick", muteSeconds: 0 }] }
+        { actions: [{ action: "mute", muteSeconds: 60 }] },
+        { actions: [{ action: "mute", muteSeconds: 600 }] },
+        { actions: [{ action: "kick", muteSeconds: 0 }] }
       ]
     : [
         { actions: [{ action: "remind", muteSeconds: 0 }] },
