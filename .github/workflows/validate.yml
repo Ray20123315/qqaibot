@@ -1,0 +1,30 @@
+name: Validate single-Worker build
+
+on:
+  push:
+    branches:
+      - main
+      - refactor/v2-modular-worker
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: package.json
+      - name: Install dependencies
+        run: npm install --ignore-scripts
+      - name: Run regression checks
+        run: npm run check
+      - name: Build the single Worker bundle
+        run: npm run check:bundle
