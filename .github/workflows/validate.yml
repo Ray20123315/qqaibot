@@ -40,17 +40,24 @@ jobs:
           node --check worker.js
           node --check verify-community-suite.mjs
       - name: Parse generated Portal clients
-        run: node verify-community-suite.mjs
+        id: community_check
+        continue-on-error: true
+        run: node verify-community-suite.mjs > community-suite-check.log 2>&1
       - name: Upload generated Portal diagnostics
-        if: failure()
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: community-suite-portal-diagnostics
           path: |
+            community-suite-check.log
             portal-generated.html
             portal-script-*.js
             portal-script-error.log
-          if-no-files-found: ignore
+          if-no-files-found: error
+      - name: Require generated Portal clients
+        run: |
+          cat community-suite-check.log
+          test "${{ steps.community_check.outcome }}" = "success"
       - name: Install dependencies
         run: npm install --ignore-scripts
       - name: Run regression checks
@@ -60,7 +67,7 @@ jobs:
       - name: Commit clean validated candidate
         if: github.event_name == 'push' && github.ref == 'refs/heads/feature/community-suite-v2.5.0'
         run: |
-          rm -rf node_modules dist package-lock.json tools/apply-community-suite-v2.5.0.mjs portal-generated.html portal-script-*.js portal-script-error.log
+          rm -rf node_modules dist package-lock.json tools/apply-community-suite-v2.5.0.mjs community-suite-check.log portal-generated.html portal-script-*.js portal-script-error.log
           git checkout origin/main -- .github/workflows/validate.yml
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
