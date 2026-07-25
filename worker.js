@@ -3805,10 +3805,11 @@ export class OneBotHub {
       const now = Date.now();
       const remainingSeconds = muteLockRemainingSeconds(muteLock, now);
       if (remainingSeconds <= 0) { await clearMuteLock(this.env, groupId, userId); return; }
-      const operatorMember = operatorId ? await getGroupMemberSafe(this.env, groupId, operatorId).catch(() => null) : null;
+      const verifiedOwner = Boolean(muteLock.allowOwnerUnmute && operatorId)
+        && await isVerifiedGroupOwner(this.env, groupId, operatorId).catch(() => false);
       const permission = canUnlockMute(this.env, muteLock, {
         actorId: operatorId,
-        actorRole: String(operatorMember?.role || "")
+        actorRole: verifiedOwner ? "owner" : ""
       });
       if (permission.allowed) {
         await clearMuteLock(this.env, groupId, userId);

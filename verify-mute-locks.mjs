@@ -47,6 +47,7 @@ assert(worker.includes('privateSelfCommand: true'), 'Private unmute must be the 
 assert(worker.includes('markMuteUnlockBlocked'), 'Unauthorized release attempts must be counted and deduplicated');
 assert(worker.includes('shouldNotify'), 'Blocked release warning must be emitted only once');
 assert(worker.includes('const permission = canUnlockMute(env, protectedLock'), 'Authorized developer or owner group commands must reach the normal confirmation flow');
+assert(worker.includes('isVerifiedGroupOwner(this.env, groupId, operatorId)'), 'Native QQ owner release must use a live owner verification rather than cached member roles');
 assert(worker.includes('!解除禁言'), 'Worker must document the private silent self-unmute command in the guard message');
 
 const pkg = JSON.parse(fs.readFileSync('package.json', 'utf8'));
