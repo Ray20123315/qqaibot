@@ -26,7 +26,9 @@ jobs:
           cache: npm
           cache-dependency-path: package.json
       - name: Apply v2.3.0 Portal moderation and partner patch
-        run: node tools/apply-v230.mjs
+        run: |
+          node tools/fix-v230-script.mjs
+          node tools/apply-v230.mjs
       - name: Check syntax
         run: |
           node --check worker.js
@@ -48,7 +50,7 @@ jobs:
           BRANCH: feature/portal-moderation-partner-v2.3.0
         run: |
           rm -rf node_modules dist package-lock.json
-          rm -f tools/apply-v230.mjs
+          rm -f tools/apply-v230.mjs tools/fix-v230-script.mjs
           git show origin/main:.github/workflows/validate.yml > .github/workflows/validate.yml
           git config user.name github-actions[bot]
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
