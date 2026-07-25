@@ -40,7 +40,7 @@ jobs:
         run: |
           set -o pipefail
           npm install --no-save --ignore-scripts @babel/parser@7
-          cat > /tmp/inventory.mjs <<'NODE'
+          cat > .v2-inventory.mjs <<'NODE'
           import fs from 'node:fs';
           import crypto from 'node:crypto';
           import { parse } from '@babel/parser';
@@ -110,9 +110,10 @@ jobs:
           fs.writeFileSync('refactor-inventory.json', `${JSON.stringify(result, null, 2)}\n`);
           NODE
           {
-            node /tmp/inventory.mjs
+            node .v2-inventory.mjs
             node --check worker.js
           } 2>&1 | tee inventory-run.log
+          rm -f .v2-inventory.mjs
 
       - name: Commit inventory
         if: github.event_name == 'push' && steps.inventory.outcome == 'success'
