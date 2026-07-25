@@ -374,6 +374,14 @@ function injectPortalMembersClient(html) {
     <div class="field"><label for="memberSearch">搜索昵称或 QQ</label><input id="memberSearch" placeholder="输入昵称、群名片或 QQ"></div>
     <div class="notice" id="memberConsoleStatus">请选择群组后读取群友列表。</div>
   </div>
+  <div class="card member-console-filters">
+    <div class="field"><label for="memberRoleFilter">身份</label><select id="memberRoleFilter"><option value="">全部身份</option><option value="owner">群主</option><option value="admin">管理员</option><option value="member">普通成员</option></select></div>
+    <div class="field"><label for="memberMuteFilter">禁言状态</label><select id="memberMuteFilter"><option value="">全部状态</option><option value="muted">禁言中</option><option value="active">可发言</option></select></div>
+    <div class="field"><label for="memberRelationshipFilter">关系</label><select id="memberRelationshipFilter"><option value="">全部关系</option><option value="related">已有关系</option><option value="none">无关系</option><option value="master">主人</option><option value="member">所属成员</option><option value="partner">对象</option></select></div>
+    <div class="field"><label for="memberSort">排序</label><select id="memberSort"><option value="role">身份优先</option><option value="name">名称</option><option value="recent">最近发言</option><option value="mute">剩余禁言</option></select></div>
+    <button id="memberResetFilters" class="btn ghost">重置筛选</button>
+    <button id="memberExport" class="btn ghost">导出 CSV</button>
+  </div>
   <div class="card relationship-console">
     <div class="section-head compact"><div><h3>关系管理</h3><p>对象关系为双方对称权限；主人关系为主人对唯一所属成员的非对称权限。一般管理层可查看，只有最高核心开发者可直接配对或强制解除。替换或解除关系不会自动改变尚未到期的既有禁言。</p></div><button id="relationshipRefresh" class="btn ghost">刷新关系</button></div>
     <div class="notice" id="relationshipStatus">正在读取关系资料…</div>
@@ -398,7 +406,7 @@ function injectPortalMembersClient(html) {
 
   const style = `
 <style id="qqai-member-console-style">
-.member-console-toolbar{display:grid;grid-template-columns:minmax(220px,1fr) minmax(260px,1.4fr);gap:14px;align-items:end;margin-bottom:16px}.member-row{display:grid;grid-template-columns:minmax(180px,1.3fr) minmax(140px,.8fr) minmax(290px,1.5fr);gap:12px;align-items:center}.member-main{min-width:0}.member-name{font-weight:800;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.member-meta{font-size:12px;color:var(--muted);margin-top:4px}.member-actions{display:flex;gap:8px;flex-wrap:wrap;align-items:center}.member-actions input[type="number"]{width:112px;min-height:40px}.member-toggle{display:inline-flex;align-items:center;gap:5px;font-size:12px;color:var(--muted);white-space:nowrap}.member-toggle input{width:auto;min-height:auto}.member-lock{font-size:12px;font-weight:800;color:#b45309}.member-history-message{white-space:pre-wrap;word-break:break-word}.member-history-time{font-size:12px;color:var(--muted);margin-bottom:6px}.member-role-owner{font-weight:800}.member-role-admin{font-weight:700}.member-muted{color:#b45309;font-weight:800}@media(max-width:900px){.member-console-toolbar,.member-row{grid-template-columns:1fr}.member-actions input{width:100%}.member-actions .btn{flex:1 1 120px}}
+.member-console-toolbar{display:grid;grid-template-columns:minmax(220px,1fr) minmax(260px,1.4fr);gap:14px;align-items:end;margin-bottom:12px}.member-console-filters{display:grid;grid-template-columns:repeat(4,minmax(135px,1fr)) auto auto;gap:10px;align-items:end;margin-bottom:16px}.member-console-filters .field{margin:0}.member-row{display:grid;grid-template-columns:minmax(180px,1.3fr) minmax(140px,.8fr) minmax(290px,1.5fr);gap:12px;align-items:center}.member-main{min-width:0}.member-name{font-weight:800;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.member-meta{font-size:12px;color:var(--muted);margin-top:4px}.member-actions{display:flex;gap:8px;flex-wrap:wrap;align-items:center}.member-actions input[type="number"]{width:112px;min-height:40px}.member-toggle{display:inline-flex;align-items:center;gap:5px;font-size:12px;color:var(--muted);white-space:nowrap}.member-toggle input{width:auto;min-height:auto}.member-lock{font-size:12px;font-weight:800;color:#b45309}.member-history-message{white-space:pre-wrap;word-break:break-word}.member-history-time{font-size:12px;color:var(--muted);margin-bottom:6px}.member-role-owner{font-weight:800}.member-role-admin{font-weight:700}.member-muted{color:#b45309;font-weight:800}@media(max-width:900px){.member-console-toolbar,.member-console-filters,.member-row{grid-template-columns:1fr}.member-actions input{width:100%}.member-actions .btn{flex:1 1 120px}}
 .relationship-console{margin-bottom:16px}.relationship-direct{display:grid;grid-template-columns:minmax(180px,1fr) minmax(180px,1fr) auto auto;gap:12px;align-items:end;margin:14px 0}.relationship-direct .field{margin:0}.relationship-replace{align-self:center}.relationship-row{display:grid;grid-template-columns:minmax(220px,1fr) auto;gap:12px;align-items:center}.relationship-actions{display:flex;gap:8px;justify-content:flex-end}.member-relationship{font-size:12px;font-weight:800;color:#6d28d9;margin-left:6px}@media(max-width:900px){.relationship-direct,.relationship-row{grid-template-columns:1fr}.relationship-actions{justify-content:stretch}.relationship-actions .btn{width:100%}}
 </style>`;
   source = source.includes("</head>") ? source.replace("</head>", style + "\n</head>") : style + source;
@@ -411,12 +419,24 @@ function injectPortalMembersClient(html) {
   function safe(value){return typeof esc==='function'?esc(value):String(value==null?'':value).replace(/[&<>\"']/g,function(c){return({'&':'&amp;','<':'&lt;','>':'&gt;','\"':'&quot;',"'":'&#39;'})[c]})}
   function notify(message){if(typeof toast==='function')toast(message);else window.alert(message)}
   async function call(path,method,body){
-    if(typeof api==='function')return api(path,method||'GET',body);
-    var response=await fetch('/api/portal'+path,{method:method||'GET',headers:{'Content-Type':'application/json'},credentials:'same-origin',body:body?JSON.stringify(body):undefined});
-    return response.json().catch(function(){return{ok:false,message:'接口返回格式错误'}})
+    try{
+      if(typeof api==='function')return await api(path,method||'GET',body);
+      var controller=typeof AbortController!=='undefined'?new AbortController():null;
+      var timer=controller?setTimeout(function(){controller.abort()},30000):null;
+      var response=await fetch('/api/portal'+path,{method:method||'GET',headers:{'Content-Type':'application/json'},credentials:'same-origin',body:body?JSON.stringify(body):undefined,signal:controller?controller.signal:undefined});
+      if(timer)clearTimeout(timer);
+      var text=await response.text(),data={};
+      try{data=text?JSON.parse(text):{}}catch(parseError){data={ok:false,message:'接口返回格式错误（HTTP '+response.status+'）'}}
+      if(!response.ok){data.ok=false;data.message=data.message||('请求失败：HTTP '+response.status)}
+      return data
+    }catch(error){return{ok:false,message:'请求失败：'+String(error&&error.message||error||'网络或脚本异常')}}
   }
   function roleText(role){return({owner:'群主',admin:'管理员',member:'群成员'})[role]||role||'群成员'}
   function secondsText(value){var seconds=Math.max(0,Number(value||0));if(seconds<60)return Math.ceil(seconds)+' 秒';if(seconds<3600)return Math.ceil(seconds/60)+' 分钟';if(seconds<86400)return Math.ceil(seconds/3600)+' 小时';return Math.ceil(seconds/86400)+' 天'}
+  function dateText(value){var time=Number(value||0);return time?new Date(time).toLocaleString():'未知'}
+  async function copyText(value){var text=String(value||'');try{if(navigator.clipboard&&navigator.clipboard.writeText)await navigator.clipboard.writeText(text);else{var input=document.createElement('textarea');input.value=text;document.body.appendChild(input);input.select();document.execCommand('copy');input.remove()}notify('已复制 QQ：'+text)}catch(error){notify('复制失败：'+String(error&&error.message||error))}}
+  function csvCell(value){var text=String(value==null?'':value);return '"'+text.replace(/"/g,'""')+'"'}
+  function exportMembers(){var rows=[['QQ','名称','身份','禁言状态','剩余禁言秒数','关系身份','入群时间','最近发言时间']];cachedMembers.forEach(function(item){var relation=relationshipFor(item.qq),relationRole=relation?(relation.mode==='master'?(String(relation.masterId)===String(item.qq)?'主人':'所属成员'):'对象'):'';rows.push([item.qq,item.name||'',roleText(item.role),item.muted?'禁言中':'可发言',item.muteRemainingSeconds||0,relationRole,dateText(item.joinTime),dateText(item.lastSentTime)])});var csv='\ufeff'+rows.map(function(row){return row.map(csvCell).join(',')}).join('\\r\\n');var blob=new Blob([csv],{type:'text/csv;charset=utf-8'}),url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download='群友列表-'+new Date().toISOString().slice(0,10)+'.csv';document.body.appendChild(a);a.click();a.remove();setTimeout(function(){URL.revokeObjectURL(url)},1000)}
   function sessionAllows(){
     try{var s=typeof session!=='undefined'?session:null,p=s&&s.permissions||{};return !!(s&&(p.developer||p.nativeAdmin||p.groupOps||s.role==='owner'||s.role==='admin'||s.role==='developer'))}catch(e){return false}
   }
@@ -444,7 +464,7 @@ function injectPortalMembersClient(html) {
     if(!relationshipPermissions.directRelationship){notify('只有最高核心开发者可以直接配对');return}
     var master=el('relationshipMaster'),member=el('relationshipMember'),replace=el('relationshipReplace');var masterId=String(master&&master.value||''),memberId=String(member&&member.value||'');
     if(!masterId||!memberId){notify('请选择主人和所属成员');return}if(masterId===memberId){notify('主人和所属成员不能是同一个帐号');return}
-    var replaceExisting=!!(replace&&replace.checked);var text='确定直接建立主人关系？\n主人：'+relationshipMemberName(masterId)+'（'+masterId+'）\n所属成员：'+relationshipMemberName(memberId)+'（'+memberId+'）'+(replaceExisting?'\n双方既有关系会被强制替换。':'');
+    var replaceExisting=!!(replace&&replace.checked);var text='确定直接建立主人关系？\\n主人：'+relationshipMemberName(masterId)+'（'+masterId+'）\\n所属成员：'+relationshipMemberName(memberId)+'（'+memberId+'）'+(replaceExisting?'\\n双方既有关系会被强制替换。':'');
     var ok=typeof confirmModal==='function'?await confirmModal(text,'最高权限直接配对'):window.confirm(text);if(!ok)return;
     var result=await call('/members/relationships/direct','POST',{masterId:masterId,memberId:memberId,replaceExisting:replaceExisting});notify(result.message||'操作完成');if(result.ok)loadMembers()
   }
@@ -456,13 +476,23 @@ function injectPortalMembersClient(html) {
   function renderMembers(){
     var root=el('memberList');if(!root)return;
     var query=String(el('memberSearch')&&el('memberSearch').value||'').trim().toLowerCase();
-    var rows=cachedMembers.filter(function(m){return !query||[m.qq,m.name,m.nickname,m.card,m.role].some(function(v){return String(v||'').toLowerCase().indexOf(query)>=0})});
+    var role=String(el('memberRoleFilter')&&el('memberRoleFilter').value||''),mute=String(el('memberMuteFilter')&&el('memberMuteFilter').value||''),relationship=String(el('memberRelationshipFilter')&&el('memberRelationshipFilter').value||''),sort=String(el('memberSort')&&el('memberSort').value||'role');
+    var rows=cachedMembers.filter(function(m){
+      if(query&&![m.qq,m.name,m.nickname,m.card,m.role].some(function(v){return String(v||'').toLowerCase().indexOf(query)>=0}))return false;
+      if(role&&String(m.role)!==role)return false;
+      if(mute==='muted'&&!m.muted)return false;if(mute==='active'&&m.muted)return false;
+      var rel=relationshipFor(m.qq),relRole=rel?(rel.mode==='master'?(String(rel.masterId)===String(m.qq)?'master':'member'):'partner'):'none';
+      if(relationship==='related'&&!rel)return false;if(relationship&&relationship!=='related'&&relRole!==relationship)return false;
+      return true
+    }).slice();
+    rows.sort(function(a,b){if(sort==='name')return String(a.name||a.qq).localeCompare(String(b.name||b.qq),'zh-CN');if(sort==='recent')return Number(b.lastSentTime||0)-Number(a.lastSentTime||0);if(sort==='mute')return Number(b.muteRemainingSeconds||0)-Number(a.muteRemainingSeconds||0);return ({owner:0,admin:1,member:2}[a.role]??3)-({owner:0,admin:1,member:2}[b.role]??3)||String(a.name||a.qq).localeCompare(String(b.name||b.qq),'zh-CN')});
     root.innerHTML='';
     rows.forEach(function(member){
       var row=document.createElement('div');row.className='item member-row';
       var lock=member.muteLock,lockText=lock?(lock.source==='self'?'自我禁言锁':lock.source==='partner'?'对象禁言锁':lock.source==='master'?'主人禁言锁':(lock.allowOwnerUnmute?'防解除：开发者或群主':'防解除：仅开发者')):'';
       var state=member.muted?'<span class="member-muted">禁言中，剩余 '+safe(secondsText(member.muteRemainingSeconds))+'</span>':'<span class="status ok">可发言</span>';if(lockText)state+=' <span class="member-lock">'+safe(lockText)+'</span>';var relation=relationshipFor(member.qq);if(relation)state+=' <span class="member-relationship">'+safe(relation.mode==='master'?(String(relation.masterId)===String(member.qq)?'主人':'所属成员'):'对象')+'</span>';
-      row.innerHTML='<div class="member-main"><div class="member-name member-role-'+safe(member.role)+'">'+safe(member.name||member.qq)+'</div><div class="member-meta">QQ '+safe(member.qq)+'｜'+safe(roleText(member.role))+(member.title?'｜'+safe(member.title):'')+'</div></div><div>'+state+'</div><div class="member-actions"><button class="btn member-history" data-qq="'+safe(member.qq)+'">历史消息</button><input class="member-seconds" type="number" min="1" max="2592000" value="60" aria-label="禁言秒数"><label class="member-toggle"><input class="member-protect" type="checkbox">防解除</label><label class="member-toggle"><input class="member-owner-unlock" type="checkbox" disabled>群主可解除</label><label class="member-toggle"><input class="member-skip-confirm" type="checkbox">跳过确认</label><button class="btn danger member-mute" data-qq="'+safe(member.qq)+'">禁言（秒）</button><button class="btn member-unmute" data-qq="'+safe(member.qq)+'">解禁</button></div>';
+      var activity='入群 '+safe(dateText(member.joinTime))+'｜最近发言 '+safe(dateText(member.lastSentTime));
+      row.innerHTML='<div class="member-main"><div class="member-name member-role-'+safe(member.role)+'">'+safe(member.name||member.qq)+'</div><div class="member-meta">QQ '+safe(member.qq)+'｜'+safe(roleText(member.role))+(member.title?'｜'+safe(member.title):'')+'</div><div class="member-meta">'+activity+'</div></div><div>'+state+'</div><div class="member-actions"><button class="btn ghost member-copy" data-qq="'+safe(member.qq)+'">复制 QQ</button><button class="btn member-history" data-qq="'+safe(member.qq)+'">历史消息</button><input class="member-seconds" type="number" min="1" max="2592000" value="60" aria-label="禁言秒数"><label class="member-toggle"><input class="member-protect" type="checkbox">防解除</label><label class="member-toggle"><input class="member-owner-unlock" type="checkbox" disabled>群主可解除</label><label class="member-toggle"><input class="member-skip-confirm" type="checkbox">跳过确认</label><button class="btn danger member-mute" data-qq="'+safe(member.qq)+'">禁言（秒）</button><button class="btn member-unmute" data-qq="'+safe(member.qq)+'">解禁</button></div>';
       root.appendChild(row)
     });
     if(!root.children.length)root.innerHTML='<div class="empty">没有符合条件的群友</div>'
@@ -470,9 +500,10 @@ function injectPortalMembersClient(html) {
   async function loadMembers(){
     var status=el('memberConsoleStatus');if(status)status.textContent='正在读取群友列表…';
     var result=await call('/members');
-    if(!result.ok){if(status)status.textContent=result.message||'读取失败';cachedMembers=[];renderMembers();return}
+    if(!result.ok){var message=result.message||'读取失败';if(status)status.textContent=message+'｜可点击「刷新群友」重试';var relationshipStatus=el('relationshipStatus');if(relationshipStatus)relationshipStatus.textContent='关系资料读取失败：'+message;cachedMembers=[];cachedRelationships=[];relationshipPermissions={};renderMembers();renderRelationships();return}
     cachedMembers=result.members||[];cachedRelationships=result.relationships||[];relationshipPermissions=result.permissions||{};renderMembers();renderRelationships();
-    if(status)status.textContent='共 '+cachedMembers.length+' 位群友'+(result.stale?'｜当前显示缓存资料':'｜即时资料')+(result.warning?'｜'+result.warning:'')
+    var mutedCount=cachedMembers.filter(function(item){return item.muted}).length,adminCount=cachedMembers.filter(function(item){return item.role==='owner'||item.role==='admin'}).length;
+    if(status)status.textContent='共 '+cachedMembers.length+' 位群友｜管理层 '+adminCount+'｜禁言中 '+mutedCount+'｜关系 '+cachedRelationships.length+(result.stale?'｜当前显示缓存资料':'｜即时资料')+(result.warning?'｜'+result.warning:'')
   }
   async function showHistory(qq){
     var panel=el('memberHistoryPanel'),list=el('memberHistoryList'),title=el('memberHistoryTitle');if(!panel||!list)return;
@@ -495,8 +526,11 @@ function injectPortalMembersClient(html) {
   }
   document.addEventListener('click',function(event){
     var target=event.target.closest&&event.target.closest('button');if(!target)return;
-    if(target.id==='memberConsoleNav'){setTimeout(function(){var title=el('pageTitle');if(title)title.textContent='群友列表';loadMembers()},0)}
+    if(target.id==='memberConsoleNav'||target.dataset.view==='members'){setTimeout(function(){var title=el('pageTitle');if(title)title.textContent='群友列表';loadMembers()},0)}
     else if(target.id==='memberRefresh'||target.id==='relationshipRefresh')loadMembers();
+    else if(target.id==='memberExport')exportMembers();
+    else if(target.id==='memberResetFilters'){['memberSearch','memberRoleFilter','memberMuteFilter','memberRelationshipFilter','memberSort'].forEach(function(id){var node=el(id);if(node)node.value=id==='memberSort'?'role':''});renderMembers()}
+    else if(target.classList.contains('member-copy'))copyText(target.dataset.qq);
     else if(target.id==='relationshipDirectPair')directPairRelationship();
     else if(target.id==='memberHistoryClose')el('memberHistoryPanel')&&el('memberHistoryPanel').classList.add('hidden');
     else if(target.classList.contains('member-history'))showHistory(target.dataset.qq);
@@ -505,8 +539,10 @@ function injectPortalMembersClient(html) {
     else if(target.classList.contains('relationship-remove'))removeRelationship(target)
   });
   document.addEventListener('input',function(event){if(event.target&&event.target.id==='memberSearch')renderMembers();if(event.target&&event.target.classList&&event.target.classList.contains('member-protect')){var row=event.target.closest('.member-row'),owner=row&&row.querySelector('.member-owner-unlock');if(owner){owner.disabled=!event.target.checked;if(!event.target.checked)owner.checked=false}}});
+  document.addEventListener('change',function(event){if(event.target&&['memberRoleFilter','memberMuteFilter','memberRelationshipFilter','memberSort'].indexOf(event.target.id)>=0)renderMembers()});
   var selector=el('groupSelect');if(selector)selector.addEventListener('change',function(){if(isMembersView())setTimeout(loadMembers,100)});
   var refresh=el('refresh');if(refresh)refresh.addEventListener('click',function(){if(isMembersView())setTimeout(loadMembers,100)});
+  syncNav();if(isMembersView())setTimeout(loadMembers,0);
 })();
 </script>`;
   return source.includes("</body>") ? source.replace("</body>", script + "\n</body>") : source + script;

@@ -59,7 +59,7 @@ assert(!fallbackBody.includes('notifyGroups(env'), 'Runtime deployment fallback 
 assert(deployment.includes('reason: "portal_only"'), 'Deployment status must explicitly record Portal-only notification policy');
 
 const pkg = JSON.parse(fs.readFileSync('package.json', 'utf8'));
-assert(pkg.version === '2.4.1', 'Package version must be 2.4.1');
+assert(pkg.version === '2.4.2', 'Package version must be 2.4.2');
 assert(pkg.scripts.check.includes('verify-partner-bindings.mjs'), 'Partner and Portal regressions must run in the permanent suite');
 
 console.log('verify-partner-bindings: ok');
