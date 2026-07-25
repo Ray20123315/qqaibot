@@ -52,7 +52,13 @@ async function resolveLiveRelationshipMember(env, groupId, qq) {
       params: { group_id: numericId(groupId), user_id: numericId(userId), no_cache: true }
     }, 12000);
     const raw = response?.data && typeof response.data === "object" ? response.data : response;
-    return normalizeMember(raw);
+    const member = normalizeMember(raw);
+    if (!member.isRobot) {
+      const cached = await readJson(env, `group_members:${groupId}`, []);
+      const known = Array.isArray(cached) ? cached.find(item => String(item?.qq || item?.user_id || "") === userId) : null;
+      if (known?.isRobot || known?.is_robot) member.isRobot = true;
+    }
+    return member;
   } catch {
     return null;
   }
@@ -369,7 +375,7 @@ function injectPortalMembersClient(html) {
     <div class="notice" id="memberConsoleStatus">请选择群组后读取群友列表。</div>
   </div>
   <div class="card relationship-console">
-    <div class="section-head compact"><div><h3>关系管理</h3><p>对象关系为双方对称权限；主人关系为主人对唯一所属成员的非对称权限。一般管理层可查看，只有最高核心开发者可直接配对或强制解除。</p></div><button id="relationshipRefresh" class="btn ghost">刷新关系</button></div>
+    <div class="section-head compact"><div><h3>关系管理</h3><p>对象关系为双方对称权限；主人关系为主人对唯一所属成员的非对称权限。一般管理层可查看，只有最高核心开发者可直接配对或强制解除。替换或解除关系不会自动改变尚未到期的既有禁言。</p></div><button id="relationshipRefresh" class="btn ghost">刷新关系</button></div>
     <div class="notice" id="relationshipStatus">正在读取关系资料…</div>
     <div id="relationshipDirectPanel" class="relationship-direct hidden">
       <div class="field"><label for="relationshipMaster">主人</label><select id="relationshipMaster"></select></div>
