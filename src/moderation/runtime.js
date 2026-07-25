@@ -6,7 +6,7 @@ import { DEFAULTS, DEFAULT_DEVELOPER_ID, VERSION } from "../config/runtime.js";
 import { developerId, isDeveloperId, recentConversationMessagesForUser } from "../core/identity.js";
 import { appendIndex, callOneBotAction, getEffectivePermissions, writeSystemAudit } from "../core/permissions.js";
 import { dbDel, dbGet, dbPut } from "../data/store.js";
-import { canUnlockMute, clearMuteLock, getMuteLock, putMuteLock } from "./mute-locks.js";
+import { canUnlockMute, clearMuteLock, createManualMuteLock, getMuteLock, putMuteLock } from "./mute-locks.js";
 import { botCanRunRuleMonitor, canUseBotGroupOperations, getBotGroupRole, isBotVerifiedGroupOwner } from "../group/runtime.js";
 import { formatDuration, parseDurationSeconds, runOneBotGroupOperation } from "../onebot/messages.js";
 import { opsActiveRuleRecords, opsFuseAllows, opsGetSettings, opsRecordAutomationResult, opsRuleExceptionMatch, opsSaveRecord } from "../operations/runtime.js";
@@ -2051,6 +2051,9 @@ async function createModerationProposal(env, data) {
     targetName: String(data.targetName || data.targetId || ""),
     targetRole: String(data.targetRole || "member"),
     durationSeconds: Number(data.durationSeconds || 0),
+    preventUnmute: Boolean(data.preventUnmute),
+    allowOwnerUnmute: Boolean(data.preventUnmute && data.allowOwnerUnmute),
+    skipConfirmation: Boolean(data.skipConfirmation),
     rejectAddRequest: Boolean(data.rejectAddRequest),
     sourceText: String(data.sourceText || "").slice(0, 1000),
     classifierReason: String(data.classifierReason || ""),
@@ -2085,7 +2088,9 @@ function formatModerationProposal(proposal) {
     : "";
   const durationLine = proposal.action === "mute" ? `\n时长：${formatDuration(proposal.durationSeconds || 600)}` : "";
   const reasonLine = proposal.reason ? `\n补充原因：${proposal.reason}` : "";
-  return `⚠️ 已建立待确认操作\n编号：${proposal.id}\n动作：${moderationActionLabel(proposal.action)}${targetLine}${durationLine}${reasonLine}\n识别原因：${proposal.classifierReason || "管理指令"}\n请在 2 分钟内发送「确认op」执行，或发送「取消op」取消。编号仍可用于「确认 ${proposal.id}」或「取消 ${proposal.id}」；未确认不会执行任何群操作。`;
+  const protectionLine = proposal.action === "mute" && proposal.preventUnmute ? `\n防解除：${proposal.allowOwnerUnmute ? "开发者或群主可解除" : "仅开发者可解除"}` : "";
+  const skipLine = proposal.skipConfirmation ? "\nPortal 执行按钮：跳过网页确认视窗" : "";
+  return `⚠️ 已建立待确认操作\n编号：${proposal.id}\n动作：${moderationActionLabel(proposal.action)}${targetLine}${durationLine}${reasonLine}${protectionLine}${skipLine}\n识别原因：${proposal.classifierReason || "管理指令"}\n请在 2 分钟内发送「确认op」执行，或发送「取消op」取消。编号仍可用于「确认 ${proposal.id}」或「取消 ${proposal.id}」；未确认不会执行任何群操作。`;
 }
 
 
@@ -2124,6 +2129,27 @@ async function executeModerationProposal(env, proposal, confirmer) {
   else if (proposal.action === "unset_admin") { action = "set_group_admin"; params = { group_id, user_id, enable: false }; }
   else return { ok: false, message: "未知群操作。" };
   let releasedLock = null;
+  let previousMuteLock = null;
+  let preparedMuteLock = false;
+  if (proposal.action === "mute") {
+    previousMuteLock = await getMuteLock(env, proposal.groupId, proposal.targetId);
+    if (previousMuteLock?.source === "self") return { ok: false, message: "该成员正在自我禁言，管理待确认操作不能覆盖。" };
+    if (proposal.preventUnmute) {
+      try {
+        await createManualMuteLock(env, {
+          groupId: proposal.groupId,
+          userId: proposal.targetId,
+          actorId: confirmer.id,
+          durationSeconds: Math.max(60, Math.min(30 * 24 * 3600, Number(proposal.durationSeconds || 600))),
+          allowOwnerUnmute: Boolean(proposal.allowOwnerUnmute),
+          reason: proposal.reason || proposal.classifierReason || "群待确认操作"
+        });
+        preparedMuteLock = true;
+      } catch (error) {
+        return { ok: false, message: `无法建立防解除锁，未执行禁言：${String(error?.message || error)}` };
+      }
+    }
+  }
   if (proposal.action === "unmute") {
     const lock = await getMuteLock(env, proposal.groupId, proposal.targetId);
     const permission = canUnlockMute(env, lock, {
@@ -2155,9 +2181,21 @@ async function executeModerationProposal(env, proposal, confirmer) {
     });
   } catch (error) {
     if (releasedLock) await putMuteLock(env, releasedLock).catch(() => {});
+    if (preparedMuteLock) {
+      if (previousMuteLock?.active) await putMuteLock(env, previousMuteLock).catch(() => {});
+      else await clearMuteLock(env, proposal.groupId, proposal.targetId).catch(() => {});
+    }
     throw error;
   }
-  if (!result.ok && releasedLock) await putMuteLock(env, releasedLock).catch(() => {});
+  if (!result.ok) {
+    if (releasedLock) await putMuteLock(env, releasedLock).catch(() => {});
+    if (preparedMuteLock) {
+      if (previousMuteLock?.active) await putMuteLock(env, previousMuteLock).catch(() => {});
+      else await clearMuteLock(env, proposal.groupId, proposal.targetId).catch(() => {});
+    }
+  } else if (proposal.action === "mute" && !proposal.preventUnmute && previousMuteLock) {
+    await clearMuteLock(env, proposal.groupId, proposal.targetId).catch(() => {});
+  }
   return result.ok ? { ok: true, message: `已执行：${moderationActionLabel(proposal.action)}。` } : { ok: false, message: `操作失败：${result.error}` };
 }
 

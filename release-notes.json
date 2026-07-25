@@ -1,17 +1,15 @@
 {
-  "version": "2.2.0",
-  "notificationPolicy": "latest-main-only-with-runtime-success-fallback",
+  "version": "2.3.0",
+  "notificationPolicy": "portal-only-with-private-developer-failure-details",
   "queueDelivery": "mark-processed-after-success",
   "added": [
-    "Portal 按秒禁言新增防解除、群主可解除与跳过确认勾选",
-    "群友可使用 !禁言自己 或 !自我禁言 主动禁言自己",
-    "本人可私讯机器人发送 !解除禁言 静默解除自我禁言"
+    "群待确认操作新增防解除、群主可解除与跳过确认选项",
+    "群友列表入口修复，并由 Portal 主权限系统控制显示",
+    "群友可在双方同意后建立一对一对象绑定并互相禁言或解除对象禁言"
   ],
   "fixed": [
-    "受保护禁言可被 Portal、QQ 客户端手动解禁或其他 OneBot 入口绕过",
-    "允许群主解除时必须由 OneBot 即时确认当前群主身份，不采用旧成员缓存",
-    "防解除重复触发时会反复在群内发送提示",
-    "自我禁言可能被管理员、群主或开发者从管理入口提前解除",
-    "旧群规禁言保护重复解禁时会持续刷提示"
+    "部署成功与更新摘要会发送到白名单群",
+    "群友列表按钮因注入脚本无法读取登入 session 而永久隐藏",
+    "对象权限可能误解除管理防解除、自我禁言或群规禁言"
   ]
 }

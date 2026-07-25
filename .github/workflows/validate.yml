@@ -3,69 +3,29 @@ name: Validate single-Worker build
 on:
   push:
     branches:
-      - feature/portal-moderation-partner-v2.3.0
+      - main
+      - refactor/v2-modular-worker
   pull_request:
     branches:
       - main
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   validate:
     runs-on: ubuntu-latest
-    timeout-minutes: 18
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
-        with:
-          ref: feature/portal-moderation-partner-v2.3.0
-          fetch-depth: 0
       - uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: npm
           cache-dependency-path: package.json
-      - name: Apply v2.3.0 Portal moderation and partner patch
-        run: |
-          node tools/fix-v230-script.mjs
-          node tools/apply-v230.mjs
-      - name: Check syntax
-        run: |
-          node --check worker.js
-          node --check src/moderation/mute-locks.js
-          node --check src/moderation/partner-bindings.js
-          node --check src/moderation/runtime.js
-          node --check src/portal/members.js
-          node --check src/portal/runtime.js
-          node --check src/deployment/notifications.js
-          node --check verify-partner-bindings.mjs
       - name: Install dependencies
         run: npm install --ignore-scripts
       - name: Run regression checks
-        id: regression
-        continue-on-error: true
-        run: npm run check > regression.log 2>&1
-      - name: Upload regression log
-        if: steps.regression.outcome == 'failure'
-        uses: actions/upload-artifact@v4
-        with:
-          name: v230-regression-log
-          path: regression.log
-          retention-days: 1
-      - name: Stop on regression failure
-        if: steps.regression.outcome == 'failure'
-        run: exit 1
+        run: npm run check
       - name: Build the single Worker bundle
         run: npm run check:bundle
-      - name: Commit clean validated candidate
-        env:
-          BRANCH: feature/portal-moderation-partner-v2.3.0
-        run: |
-          rm -rf node_modules dist package-lock.json regression.log
-          rm -f tools/apply-v230.mjs tools/fix-v230-script.mjs
-          git show origin/main:.github/workflows/validate.yml > .github/workflows/validate.yml
-          git config user.name github-actions[bot]
-          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
-          git add -A
-          git commit -m 'Fix Portal moderation and add partner bindings'
-          git push origin HEAD:$BRANCH

@@ -24,8 +24,9 @@ function normalizeMuteLock(value) {
     active: Boolean(source.active && groupId && userId && expiresAt > Date.now()),
     groupId,
     userId,
-    source: source.source === "self" ? "self" : "manual",
+    source: source.source === "self" ? "self" : source.source === "partner" ? "partner" : "manual",
     createdBy: cleanId(source.createdBy),
+    partnerId: cleanId(source.partnerId),
     createdAt: Number(source.createdAt || 0),
     expiresAt,
     durationSeconds: Math.max(1, Math.min(MAX_MUTE_SECONDS, Math.trunc(Number(source.durationSeconds || Math.ceil((expiresAt - Number(source.createdAt || Date.now())) / 1000) || 1)))),
@@ -104,6 +105,19 @@ async function createSelfMuteLock(env, { groupId, userId, durationSeconds, reaso
   });
 }
 
+async function createPartnerMuteLock(env, { groupId, userId, partnerId, durationSeconds, reason = "" }) {
+  return putMuteLock(env, {
+    groupId,
+    userId,
+    source: "partner",
+    createdBy: partnerId,
+    partnerId,
+    durationSeconds,
+    allowOwnerUnmute: false,
+    reason: reason || "对象关系禁言"
+  });
+}
+
 async function getMuteLock(env, groupId, userId) {
   const key = muteLockKey(groupId, userId);
   const lock = normalizeMuteLock(await readJsonKey(env, key, null));
@@ -124,12 +138,17 @@ async function clearMuteLock(env, groupId, userId) {
   return lock;
 }
 
-function canUnlockMute(env, lock, { actorId = "", actorRole = "", isDeveloper = false, privateSelfCommand = false } = {}) {
+function canUnlockMute(env, lock, { actorId = "", actorRole = "", isDeveloper = false, privateSelfCommand = false, partnerCommand = false, managementOverride = false } = {}) {
   if (!lock?.active) return { allowed: true, reason: "no_lock" };
   const actor = cleanId(actorId);
   if (lock.source === "self") {
     if (privateSelfCommand && actor && actor === lock.userId) return { allowed: true, reason: "self_private_release" };
     return { allowed: false, reason: "self_mute_private_only" };
+  }
+  if (lock.source === "partner") {
+    if (partnerCommand && actor && actor === lock.partnerId) return { allowed: true, reason: "partner_release" };
+    if (isDeveloper || isDeveloperId(env, actor) || managementOverride || ["owner", "admin", "developer"].includes(String(actorRole || ""))) return { allowed: true, reason: "management_partner_override" };
+    return { allowed: false, reason: "partner_mute_partner_or_management_only" };
   }
   if (isDeveloper || isDeveloperId(env, actor)) return { allowed: true, reason: "developer" };
   if (lock.allowOwnerUnmute && String(actorRole || "") === "owner") return { allowed: true, reason: "owner_allowed" };
@@ -194,6 +213,7 @@ export {
   canUnlockMute,
   clearMuteLock,
   createManualMuteLock,
+  createPartnerMuteLock,
   createSelfMuteLock,
   getMuteLock,
   listActiveSelfMuteLocks,

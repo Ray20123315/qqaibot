@@ -9,7 +9,8 @@ import { buildHealthState } from "./src/health/runtime.js";
 import { normalizeMultilingualCommand, toSimplifiedChinese } from "./src/i18n/commands.js";
 import { handleBilibiliWebhook, pollAutomaticBilibiliConnectors } from "./src/integrations/bilibili.js";
 import { attachModerationProposalMessage, createGroupWorkRequest, createJoinRequestAssist, createModerationProposal, decideJoinRequestAssist, detectNaturalModerationProposal, findLatestActiveRuleViolationForUser, formatModerationPermissionDenied, formatModerationProposal, getGroupMemberSafe, handleGroupWorkDecision, handleModerationConfirmation, inspectMessageAgainstGroupRules, normalizeRuleProxyMode, normalizeRuleStrictness, parseModerationConfirmation, parseUnlimitedNonNegativeInteger, recordRuleViolationFeedback, ruleStrictnessLabel } from "./src/moderation/runtime.js";
-import { MAX_MUTE_SECONDS as MUTE_LOCK_MAX_SECONDS, canUnlockMute, clearMuteLock, createSelfMuteLock, getMuteLock, listActiveSelfMuteLocks, markMuteLockReapplied, markMuteUnlockBlocked, muteLockRemainingSeconds, putMuteLock } from "./src/moderation/mute-locks.js";
+import { MAX_MUTE_SECONDS as MUTE_LOCK_MAX_SECONDS, canUnlockMute, clearMuteLock, createPartnerMuteLock, createSelfMuteLock, getMuteLock, listActiveSelfMuteLocks, markMuteLockReapplied, markMuteUnlockBlocked, muteLockRemainingSeconds, putMuteLock } from "./src/moderation/mute-locks.js";
+import { clearPartnerBinding, createPartnerBindingRequest, decidePartnerBindingRequest, getPartnerBinding } from "./src/moderation/partner-bindings.js";
 import { appendPortalConversationRecord, applyConversationOutputGuards, auditIgnoredRobotMessage, botInteractionAllowKey, buildReplyPlan, cacheBotSenderClassification, clearRegisteredThinkingIndicators, detectLiteralPseudoElementLabels, eventHasBotMention, eventMentionedQqs, eventPlainText, eventSenderDisplayName, eventSenderRobotHint, extractFileDescriptors, extractForwardIds, extractMediaDescriptor, extractMessageText, extractOutboundMediaTypes, extractTextMentionIds, filterRobotMentionIds, formatForwardContext, getForwardMessageSnapshot, getQuotedMessage, getTaipeiTimeContext, isExplicitCurrentTimeQuestion, isExplicitRoleplayRequest, isGroupRobotInteractionAllowed, isIgnoredGroupRobotSender, isStandaloneCurrentTimeQuestion, looksLikeRobotDisplayName, normalizeFileDescriptor, parseDurationSeconds, prepareConversationHistory, purgeLegacyBotRepliesFromRecentLogs, qqaiTruthyRobotFlag, recordStructuredMessage, registerThinkingIndicator, removeTextMentionTokens, resolveOneBotMediaAsBase64, runOneBotGroupOperation, sanitizeAiReply, sendThinkingIndicator, thinkingIndicatorRegistryKey } from "./src/onebot/messages.js";
 import { classifyCollaborationNaturalIntent, classifyNaturalLanguageCommandIntent, normalizeNaturalLanguageCommandText, opsGetGroupMember, opsGetSettings, opsHandleActivityCommand, opsHandleMemberLeave, opsProcessAutomations } from "./src/operations/runtime.js";
 import { processPlatformJobs } from "./src/platform/runtime.js";
@@ -1648,6 +1649,83 @@ const QQAIWorker = {
           return jsonReply(`${atSender}排程已提交审核，编号：${record.id}`);
         }
         return jsonReply(`${atSender}排程已建立：${formatScheduleLine(record)}`);
+      }
+
+      // 一对一对象绑定必须由双方同意；对象权限只作用于对象来源的禁言。
+      const partnerDecisionCommand = cleanMessage.match(/^[!！](同意绑定对象|同意綁定對象|拒绝绑定对象|拒絕綁定對象)\s+(pb_[a-z0-9_-]+)$/i);
+      if (partnerDecisionCommand) {
+        if (!isGroup) return new Response(null, { status: 204 });
+        const approve = /同意/.test(partnerDecisionCommand[1]);
+        const result = await decidePartnerBindingRequest(env, { groupId: currentGroupId, requestId: partnerDecisionCommand[2], actorId: userId, approve });
+        if (result.ok) {
+          await writeSystemAudit(env, { type: "partner_binding_decision", groupId: currentGroupId, actorId: userId, targetId: result.request?.requesterId || "", action: approve ? "approve" : "reject", requestId: partnerDecisionCommand[2] }).catch(() => {});
+          return jsonReply(approve ? `[CQ:at,qq=${result.request.requesterId}] [CQ:at,qq=${result.request.targetId}] 已完成一对一对象绑定。双方可使用「!对象禁言 10分」和「!解除对象禁言」。` : `[CQ:at,qq=${result.request.requesterId}] 对象绑定申请已拒绝。`);
+        }
+        return jsonReply(`${atSender}${result.message}`);
+      }
+
+      if (/^[!！](?:我的对象|我的對象|对象状态|對象狀態)$/i.test(cleanMessage)) {
+        if (!isGroup) return new Response(null, { status: 204 });
+        const binding = await getPartnerBinding(env, currentGroupId, userId);
+        if (!binding) return jsonReply(`${atSender}你目前没有绑定对象。`);
+        const partner = await getGroupMemberSafe(env, currentGroupId, binding.partnerId);
+        return jsonReply(`${atSender}你当前的对象是 ${partner?.card || partner?.nickname || binding.partnerId}（QQ:${binding.partnerId}）。`);
+      }
+
+      if (/^[!！](?:解除对象绑定|解除對象綁定|解绑对象|解綁對象)$/i.test(cleanMessage)) {
+        if (!isGroup) return new Response(null, { status: 204 });
+        const binding = await clearPartnerBinding(env, currentGroupId, userId);
+        if (!binding) return jsonReply(`${atSender}你目前没有绑定对象。`);
+        await writeSystemAudit(env, { type: "partner_binding_removed", groupId: currentGroupId, actorId: userId, targetId: binding.partnerId, action: "unbind" }).catch(() => {});
+        return jsonReply(`[CQ:at,qq=${binding.userId}] [CQ:at,qq=${binding.partnerId}] 对象绑定已解除。尚未到期的既有禁言不会自动改变。`);
+      }
+
+      const partnerBindCommand = cleanMessage.match(/^[!！](?:绑定对象|綁定對象)(?:\s+@?(\d{5,}))?$/i);
+      if (partnerBindCommand) {
+        if (!isGroup) return new Response(null, { status: 204 });
+        const targetId = String(targetMentionQqs[0] || partnerBindCommand[1] || "").replace(/\D/g, "");
+        if (!targetId) return jsonReply(`${atSender}格式：!绑定对象 @群友`);
+        if (targetId === userId || targetId === botId || targetId === String(env.DEVELOPER_ID || "")) return jsonReply(`${atSender}不能绑定这个账号。`);
+        const target = await getGroupMemberSafe(env, currentGroupId, targetId);
+        if (!target) return jsonReply(`${atSender}找不到该群友。`);
+        if (String(target.role || "") === "owner") return jsonReply(`${atSender}群主无法作为对象禁言目标。`);
+        const result = await createPartnerBindingRequest(env, { groupId: currentGroupId, requesterId: userId, targetId });
+        if (!result.ok) return jsonReply(`${atSender}${result.message}`);
+        await writeSystemAudit(env, { type: "partner_binding_requested", groupId: currentGroupId, actorId: userId, targetId, action: "request", requestId: result.request.id }).catch(() => {});
+        return jsonReply(`[CQ:at,qq=${targetId}] QQ:${userId} 想与你绑定为一对一对象。10 分钟内发送「!同意绑定对象 ${result.request.id}」或「!拒绝绑定对象 ${result.request.id}」。每个人只能绑定一个对象。`);
+      }
+
+      const partnerMuteCommand = cleanMessage.match(/^[!！](?:对象禁言|對象禁言|禁言对象|禁言對象)(?:\s+([\s\S]+))?$/i);
+      if (partnerMuteCommand) {
+        if (!isGroup) return new Response(null, { status: 204 });
+        const binding = await getPartnerBinding(env, currentGroupId, userId);
+        if (!binding) return jsonReply(`${atSender}你目前没有绑定对象。`);
+        const duration = Math.max(1, Math.min(MUTE_LOCK_MAX_SECONDS, parseDurationSeconds(String(partnerMuteCommand[1] || "10分")) || 600));
+        const previousLock = await getMuteLock(env, currentGroupId, binding.partnerId);
+        if (previousLock && previousLock.source !== "partner") return jsonReply(`${atSender}对方当前是其他来源的禁言，对象权限不能覆盖。`);
+        if (previousLock?.source === "partner" && previousLock.partnerId !== userId) return jsonReply(`${atSender}该对象禁言不是由你建立，不能覆盖。`);
+        try { await createPartnerMuteLock(env, { groupId: currentGroupId, userId: binding.partnerId, partnerId: userId, durationSeconds: duration }); } catch (error) { return jsonReply(`${atSender}无法建立对象禁言锁，未执行禁言：${String(error?.message || error).slice(0, 300)}`); }
+        try {
+          await callOneBotAction(env, { action: "set_group_ban", params: { group_id: numericId(currentGroupId), user_id: numericId(binding.partnerId), duration } }, 15000);
+        } catch (error) {
+          if (previousLock?.active) await putMuteLock(env, previousLock).catch(() => {}); else await clearMuteLock(env, currentGroupId, binding.partnerId).catch(() => {});
+          return jsonReply(`${atSender}对象禁言失败：${String(error?.message || error).slice(0, 300)}`);
+        }
+        await writeSystemAudit(env, { type: "partner_mute_started", groupId: currentGroupId, actorId: userId, targetId: binding.partnerId, action: "mute", durationSeconds: duration }).catch(() => {});
+        return jsonReply(`[CQ:at,qq=${binding.partnerId}] 已被对象禁言 ${duration} 秒。只有对象权限或正常管理权限可以解除；对象不能解除其他来源的禁言。`);
+      }
+
+      if (/^[!！](?:解除对象禁言|解除對象禁言|对象解禁|對象解禁)$/i.test(cleanMessage)) {
+        if (!isGroup) return new Response(null, { status: 204 });
+        const binding = await getPartnerBinding(env, currentGroupId, userId);
+        if (!binding) return jsonReply(`${atSender}你目前没有绑定对象。`);
+        const lock = await getMuteLock(env, currentGroupId, binding.partnerId);
+        const permission = canUnlockMute(env, lock, { actorId: userId, partnerCommand: true });
+        if (!lock || lock.source !== "partner" || !permission.allowed) return jsonReply(`${atSender}只能解除由对象关系产生的禁言；其他原因的禁言不可解除。`);
+        await clearMuteLock(env, currentGroupId, binding.partnerId);
+        try { await callOneBotAction(env, { action: "set_group_ban", params: { group_id: numericId(currentGroupId), user_id: numericId(binding.partnerId), duration: 0 } }, 15000); } catch (error) { await putMuteLock(env, lock).catch(() => {}); return jsonReply(`${atSender}解除对象禁言失败：${String(error?.message || error).slice(0, 300)}`); }
+        await writeSystemAudit(env, { type: "partner_mute_released", groupId: currentGroupId, actorId: userId, targetId: binding.partnerId, action: "unmute" }).catch(() => {});
+        return jsonReply(`[CQ:at,qq=${binding.partnerId}] 对象禁言已解除。`);
       }
 
       // 群友可直接禁言自己；自我禁言建立独立锁，管理入口不能解除。
@@ -3802,6 +3880,11 @@ export class OneBotHub {
 
     const muteLock = await getMuteLock(this.env, groupId, userId);
     if (muteLock) {
+      if (muteLock.source === "partner") {
+        await clearMuteLock(this.env, groupId, userId);
+        await writeSystemAudit(this.env, { type: "partner_mute_management_release", groupId, actorId: operatorId || "unknown", targetId: userId, action: "native_management_unmute" }).catch(() => {});
+        return;
+      }
       const now = Date.now();
       const remainingSeconds = muteLockRemainingSeconds(muteLock, now);
       if (remainingSeconds <= 0) { await clearMuteLock(this.env, groupId, userId); return; }

@@ -245,26 +245,7 @@ async function processBuildEvent(env, event) {
   }
   await kvPut(env, STATUS_KEY, JSON.stringify(portalRecord));
 
-  let groupNotification = null;
-  if (record.kind === "started") {
-    const cooldownMs = envNumber(env?.DEPLOY_NOTIFY_START_COOLDOWN_SECONDS, 600, 30, 86400) * 1000;
-    const lastStartedAt = Number(await kvGet(env, LAST_GROUP_STARTED_AT_KEY) || 0);
-    if (Date.now() - lastStartedAt >= cooldownMs) {
-      groupNotification = await notifyGroups(env, publicMessage(record));
-      await kvPut(env, LAST_GROUP_STARTED_AT_KEY, String(Date.now()));
-    }
-  } else {
-    const terminalKey = `deployment:terminal_notified:${record.commitHash || record.buildUuid}:${record.kind}`;
-    const selfFallbackAlreadyAnnounced = record.kind === "succeeded"
-      && Boolean(await kvGet(env, `${SELF_FALLBACK_ANNOUNCED_PREFIX}${summary.version}`));
-    if (!selfFallbackAlreadyAnnounced && !await kvGet(env, terminalKey)) {
-      const text = record.kind === "succeeded"
-        ? `${publicMessage(record)}${compactSummary(summary) ? `\n${compactSummary(summary)}` : ""}`
-        : publicMessage(record);
-      groupNotification = await notifyGroups(env, text);
-      await kvPut(env, terminalKey, String(Date.now()));
-    }
-  }
+  const groupNotification = { skipped: true, reason: "portal_only" };
 
   let developerNotification = null;
   if (record.kind === "failed") developerNotification = await notifyDeveloperFailure(env, portalRecord, String(event?.metadata?.accountId || ""));
@@ -292,9 +273,7 @@ async function announceDeployedVersionFallback(env, now = Date.now()) {
     return { ignored: true, reason: "queue_event_already_announced" };
   }
   const summary = releaseSummary();
-  const text = `${publicMessage({ kind: "succeeded" })}${compactSummary(summary) ? `\n${compactSummary(summary)}` : ""}`;
-  const groupNotification = await notifyGroups(env, text);
-  if (groupNotification.length && groupNotification.every(item => !item.ok)) throw new Error("Deployment self-fallback could not notify any whitelisted group");
+  const groupNotification = { skipped: true, reason: "portal_only" };
   const record = {
     kind: "succeeded", buildUuid: `self:${VERSION}`, workerName: String(env?.DEPLOY_NOTIFY_WORKER_NAME || "qqai"),
     branch: String(env?.DEPLOY_NOTIFY_BRANCH || "main"), commitHash: "", commitMessage: "Worker runtime version self-check",

@@ -98,7 +98,7 @@ assert.equal(fallbackSuccess.ok, true, "Runtime fallback must record a live vers
 assert.equal(fallbackSuccess.groupNotification?.reason, "portal_only", "Runtime fallback must not broadcast to groups");
 const fallbackStatus = await getDeploymentStatusForViewer(fallbackEnv, viewer);
 assert.equal(fallbackStatus.status.kind, "succeeded");
-assert.equal(fallbackStatus.status.releaseVersion, "2.2.0");
+assert.equal(fallbackStatus.status.releaseVersion, "2.3.0");
 const fallbackDuplicate = await announceDeployedVersionFallback(fallbackEnv, t0 + 90000);
 assert.equal(fallbackDuplicate.reason, "already_announced");
 
