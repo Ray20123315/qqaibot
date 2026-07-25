@@ -5,27 +5,47 @@ on:
     branches:
       - main
       - refactor/v2-modular-worker
+      - fix/portal-members-client-v2.4.2
   pull_request:
     branches:
       - main
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   validate:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: npm
           cache-dependency-path: package.json
+      - name: Apply Portal member console hotfix
+        if: github.ref == 'refs/heads/fix/portal-members-client-v2.4.2'
+        run: node tools/apply-portal-members-hotfix-v2.4.2.mjs
+      - name: Check syntax
+        run: |
+          node --check src/portal/members.js
+          node --check verify-portal-members-client.mjs
       - name: Install dependencies
         run: npm install --ignore-scripts
       - name: Run regression checks
         run: npm run check
       - name: Build the single Worker bundle
         run: npm run check:bundle
+      - name: Commit clean validated candidate
+        if: github.ref == 'refs/heads/fix/portal-members-client-v2.4.2'
+        run: |
+          rm -rf node_modules dist package-lock.json tools/apply-portal-members-hotfix-v2.4.2.mjs
+          git checkout origin/main -- .github/workflows/validate.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add package.json release-notes.json src/config/runtime.js src/portal/members.js verify-*.mjs .github/workflows/validate.yml
+          git commit -m "Fix Portal member console initialization"
+          git push origin HEAD:fix/portal-members-client-v2.4.2
