@@ -1,0 +1,103 @@
+name: Apply meme-aware moderation and member console
+
+on:
+  pull_request:
+    branches:
+      - main
+    types: [opened, synchronize, reopened]
+    paths:
+      - .qqai-meme-members/**
+      - .github/workflows/apply-meme-members.yml
+      - src/portal/members.js
+      - verify-meme-member-console.mjs
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    if: github.head_ref == 'feature/meme-aware-rules-member-console'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/meme-aware-rules-member-console
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Detect pending patch
+        id: gate
+        shell: bash
+        run: |
+          if [ -f .qqai-meme-members/patch.mjs ]; then
+            echo 'apply=true' >> "$GITHUB_OUTPUT"
+          else
+            echo 'apply=false' >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Apply meme and member console changes
+        if: steps.gate.outputs.apply == 'true'
+        run: node .qqai-meme-members/patch.mjs
+
+      - name: Install dependencies
+        if: steps.gate.outputs.apply == 'true'
+        run: npm install --ignore-scripts
+
+      - name: Run regression checks
+        if: steps.gate.outputs.apply == 'true'
+        shell: bash
+        run: |
+          set -o pipefail
+          npm run check 2>&1 | tee qqai-meme-members-check.log
+
+      - name: Upload diagnostics
+        if: always() && steps.gate.outputs.apply == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: qqai-meme-members-diagnostics
+          path: |
+            qqai-meme-members-check.log
+            src/moderation/runtime.js
+            src/portal/runtime.js
+            src/portal/members.js
+            worker.js
+          if-no-files-found: warn
+          retention-days: 1
+
+      - name: Build single Worker bundle
+        if: steps.gate.outputs.apply == 'true'
+        run: npm run check:bundle
+
+      - name: Enforce invariants
+        if: steps.gate.outputs.apply == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          grep -F 'const VERSION = "2.0.4"' src/config/runtime.js
+          grep -F 'async function verifyRuleMemeContext' src/moderation/runtime.js
+          grep -F 'const spamEvidence = repeatedMessageBurst' src/moderation/runtime.js
+          grep -F 'const memeProtected = repeatedMessageBurst' src/moderation/runtime.js
+          ! grep -F 'const deterministicSpamReview = repeatedMessageBurst ? {' src/moderation/runtime.js
+          grep -F 'const memberResponse = await handlePortalMemberApi' src/portal/runtime.js
+          grep -F 'path === "/members/history"' src/portal/members.js
+          grep -F 'path === "/members/mute"' src/portal/members.js
+          grep -F 'path === "/members/unmute"' src/portal/members.js
+          grep -F 'injectPortalMembersClient' worker.js
+          grep -F 'main = "worker.js"' wrangler.toml
+          git diff --check
+
+      - name: Commit validated change
+        if: steps.gate.outputs.apply == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf node_modules dist package-lock.json qqai-meme-members-check.log .qqai-meme-members .github/workflows/apply-meme-members.yml
+          git config user.name qqai-meme-members
+          git config user.email actions@users.noreply.github.com
+          git add -A
+          git diff --cached --check
+          git commit -m 'Add meme-aware moderation and member console'
+          git push origin HEAD:feature/meme-aware-rules-member-console
