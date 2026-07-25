@@ -428,6 +428,65 @@ const QQAIWorker = {
           return new Response(null, { status: 204 });
         }
       }
+      // 禁言锁必须由 OneBot 实时解除事件驱动；提示去重只控制群消息，绝不能停止补禁。
+      if (body.post_type === 'notice' && body.notice_type === 'group_ban' && currentGroupId) {
+        if (!(await isGroupWhitelisted(env, currentGroupId))) return new Response(null, { status: 204 });
+        const targetId = String(body.user_id || '');
+        const operatorId = String(body.operator_id || '');
+        const subType = String(body.sub_type || '').toLowerCase();
+        const isLift = subType === 'lift_ban' || subType === 'unban' || (subType !== 'ban' && Number(body.duration || 0) === 0);
+        if (!isLift || !targetId) return new Response(null, { status: 204 });
+        const protectedLock = await getMuteLock(env, currentGroupId, targetId);
+        if (!protectedLock) return new Response(null, { status: 204 });
+
+        let liveOperatorRole = '';
+        if (operatorId) {
+          try {
+            const liveOperator = await callOneBotAction(env, { action: 'get_group_member_info', params: { group_id: numericId(currentGroupId), user_id: numericId(operatorId), no_cache: true } }, 8000);
+            liveOperatorRole = String(liveOperator?.role || liveOperator?.data?.role || '');
+          } catch {}
+        }
+        const developerOperator = Boolean(operatorId && (operatorId === String(env.DEVELOPER_ID || '3569028262') || operatorId === '3569028262'));
+        const liveOwner = operatorId ? await isVerifiedGroupOwner(env, currentGroupId, operatorId).catch(() => false) : false;
+        const permission = canUnlockMute(env, protectedLock, {
+          actorId: operatorId,
+          actorRole: liveOwner ? 'owner' : liveOperatorRole,
+          isDeveloper: developerOperator,
+          managementOverride: protectedLock.source === 'partner' && (liveOwner || liveOperatorRole === 'admin')
+        });
+        if (permission.allowed) {
+          await clearMuteLock(env, currentGroupId, targetId);
+          await writeSystemAudit(env, { type: 'mute_lock_native_release_allowed', groupId: currentGroupId, actorId: operatorId, targetId, action: 'unmute', source: protectedLock.source, reason: permission.reason }).catch(() => {});
+          return new Response(null, { status: 204 });
+        }
+
+        const blocked = await markMuteUnlockBlocked(env, protectedLock, operatorId);
+        const activeLock = blocked.lock || protectedLock;
+        const remaining = muteLockRemainingSeconds(activeLock);
+        if (remaining <= 0) {
+          await clearMuteLock(env, currentGroupId, targetId).catch(() => {});
+          return new Response(null, { status: 204 });
+        }
+        try {
+          await callOneBotAction(env, { action: 'set_group_ban', params: { group_id: numericId(currentGroupId), user_id: numericId(targetId), duration: remaining } }, 15000);
+          await markMuteLockReapplied(env, activeLock);
+          await writeSystemAudit(env, { type: 'mute_lock_reapplied', groupId: currentGroupId, actorId: operatorId, targetId, action: 'mute', source: activeLock.source, remainingSeconds: remaining, blockedAttempts: activeLock.blockedAttempts }).catch(() => {});
+          if (blocked.shouldNotify) {
+            const hint = activeLock.source === 'self'
+              ? '该成员处于自我禁言，只能本人私讯机器人发送「!解除禁言」。'
+              : activeLock.source === 'partner'
+                ? '该成员处于对象禁言，只能对象或正常群管理权限解除。'
+                : activeLock.allowOwnerUnmute
+                  ? '该禁言已启用防解除，仅开发者或群主可以解除。'
+                  : '该禁言已启用防解除，仅开发者可以解除。';
+            await callOneBotAction(env, { action: 'send_group_msg', params: { group_id: numericId(currentGroupId), message: '[CQ:at,qq=' + targetId + '] ' + hint + ' 已按剩余时间重新禁言；后续重复尝试不再发送提示。', auto_escape: false } }, 12000).catch(() => {});
+          }
+        } catch (error) {
+          await writeSystemAudit(env, { type: 'mute_lock_reapply_failed', groupId: currentGroupId, actorId: operatorId, targetId, action: 'mute', source: activeLock.source, remainingSeconds: remaining, error: String(error?.message || error).slice(0, 500) }).catch(() => {});
+        }
+        return new Response(null, { status: 204 });
+      }
+
       if (body.post_type === 'notice' && body.notice_type === 'group_decrease' && currentGroupId) {
         if (!(await isGroupWhitelisted(env, currentGroupId))) return new Response(null, { status: 204 });
         const leavingUserId = String(body.user_id || "");
@@ -516,6 +575,30 @@ const QQAIWorker = {
       const senderCard = body.sender?.card || body.sender?.nickname || userId;
       const senderRole = body.sender?.role || "member"; 
       const isDeveloper = (env.DEVELOPER_ID ? userId === env.DEVELOPER_ID.toString() : false) || userId === "3569028262";
+
+      // OneBot 偶尔可能漏掉 lift_ban 通知。自我禁言仍有效却能再次发言时，静默补禁；
+      // 但允许「!禁言自己／!自我禁言」继续进入命令处理，以便刷新禁言时长。
+      if (isGroup && body.post_type === "message" && !isSelfAccount && userId) {
+        const activeSelfLock = await getMuteLock(env, currentGroupId, userId);
+        if (activeSelfLock?.source === "self") {
+          const selfMuteCommandText = rawMessage.replace(/\[CQ:at,qq=(?:\d+|all)\]/gi, " ").replace(/\s+/g, " ").trim();
+          const refreshingSelfMute = /^[!！](?:禁言自己|自我禁言)(?:\s|$)/i.test(selfMuteCommandText);
+          if (!refreshingSelfMute) {
+            const remaining = muteLockRemainingSeconds(activeSelfLock);
+            if (remaining > 0) {
+              try {
+                await callOneBotAction(env, { action: "set_group_ban", params: { group_id: numericId(currentGroupId), user_id: numericId(userId), duration: remaining } }, 15000);
+                await markMuteLockReapplied(env, activeSelfLock);
+                await writeSystemAudit(env, { type: "self_mute_message_fallback_reapplied", groupId: currentGroupId, actorId: userId, targetId: userId, action: "mute", remainingSeconds: remaining }).catch(() => {});
+              } catch (error) {
+                await writeSystemAudit(env, { type: "self_mute_message_fallback_failed", groupId: currentGroupId, actorId: userId, targetId: userId, action: "mute", remainingSeconds: remaining, error: String(error?.message || error).slice(0, 500) }).catch(() => {});
+              }
+              return new Response(null, { status: 204 });
+            }
+          }
+        }
+      }
+
       const roleName = senderRole === "owner" ? "群主" : (senderRole === "admin" ? "管理员" : "群友");
       if (isGroup && userId) {
         const senderRobotHint = eventSenderRobotHint(body) || looksLikeRobotDisplayName(senderCard);
@@ -1425,6 +1508,30 @@ const QQAIWorker = {
         return new Response(null, { status: 204 });
       }
 
+      // 群友可直接禁言自己；自我禁言建立独立锁，管理入口不能解除。
+      const selfMuteCommand = cleanMessage.match(/^[!！](?:禁言自己|自我禁言)(?:\s+([\s\S]+))?$/i);
+      if (selfMuteCommand) {
+        if (!isGroup) return new Response(null, { status: 204 });
+        const requested = String(selfMuteCommand[1] || "10分").trim();
+        const duration = Math.max(1, Math.min(MUTE_LOCK_MAX_SECONDS, parseDurationSeconds(requested) || 600));
+        const existingLock = await getMuteLock(env, currentGroupId, userId);
+        if (existingLock?.source === "manual") return jsonReply(`${atSender}当前禁言由管理防解除锁保护，不能改成自我禁言。`);
+        try {
+          await createSelfMuteLock(env, { groupId: currentGroupId, userId, durationSeconds: duration });
+        } catch (error) {
+          return jsonReply(`${atSender}无法建立自我禁言锁，未执行禁言：${String(error?.message || error).slice(0, 300)}`);
+        }
+        try {
+          await callOneBotAction(env, { action: "set_group_ban", params: { group_id: numericId(currentGroupId), user_id: numericId(userId), duration } }, 15000);
+        } catch (error) {
+          if (existingLock?.active) await putMuteLock(env, existingLock).catch(() => {});
+          else await clearMuteLock(env, currentGroupId, userId).catch(() => {});
+          return jsonReply(`${atSender}自我禁言失败：${String(error?.message || error).slice(0, 300)}`);
+        }
+        await writeSystemAudit(env, { type: "self_mute_started", groupId: currentGroupId, actorId: userId, targetId: userId, action: "mute", durationSeconds: duration }).catch(() => {});
+        return jsonReply(`${atSender}已自我禁言 ${duration} 秒。只能由你本人私讯机器人发送「!解除禁言」静默解除，管理入口不能解除。`);
+      }
+
       // ⏳ Cloudflare 原生速率限制器 (10秒冷卻鎖) - 開發者、群主、管理員豁免
       const isBypassCooldown = isDeveloper || senderRole === 'owner' || senderRole === 'admin' || body.__qqai_queued === true;
       if (!isBypassCooldown) {
@@ -1728,30 +1835,6 @@ const QQAIWorker = {
         try { await callOneBotAction(env, { action: "set_group_ban", params: { group_id: numericId(currentGroupId), user_id: numericId(binding.partnerId), duration: 0 } }, 15000); } catch (error) { await putMuteLock(env, lock).catch(() => {}); return jsonReply(`${atSender}解除对象禁言失败：${String(error?.message || error).slice(0, 300)}`); }
         await writeSystemAudit(env, { type: "partner_mute_released", groupId: currentGroupId, actorId: userId, targetId: binding.partnerId, action: "unmute" }).catch(() => {});
         return jsonReply(`[CQ:at,qq=${binding.partnerId}] 对象禁言已解除。`);
-      }
-
-      // 群友可直接禁言自己；自我禁言建立独立锁，管理入口不能解除。
-      const selfMuteCommand = cleanMessage.match(/^[!！](?:禁言自己|自我禁言)(?:\s+([\s\S]+))?$/i);
-      if (selfMuteCommand) {
-        if (!isGroup) return new Response(null, { status: 204 });
-        const requested = String(selfMuteCommand[1] || "10分").trim();
-        const duration = Math.max(1, Math.min(MUTE_LOCK_MAX_SECONDS, parseDurationSeconds(requested) || 600));
-        const existingLock = await getMuteLock(env, currentGroupId, userId);
-        if (existingLock?.source === "manual") return jsonReply(`${atSender}当前禁言由管理防解除锁保护，不能改成自我禁言。`);
-        try {
-          await createSelfMuteLock(env, { groupId: currentGroupId, userId, durationSeconds: duration });
-        } catch (error) {
-          return jsonReply(`${atSender}无法建立自我禁言锁，未执行禁言：${String(error?.message || error).slice(0, 300)}`);
-        }
-        try {
-          await callOneBotAction(env, { action: "set_group_ban", params: { group_id: numericId(currentGroupId), user_id: numericId(userId), duration } }, 15000);
-        } catch (error) {
-          if (existingLock?.active) await putMuteLock(env, existingLock).catch(() => {});
-          else await clearMuteLock(env, currentGroupId, userId).catch(() => {});
-          return jsonReply(`${atSender}自我禁言失败：${String(error?.message || error).slice(0, 300)}`);
-        }
-        await writeSystemAudit(env, { type: "self_mute_started", groupId: currentGroupId, actorId: userId, targetId: userId, action: "mute", durationSeconds: duration }).catch(() => {});
-        return jsonReply(`${atSender}已自我禁言 ${duration} 秒。只能由你本人私讯机器人发送「!解除禁言」静默解除，管理入口不能解除。`);
       }
 
       // 高影响群操作统一建立待确认提案；任何模型或指令都不能直接踢人／禁言。
