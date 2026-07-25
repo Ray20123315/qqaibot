@@ -1,14 +1,12 @@
 {
   "name": "qqai-bot-worker",
-  "version": "0.2.5",
+  "version": "2.0.0",
   "private": true,
   "type": "module",
   "scripts": {
-    "check": "node verify-config.mjs && node verify-migration.mjs && node verify-model-routing.mjs && node --check worker.js",
+    "check": "node verify-config.mjs && node verify-migration.mjs && node verify-model-routing.mjs && node verify-modules.mjs && node verify-routes.mjs",
+    "check:bundle": "wrangler deploy --config wrangler.toml --dry-run --outdir dist --no-assets",
     "deploy": "wrangler deploy --config wrangler.toml --no-assets"
-  },
-  "dependencies": {
-    "@cloudflare/puppeteer": "^1.1.0"
   },
   "devDependencies": {
     "wrangler": "4.112.0"
