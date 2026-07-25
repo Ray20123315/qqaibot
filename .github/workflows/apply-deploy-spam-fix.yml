@@ -1,0 +1,88 @@
+name: Apply deployment fallback and deterministic spam fix
+
+on:
+  pull_request:
+    branches:
+      - main
+    types: [opened, synchronize, reopened]
+    paths:
+      - .qqai-fix-deploy-spam/**
+      - .github/workflows/apply-deploy-spam-fix.yml
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    if: github.head_ref == 'fix/deployment-fallback-and-spam'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/deployment-fallback-and-spam
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Detect pending patch
+        id: gate
+        shell: bash
+        run: |
+          if [ -f .qqai-fix-deploy-spam/patch-deploy.mjs ]; then
+            echo 'apply=true' >> "$GITHUB_OUTPUT"
+          else
+            echo 'apply=false' >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Apply deployment fallback
+        if: steps.gate.outputs.apply == 'true'
+        run: node .qqai-fix-deploy-spam/patch-deploy.mjs
+
+      - name: Apply deterministic spam detection
+        if: steps.gate.outputs.apply == 'true'
+        run: node .qqai-fix-deploy-spam/patch-spam.mjs
+
+      - name: Apply release metadata
+        if: steps.gate.outputs.apply == 'true'
+        run: node .qqai-fix-deploy-spam/patch-meta.mjs
+
+      - name: Install dependencies
+        if: steps.gate.outputs.apply == 'true'
+        run: npm install --ignore-scripts
+
+      - name: Run regression checks
+        if: steps.gate.outputs.apply == 'true'
+        run: npm run check
+
+      - name: Build single Worker bundle
+        if: steps.gate.outputs.apply == 'true'
+        run: npm run check:bundle
+
+      - name: Enforce fix invariants
+        if: steps.gate.outputs.apply == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          grep -F 'announceDeployedVersionFallback' src/deployment/notifications.js
+          grep -F 'runtime_self_fallback' src/deployment/notifications.js
+          grep -F 'ctx.waitUntil(announceDeployedVersionFallback' worker.js
+          grep -F 'const deterministicSpamReview' src/moderation/runtime.js
+          grep -F 'if (!rules && !deterministicSpamReview)' src/moderation/runtime.js
+          grep -F 'detectRepeatedMessageBurst' verify-spam-detection.mjs
+          grep -F 'main = "worker.js"' wrangler.toml
+          git diff --check
+
+      - name: Commit validated change
+        if: steps.gate.outputs.apply == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf node_modules dist package-lock.json .qqai-fix-deploy-spam
+          git config user.name qqai-deploy-spam-fix
+          git config user.email actions@users.noreply.github.com
+          git add -A
+          git diff --cached --check
+          git commit -m 'Fix deployment notification fallback and deterministic spam detection'
+          git push origin HEAD:fix/deployment-fallback-and-spam
