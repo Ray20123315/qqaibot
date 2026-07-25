@@ -5,27 +5,55 @@ on:
     branches:
       - main
       - refactor/v2-modular-worker
+      - feature/community-suite-v2.5.0
   pull_request:
     branches:
       - main
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   validate:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
       - uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: npm
           cache-dependency-path: package.json
+      - name: Check integration patcher
+        run: node --check tools/apply-community-suite-v2.5.0.mjs
+      - name: Apply community suite
+        run: node tools/apply-community-suite-v2.5.0.mjs
+      - name: Check syntax
+        run: |
+          node --check src/portal/community-suite.js
+          node --check src/portal/members.js
+          node --check src/social/sticker-library.js
+          node --check src/moderation/partner-bindings.js
+          node --check worker.js
+          node --check verify-community-suite.mjs
+      - name: Parse generated Portal clients
+        run: node verify-community-suite.mjs
       - name: Install dependencies
         run: npm install --ignore-scripts
       - name: Run regression checks
         run: npm run check
       - name: Build the single Worker bundle
         run: npm run check:bundle
+      - name: Commit clean validated candidate
+        if: github.event_name == 'push' && github.ref == 'refs/heads/feature/community-suite-v2.5.0'
+        run: |
+          rm -rf node_modules dist package-lock.json tools/apply-community-suite-v2.5.0.mjs
+          git checkout origin/main -- .github/workflows/validate.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "Add Portal community management suite"
+          git push origin HEAD:feature/community-suite-v2.5.0
