@@ -1,0 +1,31 @@
+  function relationshipMemberName(qq){var member=cachedMembers.find(function(item){return String(item.qq)===String(qq)});return member?(member.name||member.qq):String(qq||'未知成员')}
+  function relationshipText(item){if(!item)return'';if(item.mode==='master')return relationshipMemberName(item.masterId)+'（主人） → '+relationshipMemberName(item.memberId)+'（所属成员）';var ids=item.userIds||[item.leftId,item.rightId];return relationshipMemberName(ids[0])+' ↔ '+relationshipMemberName(ids[1])+'（对象）'}
+  function relationshipFor(qq){return cachedRelationships.find(function(item){return (item.userIds||[]).map(String).indexOf(String(qq))>=0})||null}
+  function populateRelationshipSelectors(){
+    var master=el('relationshipMaster'),member=el('relationshipMember');if(!master||!member)return;
+    var masters=cachedMembers.filter(function(item){return item.relationshipEligibility&&item.relationshipEligibility.master});
+    var members=cachedMembers.filter(function(item){return item.relationshipEligibility&&item.relationshipEligibility.member});
+    master.innerHTML=masters.map(function(item){return '<option value="'+safe(item.qq)+'">'+safe(item.name||item.qq)+'｜QQ '+safe(item.qq)+'｜'+safe(roleText(item.role))+'</option>'}).join('')||'<option value="">没有可选主人</option>';
+    member.innerHTML=members.map(function(item){return '<option value="'+safe(item.qq)+'">'+safe(item.name||item.qq)+'｜QQ '+safe(item.qq)+'</option>'}).join('')||'<option value="">没有可选所属成员</option>';
+  }
+  function renderRelationships(){
+    var status=el('relationshipStatus'),panel=el('relationshipDirectPanel'),root=el('relationshipList');if(!root)return;
+    var canDirect=!!relationshipPermissions.directRelationship;
+    if(panel)panel.classList.toggle('hidden',!canDirect);
+    if(status)status.textContent='当前共 '+cachedRelationships.length+' 段关系。'+(canDirect?'你拥有最高核心开发者权限，可直接配对、替换或解除。':'当前帐号为只读查看；普通管理层不能跳过双方同意。');
+    populateRelationshipSelectors();
+    root.innerHTML=cachedRelationships.map(function(item){var ids=item.userIds||[];var remove=canDirect&&ids[0]?'<button class="btn danger relationship-remove" data-user-id="'+safe(ids[0])+'">强制解除</button>':'';var created=item.createdAt?new Date(Number(item.createdAt)).toLocaleString():'时间未知';return '<div class="item relationship-row"><div><div class="member-name">'+safe(relationshipText(item))+'</div><div class="member-meta">'+safe(item.mode==='master'?'主人关系':'对象关系')+'｜建立于 '+safe(created)+'</div></div><div class="relationship-actions">'+remove+'</div></div>'}).join('')||'<div class="empty">当前群没有任何绑定关系</div>';
+  }
+  async function directPairRelationship(){
+    if(!relationshipPermissions.directRelationship){notify('只有最高核心开发者可以直接配对');return}
+    var master=el('relationshipMaster'),member=el('relationshipMember'),replace=el('relationshipReplace');var masterId=String(master&&master.value||''),memberId=String(member&&member.value||'');
+    if(!masterId||!memberId){notify('请选择主人和所属成员');return}if(masterId===memberId){notify('主人和所属成员不能是同一个帐号');return}
+    var replaceExisting=!!(replace&&replace.checked);var text='确定直接建立主人关系？\n主人：'+relationshipMemberName(masterId)+'（'+masterId+'）\n所属成员：'+relationshipMemberName(memberId)+'（'+memberId+'）'+(replaceExisting?'\n双方既有关系会被强制替换。':'');
+    var ok=typeof confirmModal==='function'?await confirmModal(text,'最高权限直接配对'):window.confirm(text);if(!ok)return;
+    var result=await call('/members/relationships/direct','POST',{masterId:masterId,memberId:memberId,replaceExisting:replaceExisting});notify(result.message||'操作完成');if(result.ok)loadMembers()
+  }
+  async function removeRelationship(button){
+    if(!relationshipPermissions.removeRelationship){notify('只有最高核心开发者可以强制解除关系');return}
+    var userId=String(button&&button.dataset.userId||'');if(!userId)return;var item=relationshipFor(userId);var text='确定强制解除关系：'+relationshipText(item)+'？';var ok=typeof confirmModal==='function'?await confirmModal(text,'强制解除关系'):window.confirm(text);if(!ok)return;
+    var result=await call('/members/relationships/remove','POST',{userId:userId});notify(result.message||'操作完成');if(result.ok)loadMembers()
+  }
