@@ -20,13 +20,15 @@ function normalizeMuteLock(value) {
   const groupId = cleanId(source.groupId);
   const userId = cleanId(source.userId);
   const expiresAt = Number(source.expiresAt || 0);
+  const lockSource = source.source === "self" ? "self" : source.source === "partner" ? "partner" : source.source === "master" ? "master" : "manual";
   return {
     active: Boolean(source.active && groupId && userId && expiresAt > Date.now()),
     groupId,
     userId,
-    source: source.source === "self" ? "self" : source.source === "partner" ? "partner" : "manual",
+    source: lockSource,
     createdBy: cleanId(source.createdBy),
     partnerId: cleanId(source.partnerId),
+    masterId: cleanId(source.masterId),
     createdAt: Number(source.createdAt || 0),
     expiresAt,
     durationSeconds: Math.max(1, Math.min(MAX_MUTE_SECONDS, Math.trunc(Number(source.durationSeconds || Math.ceil((expiresAt - Number(source.createdAt || Date.now())) / 1000) || 1)))),
@@ -118,6 +120,19 @@ async function createPartnerMuteLock(env, { groupId, userId, partnerId, duration
   });
 }
 
+async function createMasterMuteLock(env, { groupId, userId, masterId, durationSeconds, reason = "" }) {
+  return putMuteLock(env, {
+    groupId,
+    userId,
+    source: "master",
+    createdBy: masterId,
+    masterId,
+    durationSeconds,
+    allowOwnerUnmute: false,
+    reason: reason || "主人关系禁言"
+  });
+}
+
 async function getMuteLock(env, groupId, userId) {
   const key = muteLockKey(groupId, userId);
   const lock = normalizeMuteLock(await readJsonKey(env, key, null));
@@ -138,7 +153,7 @@ async function clearMuteLock(env, groupId, userId) {
   return lock;
 }
 
-function canUnlockMute(env, lock, { actorId = "", actorRole = "", isDeveloper = false, privateSelfCommand = false, partnerCommand = false, managementOverride = false } = {}) {
+function canUnlockMute(env, lock, { actorId = "", actorRole = "", isDeveloper = false, privateSelfCommand = false, partnerCommand = false, masterCommand = false, managementOverride = false } = {}) {
   if (!lock?.active) return { allowed: true, reason: "no_lock" };
   const actor = cleanId(actorId);
   if (lock.source === "self") {
@@ -149,6 +164,11 @@ function canUnlockMute(env, lock, { actorId = "", actorRole = "", isDeveloper = 
     if (partnerCommand && actor && actor === lock.partnerId) return { allowed: true, reason: "partner_release" };
     if (isDeveloper || isDeveloperId(env, actor) || managementOverride || ["owner", "admin", "developer"].includes(String(actorRole || ""))) return { allowed: true, reason: "management_partner_override" };
     return { allowed: false, reason: "partner_mute_partner_or_management_only" };
+  }
+  if (lock.source === "master") {
+    if (masterCommand && actor && actor === lock.masterId) return { allowed: true, reason: "master_release" };
+    if (isDeveloper || isDeveloperId(env, actor) || managementOverride || ["owner", "admin", "developer"].includes(String(actorRole || ""))) return { allowed: true, reason: "management_master_override" };
+    return { allowed: false, reason: "master_mute_master_or_management_only" };
   }
   if (isDeveloper || isDeveloperId(env, actor)) return { allowed: true, reason: "developer" };
   if (lock.allowOwnerUnmute && String(actorRole || "") === "owner") return { allowed: true, reason: "owner_allowed" };
@@ -213,6 +233,7 @@ export {
   canUnlockMute,
   clearMuteLock,
   createManualMuteLock,
+  createMasterMuteLock,
   createPartnerMuteLock,
   createSelfMuteLock,
   getMuteLock,
