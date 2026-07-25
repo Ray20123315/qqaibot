@@ -6,6 +6,7 @@ import { isVerifiedGroupOwner } from "../group/runtime.js";
 import { dbPut } from "../data/store.js";
 import { jsonResponse, readJson } from "./auth.js";
 import { numericId } from "../security/network.js";
+import { handleCommunitySuiteApi, injectCommunitySuiteClient, listMemberProfileSummaries } from "./community-suite.js";
 
 const MEMBER_CACHE_TTL_MS = 5 * 60 * 1000;
 const MAX_MUTE_SECONDS = 30 * 24 * 60 * 60;
@@ -32,7 +33,8 @@ function publicRelationship(binding) {
     memberId: String(binding.memberId || ""),
     userIds: [String(binding.masterId || ""), String(binding.memberId || "")].filter(Boolean),
     createdAt: Number(binding.createdAt || 0),
-    requestId: String(binding.requestId || "")
+    requestId: String(binding.requestId || ""),
+    permissions: binding.permissions || null
   } : {
     mode: "partner",
     leftId: String(binding.leftId || binding.userIds?.[0] || ""),
@@ -172,6 +174,8 @@ async function handlePortalMemberApi(request, env, url, path, body, authed) {
   const groupId = String(authed?.groupId || "").replace(/\D/g, "");
   if (!groupId) return jsonResponse({ ok: false, message: "请先选择群组。" }, 400);
   if (!memberConsoleAllowed(authed)) return jsonResponse({ ok: false, message: "群友列表、历史消息与禁言操作仅限本群 QQ 管理员、群主、获授群操作权限者或开发者。" }, 403);
+  const suiteResponse = await handleCommunitySuiteApi(request, env, url, path, body, authed, { listPortalMembers });
+  if (suiteResponse) return suiteResponse;
 
   if (request.method === "GET" && path === "/members") {
     try {
@@ -179,12 +183,14 @@ async function handlePortalMemberApi(request, env, url, path, body, authed) {
       const query = String(url.searchParams.get("q") || "").trim().toLowerCase();
       const locks = await listGroupMuteLocks(env, groupId);
       const relationships = (await listGroupBindings(env, groupId)).map(publicRelationship);
+      const profiles = await listMemberProfileSummaries(env, groupId);
       const relationshipByUser = new Map();
       for (const relationship of relationships) for (const qq of relationship.userIds || []) relationshipByUser.set(String(qq), relationship);
       const visibleMembers = listing.members.map(item => ({
         ...item,
         muteLock: locks[item.qq] ? { source: locks[item.qq].source, allowOwnerUnmute: locks[item.qq].allowOwnerUnmute, expiresAt: locks[item.qq].expiresAt, blockedAttempts: locks[item.qq].blockedAttempts } : null,
         relationship: relationshipByUser.get(String(item.qq)) || null,
+        memberProfile: profiles[item.qq] || null,
         relationshipEligibility: {
           master: !item.isRobot,
           member: !item.isRobot && item.role === "member" && !isDeveloperId(env, item.qq)
@@ -362,9 +368,16 @@ function injectPortalMembersClient(html) {
   let source = String(html || "");
   if (!source || source.includes("qqai-member-console-client")) return source;
 
-  const navAnchor = '<button data-view="logs">操作日志</button>';
-  if (source.includes(navAnchor)) {
-    source = source.replace(navAnchor, '<button data-view="members" id="memberConsoleNav">群友列表</button>' + navAnchor);
+  const navButton = '<button data-view="members" id="memberConsoleNav">群友列表</button>';
+  if (!source.includes('id="memberConsoleNav"')) {
+    const navFallbacks = [
+      { anchor: '<button data-view="logs">操作日志</button>', value: navButton + '<button data-view="logs">操作日志</button>' },
+      { anchor: '</nav>', value: navButton + '</nav>' },
+      { anchor: '</aside>', value: '<nav>' + navButton + '</nav></aside>' }
+    ];
+    const match = navFallbacks.find(item => source.includes(item.anchor));
+    if (match) source = source.replace(match.anchor, match.value);
+    else source = navButton + source;
   }
 
   const section = `
@@ -437,10 +450,6 @@ function injectPortalMembersClient(html) {
   async function copyText(value){var text=String(value||'');try{if(navigator.clipboard&&navigator.clipboard.writeText)await navigator.clipboard.writeText(text);else{var input=document.createElement('textarea');input.value=text;document.body.appendChild(input);input.select();document.execCommand('copy');input.remove()}notify('已复制 QQ：'+text)}catch(error){notify('复制失败：'+String(error&&error.message||error))}}
   function csvCell(value){var text=String(value==null?'':value);return '"'+text.replace(/"/g,'""')+'"'}
   function exportMembers(){var rows=[['QQ','名称','身份','禁言状态','剩余禁言秒数','关系身份','入群时间','最近发言时间']];cachedMembers.forEach(function(item){var relation=relationshipFor(item.qq),relationRole=relation?(relation.mode==='master'?(String(relation.masterId)===String(item.qq)?'主人':'所属成员'):'对象'):'';rows.push([item.qq,item.name||'',roleText(item.role),item.muted?'禁言中':'可发言',item.muteRemainingSeconds||0,relationRole,dateText(item.joinTime),dateText(item.lastSentTime)])});var csv='\ufeff'+rows.map(function(row){return row.map(csvCell).join(',')}).join('\\r\\n');var blob=new Blob([csv],{type:'text/csv;charset=utf-8'}),url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download='群友列表-'+new Date().toISOString().slice(0,10)+'.csv';document.body.appendChild(a);a.click();a.remove();setTimeout(function(){URL.revokeObjectURL(url)},1000)}
-  function sessionAllows(){
-    try{var s=typeof session!=='undefined'?session:null,p=s&&s.permissions||{};return !!(s&&(p.developer||p.nativeAdmin||p.groupOps||s.role==='owner'||s.role==='admin'||s.role==='developer'))}catch(e){return false}
-  }
-  function syncNav(){var nav=el('memberConsoleNav');if(nav)nav.classList.toggle('hidden',!sessionAllows())}
   function isMembersView(){var view=el('v-members');return !!(view&&view.classList.contains('active'))}
   function relationshipMemberName(qq){var member=cachedMembers.find(function(item){return String(item.qq)===String(qq)});return member?(member.name||member.qq):String(qq||'未知成员')}
   function relationshipText(item){if(!item)return'';if(item.mode==='master')return relationshipMemberName(item.masterId)+'（主人） → '+relationshipMemberName(item.memberId)+'（所属成员）';var ids=item.userIds||[item.leftId,item.rightId];return relationshipMemberName(ids[0])+' ↔ '+relationshipMemberName(ids[1])+'（对象）'}
@@ -505,6 +514,7 @@ function injectPortalMembersClient(html) {
     var mutedCount=cachedMembers.filter(function(item){return item.muted}).length,adminCount=cachedMembers.filter(function(item){return item.role==='owner'||item.role==='admin'}).length;
     if(status)status.textContent='共 '+cachedMembers.length+' 位群友｜管理层 '+adminCount+'｜禁言中 '+mutedCount+'｜关系 '+cachedRelationships.length+(result.stale?'｜当前显示缓存资料':'｜即时资料')+(result.warning?'｜'+result.warning:'')
   }
+  window.qqaiLoadMembers=loadMembers;
   async function showHistory(qq){
     var panel=el('memberHistoryPanel'),list=el('memberHistoryList'),title=el('memberHistoryTitle');if(!panel||!list)return;
     panel.classList.remove('hidden');list.innerHTML='<div class="empty">正在读取历史消息…</div>';
@@ -542,10 +552,11 @@ function injectPortalMembersClient(html) {
   document.addEventListener('change',function(event){if(event.target&&['memberRoleFilter','memberMuteFilter','memberRelationshipFilter','memberSort'].indexOf(event.target.id)>=0)renderMembers()});
   var selector=el('groupSelect');if(selector)selector.addEventListener('change',function(){if(isMembersView())setTimeout(loadMembers,100)});
   var refresh=el('refresh');if(refresh)refresh.addEventListener('click',function(){if(isMembersView())setTimeout(loadMembers,100)});
-  syncNav();if(isMembersView())setTimeout(loadMembers,0);
+  if(isMembersView())setTimeout(loadMembers,0);
 })();
 </script>`;
-  return source.includes("</body>") ? source.replace("</body>", script + "\n</body>") : source + script;
+  const output = source.includes("</body>") ? source.replace("</body>", script + "\n</body>") : source + script;
+  return injectCommunitySuiteClient(output);
 }
 
 export { handlePortalMemberApi, injectPortalMembersClient, listPortalMembers, memberConsoleAllowed, normalizeEpochMs, normalizeMember, parseMuteSeconds };

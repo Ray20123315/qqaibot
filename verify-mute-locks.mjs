@@ -53,7 +53,7 @@ assert(worker.includes('isVerifiedGroupOwner(this.env, groupId, operatorId)'), '
 assert(worker.includes('!解除禁言'), 'Worker must document the private silent self-unmute command in the guard message');
 
 const pkg = JSON.parse(fs.readFileSync('package.json', 'utf8'));
-assert(pkg.version === '2.4.2', 'Package version must be 2.4.2');
+assert(pkg.version === '2.5.0', 'Package version must be 2.5.0');
 assert(pkg.scripts.check.includes('verify-mute-locks.mjs'), 'Mute lock verification must run in the permanent suite');
 
 console.log('verify-mute-locks: ok');

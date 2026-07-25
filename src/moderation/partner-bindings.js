@@ -1,6 +1,26 @@
 import { dbDel, dbGet, dbPut } from "../data/store.js";
 
 const PARTNER_REQUEST_TTL_MS = 10 * 60 * 1000;
+const MASTER_RELATIONSHIP_DEFAULTS = Object.freeze({
+  mute: true,
+  unmute: true,
+  recall: true,
+  rename: true,
+  kick: false,
+  maxMuteSeconds: 30 * 60
+});
+
+function normalizeMasterPermissions(value) {
+  const source = value && typeof value === "object" ? value : {};
+  return {
+    mute: source.mute !== false,
+    unmute: source.unmute !== false,
+    recall: source.recall !== false,
+    rename: source.rename !== false,
+    kick: source.kick === true,
+    maxMuteSeconds: Math.max(1, Math.min(30 * 24 * 60 * 60, Math.trunc(Number(source.maxMuteSeconds || MASTER_RELATIONSHIP_DEFAULTS.maxMuteSeconds))))
+  };
+}
 
 function cleanId(value) {
   return String(value || "").replace(/\D/g, "");
@@ -45,6 +65,7 @@ function normalizeBinding(value) {
     relationshipRole,
     masterId,
     memberId,
+    permissions: mode === "master" ? normalizeMasterPermissions(source.permissions) : null,
     createdAt: Number(source.createdAt || 0),
     requestId: String(source.requestId || "")
   };
@@ -161,7 +182,7 @@ async function decidePartnerBindingRequest(env, { groupId, requestId, actorId, a
     return { ok: false, message: "其中一方已经绑定了其他关系，本次申请无法通过。" };
   }
   const now = Date.now();
-  const common = { active: true, groupId: group, mode: request.mode === "master" ? "master" : "partner", createdAt: now, requestId: request.id };
+  const common = { active: true, groupId: group, mode: request.mode === "master" ? "master" : "partner", permissions: request.mode === "master" ? { ...MASTER_RELATIONSHIP_DEFAULTS } : null, createdAt: now, requestId: request.id };
   const left = {
     ...common,
     userId: request.requesterId,
@@ -216,6 +237,7 @@ async function listGroupBindings(env, groupId) {
       masterId: binding.masterId,
       memberId: binding.memberId,
       userIds: [binding.masterId, binding.memberId],
+      permissions: binding.permissions,
       createdAt: binding.createdAt,
       requestId: binding.requestId
     } : {
@@ -258,7 +280,7 @@ async function createDirectMasterBinding(env, { groupId, masterId, memberId, cre
   }
   const now = Date.now();
   const requestId = `direct_${now.toString(36)}_${crypto.randomUUID().slice(0, 6)}`;
-  const common = { active: true, groupId: group, mode: "master", masterId: master, memberId: member, createdAt: now, requestId, direct: true, createdBy: actor };
+  const common = { active: true, groupId: group, mode: "master", masterId: master, memberId: member, permissions: { ...MASTER_RELATIONSHIP_DEFAULTS }, createdAt: now, requestId, direct: true, createdBy: actor };
   const masterBindingRecord = { ...common, userId: master, partnerId: member, relationshipRole: "master" };
   const memberBindingRecord = { ...common, userId: member, partnerId: master, relationshipRole: "member" };
   await Promise.all([
@@ -267,6 +289,24 @@ async function createDirectMasterBinding(env, { groupId, masterId, memberId, cre
   ]);
   return { ok: true, requestId, bindings: [normalizeBinding(masterBindingRecord), normalizeBinding(memberBindingRecord)] };
 }
+async function updateMasterBindingPermissions(env, groupId, userId, patch, updatedBy = "") {
+  const binding = await getPartnerBinding(env, groupId, userId);
+  if (!binding || binding.mode !== "master") return { ok: false, message: "找不到有效的主人关系。" };
+  const permissions = normalizeMasterPermissions({ ...binding.permissions, ...(patch && typeof patch === "object" ? patch : {}) });
+  const [leftRaw, rightRaw] = await Promise.all([
+    readJsonKey(env, partnerBindingKey(binding.groupId, binding.userId), null),
+    readJsonKey(env, partnerBindingKey(binding.groupId, binding.partnerId), null)
+  ]);
+  if (!leftRaw || !rightRaw) return { ok: false, message: "主人关系资料不完整。" };
+  const updatedAt = Date.now();
+  await Promise.all([
+    dbPut(env, partnerBindingKey(binding.groupId, binding.userId), JSON.stringify({ ...leftRaw, permissions, permissionsUpdatedAt: updatedAt, permissionsUpdatedBy: cleanId(updatedBy) })),
+    dbPut(env, partnerBindingKey(binding.groupId, binding.partnerId), JSON.stringify({ ...rightRaw, permissions, permissionsUpdatedAt: updatedAt, permissionsUpdatedBy: cleanId(updatedBy) }))
+  ]);
+  const next = await getPartnerBinding(env, binding.groupId, binding.userId);
+  return { ok: true, binding: next };
+}
+
 async function clearPartnerBinding(env, groupId, userId) {
   const binding = await getPartnerBinding(env, groupId, userId);
   if (!binding) return null;
@@ -278,6 +318,7 @@ async function clearPartnerBinding(env, groupId, userId) {
 }
 
 export {
+  MASTER_RELATIONSHIP_DEFAULTS,
   PARTNER_REQUEST_TTL_MS,
   clearPartnerBinding,
   createDirectMasterBinding,
@@ -287,5 +328,7 @@ export {
   getBindingRequest,
   getPartnerBinding,
   listGroupBindings,
-  partnerBindingKey
+  normalizeMasterPermissions,
+  partnerBindingKey,
+  updateMasterBindingPermissions
 };

@@ -10,7 +10,7 @@ import { normalizeMultilingualCommand, toSimplifiedChinese } from "./src/i18n/co
 import { handleBilibiliWebhook, pollAutomaticBilibiliConnectors } from "./src/integrations/bilibili.js";
 import { attachModerationProposalMessage, createGroupWorkRequest, createJoinRequestAssist, createModerationProposal, decideJoinRequestAssist, detectNaturalModerationProposal, findLatestActiveRuleViolationForUser, formatModerationPermissionDenied, formatModerationProposal, getGroupMemberSafe, handleGroupWorkDecision, handleModerationConfirmation, inspectMessageAgainstGroupRules, normalizeRuleProxyMode, normalizeRuleStrictness, parseModerationConfirmation, parseUnlimitedNonNegativeInteger, recordRuleViolationFeedback, ruleStrictnessLabel } from "./src/moderation/runtime.js";
 import { MAX_MUTE_SECONDS as MUTE_LOCK_MAX_SECONDS, canUnlockMute, clearMuteLock, createMasterMuteLock, createPartnerMuteLock, createSelfMuteLock, getMuteLock, listActiveSelfMuteLocks, markMuteLockReapplied, markMuteUnlockBlocked, muteLockRemainingSeconds, putMuteLock } from "./src/moderation/mute-locks.js";
-import { clearPartnerBinding, createMasterBindingRequest, createPartnerBindingRequest, decidePartnerBindingRequest, getBindingRequest, getPartnerBinding } from "./src/moderation/partner-bindings.js";
+import { MASTER_RELATIONSHIP_DEFAULTS, clearPartnerBinding, createMasterBindingRequest, createPartnerBindingRequest, decidePartnerBindingRequest, getBindingRequest, getPartnerBinding } from "./src/moderation/partner-bindings.js";
 import { appendPortalConversationRecord, applyConversationOutputGuards, auditIgnoredRobotMessage, botInteractionAllowKey, buildReplyPlan, cacheBotSenderClassification, clearRegisteredThinkingIndicators, detectLiteralPseudoElementLabels, eventHasBotMention, eventMentionedQqs, eventPlainText, eventSenderDisplayName, eventSenderRobotHint, extractFileDescriptors, extractForwardIds, extractMediaDescriptor, extractMessageText, extractOutboundMediaTypes, extractTextMentionIds, filterRobotMentionIds, formatForwardContext, getForwardMessageSnapshot, getQuotedMessage, getTaipeiTimeContext, isExplicitCurrentTimeQuestion, isExplicitRoleplayRequest, isGroupRobotInteractionAllowed, isIgnoredGroupRobotSender, isStandaloneCurrentTimeQuestion, looksLikeRobotDisplayName, normalizeFileDescriptor, parseDurationSeconds, prepareConversationHistory, purgeLegacyBotRepliesFromRecentLogs, qqaiTruthyRobotFlag, recordStructuredMessage, registerThinkingIndicator, removeTextMentionTokens, resolveOneBotMediaAsBase64, runOneBotGroupOperation, sanitizeAiReply, sendThinkingIndicator, thinkingIndicatorRegistryKey } from "./src/onebot/messages.js";
 import { classifyCollaborationNaturalIntent, classifyNaturalLanguageCommandIntent, normalizeNaturalLanguageCommandText, opsGetGroupMember, opsGetSettings, opsHandleActivityCommand, opsHandleMemberLeave, opsProcessAutomations } from "./src/operations/runtime.js";
 import { processPlatformJobs } from "./src/platform/runtime.js";
@@ -18,6 +18,7 @@ import { authDbDelStrict, authDbGetStrict, authDbPutStrict, clearPasswordLoginGu
 import { getLiveHtmlPage, getPortalHomePage, handleGeminiLiveUpgrade, handlePortalApi } from "./src/portal/runtime.js";
 import { injectPortalMembersClient } from "./src/portal/members.js";
 import { applySocialOutputPolicy, buildSocialDecision, buildSocialPromptBlock, capturePersonaContinuity, oneBotBotMentionCount, oneBotEventHasMedia, oneBotEventIsBareMention, oneBotEventIsPunctuationOnly, observeSocialStyle, shouldSendSocialBufferNotice, socialInputDelayMs, waitForSocialTyping } from "./src/social/runtime.js";
+import { pickSticker, pickStickerForText, stickerCqMessage } from "./src/social/sticker-library.js";
 import { cancelSchedule, cleanupExpiredModerationProposals, cleanupTransientState, countActiveSchedulesForUser, createAppealFromText, createScheduleRecord, extractScheduleMentionIds, formatScheduleLine, listUserSchedules, parseManagementScheduleAction, parseScheduleRequest, performManualGroupCheckins, processConflictSignal, processDueSchedules, reviewScheduleWithGemma, reviseScheduleRecord, runAutomaticGroupCheckins, skipScheduleOnce } from "./src/scheduler/runtime.js";
 import { fetchPublicUrl, getFeatureFlag, getPrivateAccessMode, isGroupWhitelisted, numericId, verifyOneBotAccess } from "./src/security/network.js";
 
@@ -1535,6 +1536,19 @@ const QQAIWorker = {
         return jsonReply(`${atSender}已自我禁言 ${duration} 秒。只能由你本人私讯机器人发送「!解除禁言」静默解除，管理入口不能解除。`);
       }
 
+      const stickerCommand = cleanMessage.match(/^[!！](?:表情|表情包|贴图|貼圖)(?:\s+([\s\S]+))?$/i);
+      if (stickerCommand) {
+        if (!isGroup) return jsonReply("表情库目前按群组管理，请在群聊使用该指令。");
+        const sticker = await pickSticker(env, currentGroupId, String(stickerCommand[1] || "").trim());
+        if (!sticker) return jsonReply(`${atSender}当前群没有可用表情，管理员可在 Portal「群友列表 → 表情库」添加。使用格式：!表情 分类。`);
+        return jsonReply(stickerCqMessage(sticker));
+      }
+
+      if (isGroup && explicitlyTriggered && !isCommandMessage && meaningfulText.length <= 16) {
+        const sticker = await pickStickerForText(env, currentGroupId, meaningfulText);
+        if (sticker && Math.random() < 0.35) return jsonReply(stickerCqMessage(sticker));
+      }
+
       // ⏳ Cloudflare 原生速率限制器 (10秒冷卻鎖) - 開發者、群主、管理員豁免
       const isBypassCooldown = isDeveloper || senderRole === 'owner' || senderRole === 'admin' || body.__qqai_queued === true;
       if (!isBypassCooldown) {
@@ -1798,7 +1812,7 @@ const QQAIWorker = {
           }
           return { ok: false, message: "所属成员已不是普通群成员，主人权限已停止；若对方已升为管理层，关系会自动解除。" };
         }
-        return { ok: true, binding, member };
+        return { ok: true, binding: { ...binding, permissions: binding.permissions || { ...MASTER_RELATIONSHIP_DEFAULTS } }, member };
       };
 
       const masterDecisionCommand = cleanMessage.match(/^[!！](同意主人绑定|同意主人綁定|拒绝主人绑定|拒絕主人綁定)\s+(mb_[a-z0-9_-]+)$/i);
@@ -1876,13 +1890,15 @@ const QQAIWorker = {
       if (/^[!！](?:主人功能|主人权限|主人權限)$/i.test(cleanMessage)) {
         const control = await resolveMasterControl();
         if (!control.ok) return jsonReply(`${atSender}${control.message}`);
-        return jsonReply(`${atSender}主人可对唯一所属成员使用：
-!主人禁言 10分
-!主人解除禁言
-!主人踢出
-!主人改名 新群名片
-回复所属成员消息后发送 !主人撤回
-主人只能解除自己造成的主人禁言，不能解除群规、自我禁言、对象禁言或管理防解除。`);
+        const permissions = control.binding.permissions || MASTER_RELATIONSHIP_DEFAULTS;
+        const lines = [
+          permissions.mute ? `!主人禁言 10分（上限 ${permissions.maxMuteSeconds} 秒）` : "禁言：未开放",
+          permissions.unmute ? "!主人解除禁言" : "解禁：未开放",
+          permissions.kick ? "!主人踢出" : "踢出：未开放",
+          permissions.rename ? "!主人改名 新群名片" : "改名：未开放",
+          permissions.recall ? "回复所属成员消息后发送 !主人撤回" : "撤回：未开放"
+        ];
+        return jsonReply(`${atSender}当前主人权限：\n${lines.join("\n")}\n主人只能解除自己造成的主人禁言，不能解除群规、自我禁言、对象禁言或管理防解除。`);
       }
 
       const masterMuteCommand = cleanMessage.match(/^[!！](?:主人禁言|禁言所属成员|禁言所屬成員)(?:\s+([\s\S]+))?$/i);
@@ -1890,7 +1906,10 @@ const QQAIWorker = {
         if (!isGroup) return new Response(null, { status: 204 });
         const control = await resolveMasterControl();
         if (!control.ok) return jsonReply(`${atSender}${control.message}`);
-        const duration = Math.max(1, Math.min(MUTE_LOCK_MAX_SECONDS, parseDurationSeconds(String(masterMuteCommand[1] || "10分")) || 600));
+        const masterPermissions = control.binding.permissions || MASTER_RELATIONSHIP_DEFAULTS;
+        if (!masterPermissions.mute) return jsonReply(`${atSender}主人权限未开放禁言。`);
+        const requestedDuration = Math.max(1, parseDurationSeconds(String(masterMuteCommand[1] || "10分")) || 600);
+        const duration = Math.max(1, Math.min(MUTE_LOCK_MAX_SECONDS, Number(masterPermissions.maxMuteSeconds || 1800), requestedDuration));
         const previousLock = await getMuteLock(env, currentGroupId, control.binding.memberId);
         if (previousLock && previousLock.source !== "master") return jsonReply(`${atSender}所属成员当前是其他来源的禁言，主人权限不能覆盖。`);
         if (previousLock?.source === "master" && previousLock.masterId !== userId) return jsonReply(`${atSender}该主人禁言不是由你建立，不能覆盖。`);
@@ -1914,6 +1933,7 @@ const QQAIWorker = {
         if (!isGroup) return new Response(null, { status: 204 });
         const control = await resolveMasterControl();
         if (!control.ok) return jsonReply(`${atSender}${control.message}`);
+        if (!(control.binding.permissions || MASTER_RELATIONSHIP_DEFAULTS).unmute) return jsonReply(`${atSender}主人权限未开放解除禁言。`);
         const lock = await getMuteLock(env, currentGroupId, control.binding.memberId);
         const permission = canUnlockMute(env, lock, { actorId: userId, masterCommand: true });
         if (!lock || lock.source !== "master" || !permission.allowed) return jsonReply(`${atSender}只能解除由你建立的主人禁言；其他原因的禁言不可解除。`);
@@ -1932,6 +1952,7 @@ const QQAIWorker = {
         if (!isGroup) return new Response(null, { status: 204 });
         const control = await resolveMasterControl();
         if (!control.ok) return jsonReply(`${atSender}${control.message}`);
+        if (!(control.binding.permissions || MASTER_RELATIONSHIP_DEFAULTS).kick) return jsonReply(`${atSender}主人权限未开放踢出。`);
         try {
           await callOneBotAction(env, { action: "set_group_kick", params: { group_id: numericId(currentGroupId), user_id: numericId(control.binding.memberId), reject_add_request: false } }, 15000);
         } catch (error) {
@@ -1948,6 +1969,7 @@ const QQAIWorker = {
         if (!isGroup) return new Response(null, { status: 204 });
         const control = await resolveMasterControl();
         if (!control.ok) return jsonReply(`${atSender}${control.message}`);
+        if (!(control.binding.permissions || MASTER_RELATIONSHIP_DEFAULTS).rename) return jsonReply(`${atSender}主人权限未开放修改群名片。`);
         const card = String(masterRenameCommand[1] || "").trim().slice(0, 60);
         if (!card) return jsonReply(`${atSender}格式：!主人改名 新群名片`);
         try {
@@ -1963,6 +1985,7 @@ const QQAIWorker = {
         if (!isGroup) return new Response(null, { status: 204 });
         const control = await resolveMasterControl();
         if (!control.ok) return jsonReply(`${atSender}${control.message}`);
+        if (!(control.binding.permissions || MASTER_RELATIONSHIP_DEFAULTS).recall) return jsonReply(`${atSender}主人权限未开放撤回消息。`);
         if (!quotedMessageId) return jsonReply(`${atSender}请先回复所属成员的消息，再发送「!主人撤回」。`);
         const quoted = await getQuotedMessage(env, currentGroupId, quotedMessageId, String(body.self_id || ""));
         if (!quoted) return jsonReply(`${atSender}无法读取被回复的消息，可能已过期或 NapCat 暂时不可用。`);
