@@ -184,7 +184,7 @@ async function handlePortalMemberApi(request, env, url, path, body, authed) {
       }
       return jsonResponse({ ok: false, message: `禁言失败：${String(error?.message || error).slice(0, 500)}` }, 502);
     }
-    if (!protect && previousLock?.source === "manual") {
+    if (!protect && previousLock) {
       try {
         await clearMuteLock(env, groupId, qq);
       } catch (error) {
@@ -217,7 +217,7 @@ async function handlePortalMemberApi(request, env, url, path, body, authed) {
     const liveOwner = !developer && Boolean(lock?.allowOwnerUnmute) && await isVerifiedGroupOwner(env, groupId, authed.qq).catch(() => false);
     const permission = canUnlockMute(env, lock, { actorId: authed.qq, actorRole: liveOwner ? "owner" : authed.role, isDeveloper: developer, managementOverride: Boolean(authed?.permissions?.groupOps || authed?.permissions?.nativeAdmin) });
     if (!permission.allowed) {
-      const message = lock?.source === "self" ? "该成员为自我禁言，只能本人私讯机器人发送 !解除禁言。" : lock?.allowOwnerUnmute ? "该禁言只能由开发者或群主解除。" : "该禁言只能由开发者解除。";
+      const message = lock?.source === "self" ? "该成员为自我禁言，只能本人私讯机器人发送 !解除禁言。" : lock?.source === "partner" ? "该成员处于对象禁言，只能对象或正常群管理权限解除。" : lock?.source === "master" ? "该成员处于主人禁言，只能对应主人或正常群管理权限解除。" : lock?.allowOwnerUnmute ? "该禁言只能由开发者或群主解除。" : "该禁言只能由开发者解除。";
       return jsonResponse({ ok: false, message }, 423);
     }
     if (lock) await clearMuteLock(env, groupId, qq);
@@ -305,7 +305,7 @@ function injectPortalMembersClient(html) {
     root.innerHTML='';
     rows.forEach(function(member){
       var row=document.createElement('div');row.className='item member-row';
-      var lock=member.muteLock,lockText=lock?(lock.source==='self'?'自我禁言锁':lock.source==='partner'?'对象禁言锁':(lock.allowOwnerUnmute?'防解除：开发者或群主':'防解除：仅开发者')):'';
+      var lock=member.muteLock,lockText=lock?(lock.source==='self'?'自我禁言锁':lock.source==='partner'?'对象禁言锁':lock.source==='master'?'主人禁言锁':(lock.allowOwnerUnmute?'防解除：开发者或群主':'防解除：仅开发者')):'';
       var state=member.muted?'<span class="member-muted">禁言中，剩余 '+safe(secondsText(member.muteRemainingSeconds))+'</span>':'<span class="status ok">可发言</span>';if(lockText)state+=' <span class="member-lock">'+safe(lockText)+'</span>';
       row.innerHTML='<div class="member-main"><div class="member-name member-role-'+safe(member.role)+'">'+safe(member.name||member.qq)+'</div><div class="member-meta">QQ '+safe(member.qq)+'｜'+safe(roleText(member.role))+(member.title?'｜'+safe(member.title):'')+'</div></div><div>'+state+'</div><div class="member-actions"><button class="btn member-history" data-qq="'+safe(member.qq)+'">历史消息</button><input class="member-seconds" type="number" min="1" max="2592000" value="60" aria-label="禁言秒数"><label class="member-toggle"><input class="member-protect" type="checkbox">防解除</label><label class="member-toggle"><input class="member-owner-unlock" type="checkbox" disabled>群主可解除</label><label class="member-toggle"><input class="member-skip-confirm" type="checkbox">跳过确认</label><button class="btn danger member-mute" data-qq="'+safe(member.qq)+'">禁言（秒）</button><button class="btn member-unmute" data-qq="'+safe(member.qq)+'">解禁</button></div>';
       root.appendChild(row)

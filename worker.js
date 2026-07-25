@@ -9,8 +9,8 @@ import { buildHealthState } from "./src/health/runtime.js";
 import { normalizeMultilingualCommand, toSimplifiedChinese } from "./src/i18n/commands.js";
 import { handleBilibiliWebhook, pollAutomaticBilibiliConnectors } from "./src/integrations/bilibili.js";
 import { attachModerationProposalMessage, createGroupWorkRequest, createJoinRequestAssist, createModerationProposal, decideJoinRequestAssist, detectNaturalModerationProposal, findLatestActiveRuleViolationForUser, formatModerationPermissionDenied, formatModerationProposal, getGroupMemberSafe, handleGroupWorkDecision, handleModerationConfirmation, inspectMessageAgainstGroupRules, normalizeRuleProxyMode, normalizeRuleStrictness, parseModerationConfirmation, parseUnlimitedNonNegativeInteger, recordRuleViolationFeedback, ruleStrictnessLabel } from "./src/moderation/runtime.js";
-import { MAX_MUTE_SECONDS as MUTE_LOCK_MAX_SECONDS, canUnlockMute, clearMuteLock, createPartnerMuteLock, createSelfMuteLock, getMuteLock, listActiveSelfMuteLocks, markMuteLockReapplied, markMuteUnlockBlocked, muteLockRemainingSeconds, putMuteLock } from "./src/moderation/mute-locks.js";
-import { clearPartnerBinding, createPartnerBindingRequest, decidePartnerBindingRequest, getPartnerBinding } from "./src/moderation/partner-bindings.js";
+import { MAX_MUTE_SECONDS as MUTE_LOCK_MAX_SECONDS, canUnlockMute, clearMuteLock, createMasterMuteLock, createPartnerMuteLock, createSelfMuteLock, getMuteLock, listActiveSelfMuteLocks, markMuteLockReapplied, markMuteUnlockBlocked, muteLockRemainingSeconds, putMuteLock } from "./src/moderation/mute-locks.js";
+import { clearPartnerBinding, createMasterBindingRequest, createPartnerBindingRequest, decidePartnerBindingRequest, getBindingRequest, getPartnerBinding } from "./src/moderation/partner-bindings.js";
 import { appendPortalConversationRecord, applyConversationOutputGuards, auditIgnoredRobotMessage, botInteractionAllowKey, buildReplyPlan, cacheBotSenderClassification, clearRegisteredThinkingIndicators, detectLiteralPseudoElementLabels, eventHasBotMention, eventMentionedQqs, eventPlainText, eventSenderDisplayName, eventSenderRobotHint, extractFileDescriptors, extractForwardIds, extractMediaDescriptor, extractMessageText, extractOutboundMediaTypes, extractTextMentionIds, filterRobotMentionIds, formatForwardContext, getForwardMessageSnapshot, getQuotedMessage, getTaipeiTimeContext, isExplicitCurrentTimeQuestion, isExplicitRoleplayRequest, isGroupRobotInteractionAllowed, isIgnoredGroupRobotSender, isStandaloneCurrentTimeQuestion, looksLikeRobotDisplayName, normalizeFileDescriptor, parseDurationSeconds, prepareConversationHistory, purgeLegacyBotRepliesFromRecentLogs, qqaiTruthyRobotFlag, recordStructuredMessage, registerThinkingIndicator, removeTextMentionTokens, resolveOneBotMediaAsBase64, runOneBotGroupOperation, sanitizeAiReply, sendThinkingIndicator, thinkingIndicatorRegistryKey } from "./src/onebot/messages.js";
 import { classifyCollaborationNaturalIntent, classifyNaturalLanguageCommandIntent, normalizeNaturalLanguageCommandText, opsGetGroupMember, opsGetSettings, opsHandleActivityCommand, opsHandleMemberLeave, opsProcessAutomations } from "./src/operations/runtime.js";
 import { processPlatformJobs } from "./src/platform/runtime.js";
@@ -452,7 +452,7 @@ const QQAIWorker = {
           actorId: operatorId,
           actorRole: liveOwner ? 'owner' : liveOperatorRole,
           isDeveloper: developerOperator,
-          managementOverride: protectedLock.source === 'partner' && (liveOwner || liveOperatorRole === 'admin')
+          managementOverride: ['partner', 'master'].includes(protectedLock.source) && (liveOwner || liveOperatorRole === 'admin')
         });
         if (permission.allowed) {
           await clearMuteLock(env, currentGroupId, targetId);
@@ -476,7 +476,9 @@ const QQAIWorker = {
               ? '该成员处于自我禁言，只能本人私讯机器人发送「!解除禁言」。'
               : activeLock.source === 'partner'
                 ? '该成员处于对象禁言，只能对象或正常群管理权限解除。'
-                : activeLock.allowOwnerUnmute
+                : activeLock.source === 'master'
+                  ? '该成员处于主人禁言，只能对应主人或正常群管理权限解除。'
+                  : activeLock.allowOwnerUnmute
                   ? '该禁言已启用防解除，仅开发者或群主可以解除。'
                   : '该禁言已启用防解除，仅开发者可以解除。';
             await callOneBotAction(env, { action: 'send_group_msg', params: { group_id: numericId(currentGroupId), message: '[CQ:at,qq=' + targetId + '] ' + hint + ' 已按剩余时间重新禁言；后续重复尝试不再发送提示。', auto_escape: false } }, 12000).catch(() => {});
@@ -497,6 +499,7 @@ const QQAIWorker = {
             groupName: String(body.group_name || currentGroupId)
           });
           ctx.waitUntil(opsHandleMemberLeave(env, currentGroupId, leavingUserId));
+          ctx.waitUntil(clearPartnerBinding(env, currentGroupId, leavingUserId).catch(() => {}));
         }
         return new Response(null, { status: 204 });
       }
@@ -1758,6 +1761,220 @@ const QQAIWorker = {
         return jsonReply(`${atSender}排程已建立：${formatScheduleLine(record)}`);
       }
 
+      // 主人关系为双方同意的一对一非对称关系。主人可以是普通成员、管理员、群主或开发者；
+      // 所属成员必须持续是普通成员。机器人不能成为关系任一方。
+      const loadLiveRelationshipMember = async qq => {
+        const id = String(qq || "").replace(/\D/g, "");
+        if (!id) return null;
+        try {
+          const response = await callOneBotAction(env, { action: "get_group_member_info", params: { group_id: numericId(currentGroupId), user_id: numericId(id), no_cache: true } }, 10000);
+          const item = response?.data && typeof response.data === "object" ? response.data : response;
+          return {
+            qq: id,
+            role: String(item?.role || ""),
+            name: String(item?.card || item?.nickname || item?.name || id)
+          };
+        } catch {
+          return null;
+        }
+      };
+      const relationshipDeveloperId = String(env.DEVELOPER_ID || "3569028262");
+      const relationshipMemberEligible = member => Boolean(
+        member
+        && member.qq
+        && member.qq !== String(botId || "")
+        && member.qq !== relationshipDeveloperId
+        && member.role === "member"
+      );
+      const resolveMasterControl = async () => {
+        const binding = await getPartnerBinding(env, currentGroupId, userId);
+        if (!binding || binding.mode !== "master" || binding.relationshipRole !== "master" || binding.masterId !== userId) {
+          return { ok: false, message: "你目前不是任何所属成员的主人。" };
+        }
+        const member = await loadLiveRelationshipMember(binding.memberId);
+        if (!relationshipMemberEligible(member)) {
+          if (member && (member.role === "admin" || member.role === "owner" || member.qq === relationshipDeveloperId || member.qq === String(botId || ""))) {
+            await clearPartnerBinding(env, currentGroupId, userId).catch(() => {});
+          }
+          return { ok: false, message: "所属成员已不是普通群成员，主人权限已停止；若对方已升为管理层，关系会自动解除。" };
+        }
+        return { ok: true, binding, member };
+      };
+
+      const masterDecisionCommand = cleanMessage.match(/^[!！](同意主人绑定|同意主人綁定|拒绝主人绑定|拒絕主人綁定)\s+(mb_[a-z0-9_-]+)$/i);
+      if (masterDecisionCommand) {
+        if (!isGroup) return new Response(null, { status: 204 });
+        const approve = /同意/.test(masterDecisionCommand[1]);
+        const pending = await getBindingRequest(env, masterDecisionCommand[2]);
+        if (!pending || pending.mode !== "master" || String(pending.groupId || "") !== currentGroupId) return jsonReply(`${atSender}找不到该主人关系申请。`);
+        if (String(pending.targetId || "") !== userId) return jsonReply(`${atSender}只有被邀请的群友可以处理该申请。`);
+        if (approve) {
+          const [liveMaster, liveMember] = await Promise.all([
+            loadLiveRelationshipMember(pending.masterId),
+            loadLiveRelationshipMember(pending.memberId)
+          ]);
+          if (!liveMaster || !relationshipMemberEligible(liveMember) || liveMaster.qq === String(botId || "")) {
+            await decidePartnerBindingRequest(env, { groupId: currentGroupId, requestId: pending.id, actorId: userId, approve: false }).catch(() => {});
+            return jsonReply(`${atSender}主人关系无法建立：主人必须仍在群内，所属成员必须仍是普通成员，且机器人不能参与。`);
+          }
+        }
+        const result = await decidePartnerBindingRequest(env, { groupId: currentGroupId, requestId: pending.id, actorId: userId, approve });
+        if (!result.ok) return jsonReply(`${atSender}${result.message}`);
+        await writeSystemAudit(env, { type: "master_binding_decision", groupId: currentGroupId, actorId: userId, targetId: pending.requesterId, action: approve ? "approve" : "reject", requestId: pending.id, masterId: pending.masterId, memberId: pending.memberId }).catch(() => {});
+        return jsonReply(approve
+          ? `[CQ:at,qq=${pending.masterId}] 已成为主人；[CQ:at,qq=${pending.memberId}] 已成为所属成员。主人可直接禁言、解除主人禁言、踢出、修改群名片及撤回所属成员的消息；其他来源的处罚不能由主人解除。`
+          : `[CQ:at,qq=${pending.requesterId}] 主人关系申请已拒绝。`);
+      }
+
+      const bindMasterCommand = cleanMessage.match(/^[!！](?:绑定主人|綁定主人)(?:\s+@?(\d{5,}))?$/i);
+      const takeMemberCommand = cleanMessage.match(/^[!！](?:收为所属成员|收為所屬成員|收为成员|收為成員)(?:\s+@?(\d{5,}))?$/i);
+      if (bindMasterCommand || takeMemberCommand) {
+        if (!isGroup) return new Response(null, { status: 204 });
+        const targetId = String(targetMentionQqs[0] || bindMasterCommand?.[1] || takeMemberCommand?.[1] || "").replace(/\D/g, "");
+        if (!targetId) return jsonReply(`${atSender}${bindMasterCommand ? "格式：!绑定主人 @群友" : "格式：!收为所属成员 @群友"}`);
+        if (targetId === userId || targetId === String(botId || "")) return jsonReply(`${atSender}不能与自己或机器人建立主人关系。`);
+        const masterId = takeMemberCommand ? userId : targetId;
+        const memberId = takeMemberCommand ? targetId : userId;
+        if (memberId === relationshipDeveloperId || memberId === String(botId || "")) return jsonReply(`${atSender}核心开发者与机器人不能成为所属成员。`);
+        const [liveMaster, liveMember] = await Promise.all([
+          loadLiveRelationshipMember(masterId),
+          loadLiveRelationshipMember(memberId)
+        ]);
+        if (!liveMaster) return jsonReply(`${atSender}无法即时确认主人仍在本群，请稍后再试。`);
+        if (!relationshipMemberEligible(liveMember)) return jsonReply(`${atSender}所属成员必须是当前普通群成员，不能是管理员、群主、开发者或机器人。`);
+        const result = await createMasterBindingRequest(env, { groupId: currentGroupId, requesterId: userId, targetId, masterId, memberId });
+        if (!result.ok) return jsonReply(`${atSender}${result.message}`);
+        await writeSystemAudit(env, { type: "master_binding_requested", groupId: currentGroupId, actorId: userId, targetId, action: "request", requestId: result.request.id, masterId, memberId }).catch(() => {});
+        const invitedRole = targetId === masterId ? "主人" : "所属成员";
+        return jsonReply(`[CQ:at,qq=${targetId}] QQ:${userId} 邀请你以「${invitedRole}」身份建立一对一主人关系。10 分钟内发送「!同意主人绑定 ${result.request.id}」或「!拒绝主人绑定 ${result.request.id}」。所属成员必须是普通成员；同意后主人可直接管理该成员。`);
+      }
+
+      if (/^[!！](?:我的关系|我的關係|主人关系|主人關係|我的主人|我的所属成员|我的所屬成員|我的对象|我的對象|对象状态|對象狀態)$/i.test(cleanMessage)) {
+        if (!isGroup) return new Response(null, { status: 204 });
+        const binding = await getPartnerBinding(env, currentGroupId, userId);
+        if (!binding) return jsonReply(`${atSender}你目前没有绑定关系。`);
+        const other = await getGroupMemberSafe(env, currentGroupId, binding.partnerId);
+        const otherName = other?.card || other?.nickname || binding.partnerId;
+        if (binding.mode === "master") {
+          return jsonReply(binding.relationshipRole === "master"
+            ? `${atSender}你是主人；所属成员是 ${otherName}（QQ:${binding.memberId}）。可使用「!主人功能」查看权限。`
+            : `${atSender}你的主人是 ${otherName}（QQ:${binding.masterId}）。主人只可直接管理你，不能解除其他来源的处罚。`);
+        }
+        return jsonReply(`${atSender}你当前的对象是 ${otherName}（QQ:${binding.partnerId}）。`);
+      }
+
+      if (/^[!！](?:解除关系|解除關係|解除主人绑定|解除主人綁定|解除所属关系|解除所屬關係|解除对象绑定|解除對象綁定|解绑对象|解綁對象)$/i.test(cleanMessage)) {
+        if (!isGroup) return new Response(null, { status: 204 });
+        const binding = await clearPartnerBinding(env, currentGroupId, userId);
+        if (!binding) return jsonReply(`${atSender}你目前没有绑定关系。`);
+        await writeSystemAudit(env, { type: "relationship_binding_removed", groupId: currentGroupId, actorId: userId, targetId: binding.partnerId, action: "unbind", mode: binding.mode }).catch(() => {});
+        const label = binding.mode === "master" ? "主人关系" : "对象关系";
+        return jsonReply(`[CQ:at,qq=${binding.userId}] [CQ:at,qq=${binding.partnerId}] ${label}已解除。尚未到期的既有禁言不会自动改变。`);
+      }
+
+      if (/^[!！](?:主人功能|主人权限|主人權限)$/i.test(cleanMessage)) {
+        const control = await resolveMasterControl();
+        if (!control.ok) return jsonReply(`${atSender}${control.message}`);
+        return jsonReply(`${atSender}主人可对唯一所属成员使用：
+!主人禁言 10分
+!主人解除禁言
+!主人踢出
+!主人改名 新群名片
+回复所属成员消息后发送 !主人撤回
+主人只能解除自己造成的主人禁言，不能解除群规、自我禁言、对象禁言或管理防解除。`);
+      }
+
+      const masterMuteCommand = cleanMessage.match(/^[!！](?:主人禁言|禁言所属成员|禁言所屬成員)(?:\s+([\s\S]+))?$/i);
+      if (masterMuteCommand) {
+        if (!isGroup) return new Response(null, { status: 204 });
+        const control = await resolveMasterControl();
+        if (!control.ok) return jsonReply(`${atSender}${control.message}`);
+        const duration = Math.max(1, Math.min(MUTE_LOCK_MAX_SECONDS, parseDurationSeconds(String(masterMuteCommand[1] || "10分")) || 600));
+        const previousLock = await getMuteLock(env, currentGroupId, control.binding.memberId);
+        if (previousLock && previousLock.source !== "master") return jsonReply(`${atSender}所属成员当前是其他来源的禁言，主人权限不能覆盖。`);
+        if (previousLock?.source === "master" && previousLock.masterId !== userId) return jsonReply(`${atSender}该主人禁言不是由你建立，不能覆盖。`);
+        try {
+          await createMasterMuteLock(env, { groupId: currentGroupId, userId: control.binding.memberId, masterId: userId, durationSeconds: duration });
+        } catch (error) {
+          return jsonReply(`${atSender}无法建立主人禁言锁，未执行禁言：${String(error?.message || error).slice(0, 300)}`);
+        }
+        try {
+          await callOneBotAction(env, { action: "set_group_ban", params: { group_id: numericId(currentGroupId), user_id: numericId(control.binding.memberId), duration } }, 15000);
+        } catch (error) {
+          if (previousLock?.active) await putMuteLock(env, previousLock).catch(() => {});
+          else await clearMuteLock(env, currentGroupId, control.binding.memberId).catch(() => {});
+          return jsonReply(`${atSender}主人禁言失败：${String(error?.message || error).slice(0, 300)}`);
+        }
+        await writeSystemAudit(env, { type: "master_mute_started", groupId: currentGroupId, actorId: userId, targetId: control.binding.memberId, action: "mute", durationSeconds: duration }).catch(() => {});
+        return jsonReply(`[CQ:at,qq=${control.binding.memberId}] 已被主人禁言 ${duration} 秒。只有该主人或正常群管理权限可以解除此主人禁言。`);
+      }
+
+      if (/^[!！](?:主人解除禁言|主人解禁|解除所属成员禁言|解除所屬成員禁言)$/i.test(cleanMessage)) {
+        if (!isGroup) return new Response(null, { status: 204 });
+        const control = await resolveMasterControl();
+        if (!control.ok) return jsonReply(`${atSender}${control.message}`);
+        const lock = await getMuteLock(env, currentGroupId, control.binding.memberId);
+        const permission = canUnlockMute(env, lock, { actorId: userId, masterCommand: true });
+        if (!lock || lock.source !== "master" || !permission.allowed) return jsonReply(`${atSender}只能解除由你建立的主人禁言；其他原因的禁言不可解除。`);
+        await clearMuteLock(env, currentGroupId, control.binding.memberId);
+        try {
+          await callOneBotAction(env, { action: "set_group_ban", params: { group_id: numericId(currentGroupId), user_id: numericId(control.binding.memberId), duration: 0 } }, 15000);
+        } catch (error) {
+          await putMuteLock(env, lock).catch(() => {});
+          return jsonReply(`${atSender}解除主人禁言失败：${String(error?.message || error).slice(0, 300)}`);
+        }
+        await writeSystemAudit(env, { type: "master_mute_released", groupId: currentGroupId, actorId: userId, targetId: control.binding.memberId, action: "unmute" }).catch(() => {});
+        return jsonReply(`[CQ:at,qq=${control.binding.memberId}] 主人禁言已解除。`);
+      }
+
+      if (/^[!！](?:主人踢出|踢出所属成员|踢出所屬成員)$/i.test(cleanMessage)) {
+        if (!isGroup) return new Response(null, { status: 204 });
+        const control = await resolveMasterControl();
+        if (!control.ok) return jsonReply(`${atSender}${control.message}`);
+        try {
+          await callOneBotAction(env, { action: "set_group_kick", params: { group_id: numericId(currentGroupId), user_id: numericId(control.binding.memberId), reject_add_request: false } }, 15000);
+        } catch (error) {
+          return jsonReply(`${atSender}主人踢出失败：${String(error?.message || error).slice(0, 300)}`);
+        }
+        await clearMuteLock(env, currentGroupId, control.binding.memberId).catch(() => {});
+        await clearPartnerBinding(env, currentGroupId, userId).catch(() => {});
+        await writeSystemAudit(env, { type: "master_member_kicked", groupId: currentGroupId, actorId: userId, targetId: control.binding.memberId, action: "kick" }).catch(() => {});
+        return jsonReply(`${atSender}已踢出所属成员 QQ:${control.binding.memberId}，主人关系同时解除。`);
+      }
+
+      const masterRenameCommand = cleanMessage.match(/^[!！](?:主人改名|修改所属成员名片|修改所屬成員名片)\s+([\s\S]+)$/i);
+      if (masterRenameCommand) {
+        if (!isGroup) return new Response(null, { status: 204 });
+        const control = await resolveMasterControl();
+        if (!control.ok) return jsonReply(`${atSender}${control.message}`);
+        const card = String(masterRenameCommand[1] || "").trim().slice(0, 60);
+        if (!card) return jsonReply(`${atSender}格式：!主人改名 新群名片`);
+        try {
+          await callOneBotAction(env, { action: "set_group_card", params: { group_id: numericId(currentGroupId), user_id: numericId(control.binding.memberId), card } }, 15000);
+        } catch (error) {
+          return jsonReply(`${atSender}修改所属成员群名片失败：${String(error?.message || error).slice(0, 300)}`);
+        }
+        await writeSystemAudit(env, { type: "master_member_card_changed", groupId: currentGroupId, actorId: userId, targetId: control.binding.memberId, action: "set_group_card", card }).catch(() => {});
+        return jsonReply(`[CQ:at,qq=${control.binding.memberId}] 群名片已由主人修改为：${card}`);
+      }
+
+      if (/^[!！](?:主人撤回|撤回所属成员消息|撤回所屬成員消息)$/i.test(cleanMessage)) {
+        if (!isGroup) return new Response(null, { status: 204 });
+        const control = await resolveMasterControl();
+        if (!control.ok) return jsonReply(`${atSender}${control.message}`);
+        if (!quotedMessageId) return jsonReply(`${atSender}请先回复所属成员的消息，再发送「!主人撤回」。`);
+        const quoted = await getQuotedMessage(env, currentGroupId, quotedMessageId, String(body.self_id || ""));
+        if (!quoted) return jsonReply(`${atSender}无法读取被回复的消息，可能已过期或 NapCat 暂时不可用。`);
+        if (String(quoted.senderId || "") !== String(control.binding.memberId)) return jsonReply(`${atSender}只能撤回当前所属成员发送的消息。`);
+        try {
+          await callOneBotAction(env, { action: "delete_msg", params: { message_id: numericId(quotedMessageId) } }, 12000);
+        } catch (error) {
+          return jsonReply(`${atSender}主人撤回失败：${String(error?.message || error).slice(0, 300)}`);
+        }
+        await writeSystemAudit(env, { type: "master_member_message_recalled", groupId: currentGroupId, actorId: userId, targetId: control.binding.memberId, action: "delete_msg", messageId: quotedMessageId }).catch(() => {});
+        return jsonReply(`${atSender}已撤回所属成员的该条消息。`);
+      }
+
       // 一对一对象绑定必须由双方同意；对象权限只作用于对象来源的禁言。
       const partnerDecisionCommand = cleanMessage.match(/^[!！](同意绑定对象|同意綁定對象|拒绝绑定对象|拒絕綁定對象)\s+(pb_[a-z0-9_-]+)$/i);
       if (partnerDecisionCommand) {
@@ -1809,6 +2026,7 @@ const QQAIWorker = {
         if (!isGroup) return new Response(null, { status: 204 });
         const binding = await getPartnerBinding(env, currentGroupId, userId);
         if (!binding) return jsonReply(`${atSender}你目前没有绑定对象。`);
+        if (binding.mode !== "partner") return jsonReply(`${atSender}当前是主人关系，不能使用对象禁言指令。`);
         const duration = Math.max(1, Math.min(MUTE_LOCK_MAX_SECONDS, parseDurationSeconds(String(partnerMuteCommand[1] || "10分")) || 600));
         const previousLock = await getMuteLock(env, currentGroupId, binding.partnerId);
         if (previousLock && previousLock.source !== "partner") return jsonReply(`${atSender}对方当前是其他来源的禁言，对象权限不能覆盖。`);
@@ -1828,6 +2046,7 @@ const QQAIWorker = {
         if (!isGroup) return new Response(null, { status: 204 });
         const binding = await getPartnerBinding(env, currentGroupId, userId);
         if (!binding) return jsonReply(`${atSender}你目前没有绑定对象。`);
+        if (binding.mode !== "partner") return jsonReply(`${atSender}当前是主人关系，不能使用对象解禁指令。`);
         const lock = await getMuteLock(env, currentGroupId, binding.partnerId);
         const permission = canUnlockMute(env, lock, { actorId: userId, partnerCommand: true });
         if (!lock || lock.source !== "partner" || !permission.allowed) return jsonReply(`${atSender}只能解除由对象关系产生的禁言；其他原因的禁言不可解除。`);
@@ -1862,9 +2081,13 @@ const QQAIWorker = {
             if (blocked.shouldNotify) {
               const hint = protectedLock.source === "self"
                 ? "该成员为自我禁言，只能本人私讯机器人发送「!解除禁言」；群聊管理指令不能解除。"
-                : protectedLock.allowOwnerUnmute
-                  ? "该禁言已启用防解除，仅开发者或群主可以解除。"
-                  : "该禁言已启用防解除，仅开发者可以解除。";
+                : protectedLock.source === "partner"
+                  ? "该成员处于对象禁言，只能对象或正常群管理权限解除。"
+                  : protectedLock.source === "master"
+                    ? "该成员处于主人禁言，只能对应主人或正常群管理权限解除。"
+                    : protectedLock.allowOwnerUnmute
+                      ? "该禁言已启用防解除，仅开发者或群主可以解除。"
+                      : "该禁言已启用防解除，仅开发者可以解除。";
               return jsonReply(`${atSender}${hint} 后续重复尝试不再提示。`);
             }
             return new Response(null, { status: 204 });
