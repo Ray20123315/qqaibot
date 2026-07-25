@@ -1,0 +1,96 @@
+name: Apply validated v2 modular refactor
+
+on:
+  push:
+    branches:
+      - refactor/v2-modular-worker
+    paths:
+      - .qqai-v2-refactor/**
+      - .github/workflows/apply-v2-modular-refactor.yml
+      - .v2-apply-trigger
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: refactor/v2-modular-worker
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Verify preserved single-file baseline
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo '9ec5204125c3b9e85f3fe759193c6ed176be1e69f3c3d2877faa4b04d494464f  worker.js' | sha256sum -c -
+          test "$(grep -c '^export class OneBotHub' worker.js)" -eq 1
+          grep -F 'export default QQAIWorker;' worker.js
+
+      - name: Install temporary parser
+        run: npm install --no-save --ignore-scripts typescript@5
+
+      - name: Split worker.js deterministically
+        shell: bash
+        run: |
+          set -euo pipefail
+          node .qqai-v2-refactor/split-worker.cjs
+          sed -i '0,/const VERSION = "1.5.4";/s//const VERSION = "2.0.0";/' src/config/runtime.js
+          test "$(find src -name '*.js' -type f | wc -l)" -eq 17
+          test "$(wc -l < worker.js)" -lt 5000
+
+      - name: Apply validated configuration and regression files
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo '32f46f4f1c482bc97b0558d665e99a050242e0627e313f592f8e0f167c8b317f  .qqai-v2-refactor/final-files.tar.gz.b64' | sha256sum -c -
+          base64 -d .qqai-v2-refactor/final-files.tar.gz.b64 > /tmp/final-files.tar.gz
+          echo '0e3a2adee8dc351e4e4e8bf6254a2fc6d8d2294b1908b15c8b53c81024b21654  /tmp/final-files.tar.gz' | sha256sum -c -
+          tar -xzf /tmp/final-files.tar.gz -C .
+
+      - name: Install final dependencies
+        run: npm install --ignore-scripts
+
+      - name: Run regression checks
+        run: npm run check
+
+      - name: Build single Cloudflare Worker bundle
+        run: npm run check:bundle
+
+      - name: Enforce requested invariants
+        shell: bash
+        run: |
+          set -euo pipefail
+          grep -F 'main = "worker.js"' wrangler.toml
+          test "$(grep -c '^export class OneBotHub' worker.js)" -eq 1
+          grep -F 'export default QQAIWorker;' worker.js
+          grep -F "cleanMessage.startsWith('//')" worker.js
+          ! grep -RInE '!截图|!截圖|MYBROWSER|\[browser\]|@cloudflare/puppeteer' worker.js src README.md wrangler.toml package.json
+          git diff --check
+
+      - name: Remove temporary construction files
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf node_modules dist package-lock.json
+          rm -rf .qqai-v2-refactor
+          rm -f .v2-apply-trigger .v2-inventory-trigger refactor-inventory.json
+          rm -f .github/workflows/v2-modular-inventory.yml
+          rm -f .github/workflows/apply-v2-modular-refactor.yml
+
+      - name: Commit validated modular Worker
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name qqai-v2-refactor
+          git config user.email actions@users.noreply.github.com
+          git add -A
+          git diff --cached --check
+          git commit -m 'Refactor qqaibot v2.0.0 into single-Worker modules'
+          git push origin HEAD:refactor/v2-modular-worker
