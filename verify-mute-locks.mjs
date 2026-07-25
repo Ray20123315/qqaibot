@@ -38,7 +38,9 @@ assert(portalMuteBlock.indexOf('createManualMuteLock') < portalMuteBlock.indexOf
 
 const moderation = fs.readFileSync('src/moderation/runtime.js', 'utf8');
 assert(moderation.includes('const permission = canUnlockMute(env, lock'), 'Confirmed unmute proposals must enforce the same lock permission matrix');
-assert(moderation.includes('if (!result.ok && releasedLock) await putMuteLock'), 'Failed confirmed unmute actions must restore the lock');
+const executionFailureBlock = moderation.slice(moderation.indexOf('let result;'), moderation.indexOf('return result.ok ?'));
+assert(executionFailureBlock.includes('if (!result.ok)'), 'Confirmed moderation failures must enter a rollback branch');
+assert(executionFailureBlock.includes('if (releasedLock) await putMuteLock'), 'Failed confirmed unmute actions must restore the lock');
 
 const worker = fs.readFileSync('worker.js', 'utf8');
 assert(worker.includes('createSelfMuteLock'), 'Worker must support member self mute');
