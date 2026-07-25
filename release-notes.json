@@ -1,6 +1,7 @@
 {
   "version": "2.0.1",
   "notificationPolicy": "latest-main-only",
+  "queueDelivery": "mark-processed-after-success",
   "added": [
     "部署开始、成功与失败通知",
     "Portal 部署状态弹窗",
@@ -8,6 +9,7 @@
   ],
   "fixed": [
     "短时间连续部署造成重复通知",
-    "旧版部署结果覆盖最新版状态"
+    "旧版部署结果覆盖最新版状态",
+    "Queue 处理中断后无法重试"
   ]
 }
