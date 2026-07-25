@@ -9,6 +9,9 @@ on:
       - .qqai-v2-refactor/**
       - .github/workflows/apply-v2-modular-refactor.yml
       - .v2-apply-trigger
+      - package.json
+      - wrangler.toml
+      - verify-*.mjs
   push:
     branches:
       - refactor/v2-modular-worker
@@ -54,14 +57,36 @@ jobs:
           test "$(find src -name '*.js' -type f | wc -l)" -eq 17
           test "$(wc -l < worker.js)" -lt 5000
 
-      - name: Apply validated configuration and regression files
+      - name: Update documentation for the single-Worker modules
         shell: bash
         run: |
           set -euo pipefail
-          tr -d '\r\n\t ' < .qqai-v2-refactor/final-files.tar.gz.b64 | base64 -d > /tmp/final-files.tar.gz
-          echo '0e3a2adee8dc351e4e4e8bf6254a2fc6d8d2294b1908b15c8b53c81024b21654  /tmp/final-files.tar.gz' | sha256sum -c -
-          tar -tzf /tmp/final-files.tar.gz >/dev/null
-          tar -xzf /tmp/final-files.tar.gz -C .
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path('README.md')
+          text = path.read_text(encoding='utf-8')
+          replacements = [
+              (
+                  '一個基於 **Cloudflare Workers** 邊緣運算生態打造的高效能 QQ 群聊 AI 機器人。完美整合了 Google Gemini 大語言模型、Vectorize 向量資料庫（長期語意記憶）以及 Puppeteer 瀏覽器自動化環境，提供極其乾淨、精煉且擬真自然的群聊互動體驗。',
+                  '一個基於 **Cloudflare Workers** 邊緣運算生態打造的高效能 QQ 群聊 AI 機器人。整合 Google Gemini 大語言模型、Vectorize 向量資料庫（長期語意記憶）、D1 與 OneBot WebSocket，提供乾淨、精煉且自然的群聊互動體驗。'
+              ),
+              (
+                  '* **網頁自動化渲染**：Cloudflare Puppeteer (`MYBROWSER`)\n* **套件管理與配置**：`wrangler.toml` (`compatibility_date: 2026-06-24`)',
+                  '* **套件管理與配置**：`wrangler.toml` (`compatibility_date: 2026-07-21`)\n\n### 單一 Worker 模組化架構\nCloudflare 仍只部署一個 `qqai` Worker，入口固定為根目錄的 `worker.js`。原始碼依 AI、OneBot、Portal、群管、排程、資料存取等職責拆到 `src/`，由 Wrangler 在自動部署時打包成同一個 Worker；不需要建立額外 Worker 或修改既有自訂網域。'
+              ),
+              ('| `!截图 [网址]` | 呼叫 Cloudflare Puppeteer 無頭瀏覽器，直接在群內發送該網頁的截圖。 |\n', ''),
+              ('### Live 與截圖故障排查', '### Live 故障排查'),
+              ('* `!截图` 依賴 Cloudflare Browser Rendering binding：`MYBROWSER`。若未開通 Browser Rendering 或 Worker 沒綁定 `[browser] binding = "MYBROWSER"`，截圖會回覆綁定缺失。\n', ''),
+              ('compatibility_date = "2026-06-24"', 'compatibility_date = "2026-07-21"'),
+              ('\n[browser]\nbinding = "MYBROWSER"\n', '\n'),
+          ]
+          for old, new in replacements:
+              if old not in text:
+                  raise SystemExit(f'Expected README fragment not found: {old[:80]}')
+              text = text.replace(old, new, 1)
+          path.write_text(text, encoding='utf-8')
+          PY
 
       - name: Install final dependencies
         run: npm install --ignore-scripts
