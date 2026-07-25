@@ -2,7 +2,11 @@ import assert from "node:assert/strict";
 import { getDeploymentStatusForViewer, processBuildEvent } from "./src/deployment/notifications.js";
 
 class MockD1 {
-  constructor() { this.map = new Map(); }
+  constructor() {
+    this.map = new Map();
+    this.failKeyOnce = "";
+    this.failedKeys = new Set();
+  }
   prepare(sql) {
     const db = this;
     return {
@@ -23,7 +27,12 @@ class MockD1 {
       },
       async run() {
         if (/INSERT INTO kv_store/.test(sql)) {
-          db.map.set(String(this.args[0]), String(this.args[1]));
+          const key = String(this.args[0]);
+          if (db.failKeyOnce === key && !db.failedKeys.has(key)) {
+            db.failedKeys.add(key);
+            throw new Error(`Injected D1 failure for ${key}`);
+          }
+          db.map.set(key, String(this.args[1]));
           return { success: true };
         }
         throw new Error(`Unsupported run SQL: ${sql}`);
@@ -67,4 +76,15 @@ const status = await getDeploymentStatusForViewer(env, viewer);
 assert.equal(status.status.kind, "succeeded");
 assert.equal(status.viewer.developer, false);
 assert.equal("details" in status, false);
+
+const retryDb = new MockD1();
+retryDb.failKeyOnce = "deployment:history";
+const retryEnv = { DB: retryDb, DEPLOY_NOTIFY_DEVELOPER_ID: "" };
+const retryEvent = buildEvent("started", "build-retry", t0 + 10000, "retry333");
+await assert.rejects(() => processBuildEvent(retryEnv, retryEvent), /Injected D1 failure/);
+const retried = await processBuildEvent(retryEnv, retryEvent);
+assert.equal(retried.ok, true, "A partially processed Queue event must be retryable");
+const retryDuplicate = await processBuildEvent(retryEnv, retryEvent);
+assert.equal(retryDuplicate.reason, "duplicate", "A successfully retried event must then be deduplicated");
+
 console.log("deployment notification checks passed");
