@@ -21,11 +21,29 @@ jobs:
         with:
           node-version: '22'
       - name: Check and apply patch
+        id: patch
+        shell: bash
         run: |
-          node --check tools/apply-social-phase1.mjs
-          node tools/apply-social-phase1.mjs
-          node --check src/social/runtime.js
-          node --check worker.js
+          set +e
+          : > patch-diagnostic.log
+          node --check tools/apply-social-phase1.mjs >> patch-diagnostic.log 2>&1
+          status=$?
+          if [ "$status" -eq 0 ]; then node tools/apply-social-phase1.mjs >> patch-diagnostic.log 2>&1; status=$?; fi
+          if [ "$status" -eq 0 ]; then node --check src/social/runtime.js >> patch-diagnostic.log 2>&1; status=$?; fi
+          if [ "$status" -eq 0 ]; then node --check worker.js >> patch-diagnostic.log 2>&1; status=$?; fi
+          echo "status=$status" >> "$GITHUB_OUTPUT"
+          cat patch-diagnostic.log
+          exit 0
+      - name: Upload patch diagnostic
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: social-patch-diagnostic
+          path: patch-diagnostic.log
+          if-no-files-found: error
+      - name: Stop on patch failure
+        if: steps.patch.outputs.status != '0'
+        run: exit 1
       - name: Install dependencies
         run: npm install --ignore-scripts
       - name: Run regression checks
@@ -44,7 +62,7 @@ jobs:
           test ! -e dist/worker-2.js
       - name: Commit validated change
         run: |
-          rm -f tools/apply-social-phase1.mjs .github/workflows/apply-social-phase1.yml
+          rm -f tools/apply-social-phase1.mjs .github/workflows/apply-social-phase1.yml patch-diagnostic.log
           rmdir tools 2>/dev/null || true
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
