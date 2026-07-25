@@ -1,0 +1,108 @@
+name: V2 modularization inventory
+
+on:
+  push:
+    branches:
+      - refactor/v2-modular-worker
+    paths:
+      - worker.js
+      - .github/workflows/v2-modular-inventory.yml
+
+permissions:
+  contents: write
+
+jobs:
+  inventory:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: refactor/v2-modular-worker
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Build top-level declaration inventory
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm install --no-save --ignore-scripts acorn@8
+          cat > /tmp/inventory.mjs <<'NODE'
+          import fs from 'node:fs';
+          import crypto from 'node:crypto';
+          import { parse } from 'acorn';
+
+          const source = fs.readFileSync('worker.js', 'utf8');
+          const ast = parse(source, {
+            ecmaVersion: 'latest',
+            sourceType: 'module',
+            locations: true,
+            allowHashBang: true,
+          });
+
+          function namesFor(node) {
+            const current = node.type === 'ExportNamedDeclaration' || node.type === 'ExportDefaultDeclaration'
+              ? node.declaration
+              : node;
+            if (!current) return [];
+            if (current.type === 'FunctionDeclaration' || current.type === 'ClassDeclaration') {
+              return current.id?.name ? [current.id.name] : [];
+            }
+            if (current.type === 'VariableDeclaration') {
+              return current.declarations.flatMap((declaration) => {
+                const names = [];
+                const walk = (pattern) => {
+                  if (!pattern) return;
+                  if (pattern.type === 'Identifier') names.push(pattern.name);
+                  else if (pattern.type === 'ObjectPattern') pattern.properties.forEach((property) => walk(property.value || property.argument));
+                  else if (pattern.type === 'ArrayPattern') pattern.elements.forEach(walk);
+                  else if (pattern.type === 'RestElement') walk(pattern.argument);
+                  else if (pattern.type === 'AssignmentPattern') walk(pattern.left);
+                };
+                walk(declaration.id);
+                return names;
+              });
+            }
+            return [];
+          }
+
+          const declarations = ast.body.map((node, index) => ({
+            index,
+            type: node.type,
+            declarationType: node.declaration?.type || null,
+            names: namesFor(node),
+            start: node.start,
+            end: node.end,
+            startLine: node.loc.start.line,
+            endLine: node.loc.end.line,
+            lines: node.loc.end.line - node.loc.start.line + 1,
+            preview: source.slice(node.start, Math.min(node.end, node.start + 180)).replace(/\s+/g, ' '),
+          }));
+
+          const result = {
+            generatedAt: new Date().toISOString(),
+            sourceSha256: crypto.createHash('sha256').update(source).digest('hex'),
+            bytes: Buffer.byteLength(source),
+            lines: source.split(/\r?\n/).length,
+            topLevelCount: declarations.length,
+            declarations,
+          };
+          fs.writeFileSync('refactor-inventory.json', `${JSON.stringify(result, null, 2)}\n`);
+          NODE
+          node /tmp/inventory.mjs
+          node --check worker.js
+
+      - name: Commit inventory
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name qqai-v2-refactor
+          git config user.email actions@users.noreply.github.com
+          git add refactor-inventory.json
+          if git diff --cached --quiet; then
+            exit 0
+          fi
+          git commit -m "Inventory worker.js for v2 modularization"
+          git push origin HEAD:refactor/v2-modular-worker
