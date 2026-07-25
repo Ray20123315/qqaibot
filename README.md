@@ -1,6 +1,6 @@
 # 🌌 QQ AI Bot (專案名稱：qqaibot)
 
-一個基於 **Cloudflare Workers** 邊緣運算生態打造的高效能 QQ 群聊 AI 機器人。完美整合了 Google Gemini 大語言模型、Vectorize 向量資料庫（長期語意記憶）以及 Puppeteer 瀏覽器自動化環境，提供極其乾淨、精煉且擬真自然的群聊互動體驗。
+一個基於 **Cloudflare Workers** 邊緣運算生態打造的高效能 QQ 群聊 AI 機器人。整合 Google Gemini 大語言模型、Vectorize 向量資料庫（長期語意記憶）、D1 與 OneBot WebSocket，提供乾淨、精煉且自然的群聊互動體驗。
 
 本專案特別針對 QQ 群聊生態進行了深度優化，從底層根除了 AI 常見的「戲癮大發（括號內心戲）」、「表情包氾濫（CQ 碼堆疊）」以及「跨語系編碼亂碼（菱形問號 ）」等痛點。
 
@@ -24,8 +24,10 @@
 * **大語言模型 (LLM)**：Google Gemini API (支援多模型輪詢 Fallback：`gemini-3.1-flash-lite`, `gemini-3-flash` 等)
 * **長期語意回想 (Vector DB)**：Cloudflare 原生嵌入模型 (`@cf/baai/bge-m3`) + Cloudflare Vectorize (`VECTORIZE`)
 * **短期會話快取 (KV)**：Cloudflare KV (`QQ_STORE`)
-* **網頁自動化渲染**：Cloudflare Puppeteer (`MYBROWSER`)
-* **套件管理與配置**：`wrangler.toml` (`compatibility_date: 2026-06-24`)
+* **套件管理與配置**：`wrangler.toml` (`compatibility_date: 2026-07-21`)
+
+### 單一 Worker 模組化架構
+Cloudflare 仍只部署一個 `qqai` Worker，入口固定為根目錄的 `worker.js`。原始碼依 AI、OneBot、Portal、群管、排程、資料存取等職責拆到 `src/`，由 Wrangler 在自動部署時打包成同一個 Worker；不需要建立額外 Worker 或修改既有自訂網域。
 
 ---
 
@@ -63,7 +65,6 @@ AI 在群聊中會即時監聽 Webhook 請求，並提供極其豐富的實用�
 | `!status` / `!配额` | 查看金鑰數、AI 開關、記憶開關、累計對話與最後模型。 |
 | `!画图 [提示词]` | 使用 Gemini/Imagen 圖像模型生成圖片。 |
 | `!读网页 [网址]` | 提取網頁正文並讓 AI 精煉總結成 200-300 字的核心重點。 |
-| `!截图 [网址]` | 呼叫 Cloudflare Puppeteer 無頭瀏覽器，直接在群內發送該網頁的截圖。 |
 | `!翻译 [语言] [内容]` | 專業翻譯工具，翻譯後會自動補充 1~2 句日常或商務應用例句。 |
 | `!会议纪要 [数字]` | 將最近的 `N` 條（預設 50，最多 200）群聊紀錄整理成包含核心主題、共識、待辦事項的專業精華紀要。 |
 | `!总结 [数字]` 或 `!吃瓜` | 將最近的 `N` 條（預設 60，最多 100）群聊紀錄，用八卦、輕鬆的語氣進行總結。 |
@@ -99,10 +100,9 @@ AI 在群聊中會即時監聽 Webhook 請求，並提供極其豐富的實用�
 | `!clear` 或 `!重置` | **緊急按鈕**：物理清空當前群組的短期上下文快取與模仿狀態，重置 AI 大腦。 |
 | `!禁记忆 [@成员]` / `!解禁记忆 [@成员]` | Root 專用，凍結或恢復特定 QQ 的網頁端/指令端記憶編輯權。 |
 
-### Live 與截圖故障排查
+### Live 故障排查
 * `!live` 只負責在 QQ 群內回覆 `https://qqai.ray2025.com/live`；真正語音頁面需要 Worker 支援 WebSocket Upgrade，且 Secrets 內需配置 `GEMINI_API_KEYS` 或 `VECTORIZE_GEMINI_KEYS`。
 * `/live` 使用 `wss://generativelanguage.googleapis.com/...BidiGenerateContent` 轉接 Gemini Live；如果瀏覽器連線失敗，先用 `npx wrangler tail` 查看 101 握手與 Google WebSocket 錯誤。
-* `!截图` 依賴 Cloudflare Browser Rendering binding：`MYBROWSER`。若未開通 Browser Rendering 或 Worker 沒綁定 `[browser] binding = "MYBROWSER"`，截圖會回覆綁定缺失。
 * NapCat 必須允許 CQ 圖片 `base64://` 格式；若 QQ 端不發圖但 Worker 無錯，請檢查 NapCat 的訊息段相容性與圖片上傳權限。
 
 ---
@@ -121,11 +121,9 @@ npx wrangler vectorize create qqai --dimensions=1024 --metric=cosine
 ```toml
 name = "qqai"
 main = "worker.js"
-compatibility_date = "2026-06-24"
+compatibility_date = "2026-07-21"
 compatibility_flags = [ "nodejs_compat" ]
 
-[browser]
-binding = "MYBROWSER"
 
 [ai]
 binding = "AI"
