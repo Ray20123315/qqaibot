@@ -1,5 +1,6 @@
-import { recentConversationMessagesForUser } from "../core/identity.js";
+import { isDeveloperId, recentConversationMessagesForUser } from "../core/identity.js";
 import { canUnlockMute, clearMuteLock, createManualMuteLock, getMuteLock, listGroupMuteLocks, putMuteLock } from "../moderation/mute-locks.js";
+import { clearPartnerBinding, createDirectMasterBinding, listGroupBindings } from "../moderation/partner-bindings.js";
 import { callOneBotAction, writeSystemAudit } from "../core/permissions.js";
 import { isVerifiedGroupOwner } from "../group/runtime.js";
 import { dbPut } from "../data/store.js";
@@ -19,6 +20,53 @@ function memberConsoleAllowed(authed) {
   );
 }
 
+function coreDeveloperAllowed(env, authed) {
+  return Boolean(authed?.qq && isDeveloperId(env, String(authed.qq)));
+}
+
+function publicRelationship(binding) {
+  if (!binding) return null;
+  return binding.mode === "master" ? {
+    mode: "master",
+    masterId: String(binding.masterId || ""),
+    memberId: String(binding.memberId || ""),
+    userIds: [String(binding.masterId || ""), String(binding.memberId || "")].filter(Boolean),
+    createdAt: Number(binding.createdAt || 0),
+    requestId: String(binding.requestId || "")
+  } : {
+    mode: "partner",
+    leftId: String(binding.leftId || binding.userIds?.[0] || ""),
+    rightId: String(binding.rightId || binding.userIds?.[1] || ""),
+    userIds: (Array.isArray(binding.userIds) ? binding.userIds : [binding.leftId, binding.rightId]).map(String).filter(Boolean),
+    createdAt: Number(binding.createdAt || 0),
+    requestId: String(binding.requestId || "")
+  };
+}
+
+async function resolveLiveRelationshipMember(env, groupId, qq) {
+  const userId = String(qq || "").replace(/\D/g, "");
+  if (!userId) return null;
+  try {
+    const response = await callOneBotAction(env, {
+      action: "get_group_member_info",
+      params: { group_id: numericId(groupId), user_id: numericId(userId), no_cache: true }
+    }, 12000);
+    const raw = response?.data && typeof response.data === "object" ? response.data : response;
+    return normalizeMember(raw);
+  } catch {
+    return null;
+  }
+}
+
+async function getLiveBotId(env) {
+  try {
+    const response = await callOneBotAction(env, { action: "get_login_info", params: {} }, 10000);
+    const raw = response?.data && typeof response.data === "object" ? response.data : response;
+    return String(raw?.user_id || raw?.userId || "").replace(/\D/g, "");
+  } catch {
+    return "";
+  }
+}
 function normalizeEpochMs(primarySeconds, fallbackValue = 0) {
   const primary = Number(primarySeconds || 0);
   if (primary > 0) return primary > 100000000000 ? primary : primary * 1000;
@@ -124,18 +172,30 @@ async function handlePortalMemberApi(request, env, url, path, body, authed) {
       const listing = await listPortalMembers(env, groupId);
       const query = String(url.searchParams.get("q") || "").trim().toLowerCase();
       const locks = await listGroupMuteLocks(env, groupId);
-      const visibleMembers = listing.members.map(item => ({ ...item, muteLock: locks[item.qq] ? { source: locks[item.qq].source, allowOwnerUnmute: locks[item.qq].allowOwnerUnmute, expiresAt: locks[item.qq].expiresAt, blockedAttempts: locks[item.qq].blockedAttempts } : null }));
+      const relationships = (await listGroupBindings(env, groupId)).map(publicRelationship);
+      const relationshipByUser = new Map();
+      for (const relationship of relationships) for (const qq of relationship.userIds || []) relationshipByUser.set(String(qq), relationship);
+      const visibleMembers = listing.members.map(item => ({
+        ...item,
+        muteLock: locks[item.qq] ? { source: locks[item.qq].source, allowOwnerUnmute: locks[item.qq].allowOwnerUnmute, expiresAt: locks[item.qq].expiresAt, blockedAttempts: locks[item.qq].blockedAttempts } : null,
+        relationship: relationshipByUser.get(String(item.qq)) || null,
+        relationshipEligibility: {
+          master: !item.isRobot,
+          member: !item.isRobot && item.role === "member" && !isDeveloperId(env, item.qq)
+        }
+      }));
       const members = query
         ? visibleMembers.filter(item => [item.qq, item.name, item.nickname, item.card, item.role].some(value => String(value || "").toLowerCase().includes(query)))
         : visibleMembers;
       return jsonResponse({
         ok: true,
         members,
+        relationships,
         total: members.length,
         source: listing.source,
         stale: listing.stale,
         warning: listing.warning || "",
-        permissions: { viewHistory: true, mute: true, unmute: true },
+        permissions: { viewHistory: true, mute: true, unmute: true, directRelationship: coreDeveloperAllowed(env, authed), removeRelationship: coreDeveloperAllowed(env, authed) },
         maxMuteSeconds: MAX_MUTE_SECONDS
       });
     } catch (error) {
@@ -143,6 +203,52 @@ async function handlePortalMemberApi(request, env, url, path, body, authed) {
     }
   }
 
+  if (request.method === "POST" && path === "/members/relationships/direct") {
+    if (!coreDeveloperAllowed(env, authed)) return jsonResponse({ ok: false, message: "只有最高核心开发者可以从 Portal 直接配对。" }, 403);
+    const masterId = String(body?.masterId || "").replace(/\D/g, "");
+    const memberId = String(body?.memberId || "").replace(/\D/g, "");
+    const replaceExisting = body?.replaceExisting === true;
+    if (!masterId || !memberId || masterId === memberId) return jsonResponse({ ok: false, message: "请选择不同的主人和所属成员。" }, 400);
+    const [master, member, botId] = await Promise.all([
+      resolveLiveRelationshipMember(env, groupId, masterId),
+      resolveLiveRelationshipMember(env, groupId, memberId),
+      getLiveBotId(env)
+    ]);
+    if (!master || !member) return jsonResponse({ ok: false, message: "无法即时确认双方都在本群，请刷新群友列表后重试。" }, 409);
+    if (masterId === botId || memberId === botId || master.isRobot || member.isRobot) return jsonResponse({ ok: false, message: "机器人账号不能参与关系绑定。" }, 403);
+    if (member.role !== "member" || isDeveloperId(env, memberId)) return jsonResponse({ ok: false, message: "所属成员必须是普通群成员，不能是管理员、群主、开发者或机器人。" }, 403);
+    const result = await createDirectMasterBinding(env, { groupId, masterId, memberId, createdBy: authed.qq, replaceExisting });
+    if (!result.ok) return jsonResponse({ ok: false, message: result.message, conflict: Boolean(result.conflict) }, result.conflict ? 409 : 400);
+    await writeSystemAudit(env, {
+      type: "portal_master_binding_direct",
+      groupId,
+      actorId: authed.qq,
+      targetId: memberId,
+      masterId,
+      memberId,
+      action: replaceExisting ? "direct_replace" : "direct_create",
+      requestId: result.requestId
+    }).catch(() => {});
+    return jsonResponse({ ok: true, message: `已直接配对：${master.name || masterId} 为主人，${member.name || memberId} 为所属成员。`, relationship: { mode: "master", masterId, memberId, userIds: [masterId, memberId], createdAt: Date.now(), requestId: result.requestId } });
+  }
+
+  if (request.method === "POST" && path === "/members/relationships/remove") {
+    if (!coreDeveloperAllowed(env, authed)) return jsonResponse({ ok: false, message: "只有最高核心开发者可以从 Portal 强制解除关系。" }, 403);
+    const userId = String(body?.userId || "").replace(/\D/g, "");
+    if (!userId) return jsonResponse({ ok: false, message: "请指定关系中的任一 QQ。" }, 400);
+    const binding = await clearPartnerBinding(env, groupId, userId);
+    if (!binding) return jsonResponse({ ok: false, message: "找不到该成员的有效关系。" }, 404);
+    await writeSystemAudit(env, {
+      type: "portal_relationship_removed",
+      groupId,
+      actorId: authed.qq,
+      targetId: userId,
+      action: "force_remove",
+      mode: binding.mode,
+      otherId: binding.partnerId
+    }).catch(() => {});
+    return jsonResponse({ ok: true, message: binding.mode === "master" ? "主人关系已强制解除。" : "对象关系已强制解除。" });
+  }
   if (request.method === "GET" && path === "/members/history") {
     const qq = String(url.searchParams.get("qq") || "").replace(/\D/g, "");
     const limit = Math.max(1, Math.min(200, Math.trunc(Number(url.searchParams.get("limit") || 80))));
@@ -262,6 +368,17 @@ function injectPortalMembersClient(html) {
     <div class="field"><label for="memberSearch">搜索昵称或 QQ</label><input id="memberSearch" placeholder="输入昵称、群名片或 QQ"></div>
     <div class="notice" id="memberConsoleStatus">请选择群组后读取群友列表。</div>
   </div>
+  <div class="card relationship-console">
+    <div class="section-head compact"><div><h3>关系管理</h3><p>对象关系为双方对称权限；主人关系为主人对唯一所属成员的非对称权限。一般管理层可查看，只有最高核心开发者可直接配对或强制解除。</p></div><button id="relationshipRefresh" class="btn ghost">刷新关系</button></div>
+    <div class="notice" id="relationshipStatus">正在读取关系资料…</div>
+    <div id="relationshipDirectPanel" class="relationship-direct hidden">
+      <div class="field"><label for="relationshipMaster">主人</label><select id="relationshipMaster"></select></div>
+      <div class="field"><label for="relationshipMember">所属成员</label><select id="relationshipMember"></select></div>
+      <label class="member-toggle relationship-replace"><input id="relationshipReplace" type="checkbox">替换双方既有关系</label>
+      <button id="relationshipDirectPair" class="btn danger">最高权限直接配对</button>
+    </div>
+    <div id="relationshipList" class="list relationship-list"><div class="empty">尚未读取关系资料</div></div>
+  </div>
   <div id="memberList" class="list"><div class="empty">尚未读取群友列表</div></div>
   <div id="memberHistoryPanel" class="card hidden">
     <div class="section-head compact"><div><h3 id="memberHistoryTitle">历史消息</h3><p>只显示本 Worker 已保存的该群聊天记录。</p></div><button id="memberHistoryClose" class="btn ghost">关闭</button></div>
@@ -276,13 +393,14 @@ function injectPortalMembersClient(html) {
   const style = `
 <style id="qqai-member-console-style">
 .member-console-toolbar{display:grid;grid-template-columns:minmax(220px,1fr) minmax(260px,1.4fr);gap:14px;align-items:end;margin-bottom:16px}.member-row{display:grid;grid-template-columns:minmax(180px,1.3fr) minmax(140px,.8fr) minmax(290px,1.5fr);gap:12px;align-items:center}.member-main{min-width:0}.member-name{font-weight:800;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.member-meta{font-size:12px;color:var(--muted);margin-top:4px}.member-actions{display:flex;gap:8px;flex-wrap:wrap;align-items:center}.member-actions input[type="number"]{width:112px;min-height:40px}.member-toggle{display:inline-flex;align-items:center;gap:5px;font-size:12px;color:var(--muted);white-space:nowrap}.member-toggle input{width:auto;min-height:auto}.member-lock{font-size:12px;font-weight:800;color:#b45309}.member-history-message{white-space:pre-wrap;word-break:break-word}.member-history-time{font-size:12px;color:var(--muted);margin-bottom:6px}.member-role-owner{font-weight:800}.member-role-admin{font-weight:700}.member-muted{color:#b45309;font-weight:800}@media(max-width:900px){.member-console-toolbar,.member-row{grid-template-columns:1fr}.member-actions input{width:100%}.member-actions .btn{flex:1 1 120px}}
+.relationship-console{margin-bottom:16px}.relationship-direct{display:grid;grid-template-columns:minmax(180px,1fr) minmax(180px,1fr) auto auto;gap:12px;align-items:end;margin:14px 0}.relationship-direct .field{margin:0}.relationship-replace{align-self:center}.relationship-row{display:grid;grid-template-columns:minmax(220px,1fr) auto;gap:12px;align-items:center}.relationship-actions{display:flex;gap:8px;justify-content:flex-end}.member-relationship{font-size:12px;font-weight:800;color:#6d28d9;margin-left:6px}@media(max-width:900px){.relationship-direct,.relationship-row{grid-template-columns:1fr}.relationship-actions{justify-content:stretch}.relationship-actions .btn{width:100%}}
 </style>`;
   source = source.includes("</head>") ? source.replace("</head>", style + "\n</head>") : style + source;
 
   const script = `
 <script id="qqai-member-console-client">
 (function(){
-  var cachedMembers=[];
+  var cachedMembers=[],cachedRelationships=[],relationshipPermissions={};
   function el(id){return document.getElementById(id)}
   function safe(value){return typeof esc==='function'?esc(value):String(value==null?'':value).replace(/[&<>\"']/g,function(c){return({'&':'&amp;','<':'&lt;','>':'&gt;','\"':'&quot;',"'":'&#39;'})[c]})}
   function notify(message){if(typeof toast==='function')toast(message);else window.alert(message)}
@@ -298,6 +416,37 @@ function injectPortalMembersClient(html) {
   }
   function syncNav(){var nav=el('memberConsoleNav');if(nav)nav.classList.toggle('hidden',!sessionAllows())}
   function isMembersView(){var view=el('v-members');return !!(view&&view.classList.contains('active'))}
+  function relationshipMemberName(qq){var member=cachedMembers.find(function(item){return String(item.qq)===String(qq)});return member?(member.name||member.qq):String(qq||'未知成员')}
+  function relationshipText(item){if(!item)return'';if(item.mode==='master')return relationshipMemberName(item.masterId)+'（主人） → '+relationshipMemberName(item.memberId)+'（所属成员）';var ids=item.userIds||[item.leftId,item.rightId];return relationshipMemberName(ids[0])+' ↔ '+relationshipMemberName(ids[1])+'（对象）'}
+  function relationshipFor(qq){return cachedRelationships.find(function(item){return (item.userIds||[]).map(String).indexOf(String(qq))>=0})||null}
+  function populateRelationshipSelectors(){
+    var master=el('relationshipMaster'),member=el('relationshipMember');if(!master||!member)return;
+    var masters=cachedMembers.filter(function(item){return item.relationshipEligibility&&item.relationshipEligibility.master});
+    var members=cachedMembers.filter(function(item){return item.relationshipEligibility&&item.relationshipEligibility.member});
+    master.innerHTML=masters.map(function(item){return '<option value="'+safe(item.qq)+'">'+safe(item.name||item.qq)+'｜QQ '+safe(item.qq)+'｜'+safe(roleText(item.role))+'</option>'}).join('')||'<option value="">没有可选主人</option>';
+    member.innerHTML=members.map(function(item){return '<option value="'+safe(item.qq)+'">'+safe(item.name||item.qq)+'｜QQ '+safe(item.qq)+'</option>'}).join('')||'<option value="">没有可选所属成员</option>';
+  }
+  function renderRelationships(){
+    var status=el('relationshipStatus'),panel=el('relationshipDirectPanel'),root=el('relationshipList');if(!root)return;
+    var canDirect=!!relationshipPermissions.directRelationship;
+    if(panel)panel.classList.toggle('hidden',!canDirect);
+    if(status)status.textContent='当前共 '+cachedRelationships.length+' 段关系。'+(canDirect?'你拥有最高核心开发者权限，可直接配对、替换或解除。':'当前帐号为只读查看；普通管理层不能跳过双方同意。');
+    populateRelationshipSelectors();
+    root.innerHTML=cachedRelationships.map(function(item){var ids=item.userIds||[];var remove=canDirect&&ids[0]?'<button class="btn danger relationship-remove" data-user-id="'+safe(ids[0])+'">强制解除</button>':'';var created=item.createdAt?new Date(Number(item.createdAt)).toLocaleString():'时间未知';return '<div class="item relationship-row"><div><div class="member-name">'+safe(relationshipText(item))+'</div><div class="member-meta">'+safe(item.mode==='master'?'主人关系':'对象关系')+'｜建立于 '+safe(created)+'</div></div><div class="relationship-actions">'+remove+'</div></div>'}).join('')||'<div class="empty">当前群没有任何绑定关系</div>';
+  }
+  async function directPairRelationship(){
+    if(!relationshipPermissions.directRelationship){notify('只有最高核心开发者可以直接配对');return}
+    var master=el('relationshipMaster'),member=el('relationshipMember'),replace=el('relationshipReplace');var masterId=String(master&&master.value||''),memberId=String(member&&member.value||'');
+    if(!masterId||!memberId){notify('请选择主人和所属成员');return}if(masterId===memberId){notify('主人和所属成员不能是同一个帐号');return}
+    var replaceExisting=!!(replace&&replace.checked);var text='确定直接建立主人关系？\n主人：'+relationshipMemberName(masterId)+'（'+masterId+'）\n所属成员：'+relationshipMemberName(memberId)+'（'+memberId+'）'+(replaceExisting?'\n双方既有关系会被强制替换。':'');
+    var ok=typeof confirmModal==='function'?await confirmModal(text,'最高权限直接配对'):window.confirm(text);if(!ok)return;
+    var result=await call('/members/relationships/direct','POST',{masterId:masterId,memberId:memberId,replaceExisting:replaceExisting});notify(result.message||'操作完成');if(result.ok)loadMembers()
+  }
+  async function removeRelationship(button){
+    if(!relationshipPermissions.removeRelationship){notify('只有最高核心开发者可以强制解除关系');return}
+    var userId=String(button&&button.dataset.userId||'');if(!userId)return;var item=relationshipFor(userId);var text='确定强制解除关系：'+relationshipText(item)+'？';var ok=typeof confirmModal==='function'?await confirmModal(text,'强制解除关系'):window.confirm(text);if(!ok)return;
+    var result=await call('/members/relationships/remove','POST',{userId:userId});notify(result.message||'操作完成');if(result.ok)loadMembers()
+  }
   function renderMembers(){
     var root=el('memberList');if(!root)return;
     var query=String(el('memberSearch')&&el('memberSearch').value||'').trim().toLowerCase();
@@ -306,7 +455,7 @@ function injectPortalMembersClient(html) {
     rows.forEach(function(member){
       var row=document.createElement('div');row.className='item member-row';
       var lock=member.muteLock,lockText=lock?(lock.source==='self'?'自我禁言锁':lock.source==='partner'?'对象禁言锁':lock.source==='master'?'主人禁言锁':(lock.allowOwnerUnmute?'防解除：开发者或群主':'防解除：仅开发者')):'';
-      var state=member.muted?'<span class="member-muted">禁言中，剩余 '+safe(secondsText(member.muteRemainingSeconds))+'</span>':'<span class="status ok">可发言</span>';if(lockText)state+=' <span class="member-lock">'+safe(lockText)+'</span>';
+      var state=member.muted?'<span class="member-muted">禁言中，剩余 '+safe(secondsText(member.muteRemainingSeconds))+'</span>':'<span class="status ok">可发言</span>';if(lockText)state+=' <span class="member-lock">'+safe(lockText)+'</span>';var relation=relationshipFor(member.qq);if(relation)state+=' <span class="member-relationship">'+safe(relation.mode==='master'?(String(relation.masterId)===String(member.qq)?'主人':'所属成员'):'对象')+'</span>';
       row.innerHTML='<div class="member-main"><div class="member-name member-role-'+safe(member.role)+'">'+safe(member.name||member.qq)+'</div><div class="member-meta">QQ '+safe(member.qq)+'｜'+safe(roleText(member.role))+(member.title?'｜'+safe(member.title):'')+'</div></div><div>'+state+'</div><div class="member-actions"><button class="btn member-history" data-qq="'+safe(member.qq)+'">历史消息</button><input class="member-seconds" type="number" min="1" max="2592000" value="60" aria-label="禁言秒数"><label class="member-toggle"><input class="member-protect" type="checkbox">防解除</label><label class="member-toggle"><input class="member-owner-unlock" type="checkbox" disabled>群主可解除</label><label class="member-toggle"><input class="member-skip-confirm" type="checkbox">跳过确认</label><button class="btn danger member-mute" data-qq="'+safe(member.qq)+'">禁言（秒）</button><button class="btn member-unmute" data-qq="'+safe(member.qq)+'">解禁</button></div>';
       root.appendChild(row)
     });
@@ -316,7 +465,7 @@ function injectPortalMembersClient(html) {
     var status=el('memberConsoleStatus');if(status)status.textContent='正在读取群友列表…';
     var result=await call('/members');
     if(!result.ok){if(status)status.textContent=result.message||'读取失败';cachedMembers=[];renderMembers();return}
-    cachedMembers=result.members||[];renderMembers();
+    cachedMembers=result.members||[];cachedRelationships=result.relationships||[];relationshipPermissions=result.permissions||{};renderMembers();renderRelationships();
     if(status)status.textContent='共 '+cachedMembers.length+' 位群友'+(result.stale?'｜当前显示缓存资料':'｜即时资料')+(result.warning?'｜'+result.warning:'')
   }
   async function showHistory(qq){
@@ -341,11 +490,13 @@ function injectPortalMembersClient(html) {
   document.addEventListener('click',function(event){
     var target=event.target.closest&&event.target.closest('button');if(!target)return;
     if(target.id==='memberConsoleNav'){setTimeout(function(){var title=el('pageTitle');if(title)title.textContent='群友列表';loadMembers()},0)}
-    else if(target.id==='memberRefresh')loadMembers();
+    else if(target.id==='memberRefresh'||target.id==='relationshipRefresh')loadMembers();
+    else if(target.id==='relationshipDirectPair')directPairRelationship();
     else if(target.id==='memberHistoryClose')el('memberHistoryPanel')&&el('memberHistoryPanel').classList.add('hidden');
     else if(target.classList.contains('member-history'))showHistory(target.dataset.qq);
     else if(target.classList.contains('member-mute'))muteMember(target);
-    else if(target.classList.contains('member-unmute'))unmuteMember(target)
+    else if(target.classList.contains('member-unmute'))unmuteMember(target);
+    else if(target.classList.contains('relationship-remove'))removeRelationship(target)
   });
   document.addEventListener('input',function(event){if(event.target&&event.target.id==='memberSearch')renderMembers();if(event.target&&event.target.classList&&event.target.classList.contains('member-protect')){var row=event.target.closest('.member-row'),owner=row&&row.querySelector('.member-owner-unlock');if(owner){owner.disabled=!event.target.checked;if(!event.target.checked)owner.checked=false}}});
   var selector=el('groupSelect');if(selector)selector.addEventListener('change',function(){if(isMembersView())setTimeout(loadMembers,100)});

@@ -3,48 +3,29 @@ name: Validate single-Worker build
 on:
   push:
     branches:
-      - feature/portal-relationship-console-v2.4.1
+      - main
+      - refactor/v2-modular-worker
   pull_request:
     branches:
       - main
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   validate:
     runs-on: ubuntu-latest
-    timeout-minutes: 18
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
-        with:
-          ref: feature/portal-relationship-console-v2.4.1
-          fetch-depth: 0
       - uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: npm
           cache-dependency-path: package.json
-      - name: Apply Portal relationship patch
-        run: node tools/apply-v241.mjs
-      - name: Check syntax
-        run: |
-          node --check src/moderation/partner-bindings.js
-          node --check src/portal/members.js
-          node --check verify-portal-relationships.mjs
       - name: Install dependencies
         run: npm install --ignore-scripts
       - name: Run regression checks
         run: npm run check
       - name: Build the single Worker bundle
         run: npm run check:bundle
-      - name: Commit validated clean candidate
-        run: |
-          rm -rf node_modules dist package-lock.json
-          rm -f tools/apply-v241.mjs tools/v241-*.txt
-          git checkout origin/main -- .github/workflows/validate.yml
-          git config user.name github-actions[bot]
-          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
-          git add package.json release-notes.json src/config/runtime.js src/moderation/partner-bindings.js src/portal/members.js verify-*.mjs .github/workflows/validate.yml tools
-          git commit -m 'Add Portal relationship management console'
-          git push origin HEAD:feature/portal-relationship-console-v2.4.1
