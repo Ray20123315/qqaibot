@@ -1,0 +1,91 @@
+name: Apply worker v1.5.4 progressive multi-actions
+
+on:
+  push:
+    branches: [worker-v1.5.4-progressive-actions]
+    paths: ['.qqai-v1.5.4-trigger']
+  pull_request:
+    branches: [main]
+    paths: ['.qqai-v1.5.4-trigger']
+
+permissions:
+  contents: write
+
+concurrency:
+  group: apply-worker-v1.5.4
+  cancel-in-progress: false
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Reconstruct and apply exact patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          grep -F 'const VERSION = "1.5.3";' worker.js
+          echo '5e19cfaa3c4049cb4d8884e04b5f68c68463c0b8377f244ffc7e047100a24c29  worker.js' | sha256sum -c -
+          tr -d '\r\n\t ' < .qqai-patches/v1.5.4/worker.patch.gz.b64 | base64 -d | gzip -d > /tmp/worker-v1.5.4.patch
+          echo 'c1207eb76630bd6a44c4930bc59c36a62d0a96e06e224edff2f7efc0b3e30845  /tmp/worker-v1.5.4.patch' | sha256sum -c -
+          git apply --check /tmp/worker-v1.5.4.patch
+          git apply /tmp/worker-v1.5.4.patch
+          echo 'e2d3bf7e5916fe6b61619d0d173a2c89ef2dd8c711b664fbe4b73cfffcf0623c  worker.js' | sha256sum -c -
+
+      - name: Validate standalone module and Portal
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --check worker.js
+          cp worker.js /tmp/worker-v1.5.4.mjs
+          node -e "import('file:///tmp/worker-v1.5.4.mjs').then(m=>{if(!m.default||typeof m.default.fetch!=='function'||!m.OneBotHub)throw Error('exports')})"
+          ! grep -Eq '^[[:space:]]*import[[:space:]]' worker.js
+          grep -F 'const VERSION = "1.5.4";' worker.js
+          grep -F 'QQAI_V1_R54_PROGRESSIVE_MULTI_ACTION_MARKER' worker.js
+          python - <<'PY'
+          from pathlib import Path
+          from html.parser import HTMLParser
+          import re, subprocess
+          s=Path('worker.js').read_text()
+          a=s.index('function getPortalHomePage(host)')
+          a=s.index('String.raw`',a)+10
+          h=s[a:s.index('`);\n}',a)]
+          scripts=re.findall(r'<script(?: [^>]*)?>(.*?)</script>',h,re.S)
+          assert len(scripts)>=2
+          for i,x in enumerate(scripts):
+              f=Path(f'/tmp/portal154-{i}.js'); f.write_text(x); subprocess.run(['node','--check',str(f)],check=True)
+          class P(HTMLParser):
+              def __init__(self): super().__init__(); self.ids=[]
+              def handle_starttag(self,t,a): self.ids += [v for k,v in a if k=='id']
+          p=P(); p.feed(h); assert len(p.ids)==len(set(p.ids))
+          for token in ['增加动作','删除动作','每个次数可依序执行多个动作','normalizeProgressiveActionSpecs','progressiveStepActions']:
+              assert token in s, token
+          print('portal progressive multi-action PASS')
+          PY
+
+      - name: Run progressive multi-action regression tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          cp worker.js /tmp/worker-v1.5.4-ci.mjs
+          cat >> /tmp/worker-v1.5.4-ci.mjs <<'JS'
+          export { normalizeRuleProgressivePolicy, resolveRuleProgressiveStep, progressiveMuteFallback, performRuleProxyAction };
+          JS
+          node .qqai-tests/v1.5.4/runtime.mjs
+
+      - name: Commit verified worker to main
+        shell: bash
+        run: |
+          set -euo pipefail
+          printf '%s\n' '${{ github.run_id }}' > .qqai-v1.5.4-run-id
+          rm -f .qqai-v1.5.4-trigger
+          rm -rf .qqai-patches/v1.5.4 .qqai-tests/v1.5.4
+          rm -f .github/workflows/apply-worker-v1.5.4.yml
+          git config user.name qqai-updater
+          git config user.email actions@users.noreply.github.com
+          git add -A
+          git commit -m 'Add progressive multi-action rules v1.5.4'
+          git push origin HEAD:main
