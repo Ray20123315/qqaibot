@@ -97,6 +97,59 @@ jobs:
               readme.write_text(text, encoding='utf-8')
           PY
 
+      - name: Harden queue retries and stale status handling
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path('src/deployment/notifications.js')
+          text = path.read_text(encoding='utf-8')
+          replacements = [
+              (
+                  '''  const seenKey = `deployment:seen:${record.buildUuid}:${record.kind}`;
+  if (await kvGet(env, seenKey)) return { ignored: true, reason: "duplicate" };
+  await kvPut(env, seenKey, String(Date.now()));
+''',
+                  '''  const seenKey = `deployment:seen:${record.buildUuid}:${record.kind}`;
+  if (await kvGet(env, seenKey)) return { ignored: true, reason: "duplicate" };
+'''
+              ),
+              (
+                  '''  await kvPut(env, STATUS_KEY, JSON.stringify(portalRecord));
+  await appendHistory(env, portalRecord);
+
+  if (stale) return { ignored: true, reason: "stale_terminal", record: portalRecord };
+''',
+                  '''  await appendHistory(env, portalRecord);
+
+  if (stale) {
+    await kvPut(env, seenKey, String(Date.now()));
+    return { ignored: true, reason: "stale_terminal", record: portalRecord };
+  }
+  await kvPut(env, STATUS_KEY, JSON.stringify(portalRecord));
+'''
+              ),
+              (
+                  '''  await kvPut(env, STATUS_KEY, JSON.stringify({ ...portalRecord, groupNotification, developerNotification }));
+  return { ok: true, record: portalRecord, groupNotification, developerNotification };
+''',
+                  '''  await kvPut(env, STATUS_KEY, JSON.stringify({ ...portalRecord, groupNotification, developerNotification }));
+  await kvPut(env, seenKey, String(Date.now()));
+  return { ok: true, record: portalRecord, groupNotification, developerNotification };
+'''
+              )
+          ]
+          for old, new in replacements:
+              if new in text:
+                  continue
+              if old not in text:
+                  raise SystemExit(f'Expected deployment fragment not found: {old[:100]!r}')
+              text = text.replace(old, new, 1)
+          path.write_text(text, encoding='utf-8')
+          PY
+
       - name: Install dependencies
         run: npm install --ignore-scripts
 
@@ -117,6 +170,16 @@ jobs:
           grep -F '"version": "2.0.1"' package.json
           grep -F 'main = "worker.js"' wrangler.toml
           ! grep -RIn '^\[\[queues.consumers\]\]' wrangler.toml
+          python3 - <<'PY'
+          from pathlib import Path
+          text = Path('src/deployment/notifications.js').read_text(encoding='utf-8')
+          stale = text.index('if (stale) {')
+          status = text.index('await kvPut(env, STATUS_KEY, JSON.stringify(portalRecord));')
+          if stale >= status:
+              raise SystemExit('Stale terminal events can overwrite latest Portal status')
+          if 'await kvPut(env, seenKey, String(Date.now()));\n\n  const latestStarted' in text:
+              raise SystemExit('Seen marker is written before processing completes')
+          PY
           git diff --check
 
       - name: Commit validated implementation
@@ -126,7 +189,7 @@ jobs:
           rm -rf node_modules dist package-lock.json
           git config user.name qqai-deploy-notifications
           git config user.email actions@users.noreply.github.com
-          git add worker.js src/config/runtime.js wrangler.toml README.md
+          git add worker.js src/config/runtime.js src/deployment/notifications.js wrangler.toml README.md
           if git diff --cached --quiet; then
             exit 0
           fi
