@@ -29,7 +29,9 @@ jobs:
           cache-dependency-path: package.json
       - name: Apply Portal member console hotfix
         if: github.ref == 'refs/heads/fix/portal-members-client-v2.4.2' || github.head_ref == 'fix/portal-members-client-v2.4.2'
-        run: node tools/apply-portal-members-hotfix-v2.4.2.mjs
+        run: |
+          node tools/apply-portal-members-hotfix-v2.4.2.mjs
+          for file in verify-*.mjs; do sed -i 's/2\.4\.1/2.4.2/g' "$file"; done
       - name: Check syntax
         run: |
           node --check src/portal/members.js
