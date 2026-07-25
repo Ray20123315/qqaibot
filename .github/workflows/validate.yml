@@ -10,22 +10,52 @@ on:
       - main
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   validate:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: feature/protected-self-mute-v2.2.0
+          fetch-depth: 0
       - uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: npm
           cache-dependency-path: package.json
+      - name: Apply guarded mute lock patch
+        run: node tools/apply-mute-locks-v220.mjs
+      - name: Check syntax
+        run: |
+          node --check worker.js
+          node --check src/moderation/mute-locks.js
+          node --check src/portal/members.js
+          node --check verify-mute-locks.mjs
       - name: Install dependencies
         run: npm install --ignore-scripts
       - name: Run regression checks
         run: npm run check
       - name: Build the single Worker bundle
         run: npm run check:bundle
+      - name: Enforce mute lock invariants
+        run: |
+          grep -q 'member-protect' src/portal/members.js
+          grep -q 'privateSelfCommand: true' worker.js
+          grep -q 'markMuteUnlockBlocked' worker.js
+          test "$(find . -maxdepth 1 -name 'worker*.js' -type f | wc -l)" -eq 1
+      - name: Commit clean validated candidate
+        env:
+          BRANCH: feature/protected-self-mute-v2.2.0
+        run: |
+          rm -rf node_modules dist package-lock.json
+          rm -f tools/apply-mute-locks-v220.mjs
+          rm -f .github/workflows/apply-mute-locks-v220.yml
+          git show origin/main:.github/workflows/validate.yml > .github/workflows/validate.yml
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add -A
+          git commit -m 'Add protected and self mute controls'
+          git push origin HEAD:$BRANCH
