@@ -1,0 +1,74 @@
+async function listGroupBindings(env, groupId) {
+  const group = cleanId(groupId);
+  if (!env?.DB || !group) return [];
+  const prefix = `partner_binding:${group}:`;
+  const rows = await env.DB.prepare("SELECT key, value FROM kv_store WHERE substr(key, 1, ?) = ? ORDER BY key ASC").bind(prefix.length, prefix).all();
+  const output = [];
+  const seen = new Set();
+  for (const row of rows.results || []) {
+    let parsed = null;
+    try { parsed = JSON.parse(String(row?.value || "{}")); } catch {}
+    const binding = normalizeBinding(parsed);
+    if (!binding.active) continue;
+    const live = await getPartnerBinding(env, group, binding.userId);
+    if (!live) continue;
+    const pair = [live.userId, live.partnerId].sort();
+    const key = `${live.mode}:${pair[0]}:${pair[1]}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    output.push(live.mode === "master" ? {
+      mode: "master",
+      masterId: live.masterId,
+      memberId: live.memberId,
+      userIds: [live.masterId, live.memberId],
+      createdAt: live.createdAt,
+      requestId: live.requestId
+    } : {
+      mode: "partner",
+      leftId: pair[0],
+      rightId: pair[1],
+      userIds: pair,
+      createdAt: live.createdAt,
+      requestId: live.requestId
+    });
+  }
+  return output.sort((left, right) => Number(right.createdAt || 0) - Number(left.createdAt || 0));
+}
+
+async function createDirectMasterBinding(env, { groupId, masterId, memberId, createdBy = "", replaceExisting = false }) {
+  const group = cleanId(groupId);
+  const master = cleanId(masterId);
+  const member = cleanId(memberId);
+  const actor = cleanId(createdBy);
+  if (!group || !master || !member || master === member) return { ok: false, message: "主人与所属成员资料不完整。" };
+  const [masterBinding, memberBinding] = await Promise.all([
+    getPartnerBinding(env, group, master),
+    getPartnerBinding(env, group, member)
+  ]);
+  if ((masterBinding || memberBinding) && !replaceExisting) {
+    return { ok: false, conflict: true, message: "主人或所属成员已有关系；请明确勾选替换既有关系。" };
+  }
+  if (replaceExisting) {
+    const users = [...new Set([masterBinding?.userId, masterBinding?.partnerId, memberBinding?.userId, memberBinding?.partnerId].filter(Boolean))];
+    for (const userId of users) await clearPartnerBinding(env, group, userId).catch(() => {});
+  }
+  for (const userId of [master, member]) {
+    const pending = await activePendingRequest(env, group, userId);
+    if (!pending) continue;
+    pending.status = "superseded";
+    pending.decidedAt = Date.now();
+    pending.decidedBy = actor;
+    await dbPut(env, partnerRequestKey(pending.id), JSON.stringify(pending)).catch(() => {});
+    await clearPendingRequestPointers(env, pending);
+  }
+  const now = Date.now();
+  const requestId = `direct_${now.toString(36)}_${crypto.randomUUID().slice(0, 6)}`;
+  const common = { active: true, groupId: group, mode: "master", masterId: master, memberId: member, createdAt: now, requestId, direct: true, createdBy: actor };
+  const masterBindingRecord = { ...common, userId: master, partnerId: member, relationshipRole: "master" };
+  const memberBindingRecord = { ...common, userId: member, partnerId: master, relationshipRole: "member" };
+  await Promise.all([
+    dbPut(env, partnerBindingKey(group, master), JSON.stringify(masterBindingRecord)),
+    dbPut(env, partnerBindingKey(group, member), JSON.stringify(memberBindingRecord))
+  ]);
+  return { ok: true, requestId, bindings: [normalizeBinding(masterBindingRecord), normalizeBinding(memberBindingRecord)] };
+}
