@@ -26,7 +26,25 @@ jobs:
           cache: npm
           cache-dependency-path: package.json
       - name: Apply v2.3.1 self-mute patch
-        run: node tools/apply-v231.mjs
+        id: apply
+        shell: bash
+        run: |
+          set +e
+          node tools/apply-v231.mjs > apply-v231.log 2>&1
+          status=$?
+          cat apply-v231.log
+          echo "status=$status" >> "$GITHUB_OUTPUT"
+          exit 0
+      - name: Upload patch diagnostics
+        if: steps.apply.outputs.status != '0'
+        uses: actions/upload-artifact@v4
+        with:
+          name: v231-patch-diagnostics
+          path: apply-v231.log
+          retention-days: 1
+      - name: Stop on patch failure
+        if: steps.apply.outputs.status != '0'
+        run: exit 1
       - name: Check syntax
         run: |
           node --check worker.js
