@@ -50,6 +50,10 @@ jobs:
           node --check .qqai-meme-members/patch.mjs 2>&1 | tee qqai-meme-patch.log
           node .qqai-meme-members/patch.mjs 2>&1 | tee -a qqai-meme-patch.log
 
+      - name: Update deployment version assertion
+        if: steps.gate.outputs.apply == 'true'
+        run: node .qqai-meme-members/fix-version-test.mjs
+
       - name: Install dependencies
         if: steps.gate.outputs.apply == 'true'
         run: npm install --ignore-scripts
