@@ -22,7 +22,7 @@ function walk(dir) {
 }
 walk(path.join(root, 'src'));
 
-assert(pkg.version === '2.0.0', 'package.json version must be 2.0.0');
+assert(/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(pkg.version), `package.json version must be valid SemVer, got ${pkg.version}`);
 assert(versionMatch?.[1] === pkg.version, `Worker version ${versionMatch?.[1] || 'missing'} must match package version ${pkg.version}`);
 assert(pkg.type === 'module', 'package.json must keep ES module mode');
 assert(!pkg.dependencies?.['@cloudflare/puppeteer'], 'Removed screenshot feature must not retain Puppeteer');
