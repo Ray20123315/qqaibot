@@ -62,6 +62,7 @@ const env = { DB: new MockD1(), DEPLOY_NOTIFY_DEVELOPER_ID: "" };
 const t0 = Date.now();
 const first = await processBuildEvent(env, buildEvent("started", "build-a", t0, "aaa111"));
 assert.equal(first.ok, true);
+assert.equal(first.groupNotification?.reason, "portal_only", "Build start must be recorded for Portal without group broadcast");
 const duplicate = await processBuildEvent(env, buildEvent("started", "build-a", t0, "aaa111"));
 assert.equal(duplicate.reason, "duplicate");
 await processBuildEvent(env, buildEvent("started", "build-b", t0 + 5000, "bbb222"));
@@ -72,6 +73,7 @@ assert.equal(duringNewerBuild.status.kind, "started", "A stale terminal event mu
 assert.equal(duringNewerBuild.status.noticeId, "build-b:started");
 const latest = await processBuildEvent(env, buildEvent("succeeded", "build-b", t0 + 5000, "bbb222"));
 assert.equal(latest.ok, true);
+assert.equal(latest.groupNotification?.reason, "portal_only", "Successful deployment summary must stay in Portal");
 const status = await getDeploymentStatusForViewer(env, viewer);
 assert.equal(status.status.kind, "succeeded");
 assert.equal(status.viewer.developer, false);
@@ -92,7 +94,8 @@ const fallbackEnv = { DB: fallbackDb, DEPLOY_NOTIFY_DEVELOPER_ID: "", DEPLOY_NOT
 const fallbackFirst = await announceDeployedVersionFallback(fallbackEnv, t0 + 20000);
 assert.equal(fallbackFirst.reason, "grace_started");
 const fallbackSuccess = await announceDeployedVersionFallback(fallbackEnv, t0 + 51000);
-assert.equal(fallbackSuccess.ok, true, "Runtime fallback must announce a live version when Queue events are absent");
+assert.equal(fallbackSuccess.ok, true, "Runtime fallback must record a live version in Portal when Queue events are absent");
+assert.equal(fallbackSuccess.groupNotification?.reason, "portal_only", "Runtime fallback must not broadcast to groups");
 const fallbackStatus = await getDeploymentStatusForViewer(fallbackEnv, viewer);
 assert.equal(fallbackStatus.status.kind, "succeeded");
 assert.equal(fallbackStatus.status.releaseVersion, "2.2.0");
