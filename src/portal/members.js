@@ -1,4 +1,5 @@
 import { recentConversationMessagesForUser } from "../core/identity.js";
+import { canUnlockMute, clearMuteLock, createManualMuteLock, getMuteLock, listGroupMuteLocks, putMuteLock } from "../moderation/mute-locks.js";
 import { callOneBotAction, writeSystemAudit } from "../core/permissions.js";
 import { dbPut } from "../data/store.js";
 import { jsonResponse, readJson } from "./auth.js";
@@ -121,9 +122,11 @@ async function handlePortalMemberApi(request, env, url, path, body, authed) {
     try {
       const listing = await listPortalMembers(env, groupId);
       const query = String(url.searchParams.get("q") || "").trim().toLowerCase();
+      const locks = await listGroupMuteLocks(env, groupId);
+      const visibleMembers = listing.members.map(item => ({ ...item, muteLock: locks[item.qq] ? { source: locks[item.qq].source, allowOwnerUnmute: locks[item.qq].allowOwnerUnmute, expiresAt: locks[item.qq].expiresAt, blockedAttempts: locks[item.qq].blockedAttempts } : null }));
       const members = query
-        ? listing.members.filter(item => [item.qq, item.name, item.nickname, item.card, item.role].some(value => String(value || "").toLowerCase().includes(query)))
-        : listing.members;
+        ? visibleMembers.filter(item => [item.qq, item.name, item.nickname, item.card, item.role].some(value => String(value || "").toLowerCase().includes(query)))
+        : visibleMembers;
       return jsonResponse({
         ok: true,
         members,
@@ -152,16 +155,25 @@ async function handlePortalMemberApi(request, env, url, path, body, authed) {
   if (request.method === "POST" && path === "/members/mute") {
     const qq = String(body?.qq || "").replace(/\D/g, "");
     const duration = parseMuteSeconds(body?.seconds);
+    const protect = body?.protect === true;
+    const allowOwnerUnmute = protect && body?.allowOwnerUnmute === true;
     if (!qq) return jsonResponse({ ok: false, message: "请提供目标 QQ。" }, 400);
     if (!duration) return jsonResponse({ ok: false, message: `禁言秒数必须是 1 到 ${MAX_MUTE_SECONDS} 的整数。` }, 400);
     const member = await resolveTargetMember(env, groupId, qq).catch(() => null);
     const protectedReason = protectedTargetReason(member, authed, "mute");
     if (protectedReason) return jsonResponse({ ok: false, message: protectedReason }, 403);
+    const previousLock = await getMuteLock(env, groupId, qq);
+    if (previousLock?.source === "self") return jsonResponse({ ok: false, message: "该成员正在自我禁言，管理入口不能覆盖或解除。" }, 423);
     try {
       await callOneBotAction(env, {
         action: "set_group_ban",
         params: { group_id: numericId(groupId), user_id: numericId(qq), duration }
       }, 15000);
+      if (protect) {
+        await createManualMuteLock(env, { groupId, userId: qq, actorId: authed.qq, durationSeconds: duration, allowOwnerUnmute, reason: String(body?.reason || "Portal 群友列表手动禁言").slice(0, 500) });
+      } else if (previousLock?.source === "manual") {
+        await clearMuteLock(env, groupId, qq);
+      }
       await writeSystemAudit(env, {
         type: "portal_member_mute",
         groupId,
@@ -170,9 +182,11 @@ async function handlePortalMemberApi(request, env, url, path, body, authed) {
         targetName: member?.name || qq,
         action: "mute",
         durationSeconds: duration,
+        preventUnmute: protect,
+        allowOwnerUnmute,
         reason: String(body?.reason || "Portal 群友列表手动禁言").slice(0, 500)
       });
-      return jsonResponse({ ok: true, message: `已禁言 ${member?.name || qq} ${duration} 秒。`, qq, durationSeconds: duration });
+      return jsonResponse({ ok: true, message: `已禁言 ${member?.name || qq} ${duration} 秒${protect ? `，并启用防解除（${allowOwnerUnmute ? "开发者或群主可解除" : "仅开发者可解除"}）` : ""}。`, qq, durationSeconds: duration, preventUnmute: protect, allowOwnerUnmute });
     } catch (error) {
       return jsonResponse({ ok: false, message: `禁言失败：${String(error?.message || error).slice(0, 500)}` }, 502);
     }
@@ -184,6 +198,13 @@ async function handlePortalMemberApi(request, env, url, path, body, authed) {
     const member = await resolveTargetMember(env, groupId, qq).catch(() => null);
     const protectedReason = protectedTargetReason(member, authed, "unmute");
     if (protectedReason) return jsonResponse({ ok: false, message: protectedReason }, 403);
+    const lock = await getMuteLock(env, groupId, qq);
+    const permission = canUnlockMute(env, lock, { actorId: authed.qq, actorRole: authed.role, isDeveloper: Boolean(authed?.permissions?.developer) });
+    if (!permission.allowed) {
+      const message = lock?.source === "self" ? "该成员为自我禁言，只能本人私讯机器人发送 !解除禁言。" : lock?.allowOwnerUnmute ? "该禁言只能由开发者或群主解除。" : "该禁言只能由开发者解除。";
+      return jsonResponse({ ok: false, message }, 423);
+    }
+    if (lock) await clearMuteLock(env, groupId, qq);
     try {
       await callOneBotAction(env, {
         action: "set_group_ban",
@@ -201,6 +222,7 @@ async function handlePortalMemberApi(request, env, url, path, body, authed) {
       });
       return jsonResponse({ ok: true, message: `已解除 ${member?.name || qq} 的禁言。`, qq });
     } catch (error) {
+      if (lock) await putMuteLock(env, lock).catch(() => {});
       return jsonResponse({ ok: false, message: `解除禁言失败：${String(error?.message || error).slice(0, 500)}` }, 502);
     }
   }
@@ -219,7 +241,7 @@ function injectPortalMembersClient(html) {
 
   const section = `
 <section id="v-members" class="view">
-  <div class="section-head"><div><h2>群友列表</h2><p>仅管理层可查看。可读取本群历史消息，并直接按秒禁言或解除禁言；所有操作都会写入审计日志。</p></div><button id="memberRefresh" class="btn">刷新群友</button></div>
+  <div class="section-head"><div><h2>群友列表</h2><p>仅管理层可查看。禁言可勾选防解除、群主可解除及跳过确认；自我禁言只能由本人私讯解除。所有操作都会写入审计日志。</p></div><button id="memberRefresh" class="btn">刷新群友</button></div>
   <div class="card member-console-toolbar">
     <div class="field"><label for="memberSearch">搜索昵称或 QQ</label><input id="memberSearch" placeholder="输入昵称、群名片或 QQ"></div>
     <div class="notice" id="memberConsoleStatus">请选择群组后读取群友列表。</div>
@@ -237,7 +259,7 @@ function injectPortalMembersClient(html) {
 
   const style = `
 <style id="qqai-member-console-style">
-.member-console-toolbar{display:grid;grid-template-columns:minmax(220px,1fr) minmax(260px,1.4fr);gap:14px;align-items:end;margin-bottom:16px}.member-row{display:grid;grid-template-columns:minmax(180px,1.3fr) minmax(140px,.8fr) minmax(290px,1.5fr);gap:12px;align-items:center}.member-main{min-width:0}.member-name{font-weight:800;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.member-meta{font-size:12px;color:var(--muted);margin-top:4px}.member-actions{display:flex;gap:8px;flex-wrap:wrap;align-items:center}.member-actions input{width:112px;min-height:40px}.member-history-message{white-space:pre-wrap;word-break:break-word}.member-history-time{font-size:12px;color:var(--muted);margin-bottom:6px}.member-role-owner{font-weight:800}.member-role-admin{font-weight:700}.member-muted{color:#b45309;font-weight:800}@media(max-width:900px){.member-console-toolbar,.member-row{grid-template-columns:1fr}.member-actions input{width:100%}.member-actions .btn{flex:1 1 120px}}
+.member-console-toolbar{display:grid;grid-template-columns:minmax(220px,1fr) minmax(260px,1.4fr);gap:14px;align-items:end;margin-bottom:16px}.member-row{display:grid;grid-template-columns:minmax(180px,1.3fr) minmax(140px,.8fr) minmax(290px,1.5fr);gap:12px;align-items:center}.member-main{min-width:0}.member-name{font-weight:800;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.member-meta{font-size:12px;color:var(--muted);margin-top:4px}.member-actions{display:flex;gap:8px;flex-wrap:wrap;align-items:center}.member-actions input[type="number"]{width:112px;min-height:40px}.member-toggle{display:inline-flex;align-items:center;gap:5px;font-size:12px;color:var(--muted);white-space:nowrap}.member-toggle input{width:auto;min-height:auto}.member-lock{font-size:12px;font-weight:800;color:#b45309}.member-history-message{white-space:pre-wrap;word-break:break-word}.member-history-time{font-size:12px;color:var(--muted);margin-bottom:6px}.member-role-owner{font-weight:800}.member-role-admin{font-weight:700}.member-muted{color:#b45309;font-weight:800}@media(max-width:900px){.member-console-toolbar,.member-row{grid-template-columns:1fr}.member-actions input{width:100%}.member-actions .btn{flex:1 1 120px}}
 </style>`;
   source = source.includes("</head>") ? source.replace("</head>", style + "\n</head>") : style + source;
 
@@ -267,8 +289,9 @@ function injectPortalMembersClient(html) {
     root.innerHTML='';
     rows.forEach(function(member){
       var row=document.createElement('div');row.className='item member-row';
-      var state=member.muted?'<span class="member-muted">禁言中，剩余 '+safe(secondsText(member.muteRemainingSeconds))+'</span>':'<span class="status ok">可发言</span>';
-      row.innerHTML='<div class="member-main"><div class="member-name member-role-'+safe(member.role)+'">'+safe(member.name||member.qq)+'</div><div class="member-meta">QQ '+safe(member.qq)+'｜'+safe(roleText(member.role))+(member.title?'｜'+safe(member.title):'')+'</div></div><div>'+state+'</div><div class="member-actions"><button class="btn member-history" data-qq="'+safe(member.qq)+'">历史消息</button><input class="member-seconds" type="number" min="1" max="2592000" value="60" aria-label="禁言秒数"><button class="btn danger member-mute" data-qq="'+safe(member.qq)+'">禁言（秒）</button><button class="btn member-unmute" data-qq="'+safe(member.qq)+'">解禁</button></div>';
+      var lock=member.muteLock,lockText=lock?(lock.source==='self'?'自我禁言锁':(lock.allowOwnerUnmute?'防解除：开发者或群主':'防解除：仅开发者')):'';
+      var state=member.muted?'<span class="member-muted">禁言中，剩余 '+safe(secondsText(member.muteRemainingSeconds))+'</span>':'<span class="status ok">可发言</span>';if(lockText)state+=' <span class="member-lock">'+safe(lockText)+'</span>';
+      row.innerHTML='<div class="member-main"><div class="member-name member-role-'+safe(member.role)+'">'+safe(member.name||member.qq)+'</div><div class="member-meta">QQ '+safe(member.qq)+'｜'+safe(roleText(member.role))+(member.title?'｜'+safe(member.title):'')+'</div></div><div>'+state+'</div><div class="member-actions"><button class="btn member-history" data-qq="'+safe(member.qq)+'">历史消息</button><input class="member-seconds" type="number" min="1" max="2592000" value="60" aria-label="禁言秒数"><label class="member-toggle"><input class="member-protect" type="checkbox">防解除</label><label class="member-toggle"><input class="member-owner-unlock" type="checkbox" disabled>群主可解除</label><label class="member-toggle"><input class="member-skip-confirm" type="checkbox">跳过确认</label><button class="btn danger member-mute" data-qq="'+safe(member.qq)+'">禁言（秒）</button><button class="btn member-unmute" data-qq="'+safe(member.qq)+'">解禁</button></div>';
       root.appendChild(row)
     });
     if(!root.children.length)root.innerHTML='<div class="empty">没有符合条件的群友</div>'
@@ -290,12 +313,13 @@ function injectPortalMembersClient(html) {
   }
   async function muteMember(button){
     var row=button.closest('.member-row'),input=row&&row.querySelector('.member-seconds'),seconds=Math.trunc(Number(input&&input.value||0)),qq=button.dataset.qq;
+    var protect=!!(row&&row.querySelector('.member-protect')&&row.querySelector('.member-protect').checked),ownerUnlock=!!(row&&row.querySelector('.member-owner-unlock')&&row.querySelector('.member-owner-unlock').checked),skip=!!(row&&row.querySelector('.member-skip-confirm')&&row.querySelector('.member-skip-confirm').checked);
     if(!seconds||seconds<1){notify('请输入大于 0 的禁言秒数');return}
-    var ok=typeof confirmModal==='function'?await confirmModal('确定禁言 QQ '+qq+' '+seconds+' 秒？','确认禁言'):window.confirm('确定禁言 QQ '+qq+' '+seconds+' 秒？');if(!ok)return;
-    var result=await call('/members/mute','POST',{qq:qq,seconds:seconds});notify(result.message||'操作完成');if(result.ok)loadMembers()
+    if(!skip){var ok=typeof confirmModal==='function'?await confirmModal('确定禁言 QQ '+qq+' '+seconds+' 秒'+(protect?'并启用防解除':'')+'？','确认禁言'):window.confirm('确定禁言 QQ '+qq+' '+seconds+' 秒？');if(!ok)return}
+    var result=await call('/members/mute','POST',{qq:qq,seconds:seconds,protect:protect,allowOwnerUnmute:ownerUnlock});notify(result.message||'操作完成');if(result.ok)loadMembers()
   }
   async function unmuteMember(button){
-    var qq=button.dataset.qq,ok=typeof confirmModal==='function'?await confirmModal('确定解除 QQ '+qq+' 的禁言？','确认解禁'):window.confirm('确定解除 QQ '+qq+' 的禁言？');if(!ok)return;
+    var row=button.closest('.member-row'),qq=button.dataset.qq,skip=!!(row&&row.querySelector('.member-skip-confirm')&&row.querySelector('.member-skip-confirm').checked);if(!skip){var ok=typeof confirmModal==='function'?await confirmModal('确定解除 QQ '+qq+' 的禁言？','确认解禁'):window.confirm('确定解除 QQ '+qq+' 的禁言？');if(!ok)return}
     var result=await call('/members/unmute','POST',{qq:qq});notify(result.message||'操作完成');if(result.ok)loadMembers()
   }
   document.addEventListener('click',function(event){
@@ -307,7 +331,7 @@ function injectPortalMembersClient(html) {
     else if(target.classList.contains('member-mute'))muteMember(target);
     else if(target.classList.contains('member-unmute'))unmuteMember(target)
   });
-  document.addEventListener('input',function(event){if(event.target&&event.target.id==='memberSearch')renderMembers()});
+  document.addEventListener('input',function(event){if(event.target&&event.target.id==='memberSearch')renderMembers();if(event.target&&event.target.classList&&event.target.classList.contains('member-protect')){var row=event.target.closest('.member-row'),owner=row&&row.querySelector('.member-owner-unlock');if(owner){owner.disabled=!event.target.checked;if(!event.target.checked)owner.checked=false}}});
   var selector=el('groupSelect');if(selector)selector.addEventListener('change',function(){if(isMembersView())setTimeout(loadMembers,100)});
   var refresh=el('refresh');if(refresh)refresh.addEventListener('click',function(){if(isMembersView())setTimeout(loadMembers,100)});
   syncNav();setInterval(syncNav,3000)
