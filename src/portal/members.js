@@ -17,9 +17,17 @@ function memberConsoleAllowed(authed) {
   );
 }
 
+function normalizeEpochMs(primarySeconds, fallbackValue = 0) {
+  const primary = Number(primarySeconds || 0);
+  if (primary > 0) return primary > 100000000000 ? primary : primary * 1000;
+  const fallback = Number(fallbackValue || 0);
+  if (fallback <= 0) return 0;
+  return fallback > 100000000000 ? fallback : fallback * 1000;
+}
+
 function normalizeMember(raw) {
-  const nowSeconds = Math.floor(Date.now() / 1000);
-  const muteUntilSeconds = Math.max(0, Number(raw?.shut_up_timestamp || raw?.muteUntil || raw?.mute_until || 0));
+  const now = Date.now();
+  const muteUntil = normalizeEpochMs(raw?.shut_up_timestamp ?? raw?.mute_until, raw?.muteUntil);
   const qq = String(raw?.user_id || raw?.qq || "").replace(/\D/g, "");
   const nickname = String(raw?.nickname || raw?.name || qq);
   const card = String(raw?.card || "");
@@ -30,11 +38,11 @@ function normalizeMember(raw) {
     card,
     role: String(raw?.role || "member"),
     isRobot: Boolean(raw?.is_robot || raw?.isRobot),
-    muted: muteUntilSeconds > nowSeconds,
-    muteUntil: muteUntilSeconds > 0 ? muteUntilSeconds * 1000 : 0,
-    muteRemainingSeconds: muteUntilSeconds > nowSeconds ? muteUntilSeconds - nowSeconds : 0,
-    joinTime: Number(raw?.join_time || raw?.joinTime || 0) * (Number(raw?.join_time || 0) > 100000000000 ? 1 : 1000),
-    lastSentTime: Number(raw?.last_sent_time || raw?.lastSentTime || 0) * (Number(raw?.last_sent_time || 0) > 100000000000 ? 1 : 1000),
+    muted: muteUntil > now,
+    muteUntil,
+    muteRemainingSeconds: muteUntil > now ? Math.ceil((muteUntil - now) / 1000) : 0,
+    joinTime: normalizeEpochMs(raw?.join_time, raw?.joinTime),
+    lastSentTime: normalizeEpochMs(raw?.last_sent_time, raw?.lastSentTime),
     level: String(raw?.level || ""),
     title: String(raw?.title || raw?.special_title || raw?.specialTitle || "")
   };
@@ -308,4 +316,4 @@ function injectPortalMembersClient(html) {
   return source.includes("</body>") ? source.replace("</body>", script + "\n</body>") : source + script;
 }
 
-export { handlePortalMemberApi, injectPortalMembersClient, listPortalMembers, memberConsoleAllowed, normalizeMember, parseMuteSeconds };
+export { handlePortalMemberApi, injectPortalMembersClient, listPortalMembers, memberConsoleAllowed, normalizeEpochMs, normalizeMember, parseMuteSeconds };

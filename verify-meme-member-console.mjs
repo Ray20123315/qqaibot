@@ -3,6 +3,7 @@ import fs from "node:fs";
 import {
   injectPortalMembersClient,
   memberConsoleAllowed,
+  normalizeEpochMs,
   normalizeMember,
   parseMuteSeconds
 } from "./src/portal/members.js";
@@ -16,6 +17,8 @@ assert.equal(parseMuteSeconds("1"), 1, "Mute duration must support seconds direc
 assert.equal(parseMuteSeconds(31 * 24 * 3600), 30 * 24 * 3600, "Mute duration must clamp to the OneBot safety maximum");
 assert.equal(parseMuteSeconds(0), 0);
 assert.equal(parseMuteSeconds("bad"), 0);
+assert.equal(normalizeEpochMs(1700000000, 0), 1700000000000);
+assert.equal(normalizeEpochMs(0, 1700000000000), 1700000000000);
 
 const nowSeconds = Math.floor(Date.now() / 1000);
 const member = normalizeMember({
@@ -30,6 +33,9 @@ assert.equal(member.name, "群名片");
 assert.equal(member.role, "admin");
 assert.equal(member.muted, true);
 assert(member.muteRemainingSeconds >= 115 && member.muteRemainingSeconds <= 120);
+const cachedMember = normalizeMember(member);
+assert.equal(cachedMember.muteUntil, member.muteUntil, "Cached normalized member timestamps must not be multiplied again");
+assert(cachedMember.muteRemainingSeconds >= 115 && cachedMember.muteRemainingSeconds <= 120);
 
 const sampleHtml = '<!doctype html><html><head></head><body><nav><button data-view="logs">操作日志</button></nav><main><section id="v-logs" class="view"></section></main></body></html>';
 const injected = injectPortalMembersClient(sampleHtml);
@@ -47,6 +53,7 @@ assert(moderation.includes("const spamEvidence = repeatedMessageBurst"), "Repeat
 assert(moderation.includes("const memeProtected = repeatedMessageBurst"), "Verified meme and chain context must be able to prevent a false spam penalty");
 assert(moderation.includes("learnedMemeExamples"), "Manager-confirmed group memes must be reused in later decisions");
 assert(moderation.includes("搜不到只能视为未知"), "A failed search must not be treated as proof that something is not a meme");
+assert(moderation.includes("警告|撤回|禁言|踢出"), "Explicit group-rule punishments must override meme exemptions");
 assert(!moderation.includes("const deterministicSpamReview = repeatedMessageBurst ? {"), "The old unconditional deterministic spam verdict must be removed");
 
 const portal = fs.readFileSync("src/portal/runtime.js", "utf8");

@@ -1714,7 +1714,7 @@ async function inspectMessageAgainstGroupRules(env, { groupId, userId, senderNam
     humanFeedbackExamples,
     learnedExamples: learnedMemeExamples
   });
-  const explicitMemeSpamRule = Boolean(rules && /(?:禁止|严禁|嚴禁|不得).{0,12}(?:刷屏|复读|復讀|接龙|接龍|玩梗)|(?:刷屏|复读|復讀|接龙|接龍|玩梗).{0,12}(?:禁止|严禁|嚴禁|不得)/i.test(rules));
+  const explicitMemeSpamRule = Boolean(rules && /(?:禁止|严禁|嚴禁|不得|违规|違規|处罚|處罰|警告|撤回|禁言|踢出).{0,20}(?:刷屏|复读|復讀|接龙|接龍|玩梗)|(?:刷屏|复读|復讀|接龙|接龍|玩梗).{0,20}(?:禁止|严禁|嚴禁|不得|违规|違規|处罚|處罰|警告|撤回|禁言|踢出)/i.test(rules));
   const memeProtected = repeatedMessageBurst
     && memeVerification?.likelyMeme === true
     && Number(memeVerification.confidence || 0) >= 0.7
