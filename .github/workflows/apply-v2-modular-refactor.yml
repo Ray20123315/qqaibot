@@ -58,9 +58,9 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          echo '32f46f4f1c482bc97b0558d665e99a050242e0627e313f592f8e0f167c8b317f  .qqai-v2-refactor/final-files.tar.gz.b64' | sha256sum -c -
-          base64 -d .qqai-v2-refactor/final-files.tar.gz.b64 > /tmp/final-files.tar.gz
+          tr -d '\r\n\t ' < .qqai-v2-refactor/final-files.tar.gz.b64 | base64 -d > /tmp/final-files.tar.gz
           echo '0e3a2adee8dc351e4e4e8bf6254a2fc6d8d2294b1908b15c8b53c81024b21654  /tmp/final-files.tar.gz' | sha256sum -c -
+          tar -tzf /tmp/final-files.tar.gz >/dev/null
           tar -xzf /tmp/final-files.tar.gz -C .
 
       - name: Install final dependencies
