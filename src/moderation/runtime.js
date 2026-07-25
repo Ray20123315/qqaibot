@@ -225,37 +225,66 @@ async function reviewJoinRequestAssist(env, requestInfo) {
 
 
 
-async function resolveSubgroupJoinFamily(env, groupId) {
+async function resolveHeadJoinFamily(env, groupId) {
   const id = String(groupId || "").replace(/\D/g, "");
   if (!id) return null;
-  const headGroupId = String(await dbGet(env, `group_family:member:${id}`) || "").replace(/\D/g, "");
-  if (!headGroupId || headGroupId === id) return null;
-  const family = await readJson(env, `group_family:${headGroupId}`, null);
-  if (!family || String(family.headGroupId || "") !== headGroupId) return null;
-  const branch = (Array.isArray(family.branches) ? family.branches : []).find(item => String(item?.groupId || "") === id);
-  if (!branch) return null;
-  return {
-    headGroupId,
-    headAlias: String(family.headAlias || headGroupId),
-    branchAlias: String(branch.alias || id)
-  };
+  const family = await readJson(env, "group_family:" + id, null);
+  if (!family || String(family.headGroupId || "") !== id) return null;
+  const branches = (Array.isArray(family.branches) ? family.branches : []).map(item => ({
+    groupId: String(item?.groupId || "").replace(/\D/g, ""),
+    alias: String(item?.alias || item?.groupId || "分群").trim().slice(0, 80)
+  })).filter(item => item.groupId && item.groupId !== id).slice(0, 50);
+  if (!branches.length) return null;
+  return { headGroupId: id, headAlias: String(family.headAlias || id), branches };
 }
 
 
+async function findApplicantBranchMembership(env, family, userId) {
+  const qq = String(userId || "").replace(/\D/g, "");
+  if (!qq || !family) return null;
+  const branches = Array.isArray(family.branches) ? family.branches : [];
+  if (!branches.length) return null;
+  const checks = branches.map(async branch => {
+    const response = await callOneBotAction(env, {
+      action: "get_group_member_info",
+      params: { group_id: numericId(branch.groupId), user_id: numericId(qq), no_cache: true }
+    }, 8000);
+    const member = response?.data && typeof response.data === "object" ? response.data : response;
+    const memberId = String(member?.user_id || member?.qq || "").replace(/\D/g, "");
+    if (memberId !== qq) throw new Error("Applicant is not a live member of this branch");
+    return {
+      groupId: String(branch.groupId),
+      branchAlias: String(branch.alias || branch.groupId),
+      userId: qq,
+      memberName: String(member?.card || member?.nickname || member?.name || qq),
+      role: String(member?.role || "member"),
+      verifiedAt: Date.now(),
+      source: "onebot_live_member_info"
+    };
+  });
+  try {
+    return await Promise.any(checks);
+  } catch {
+    return null;
+  }
+}
+
 
 async function createJoinRequestAssist(env, body) {
-  const groupId = String(body.group_id || "");
+  const groupId = String(body.group_id || "").replace(/\D/g, "");
+  const userId = String(body.user_id || "").replace(/\D/g, "");
   const comment = String(body.comment || "");
   const subType = String(body.sub_type || "add");
-  const subgroupFamily = await resolveSubgroupJoinFamily(env, groupId);
+  const headFamily = subType === "add" ? await resolveHeadJoinFamily(env, groupId) : null;
+  const branchMembership = headFamily && userId ? await findApplicantBranchMembership(env, headFamily, userId) : null;
   const patternHash = await joinRequestPatternHash(comment, subType);
 
-  if (subgroupFamily) {
+  if (branchMembership) {
     const id = `jr_${Date.now().toString(36)}_${crypto.randomUUID().slice(0, 6)}`;
     const item = {
       id,
       groupId,
-      userId: String(body.user_id || ""),
+      userId,
       flag: String(body.flag || ""),
       subType,
       comment,
@@ -264,35 +293,44 @@ async function createJoinRequestAssist(env, body) {
         decision: "direct_approve",
         riskLevel: "not_applicable",
         confidence: 1,
-        reason: "分群申请依群组政策直接同意，不经过 AI 审核",
-        family: subgroupFamily
+        reason: "OneBot 已即时确认申请者为分群「" + branchMembership.branchAlias + "」成员，依群组政策直接同意，不经过 AI 审核",
+        family: {
+          headGroupId: headFamily.headGroupId,
+          headAlias: headFamily.headAlias,
+          sourceGroupId: branchMembership.groupId,
+          sourceGroupAlias: branchMembership.branchAlias
+        },
+        membership: branchMembership
       },
-      status: "approved_subgroup_direct",
+      status: "approved_subgroup_member_direct",
       createdAt: Date.now()
     };
     try {
       await callOneBotAction(env, { action: "set_group_add_request", params: { flag: item.flag, sub_type: subType, approve: true, reason: "" } }, 15000);
       await recordJoinPatternDecision(env, groupId, patternHash, comment, "approved");
       await writeSystemAudit(env, {
-        type: "join_request_subgroup_direct_approved",
+        type: "join_request_subgroup_member_direct_approved",
         groupId,
-        actorId: "system:subgroup_join_policy",
+        actorId: "system:subgroup_member_join_policy",
         targetId: item.userId,
         action: "approve",
         reason: item.review.reason,
-        headGroupId: subgroupFamily.headGroupId
+        headGroupId: headFamily.headGroupId,
+        sourceGroupId: branchMembership.groupId,
+        membershipSource: branchMembership.source
       });
     } catch (error) {
       item.status = "approve_failed";
       item.result = String(error?.message || error);
       await writeSystemAudit(env, {
-        type: "join_request_subgroup_direct_approve_failed",
+        type: "join_request_subgroup_member_direct_approve_failed",
         groupId,
-        actorId: "system:subgroup_join_policy",
+        actorId: "system:subgroup_member_join_policy",
         targetId: item.userId,
         action: "approve_failed",
         error: item.result,
-        headGroupId: subgroupFamily.headGroupId
+        headGroupId: headFamily.headGroupId,
+        sourceGroupId: branchMembership.groupId
       }).catch(() => {});
     }
     await dbPut(env, `joinrequest:${id}`, JSON.stringify(item));
@@ -2267,4 +2305,4 @@ async function listModerationProposals(env, groupId, { limit = 100 } = {}) {
   return items;
 }
 
-export { addRuleStrike, detectRepeatedMessageBurst, appendHumanCorrectionToRulePolicy, appendRuleViolationRecord, attachModerationProposalMessage, classifyNaturalModerationIntent, createGroupWorkRequest, createJoinRequestAssist, createModerationProposal, decideJoinRequestAssist, defaultRuleCategoryPolicies, defaultRuleProgressivePolicy, detectNaturalModerationProposal, executeGroupWorkRequest, executeModerationProposal, explicitPromotionLanguage, extractHtmlMetadata, extractOneBotMessageId, extractRuleReviewUrls, findLatestActiveRuleViolationForUser, findLatestPendingModerationProposalId, formatModerationPermissionDenied, formatModerationProposal, getGroupMemberSafe, getRuleCategoryPolicies, getRuleProgressivePolicy, handleGroupWorkDecision, handleModerationConfirmation, inspectMessageAgainstGroupRules, inspectUrlsForRuleReview, joinRequestPatternHash, listModerationProposals, localModerationIntent, matchRuleCategoryPolicy, moderationActionLabel, moderationActionNeedsTarget, moderationPermissionLevelLabel, normalizeProgressiveAction, normalizeProgressiveActionSpecs, normalizeRuleCategoryPolicies, normalizeRulePolicyActionSpec, normalizeRulePolicyActions, normalizeRulePolicyPunishment, normalizeRuleProgressivePolicy, normalizeRuleProxyMode, normalizeRuleSeverity, normalizeRuleStrictness, parseModerationConfirmation, parseUnlimitedNonNegativeInteger, performRuleAdditionalActions, performRuleProxyAction, progressiveMuteFallback, readJoinPattern, readRecentRuleFeedbackExamples, readResponseTextPrefix, readRuleMemeExamples, rememberRuleMemeExample, recordJoinPatternDecision, recordRuleViolationFeedback, removeRuleStrike, requestRuleManagerClarification, resolveAdaptiveRuleStrictness, resolveModerationTarget, resolveSubgroupJoinFamily, resolveRuleProgressiveStep, retractModerationProposalMessage, reverseRuleViolationAction, reviewGroupWorkWithGemma, reviewJoinRequestAssist, ruleBaseActionName, ruleContentNeedsWebVerification, ruleProxyCooldownRemaining, ruleStrictnessConfig, ruleStrictnessLabel, updateRuleViolationRecord, validateModerationProposalTarget, verifyRuleMemeContext, verifyRuleNewsContext };
+export { addRuleStrike, detectRepeatedMessageBurst, appendHumanCorrectionToRulePolicy, appendRuleViolationRecord, attachModerationProposalMessage, classifyNaturalModerationIntent, createGroupWorkRequest, createJoinRequestAssist, createModerationProposal, decideJoinRequestAssist, defaultRuleCategoryPolicies, defaultRuleProgressivePolicy, detectNaturalModerationProposal, executeGroupWorkRequest, executeModerationProposal, explicitPromotionLanguage, extractHtmlMetadata, extractOneBotMessageId, extractRuleReviewUrls, findLatestActiveRuleViolationForUser, findLatestPendingModerationProposalId, formatModerationPermissionDenied, formatModerationProposal, getGroupMemberSafe, getRuleCategoryPolicies, getRuleProgressivePolicy, handleGroupWorkDecision, handleModerationConfirmation, inspectMessageAgainstGroupRules, inspectUrlsForRuleReview, joinRequestPatternHash, listModerationProposals, localModerationIntent, matchRuleCategoryPolicy, moderationActionLabel, moderationActionNeedsTarget, moderationPermissionLevelLabel, normalizeProgressiveAction, normalizeProgressiveActionSpecs, normalizeRuleCategoryPolicies, normalizeRulePolicyActionSpec, normalizeRulePolicyActions, normalizeRulePolicyPunishment, normalizeRuleProgressivePolicy, normalizeRuleProxyMode, normalizeRuleSeverity, normalizeRuleStrictness, parseModerationConfirmation, parseUnlimitedNonNegativeInteger, performRuleAdditionalActions, performRuleProxyAction, progressiveMuteFallback, readJoinPattern, readRecentRuleFeedbackExamples, readResponseTextPrefix, readRuleMemeExamples, rememberRuleMemeExample, recordJoinPatternDecision, recordRuleViolationFeedback, removeRuleStrike, requestRuleManagerClarification, resolveAdaptiveRuleStrictness, resolveModerationTarget, findApplicantBranchMembership, resolveHeadJoinFamily, resolveRuleProgressiveStep, retractModerationProposalMessage, reverseRuleViolationAction, reviewGroupWorkWithGemma, reviewJoinRequestAssist, ruleBaseActionName, ruleContentNeedsWebVerification, ruleProxyCooldownRemaining, ruleStrictnessConfig, ruleStrictnessLabel, updateRuleViolationRecord, validateModerationProposalTarget, verifyRuleMemeContext, verifyRuleNewsContext };

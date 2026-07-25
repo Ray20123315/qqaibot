@@ -1,16 +1,11 @@
 {
-  "version": "2.0.4",
+  "version": "2.0.5",
   "notificationPolicy": "latest-main-only-with-runtime-success-fallback",
   "queueDelivery": "mark-processed-after-success",
   "added": [
-    "群规判断的联网流行梗、接龙与群内梗核查",
-    "管理员人工纠错后的群内梗学习记录",
-    "Portal 群友列表、群内历史消息、按秒禁言与所有管理手动解禁"
+    "总群入群申请在 OneBot 即时确认申请者属于绑定分群时直接同意"
   ],
   "fixed": [
-    "达到重复门槛后直接处罚，导致流行梗和多人接龙被当作刷屏",
-    "明确写有警告、撤回、禁言或踢出等处罚的群规未完全压过梗豁免",
-    "管理员无法从 Portal 快速查看成员历史消息并直接解禁",
-    "群友列表使用缓存时禁言截止时间被重复换算"
+    "旧逻辑只判断申请目标是分群，可能将未验证的陌生申请者自动放行"
   ]
 }
