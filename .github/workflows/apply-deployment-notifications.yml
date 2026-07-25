@@ -51,49 +51,41 @@ jobs:
               'import { appendChatHistoryTurn, clearChatSessionHistory, dbDel, dbGet, dbPut, readChatHistory, withTimeout } from "./src/data/store.js";\n',
               'import { appendChatHistoryTurn, clearChatSessionHistory, dbDel, dbGet, dbPut, readChatHistory, withTimeout } from "./src/data/store.js";\nimport { getDeploymentStatusForViewer, handleDeploymentBuildQueue, injectDeploymentPortalClient } from "./src/deployment/notifications.js";\n'
           )
-
           replace_once(
               'worker.js',
               'generateSixDigitCode, getOneBotHub, getPublicNebulaSeed,',
               'generateSixDigitCode, getOneBotHub, getPortalSession, getPublicNebulaSeed,'
           )
-
           replace_once(
               'worker.js',
               "    if (request.method === 'GET' && ['/', '/portal', '/matrix'].includes(url.pathname)) {\n      return new Response(toSimplifiedChinese(getPortalHomePage(url.host)), {\n        headers: { \"Content-Type\": \"text/html; charset=utf-8\" }\n      });\n    }",
               "    if (request.method === 'GET' && ['/', '/portal', '/matrix'].includes(url.pathname)) {\n      const portalHtml = injectDeploymentPortalClient(toSimplifiedChinese(getPortalHomePage(url.host)));\n      return new Response(portalHtml, {\n        headers: { \"Content-Type\": \"text/html; charset=utf-8\", \"Cache-Control\": \"no-store\" }\n      });\n    }"
           )
-
           replace_once(
               'worker.js',
               "    if (url.pathname.startsWith('/api/portal/')) {\n      return handlePortalApi(request, env, url);\n    }",
               "    if (request.method === 'GET' && url.pathname === '/api/deployment/status') {\n      const token = readCookie(request, 'qqai_session');\n      const session = await getPortalSession(env, token, { touch: false }).catch(() => null);\n      if (!session) return jsonResponse({ ok: false, message: '请先登录 Portal。' }, 401);\n      return jsonResponse(await getDeploymentStatusForViewer(env, session));\n    }\n\n    if (url.pathname.startsWith('/api/portal/')) {\n      return handlePortalApi(request, env, url);\n    }"
           )
-
           replace_once(
               'worker.js',
               "  async scheduled(controller, env, ctx) {\n    ctx.waitUntil(dbPut(env, \"system:last_cron\", String(Number(controller?.scheduledTime || Date.now()))));\n    ctx.waitUntil(processDueSchedules(env, Number(controller?.scheduledTime || Date.now())));\n    ctx.waitUntil(cleanupTransientState(env));\n    ctx.waitUntil(cleanupExpiredModerationProposals(env));\n    ctx.waitUntil(runAutomaticGroupCheckins(env, Number(controller?.scheduledTime || Date.now())));\n    ctx.waitUntil(processPlatformJobs(env, Number(controller?.scheduledTime || Date.now())));\n    ctx.waitUntil(opsProcessAutomations(env, Number(controller?.scheduledTime || Date.now())));\n    ctx.waitUntil(pollAutomaticBilibiliConnectors(env, Number(controller?.scheduledTime || Date.now())));\n  }\n};",
               "  async scheduled(controller, env, ctx) {\n    ctx.waitUntil(dbPut(env, \"system:last_cron\", String(Number(controller?.scheduledTime || Date.now()))));\n    ctx.waitUntil(processDueSchedules(env, Number(controller?.scheduledTime || Date.now())));\n    ctx.waitUntil(cleanupTransientState(env));\n    ctx.waitUntil(cleanupExpiredModerationProposals(env));\n    ctx.waitUntil(runAutomaticGroupCheckins(env, Number(controller?.scheduledTime || Date.now())));\n    ctx.waitUntil(processPlatformJobs(env, Number(controller?.scheduledTime || Date.now())));\n    ctx.waitUntil(opsProcessAutomations(env, Number(controller?.scheduledTime || Date.now())));\n    ctx.waitUntil(pollAutomaticBilibiliConnectors(env, Number(controller?.scheduledTime || Date.now())));\n  },\n\n  async queue(batch, env, ctx) {\n    await handleDeploymentBuildQueue(batch, env);\n  }\n};"
           )
-
           replace_once('src/config/runtime.js', 'const VERSION = "2.0.0";', 'const VERSION = "2.0.1";')
 
           wrangler = Path('wrangler.toml')
           text = wrangler.read_text(encoding='utf-8')
-          marker = 'DEPLOY_NOTIFY_WORKER_NAME = "qqai"'
-          if marker not in text:
+          if 'DEPLOY_NOTIFY_WORKER_NAME = "qqai"' not in text:
               old = '[vars]\nDEVELOPER_ID = "3569028262"\n'
               new = '[vars]\nDEVELOPER_ID = "3569028262"\nDEPLOY_NOTIFY_WORKER_NAME = "qqai"\nDEPLOY_NOTIFY_BRANCH = "main"\nDEPLOY_NOTIFY_START_COOLDOWN_SECONDS = "600"\n'
               if old not in text:
                   raise SystemExit('wrangler vars anchor missing')
-              text = text.replace(old, new, 1)
-              wrangler.write_text(text, encoding='utf-8')
+              wrangler.write_text(text.replace(old, new, 1), encoding='utf-8')
 
           readme = Path('README.md')
           text = readme.read_text(encoding='utf-8')
-          marker = '## 部署通知（單一 Worker）'
-          if marker not in text:
-              text += '''\n\n## 部署通知（單一 Worker）\n\n程式已支援 Cloudflare Workers Builds Event Subscriptions，仍由原本的 `qqai` Worker 消費事件，不會新增第二個 Worker。\n\n啟用方式：\n\n1. 在 Cloudflare Queues 建立 `qqai-deploy-events`。\n2. 將該 Queue 的 Consumer 指向現有 Worker `qqai`。\n3. 在 Queue 的 Subscriptions 訂閱 Workers Builds，Worker 選擇 `qqai`，事件勾選 `build.started`、`build.succeeded`、`build.failed`、`build.canceled`。\n4. 可選：設定 Secret `CLOUDFLARE_BUILDS_API_TOKEN`（Workers CI Read），失敗時會私訊開發者更完整的 Build Logs；未設定時仍會提供 Build UUID、Commit 與事件附帶錯誤。\n\n防洗版規則：只處理 `main`、依 Build UUID 去重、部署中通知預設十分鐘冷卻、只通知最新 Build 的最終結果。白名單群只收到簡短成功／失敗；失敗詳細資料只提供給 `DEPLOY_NOTIFY_DEVELOPER_ID`、`DEVELOPER_ID` 或預設開發者 QQ。\n'''
+          if '## 部署通知（單一 Worker）' not in text:
+              text += '\n\n## 部署通知（單一 Worker）\n\n程式已支援 Cloudflare Workers Builds Event Subscriptions，仍由原本的 `qqai` Worker 消費事件，不會新增第二個 Worker。\n\n啟用方式：\n\n1. 在 Cloudflare Queues 建立 `qqai-deploy-events`。\n2. 將該 Queue 的 Consumer 指向現有 Worker `qqai`。\n3. 在 Queue 的 Subscriptions 訂閱 Workers Builds，Worker 選擇 `qqai`，事件勾選 `build.started`、`build.succeeded`、`build.failed`、`build.canceled`。\n4. 可選：設定 Secret `CLOUDFLARE_BUILDS_API_TOKEN`（Workers CI Read），失敗時會私訊開發者更完整的 Build Logs；未設定時仍會提供 Build UUID、Commit 與事件附帶錯誤。\n\n防洗版規則：只處理 `main`、依 Build UUID 去重、部署中通知預設十分鐘冷卻、只通知最新 Build 的最終結果。白名單群只收到簡短成功／失敗；失敗詳細資料只提供給 `DEPLOY_NOTIFY_DEVELOPER_ID`、`DEVELOPER_ID` 或預設開發者 QQ。\n'
               readme.write_text(text, encoding='utf-8')
           PY
 
@@ -103,43 +95,12 @@ jobs:
           set -euo pipefail
           python3 - <<'PY'
           from pathlib import Path
-
           path = Path('src/deployment/notifications.js')
           text = path.read_text(encoding='utf-8')
           replacements = [
-              (
-                  '''  const seenKey = `deployment:seen:${record.buildUuid}:${record.kind}`;
-  if (await kvGet(env, seenKey)) return { ignored: true, reason: "duplicate" };
-  await kvPut(env, seenKey, String(Date.now()));
-''',
-                  '''  const seenKey = `deployment:seen:${record.buildUuid}:${record.kind}`;
-  if (await kvGet(env, seenKey)) return { ignored: true, reason: "duplicate" };
-'''
-              ),
-              (
-                  '''  await kvPut(env, STATUS_KEY, JSON.stringify(portalRecord));
-  await appendHistory(env, portalRecord);
-
-  if (stale) return { ignored: true, reason: "stale_terminal", record: portalRecord };
-''',
-                  '''  await appendHistory(env, portalRecord);
-
-  if (stale) {
-    await kvPut(env, seenKey, String(Date.now()));
-    return { ignored: true, reason: "stale_terminal", record: portalRecord };
-  }
-  await kvPut(env, STATUS_KEY, JSON.stringify(portalRecord));
-'''
-              ),
-              (
-                  '''  await kvPut(env, STATUS_KEY, JSON.stringify({ ...portalRecord, groupNotification, developerNotification }));
-  return { ok: true, record: portalRecord, groupNotification, developerNotification };
-''',
-                  '''  await kvPut(env, STATUS_KEY, JSON.stringify({ ...portalRecord, groupNotification, developerNotification }));
-  await kvPut(env, seenKey, String(Date.now()));
-  return { ok: true, record: portalRecord, groupNotification, developerNotification };
-'''
-              )
+              ('  const seenKey = `deployment:seen:${record.buildUuid}:${record.kind}`;\n  if (await kvGet(env, seenKey)) return { ignored: true, reason: "duplicate" };\n  await kvPut(env, seenKey, String(Date.now()));\n', '  const seenKey = `deployment:seen:${record.buildUuid}:${record.kind}`;\n  if (await kvGet(env, seenKey)) return { ignored: true, reason: "duplicate" };\n'),
+              ('  await kvPut(env, STATUS_KEY, JSON.stringify(portalRecord));\n  await appendHistory(env, portalRecord);\n\n  if (stale) return { ignored: true, reason: "stale_terminal", record: portalRecord };\n', '  await appendHistory(env, portalRecord);\n\n  if (stale) {\n    await kvPut(env, seenKey, String(Date.now()));\n    return { ignored: true, reason: "stale_terminal", record: portalRecord };\n  }\n  await kvPut(env, STATUS_KEY, JSON.stringify(portalRecord));\n'),
+              ('  await kvPut(env, STATUS_KEY, JSON.stringify({ ...portalRecord, groupNotification, developerNotification }));\n  return { ok: true, record: portalRecord, groupNotification, developerNotification };\n', '  await kvPut(env, STATUS_KEY, JSON.stringify({ ...portalRecord, groupNotification, developerNotification }));\n  await kvPut(env, seenKey, String(Date.now()));\n  return { ok: true, record: portalRecord, groupNotification, developerNotification };\n')
           ]
           for old, new in replacements:
               if new in text:
