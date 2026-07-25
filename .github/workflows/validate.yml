@@ -56,12 +56,30 @@ jobs:
       - name: Install dependencies
         run: npm install --ignore-scripts
       - name: Run regression checks
-        run: npm run check
+        id: regression
+        shell: bash
+        run: |
+          set +e
+          npm run check > v231-regression.log 2>&1
+          status=$?
+          cat v231-regression.log
+          echo "status=$status" >> "$GITHUB_OUTPUT"
+          exit 0
+      - name: Upload regression diagnostics
+        if: steps.regression.outputs.status != '0'
+        uses: actions/upload-artifact@v4
+        with:
+          name: v231-regression-diagnostics
+          path: v231-regression.log
+          retention-days: 1
+      - name: Stop on regression failure
+        if: steps.regression.outputs.status != '0'
+        run: exit 1
       - name: Build the single Worker bundle
         run: npm run check:bundle
       - name: Commit validated source changes
         run: |
-          rm -rf node_modules dist package-lock.json
+          rm -rf node_modules dist package-lock.json v231-regression.log apply-v231.log
           git config user.name github-actions[bot]
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
           git add package.json release-notes.json src/config/runtime.js worker.js verify-*.mjs
