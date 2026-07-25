@@ -236,10 +236,13 @@ async function processBuildEvent(env, event) {
     publicMessage: publicMessage(record),
     processedAt: Date.now()
   };
-  await kvPut(env, STATUS_KEY, JSON.stringify(portalRecord));
   await appendHistory(env, portalRecord);
 
-  if (stale) return { ignored: true, reason: "stale_terminal", record: portalRecord };
+  if (stale) {
+    await kvPut(env, seenKey, String(Date.now()));
+    return { ignored: true, reason: "stale_terminal", record: portalRecord };
+  }
+  await kvPut(env, STATUS_KEY, JSON.stringify(portalRecord));
 
   let groupNotification = null;
   if (record.kind === "started") {
@@ -264,6 +267,7 @@ async function processBuildEvent(env, event) {
   if (record.kind === "failed") developerNotification = await notifyDeveloperFailure(env, portalRecord, String(event?.metadata?.accountId || ""));
 
   await kvPut(env, STATUS_KEY, JSON.stringify({ ...portalRecord, groupNotification, developerNotification }));
+  await kvPut(env, seenKey, String(Date.now()));
   return { ok: true, record: portalRecord, groupNotification, developerNotification };
 }
 
