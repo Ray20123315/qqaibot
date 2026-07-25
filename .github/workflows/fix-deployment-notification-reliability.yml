@@ -7,6 +7,7 @@ on:
     types: [opened, synchronize, reopened]
     paths:
       - src/deployment/notifications.js
+      - verify-deployment-notifications.mjs
       - .github/workflows/fix-deployment-notification-reliability.yml
 
 permissions:
@@ -27,88 +28,36 @@ jobs:
         with:
           node-version: 22
 
-      - name: Apply queue retry and stale-status guards
+      - name: Apply retry and stale-status guards
         shell: bash
         run: |
           set -euo pipefail
           python3 - <<'PY'
           from pathlib import Path
-
           path = Path('src/deployment/notifications.js')
           text = path.read_text(encoding='utf-8')
-
           replacements = [
-              (
-                  '''  const seenKey = `deployment:seen:${record.buildUuid}:${record.kind}`;
-  if (await kvGet(env, seenKey)) return { ignored: true, reason: "duplicate" };
-  await kvPut(env, seenKey, String(Date.now()));
-''',
-                  '''  const seenKey = `deployment:seen:${record.buildUuid}:${record.kind}`;
-  if (await kvGet(env, seenKey)) return { ignored: true, reason: "duplicate" };
-'''
-              ),
-              (
-                  '''  await kvPut(env, STATUS_KEY, JSON.stringify(portalRecord));
-  await appendHistory(env, portalRecord);
-
-  if (stale) return { ignored: true, reason: "stale_terminal", record: portalRecord };
-''',
-                  '''  await appendHistory(env, portalRecord);
-
-  if (stale) {
-    await kvPut(env, seenKey, String(Date.now()));
-    return { ignored: true, reason: "stale_terminal", record: portalRecord };
-  }
-  await kvPut(env, STATUS_KEY, JSON.stringify(portalRecord));
-'''
-              ),
-              (
-                  '''  await kvPut(env, STATUS_KEY, JSON.stringify({ ...portalRecord, groupNotification, developerNotification }));
-  return { ok: true, record: portalRecord, groupNotification, developerNotification };
-''',
-                  '''  await kvPut(env, STATUS_KEY, JSON.stringify({ ...portalRecord, groupNotification, developerNotification }));
-  await kvPut(env, seenKey, String(Date.now()));
-  return { ok: true, record: portalRecord, groupNotification, developerNotification };
-'''
-              )
+              ('  const seenKey = `deployment:seen:${record.buildUuid}:${record.kind}`;\n  if (await kvGet(env, seenKey)) return { ignored: true, reason: "duplicate" };\n  await kvPut(env, seenKey, String(Date.now()));\n', '  const seenKey = `deployment:seen:${record.buildUuid}:${record.kind}`;\n  if (await kvGet(env, seenKey)) return { ignored: true, reason: "duplicate" };\n'),
+              ('  await kvPut(env, STATUS_KEY, JSON.stringify(portalRecord));\n  await appendHistory(env, portalRecord);\n\n  if (stale) return { ignored: true, reason: "stale_terminal", record: portalRecord };\n', '  await appendHistory(env, portalRecord);\n\n  if (stale) {\n    await kvPut(env, seenKey, String(Date.now()));\n    return { ignored: true, reason: "stale_terminal", record: portalRecord };\n  }\n  await kvPut(env, STATUS_KEY, JSON.stringify(portalRecord));\n'),
+              ('  await kvPut(env, STATUS_KEY, JSON.stringify({ ...portalRecord, groupNotification, developerNotification }));\n  return { ok: true, record: portalRecord, groupNotification, developerNotification };\n', '  await kvPut(env, STATUS_KEY, JSON.stringify({ ...portalRecord, groupNotification, developerNotification }));\n  await kvPut(env, seenKey, String(Date.now()));\n  return { ok: true, record: portalRecord, groupNotification, developerNotification };\n')
           ]
-
           for old, new in replacements:
               if new in text:
                   continue
               if old not in text:
                   raise SystemExit(f'Expected deployment fragment not found: {old[:100]!r}')
               text = text.replace(old, new, 1)
-
           path.write_text(text, encoding='utf-8')
           PY
 
       - name: Install dependencies
         run: npm install --ignore-scripts
 
-      - name: Run regression checks
+      - name: Run behavioral regression checks
         run: npm run check
 
       - name: Build the single Worker bundle
         run: npm run check:bundle
-
-      - name: Verify reliability guards
-        shell: bash
-        run: |
-          set -euo pipefail
-          python3 - <<'PY'
-          from pathlib import Path
-          text = Path('src/deployment/notifications.js').read_text(encoding='utf-8')
-          stale = text.index('if (stale) {')
-          status = text.index('await kvPut(env, STATUS_KEY, JSON.stringify(portalRecord));')
-          if stale >= status:
-              raise SystemExit('Stale terminal events can still overwrite latest Portal status')
-          if 'await kvPut(env, seenKey, String(Date.now()));\n\n  const latestStarted' in text:
-              raise SystemExit('Seen marker is still written before processing finishes')
-          if text.count('await kvPut(env, seenKey, String(Date.now()));') < 2:
-              raise SystemExit('Processed-event markers missing from terminal paths')
-          PY
-          git diff --check
 
       - name: Commit reliability fix
         shell: bash
