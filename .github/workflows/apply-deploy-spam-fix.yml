@@ -68,7 +68,10 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: qqai-regression-check-log
-          path: qqai-regression-check.log
+          path: |
+            qqai-regression-check.log
+            src/deployment/notifications.js
+            src/moderation/runtime.js
           if-no-files-found: warn
           retention-days: 1
 
