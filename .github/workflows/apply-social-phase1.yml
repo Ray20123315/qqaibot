@@ -1,0 +1,57 @@
+name: Apply social digital twin phase one
+
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    if: github.head_ref == 'feature/social-digital-twin-phase1'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.head_ref }}
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Check and apply patch
+        run: |
+          node --check tools/apply-social-phase1.mjs
+          node tools/apply-social-phase1.mjs
+          node --check src/social/runtime.js
+          node --check worker.js
+      - name: Install dependencies
+        run: npm install --ignore-scripts
+      - name: Run regression checks
+        run: npm run check
+      - name: Build single Worker bundle
+        run: npm run check:bundle
+      - name: Enforce social invariants
+        run: |
+          test "$(grep -c 'from "./src/social/runtime.js"' worker.js)" -eq 1
+          grep -q 'oneBotEventIsBareMention(body)' worker.js
+          grep -q 'social_thinking_indicator_enabled' worker.js
+          grep -q 'applySocialOutputPolicy({' worker.js
+          grep -q 'capturePersonaContinuity(env' worker.js
+          grep -q 'waitForSocialTyping({' worker.js
+          grep -q 'const VERSION = "2.1.0"' src/config/runtime.js
+          test ! -e dist/worker-2.js
+      - name: Commit validated change
+        run: |
+          rm -f tools/apply-social-phase1.mjs .github/workflows/apply-social-phase1.yml
+          rmdir tools 2>/dev/null || true
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          if git diff --cached --quiet; then
+            echo "No changes to commit"
+          else
+            git commit -m "Add social digital twin phase one"
+            git push origin HEAD:${{ github.head_ref }}
+          fi
