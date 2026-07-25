@@ -48,6 +48,7 @@ function buildEvent(kind, uuid, createdAt, commitHash) {
   };
 }
 
+const viewer = { qq: "123", role: "member", permissions: {} };
 const env = { DB: new MockD1(), DEPLOY_NOTIFY_DEVELOPER_ID: "" };
 const t0 = Date.now();
 const first = await processBuildEvent(env, buildEvent("started", "build-a", t0, "aaa111"));
@@ -57,9 +58,12 @@ assert.equal(duplicate.reason, "duplicate");
 await processBuildEvent(env, buildEvent("started", "build-b", t0 + 5000, "bbb222"));
 const stale = await processBuildEvent(env, buildEvent("succeeded", "build-a", t0, "aaa111"));
 assert.equal(stale.reason, "stale_terminal");
+const duringNewerBuild = await getDeploymentStatusForViewer(env, viewer);
+assert.equal(duringNewerBuild.status.kind, "started", "A stale terminal event must not replace the newer build status");
+assert.equal(duringNewerBuild.status.noticeId, "build-b:started");
 const latest = await processBuildEvent(env, buildEvent("succeeded", "build-b", t0 + 5000, "bbb222"));
 assert.equal(latest.ok, true);
-const status = await getDeploymentStatusForViewer(env, { qq: "123", role: "member", permissions: {} });
+const status = await getDeploymentStatusForViewer(env, viewer);
 assert.equal(status.status.kind, "succeeded");
 assert.equal(status.viewer.developer, false);
 assert.equal("details" in status, false);
