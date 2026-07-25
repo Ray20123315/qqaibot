@@ -604,11 +604,13 @@ function extractMessageText(message) {
     .replace(/\[CQ:video,[^\]]+\]/g, "[视频]")
     .replace(/\[CQ:file,[^\]]+\]/g, "[文件]")
     .replace(/\[CQ:forward,[^\]]+\]/g, "[转发消息]")
+    .replace(/\[CQ:face,[^\]]*id=([^,\]]+)[^\]]*\]/g, "[表情:$1]")
+    .replace(/\[CQ:face,[^\]]+\]/g, "[表情]")
     .replace(/\[CQ:reply,[^\]]+\]/g, "")
     .replace(/\[CQ:[^\]]+\]/g, "")
     .trim();
   if (!Array.isArray(message)) return "";
-  return message.map(part => part?.type === "text" ? String(part.data?.text || "") : part?.type === "at" ? `@${part.data?.qq || ""}` : part?.type === "image" ? "[图片]" : part?.type === "record" ? "[语音]" : part?.type === "video" ? "[视频]" : part?.type === "file" ? `[文件：${part.data?.name || part.data?.file_name || part.data?.file || "未命名"}]` : part?.type === "forward" ? "[转发消息]" : "").join("").trim();
+  return message.map(part => part?.type === "text" ? String(part.data?.text || "") : part?.type === "at" ? `@${part.data?.qq || ""}` : part?.type === "image" ? "[图片]" : part?.type === "record" ? "[语音]" : part?.type === "video" ? "[视频]" : part?.type === "file" ? `[文件：${part.data?.name || part.data?.file_name || part.data?.file || "未命名"}]` : part?.type === "forward" ? "[转发消息]" : part?.type === "face" ? `[表情:${String(part.data?.id || part.data?.face_id || "").trim() || "未知"}]` : "").join("").trim();
 }
 
 

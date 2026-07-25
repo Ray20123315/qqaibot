@@ -3000,11 +3000,15 @@ ${deepseekContextSummary}`;
         isGroup,
         explicitLong: explicitLongReply
       });
-      ctx.waitUntil(capturePersonaContinuity(env, {
+      const personaContinuity = await capturePersonaContinuity(env, {
         groupId: currentGroupId,
         userText: conversationText,
         replyText
-      }).catch(error => console.warn("persona continuity capture failed", error?.message || error)));
+      }).catch(error => {
+        console.warn("persona continuity capture failed", error?.message || error);
+        return null;
+      });
+      if (personaContinuity?.replyText) replyText = personaContinuity.replyText;
       if (aiReplyPromisesFutureSearch(replyText)) {
         replyText = searchInfo.performed && searchInfo.context
           ? appendSearchSources(searchInfo.context, searchInfo.sources || [])
@@ -3771,7 +3775,8 @@ export class OneBotHub {
     if (body?.post_type !== "message" || body?.message_type !== "group") return "";
     if (String(body.user_id || "") === String(body.self_id || "")) return "";
     const text = eventPlainText(body).trim();
-    if (!text || /^(?:[!！]|\/!)/.test(text)) return "";
+    const hasPayload = Boolean(text || oneBotEventHasMedia(body));
+    if (!hasPayload || /^(?:[!！]|\/!)/.test(text)) return "";
     const key = this.userQueueKey(body);
     const selfId = String(body.self_id || "");
     const mentions = eventMentionedQqs(body).map(String).filter(Boolean);

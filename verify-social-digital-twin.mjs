@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import {
   applySocialOutputPolicy,
   buildSocialPromptBlock,
+  oneBotEventHasMedia,
   oneBotEventIsBareMention,
   socialInputDelayMs,
   socialTypingDelayMs
@@ -22,6 +23,8 @@ const bareMention = {
 };
 assert(oneBotEventIsBareMention(bareMention), 'Bare @ mention must be recognized for follow-up aggregation');
 assert(socialInputDelayMs([bareMention]) >= 3000, 'Bare mention must wait long enough for a following image or short message');
+const nativeFace = { message_type: 'group', message: [{ type: 'face', data: { id: '178' } }] };
+assert(oneBotEventHasMedia(nativeFace), 'Native QQ face events must count as follow-up payload');
 
 const punctuation = applySocialOutputPolicy({
   text: '这是一个非常完整而且不自然的解释。',
@@ -61,6 +64,12 @@ assert(worker.includes('shouldSendSocialBufferNotice'), 'Multi-message waiting n
 assert(worker.includes('buildSocialDecision(env'), 'Worker must run the social decision layer before public wording');
 assert(worker.includes('applySocialOutputPolicy({'), 'Worker must enforce output shape after model generation');
 assert(worker.includes('capturePersonaContinuity(env'), 'Generated persona facts must be persisted for continuity');
+assert(worker.includes('const personaContinuity = await capturePersonaContinuity'), 'Persona facts must be locked before the reply is sent');
+const socialSource = fs.readFileSync('src/social/runtime.js', 'utf8');
+assert(socialSource.includes('social_persona:global'), 'Persona facts must be global across groups and private chat');
+assert(socialSource.includes('INSERT OR IGNORE INTO kv_store'), 'First-generated persona facts must use an atomic claim');
+const onebotSource = fs.readFileSync('src/onebot/messages.js', 'utf8');
+assert(onebotSource.includes('[表情:'), 'Native QQ face IDs must survive text extraction');
 assert(worker.includes('waitForSocialTyping({'), 'Group replies must use bounded natural typing delay');
 assert(worker.includes('social_thinking_indicator_enabled'), 'Visible thinking indicators must be opt-in for group chat');
 

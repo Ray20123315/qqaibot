@@ -42,8 +42,12 @@ function cleanId(value) {
   return String(value || "").replace(/\D/g, "");
 }
 
-function socialProfileKey(groupId) {
-  return `social_persona:${cleanId(groupId) || "private"}`;
+function socialProfileKey() {
+  return "social_persona:global";
+}
+
+function socialPersonaFactKey(key) {
+  return `social_persona_fact:${String(key || "").trim()}`;
 }
 
 function socialStyleKey(groupId) {
@@ -95,14 +99,35 @@ function normalizeGeneratedCanon(value) {
   return output;
 }
 
+async function readAtomicPersonaFacts(env) {
+  const output = {};
+  if (!env?.DB) return output;
+  const prefix = "social_persona_fact:";
+  try {
+    const rows = await env.DB.prepare("SELECT key, value FROM kv_store WHERE substr(key, 1, ?) = ?").bind(prefix.length, prefix).all();
+    for (const row of rows.results || []) {
+      const key = String(row?.key || "").slice(prefix.length);
+      if (!["birthday", "age", "gender", "heightCm", "weight"].includes(key)) continue;
+      try {
+        const parsed = JSON.parse(String(row?.value || "{}"));
+        if (parsed?.value !== undefined && parsed?.value !== null && parsed?.value !== "") output[key] = parsed;
+      } catch {}
+    }
+  } catch (error) {
+    console.warn("read atomic persona facts failed", error?.message || error);
+  }
+  return normalizeGeneratedCanon(output);
+}
+
 async function getSocialProfile(env, groupId) {
-  const stored = await readJson(env, socialProfileKey(groupId), null);
+  const stored = await readJson(env, socialProfileKey(), null);
   const learnedStyle = normalizeStyle(await readJson(env, socialStyleKey(groupId), DEFAULT_STYLE));
   const profile = stored && typeof stored === "object" ? stored : {};
+  const atomicFacts = await readAtomicPersonaFacts(env);
   return {
     version: SOCIAL_PROFILE_VERSION,
     canon: normalizeCanon(profile.canon || DEFAULT_CANON),
-    generatedCanon: normalizeGeneratedCanon(profile.generatedCanon),
+    generatedCanon: { ...normalizeGeneratedCanon(profile.generatedCanon), ...atomicFacts },
     style: learnedStyle,
     updatedAt: Number(profile.updatedAt || 0)
   };
@@ -115,7 +140,7 @@ async function saveSocialProfile(env, groupId, profile) {
     generatedCanon: normalizeGeneratedCanon(profile?.generatedCanon),
     updatedAt: Date.now()
   };
-  await dbPut(env, socialProfileKey(groupId), JSON.stringify(next));
+  await dbPut(env, socialProfileKey(), JSON.stringify(next));
   return { ...next, style: normalizeStyle(await readJson(env, socialStyleKey(groupId), DEFAULT_STYLE)) };
 }
 
@@ -131,8 +156,8 @@ function eventSegments(body) {
 }
 
 function oneBotEventHasMedia(body) {
-  if (eventSegments(body).some(part => ["image", "record", "video", "file", "forward"].includes(String(part?.type || "").toLowerCase()))) return true;
-  return /\[CQ:(?:image|record|video|file|forward),/i.test(String(body?.raw_message || (typeof body?.message === "string" ? body.message : "")));
+  if (eventSegments(body).some(part => ["image", "record", "video", "file", "forward", "face"].includes(String(part?.type || "").toLowerCase()))) return true;
+  return /\[CQ:(?:image|record|video|file|forward|face),/i.test(String(body?.raw_message || (typeof body?.message === "string" ? body.message : "")));
 }
 
 function eventMentionIds(body) {
@@ -157,6 +182,7 @@ function eventVisibleText(body) {
       if (type === "video") return "[视频]";
       if (type === "file") return "[文件]";
       if (type === "forward") return "[转发消息]";
+      if (type === "face") return `[表情:${String(part?.data?.id || part?.data?.face_id || "").trim() || "未知"}]`;
       return "";
     }).join("").trim();
   }
@@ -168,6 +194,8 @@ function eventVisibleText(body) {
     .replace(/\[CQ:video,[^\]]+\]/gi, "[视频]")
     .replace(/\[CQ:file,[^\]]+\]/gi, "[文件]")
     .replace(/\[CQ:forward,[^\]]+\]/gi, "[转发消息]")
+    .replace(/\[CQ:face,[^\]]*id=([^,\]]+)[^\]]*\]/gi, "[表情:$1]")
+    .replace(/\[CQ:face,[^\]]+\]/gi, "[表情]")
     .replace(/\[CQ:[^\]]+\]/gi, "")
     .trim();
 }
@@ -391,7 +419,9 @@ async function buildSocialDecision(env, { groupId, userId, senderName = "", text
       decision = { ...decision, sceneAiError: String(error?.message || error).slice(0, 300) };
     }
   }
-  const relationship = await updateSocialRelationship(env, groupId, userId, decision.sceneType);
+  const relationship = (direct || risky || hasMedia || decision.sceneType !== "casual")
+    ? await updateSocialRelationship(env, groupId, userId, decision.sceneType)
+    : previousRelationship;
   const managerMentionId = await chooseManagerMention(env, groupId, userId, relationship, decision.action).catch(() => "");
   return { ...decision, profile, relationship, managerMentionId };
 }
@@ -530,15 +560,53 @@ function extractGeneratedFact(userText, replyText) {
   return null;
 }
 
+function personaFactReplyText(key, value) {
+  if (key === "heightCm") return `我${value}cm`;
+  if (key === "age") return `我${value}岁`;
+  if (key === "birthday") return `我生日是${value}`;
+  if (key === "gender") return `我是${value}`;
+  if (key === "weight") return `我${value}`;
+  return String(value || "");
+}
+
+async function claimGeneratedPersonaFact(env, found) {
+  const key = socialPersonaFactKey(found.key);
+  const proposed = { value: found.value, source: "first_generated_answer", createdAt: Date.now() };
+  if (env?.DB) {
+    try {
+      await env.DB.prepare("INSERT OR IGNORE INTO kv_store (key, value) VALUES (?, ?)").bind(key, JSON.stringify(proposed)).run();
+      const stored = await dbGet(env, key);
+      if (stored) {
+        const parsed = JSON.parse(stored);
+        if (parsed?.value !== undefined && parsed?.value !== null && parsed?.value !== "") return parsed;
+      }
+    } catch (error) {
+      console.warn("atomic persona fact claim failed", error?.message || error);
+    }
+  }
+  const existing = await readJson(env, key, null);
+  if (existing?.value !== undefined && existing?.value !== null && existing?.value !== "") return existing;
+  await dbPut(env, key, JSON.stringify(proposed));
+  return proposed;
+}
+
 async function capturePersonaContinuity(env, { groupId, userText, replyText }) {
   const found = extractGeneratedFact(userText, replyText);
   if (!found) return null;
   const profile = await getSocialProfile(env, groupId);
   const existingFact = effectivePersonaFact(profile, found.key);
-  if (existingFact !== null && existingFact !== "") return null;
-  profile.generatedCanon[found.key] = { value: found.value, source: "first_generated_answer", createdAt: Date.now() };
+  if (existingFact !== null && existingFact !== "") {
+    return { key: found.key, value: existingFact, reused: true, replyText: personaFactReplyText(found.key, existingFact) };
+  }
+  const claimed = await claimGeneratedPersonaFact(env, found);
+  profile.generatedCanon[found.key] = claimed;
   await saveSocialProfile(env, groupId, profile);
-  return found;
+  return {
+    key: found.key,
+    value: claimed.value,
+    reused: String(claimed.value) !== String(found.value),
+    replyText: personaFactReplyText(found.key, claimed.value)
+  };
 }
 
 function socialTypingDelayMs({ text, decision, isGroup = true, direct = false }) {
