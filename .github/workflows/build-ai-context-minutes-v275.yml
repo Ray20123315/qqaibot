@@ -1,0 +1,124 @@
+name: Build AI context output and minutes v2.7.5
+
+on:
+  push:
+    branches:
+      - fix/ai-context-output-minutes-v2.7.5
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: write
+
+concurrency:
+  group: ai-context-output-minutes-v275
+  cancel-in-progress: false
+
+jobs:
+  build-candidate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/ai-context-output-minutes-v2.7.5
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: package.json
+      - name: Apply v2.7.5 candidate
+        id: apply
+        continue-on-error: true
+        run: |
+          set -o pipefail
+          if grep -q '"version": "2.7.5"' package.json; then
+            echo 'Permanent candidate already applied.' | tee /tmp/v275-apply.log
+          else
+            base64 -d tools/.ai-context-minutes-v275/apply.py.gz.b64 | gzip -d > /tmp/apply-v275.py
+            python /tmp/apply-v275.py 2>&1 | tee /tmp/v275-apply.log
+          fi
+      - name: Upload builder diagnostics
+        if: steps.apply.outcome == 'failure'
+        uses: actions/upload-artifact@v4
+        with:
+          name: v275-builder-diagnostics
+          path: /tmp/v275-apply.log
+          if-no-files-found: error
+      - name: Stop after builder failure
+        if: steps.apply.outcome == 'failure'
+        run: |
+          cat /tmp/v275-apply.log
+          exit 1
+      - name: Validate source syntax
+        id: syntax
+        continue-on-error: true
+        run: |
+          set -o pipefail
+          {
+            node --check src/ai/conversation-quality.js
+            node --check src/ai/runtime.js
+            node --check src/social/runtime.js
+            node --check src/onebot/messages.js
+            node --check src/core/permissions.js
+            node --check worker.js
+            node --check verify-ai-context-output.mjs
+            node --check verify-meeting-minutes.mjs
+          } 2>&1 | tee /tmp/v275-syntax.log
+      - name: Upload syntax diagnostics
+        if: steps.syntax.outcome == 'failure'
+        uses: actions/upload-artifact@v4
+        with:
+          name: v275-syntax-diagnostics
+          path: |
+            /tmp/v275-syntax.log
+            src/ai/conversation-quality.js
+            src/ai/runtime.js
+            src/social/runtime.js
+            src/onebot/messages.js
+            worker.js
+          if-no-files-found: error
+      - name: Stop after syntax failure
+        if: steps.syntax.outcome == 'failure'
+        run: |
+          cat /tmp/v275-syntax.log
+          exit 1
+      - name: Run focused executable validation
+        run: |
+          node verify-ai-context-output.mjs
+          node verify-meeting-minutes.mjs
+      - name: Install dependencies
+        run: npm install --ignore-scripts
+      - name: Run complete regression suite
+        id: regression
+        continue-on-error: true
+        run: |
+          set -o pipefail
+          npm run check 2>&1 | tee /tmp/v275-regression.log
+      - name: Upload regression diagnostics
+        if: steps.regression.outcome == 'failure'
+        uses: actions/upload-artifact@v4
+        with:
+          name: v275-regression-diagnostics
+          path: /tmp/v275-regression.log
+          if-no-files-found: error
+      - name: Stop after regression failure
+        if: steps.regression.outcome == 'failure'
+        run: |
+          tail -n 260 /tmp/v275-regression.log
+          exit 1
+      - name: Build single Worker bundle
+        run: npm run check:bundle
+      - name: Commit verified permanent candidate
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add worker.js package.json release-notes.json src/config/runtime.js src/ai/conversation-quality.js src/ai/runtime.js src/social/runtime.js src/onebot/messages.js verify-*.mjs
+          if git diff --cached --quiet; then
+            echo 'No permanent changes to commit.'
+          else
+            git commit -m 'Fix AI completion context and 500-message minutes'
+            git push origin HEAD:fix/ai-context-output-minutes-v2.7.5
+          fi
