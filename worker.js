@@ -20,6 +20,7 @@ import { injectPortalMembersClient } from "./src/portal/members.js";
 import { applySocialOutputPolicy, buildSocialDecision, buildSocialPromptBlock, capturePersonaContinuity, oneBotBotMentionCount, oneBotEventHasMedia, oneBotEventIsBareMention, oneBotEventIsPunctuationOnly, observeSocialStyle, shouldSendSocialBufferNotice, socialInputDelayMs, waitForSocialTyping } from "./src/social/runtime.js";
 import { pickSticker, pickStickerForText, stickerCqMessage } from "./src/social/sticker-library.js";
 import { cancelSchedule, cleanupExpiredModerationProposals, cleanupTransientState, countActiveSchedulesForUser, createAppealFromText, createScheduleRecord, extractScheduleMentionIds, formatScheduleLine, listUserSchedules, parseManagementScheduleAction, parseScheduleRequest, performManualGroupCheckins, processConflictSignal, processDueSchedules, reviewScheduleWithGemma, reviseScheduleRecord, runAutomaticGroupCheckins, skipScheduleOnce } from "./src/scheduler/runtime.js";
+import { handleWerewolfOneBotEvent, injectWerewolfPortalClient, processWerewolfTimers } from "./src/games/werewolf.js";
 import { fetchPublicUrl, getFeatureFlag, getPrivateAccessMode, isGroupWhitelisted, numericId, verifyOneBotAccess } from "./src/security/network.js";
 
 
@@ -123,7 +124,7 @@ const QQAIWorker = {
     // 🌌 公共首頁與記憶矩陣中心
     // ==========================================
     if (request.method === 'GET' && ['/', '/portal', '/matrix'].includes(url.pathname)) {
-      const portalHtml = injectPortalMembersClient(injectDeploymentPortalClient(toSimplifiedChinese(getPortalHomePage(url.host))));
+      const portalHtml = injectWerewolfPortalClient(injectPortalMembersClient(injectDeploymentPortalClient(toSimplifiedChinese(getPortalHomePage(url.host)))));
       return new Response(portalHtml, {
         headers: { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store" }
       });
@@ -3628,6 +3629,7 @@ ${deepseekContextSummary}`;
     ctx.waitUntil(cleanupExpiredModerationProposals(env));
     ctx.waitUntil(runAutomaticGroupCheckins(env, Number(controller?.scheduledTime || Date.now())));
     ctx.waitUntil(processPlatformJobs(env, Number(controller?.scheduledTime || Date.now())));
+    ctx.waitUntil(processWerewolfTimers(env, Number(controller?.scheduledTime || Date.now())).catch(error => console.error("werewolf timer failed", error)));
     ctx.waitUntil(opsProcessAutomations(env, Number(controller?.scheduledTime || Date.now())));
     ctx.waitUntil(pollAutomaticBilibiliConnectors(env, Number(controller?.scheduledTime || Date.now())));
   },
@@ -4058,6 +4060,11 @@ export class OneBotHub {
       pending.resolve(body); return;
     }
     if (!body) return;
+    const werewolfHandled = await handleWerewolfOneBotEvent(this.env, body).catch(async error => {
+      await writeSystemAudit(this.env, { type: "werewolf_event_failed", groupId: String(body?.group_id || ""), actorId: String(body?.user_id || ""), action: "handle_event", error: String(error?.message || error).slice(0, 500) }).catch(() => {});
+      return null;
+    });
+    if (werewolfHandled?.handled) return;
     if (this.isRuleMuteLiftNotice(body)) {
       await this.handleRuleMuteLiftNotice(body);
       return;
