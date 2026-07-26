@@ -2,6 +2,7 @@
 // Cloudflare still deploys worker.js as the single Worker entry point.
 
 import { DEFAULTS } from "../config/runtime.js";
+import { closeIncompleteReply, finishReasonReachedLimit, mergeContinuationText } from "./conversation-quality.js";
 import { developerId } from "../core/identity.js";
 import { appendIndex, callOneBotAction, normalizeModelPreference, outboundFingerprint, writeSystemAudit } from "../core/permissions.js";
 import { dbDel, dbGet, dbPut, isDeadlineExceeded, remainingTimeout, withTimeout } from "../data/store.js";
@@ -506,10 +507,11 @@ async function callDeepSeek(env, { messages, userId, groupId, thinking = "disabl
         lastError = `DEEPSEEK_${response.status}:${data?.error?.message || "UNKNOWN"}`;
         continue;
       }
-      const text = String(data?.choices?.[0]?.message?.content || "").trim();
+      const choice = data?.choices?.[0] || {};
+      const text = String(choice?.message?.content || "").trim();
       if (!text) { lastError = "DEEPSEEK_EMPTY"; continue; }
       await recordDeepSeekUsage(env, { userId, groupId, model: selectedModel, usage: data.usage || {} });
-      return { text, model: selectedModel, usage: data.usage || {} };
+      return { text, model: selectedModel, usage: data.usage || {}, finishReason: String(choice.finish_reason || ""), finishMessage: String(choice?.message?.refusal || "") };
     } catch (error) {
       lastError = String(error?.message || error);
     }
@@ -764,8 +766,9 @@ async function callGemmaChat(env, { model, system, contents, maxOutputTokens = 1
         });
         const data = await response.json().catch(() => ({}));
         if (response.ok) {
-          const text = (data.candidates?.[0]?.content?.parts || []).filter(part => !part.thought).map(part => part.text || "").join("").trim();
-          if (text) return { text, model: selectedModel, usage: data.usageMetadata || {} };
+          const candidate = data.candidates?.[0] || {};
+          const text = (candidate.content?.parts || []).filter(part => !part.thought).map(part => part.text || "").join("").trim();
+          if (text) return { text, model: selectedModel, usage: data.usageMetadata || {}, finishReason: String(candidate.finishReason || ""), finishMessage: String(candidate.finishMessage || "") };
         }
         lastError = `GEMMA_CHAT_${response.status}:${data?.error?.message || "UNKNOWN"}`;
       } catch (error) {
@@ -927,13 +930,14 @@ async function callGeminiGenerate(env, { models, system, contents, maxOutputToke
           });
           const data = await response.json().catch(() => ({}));
           if (response.ok) {
-            const text = (data.candidates?.[0]?.content?.parts || []).filter(part => !part.thought).map(p => p.text || "").join("").trim();
+            const candidate = data.candidates?.[0] || {};
+            const text = (candidate.content?.parts || []).filter(part => !part.thought).map(p => p.text || "").join("").trim();
             const grounding = extractGeminiGrounding(data);
             if (requireSearch && !grounding.grounded) {
               lastError = "GEMINI_SEARCH_NOT_GROUNDED";
               break;
             }
-            if (text) return { text, model, usage: data.usageMetadata || {}, ...grounding };
+            if (text) return { text, model, usage: data.usageMetadata || {}, finishReason: String(candidate.finishReason || ""), finishMessage: String(candidate.finishMessage || ""), ...grounding };
           }
           lastError = `GEMINI_${response.status}:${data?.error?.message || "UNKNOWN"}`;
           // 自动搜索可以在模型不兼容时降级；强制搜索绝不能悄悄改成离线回答。
@@ -1045,6 +1049,45 @@ async function generateHybridReply(env, args) {
     if (search?.required) return `${prompt}\n\n【联网搜索状态】本题需要实时资料，但独立搜索服务未取得可用结果（${search.error || "未返回可靠来源"}）。不得假装已经联网；涉及实时事实时要明确说明无法查证。`;
     return prompt;
   };
+  const continueIfLimited = async (result, { system, contents }) => {
+    const source = String(result?.text || "").trim();
+    if (!source || !finishReasonReachedLimit(result?.finishReason)) return result;
+    if (args.fastChat || isDeadlineExceeded(overallDeadlineAt, 4800)) {
+      return { ...result, text: closeIncompleteReply(source), continuationUsed: false, completionStatus: "closed_after_output_limit" };
+    }
+    try {
+      const continuationContents = [
+        ...(Array.isArray(contents) ? contents : []),
+        { role: "model", parts: [{ text: source }] },
+        { role: "user", parts: [{ text: "上一个回答因为输出上限中断。只续写尚未完成的部分，不要重复已经出现的文字，不要重新开头，并在本轮结束完整句子。" }] }
+      ];
+      const continued = await callGeminiGenerate(env, {
+        models: args.chatModels,
+        system: `${system}\n\n【续写规则】仅补全上一段被输出上限截断的结尾；不得重复、改写或另起一份答案。`,
+        contents: continuationContents,
+        maxOutputTokens: 700,
+        temperature: 0.35,
+        useSearch: false,
+        requireSearch: false,
+        timeoutMs: 5500,
+        deadlineAt: overallDeadlineAt,
+        maxAttempts: 1,
+        signal: args.signal
+      });
+      const merged = mergeContinuationText(source, continued.text);
+      return {
+        ...result,
+        text: finishReasonReachedLimit(continued.finishReason) ? closeIncompleteReply(merged) : merged,
+        continuationUsed: true,
+        continuationModel: String(continued.model || ""),
+        continuationFinishReason: String(continued.finishReason || ""),
+        completionStatus: finishReasonReachedLimit(continued.finishReason) ? "continued_then_safely_closed" : "continued_complete"
+      };
+    } catch (error) {
+      return { ...result, text: closeIncompleteReply(source), continuationUsed: false, continuationError: String(error?.message || error).slice(0, 500), completionStatus: "continuation_failed_safely_closed" };
+    }
+  };
+
   const finish = (provider, result, search) => ({
     provider,
     ...result,
@@ -1065,9 +1108,10 @@ async function generateHybridReply(env, args) {
   const tryGemma = async modelPref => {
     if (args.hasMedia) throw new Error("GEMMA_NO_MEDIA");
     const search = await getSharedSearch();
+    const system = mergeSearchPrompt(args.finalStylePrompt, search);
     const result = await callGemmaChat(env, {
       model: modelPref,
-      system: mergeSearchPrompt(args.finalStylePrompt, search),
+      system,
       contents: args.contents,
       maxOutputTokens: args.fastChat ? 160 : 1000,
       temperature: args.fastChat ? 0.9 : 0.82,
@@ -1076,15 +1120,16 @@ async function generateHybridReply(env, args) {
       maxAttempts: 1,
       signal: args.signal
     });
-    return finish("gemma", result, search);
+    return finish("gemma", await continueIfLimited(result, { system, contents: args.contents }), search);
   };
   const tryGemini = async () => {
     const search = await getSharedSearch();
+    const system = mergeSearchPrompt(args.finalStylePrompt, search);
     const result = await callGeminiGenerate(env, {
       models: args.visionRequest ? parseList(env.GEMINI_VISION_MODELS, args.chatModels) : args.chatModels,
       apiKeys: args.visionRequest ? geminiVisionApiKeys(env) : null,
       keyProvider: args.visionRequest ? "gemini_vision" : "gemini",
-      system: mergeSearchPrompt(args.finalStylePrompt, search),
+      system,
       contents: args.contents,
       maxOutputTokens: args.fastChat ? 180 : 1000,
       temperature: args.fastChat ? 0.9 : 0.82,
@@ -1096,14 +1141,15 @@ async function generateHybridReply(env, args) {
       maxAttempts: args.fastChat ? 2 : 4,
       signal: args.signal
     });
-    return finish("gemini", result, search);
+    return finish("gemini", await continueIfLimited(result, { system, contents: args.contents }), search);
   };
   const tryDeepSeek = async () => {
     if (!deepseekEnabled || !deepSeekApiKeys(env).length || args.hasMedia) throw new Error("DEEPSEEK_UNAVAILABLE");
     const emergencyWindow = args.isDeveloper ? null : await readActiveDeepSeekEmergencyWindow(env, { groupId: args.groupId || "private", userId: args.userId });
     if (!args.isDeveloper && !emergencyWindow) throw new Error("DEEPSEEK_CHAT_RESTRICTED");
     const search = await getSharedSearch();
-    const messages = [{ role: "system", content: mergeSearchPrompt(args.finalStylePrompt, search) }, ...flattenGeminiContents(args.contents).slice(-32)];
+    const system = mergeSearchPrompt(args.finalStylePrompt, search);
+    const messages = [{ role: "system", content: system }, ...flattenGeminiContents(args.contents).slice(-32)];
     const startedAt = Date.now();
     const result = await callDeepSeek(env, {
       messages, userId: args.userId, groupId: args.groupId || "private", thinking: "disabled",
@@ -1111,7 +1157,7 @@ async function generateHybridReply(env, args) {
       deadlineAt: overallDeadlineAt, maxAttempts: 1, signal: args.signal
     });
     if (emergencyWindow) await recordDeepSeekEmergencyUse(env, emergencyWindow, { startedAt, endedAt: Date.now(), model: result.model }).catch(() => null);
-    return finish("deepseek", result, search);
+    return finish("deepseek", await continueIfLimited(result, { system, contents: args.contents }), search);
   };
 
   const attempts = [];

@@ -1,7 +1,8 @@
 // Extracted from worker.js without behavioral changes.
 // Cloudflare still deploys worker.js as the single Worker entry point.
 
-import { AI_MEDIA_LIMITS, VERSION } from "../config/runtime.js";
+import { AI_MEDIA_LIMITS, DEFAULTS, VERSION } from "../config/runtime.js";
+import { completeTextAtBoundary } from "../ai/conversation-quality.js";
 import { neutralizeAiCommandPrefix } from "../core/identity.js";
 import { appendIndex, callOneBotAction, writeSystemAudit } from "../core/permissions.js";
 import { dbDel, dbGet, dbPut } from "../data/store.js";
@@ -36,7 +37,7 @@ async function purgeLegacyBotRepliesFromRecentLogs(env, groupId, botId) {
   if (Array.isArray(logs) && logs.length) {
     const marker = `(QQ:${bid})]:`;
     const cleaned = logs.filter(line => !String(line || "").includes(marker));
-    if (cleaned.length !== logs.length) await dbPut(env, key, JSON.stringify(cleaned.slice(-200)));
+    if (cleaned.length !== logs.length) await dbPut(env, key, JSON.stringify(cleaned.slice(-DEFAULTS.groupContextMaximumMessages)));
   }
   await dbPut(env, doneKey, String(Date.now()));
 }
@@ -908,7 +909,7 @@ function formatDuration(seconds) {
 
 
 function sanitizeAiReply(text) {
-  return neutralizeAiCommandPrefix(String(text || "")
+  const cleaned = neutralizeAiCommandPrefix(String(text || "")
     .replace(/\[CQ:[^\]]+\]/g, "")
     // 模型偶尔会复述解析器或历史上下文的内部标签；这些都不是用户可见内容。
     .replace(/\s*(?:\[不支持的元素类型\]|【不支持的元素类型】|\[unsupported element type\])\s*/gi, "")
@@ -917,10 +918,9 @@ function sanitizeAiReply(text) {
     .replace(/\*\*/g, "")
     .replace(/^#+\s*/gm, "")
     .replace(/\s{2,}/g, " ")
-    .trim()
-    .slice(0, 4000));
+    .trim());
+  return completeTextAtBoundary(cleaned, DEFAULTS.replyHardChars);
 }
-
 
 
 function getTaipeiTimeContext(date = new Date()) {
