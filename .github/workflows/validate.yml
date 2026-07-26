@@ -78,7 +78,6 @@ jobs:
       - name: Build single Worker bundle
         run: npm run check:bundle
       - name: Commit clean candidate
-        if: github.event_name == 'push'
         run: |
           rm -rf tools/werewolf_payload
           rm -f tools/apply-werewolf-v2.6.0.mjs tools/fix-werewolf-boundaries.mjs
