@@ -25,70 +25,36 @@ jobs:
           node-version: 22
           cache: npm
           cache-dependency-path: package.json
-      - name: Recover and extract staged implementation
+      - name: Reconstruct verified staged implementation
         id: extract
         shell: bash
         run: |
-          set -o pipefail
+          set -euo pipefail
           {
-            rm -rf /tmp/werewolf-parts
-            mkdir -p /tmp/werewolf-parts
-            for name in part-00 part-01 part-02; do
-              git show 34f659e60186a3295e614840668fa56acfdbe3e4:tools/werewolf_payload/$name > /tmp/werewolf-parts/$name
-            done
-            python - <<'PY'
-          import base64, gzip, pathlib
-          root = pathlib.Path('/tmp/werewolf-parts')
-          parts = [root / f'part-0{i}' for i in range(3)]
-          blobs = []
-          report = []
-          for path in parts:
-              raw = path.read_bytes().strip()
-              invalid = [(i, b) for i, b in enumerate(raw) if not (65 <= b <= 90 or 97 <= b <= 122 or 48 <= b <= 57 or b in b'+/=')]
-              report.append(f'{path.name}: bytes={len(raw)} mod4={len(raw)%4} invalid={invalid[:5]} tail={raw[-12:]!r}')
-              blobs.append(raw)
-          combined = b''.join(blobs)
-          candidates = []
-          try:
-              candidates.append(('combined', base64.b64decode(combined, validate=True)))
-          except Exception as exc:
-              report.append(f'combined decode failed: {exc}')
-          try:
-              candidates.append(('per-part', b''.join(base64.b64decode(blob, validate=True) for blob in blobs)))
-          except Exception as exc:
-              report.append(f'per-part decode failed: {exc}')
-          chosen = None
-          for mode, data in candidates:
-              report.append(f'{mode}: decoded={len(data)} magic={data[:4]!r}')
-              try:
-                  gzip.decompress(data)
-                  chosen = (mode, data)
-                  break
-              except Exception as exc:
-                  report.append(f'{mode} gzip failed: {exc}')
-          pathlib.Path('/tmp/werewolf-payload-diagnostics.txt').write_text('\n'.join(report), encoding='utf-8')
-          if not chosen:
-              raise SystemExit('\n'.join(report))
-          pathlib.Path('/tmp/werewolf-payload.tgz').write_bytes(chosen[1])
-          print('\n'.join(report))
-          print(f'using {chosen[0]} payload')
-          PY
+            cat tools/werewolf_payload/part-* > /tmp/werewolf-payload.b64
+            test "$(wc -c < /tmp/werewolf-payload.b64)" = "34208"
+            echo "6c056ac83fb2641be1964fcb5ce2233dbc67d14a202a1a4cfc8fd867e32a8d3d  /tmp/werewolf-payload.b64" | sha256sum -c -
+            base64 -d /tmp/werewolf-payload.b64 > /tmp/werewolf-payload.tgz
+            echo "27cdef3bf51b4cb1cc6b5e06144871c5f6c1ef8d15e65a520d42821dc7e3e793  /tmp/werewolf-payload.tgz" | sha256sum -c -
             tar -tzf /tmp/werewolf-payload.tgz
             tar -xzf /tmp/werewolf-payload.tgz
             node --check tools/apply-werewolf-v2.6.0.mjs
             node --check tools/fix-werewolf-boundaries.mjs
+            node --check src/games/werewolf.js
+            node --check verify-werewolf.mjs
             node tools/fix-werewolf-boundaries.mjs
             node tools/apply-werewolf-v2.6.0.mjs
           } 2>&1 | tee /tmp/werewolf-extract.log
-      - name: Upload extraction diagnostics
+      - name: Upload reconstruction diagnostics
         if: failure() && steps.extract.outcome == 'failure'
         uses: actions/upload-artifact@v4
         with:
-          name: werewolf-extract-log
+          name: werewolf-reconstruction-diagnostics
           path: |
             /tmp/werewolf-extract.log
-            /tmp/werewolf-payload-diagnostics.txt
-            /tmp/werewolf-parts/
+            /tmp/werewolf-payload.b64
+            /tmp/werewolf-payload.tgz
+            tools/werewolf_payload/
       - name: Validate generated source
         run: |
           node --check src/games/werewolf.js
@@ -113,5 +79,9 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add -A
           git status --short
-          git commit -m "Add debate-style werewolf game and Portal"
-          git push origin HEAD:feature/werewolf-v2.6.0
+          if git diff --cached --quiet; then
+            echo "No generated changes to commit."
+          else
+            git commit -m "Add debate-style werewolf game and Portal"
+            git push origin HEAD:feature/werewolf-v2.6.0
+          fi
