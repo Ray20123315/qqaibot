@@ -58,13 +58,26 @@ jobs:
       - name: Install dependencies
         run: npm install --ignore-scripts
       - name: Run regression checks
-        run: npm run check
+        id: regression
+        continue-on-error: true
+        run: npm run check > social-boundary-regression.log 2>&1
+      - name: Upload regression diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: social-boundary-regression-diagnostics
+          path: social-boundary-regression.log
+          if-no-files-found: error
+      - name: Require regression checks
+        run: |
+          cat social-boundary-regression.log
+          test "${{ steps.regression.outcome }}" = "success"
       - name: Build the single Worker bundle
         run: npm run check:bundle
       - name: Commit clean validated candidate
         if: github.event_name == 'push' && github.ref == 'refs/heads/feature/social-boundaries-v2.5.2'
         run: |
-          rm -rf node_modules dist package-lock.json tools/apply-social-boundaries-v2.5.2.py tools/fix-social-boundary-patcher.py tools/__pycache__ social-boundary-patch.log
+          rm -rf node_modules dist package-lock.json tools/apply-social-boundaries-v2.5.2.py tools/fix-social-boundary-patcher.py tools/__pycache__ social-boundary-patch.log social-boundary-regression.log
           git checkout origin/main -- .github/workflows/validate.yml
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
