@@ -37,7 +37,7 @@ jobs:
               git show 34f659e60186a3295e614840668fa56acfdbe3e4:tools/werewolf_payload/$name > /tmp/werewolf-parts/$name
             done
             python - <<'PY'
-          import base64, gzip, pathlib, re
+          import base64, gzip, pathlib
           root = pathlib.Path('/tmp/werewolf-parts')
           parts = [root / f'part-0{i}' for i in range(3)]
           blobs = []
@@ -88,6 +88,7 @@ jobs:
           path: |
             /tmp/werewolf-extract.log
             /tmp/werewolf-payload-diagnostics.txt
+            /tmp/werewolf-parts/
       - name: Validate generated source
         run: |
           node --check src/games/werewolf.js
