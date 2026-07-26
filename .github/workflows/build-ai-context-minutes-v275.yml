@@ -74,6 +74,20 @@ jobs:
           anchor_new = "r'''function sanitizeAiReply\\(text\\) \\{[\\s\\S]*?\\n\\}\\s*function getTaipeiTimeContext'''"
           assert anchor_old in script
           script = script.replace(anchor_old, anchor_new, 1)
+          raw_literal_markers = [
+              ("continuation = '''", "continuation = r'''"),
+              ("meeting_replacement = '''", "meeting_replacement = r'''"),
+              ("send_replacement = '''", "send_replacement = r'''"),
+              ("    '''  let maxChars = clamp", "    r'''  let maxChars = clamp"),
+              ("    '''  const cleaned = output.replace", "    r'''  const cleaned = output.replace"),
+              ("    '''function sanitizeAiReply(text)", "    r'''function sanitizeAiReply(text)"),
+              ("    '''         // 1. 建立標準歷史格式", "    r'''         // 1. 建立標準歷史格式"),
+              ("    '''         // 先截取当前消息之前", "    r'''         // 先截取当前消息之前"),
+              ("    '''      const immediateContext", "    r'''      const immediateContext")
+          ]
+          for marker_old, marker_new in raw_literal_markers:
+              assert marker_old in script, marker_old
+              script = script.replace(marker_old, marker_new, 1)
           Path('/tmp/apply-v275.py').write_text(script, encoding='utf-8')
           PY
               python /tmp/apply-v275.py
