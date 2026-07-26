@@ -73,14 +73,10 @@ jobs:
           fi
       - name: Build single Worker bundle
         run: npm run check:bundle
-      - name: Commit permanent candidate files
+      - name: Commit verified permanent candidate files
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git rm -r tools/.member-console-v272
-          rm -f tools/apply-member-console-v2.7.2.mjs
-          git restore --source=origin/main -- .github/workflows/validate.yml
-          git rm .github/workflows/member-console-v272.yml
-          git add -A
+          git add package.json release-notes.json src/config/runtime.js src/portal/member-cleanup.js src/portal/members.js src/games/werewolf.js verify-*.mjs
           git commit -m "Split member console and improve member data sync"
-          git push
+          git push origin HEAD:feature/member-console-split-v2.7.2
