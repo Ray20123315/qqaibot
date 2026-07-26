@@ -14,6 +14,7 @@ const SEER_ROLES = new Set(["seer", "apprentice_seer"]);
 const ACTIVE_PHASES = new Set(["sheriff_nomination", "sheriff_vote", "night", "day_discussion", "day_vote", "death_skill"]);
 const COPYABLE_ROLE_ACTIONS = Object.freeze({ seer: "inspect", witch: "witch_poison", ninja: "decoy", shapeshifter_wolf: "disguise", blood_wolf: "blood_moon", mermaid: "redirect", guard: "protect", detective: "track", lecher: "visit", villager: "vigilance", voodoo_girl: "curse", enchanter: "hex" });
 const QQAI_WEREWOLF_V274_COMPLETION_MARKER = "QQAI_WEREWOLF_V274_COMPLETION_MARKER";
+const QQAI_WEREWOLF_V274_WIN_ORDER_MARKER = "QQAI_WEREWOLF_V274_WIN_ORDER_MARKER";
 
 const ROLE_DEFINITIONS = Object.freeze({
   werewolf: { id: "werewolf", name: "狼人", team: "wolf", summary: "每晚与狼队共同选择一名非狼人玩家袭击。", action: "wolf_kill" },
@@ -583,8 +584,8 @@ async function resolveNight(env, game) {
   game.bloodMoonActive = false;
   const resolvedDead = game.deaths.slice(deathStart).map(item => ({ player: playerById(game, item.userId), cause: item.cause })).filter(item => item.player);
   appendPublic(game, resolvedDead.length ? `天亮了，本夜死亡：${resolvedDead.map(item => item.player.name).join("、")}。` : "天亮了，本夜无人死亡。", "dawn");
-  if (await finishIfWon(env, game)) return;
   if (checkPendingDeathSkill(game, resolvedDead)) { await runAiPhase(env, game); return; }
+  if (await finishIfWon(env, game)) return;
   game.day += 1;
   setPhase(game, "day_discussion", `第 ${game.day} 天公开讨论`);
   await runAiPhase(env, game);
@@ -651,9 +652,9 @@ async function tallyDayVote(env, game) {
   }
   game.dayVotes = {};
   promoteApprentice(game);
-  if (await finishIfWon(env, game)) return;
   const resolvedDead = game.deaths.slice(deathStart).map(item => ({ player: playerById(game, item.userId), cause: item.cause })).filter(item => item.player);
   if (checkPendingDeathSkill(game, resolvedDead)) { await runAiPhase(env, game); return; }
+  if (await finishIfWon(env, game)) return;
   game.night += 1;
   setPhase(game, "night", `第 ${game.night} 夜`);
   await runAiPhase(env, game);
@@ -689,8 +690,10 @@ async function advanceGame(env, game, reason = "manual") {
     const resumeIncrement = game.pendingDeathSkill?.resumeIncrement !== false;
     game.pendingDeathSkill = null;
     if (!activateNextDeathSkill(game, resume, resumeIncrement)) {
-      resumeAfterDeathSkill(game, resume, resumeIncrement, "死亡技能超时");
-      await runAiPhase(env, game);
+      if (!(await finishIfWon(env, game))) {
+        resumeAfterDeathSkill(game, resume, resumeIncrement, "死亡技能超时");
+        await runAiPhase(env, game);
+      }
     } else {
       await runAiPhase(env, game);
     }
@@ -864,7 +867,9 @@ async function runAiDeathSkill(env, game) {
       const resume = game.pendingDeathSkill.resumePhase || "night";
       const resumeIncrement = game.pendingDeathSkill.resumeIncrement !== false;
       game.pendingDeathSkill = null;
-      if (!activateNextDeathSkill(game, resume, resumeIncrement)) resumeAfterDeathSkill(game, resume, resumeIncrement, "AI 死亡技能无有效目标");
+      if (!activateNextDeathSkill(game, resume, resumeIncrement)) {
+        if (!(await finishIfWon(env, game))) resumeAfterDeathSkill(game, resume, resumeIncrement, "AI 死亡技能无有效目标");
+      }
       continue;
     }
     const result = await handlePlayerAction(env, game, { userId: actor.id }, "death_shot", targetId, {});
@@ -1021,7 +1026,8 @@ async function handlePlayerAction(env, game, actor, action, targetId = "", extra
     const cause = isWolfRole(target.roleId) ? `骑士 ${player.name} 决斗命中狼人` : `骑士决斗判断错误`;
     queueDeath(game, dead, cause, player.id);
     appendPublic(game, `${player.name} 发起骑士决斗；${dead.name} 死亡。`, "duel");
-    if (!(await finishIfWon(env, game)) && checkPendingDeathSkill(game, [{ player: dead, cause }], "day_discussion", false)) await runAiPhase(env, game);
+    if (checkPendingDeathSkill(game, [{ player: dead, cause }], "day_discussion", false)) await runAiPhase(env, game);
+    else await finishIfWon(env, game);
     await saveGame(env, game);
     return { ok: true, message: "骑士决斗已结算。" };
   }
@@ -1031,15 +1037,15 @@ async function handlePlayerAction(env, game, actor, action, targetId = "", extra
     queueDeath(game, player, "白狼王正式牺牲技能", player.id);
     queueDeath(game, target, "白狼王审判带走", player.id);
     appendPublic(game, `白狼王 ${player.name} 发动正式审判并带走 ${target.name}；普通自爆规则仍为禁止。`, "white_judgement");
-    if (!(await finishIfWon(env, game))) {
-      if (!checkPendingDeathSkill(game, [{ player, cause: "白狼王正式牺牲技能" }, { player: target, cause: "白狼王审判带走" }], "night", true)) {
+    if (!checkPendingDeathSkill(game, [{ player, cause: "白狼王正式牺牲技能" }, { player: target, cause: "白狼王审判带走" }], "night", true)) {
+      if (!(await finishIfWon(env, game))) {
         resumeAfterDeathSkill(game, "night", true, "白狼王审判强制结束白天");
         await runAiPhase(env, game);
-      } else {
-        await runAiPhase(env, game);
       }
-      await saveGame(env, game);
+    } else {
+      await runAiPhase(env, game);
     }
+    await saveGame(env, game);
     return { ok: true, message: "白狼王审判已结算。" };
   }
   if (action === "plant_bomb") {
@@ -1056,15 +1062,15 @@ async function handlePlayerAction(env, game, actor, action, targetId = "", extra
     const resume = game.pendingDeathSkill.resumePhase || "night";
     const resumeIncrement = game.pendingDeathSkill.resumeIncrement !== false;
     game.pendingDeathSkill = null;
-    if (!(await finishIfWon(env, game))) {
-      if (!checkPendingDeathSkill(game, [{ player: target, cause: shotCause }], resume, resumeIncrement)) {
+    if (!checkPendingDeathSkill(game, [{ player: target, cause: shotCause }], resume, resumeIncrement)) {
+      if (!(await finishIfWon(env, game))) {
         resumeAfterDeathSkill(game, resume, resumeIncrement);
         await runAiPhase(env, game);
-      } else {
-        await runAiPhase(env, game);
       }
-      await saveGame(env, game);
+    } else {
+      await runAiPhase(env, game);
     }
+    await saveGame(env, game);
     return { ok: true, message: `已带走 ${target.name}。` };
   }
   if (game.phase !== "night") return { ok: false, message: "该职业技能只能在夜晚使用。" };

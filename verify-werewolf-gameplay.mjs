@@ -129,4 +129,14 @@ function gameWith(players, phase = "night") {
   assert.notEqual(game.phase, "death_skill", "AI death skills must not leave the game stuck");
 }
 
+{
+  const blackWolf = player("20001", "black_wolf_king"), goodA = player("20002", "villager"), goodB = player("20003", "villager");
+  const game = gameWith([blackWolf, goodA, goodB], "day_vote");
+  game.dayVotes = { [goodA.id]: blackWolf.id, [goodB.id]: blackWolf.id, [blackWolf.id]: goodA.id };
+  await tallyDayVote(null, game);
+  assert.equal(game.status, "active", "eliminating the last black wolf king must not end the game before its death skill");
+  assert.equal(game.phase, "death_skill");
+  assert.equal(game.pendingDeathSkill?.actorId, blackWolf.id);
+}
+
 console.log("verify-werewolf-gameplay: ok");
