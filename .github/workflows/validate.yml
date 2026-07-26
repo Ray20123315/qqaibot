@@ -31,7 +31,22 @@ jobs:
           echo "5333968b02df79d9dfedbe4a67886d81464ccfac32f650747b1a4ef5e5077c67  tools/apply-member-console-v2.7.2.mjs" | sha256sum -c -
           node --check tools/apply-member-console-v2.7.2.mjs
       - name: Apply member console patch
-        run: node tools/apply-member-console-v2.7.2.mjs
+        run: |
+          node tools/apply-member-console-v2.7.2.mjs
+          python - <<'PY'
+          from pathlib import Path
+          for path, marker in [
+              ('src/portal/members.js', 'function injectPortalMembersClient'),
+              ('src/portal/member-cleanup.js', 'function injectMemberCleanupClient'),
+          ]:
+              source = Path(path).read_text()
+              anchor = source.index(marker)
+              start = source.index('const script = `<script', anchor)
+              end = source.index('</script>`;', start) + len('</script>`;')
+              inner = source[start:end]
+              inner = inner.replace(r'\ufeff', r'\\ufeff').replace(r'\r', r'\\r').replace(r'\n', r'\\n')
+              Path(path).write_text(source[:start] + inner + source[end:])
+          PY
       - name: Validate generated source
         run: |
           node --check src/portal/members.js
