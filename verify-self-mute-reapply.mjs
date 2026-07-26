@@ -3,7 +3,7 @@ import fs from 'node:fs';
 function assert(condition, message) { if (!condition) throw new Error(message); }
 const worker = fs.readFileSync('worker.js', 'utf8');
 const pkg = JSON.parse(fs.readFileSync('package.json', 'utf8'));
-assert(pkg.version === '2.6.0', 'Package version must be 2.5.2');
+assert(pkg.version === '2.7.0', 'Package version must be 2.5.2');
 assert(pkg.scripts.check.includes('verify-self-mute-reapply.mjs'), 'Permanent check suite must include self-mute reapply verification');
 assert(worker.includes("body.notice_type === 'group_ban'"), 'Worker must process OneBot group_ban notices');
 assert(worker.includes("subType === 'lift_ban'"), 'Worker must recognize lift_ban events');
