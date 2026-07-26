@@ -14,11 +14,6 @@ replacements = [
         "night_end = werewolf.index('  player.lastActionAt = nowMs();', night_start)",
         "night action block end",
     ),
-    (
-        "'''  player.roleState[usedKey] = true;\n  player.lastActionAt = nowMs();",
-        "'''  abilityState[usedKey] = true;\n  player.lastActionAt = nowMs();",
-        "final action state anchor",
-    ),
 ]
 
 for old, new, label in replacements:
