@@ -12,7 +12,7 @@ let source = fs.readFileSync(path, "utf8");
 const oldPrefix = `async function handleWerewolfOneBotEvent(env, body) {
   if (!body || body.post_type !== "message") return null;
   const text = eventText(body);
-  if (!/^(?:[!！](?:狼人杀|狼人殺|狼聊|分组查验|分組查驗|自爆|狼人自爆|投票|竞选警长|競選警長|退出竞选|退出競選|警长投票|警長投票|白狼王审判|白狼王審判|骑士决斗|騎士決鬥|炸弹植入|炸彈植入)|[!！]我的狼人杀)/i.test(text)) return null;
+  if (!/^(?:[!！](?:狼人杀|狼人殺|狼聊|分组查验|分組查驗|自爆|狼人自爆|投票|竞选警长|競選警長|退出竞选|退出競選|警长投票|警長投票)|[!！]我的狼人杀)/i.test(text)) return null;
   const isGroup = body.message_type === "group";
   const userId = cleanId(body.user_id);
   const groupId = isGroup ? cleanId(body.group_id) : cleanId(commandArgs(text)[1]);
