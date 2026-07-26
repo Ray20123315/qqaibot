@@ -94,6 +94,8 @@ for (const match of html.matchAll(/<script[^>]*>([\s\S]*?)<\/script>/g)) new Fun
 const cleanupModule = fs.readFileSync('src/portal/member-cleanup.js', 'utf8');
 assert(cleanupModule.includes('确认清理 ${preview.eligible.length} 人'), 'Execution must require an exact preview-bound confirmation phrase');
 assert(cleanupModule.includes('get_group_member_info') && cleanupModule.includes('no_cache: true'), 'Execution must revalidate live QQ member roles without cache before removal');
+assert(cleanupModule.includes('await dbDel(env, `${PREVIEW_PREFIX}${token}`)'), 'Cleanup preview tokens must be consumed before execution to prevent replay');
+assert(cleanupModule.includes('liveHonors.get(userId)'), 'Execution must refresh group honors before the final cleanup decision');
 const members = fs.readFileSync('src/portal/members.js', 'utf8');
 assert(members.includes('handleMemberCleanupApi'), 'Member API must route cleanup endpoints');
 assert(members.includes('injectMemberCleanupClient'), 'Portal HTML must inject the cleanup client');

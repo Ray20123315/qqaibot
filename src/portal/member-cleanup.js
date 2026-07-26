@@ -1,6 +1,6 @@
 import { isDeveloperId } from "../core/identity.js";
 import { callOneBotAction, writeSystemAudit } from "../core/permissions.js";
-import { dbGet, dbPut } from "../data/store.js";
+import { dbDel, dbGet, dbPut } from "../data/store.js";
 import { jsonResponse } from "./auth.js";
 import { numericId } from "../security/network.js";
 
@@ -473,16 +473,20 @@ async function executeCleanup(env, groupId, authed, body, helpers) {
   }
   const expected = `确认清理 ${preview.eligible.length} 人`;
   if (String(body?.confirmationText || "").trim() !== expected) return { ok: false, status: 400, message: `请输入：${expected}` };
+  await dbDel(env, `${PREVIEW_PREFIX}${token}`);
   const policy = await readPolicy(env, groupId);
-  const profiles = typeof helpers?.listMemberProfileSummaries === "function" ? await helpers.listMemberProfileSummaries(env, groupId) : {};
-  const relationships = typeof helpers?.listGroupBindings === "function" ? await helpers.listGroupBindings(env, groupId) : [];
+  const [profiles, relationships, liveHonors] = await Promise.all([
+    typeof helpers?.listMemberProfileSummaries === "function" ? helpers.listMemberProfileSummaries(env, groupId) : {},
+    typeof helpers?.listGroupBindings === "function" ? helpers.listGroupBindings(env, groupId) : [],
+    fetchHonors(env, groupId)
+  ]);
   const related = relationshipUsers(relationships);
   const results = [];
   for (const requested of preview.eligible) {
     const userId = cleanId(requested.userId);
     try {
       const member = await liveMember(env, groupId, userId);
-      const context = { profile: profiles?.[userId] || null, honors: member.honors || [], hasRelationship: related.has(userId), isDeveloper: isDeveloperId(env, userId) };
+      const context = { profile: profiles?.[userId] || null, honors: liveHonors.get(userId) || [], hasRelationship: related.has(userId), isDeveloper: isDeveloperId(env, userId) };
       const classification = classifyMemberForCleanup(member, context, policy);
       if (classification.protected || member.role !== "member" || member.isRobot || !["cleanup_candidate", "review"].includes(classification.recommendation)) {
         throw new Error(`即时复核不通过：${classification.reasons.join("；") || classification.label}`);
