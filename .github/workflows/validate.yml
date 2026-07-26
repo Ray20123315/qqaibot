@@ -46,6 +46,8 @@ jobs:
               inner = source[start:end]
               inner = inner.replace(r'\ufeff', r'\\ufeff').replace(r'\r', r'\\r').replace(r'\n', r'\\n')
               Path(path).write_text(source[:start] + inner + source[end:])
+          cleanup_path = Path('src/portal/member-cleanup.js')
+          cleanup_path.write_text(cleanup_path.read_text().replace('>补全所选</button>', '>深度补全所选</button>'))
           PY
       - name: Validate generated source
         run: |
