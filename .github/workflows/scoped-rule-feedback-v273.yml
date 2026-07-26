@@ -1,12 +1,7 @@
 name: Build scoped rule feedback v2.7.3
 
 on:
-  push:
-    branches:
-      - fix/scoped-rule-feedback-v2.7.3
-  pull_request:
-    branches:
-      - main
+  workflow_dispatch:
 
 permissions:
   contents: write
