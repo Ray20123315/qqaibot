@@ -7,6 +7,7 @@ import { dbPut } from "../data/store.js";
 import { jsonResponse, readJson } from "./auth.js";
 import { numericId } from "../security/network.js";
 import { handleCommunitySuiteApi, injectCommunitySuiteClient, listMemberProfileSummaries } from "./community-suite.js";
+import { handleMemberCleanupApi, injectMemberCleanupClient } from "./member-cleanup.js";
 
 const MEMBER_CACHE_TTL_MS = 5 * 60 * 1000;
 const MAX_MUTE_SECONDS = 30 * 24 * 60 * 60;
@@ -176,6 +177,8 @@ async function handlePortalMemberApi(request, env, url, path, body, authed) {
   if (!memberConsoleAllowed(authed)) return jsonResponse({ ok: false, message: "群友列表、历史消息与禁言操作仅限本群 QQ 管理员、群主、获授群操作权限者或开发者。" }, 403);
   const suiteResponse = await handleCommunitySuiteApi(request, env, url, path, body, authed, { listPortalMembers });
   if (suiteResponse) return suiteResponse;
+  const cleanupResponse = await handleMemberCleanupApi(request, env, url, path, body, authed, { listPortalMembers, listMemberProfileSummaries, listGroupBindings, listGroupMuteLocks });
+  if (cleanupResponse) return cleanupResponse;
 
   if (request.method === "GET" && path === "/members") {
     try {
@@ -556,7 +559,7 @@ function injectPortalMembersClient(html) {
 })();
 </script>`;
   const output = source.includes("</body>") ? source.replace("</body>", script + "\n</body>") : source + script;
-  return injectCommunitySuiteClient(output);
+  return injectMemberCleanupClient(injectCommunitySuiteClient(output));
 }
 
 export { handlePortalMemberApi, injectPortalMembersClient, listPortalMembers, memberConsoleAllowed, normalizeEpochMs, normalizeMember, parseMuteSeconds };
