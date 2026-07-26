@@ -49,12 +49,27 @@ jobs:
           cat master-level-patch.log
           test "${{ steps.level_patch.outcome }}" = "success"
       - name: Check syntax
+        id: syntax_check
+        continue-on-error: true
         run: |
-          node --check src/moderation/partner-bindings.js
-          node --check src/portal/community-suite.js
-          node --check worker.js
-          node --check verify-community-suite.mjs
-          node --check verify-master-bindings.mjs
+          {
+            node --check src/moderation/partner-bindings.js
+            node --check src/portal/community-suite.js
+            node --check worker.js
+            node --check verify-community-suite.mjs
+            node --check verify-master-bindings.mjs
+          } > master-level-syntax.log 2>&1
+      - name: Upload generated syntax diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: master-level-syntax-diagnostics
+          path: master-level-syntax.log
+          if-no-files-found: error
+      - name: Require generated syntax
+        run: |
+          cat master-level-syntax.log
+          test "${{ steps.syntax_check.outcome }}" = "success"
       - name: Install dependencies
         run: npm install --ignore-scripts
       - name: Run regression checks
@@ -64,7 +79,7 @@ jobs:
       - name: Commit clean validated candidate
         if: github.event_name == 'push' && github.ref == 'refs/heads/feature/master-levels-v2.5.1'
         run: |
-          rm -rf node_modules dist package-lock.json tools/apply-master-levels-v2.5.1.mjs tools/apply-master-levels-v2.5.1.py tools/fix-master-level-patcher.py tools/__pycache__ master-level-patch.log
+          rm -rf node_modules dist package-lock.json tools/apply-master-levels-v2.5.1.mjs tools/apply-master-levels-v2.5.1.py tools/fix-master-level-patcher.py tools/__pycache__ master-level-patch.log master-level-syntax.log
           git checkout origin/main -- .github/workflows/validate.yml
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
