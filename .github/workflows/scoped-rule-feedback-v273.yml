@@ -1,7 +1,9 @@
 name: Build scoped rule feedback v2.7.3
 
 on:
-  workflow_dispatch:
+  push:
+    branches:
+      - fix/scoped-rule-feedback-v2.7.3
 
 permissions:
   contents: write
@@ -27,6 +29,13 @@ jobs:
           else
             python tools/.scoped-rule-feedback-v273/apply.py
           fi
+      - name: Add historical record cleanup
+        run: |
+          if grep -q 'rule_policy_note_migration_v273' src/moderation/runtime.js; then
+            echo 'Historical migration already applied.'
+          else
+            python tools/.scoped-rule-feedback-v273/harden-existing.py
+          fi
       - name: Validate generated source
         run: |
           node --check src/moderation/runtime.js
@@ -46,6 +55,6 @@ jobs:
           if git diff --cached --quiet; then
             echo 'No permanent changes to commit.'
           else
-            git commit -m 'Scope moderation human feedback to matching messages'
+            git commit -m 'Clean legacy correction notes from historical records'
             git push origin HEAD:fix/scoped-rule-feedback-v2.7.3
           fi
