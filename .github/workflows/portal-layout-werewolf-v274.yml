@@ -87,7 +87,23 @@ jobs:
       - name: Install dependencies
         run: npm install --ignore-scripts
       - name: Run complete regression suite
-        run: npm run check
+        id: regression
+        continue-on-error: true
+        run: |
+          set -o pipefail
+          npm run check 2>&1 | tee /tmp/v274-regression.log
+      - name: Upload regression diagnostics
+        if: steps.regression.outcome == 'failure'
+        uses: actions/upload-artifact@v4
+        with:
+          name: v274-regression-diagnostics
+          path: /tmp/v274-regression.log
+          if-no-files-found: error
+      - name: Stop after regression failure
+        if: steps.regression.outcome == 'failure'
+        run: |
+          tail -n 240 /tmp/v274-regression.log
+          exit 1
       - name: Build single Worker bundle
         run: npm run check:bundle
       - name: Commit verified permanent candidate
