@@ -1,133 +1,31 @@
-name: Build werewolf v2.6.0 candidate
+name: Validate single-Worker build
 
 on:
+  push:
+    branches:
+      - main
+      - refactor/v2-modular-worker
   pull_request:
     branches:
       - main
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
-  build-candidate:
+  validate:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
-        with:
-          ref: feature/werewolf-v2.6.0
-          fetch-depth: 0
       - uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: npm
           cache-dependency-path: package.json
-      - name: Reconstruct verified staged implementation
-        id: extract
-        shell: bash
-        run: |
-          set -euo pipefail
-          {
-            cat tools/werewolf_payload/part-* > /tmp/werewolf-payload.b64
-            test "$(wc -c < /tmp/werewolf-payload.b64)" = "34208"
-            echo "6c056ac83fb2641be1964fcb5ce2233dbc67d14a202a1a4cfc8fd867e32a8d3d  /tmp/werewolf-payload.b64" | sha256sum -c -
-            base64 -d /tmp/werewolf-payload.b64 > /tmp/werewolf-payload.tgz
-            echo "27cdef3bf51b4cb1cc6b5e06144871c5f6c1ef8d15e65a520d42821dc7e3e793  /tmp/werewolf-payload.tgz" | sha256sum -c -
-            tar -tzf /tmp/werewolf-payload.tgz
-            tar -xzf /tmp/werewolf-payload.tgz
-            node --check tools/apply-werewolf-v2.6.0.mjs
-            node --check tools/fix-werewolf-boundaries.mjs
-            node --check src/games/werewolf.js
-            node --check verify-werewolf.mjs
-            node tools/fix-werewolf-boundaries.mjs
-            node tools/apply-werewolf-v2.6.0.mjs
-          } 2>&1 | tee /tmp/werewolf-extract.log
-      - name: Upload reconstruction diagnostics
-        if: failure() && steps.extract.outcome == 'failure'
-        uses: actions/upload-artifact@v4
-        with:
-          name: werewolf-reconstruction-diagnostics
-          path: |
-            /tmp/werewolf-extract.log
-            /tmp/werewolf-payload.b64
-            /tmp/werewolf-payload.tgz
-            tools/werewolf_payload/
-      - name: Validate generated source
-        run: |
-          node --check src/games/werewolf.js
-          node --check worker.js
-          node --check src/portal/runtime.js
-          node --check verify-werewolf.mjs
       - name: Install dependencies
         run: npm install --ignore-scripts
       - name: Run regression checks
-        id: regression
-        shell: bash
-        run: |
-          set -o pipefail
-          npm run check 2>&1 | tee /tmp/werewolf-regression.log
-      - name: Upload regression diagnostics
-        if: failure() && steps.regression.outcome == 'failure'
-        uses: actions/upload-artifact@v4
-        with:
-          name: werewolf-regression-diagnostics
-          path: /tmp/werewolf-regression.log
-      - name: Build single Worker bundle
+        run: npm run check
+      - name: Build the single Worker bundle
         run: npm run check:bundle
-      - name: Commit permanent candidate files
-        id: commit
-        shell: bash
-        run: |
-          set -o pipefail
-          {
-            set -euo pipefail
-            rm -rf node_modules dist
-            rm -f package-lock.json
-            rm -rf tools/werewolf_payload tools/werewolf_recovery tools/werewolf_tail
-            rm -f tools/apply-werewolf-v2.6.0.mjs tools/fix-werewolf-boundaries.mjs tools/recover-werewolf-v2.6.0.py
-            test -f src/games/werewolf.js
-            test -f verify-werewolf.mjs
-            test ! -e node_modules
-            test ! -e dist
-            test ! -e package-lock.json
-            git add -A
-            git status --short
-            python - <<'PY'
-          import subprocess
-          expected = {
-              'package.json',
-              'release-notes.json',
-              'src/config/runtime.js',
-              'src/games/werewolf.js',
-              'src/portal/runtime.js',
-              'verify-community-suite.mjs',
-              'verify-deployment-notifications.mjs',
-              'verify-explicit-question-priority.mjs',
-              'verify-master-bindings.mjs',
-              'verify-mute-locks.mjs',
-              'verify-partner-bindings.mjs',
-              'verify-portal-relationships.mjs',
-              'verify-self-mute-reapply.mjs',
-              'verify-social-boundaries.mjs',
-              'verify-social-digital-twin.mjs',
-              'verify-werewolf.mjs',
-              'worker.js',
-          }
-          actual = set(subprocess.check_output(['git', 'diff', '--name-only', 'origin/main'], text=True).splitlines())
-          if actual != expected:
-              raise SystemExit(f'Unexpected final diff. Missing={sorted(expected-actual)} Extra={sorted(actual-expected)}')
-          print('Permanent Werewolf file allowlist passed:', len(actual))
-          PY
-            git config user.name "github-actions[bot]"
-            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-            git commit -m "Add debate-style werewolf game and Portal"
-            git push origin HEAD:feature/werewolf-v2.6.0
-          } 2>&1 | tee /tmp/werewolf-commit.log
-      - name: Upload commit diagnostics
-        if: failure() && steps.commit.outcome == 'failure'
-        uses: actions/upload-artifact@v4
-        with:
-          name: werewolf-commit-diagnostics
-          path: |
-            /tmp/werewolf-commit.log
-            /tmp/werewolf-regression.log
