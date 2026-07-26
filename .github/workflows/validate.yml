@@ -30,7 +30,20 @@ jobs:
       - name: Check social boundary patcher
         run: python -m py_compile tools/apply-social-boundaries-v2.5.2.py
       - name: Apply social boundaries
-        run: python tools/apply-social-boundaries-v2.5.2.py
+        id: social_patch
+        continue-on-error: true
+        run: python tools/apply-social-boundaries-v2.5.2.py > social-boundary-patch.log 2>&1
+      - name: Upload social boundary patch diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: social-boundary-patch-diagnostics
+          path: social-boundary-patch.log
+          if-no-files-found: error
+      - name: Require social boundary patch
+        run: |
+          cat social-boundary-patch.log
+          test "${{ steps.social_patch.outcome }}" = "success"
       - name: Check generated syntax
         run: |
           node --check src/moderation/social-boundaries.js
@@ -47,7 +60,7 @@ jobs:
       - name: Commit clean validated candidate
         if: github.event_name == 'push' && github.ref == 'refs/heads/feature/social-boundaries-v2.5.2'
         run: |
-          rm -rf node_modules dist package-lock.json tools/apply-social-boundaries-v2.5.2.py tools/__pycache__
+          rm -rf node_modules dist package-lock.json tools/apply-social-boundaries-v2.5.2.py tools/__pycache__ social-boundary-patch.log
           git checkout origin/main -- .github/workflows/validate.yml
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
