@@ -2,6 +2,7 @@ import fs from "node:fs";
 import assert from "node:assert/strict";
 import {
   normalizeRuleCategoryPolicies,
+  sanitizeLegacyRuleViolationRecord,
   selectRelevantRuleFeedbackExamples,
   stripLegacyHumanCorrectionLines
 } from "./src/moderation/runtime.js";
@@ -12,6 +13,11 @@ assert.equal(stripLegacyHumanCorrectionLines("管理员自定义说明：人工�
 
 const normalized = normalizeRuleCategoryPolicies([{ name: "管理员记录", punishment: "manual", note: polluted }]);
 assert.equal(normalized[0].note, "无法归入明确分类时只记录，交由管理复核。", "normalized category policy must not retain polluted correction text");
+
+const historical = sanitizeLegacyRuleViolationRecord({ id: "rv_old", policyNote: polluted, content: "其他人的消息" }, 123456);
+assert.equal(historical.policyNote, "无法归入明确分类时只记录，交由管理复核。", "existing violation records must lose copied legacy correction lines");
+assert.equal(historical.legacyPolicyNoteCleanedAt, 123456);
+assert.equal(sanitizeLegacyRuleViolationRecord({ policyNote: "管理员自定义说明" }, 123456), null, "clean historical records must not be rewritten");
 
 const examples = [
   { content: "这属于近期的一个梗", verdict: "not_violation", note: "群内梗" },
@@ -26,6 +32,8 @@ assert.deepEqual(selectRelevantRuleFeedbackExamples("[图片]", examples, 8), []
 const source = fs.readFileSync("src/moderation/runtime.js", "utf8");
 assert.ok(source.includes("rule_feedback_scoped_to_record"), "per-record correction audit must exist");
 assert.ok(source.includes("rule_policy_legacy_correction_cleanup"), "legacy policy cleanup migration must exist");
+assert.ok(source.includes("rule_policy_note_migration_v273"), "existing violation records must be cleaned in bounded migration batches");
+assert.ok(source.includes("rule_violation_policy_note_migration"), "historical migration must be auditable");
 assert.ok(!source.includes("const correction = `人工纠错"), "per-record correction must not be appended to global policy notes");
 assert.ok(source.includes("resolveAdaptiveRuleStrictness(env, groupId, recentContext, recentRuleFeedback)"), "aggregate feedback may still tune smart strictness without exposing unrelated notes");
 

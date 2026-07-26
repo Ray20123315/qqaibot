@@ -607,6 +607,75 @@ function normalizeRuleCategoryPolicies(value, fallbackPolicies = null) {
 
 
 
+function sanitizeLegacyRuleViolationRecord(item, now = Date.now()) {
+  if (!item || typeof item !== "object") return null;
+  const before = String(item.policyNote || "").trim().slice(0, 2000);
+  const policyNote = stripLegacyHumanCorrectionLines(before);
+  if (policyNote === before) return null;
+  return {
+    ...item,
+    policyNote,
+    legacyPolicyNoteCleanedAt: Number(now || Date.now()),
+    updatedAt: Number(now || Date.now())
+  };
+}
+
+
+async function migrateLegacyRuleViolationPolicyNotes(env, groupId, batchSize = 50) {
+  const stateKey = `rule_policy_note_migration_v273:${groupId}`;
+  const previous = await readJson(env, stateKey, null);
+  if (previous?.done === true) return previous;
+  const ids = await readJson(env, `ruleviolation:index:${groupId}`, []);
+  const list = Array.isArray(ids) ? ids.map(String).filter(Boolean) : [];
+  const previousCursor = Number(previous?.cursor);
+  const cursor = Number.isFinite(previousCursor)
+    ? Math.max(0, Math.min(list.length, Math.trunc(previousCursor)))
+    : list.length;
+  const safeBatchSize = Math.max(1, Math.min(100, Math.trunc(Number(batchSize || 50))));
+  const start = Math.max(0, cursor - safeBatchSize);
+  let checked = 0;
+  let cleaned = 0;
+  const cleanedIds = [];
+  const migrationAt = Date.now();
+  for (const id of list.slice(start, cursor).reverse()) {
+    const item = await readJson(env, `ruleviolation:${id}`, null);
+    if (!item) continue;
+    checked += 1;
+    const next = sanitizeLegacyRuleViolationRecord(item, migrationAt);
+    if (!next) continue;
+    await dbPut(env, `ruleviolation:${id}`, JSON.stringify(next));
+    cleaned += 1;
+    cleanedIds.push(id);
+  }
+  const state = {
+    version: 1,
+    totalAtStart: Number(previous?.totalAtStart || list.length),
+    cursor: start,
+    done: start === 0,
+    checked: Number(previous?.checked || 0) + checked,
+    cleaned: Number(previous?.cleaned || 0) + cleaned,
+    lastBatchChecked: checked,
+    lastBatchCleaned: cleaned,
+    updatedAt: migrationAt,
+    completedAt: start === 0 ? migrationAt : Number(previous?.completedAt || 0)
+  };
+  await dbPut(env, stateKey, JSON.stringify(state));
+  if (cleaned > 0 || state.done) {
+    await writeSystemAudit(env, {
+      type: "rule_violation_policy_note_migration",
+      groupId: String(groupId || ""),
+      actorId: "system:migration_v273",
+      action: state.done ? "completed" : "batch",
+      checked,
+      cleaned,
+      cleanedIds: cleanedIds.slice(0, 50),
+      remaining: start
+    }).catch(() => {});
+  }
+  return state;
+}
+
+
 async function getRuleCategoryPolicies(env, groupId) {
   const key = `rule_category_policies:${groupId}`;
   const raw = await readJson(env, key, null);
@@ -621,6 +690,7 @@ async function getRuleCategoryPolicies(env, groupId) {
       action: "remove_per_record_corrections_from_category_notes"
     }).catch(() => {});
   }
+  await migrateLegacyRuleViolationPolicyNotes(env, groupId);
   return normalized;
 }
 
@@ -2605,4 +2675,4 @@ async function listModerationProposals(env, groupId, { limit = 100 } = {}) {
   return items;
 }
 
-export { addRuleStrike, detectRepeatedMessageBurst, appendHumanCorrectionToRulePolicy, appendRuleViolationRecord, attachModerationProposalMessage, classifyNaturalModerationIntent, createGroupWorkRequest, createJoinRequestAssist, createModerationProposal, decideJoinRequestAssist, defaultRuleCategoryPolicies, defaultRuleProgressivePolicy, detectNaturalModerationProposal, executeGroupWorkRequest, executeModerationProposal, explicitPromotionLanguage, extractHtmlMetadata, extractOneBotMessageId, extractRuleReviewUrls, findLatestActiveRuleViolationForUser, findLatestPendingModerationProposalId, formatModerationPermissionDenied, formatModerationProposal, getGroupMemberSafe, getRuleCategoryPolicies, getRuleProgressivePolicy, handleGroupWorkDecision, handleModerationConfirmation, inspectMessageAgainstGroupRules, inspectUrlsForRuleReview, joinRequestPatternHash, listModerationProposals, localModerationIntent, matchRuleCategoryPolicy, moderationActionLabel, moderationActionNeedsTarget, moderationPermissionLevelLabel, normalizeProgressiveAction, normalizeProgressiveActionSpecs, normalizeRuleCategoryPolicies, normalizeRulePolicyActionSpec, normalizeRulePolicyActions, normalizeRulePolicyPunishment, normalizeRuleProgressivePolicy, normalizeRuleProxyMode, normalizeRuleSeverity, normalizeRuleStrictness, selectRelevantRuleFeedbackExamples, stripLegacyHumanCorrectionLines, parseModerationConfirmation, parseUnlimitedNonNegativeInteger, performRuleAdditionalActions, performRuleProxyAction, progressiveMuteFallback, readJoinPattern, readRecentRuleFeedbackExamples, readResponseTextPrefix, readRuleMemeExamples, rememberRuleMemeExample, recordJoinPatternDecision, recordRuleViolationFeedback, removeRuleStrike, requestRuleManagerClarification, resolveAdaptiveRuleStrictness, resolveModerationTarget, findApplicantBranchMembership, resolveHeadJoinFamily, resolveRuleProgressiveStep, retractModerationProposalMessage, reverseRuleViolationAction, reviewGroupWorkWithGemma, reviewJoinRequestAssist, ruleBaseActionName, ruleContentNeedsWebVerification, ruleProxyCooldownRemaining, ruleStrictnessConfig, ruleStrictnessLabel, updateRuleViolationRecord, validateModerationProposalTarget, verifyRuleMemeContext, verifyRuleNewsContext };
+export { addRuleStrike, detectRepeatedMessageBurst, appendHumanCorrectionToRulePolicy, appendRuleViolationRecord, attachModerationProposalMessage, classifyNaturalModerationIntent, createGroupWorkRequest, createJoinRequestAssist, createModerationProposal, decideJoinRequestAssist, defaultRuleCategoryPolicies, defaultRuleProgressivePolicy, detectNaturalModerationProposal, executeGroupWorkRequest, executeModerationProposal, explicitPromotionLanguage, extractHtmlMetadata, extractOneBotMessageId, extractRuleReviewUrls, findLatestActiveRuleViolationForUser, findLatestPendingModerationProposalId, formatModerationPermissionDenied, formatModerationProposal, getGroupMemberSafe, getRuleCategoryPolicies, getRuleProgressivePolicy, handleGroupWorkDecision, handleModerationConfirmation, inspectMessageAgainstGroupRules, inspectUrlsForRuleReview, joinRequestPatternHash, listModerationProposals, localModerationIntent, matchRuleCategoryPolicy, moderationActionLabel, moderationActionNeedsTarget, moderationPermissionLevelLabel, normalizeProgressiveAction, normalizeProgressiveActionSpecs, normalizeRuleCategoryPolicies, normalizeRulePolicyActionSpec, normalizeRulePolicyActions, normalizeRulePolicyPunishment, normalizeRuleProgressivePolicy, normalizeRuleProxyMode, normalizeRuleSeverity, normalizeRuleStrictness, sanitizeLegacyRuleViolationRecord, selectRelevantRuleFeedbackExamples, stripLegacyHumanCorrectionLines, parseModerationConfirmation, parseUnlimitedNonNegativeInteger, performRuleAdditionalActions, performRuleProxyAction, progressiveMuteFallback, readJoinPattern, readRecentRuleFeedbackExamples, readResponseTextPrefix, readRuleMemeExamples, rememberRuleMemeExample, recordJoinPatternDecision, recordRuleViolationFeedback, removeRuleStrike, requestRuleManagerClarification, resolveAdaptiveRuleStrictness, resolveModerationTarget, findApplicantBranchMembership, resolveHeadJoinFamily, resolveRuleProgressiveStep, retractModerationProposalMessage, reverseRuleViolationAction, reviewGroupWorkWithGemma, reviewJoinRequestAssist, ruleBaseActionName, ruleContentNeedsWebVerification, ruleProxyCooldownRemaining, ruleStrictnessConfig, ruleStrictnessLabel, updateRuleViolationRecord, validateModerationProposalTarget, verifyRuleMemeContext, verifyRuleNewsContext };
