@@ -6,7 +6,7 @@ on:
       - main
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   build-candidate:
@@ -78,32 +78,18 @@ jobs:
           path: /tmp/werewolf-regression.log
       - name: Build single Worker bundle
         run: npm run check:bundle
-      - name: Commit clean candidate without changing workflow
-        id: commit
+      - name: Prepare clean candidate artifact
         shell: bash
         run: |
-          set -o pipefail
-          {
-            set -euo pipefail
-            git checkout -- .github/workflows/validate.yml
-            rm -rf tools/werewolf_payload tools/werewolf_recovery tools/werewolf_tail
-            rm -f tools/apply-werewolf-v2.6.0.mjs tools/fix-werewolf-boundaries.mjs tools/recover-werewolf-v2.6.0.py
-            git config user.name "github-actions[bot]"
-            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-            git add -A
-            git status --short
-            if git diff --cached --quiet; then
-              echo "Candidate is already clean; nothing to commit."
-            else
-              git commit -m "Add debate-style werewolf game and Portal"
-              git push origin HEAD:feature/werewolf-v2.6.0
-            fi
-          } 2>&1 | tee /tmp/werewolf-commit.log
-      - name: Upload commit diagnostics
-        if: failure() && steps.commit.outcome == 'failure'
+          set -euo pipefail
+          rm -rf tools/werewolf_payload tools/werewolf_recovery tools/werewolf_tail node_modules .git
+          rm -f tools/apply-werewolf-v2.6.0.mjs tools/fix-werewolf-boundaries.mjs tools/recover-werewolf-v2.6.0.py
+          tar -czf /tmp/werewolf-v2.6.0-clean-candidate.tar.gz .
+          sha256sum /tmp/werewolf-v2.6.0-clean-candidate.tar.gz > /tmp/werewolf-v2.6.0-clean-candidate.sha256
+      - name: Upload clean candidate
         uses: actions/upload-artifact@v4
         with:
-          name: werewolf-commit-diagnostics
+          name: werewolf-v2.6.0-clean-candidate
           path: |
-            /tmp/werewolf-commit.log
-            /tmp/werewolf-regression.log
+            /tmp/werewolf-v2.6.0-clean-candidate.tar.gz
+            /tmp/werewolf-v2.6.0-clean-candidate.sha256
