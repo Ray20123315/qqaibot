@@ -95,7 +95,6 @@ jobs:
             python - <<'PY'
           import subprocess
           expected = {
-              '.github/workflows/validate.yml',
               'package.json',
               'release-notes.json',
               'src/config/runtime.js',
