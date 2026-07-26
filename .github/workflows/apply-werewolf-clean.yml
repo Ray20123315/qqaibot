@@ -1,0 +1,70 @@
+name: Apply clean Werewolf v2.6.0 candidate
+
+on:
+  push:
+    branches:
+      - feature/werewolf-v2.6.0-clean
+
+concurrency:
+  group: werewolf-v2.6.0-clean
+  cancel-in-progress: true
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/werewolf-v2.6.0-clean
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: package.json
+      - name: Reconstruct and integrate Werewolf
+        run: |
+          set -euo pipefail
+          cat tools/werewolf_payload/part-* > /tmp/werewolf-payload.b64
+          test "$(wc -c < /tmp/werewolf-payload.b64)" = "34208"
+          echo "6c056ac83fb2641be1964fcb5ce2233dbc67d14a202a1a4cfc8fd867e32a8d3d  /tmp/werewolf-payload.b64" | sha256sum -c -
+          base64 -d /tmp/werewolf-payload.b64 > /tmp/werewolf-payload.tgz
+          echo "27cdef3bf51b4cb1cc6b5e06144871c5f6c1ef8d15e65a520d42821dc7e3e793  /tmp/werewolf-payload.tgz" | sha256sum -c -
+          tar -tzf /tmp/werewolf-payload.tgz
+          tar -xzf /tmp/werewolf-payload.tgz
+          node --check tools/apply-werewolf-v2.6.0.mjs
+          node --check tools/fix-werewolf-boundaries.mjs
+          node tools/fix-werewolf-boundaries.mjs
+          node tools/apply-werewolf-v2.6.0.mjs
+      - name: Validate generated source
+        run: |
+          node --check src/games/werewolf.js
+          node --check worker.js
+          node --check src/portal/runtime.js
+          node --check verify-werewolf.mjs
+      - name: Install dependencies
+        run: npm install --ignore-scripts
+      - name: Run all regression checks
+        run: npm run check
+      - name: Build single Worker bundle
+        run: npm run check:bundle
+      - name: Commit permanent files only
+        run: |
+          set -euo pipefail
+          git show origin/main:.github/workflows/validate.yml > .github/workflows/validate.yml
+          rm -f .github/workflows/apply-werewolf-clean.yml
+          rm -rf tools/werewolf_payload tools/werewolf_recovery tools/werewolf_tail
+          rm -f tools/apply-werewolf-v2.6.0.mjs tools/fix-werewolf-boundaries.mjs tools/recover-werewolf-v2.6.0.py
+          test -f src/games/werewolf.js
+          test -f verify-werewolf.mjs
+          test ! -e tools/werewolf_payload
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git status --short
+          git commit -m "Add debate-style werewolf game and Portal"
+          git push origin HEAD:feature/werewolf-v2.6.0-clean
