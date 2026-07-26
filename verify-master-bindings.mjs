@@ -34,6 +34,6 @@ assert(portal.includes('主人禁言锁'), 'Portal must label master-source lock
 assert(portal.includes('if (!protect && previousLock)'), 'Normal Portal moderation must clear an old relationship lock after overriding it');
 
 const pkg = JSON.parse(fs.readFileSync('package.json', 'utf8'));
-assert(pkg.version === '2.5.1', 'Package version must be 2.5.1');
+assert(pkg.version === '2.5.2', 'Package version must be 2.5.2');
 assert(pkg.scripts.check.includes('verify-master-bindings.mjs'), 'Master relationship verification must run permanently');
 console.log('verify-master-bindings: ok');

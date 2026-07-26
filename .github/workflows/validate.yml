@@ -5,82 +5,27 @@ on:
     branches:
       - main
       - refactor/v2-modular-worker
-      - feature/social-boundaries-v2.5.2
   pull_request:
     branches:
       - main
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   validate:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-          ref: ${{ github.event.pull_request.head.sha || github.sha }}
       - uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: npm
           cache-dependency-path: package.json
-      - name: Check social boundary patchers
-        run: |
-          python -m py_compile tools/fix-social-boundary-patcher.py
-          python -m py_compile tools/apply-social-boundaries-v2.5.2.py
-      - name: Apply social boundaries
-        id: social_patch
-        continue-on-error: true
-        run: |
-          python tools/fix-social-boundary-patcher.py
-          python tools/apply-social-boundaries-v2.5.2.py > social-boundary-patch.log 2>&1
-      - name: Upload social boundary patch diagnostics
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: social-boundary-patch-diagnostics
-          path: social-boundary-patch.log
-          if-no-files-found: error
-      - name: Require social boundary patch
-        run: |
-          cat social-boundary-patch.log
-          test "${{ steps.social_patch.outcome }}" = "success"
-      - name: Check generated syntax
-        run: |
-          node --check src/moderation/social-boundaries.js
-          node --check src/moderation/runtime.js
-          node --check src/scheduler/runtime.js
-          node --check worker.js
-          node --check verify-social-boundaries.mjs
       - name: Install dependencies
         run: npm install --ignore-scripts
       - name: Run regression checks
-        id: regression
-        continue-on-error: true
-        run: npm run check > social-boundary-regression.log 2>&1
-      - name: Upload regression diagnostics
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: social-boundary-regression-diagnostics
-          path: social-boundary-regression.log
-          if-no-files-found: error
-      - name: Require regression checks
-        run: |
-          cat social-boundary-regression.log
-          test "${{ steps.regression.outcome }}" = "success"
+        run: npm run check
       - name: Build the single Worker bundle
         run: npm run check:bundle
-      - name: Commit clean validated candidate
-        if: github.event_name == 'push' && github.ref == 'refs/heads/feature/social-boundaries-v2.5.2'
-        run: |
-          rm -rf node_modules dist package-lock.json tools/apply-social-boundaries-v2.5.2.py tools/fix-social-boundary-patcher.py tools/__pycache__ social-boundary-patch.log social-boundary-regression.log
-          git checkout origin/main -- .github/workflows/validate.yml
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add -A
-          git commit -m "Add proportional social boundary moderation"
-          git push origin HEAD:feature/social-boundaries-v2.5.2

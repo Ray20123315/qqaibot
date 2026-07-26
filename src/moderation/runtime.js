@@ -7,6 +7,7 @@ import { developerId, isDeveloperId, recentConversationMessagesForUser } from ".
 import { appendIndex, callOneBotAction, getEffectivePermissions, writeSystemAudit } from "../core/permissions.js";
 import { dbDel, dbGet, dbPut } from "../data/store.js";
 import { canUnlockMute, clearMuteLock, createManualMuteLock, getMuteLock, putMuteLock } from "./mute-locks.js";
+import { FLIRT_MUTE_MAX_SECONDS, clampFlirtMuteSeconds, isFlirtRefusalSignal, isManagementRole, looksLikeFlirtCandidate, looksLikeRoughBanter, managerExchangeContext, normalizeFlirtAction, readRecentConversationRecords } from "./social-boundaries.js";
 import { botCanRunRuleMonitor, canUseBotGroupOperations, getBotGroupRole, isBotVerifiedGroupOwner } from "../group/runtime.js";
 import { formatDuration, parseDurationSeconds, runOneBotGroupOperation } from "../onebot/messages.js";
 import { opsActiveRuleRecords, opsFuseAllows, opsGetSettings, opsRecordAutomationResult, opsRuleExceptionMatch, opsSaveRecord } from "../operations/runtime.js";
@@ -1668,7 +1669,182 @@ function detectRepeatedMessageBurst(rows, currentText, threshold = DEFAULTS.rule
   };
 }
 
-async function inspectMessageAgainstGroupRules(env, { groupId, userId, senderName, text, messageId, manualReport = null, imageUrl = null, imageFile = null }) {
+
+function flirtBoundaryStateKey(groupId, userId) {
+  return `flirt_boundary:${String(groupId || "")}:${String(userId || "")}`;
+}
+
+function fallbackFlirtBoundaryAssessment({ content, userId, recentRecords }) {
+  const now = Date.now();
+  const recent = (Array.isArray(recentRecords) ? recentRecords : []).filter(record => now - Number(record?.createdAt || 0) <= 10 * 60 * 1000);
+  const flirtRows = recent.filter(record => looksLikeFlirtCandidate(record?.text || "", []));
+  let offenderId = String(userId || "");
+  if (isFlirtRefusalSignal(content)) {
+    const prior = [...flirtRows].reverse().find(record => String(record.userId || "") !== String(userId || ""));
+    if (prior) offenderId = String(prior.userId || offenderId);
+  }
+  const offenderRows = flirtRows.filter(record => String(record.userId || "") === offenderId);
+  const explicit = /(?:做爱|做愛|约炮|約炮|上床|开房|開房|睡你|想睡你|脱衣|脫衣|摸胸|舔你|舌吻|发情|發情)/i.test(String(content || ""))
+    || offenderRows.some(record => /(?:做爱|做愛|约炮|約炮|上床|开房|開房|睡你|想睡你|脱衣|脫衣|摸胸|舔你|舌吻|发情|發情)/i.test(String(record.text || "")));
+  const refusal = isFlirtRefusalSignal(content) || recent.some(record => String(record.userId || "") !== offenderId && isFlirtRefusalSignal(record.text));
+  const repeated = offenderRows.length >= 3;
+  const boundaryViolation = explicit || (refusal && offenderRows.length > 0) || repeated;
+  if (!boundaryViolation) return { flirt: true, consensual: true, boundaryViolation: false, action: "none", offenderId, targetId: "", reason: "普通、非露骨且未发现拒绝或持续纠缠的文字调情", confidence: 0.62, muteSeconds: 0 };
+  const action = (refusal && repeated) || (explicit && repeated) ? "warn_recall_mute" : explicit || refusal ? "warn_recall" : "warn";
+  return { flirt: true, consensual: !refusal, boundaryViolation: true, action, offenderId, targetId: "", reason: refusal ? "对方已表现拒绝或不适，仍出现持续调情内容" : explicit ? "群聊调情内容过于露骨" : "调情内容持续占用公共聊天", confidence: 0.72, muteSeconds: action === "warn_recall_mute" ? 120 : 0 };
+}
+
+async function classifyFlirtBoundary(env, payload) {
+  const fallback = fallbackFlirtBoundaryAssessment(payload);
+  try {
+    const result = await callGoogleDecision(env, {
+      system: `你是QQ群文字调情边界分类器。正常、双方自愿、不过度露骨的文字调情允许，不得处罚；单次“老婆、宝贝、抱抱、贴贴、亲亲”等也不能仅凭词语判违规。只有出现以下情况才 boundaryViolation=true：对方明确拒绝或不适后仍持续；公开内容明显露骨；强迫、纠缠、针对性骚扰；持续影响正常群聊。只输出JSON：{"flirt":true|false,"consensual":true|false,"boundaryViolation":true|false,"severity":0|1|2|3,"action":"none|warn|warn_recall|warn_recall_mute","muteSeconds":0到300,"offenderId":"QQ或空","targetId":"QQ或空","reason":"简短原因","confidence":0到1}。处置原则：轻微边界提醒；明确露骨或持续内容提醒并撤回近期相关内容；无视拒绝、强迫或重复越界才可加禁言，且最多300秒。管理员身份不代表可以无视明确拒绝，但不得仅因普通玩笑或熟人互动处罚。`,
+      prompt: JSON.stringify({
+        current: { userId: String(payload.userId || ""), senderRole: String(payload.senderRole || "member"), text: String(payload.content || ""), messageId: String(payload.messageId || "") },
+        recent: (Array.isArray(payload.recentRecords) ? payload.recentRecords : []).slice(-18).map(record => ({ userId: String(record.userId || ""), role: String(record.senderRole || "member"), text: String(record.text || "").slice(0, 800), mentions: record.mentions || [], messageId: String(record.messageId || ""), createdAt: Number(record.createdAt || 0) })),
+        fallbackSignals: fallback
+      }).slice(0, 15000),
+      maxOutputTokens: 240
+    });
+    const parsed = JSON.parse(result.text.match(/\{[\s\S]*\}/)?.[0] || "{}");
+    const knownIds = new Set([String(payload.userId || ""), ...(Array.isArray(payload.recentRecords) ? payload.recentRecords : []).map(record => String(record?.userId || ""))].filter(Boolean));
+    const offenderId = knownIds.has(String(parsed.offenderId || "")) ? String(parsed.offenderId) : fallback.offenderId;
+    return {
+      flirt: parsed.flirt === true,
+      consensual: parsed.consensual !== false,
+      boundaryViolation: parsed.boundaryViolation === true,
+      severity: Math.max(0, Math.min(3, Number(parsed.severity || 0))),
+      action: normalizeFlirtAction(parsed.action, fallback.action),
+      muteSeconds: clampFlirtMuteSeconds(parsed.muteSeconds || fallback.muteSeconds || 60),
+      offenderId,
+      targetId: knownIds.has(String(parsed.targetId || "")) ? String(parsed.targetId) : "",
+      reason: String(parsed.reason || fallback.reason || "调情边界判断").slice(0, 500),
+      confidence: Math.max(0, Math.min(1, Number(parsed.confidence || fallback.confidence || 0)))
+    };
+  } catch (error) {
+    return { ...fallback, error: String(error?.message || error).slice(0, 300) };
+  }
+}
+
+async function handleFlirtBoundary(env, { groupId, userId, senderName, senderRole, content, messageId, recentRecords, canEnforce }) {
+  if (!looksLikeFlirtCandidate(content, recentRecords)) return null;
+  const assessment = await classifyFlirtBoundary(env, { groupId, userId, senderName, senderRole, content, messageId, recentRecords });
+  if (!assessment.flirt) return null;
+  if (!assessment.boundaryViolation) {
+    return { status: "no_violation", review: { violation: false, confidence: assessment.confidence, violationType: "调情边界", reason: assessment.reason, flirtAllowed: true } };
+  }
+
+  const offenderId = String(assessment.offenderId || userId || "");
+  const offenderRecord = [...(Array.isArray(recentRecords) ? recentRecords : [])].reverse().find(record => String(record?.userId || "") === offenderId);
+  const offenderName = String(offenderRecord?.senderName || (offenderId === String(userId || "") ? senderName : offenderId));
+  const offenderRole = String(offenderRecord?.senderRole || (offenderId === String(userId || "") ? senderRole : "member"));
+  const stateKey = flirtBoundaryStateKey(groupId, offenderId);
+  const previous = await readJson(env, stateKey, { count: 0, lastAt: 0, lastAction: "none" });
+  const recentRepeat = Date.now() - Number(previous.lastAt || 0) <= 30 * 60 * 1000;
+  let action = normalizeFlirtAction(assessment.action, "warn");
+  if (recentRepeat && Number(previous.count || 0) >= 1 && action === "warn") action = "warn_recall";
+  if (recentRepeat && Number(previous.count || 0) >= 2 && action !== "warn_recall_mute") action = "warn_recall_mute";
+  // 管理层的明确越界仍可警告并记录，但不由机器人自动撤回同级管理消息或禁言管理层。
+  if (isManagementRole(offenderRole) && action !== "warn") action = "warn";
+  if (!canEnforce && action !== "warn") action = "warn";
+
+  const cutoff = Date.now() - 10 * 60 * 1000;
+  const relatedMessageIds = [...new Set([
+    ...(Array.isArray(recentRecords) ? recentRecords : [])
+      .filter(record => String(record?.userId || "") === offenderId && Number(record?.createdAt || 0) >= cutoff && looksLikeFlirtCandidate(record?.text || "", []))
+      .map(record => String(record?.messageId || "")),
+    offenderId === String(userId || "") ? String(messageId || "") : ""
+  ].filter(Boolean))].slice(-8);
+
+  let item = await appendRuleViolationRecord(env, {
+    groupId,
+    userId: offenderId,
+    senderName: offenderName,
+    content: String(content || ""),
+    violationType: "调情边界",
+    rule: "群聊文字调情需保持自愿、不过度露骨且不得持续纠缠",
+    reason: assessment.reason,
+    confidence: assessment.confidence,
+    recommendedAction: action,
+    messageId: offenderId === String(userId || "") ? String(messageId || "") : relatedMessageIds[relatedMessageIds.length - 1] || "",
+    relatedMessageIds,
+    strictness: "system_boundary",
+    effectiveStrictness: "system_boundary",
+    severity: action === "warn" ? "minor" : action === "warn_recall" ? "moderate" : "severe",
+    intentional: action === "warn_recall_mute",
+    policyAction: action,
+    policyActions: [],
+    policyNote: "独立调情边界；禁言硬上限300秒"
+  });
+
+  const results = [];
+  const actionsTaken = ["warn"];
+  let recalled = 0;
+  if (action === "warn_recall" || action === "warn_recall_mute") {
+    for (const id of relatedMessageIds) {
+      try {
+        await callOneBotAction(env, { action: "delete_msg", params: { message_id: numericId(id) } }, 15000);
+        recalled += 1;
+      } catch {}
+    }
+    if (recalled) {
+      actionsTaken.push("recall");
+      results.push(`撤回近期调情内容 ${recalled} 条`);
+    } else results.push("未能撤回近期调情内容");
+  }
+
+  let muteSeconds = 0;
+  if (action === "warn_recall_mute") {
+    muteSeconds = clampFlirtMuteSeconds(assessment.muteSeconds || 120);
+    try {
+      await callOneBotAction(env, { action: "set_group_ban", params: { group_id: numericId(groupId), user_id: numericId(offenderId), duration: muteSeconds } }, 15000);
+      actionsTaken.push("mute");
+      results.push(`禁言 ${muteSeconds} 秒`);
+      await dbPut(env, `rule_mute_enforcement:${groupId}:${offenderId}`, JSON.stringify({ violationId: item.id, groupId, userId: offenderId, startedAt: Date.now(), durationSeconds: muteSeconds, expiresAt: Date.now() + muteSeconds * 1000, active: true }));
+    } catch (error) {
+      results.push(`禁言失败：${String(error?.message || error).slice(0, 200)}`);
+      muteSeconds = 0;
+    }
+  }
+
+  const warningText = action === "warn"
+    ? "群聊文字调情可以，但请注意分寸，确认对方接受后再继续。"
+    : action === "warn_recall"
+      ? `群聊文字调情可以，但这段已经越界；近期相关内容${recalled ? "已撤回" : "未能撤回"}，请停止继续。`
+      : `群聊文字调情可以，但请停止露骨内容或无视拒绝的纠缠；近期相关内容${recalled ? "已撤回" : "未能撤回"}${muteSeconds ? `，并禁言 ${muteSeconds} 秒` : ""}。`;
+  const message = [];
+  if (action === "warn" && offenderId === String(userId || "") && messageId) message.push({ type: "reply", data: { id: String(messageId) } });
+  message.push({ type: "at", data: { qq: offenderId } });
+  message.push({ type: "text", data: { text: ` ${warningText}` } });
+  let warningMessageId = "";
+  try {
+    const sent = await callOneBotAction(env, { action: "send_group_msg", params: { group_id: numericId(groupId), message, auto_escape: false } }, 15000);
+    warningMessageId = extractOneBotMessageId(sent);
+    results.unshift("已发送边界警告");
+  } catch (error) {
+    results.unshift(`警告发送失败：${String(error?.message || error).slice(0, 200)}`);
+  }
+
+  const nextCount = recentRepeat ? Number(previous.count || 0) + 1 : 1;
+  await dbPut(env, stateKey, JSON.stringify({ count: nextCount, lastAt: Date.now(), lastAction: action, targetId: assessment.targetId || "", reason: assessment.reason }));
+  item = await updateRuleViolationRecord(env, item, {
+    actionTaken: `flirt_${action}`,
+    actionsTaken,
+    actionResults: results,
+    actionResult: results.join("；"),
+    actionOk: Boolean(warningMessageId || recalled || muteSeconds),
+    actionDurationSeconds: muteSeconds,
+    warningMessageId,
+    warningMessageIds: warningMessageId ? [warningMessageId] : [],
+    flirtBoundary: true,
+    flirtAssessment: assessment,
+    strikeCounted: false
+  });
+  await writeSystemAudit(env, { type: "flirt_boundary_action", groupId, actorId: "system:flirt_boundary", targetId: offenderId, action, messageId: String(messageId || ""), relatedMessageIds, muteSeconds, recalled, reason: assessment.reason }).catch(() => {});
+  return { status: "violation", item, review: { violation: true, confidence: assessment.confidence, violationType: "调情边界", reason: assessment.reason, action, muteSeconds } };
+}
+
+async function inspectMessageAgainstGroupRules(env, { groupId, userId, senderName, senderRole = "member", text, messageId, manualReport = null, imageUrl = null, imageFile = null, mentionedQqs = [], quotedSenderId = "" }) {
   const manual = Boolean(manualReport && typeof manualReport === "object");
   const botRuleState = await getBotGroupRole(env, groupId);
   const canEnforce = botCanRunRuleMonitor(botRuleState);
@@ -1725,11 +1901,19 @@ async function inspectMessageAgainstGroupRules(env, { groupId, userId, senderNam
     windowSeconds: spamWindowSeconds,
     relatedMessageIds: repeatedMessageIds
   } : null;
-  if (!rules && !spamEvidence) return { status: "no_rules" };
   if (content.length < 2 && !repeatedMessageBurst && !manual) return { status: "no_violation", review: { violation: false, confidence: 1, reason: "消息过短且无重复发送证据" } };
 
   const recentLogRows = (await readJson(env, `recent_logs:${groupId}`, [])).slice(-30);
   const recentContext = recentLogRows.slice(-18).join("\n").slice(-5000);
+  const recentConversationRecords = await readRecentConversationRecords(env, groupId, 30);
+  const managerExchange = managerExchangeContext(recentConversationRecords, { userId, senderRole, text: content, mentionedQqs, quotedSenderId });
+  if (!manual && looksLikeRoughBanter(content) && (managerExchange.managerParticipating || managerExchange.managerStopActive)) {
+    await writeSystemAudit(env, { type: "rule_banter_manager_participation_skip", groupId, actorId: String(userId || ""), action: managerExchange.managerStopActive ? "handled_by_manager_stop" : "manager_participating", messageId: String(messageId || "") }).catch(() => {});
+    return { status: "no_violation", review: { violation: false, confidence: 1, reason: managerExchange.managerStopActive ? "管理已明确介入，后续由冲突守卫记录并警告，不重复执行群规处罚" : "管理层正在参与该段熟人互呛，视为已有人工分寸判断" } };
+  }
+  const flirtBoundary = await handleFlirtBoundary(env, { groupId, userId, senderName, senderRole, content, messageId, recentRecords: recentConversationRecords, canEnforce });
+  if (flirtBoundary) return flirtBoundary;
+  if (!rules && !spamEvidence) return { status: "no_rules" };
   const recentTargetRecords = await recentConversationMessagesForUser(env, groupId, userId, 12);
   const targetRecentMessages = recentTargetRecords.map(item => ({
     messageId: String(item.messageId || item.id || ""),
@@ -1832,7 +2016,9 @@ async function inspectMessageAgainstGroupRules(env, { groupId, userId, senderNam
 15. 时效性新闻或公共事件若提供了联网核查结果，必须优先采用核查事实；核查失败只能标记不确定，不能编造。
 16. 不确定必须输出 violation=false，并在 reason 明确写“需要管理确认”。action 只是建议，系统会按授权范围决定是否执行。
 17. 流行梗、多人自愿接龙、复读梗、双方都在参与的玩笑或群内既有梗不等于恶意刷屏；除非明确群规禁止，或有人明确制止、正常聊天已被持续打断，才可按公共秩序处理。
-18. memeVerification 是联网搜索、群内上下文和管理员历史纠错的综合核查。likelyMeme=true 且 disruptive=false 时优先不处罚；搜不到只能视为未知，不能直接判定“不是梗”。`,
+18. memeVerification 是联网搜索、群内上下文和管理员历史纠错的综合核查。likelyMeme=true 且 disruptive=false 时优先不处罚；搜不到只能视为未知，不能直接判定“不是梗”。
+19. 管理员、群主或开发者正在参与一段熟人互呛时，不得仅凭“滚、神经、笨蛋”等短词判违规；管理明确要求停止后仍继续的情况由独立冲突守卫记录并警告，避免重复处罚。
+20. 群内普通、双方自愿且不过度露骨的文字调情允许。只有明确拒绝后仍持续、公开内容明显露骨、强迫纠缠或持续影响正常聊天时才越界；独立调情边界最多禁言300秒。`,
       prompt: JSON.stringify({
         currentMessage: content,
         userId,

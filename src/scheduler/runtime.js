@@ -11,6 +11,7 @@ import { parseDurationSeconds, runOneBotGroupOperation } from "../onebot/message
 import { opsFuseAllows, opsGetSettings, opsQuietState, opsRecordAutomationResult } from "../operations/runtime.js";
 import { readJson, sendPortalVerificationMessage } from "../portal/auth.js";
 import { getFeatureFlag, isGroupWhitelisted, numericId } from "../security/network.js";
+import { isManagementRole, looksLikeRoughBanter, managerExchangeContext, readRecentConversationRecords } from "../moderation/social-boundaries.js";
 
 
 
@@ -711,32 +712,110 @@ async function voteAppeal(env, id, reviewerId, vote, note = "") {
 
 
 
-async function processConflictSignal(env, { groupId, userId, senderName, text, botId }) {
-  const rough = /滚|闭嘴|垃圾|废物|智障|傻逼|妈的|操你|去死|有病|恶心|人身攻击|吵架/i.test(text);
-  const state = await readJson(env, `conflict:${groupId}`, { stage: 0, updatedAt: 0, participants: [] });
-  if (!rough && Date.now() - Number(state.updatedAt || 0) > 10 * 60 * 1000) return null;
+async function processConflictSignal(env, { groupId, userId, senderName, senderRole = "member", text, botId, mentionedQqs = [], quotedSenderId = "", messageId = "" }) {
+  const now = Date.now();
+  const records = await readRecentConversationRecords(env, groupId, 20);
+  const managerContext = managerExchangeContext(records, { userId, senderRole, text, mentionedQqs, quotedSenderId, now });
+  const stateKey = `conflict:${groupId}`;
+  const state = await readJson(env, stateKey, { warnedAt: 0, updatedAt: 0, participants: [], managerStoppedAt: 0, managerId: "", warnedAfterManagerStop: [] });
+
+  if (managerContext.currentManagerStop) {
+    const participants = [...new Set([
+      ...(Array.isArray(state.participants) ? state.participants : []),
+      ...records.filter(record => !isManagementRole(record.senderRole) && now - Number(record.createdAt || 0) <= 5 * 60 * 1000).map(record => String(record.userId || ""))
+    ].filter(Boolean))];
+    const next = {
+      ...state,
+      updatedAt: now,
+      managerStoppedAt: now,
+      managerId: String(userId || ""),
+      managerStopMessageId: String(messageId || ""),
+      participants,
+      warnedAfterManagerStop: []
+    };
+    await dbPut(env, stateKey, JSON.stringify(next));
+    await writeSystemAudit(env, {
+      type: "conflict_manager_intervention",
+      groupId,
+      actorId: String(userId || ""),
+      action: "stop_signal",
+      messageId: String(messageId || ""),
+      participants
+    }).catch(() => {});
+    return null;
+  }
+
+  // 管理层正在参与该段对话时，视为已有人工分寸判断；机器人不插手、不升级也不召集其他管理。
+  if (managerContext.managerParticipating) {
+    if (Number(state.updatedAt || 0)) await dbDel(env, stateKey).catch(() => {});
+    return null;
+  }
+
+  const rough = looksLikeRoughBanter(text);
+  const activeManagerStopAt = Math.max(Number(state.managerStoppedAt || 0), Number(managerContext.managerStopRecord?.createdAt || 0));
+  const managerStopActive = activeManagerStopAt > 0 && now - activeManagerStopAt <= 8 * 60 * 1000;
+  if (!rough && !managerStopActive && now - Number(state.updatedAt || 0) > 10 * 60 * 1000) {
+    if (Number(state.updatedAt || 0)) await dbDel(env, stateKey).catch(() => {});
+    return null;
+  }
+
   let conflict = rough;
+  let severity = rough ? 1 : 0;
   try {
-    const logs = (await readJson(env, `recent_logs:${groupId}`, [])).slice(-12).join("\n");
+    const context = records.slice(-14).map(record => `[${record.senderRole}:${record.senderName || record.userId}(QQ:${record.userId})] ${record.text}`).join("\n");
     const result = await callGoogleDecision(env, {
-      system: "判断QQ群最近对话是否正在发生真实持续争吵或人身攻击。只输出JSON：{\"conflict\":true/false,\"severity\":0-3}。玩笑互呛应为false。",
-      prompt: logs,
+      system: "判断QQ群最近对话是否发生真实持续争吵或人身攻击。熟人玩笑互呛、短暂的‘神经／滚／笨蛋’、双方都在接话、或管理员正在参与时必须判 conflict=false。只输出JSON：{\"conflict\":true|false,\"severity\":0|1|2|3}。",
+      prompt: context.slice(-5000),
       maxOutputTokens: 80
     });
-    const obj = JSON.parse(result.text.match(/\{[\s\S]*\}/)?.[0] || "{}"); conflict = Boolean(obj.conflict);
+    const obj = JSON.parse(result.text.match(/\{[\s\S]*\}/)?.[0] || "{}");
+    conflict = Boolean(obj.conflict);
+    severity = Math.max(0, Math.min(3, Number(obj.severity || 0)));
   } catch {}
-  if (!conflict) { if (state.stage) await dbDel(env, `conflict:${groupId}`); return null; }
-  state.stage = Math.min(3, Number(state.stage || 0) + 1); state.updatedAt = Date.now(); state.participants = [...new Set([...(state.participants || []), userId])];
-  await dbPut(env, `conflict:${groupId}`, JSON.stringify(state));
-  if (state.stage === 1) return { replyText: "先停一下，语气已经有点冲了。把事情说清楚就好，别继续针对人。" };
-  if (state.stage === 2) return { replyText: "已经提醒过一次了，请停止人身攻击和持续争吵。继续下去会通知管理处理。" };
-  let adminMentions = [];
-  try {
-    const members = await callOneBotAction(env, { action: "get_group_member_list", params: { group_id: numericId(groupId), no_cache: false } }, 12000);
-    adminMentions = (Array.isArray(members) ? members : []).filter(m => ["owner", "admin"].includes(m.role)).map(m => String(m.user_id)).filter(id => id && id !== botId);
-  } catch {}
-  await notifyDeveloper(env, `【群冲突升级】\n群号：${groupId}\n参与QQ：${state.participants.join('、')}\n已进行两次劝阻，请决定是否交给其他管理。`);
-  return { replyText: "群内冲突持续，已经两次劝阻无效，请人工处理。", mentionIds: adminMentions };
+
+  if (!conflict) {
+    if (!managerStopActive && Number(state.updatedAt || 0)) await dbDel(env, stateKey).catch(() => {});
+    return null;
+  }
+
+  const participants = [...new Set([...(Array.isArray(state.participants) ? state.participants : []), String(userId || "")].filter(Boolean))];
+  if (managerStopActive) {
+    const warned = new Set((Array.isArray(state.warnedAfterManagerStop) ? state.warnedAfterManagerStop : []).map(String));
+    if (warned.has(String(userId || ""))) {
+      await dbPut(env, stateKey, JSON.stringify({ ...state, updatedAt: now, participants }));
+      return null;
+    }
+    warned.add(String(userId || ""));
+    const next = {
+      ...state,
+      updatedAt: now,
+      managerStoppedAt: activeManagerStopAt,
+      managerId: String(state.managerId || managerContext.managerStopRecord?.userId || ""),
+      participants,
+      warnedAfterManagerStop: [...warned]
+    };
+    await dbPut(env, stateKey, JSON.stringify(next));
+    await writeSystemAudit(env, {
+      type: "conflict_warning_after_manager_stop",
+      groupId,
+      actorId: String(userId || ""),
+      targetId: String(userId || ""),
+      action: "warn",
+      messageId: String(messageId || ""),
+      severity,
+      managerId: next.managerId,
+      participants
+    }).catch(() => {});
+    return { replyText: "管理已经要求停止，请不要继续针对人或延续争吵。" };
+  }
+
+  // 没有管理介入时最多劝阻一次；继续争吵只记录状态，不再重复劝阻、@管理或私讯开发者。
+  if (Number(state.warnedAt || 0) && now - Number(state.warnedAt || 0) <= 10 * 60 * 1000) {
+    await dbPut(env, stateKey, JSON.stringify({ ...state, updatedAt: now, participants, lastSeverity: severity }));
+    return null;
+  }
+  await dbPut(env, stateKey, JSON.stringify({ ...state, warnedAt: now, updatedAt: now, participants, lastSeverity: severity }));
+  return { replyText: "先停一下，语气有点冲了。把事情说清楚就好，别继续针对人。" };
 }
 
 export { appealApprovalReached, buildScheduledGroupMessage, cancelSchedule, checkinDoneForDay, claimAutomaticCheckinWindow, cleanupExpiredModerationProposals, cleanupTransientState, computeNextScheduleRun, countActiveSchedulesForUser, createAppealFromText, createScheduleRecord, deleteScheduleRecord, executeManagementSchedule, extractScheduleMentionIds, formatScheduleLine, heartbeatAutomaticCheckinWindow, listOneBotGroups, listUserSchedules, nextTaipeiMonthly, nextTaipeiTime, nextTaipeiWeekday, parseManagementScheduleAction, parseScheduleRequest, parseTaipeiDateTime, performGroupCheckin, performManualGroupCheckins, processActiveSpeaking, processConflictSignal, processDueSchedules, reviewScheduleWithGemma, reviseScheduleRecord, runAutomaticGroupCheckins, sanitizeAppealForReviewer, scheduleApprovalReached, scheduleSpecFromRecord, skipScheduleOnce, sleepMs, taipeiParts, voteAppeal, voteSchedule };

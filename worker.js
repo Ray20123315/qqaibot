@@ -1070,7 +1070,7 @@ const QQAIWorker = {
       const operationsHighRiskPaused = Boolean(operationsRuntimeSettings?.maintenanceMode || operationsRuntimeSettings?.emergencyLock);
       if (isGroup && !operationsHighRiskPaused && !isCommandMessage && !isSelfAccount && (cleanMessage.length > 0 || ((imageUrl || imageFile) && imageInspectionConfigured)) && await dbGet(env, `rule_monitor_enabled:${currentGroupId}`) !== "false") {
         // 在后台检查；群规文字优先，图片作为直接证据一并送入 Google 判断链。检查器会先即时确认机器人为群主／管理员。
-        ctx.waitUntil(inspectMessageAgainstGroupRules(env, { groupId: currentGroupId, userId, senderName: senderCard, text: cleanMessage || ((imageUrl || imageFile) ? "[图片]" : ""), messageId: replyMessageId, imageUrl, imageFile }));
+        ctx.waitUntil(inspectMessageAgainstGroupRules(env, { groupId: currentGroupId, userId, senderName: senderCard, senderRole: isDeveloper ? "developer" : senderRole, text: cleanMessage || ((imageUrl || imageFile) ? "[图片]" : ""), messageId: replyMessageId, imageUrl, imageFile, mentionedQqs, quotedSenderId: String(quotedMessage?.senderId || "") }));
       }
 
       // 维护／紧急锁定时暂停主动插话，但保留群友主动 @Bot 的一般聊天。
@@ -2959,7 +2959,7 @@ const QQAIWorker = {
       // 群內衝突分級處理：先勸阻；持續無效時只私訊開發者，不擅自私訊其他管理。
       if (isGroup && !isCommandMessage && !isSelfAccount && body.__qqai_suppress_optional_ai !== true) {
         const conflictResult = await processConflictSignal(env, {
-          groupId: currentGroupId, userId, senderName: senderCard, text: cleanMessage, botId
+          groupId: currentGroupId, userId, senderName: senderCard, senderRole: isDeveloper ? "developer" : senderRole, text: cleanMessage, botId, mentionedQqs, quotedSenderId: String(quotedMessage?.senderId || ""), messageId: replyMessageId
         });
         if (conflictResult?.replyText) {
           const conflictPlan = { mode: conflictResult.mentionIds?.length ? 'mention_targets' : 'plain', mentionIds: conflictResult.mentionIds || [], quoteMessageId: '', text: conflictResult.replyText };
