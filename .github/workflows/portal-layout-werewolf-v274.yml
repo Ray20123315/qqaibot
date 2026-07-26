@@ -37,6 +37,7 @@ jobs:
           if grep -q 'qqai-portal-layout-v274' src/portal/layout.js 2>/dev/null && grep -q '"version": "2.7.4"' package.json; then
             echo 'Permanent candidate already applied.' | tee /tmp/v274-apply.log
           else
+            python tools/.portal-layout-werewolf-v274/repair.py
             python tools/.portal-layout-werewolf-v274/apply.py 2>&1 | tee /tmp/v274-apply.log
           fi
       - name: Upload builder diagnostics
