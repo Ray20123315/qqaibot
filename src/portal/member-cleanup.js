@@ -69,10 +69,13 @@ function memberMissingFields(member) {
 function mergeRawMember(groupRaw, strangerRaw) {
   const group = groupRaw && typeof groupRaw === "object" ? groupRaw : {};
   const stranger = strangerRaw && typeof strangerRaw === "object" ? strangerRaw : {};
-  const merged = { ...stranger, ...group };
+  const merged = { ...group };
+  if (!cleanId(group.user_id || group.userId || group.qq)) merged.user_id = stranger.user_id ?? stranger.userId ?? stranger.qq;
+  if (!String(group.nickname || group.name || "").trim() && String(stranger.nickname || stranger.name || "").trim()) merged.nickname = stranger.nickname || stranger.name;
   if (normalizeSex(group.sex) === "unknown" && normalizeSex(stranger.sex) !== "unknown") merged.sex = stranger.sex;
   if (!Number(group.age || 0) && Number(stranger.age || 0)) merged.age = stranger.age;
-  if (!String(group.area || "").trim()) merged.area = String(stranger.area || stranger.location || [stranger.province, stranger.city].filter(Boolean).join(" ") || "");
+  const groupArea = String(group.area || group.location || [group.province, group.city].filter(Boolean).join(" ") || "").trim();
+  if (!groupArea) merged.area = String(stranger.area || stranger.location || [stranger.province, stranger.city].filter(Boolean).join(" ") || "");
   if (!Number(group.qq_level ?? group.qqLevel ?? 0)) merged.qq_level = Number(stranger.qq_level ?? stranger.qqLevel ?? stranger.level ?? 0);
   merged._data_sources = ["group_member_info", ...(Object.keys(stranger).length ? ["stranger_info"] : [])];
   return merged;
@@ -81,6 +84,16 @@ function mergeRawMember(groupRaw, strangerRaw) {
 function preserveEnrichedMember(previous, current) {
   const before = previous && typeof previous === "object" ? previous : {};
   const next = current && typeof current === "object" ? current : {};
+  const nextRawFields = Array.isArray(next.rawFields) ? next.rawFields : [];
+  const hasTitleField = nextRawFields.some(field => ["title", "special_title", "specialTitle"].includes(String(field)));
+  const hasTitleExpireField = nextRawFields.some(field => ["title_expire_time", "titleExpireTime"].includes(String(field)));
+  const title = hasTitleField ? String(next.title || "") : String(next.title || before.title || "");
+  let titleExpireTime = 0;
+  if (title) {
+    if (hasTitleExpireField) titleExpireTime = Number(next.titleExpireTime || 0);
+    else if (title === String(before.title || "")) titleExpireTime = Number(before.titleExpireTime || 0);
+    else titleExpireTime = Number(next.titleExpireTime || 0);
+  }
   const merged = {
     ...before,
     ...next,
@@ -88,9 +101,13 @@ function preserveEnrichedMember(previous, current) {
     age: Number(next.age || 0) || Number(before.age || 0),
     area: String(next.area || before.area || ""),
     qqLevel: Number(next.qqLevel || 0) || Number(before.qqLevel || 0),
-    titleExpireTime: Number(next.titleExpireTime || 0) || Number(before.titleExpireTime || 0),
+    title,
+    specialTitle: title,
+    titleExpireTime,
+    titleStatus: !title ? "none" : titleExpireTime ? "expires" : "unspecified",
+    cardChangeable: next.cardChangeable ?? before.cardChangeable ?? null,
     extra: { ...(before.extra || {}), ...(next.extra || {}) },
-    rawFields: [...new Set([...(before.rawFields || []), ...(next.rawFields || [])])].slice(0, 100),
+    rawFields: [...new Set([...(before.rawFields || []), ...nextRawFields])].slice(0, 100),
     dataSources: [...new Set([...(before.dataSources || []), ...(next.dataSources || [])])]
   };
   merged.missingFields = memberMissingFields(merged);
@@ -113,7 +130,7 @@ function extractExtraFields(raw) {
   ]);
   const out = {};
   for (const [key, value] of Object.entries(raw && typeof raw === "object" ? raw : {})) {
-    if (known.has(key)) continue;
+    if (known.has(key) || String(key).startsWith("_")) continue;
     const normalized = safeScalar(value);
     if (normalized !== null) out[String(key).slice(0, 80)] = normalized;
     if (Object.keys(out).length >= 40) break;
@@ -424,7 +441,7 @@ async function fastSync(env, groupId) {
     const liveHonors = honors.get(current.qq);
     return {
       ...merged,
-      honors: liveHonors || previous.honors || [],
+      honors: honors.ok === false ? (previous.honors || []) : (liveHonors || []),
       honorSyncOk: honors.ok !== false,
       honorSyncWarning: honors.warning || "",
       syncMode: String(previous.syncMode || "").includes("deep") ? "deep+fast" : "fast",
@@ -486,7 +503,7 @@ async function deepSync(env, groupId, userIds) {
       raw._supplement_warning = supplementWarning;
       const current = normalizeFullMember(raw, capturedAt);
       const snapshot = preserveEnrichedMember(existing.get(userId) || {}, current);
-      snapshot.honors = honors.get(userId) || existing.get(userId)?.honors || [];
+      snapshot.honors = honors.ok === false ? (existing.get(userId)?.honors || []) : (honors.get(userId) || []);
       snapshot.honorSyncOk = honors.ok !== false;
       snapshot.honorSyncWarning = honors.warning || "";
       snapshot.syncMode = "deep";
@@ -818,8 +835,10 @@ export {
   handleMemberCleanupApi,
   honorMapFromResponse,
   injectMemberCleanupClient,
+  mergeRawMember,
   normalizeFullMember,
   normalizeSex,
+  preserveEnrichedMember,
   normalizePolicy,
   normalizeRequestedMemberIds
 };

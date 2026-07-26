@@ -1,5 +1,5 @@
 import fs from 'node:fs';
-import { honorMapFromResponse, injectMemberCleanupClient, normalizeFullMember, normalizeSex } from './src/portal/member-cleanup.js';
+import { honorMapFromResponse, injectMemberCleanupClient, mergeRawMember, normalizeFullMember, normalizeSex, preserveEnrichedMember } from './src/portal/member-cleanup.js';
 import { injectPortalMembersClient } from './src/portal/members.js';
 
 function assert(condition, message) { if (!condition) throw new Error(message); }
@@ -7,11 +7,21 @@ assert(normalizeSex('男') === 'male' && normalizeSex(2) === 'female' && normali
 const normalized = normalizeFullMember({ user_id: '10001', sex: '女', age: 18, province: '台灣', city: '台北', title: '', title_expire_time: 0 });
 assert(normalized.sex === 'female' && normalized.area.includes('台北'), 'Compatible demographic fields must normalize');
 assert(normalized.titleStatus === 'none' && normalized.titleExpireTime === 0, 'No title must be not-applicable rather than ambiguous expiry');
+const mergedRaw = mergeRawMember({ user_id: '10001', level: 'group-8', sex: 'unknown', age: 0, area: '' }, { user_id: '10001', level: 88, sex: 'male', age: 20, area: '补全地区' });
+const mergedMember = normalizeFullMember(mergedRaw);
+assert(mergedMember.level === 'group-8' && mergedMember.qqLevel === 88, 'Stranger level must supplement QQ level without replacing the group level');
+const previousTitle = { title: '保留头衔', specialTitle: '保留头衔', titleExpireTime: 1900000000000, sex: 'female', age: 20, area: '地区', rawFields: ['title', 'title_expire_time'] };
+const listRefresh = normalizeFullMember({ user_id: '10001', sex: 'unknown', age: 0, area: '' });
+const preservedTitle = preserveEnrichedMember(previousTitle, listRefresh);
+assert(preservedTitle.title === '保留头衔' && preservedTitle.titleExpireTime === 1900000000000, 'Fast sync must preserve a title when the list response omits title fields');
+const explicitNoTitle = preserveEnrichedMember(previousTitle, normalizeFullMember({ user_id: '10001', title: '', title_expire_time: 0 }));
+assert(explicitNoTitle.title === '' && explicitNoTitle.titleStatus === 'none', 'An explicit empty title from the member API must clear a stale title');
 const honors = honorMapFromResponse({ data: { currentTalkative: { user_id: 1 }, performerList: [{ user_id: 2 }] } });
 assert(honors.get('1')?.[0]?.type === 'current_talkative' && honors.get('2')?.[0]?.type === 'performer', 'Honor camelCase aliases must parse');
 const cleanupSource = fs.readFileSync('src/portal/member-cleanup.js', 'utf8');
 assert(cleanupSource.includes('get_stranger_info'), 'Deep sync must use stranger fallback');
 assert(cleanupSource.includes('preserveEnrichedMember'), 'Fast sync must preserve enriched fields');
+assert(cleanupSource.includes('honors.ok === false ? (previous.honors || []) : (liveHonors || [])'), 'Successful honor sync must clear stale honors while failed sync preserves the last known value');
 assert(cleanupSource.includes('deepSyncAll'), 'Portal must support all-member batched completion');
 assert(cleanupSource.includes('平台未提供'), 'Missing fields must be labeled honestly');
 const base = '<!doctype html><html><head></head><body><nav><button data-view="logs">操作日志</button></nav><main><section id="v-logs"></section></main></body></html>';
