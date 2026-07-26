@@ -9,7 +9,7 @@ const META_PREFIX = "member_snapshot_meta:";
 const POLICY_PREFIX = "member_cleanup_policy:";
 const PREVIEW_PREFIX = "member_cleanup_preview:";
 const DEEP_BATCH_LIMIT = 30;
-const EXECUTE_BATCH_LIMIT = 20;
+const EXECUTE_CHUNK_SIZE = 5;
 const PREVIEW_TTL_MS = 5 * 60 * 1000;
 
 const DEFAULT_POLICY = Object.freeze({
@@ -27,6 +27,10 @@ const DEFAULT_POLICY = Object.freeze({
 
 function cleanId(value) {
   return String(value || "").replace(/\D/g, "");
+}
+
+function normalizeRequestedMemberIds(value) {
+  return [...new Set((Array.isArray(value) ? value : []).map(cleanId).filter(Boolean))];
 }
 
 function boundedInt(value, fallback, min, max) {
@@ -444,7 +448,7 @@ async function liveMember(env, groupId, userId) {
 }
 
 async function createCleanupPreview(env, groupId, authed, body, helpers) {
-  const ids = [...new Set((Array.isArray(body?.userIds) ? body.userIds : []).map(cleanId).filter(Boolean))].slice(0, EXECUTE_BATCH_LIMIT);
+  const ids = normalizeRequestedMemberIds(body?.userIds);
   if (!ids.length) return { ok: false, status: 400, message: "请至少选择一位候选成员。" };
   const policy = await readPolicy(env, groupId);
   const records = await buildRecords(env, groupId, helpers, policy);
@@ -460,20 +464,37 @@ async function createCleanupPreview(env, groupId, authed, body, helpers) {
   }
   if (!eligible.length) return { ok: false, status: 409, message: "所选成员均不符合清理预览条件。", excluded };
   const token = crypto.randomUUID();
-  const preview = { token, groupId: cleanId(groupId), actorId: cleanId(authed?.qq), eligible, excluded, createdAt: Date.now(), expiresAt: Date.now() + PREVIEW_TTL_MS };
+  const preview = { token, groupId: cleanId(groupId), actorId: cleanId(authed?.qq), eligible, excluded, offset: 0, succeeded: 0, failed: 0, createdAt: Date.now(), expiresAt: Date.now() + PREVIEW_TTL_MS };
   await dbPut(env, `${PREVIEW_PREFIX}${token}`, JSON.stringify(preview));
   return { ok: true, preview, confirmText: `确认清理 ${eligible.length} 人`, message: `预览完成：可清理 ${eligible.length} 人，排除 ${excluded.length} 人。` };
 }
 
-async function executeCleanup(env, groupId, authed, body, helpers) {
-  const token = String(body?.token || "");
-  const preview = await readJsonValue(env, `${PREVIEW_PREFIX}${token}`, null);
-  if (!preview || preview.groupId !== cleanId(groupId) || preview.actorId !== cleanId(authed?.qq) || Number(preview.expiresAt || 0) < Date.now()) {
+async function claimPreviewToken(env, token, groupId, actorId, confirmationText) {
+  const key = `${PREVIEW_PREFIX}${String(token || "")}`;
+  const raw = await dbGet(env, key);
+  if (!raw || !env?.DB) return { ok: false, status: 409, message: "清理预览不存在、已过期、正在使用或不属于当前账号，请重新建立预览。" };
+  let preview = null;
+  try { preview = JSON.parse(raw); } catch { return { ok: false, status: 409, message: "清理预览资料损坏，请重新建立预览。" }; }
+  if (preview.claimedAt || preview.claimId) return { ok: false, status: 409, message: "这张清理预览已被使用，请勿重复提交。" };
+  if (preview.groupId !== cleanId(groupId) || preview.actorId !== cleanId(actorId) || Number(preview.expiresAt || 0) < Date.now()) {
     return { ok: false, status: 409, message: "清理预览不存在、已过期或不属于当前账号，请重新建立预览。" };
   }
   const expected = `确认清理 ${preview.eligible.length} 人`;
-  if (String(body?.confirmationText || "").trim() !== expected) return { ok: false, status: 400, message: `请输入：${expected}` };
-  await dbDel(env, `${PREVIEW_PREFIX}${token}`);
+  if (String(confirmationText || "").trim() !== expected) return { ok: false, status: 400, message: `请输入：${expected}` };
+  const claimId = crypto.randomUUID();
+  const claimed = JSON.stringify({ ...preview, claimedAt: Date.now(), claimId });
+  const result = await env.DB.prepare("UPDATE kv_store SET value = ? WHERE key = ? AND value = ?").bind(claimed, key, raw).run();
+  const changes = Number(result?.meta?.changes ?? result?.changes ?? 0);
+  if (changes !== 1) return { ok: false, status: 409, message: "这张清理预览已被使用，请勿重复提交。" };
+  await dbDel(env, key);
+  return { ok: true, preview };
+}
+
+async function executeCleanup(env, groupId, authed, body, helpers) {
+  const token = String(body?.token || "");
+  const claim = await claimPreviewToken(env, token, groupId, authed?.qq, body?.confirmationText);
+  if (!claim.ok) return claim;
+  const preview = claim.preview;
   const policy = await readPolicy(env, groupId);
   const [profiles, relationships, liveHonors] = await Promise.all([
     typeof helpers?.listMemberProfileSummaries === "function" ? helpers.listMemberProfileSummaries(env, groupId) : {},
@@ -481,8 +502,10 @@ async function executeCleanup(env, groupId, authed, body, helpers) {
     fetchHonors(env, groupId)
   ]);
   const related = relationshipUsers(relationships);
-  const results = [];
-  for (const requested of preview.eligible) {
+  const start = Math.max(0, Math.trunc(Number(preview.offset || 0)));
+  const end = Math.min(preview.eligible.length, start + EXECUTE_CHUNK_SIZE);
+  const chunk = preview.eligible.slice(start, end);
+  const results = await runPool(chunk, Math.min(3, chunk.length || 1), async requested => {
     const userId = cleanId(requested.userId);
     try {
       const member = await liveMember(env, groupId, userId);
@@ -492,14 +515,52 @@ async function executeCleanup(env, groupId, authed, body, helpers) {
         throw new Error(`即时复核不通过：${classification.reasons.join("；") || classification.label}`);
       }
       await callOneBotAction(env, { action: "set_group_kick", params: { group_id: numericId(groupId), user_id: numericId(userId), reject_add_request: false } }, 15000);
-      results.push({ userId, ok: true, name: member.name || userId });
+      return { userId, ok: true, name: member.name || userId };
     } catch (error) {
-      results.push({ userId, ok: false, error: String(error?.message || error).slice(0, 300) });
+      return { userId, ok: false, error: String(error?.message || error).slice(0, 300) };
     }
+  });
+  const chunkSucceeded = results.filter(item => item.ok).length;
+  const chunkFailed = results.length - chunkSucceeded;
+  const succeeded = Number(preview.succeeded || 0) + chunkSucceeded;
+  const failed = Number(preview.failed || 0) + chunkFailed;
+  let continuationToken = "";
+  if (end < preview.eligible.length) {
+    continuationToken = crypto.randomUUID();
+    const continuation = { ...preview, token: continuationToken, offset: end, succeeded, failed, expiresAt: Date.now() + PREVIEW_TTL_MS };
+    delete continuation.claimedAt;
+    delete continuation.claimId;
+    await dbPut(env, `${PREVIEW_PREFIX}${continuationToken}`, JSON.stringify(continuation));
   }
-  const succeeded = results.filter(item => item.ok).length;
-  await writeSystemAudit(env, { type: "portal_member_cleanup_execute", groupId: cleanId(groupId), actorId: cleanId(authed?.qq), action: "kick_reviewed_members", requested: preview.eligible.length, succeeded, failed: results.length - succeeded, targets: results.map(item => item.userId) }).catch(() => {});
-  return { ok: succeeded > 0, status: succeeded > 0 ? 200 : 409, message: `清理执行完成：成功 ${succeeded}，失败 ${results.length - succeeded}。`, results };
+  await writeSystemAudit(env, {
+    type: continuationToken ? "portal_member_cleanup_execute_chunk" : "portal_member_cleanup_execute",
+    groupId: cleanId(groupId),
+    actorId: cleanId(authed?.qq),
+    action: "kick_reviewed_members",
+    requested: preview.eligible.length,
+    processedFrom: start,
+    processedTo: end,
+    chunkSucceeded,
+    chunkFailed,
+    succeeded,
+    failed,
+    completed: !continuationToken,
+    targets: results.map(item => item.userId)
+  }).catch(() => {});
+  return {
+    ok: true,
+    completed: !continuationToken,
+    continuationToken,
+    processed: end,
+    total: preview.eligible.length,
+    remaining: Math.max(0, preview.eligible.length - end),
+    succeeded,
+    failed,
+    message: continuationToken
+      ? `清理处理中：已处理 ${end}/${preview.eligible.length} 人，累计成功 ${succeeded}，失败 ${failed}。`
+      : `清理执行完成：成功 ${succeeded}，失败 ${failed}。`,
+    results
+  };
 }
 
 async function handleMemberCleanupApi(request, env, url, path, body, authed, helpers = {}) {
@@ -555,7 +616,7 @@ function injectMemberCleanupClient(html) {
   if (!source.includes(anchor)) return source;
   const panel = `
   <div class="card cleanup-console">
-    <div class="section-head compact"><div><h3>群成员资料与清人分析</h3><p>同步 QQ／OneBot 可取得的成员资料并透明分类。系统不会自动踢人；执行前必须建立预览、即时复核并输入确认文字。</p></div><div class="cleanup-head-actions"><button id="cleanupRefresh" class="btn ghost">刷新分析</button><button id="cleanupFastSync" class="btn">快速同步</button><button id="cleanupDeepSync" class="btn">深度补全所选</button></div></div>
+    <div class="section-head compact"><div><h3>群成员资料与清人分析</h3><p>同步 QQ／OneBot 可取得的成员资料并透明分类。所选清理人数不设上限，系统会自动分批执行；执行前仍必须建立预览、即时复核并输入确认文字。</p></div><div class="cleanup-head-actions"><button id="cleanupRefresh" class="btn ghost">刷新分析</button><button id="cleanupFastSync" class="btn">快速同步</button><button id="cleanupDeepSync" class="btn">深度补全所选</button></div></div>
     <div class="cleanup-summary" id="cleanupSummary"><div class="empty">尚未同步清人资料</div></div>
     <div class="cleanup-policy">
       <div class="field"><label>活跃天数</label><input id="cleanupActiveDays" type="number" min="1" max="180" value="30"></div>
@@ -606,7 +667,7 @@ function injectMemberCleanupClient(html) {
   function selectCandidates(){document.querySelectorAll('.cleanup-select:not(:disabled)').forEach(function(n){n.checked=true})}
   function exportCleanup(){var rows=[['QQ','名称','身份','分类','建议','分数','入群时间','最后发言时间','未发言天数','群等级','QQ等级','专属头衔','头衔到期','地区','年龄','性别','群荣誉','分类理由','抓取模式','原始字段']];cleanupRecords.forEach(function(r){var m=r.member||{},c=r.classification||{};rows.push([m.qq,m.name,m.role,c.label,c.recommendation,c.score,cd(m.joinTime),cd(m.lastSentTime),c.inactiveDays==null?'':c.inactiveDays,m.level,m.qqLevel,m.title,cd(m.titleExpireTime),m.area,m.age,m.sex,(m.honors||[]).map(function(x){return x.type}).join('|'),(c.reasons||[]).join('|'),m.syncMode,(m.rawFields||[]).join('|')])});function cell(v){return'"'+String(v==null?'':v).replace(/"/g,'""')+'"'}var csv='\ufeff'+rows.map(function(row){return row.map(cell).join(',')}).join('\\r\\n'),blob=new Blob([csv],{type:'text/csv;charset=utf-8'}),url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download='群成员清人分析-'+new Date().toISOString().slice(0,10)+'.csv';document.body.appendChild(a);a.click();a.remove();setTimeout(function(){URL.revokeObjectURL(url)},1000)}
   async function previewCleanup(){var ids=cselected();if(!ids.length){cn('请先选择候选成员');return}var r=await cc('/members/cleanup/preview','POST',{userIds:ids});cn(r.message||'预览完成');if(!r.ok)return;cleanupPreviewToken=r.preview.token;cleanupConfirmText=r.confirmText;var panel=ce('cleanupExecutePanel'),text=ce('cleanupPreviewText'),input=ce('cleanupConfirmationText');if(panel)panel.classList.remove('hidden');if(text)text.textContent='可清理 '+r.preview.eligible.length+' 人；排除 '+r.preview.excluded.length+' 人。请输入：'+r.confirmText;if(input){input.value='';input.placeholder=r.confirmText}}
-  async function executeCleanup(){if(!cleanupPreviewToken){cn('请先建立清理预览');return}var text=String(ce('cleanupConfirmationText')&&ce('cleanupConfirmationText').value||'');if(text!==cleanupConfirmText){cn('确认文字不正确，应为：'+cleanupConfirmText);return}var r=await cc('/members/cleanup/execute','POST',{token:cleanupPreviewToken,confirmationText:text});cn(r.message||'执行完成');if(r.ok){cleanupPreviewToken='';cleanupConfirmText='';ce('cleanupExecutePanel')&&ce('cleanupExecutePanel').classList.add('hidden');if(typeof window.qqaiLoadMembers==='function')window.qqaiLoadMembers();loadCleanup()}}
+  async function executeCleanup(){if(!cleanupPreviewToken){cn('请先建立清理预览');return}var text=String(ce('cleanupConfirmationText')&&ce('cleanupConfirmationText').value||'');if(text!==cleanupConfirmText){cn('确认文字不正确，应为：'+cleanupConfirmText);return}var button=ce('cleanupExecute'),status=ce('cleanupPreviewText'),token=cleanupPreviewToken,previousToken='',last=null;if(button)button.disabled=true;while(token){if(token===previousToken){cn('服务器返回重复续传凭证，已停止以避免重复操作');break}previousToken=token;var r=await cc('/members/cleanup/execute','POST',{token:token,confirmationText:text});last=r;if(!r.ok){cn(r.message||'执行失败');break}token=String(r.continuationToken||'');cleanupPreviewToken=token;if(status)status.textContent=r.message||('已处理 '+String(r.processed||0)+'/'+String(r.total||0)+' 人')}if(button)button.disabled=false;if(last&&last.completed){cn(last.message||'执行完成');cleanupPreviewToken='';cleanupConfirmText='';ce('cleanupExecutePanel')&&ce('cleanupExecutePanel').classList.add('hidden');if(typeof window.qqaiLoadMembers==='function')window.qqaiLoadMembers();loadCleanup()}else if(token){cn('清理尚未完成，可再次点击继续处理剩余成员。')}}
   document.addEventListener('click',function(e){var t=e.target;if(!t)return;if(t.id==='cleanupRefresh')loadCleanup();else if(t.id==='cleanupFastSync')fastSync();else if(t.id==='cleanupDeepSync')deepSync();else if(t.id==='cleanupSavePolicy')savePolicy();else if(t.id==='cleanupSelectCandidates')selectCandidates();else if(t.id==='cleanupExport')exportCleanup();else if(t.id==='cleanupPreview')previewCleanup();else if(t.id==='cleanupExecute')executeCleanup()});
   document.addEventListener('input',function(e){if(e.target&&e.target.id==='cleanupSearch')renderCleanup()});document.addEventListener('change',function(e){if(e.target&&['cleanupCategory','cleanupHideProtected'].indexOf(e.target.id)>=0)renderCleanup()});
   var oldLoad=window.qqaiLoadMembers;window.qqaiLoadMembers=async function(){if(typeof oldLoad==='function')await oldLoad();setTimeout(loadCleanup,0)};if(document.getElementById('v-members')&&document.getElementById('v-members').classList.contains('active'))setTimeout(loadCleanup,0)
@@ -624,5 +685,6 @@ export {
   honorMapFromResponse,
   injectMemberCleanupClient,
   normalizeFullMember,
-  normalizePolicy
+  normalizePolicy,
+  normalizeRequestedMemberIds
 };

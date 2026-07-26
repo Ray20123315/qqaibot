@@ -1,75 +1,31 @@
-name: Build unlimited member cleanup v2.7.1 candidate
+name: Validate single-Worker build
 
 on:
+  push:
+    branches:
+      - main
+      - refactor/v2-modular-worker
   pull_request:
     branches:
       - main
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
-  build-candidate:
+  validate:
     runs-on: ubuntu-latest
-    timeout-minutes: 18
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
-        with:
-          ref: feature/member-cleanup-unlimited-v2.7.1
-          fetch-depth: 0
       - uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: npm
           cache-dependency-path: package.json
-      - name: Apply unlimited cleanup patch
-        run: node tools/apply-member-cleanup-unlimited-v2.7.1.mjs
-      - name: Validate generated source
-        run: |
-          node --check src/portal/member-cleanup.js
-          node --check verify-member-cleanup.mjs
       - name: Install dependencies
         run: npm install --ignore-scripts
-      - name: Run complete regression suite
+      - name: Run regression checks
         run: npm run check
-      - name: Build single Worker bundle
+      - name: Build the single Worker bundle
         run: npm run check:bundle
-      - name: Commit permanent candidate files
-        shell: bash
-        run: |
-          set -euo pipefail
-          rm -rf node_modules dist
-          rm -f package-lock.json
-          rm -f tools/apply-member-cleanup-unlimited-v2.7.1.mjs
-          rm -f .github/workflows/member-cleanup-unlimited-v271.yml
-          git checkout origin/main -- .github/workflows/validate.yml
-          git add -A
-          python - <<'PY'
-          import subprocess
-          expected = {
-              'package.json',
-              'release-notes.json',
-              'src/config/runtime.js',
-              'src/portal/member-cleanup.js',
-              'verify-community-suite.mjs',
-              'verify-deployment-notifications.mjs',
-              'verify-explicit-question-priority.mjs',
-              'verify-master-bindings.mjs',
-              'verify-member-cleanup.mjs',
-              'verify-mute-locks.mjs',
-              'verify-partner-bindings.mjs',
-              'verify-portal-relationships.mjs',
-              'verify-self-mute-reapply.mjs',
-              'verify-social-boundaries.mjs',
-              'verify-social-digital-twin.mjs',
-              'verify-werewolf.mjs',
-          }
-          actual = set(subprocess.check_output(['git', 'diff', '--name-only', 'origin/main'], text=True).splitlines())
-          if actual != expected:
-              raise SystemExit(f'Unexpected final diff. Missing={sorted(expected-actual)} Extra={sorted(actual-expected)}')
-          print('Unlimited cleanup permanent allowlist passed:', len(actual))
-          PY
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git commit -m "Remove member cleanup selection limit"
-          git push origin HEAD:feature/member-cleanup-unlimited-v2.7.1
