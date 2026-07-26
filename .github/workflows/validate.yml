@@ -27,12 +27,16 @@ jobs:
           node-version: 22
           cache: npm
           cache-dependency-path: package.json
-      - name: Check level patcher
-        run: python -m py_compile tools/apply-master-levels-v2.5.1.py
+      - name: Check level patchers
+        run: |
+          python -m py_compile tools/fix-master-level-patcher.py
+          python -m py_compile tools/apply-master-levels-v2.5.1.py
       - name: Apply master relationship levels
         id: level_patch
         continue-on-error: true
-        run: python tools/apply-master-levels-v2.5.1.py > master-level-patch.log 2>&1
+        run: |
+          python tools/fix-master-level-patcher.py
+          python tools/apply-master-levels-v2.5.1.py > master-level-patch.log 2>&1
       - name: Upload level patch diagnostics
         if: always()
         uses: actions/upload-artifact@v4
@@ -60,7 +64,7 @@ jobs:
       - name: Commit clean validated candidate
         if: github.event_name == 'push' && github.ref == 'refs/heads/feature/master-levels-v2.5.1'
         run: |
-          rm -rf node_modules dist package-lock.json tools/apply-master-levels-v2.5.1.mjs tools/apply-master-levels-v2.5.1.py tools/__pycache__ master-level-patch.log
+          rm -rf node_modules dist package-lock.json tools/apply-master-levels-v2.5.1.mjs tools/apply-master-levels-v2.5.1.py tools/fix-master-level-patcher.py tools/__pycache__ master-level-patch.log
           git checkout origin/main -- .github/workflows/validate.yml
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
