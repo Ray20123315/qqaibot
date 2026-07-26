@@ -28,9 +28,9 @@ jobs:
           cache: npm
           cache-dependency-path: package.json
       - name: Check level patcher
-        run: node --check tools/apply-master-levels-v2.5.1.mjs
+        run: python -m py_compile tools/apply-master-levels-v2.5.1.py
       - name: Apply master relationship levels
-        run: node tools/apply-master-levels-v2.5.1.mjs
+        run: python tools/apply-master-levels-v2.5.1.py
       - name: Check syntax
         run: |
           node --check src/moderation/partner-bindings.js
@@ -47,7 +47,7 @@ jobs:
       - name: Commit clean validated candidate
         if: github.event_name == 'push' && github.ref == 'refs/heads/feature/master-levels-v2.5.1'
         run: |
-          rm -rf node_modules dist package-lock.json tools/apply-master-levels-v2.5.1.mjs
+          rm -rf node_modules dist package-lock.json tools/apply-master-levels-v2.5.1.mjs tools/apply-master-levels-v2.5.1.py tools/__pycache__
           git checkout origin/main -- .github/workflows/validate.yml
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
