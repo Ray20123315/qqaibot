@@ -80,7 +80,7 @@ source = replace_once(source, old_prefix, new_prefix, 'OneBot handler boundary')
 source = replace_once(
     source,
     '  if (!game) { await reply("没有找到你参与中的狼人杀；私讯技能时请附群号。"); return { handled: true }; }\n',
-    '  if (!game) {\n    if (/^[!！](?:投票|竞选警长|競選警長|退出竞选|退出競選|警长投票|警長投票|白狼王审判|白狼王審判|骑士决斗|騎士決鬥|炸弹植入|炸彈植入)/i.test(text)) return null;\n    await reply("没有找到你参与中的狼人杀；私讯技能时请附群号。\");\n    return { handled: true };\n  }\n',
+    '  if (!game) {\n    if (/^[!！](?:投票|竞选警长|競選警長|退出竞选|退出競選|警长投票|警長投票|白狼王审判|白狼王審判|骑士决斗|騎士決鬥|炸弹植入|炸彈植入)/i.test(text)) return null;\n    await reply("没有找到你参与中的狼人杀；私讯技能时请附群号。");\n    return { handled: true };\n  }\n',
     'generic command handoff'
 )
 tail = ''.join((ROOT / f'tools/werewolf_tail/part-0{i}').read_text() for i in range(3))
