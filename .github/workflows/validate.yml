@@ -31,12 +31,14 @@ jobs:
         run: |
           python -m py_compile tools/fix-master-level-patcher.py
           python -m py_compile tools/apply-master-levels-v2.5.1.py
+          python -m py_compile tools/fix-master-level-output.py
       - name: Apply master relationship levels
         id: level_patch
         continue-on-error: true
         run: |
           python tools/fix-master-level-patcher.py
           python tools/apply-master-levels-v2.5.1.py > master-level-patch.log 2>&1
+          python tools/fix-master-level-output.py >> master-level-patch.log 2>&1
       - name: Upload level patch diagnostics
         if: always()
         uses: actions/upload-artifact@v4
@@ -79,7 +81,7 @@ jobs:
       - name: Commit clean validated candidate
         if: github.event_name == 'push' && github.ref == 'refs/heads/feature/master-levels-v2.5.1'
         run: |
-          rm -rf node_modules dist package-lock.json tools/apply-master-levels-v2.5.1.mjs tools/apply-master-levels-v2.5.1.py tools/fix-master-level-patcher.py tools/__pycache__ master-level-patch.log master-level-syntax.log
+          rm -rf node_modules dist package-lock.json tools/apply-master-levels-v2.5.1.mjs tools/apply-master-levels-v2.5.1.py tools/fix-master-level-patcher.py tools/fix-master-level-output.py tools/__pycache__ master-level-patch.log master-level-syntax.log
           git checkout origin/main -- .github/workflows/validate.yml
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
