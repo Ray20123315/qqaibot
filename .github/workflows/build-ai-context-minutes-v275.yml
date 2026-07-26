@@ -150,9 +150,26 @@ jobs:
           cat /tmp/v275-syntax.log
           exit 1
       - name: Run focused executable validation
+        id: focused
+        continue-on-error: true
         run: |
-          node verify-ai-context-output.mjs
-          node verify-meeting-minutes.mjs
+          set -o pipefail
+          {
+            node verify-ai-context-output.mjs
+            node verify-meeting-minutes.mjs
+          } 2>&1 | tee /tmp/v275-focused.log
+      - name: Upload focused diagnostics
+        if: steps.focused.outcome == 'failure'
+        uses: actions/upload-artifact@v4
+        with:
+          name: v275-focused-diagnostics
+          path: /tmp/v275-focused.log
+          if-no-files-found: error
+      - name: Stop after focused failure
+        if: steps.focused.outcome == 'failure'
+        run: |
+          cat /tmp/v275-focused.log
+          exit 1
       - name: Install dependencies
         run: npm install --ignore-scripts
       - name: Run complete regression suite
