@@ -91,6 +91,9 @@ assert(html.includes('qqai-member-cleanup-client'), 'Cleanup client must be inje
 assert(html.includes('快速同步') && html.includes('深度补全所选') && html.includes('建立清理预览'), 'Cleanup UI must expose sync and reviewed cleanup controls');
 for (const match of html.matchAll(/<script[^>]*>([\s\S]*?)<\/script>/g)) new Function(match[1]);
 
+const cleanupModule = fs.readFileSync('src/portal/member-cleanup.js', 'utf8');
+assert(cleanupModule.includes('确认清理 ${preview.eligible.length} 人'), 'Execution must require an exact preview-bound confirmation phrase');
+assert(cleanupModule.includes('get_group_member_info') && cleanupModule.includes('no_cache: true'), 'Execution must revalidate live QQ member roles without cache before removal');
 const members = fs.readFileSync('src/portal/members.js', 'utf8');
 assert(members.includes('handleMemberCleanupApi'), 'Member API must route cleanup endpoints');
 assert(members.includes('injectMemberCleanupClient'), 'Portal HTML must inject the cleanup client');
