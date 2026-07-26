@@ -1,5 +1,6 @@
 name: Build werewolf v2.6.0 candidate
 
+# Connector-authored trigger: generate the already validated clean candidate artifact.
 on:
   pull_request:
     branches:
