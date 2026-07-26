@@ -572,6 +572,16 @@ function normalizeRulePolicyActions(value, fallbackPunishment = "manual", fallba
 
 
 
+function stripLegacyHumanCorrectionLines(value) {
+  return String(value || "")
+    .split(/\r?\n/)
+    .filter(line => !/^\s*人工(?:纠错|糾錯)\s+\d{4}-\d{2}-\d{2}\s*[（(]QQ[:：]?\d+[）)]\s*[:：]/.test(String(line || "")))
+    .join("\n")
+    .trim()
+    .slice(0, 2000);
+}
+
+
 function normalizeRuleCategoryPolicies(value, fallbackPolicies = null) {
   const source = Array.isArray(value) ? value : [];
   const output = [];
@@ -583,7 +593,7 @@ function normalizeRuleCategoryPolicies(value, fallbackPolicies = null) {
       name,
       punishment: actions[0].action,
       actions,
-      note: String(raw?.note || "").trim().slice(0, 2000),
+      note: stripLegacyHumanCorrectionLines(raw?.note),
       muteSeconds: actions.find(item => item.action === "mute")?.muteSeconds || parseUnlimitedNonNegativeInteger(raw?.muteSeconds, 0)
     });
   }
@@ -591,14 +601,97 @@ function normalizeRuleCategoryPolicies(value, fallbackPolicies = null) {
   const fallback = Array.isArray(fallbackPolicies) && fallbackPolicies.length ? fallbackPolicies : defaultRuleCategoryPolicies();
   return fallback.map(raw => {
     const actions = normalizeRulePolicyActions(raw?.actions, raw?.punishment, raw?.muteSeconds);
-    return { ...raw, punishment: actions[0].action, actions, note: String(raw?.note || "").slice(0, 2000), muteSeconds: actions.find(item => item.action === "mute")?.muteSeconds || parseUnlimitedNonNegativeInteger(raw?.muteSeconds, 0) };
+    return { ...raw, punishment: actions[0].action, actions, note: stripLegacyHumanCorrectionLines(raw?.note), muteSeconds: actions.find(item => item.action === "mute")?.muteSeconds || parseUnlimitedNonNegativeInteger(raw?.muteSeconds, 0) };
   });
 }
 
 
 
+function sanitizeLegacyRuleViolationRecord(item, now = Date.now()) {
+  if (!item || typeof item !== "object") return null;
+  const before = String(item.policyNote || "").trim().slice(0, 2000);
+  const policyNote = stripLegacyHumanCorrectionLines(before);
+  if (policyNote === before) return null;
+  return {
+    ...item,
+    policyNote,
+    legacyPolicyNoteCleanedAt: Number(now || Date.now()),
+    updatedAt: Number(now || Date.now())
+  };
+}
+
+
+async function migrateLegacyRuleViolationPolicyNotes(env, groupId, batchSize = 50) {
+  const stateKey = `rule_policy_note_migration_v273:${groupId}`;
+  const previous = await readJson(env, stateKey, null);
+  if (previous?.done === true) return previous;
+  const ids = await readJson(env, `ruleviolation:index:${groupId}`, []);
+  const list = Array.isArray(ids) ? ids.map(String).filter(Boolean) : [];
+  const previousCursor = Number(previous?.cursor);
+  const cursor = Number.isFinite(previousCursor)
+    ? Math.max(0, Math.min(list.length, Math.trunc(previousCursor)))
+    : list.length;
+  const safeBatchSize = Math.max(1, Math.min(100, Math.trunc(Number(batchSize || 50))));
+  const start = Math.max(0, cursor - safeBatchSize);
+  let checked = 0;
+  let cleaned = 0;
+  const cleanedIds = [];
+  const migrationAt = Date.now();
+  for (const id of list.slice(start, cursor).reverse()) {
+    const item = await readJson(env, `ruleviolation:${id}`, null);
+    if (!item) continue;
+    checked += 1;
+    const next = sanitizeLegacyRuleViolationRecord(item, migrationAt);
+    if (!next) continue;
+    await dbPut(env, `ruleviolation:${id}`, JSON.stringify(next));
+    cleaned += 1;
+    cleanedIds.push(id);
+  }
+  const state = {
+    version: 1,
+    totalAtStart: Number(previous?.totalAtStart || list.length),
+    cursor: start,
+    done: start === 0,
+    checked: Number(previous?.checked || 0) + checked,
+    cleaned: Number(previous?.cleaned || 0) + cleaned,
+    lastBatchChecked: checked,
+    lastBatchCleaned: cleaned,
+    updatedAt: migrationAt,
+    completedAt: start === 0 ? migrationAt : Number(previous?.completedAt || 0)
+  };
+  await dbPut(env, stateKey, JSON.stringify(state));
+  if (cleaned > 0 || state.done) {
+    await writeSystemAudit(env, {
+      type: "rule_violation_policy_note_migration",
+      groupId: String(groupId || ""),
+      actorId: "system:migration_v273",
+      action: state.done ? "completed" : "batch",
+      checked,
+      cleaned,
+      cleanedIds: cleanedIds.slice(0, 50),
+      remaining: start
+    }).catch(() => {});
+  }
+  return state;
+}
+
+
 async function getRuleCategoryPolicies(env, groupId) {
-  return normalizeRuleCategoryPolicies(await readJson(env, `rule_category_policies:${groupId}`, null), defaultRuleCategoryPolicies(groupId));
+  const key = `rule_category_policies:${groupId}`;
+  const raw = await readJson(env, key, null);
+  const normalized = normalizeRuleCategoryPolicies(raw, defaultRuleCategoryPolicies(groupId));
+  const legacyPollution = Array.isArray(raw) && raw.some(item => stripLegacyHumanCorrectionLines(item?.note) !== String(item?.note || "").trim().slice(0, 2000));
+  if (legacyPollution) {
+    await dbPut(env, key, JSON.stringify(normalized));
+    await writeSystemAudit(env, {
+      type: "rule_policy_legacy_correction_cleanup",
+      groupId: String(groupId || ""),
+      actorId: "system:migration_v273",
+      action: "remove_per_record_corrections_from_category_notes"
+    }).catch(() => {});
+  }
+  await migrateLegacyRuleViolationPolicyNotes(env, groupId);
+  return normalized;
 }
 
 
@@ -1135,7 +1228,7 @@ async function appendRuleViolationRecord(env, data) {
     actionsTaken: Array.isArray(data.actionsTaken) ? data.actionsTaken.map(String).slice(0, 12) : [],
     actionResults: Array.isArray(data.actionResults) ? data.actionResults.map(String).slice(0, 20) : [],
     warningMessageIds: Array.isArray(data.warningMessageIds) ? data.warningMessageIds.map(String).filter(Boolean).slice(0, 20) : [],
-    policyNote: String(data.policyNote || "").slice(0, 2000),
+    policyNote: stripLegacyHumanCorrectionLines(data.policyNote),
     humanVerdict: String(data.humanVerdict || ""),
     createdAt: Date.now()
   };
@@ -1507,21 +1600,21 @@ async function reverseRuleViolationAction(env, item, actorId) {
 
 async function appendHumanCorrectionToRulePolicy(env, item, actorId, note) {
   const text = String(note || "").trim().slice(0, 800);
-  if (!text) return { updated: false, note: "" };
-  const policies = await getRuleCategoryPolicies(env, item.groupId);
-  const matched = matchRuleCategoryPolicy(item.violationType || item.rule || "其他", policies);
-  const index = Math.max(0, policies.findIndex(policy => policy.name === matched.name));
-  const target = policies[index] || matched;
-  const date = new Date().toISOString().slice(0, 10);
-  const correction = `人工纠错 ${date}（QQ:${actorId}）：${text}`;
-  const current = String(target.note || "").trim();
-  if (current.includes(text)) return { updated: false, note: current };
-  const combined = [current, correction].filter(Boolean).join("\n");
-  target.note = combined.length > 2000 ? combined.slice(combined.length - 2000) : combined;
-  policies[index] = target;
-  await dbPut(env, `rule_category_policies:${item.groupId}`, JSON.stringify(normalizeRuleCategoryPolicies(policies, defaultRuleCategoryPolicies(item.groupId))));
-  await writeSystemAudit(env, { type: "rule_policy_human_correction", groupId: item.groupId, actorId: String(actorId), targetId: item.id, action: target.name, reason: text });
-  return { updated: true, note: target.note, category: target.name };
+  if (!text) return { updated: false, note: "", scoped: true };
+  await writeSystemAudit(env, {
+    type: "rule_feedback_scoped_to_record",
+    groupId: String(item?.groupId || ""),
+    actorId: String(actorId || ""),
+    targetId: String(item?.id || ""),
+    action: String(item?.violationType || item?.rule || "其他"),
+    reason: text
+  }).catch(() => {});
+  return {
+    updated: false,
+    note: text,
+    category: String(item?.violationType || item?.rule || "其他"),
+    scoped: true
+  };
 }
 
 
@@ -1643,6 +1736,29 @@ function spamTextSimilarity(left, right) {
   const union = new Set([...leftGrams, ...rightGrams]).size || 1;
   return Math.max(edgeRatio, intersection / union);
 }
+
+function selectRelevantRuleFeedbackExamples(content, examples, limit = 8) {
+  const current = normalizeSpamBurstText(content);
+  if (!current) return [];
+  const scored = [];
+  for (const example of Array.isArray(examples) ? examples : []) {
+    const candidate = normalizeSpamBurstText(example?.content || "");
+    if (!candidate) continue;
+    const similarity = spamTextSimilarity(current, candidate);
+    const shorter = Math.min(current.length, candidate.length);
+    const contained = shorter >= 6 && (current.includes(candidate) || candidate.includes(current));
+    if (similarity < 0.55 && !contained) continue;
+    scored.push({
+      ...example,
+      similarity: Math.max(similarity, contained ? Math.min(0.95, shorter / Math.max(current.length, candidate.length)) : 0)
+    });
+  }
+  return scored
+    .sort((left, right) => Number(right.similarity || 0) - Number(left.similarity || 0))
+    .slice(0, Math.max(1, Math.min(20, Number(limit || 8))))
+    .map(item => ({ ...item, similarity: Number(Number(item.similarity || 0).toFixed(3)) }));
+}
+
 
 function detectRepeatedMessageBurst(rows, currentText, threshold = DEFAULTS.ruleSpamThreshold, keepCount = DEFAULTS.ruleSpamKeepCount) {
   const safeThreshold = Math.max(2, Math.min(50, Number(threshold || DEFAULTS.ruleSpamThreshold)));
@@ -1923,9 +2039,10 @@ async function inspectMessageAgainstGroupRules(env, { groupId, userId, senderNam
   }));
   const urlInspections = await inspectUrlsForRuleReview(env, content);
   const categoryPolicies = await getRuleCategoryPolicies(env, groupId);
-  const humanFeedbackExamples = await readRecentRuleFeedbackExamples(env, groupId, 30);
+  const recentRuleFeedback = await readRecentRuleFeedbackExamples(env, groupId, 30);
+  const humanFeedbackExamples = selectRelevantRuleFeedbackExamples(content, recentRuleFeedback, 8);
   const learnedMemeExamples = await readRuleMemeExamples(env, groupId, 60);
-  const strictness = await resolveAdaptiveRuleStrictness(env, groupId, recentContext, humanFeedbackExamples);
+  const strictness = await resolveAdaptiveRuleStrictness(env, groupId, recentContext, recentRuleFeedback);
   const progressivePolicy = await getRuleProgressivePolicy(env, groupId);
   const newsVerification = await verifyRuleNewsContext(env, content);
   const memeVerification = await verifyRuleMemeContext(env, {
@@ -1997,7 +2114,7 @@ async function inspectMessageAgainstGroupRules(env, { groupId, userId, senderNam
       system: `你是 QQ 群规合规分类器。只能输出 JSON：{"violation":true|false,"confidence":0到1,"violationType":"违规项目分类","rule":"涉及群规","reason":"简短且具体的原因","severity":"minor|moderate|severe|critical","intentional":true|false,"action":"record|warn|mute|kick","muteSeconds":整数,"testContext":true|false,"linkAssessment":"无链接或简短判断"}。
 当前判断等级：${strictness.configuredLevel === "smart" ? `智慧→${ruleStrictnessLabel(strictness.level)}` : ruleStrictnessLabel(strictness.level)}。${strictness.instruction}
 智慧校准原因：${strictness.adaptiveReason || "无"}
-证据优先级（不得颠倒）：明确群规与有效临时规则 > 群规例外 > 图片直接内容证据 > 分类备注与人工纠错 > 最近语境与模型常识。
+证据优先级（不得颠倒）：明确群规与有效临时规则 > 群规例外 > 图片直接内容证据 > 分类备注与“仅限当前相似表达”的人工纠错样本 > 最近语境与模型常识。
 强制规则：
 1. 必须结合最近聊天语境，测试机器人、测试禁言、测试群规、引用他人、转述、反讽、角色扮演、讨论管理操作，不等于真实违规。
 2. “禁言、踢人、攻击”等词只是词语；必须判断发言者是否真的在针对他人实施骚扰或煽动现实伤害。类似“找一个人试禁言”“测试一下禁言”不得判成人身攻击。
@@ -2005,7 +2122,7 @@ async function inspectMessageAgainstGroupRules(env, { groupId, userId, senderNam
 4. 无法访问链接时只能写入不确定性，不能仅因无法访问就判违规。
 5. “建政/涉政”必须是对现实国家政治制度、领导人、公共政策、政治事件的实质讨论、宣传、攻击、批评或动员。游戏、军事梗、影视台词、虚构阵营、普通玩笑和比喻不得单独判为建政。
 6. violationType 必须优先选择“分类与处罚设置”中已有的分类。群规正文与有效临时规则具有最高优先级；分类备注和人工纠错用于解释群规，不得反过来覆盖明确群规。
-7. 管理人工复核结果是学习样本；被标记为误判的相似表达不得再次仅凭表面词语判违规。
+7. 管理人工复核结果是单条学习样本，只能影响内容实质相似的表达；禁止把某一人的单笔纠错备注当成整个分类或所有后续消息的规则。被标记为误判的相似表达不得再次仅凭表面词语判违规。
 8. severity 必须按实际影响判断：minor 是轻微、初次、无明显恶意或可通过提醒改善；moderate 是明确违规；severe 是重复、明显恶意或造成较大影响；critical 是需要立即制止的严重行为。
 9. intentional 只有在语境显示明确故意时才为 true。轻微、误发、误解、初次边界行为应优先标记 minor，并由系统采用不累计次数的友善提醒。
 10. 刷屏标准以本群群规和本群配置为准；当前确定性配置为 ${spamWindowSeconds} 秒内同内容 ${spamThreshold} 条，处罚撤回时保留最早 ${spamKeepCount} 条。
@@ -2558,4 +2675,4 @@ async function listModerationProposals(env, groupId, { limit = 100 } = {}) {
   return items;
 }
 
-export { addRuleStrike, detectRepeatedMessageBurst, appendHumanCorrectionToRulePolicy, appendRuleViolationRecord, attachModerationProposalMessage, classifyNaturalModerationIntent, createGroupWorkRequest, createJoinRequestAssist, createModerationProposal, decideJoinRequestAssist, defaultRuleCategoryPolicies, defaultRuleProgressivePolicy, detectNaturalModerationProposal, executeGroupWorkRequest, executeModerationProposal, explicitPromotionLanguage, extractHtmlMetadata, extractOneBotMessageId, extractRuleReviewUrls, findLatestActiveRuleViolationForUser, findLatestPendingModerationProposalId, formatModerationPermissionDenied, formatModerationProposal, getGroupMemberSafe, getRuleCategoryPolicies, getRuleProgressivePolicy, handleGroupWorkDecision, handleModerationConfirmation, inspectMessageAgainstGroupRules, inspectUrlsForRuleReview, joinRequestPatternHash, listModerationProposals, localModerationIntent, matchRuleCategoryPolicy, moderationActionLabel, moderationActionNeedsTarget, moderationPermissionLevelLabel, normalizeProgressiveAction, normalizeProgressiveActionSpecs, normalizeRuleCategoryPolicies, normalizeRulePolicyActionSpec, normalizeRulePolicyActions, normalizeRulePolicyPunishment, normalizeRuleProgressivePolicy, normalizeRuleProxyMode, normalizeRuleSeverity, normalizeRuleStrictness, parseModerationConfirmation, parseUnlimitedNonNegativeInteger, performRuleAdditionalActions, performRuleProxyAction, progressiveMuteFallback, readJoinPattern, readRecentRuleFeedbackExamples, readResponseTextPrefix, readRuleMemeExamples, rememberRuleMemeExample, recordJoinPatternDecision, recordRuleViolationFeedback, removeRuleStrike, requestRuleManagerClarification, resolveAdaptiveRuleStrictness, resolveModerationTarget, findApplicantBranchMembership, resolveHeadJoinFamily, resolveRuleProgressiveStep, retractModerationProposalMessage, reverseRuleViolationAction, reviewGroupWorkWithGemma, reviewJoinRequestAssist, ruleBaseActionName, ruleContentNeedsWebVerification, ruleProxyCooldownRemaining, ruleStrictnessConfig, ruleStrictnessLabel, updateRuleViolationRecord, validateModerationProposalTarget, verifyRuleMemeContext, verifyRuleNewsContext };
+export { addRuleStrike, detectRepeatedMessageBurst, appendHumanCorrectionToRulePolicy, appendRuleViolationRecord, attachModerationProposalMessage, classifyNaturalModerationIntent, createGroupWorkRequest, createJoinRequestAssist, createModerationProposal, decideJoinRequestAssist, defaultRuleCategoryPolicies, defaultRuleProgressivePolicy, detectNaturalModerationProposal, executeGroupWorkRequest, executeModerationProposal, explicitPromotionLanguage, extractHtmlMetadata, extractOneBotMessageId, extractRuleReviewUrls, findLatestActiveRuleViolationForUser, findLatestPendingModerationProposalId, formatModerationPermissionDenied, formatModerationProposal, getGroupMemberSafe, getRuleCategoryPolicies, getRuleProgressivePolicy, handleGroupWorkDecision, handleModerationConfirmation, inspectMessageAgainstGroupRules, inspectUrlsForRuleReview, joinRequestPatternHash, listModerationProposals, localModerationIntent, matchRuleCategoryPolicy, moderationActionLabel, moderationActionNeedsTarget, moderationPermissionLevelLabel, normalizeProgressiveAction, normalizeProgressiveActionSpecs, normalizeRuleCategoryPolicies, normalizeRulePolicyActionSpec, normalizeRulePolicyActions, normalizeRulePolicyPunishment, normalizeRuleProgressivePolicy, normalizeRuleProxyMode, normalizeRuleSeverity, normalizeRuleStrictness, sanitizeLegacyRuleViolationRecord, selectRelevantRuleFeedbackExamples, stripLegacyHumanCorrectionLines, parseModerationConfirmation, parseUnlimitedNonNegativeInteger, performRuleAdditionalActions, performRuleProxyAction, progressiveMuteFallback, readJoinPattern, readRecentRuleFeedbackExamples, readResponseTextPrefix, readRuleMemeExamples, rememberRuleMemeExample, recordJoinPatternDecision, recordRuleViolationFeedback, removeRuleStrike, requestRuleManagerClarification, resolveAdaptiveRuleStrictness, resolveModerationTarget, findApplicantBranchMembership, resolveHeadJoinFamily, resolveRuleProgressiveStep, retractModerationProposalMessage, reverseRuleViolationAction, reviewGroupWorkWithGemma, reviewJoinRequestAssist, ruleBaseActionName, ruleContentNeedsWebVerification, ruleProxyCooldownRemaining, ruleStrictnessConfig, ruleStrictnessLabel, updateRuleViolationRecord, validateModerationProposalTarget, verifyRuleMemeContext, verifyRuleNewsContext };
