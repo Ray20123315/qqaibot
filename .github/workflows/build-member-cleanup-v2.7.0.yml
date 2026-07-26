@@ -52,11 +52,22 @@ jobs:
             /tmp/member-cleanup-v270.tgz
             tools/member_cleanup_payload/
       - name: Validate source and generated Portal client
+        id: validation
+        shell: bash
         run: |
-          node --check src/portal/member-cleanup.js
-          node --check src/portal/members.js
-          node --check verify-member-cleanup.mjs
-          node verify-member-cleanup.mjs
+          set -o pipefail
+          {
+            node --check src/portal/member-cleanup.js
+            node --check src/portal/members.js
+            node --check verify-member-cleanup.mjs
+            node verify-member-cleanup.mjs
+          } 2>&1 | tee /tmp/member-cleanup-validation.log
+      - name: Upload validation diagnostics
+        if: failure() && steps.validation.outcome == 'failure'
+        uses: actions/upload-artifact@v4
+        with:
+          name: member-cleanup-validation-diagnostics
+          path: /tmp/member-cleanup-validation.log
       - name: Install dependencies
         run: npm install --ignore-scripts
       - name: Run complete regression suite
