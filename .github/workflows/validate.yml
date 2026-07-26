@@ -64,7 +64,17 @@ jobs:
       - name: Install dependencies
         run: npm install --ignore-scripts
       - name: Run regression checks
-        run: npm run check
+        id: regression
+        shell: bash
+        run: |
+          set -o pipefail
+          npm run check 2>&1 | tee /tmp/werewolf-regression.log
+      - name: Upload regression diagnostics
+        if: failure() && steps.regression.outcome == 'failure'
+        uses: actions/upload-artifact@v4
+        with:
+          name: werewolf-regression-diagnostics
+          path: /tmp/werewolf-regression.log
       - name: Build single Worker bundle
         run: npm run check:bundle
       - name: Commit clean candidate
