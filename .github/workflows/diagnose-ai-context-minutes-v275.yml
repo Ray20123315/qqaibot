@@ -30,40 +30,23 @@ jobs:
             echo "=== GREP: $pattern ===" >> "$OUT"
             grep -R -n -F "$pattern" worker.js src verify-*.mjs 2>/dev/null | head -n 120 >> "$OUT" || true
           done
-          echo '=== WORKER MEETING BLOCKS ===' >> "$OUT"
-          while IFS=: read -r file line rest; do
-            start=$((line>45 ? line-45 : 1)); end=$((line+120));
-            echo "--- $file:$start-$end ---" >> "$OUT"
-            sed -n "${start},${end}p" "$file" >> "$OUT"
-          done < <(grep -n -F '会议纪要' worker.js | head -n 10)
-          echo '=== WORKER AI GENERATION BLOCKS ===' >> "$OUT"
-          while IFS=: read -r file line rest; do
-            start=$((line>80 ? line-80 : 1)); end=$((line+180));
-            echo "--- $file:$start-$end ---" >> "$OUT"
-            sed -n "${start},${end}p" "$file" >> "$OUT"
-          done < <(grep -n -E 'generateHybridReply|prepareConversationHistory|sanitizeAiReply|applyConversationOutputGuards' worker.js | head -n 16)
-          echo '=== AI RUNTIME RELEVANT FUNCTIONS ===' >> "$OUT"
-          for pattern in 'function callGeminiGenerate' 'async function callGeminiGenerate' 'function generateHybridReply' 'async function generateHybridReply' 'maxOutputTokens'; do
-            while IFS=: read -r file line rest; do
-              start=$((line>55 ? line-55 : 1)); end=$((line+180));
-              echo "--- $file:$start-$end ($pattern) ---" >> "$OUT"
+          collect_blocks() {
+            local pattern="$1"; shift
+            local before="$1"; shift
+            local after="$1"; shift
+            local label="$1"; shift
+            echo "=== $label ===" >> "$OUT"
+            grep -Hn -E "$pattern" "$@" 2>/dev/null | head -n 20 | while IFS=: read -r file line rest; do
+              start=$((line>before ? line-before : 1)); end=$((line+after));
+              echo "--- $file:$start-$end ---" >> "$OUT"
               sed -n "${start},${end}p" "$file" >> "$OUT"
-            done < <(grep -n -F "$pattern" src/ai/runtime.js | head -n 8)
-          done
-          echo '=== MESSAGE CONTEXT FUNCTIONS ===' >> "$OUT"
-          for pattern in 'function prepareConversationHistory' 'async function prepareConversationHistory' 'function sanitizeAiReply' 'function applyConversationOutputGuards'; do
-            while IFS=: read -r file line rest; do
-              start=$((line>40 ? line-40 : 1)); end=$((line+150));
-              echo "--- $file:$start-$end ($pattern) ---" >> "$OUT"
-              sed -n "${start},${end}p" "$file" >> "$OUT"
-            done < <(grep -n -F "$pattern" src/onebot/messages.js | head -n 8)
-          done
-          echo '=== LONG GROUP CONTEXT ===' >> "$OUT"
-          while IFS=: read -r file line rest; do
-            start=$((line>40 ? line-40 : 1)); end=$((line+180));
-            echo "--- $file:$start-$end ---" >> "$OUT"
-            sed -n "${start},${end}p" "$file" >> "$OUT"
-          done < <(grep -n -F 'buildLongGroupConversationContext' src/core/permissions.js | head -n 8)
+            done
+          }
+          collect_blocks '会议纪要' 45 130 'WORKER MEETING BLOCKS' worker.js
+          collect_blocks 'generateHybridReply|prepareConversationHistory|sanitizeAiReply|applyConversationOutputGuards' 80 190 'WORKER AI GENERATION BLOCKS' worker.js
+          collect_blocks 'callGeminiGenerate|generateHybridReply|maxOutputTokens' 55 190 'AI RUNTIME RELEVANT FUNCTIONS' src/ai/runtime.js
+          collect_blocks 'prepareConversationHistory|sanitizeAiReply|applyConversationOutputGuards' 45 170 'MESSAGE CONTEXT FUNCTIONS' src/onebot/messages.js
+          collect_blocks 'buildLongGroupConversationContext' 45 190 'LONG GROUP CONTEXT' src/core/permissions.js
           echo '=== END ===' >> "$OUT"
           wc -l "$OUT"
       - uses: actions/upload-artifact@v4
