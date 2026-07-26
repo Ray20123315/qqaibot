@@ -1152,9 +1152,12 @@ async function processWerewolfTimers(env, now = nowMs()) {
 function injectWerewolfPortalClient(html) {
   let source = String(html || "");
   if (!source || source.includes("qqai-werewolf-client")) return source;
-  const nav = '<button data-view="werewolf" id="werewolfNav">狼人杀</button>';
+  const nav = '<button data-view="werewolf" id="werewolfNav" class="qqai-nav-entry"><span class="qqai-nav-glyph" aria-hidden="true">狼</span><span>狼人杀</span></button>';
   if (!source.includes('id="werewolfNav"')) {
-    if (source.includes('<button data-view="members" id="memberConsoleNav">群友列表</button>')) source = source.replace('<button data-view="members" id="memberConsoleNav">群友列表</button>', '<button data-view="members" id="memberConsoleNav">群友列表</button>' + nav);
+    const cleanupButton = /<button[^>]*id="memberCleanupNav"[\s\S]*?<\/button>/;
+    const memberButton = /<button[^>]*id="memberConsoleNav"[\s\S]*?<\/button>/;
+    if (cleanupButton.test(source)) source = source.replace(cleanupButton, match => match + nav);
+    else if (memberButton.test(source)) source = source.replace(memberButton, match => match + nav);
     else if (source.includes('</nav>')) source = source.replace('</nav>', nav + '</nav>');
     else source = nav + source;
   }
@@ -1172,7 +1175,7 @@ function injectWerewolfPortalClient(html) {
   if (membersIndex >= 0) source = source.slice(0, membersIndex) + section + source.slice(membersIndex);
   else if (source.includes('</main>')) source = source.replace('</main>', section + '</main>');
   else source += section;
-  const style = `<style id="qqai-werewolf-style">.ww-layout{display:grid;grid-template-columns:minmax(0,1.25fr) minmax(300px,.75fr);gap:14px}.ww-grid{display:grid;grid-template-columns:repeat(4,minmax(130px,1fr));gap:10px}.ww-grid label,.ww-action{display:flex;flex-direction:column;gap:6px}.ww-role-pool{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:6px;margin:10px 0}.ww-role-pool label{display:flex;gap:6px;align-items:center}.ww-player{display:grid;grid-template-columns:1fr auto;gap:8px}.ww-log{max-height:360px;overflow:auto;display:flex;flex-direction:column;gap:8px;margin-top:10px}.ww-log-row{padding:8px 10px;border:1px solid var(--border);border-radius:10px;white-space:pre-wrap}.ww-action{margin-top:12px}.ww-secret{padding:12px;border:1px solid #7c3aed;border-radius:12px}.ww-dead{opacity:.6;text-decoration:line-through}@media(max-width:900px){.ww-layout,.ww-grid{grid-template-columns:1fr}.ww-layout>.card,.ww-create{padding:12px}.ww-action{display:grid;grid-template-columns:1fr}.ww-role-pool{grid-template-columns:1fr 1fr}}</style>`;
+  const style = `<style id="qqai-werewolf-style">#werewolfNav::before{content:none!important;display:none!important}.ww-layout{display:grid;grid-template-columns:minmax(0,1.25fr) minmax(300px,.75fr);gap:14px}.ww-grid{display:grid;grid-template-columns:repeat(4,minmax(130px,1fr));gap:10px}.ww-grid label,.ww-action{display:flex;flex-direction:column;gap:6px}.ww-role-pool{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:6px;margin:10px 0}.ww-role-pool label{display:flex;gap:6px;align-items:center}.ww-player{display:grid;grid-template-columns:1fr auto;gap:8px}.ww-log{max-height:360px;overflow:auto;display:flex;flex-direction:column;gap:8px;margin-top:10px}.ww-log-row{padding:8px 10px;border:1px solid var(--border);border-radius:10px;white-space:pre-wrap}.ww-action{margin-top:12px}.ww-secret{padding:12px;border:1px solid #7c3aed;border-radius:12px}.ww-dead{opacity:.6;text-decoration:line-through}@media(max-width:900px){.ww-layout,.ww-grid{grid-template-columns:1fr}.ww-layout>.card,.ww-create{padding:12px}.ww-action{display:grid;grid-template-columns:1fr}.ww-role-pool{grid-template-columns:1fr 1fr}}</style>`;
   source = source.includes('</head>') ? source.replace('</head>', style + '</head>') : style + source;
   const script = `<script id="qqai-werewolf-client">(function(){
     var wwState=null,roles={};function e(id){return document.getElementById(id)}function s(v){return typeof esc==='function'?esc(v):String(v==null?'':v).replace(/[&<>"']/g,function(c){return({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'})[c]})}function n(m){if(typeof toast==='function')toast(m);else alert(m)}

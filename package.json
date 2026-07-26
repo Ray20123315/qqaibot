@@ -1,10 +1,10 @@
 {
   "name": "qqai-bot-worker",
-  "version": "2.7.1",
+  "version": "2.7.2",
   "private": true,
   "type": "module",
   "scripts": {
-    "check": "node verify-config.mjs && node verify-migration.mjs && node verify-model-routing.mjs && node verify-modules.mjs && node verify-routes.mjs && node verify-deployment-notifications.mjs && node verify-subgroup-join.mjs && node verify-spam-detection.mjs && node verify-meme-member-console.mjs && node verify-social-digital-twin.mjs && node verify-explicit-question-priority.mjs && node verify-mute-locks.mjs && node verify-partner-bindings.mjs && node verify-self-mute-reapply.mjs && node verify-master-bindings.mjs && node verify-portal-relationships.mjs && node verify-portal-members-client.mjs && node verify-community-suite.mjs && node verify-social-boundaries.mjs && node verify-werewolf.mjs && node verify-member-cleanup.mjs",
+    "check": "node verify-config.mjs && node verify-migration.mjs && node verify-model-routing.mjs && node verify-modules.mjs && node verify-routes.mjs && node verify-deployment-notifications.mjs && node verify-subgroup-join.mjs && node verify-spam-detection.mjs && node verify-meme-member-console.mjs && node verify-social-digital-twin.mjs && node verify-explicit-question-priority.mjs && node verify-mute-locks.mjs && node verify-partner-bindings.mjs && node verify-self-mute-reapply.mjs && node verify-master-bindings.mjs && node verify-portal-relationships.mjs && node verify-portal-members-client.mjs && node verify-community-suite.mjs && node verify-social-boundaries.mjs && node verify-werewolf.mjs && node verify-member-cleanup.mjs && node verify-member-console-split.mjs",
     "check:bundle": "wrangler deploy --config wrangler.toml --dry-run --outdir dist --no-assets",
     "deploy": "wrangler deploy --config wrangler.toml --no-assets"
   },
