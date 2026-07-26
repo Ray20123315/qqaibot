@@ -35,11 +35,12 @@ jobs:
         run: |
           set -o pipefail
           if grep -q 'qqai-portal-layout-v274' src/portal/layout.js 2>/dev/null && grep -q '"version": "2.7.4"' package.json; then
-            echo 'Permanent candidate already applied.' | tee /tmp/v274-apply.log
+            echo 'Permanent base candidate already applied.' | tee /tmp/v274-apply.log
           else
             python tools/.portal-layout-werewolf-v274/repair.py
             python tools/.portal-layout-werewolf-v274/apply.py 2>&1 | tee /tmp/v274-apply.log
           fi
+          python tools/.portal-layout-werewolf-v274/post.py 2>&1 | tee -a /tmp/v274-apply.log
       - name: Upload builder diagnostics
         if: steps.apply.outcome == 'failure'
         uses: actions/upload-artifact@v4
@@ -114,6 +115,6 @@ jobs:
           if git diff --cached --quiet; then
             echo 'No permanent changes to commit.'
           else
-            git commit -m 'Polish Portal layout and harden Werewolf gameplay'
+            git commit -m 'Complete Werewolf role interactions and AI actions'
             git push origin HEAD:fix/portal-layout-werewolf-v2.7.4
           fi
