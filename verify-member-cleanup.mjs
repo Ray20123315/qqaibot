@@ -111,9 +111,9 @@ const members = fs.readFileSync('src/portal/members.js', 'utf8');
 assert(members.includes('handleMemberCleanupApi'), 'Member API must route cleanup endpoints');
 assert(members.includes('injectMemberCleanupClient'), 'Portal HTML must inject the cleanup client');
 const pkg = JSON.parse(fs.readFileSync('package.json', 'utf8'));
-assert(pkg.version === '2.7.3', 'Package version must be 2.7.3');
+assert(pkg.version === '2.7.4', 'Package version must be 2.7.3');
 assert(pkg.scripts.check.includes('verify-member-cleanup.mjs'), 'Member cleanup verification must run in the permanent test suite');
 const notes = JSON.parse(fs.readFileSync('release-notes.json', 'utf8'));
-assert(notes.version === '2.7.3', 'Release notes must be 2.7.3');
+assert(notes.version === '2.7.4', 'Release notes must be 2.7.3');
 
 console.log('verify-member-cleanup: ok');
