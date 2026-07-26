@@ -7,7 +7,10 @@ import {
   handlePlayerAction,
   newPlayer,
   normalizeWerewolfConfig,
-  resolveWerewolfWin
+  queueDeath,
+  resolveWerewolfWin,
+  runAiPhase,
+  tallyDayVote
 } from "./src/games/werewolf.js";
 
 function player(id, roleId, alive = true) {
@@ -87,6 +90,43 @@ function gameWith(players, phase = "night") {
   assert.notEqual(resolveWerewolfWin(game)?.team, "lecher", "dead visited targets must not count toward the personal win");
   lecher.roleState.visitedIds = [a.id, b.id, c.id];
   assert.equal(resolveWerewolfWin(game)?.team, "lecher");
+}
+
+{
+  const loverA = player("16001", "hunter"), loverB = player("16002", "villager"), wolf = player("16003", "werewolf"), spare = player("16004", "villager");
+  const game = gameWith([loverA, loverB, wolf, spare]);
+  game.lovers = [loverA.id, loverB.id];
+  assert.equal(queueDeath(game, loverA, "测试死亡", wolf.id), true);
+  assert.equal(loverB.alive, false, "the surviving lover must die with the first lover");
+  assert.match(loverB.deathCause, /殉情/);
+  assert.equal(checkPendingDeathSkill(game, [{ player: loverA, cause: loverA.deathCause }], "day_discussion", false), true, "lover cascade must still queue a hunter death skill");
+}
+
+{
+  const spirit = player("17001", "voodoo_girl"), good = player("17002", "villager"), deadWolf = player("17003", "werewolf", false);
+  const game = gameWith([spirit, good, deadWolf], "day_vote");
+  const winner = resolveWerewolfWin(game);
+  assert.equal(winner?.team, "spirit", "all living spirit roles share the spirit-team win when wolves are gone");
+  assert.deepEqual(winner?.playerIds, [spirit.id]);
+}
+
+{
+  const cultist = player("18001", "masochist_cultist"), a = player("18002", "villager"), b = player("18003", "villager"), c = player("18004", "villager"), wolf = player("18005", "werewolf");
+  const game = gameWith([cultist, a, b, c, wolf], "day_vote");
+  game.dayVotes = { [a.id]: cultist.id, [b.id]: cultist.id, [c.id]: a.id, [cultist.id]: a.id };
+  await tallyDayVote(null, game);
+  assert.equal(game.winner?.team, "masochist_cultist", "cultist personal win must use the actual effective vote counts");
+}
+
+{
+  const aiHunter = player("ai:1", "hunter", false), wolf = player("19002", "werewolf"), goodA = player("19003", "villager"), goodB = player("19004", "villager");
+  aiHunter.isAi = true;
+  const game = gameWith([aiHunter, wolf, goodA, goodB], "night");
+  assert.equal(checkPendingDeathSkill(game, [{ player: aiHunter, cause: "夜袭" }], "day_discussion", true), true);
+  const aliveBefore = game.players.filter(item => item.alive).length;
+  await runAiPhase(null, game);
+  assert.ok(game.players.filter(item => item.alive).length < aliveBefore, "AI hunter or black wolf king must execute a valid death shot");
+  assert.notEqual(game.phase, "death_skill", "AI death skills must not leave the game stuck");
 }
 
 console.log("verify-werewolf-gameplay: ok");

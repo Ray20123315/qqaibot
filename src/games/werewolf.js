@@ -13,6 +13,7 @@ const WOLF_ROLES = new Set(["werewolf", "black_wolf_king", "white_wolf_king", "s
 const SEER_ROLES = new Set(["seer", "apprentice_seer"]);
 const ACTIVE_PHASES = new Set(["sheriff_nomination", "sheriff_vote", "night", "day_discussion", "day_vote", "death_skill"]);
 const COPYABLE_ROLE_ACTIONS = Object.freeze({ seer: "inspect", witch: "witch_poison", ninja: "decoy", shapeshifter_wolf: "disguise", blood_wolf: "blood_moon", mermaid: "redirect", guard: "protect", detective: "track", lecher: "visit", villager: "vigilance", voodoo_girl: "curse", enchanter: "hex" });
+const QQAI_WEREWOLF_V274_COMPLETION_MARKER = "QQAI_WEREWOLF_V274_COMPLETION_MARKER";
 
 const ROLE_DEFINITIONS = Object.freeze({
   werewolf: { id: "werewolf", name: "狼人", team: "wolf", summary: "每晚与狼队共同选择一名非狼人玩家袭击。", action: "wolf_kill" },
@@ -354,7 +355,7 @@ function nextSheriff(game) {
   if (next) appendPublic(game, `${playerById(game, next)?.name || next} 继任警长。`, "sheriff");
 }
 
-function queueDeath(game, player, cause, killerId = "") {
+function queueDeath(game, player, cause, killerId = "", chainLover = true) {
   if (!player || player.alive === false) return false;
   player.alive = false;
   player.diedAt = nowMs();
@@ -362,6 +363,11 @@ function queueDeath(game, player, cause, killerId = "") {
   game.deaths.push({ userId: player.id, name: player.name, roleId: player.roleId, cause, killerId, at: nowMs() });
   appendPublic(game, `${player.name} 死亡。原因：${cause}。`, "death", { userId: player.id, cause });
   if (game.sheriff?.holderId === player.id) nextSheriff(game);
+  if (chainLover && Array.isArray(game.lovers) && game.lovers.includes(player.id)) {
+    const loverId = game.lovers.find(id => id !== player.id);
+    const lover = playerById(game, loverId);
+    if (lover?.alive !== false) queueDeath(game, lover, `恋人 ${player.name} 死亡，随之殉情`, player.id, false);
+  }
   return true;
 }
 
@@ -396,7 +402,18 @@ function activateNextDeathSkill(game, fallbackResumePhase = "", fallbackResumeIn
 function checkPendingDeathSkill(game, deadPlayers, resumePhase = "", resumeIncrement = true) {
   const resolvedResumePhase = resumePhase || (game.phase === "night" ? "day_discussion" : "night");
   const queue = deathSkillQueue(game);
-  for (const entry of deadPlayers || []) {
+  const entries = [];
+  const seen = new Set();
+  for (const entry of [
+    ...(Array.isArray(deadPlayers) ? deadPlayers : []),
+    ...(game.players || []).filter(player => player.alive === false).map(player => ({ player, cause: player.deathCause || "" }))
+  ]) {
+    const id = String(entry?.player?.id || "");
+    if (!id || seen.has(id)) continue;
+    seen.add(id);
+    entries.push(entry);
+  }
+  for (const entry of entries) {
     const player = entry?.player;
     const cause = entry?.cause || player?.deathCause || "";
     if (!deathSkillEligible(player, cause)) continue;
@@ -453,11 +470,12 @@ function resolveWerewolfWin(game) {
   const lovers = loversWinState(game);
   if (lovers) return lovers;
   const wolves = alive.filter(player => isWolfRole(player.roleId));
+  const spirits = alive.filter(player => player.team === "spirit");
+  const good = alive.filter(player => player.team === "good");
   const nonWolves = alive.filter(player => !isWolfRole(player.roleId));
   if (!wolves.length) {
-    const wraith = alive.find(player => player.roleId === "wraith");
-    if (wraith) return { team: "spirit", playerIds: [wraith.id], text: `狼人已经全灭，但怨灵 ${wraith.name} 仍潜伏在人群中，怨灵阵营获胜。` };
-    return { team: "good", playerIds: nonWolves.map(player => player.id), text: "狼人已经全灭，好人阵营获胜。" };
+    if (spirits.length) return { team: "spirit", playerIds: spirits.map(player => player.id), text: `狼人已经全灭，仍存活的怨灵阵营成员（${spirits.map(player => player.name).join("、")}）获胜。` };
+    return { team: "good", playerIds: good.map(player => player.id), text: "狼人和怨灵阵营均已全灭，好人阵营获胜。" };
   }
   if (wolves.length >= nonWolves.length) return { team: "wolf", playerIds: wolves.map(player => player.id), text: "狼人数量已不低于其他存活玩家，狼人阵营获胜。" };
   return null;
@@ -510,6 +528,7 @@ function resolveWolfTarget(game, { consumeBoost = true } = {}) {
 
 async function resolveNight(env, game) {
   const dead = [];
+  const deathStart = game.deaths.length;
   let wolfTarget = resolveWolfTarget(game);
   const bloodMoon = getNightActions(game, "blood_moon").some(action => playerById(game, action.playerId)?.alive !== false);
   game.bloodMoonActive = bloodMoon;
@@ -562,9 +581,10 @@ async function resolveNight(env, game) {
   promoteApprentice(game);
   game.nightActions = {};
   game.bloodMoonActive = false;
-  appendPublic(game, dead.length ? `天亮了，本夜死亡：${dead.map(item => item.player.name).join("、")}。` : "天亮了，本夜无人死亡。", "dawn");
+  const resolvedDead = game.deaths.slice(deathStart).map(item => ({ player: playerById(game, item.userId), cause: item.cause })).filter(item => item.player);
+  appendPublic(game, resolvedDead.length ? `天亮了，本夜死亡：${resolvedDead.map(item => item.player.name).join("、")}。` : "天亮了，本夜无人死亡。", "dawn");
   if (await finishIfWon(env, game)) return;
-  if (checkPendingDeathSkill(game, dead)) return;
+  if (checkPendingDeathSkill(game, resolvedDead)) { await runAiPhase(env, game); return; }
   game.day += 1;
   setPhase(game, "day_discussion", `第 ${game.day} 天公开讨论`);
   await runAiPhase(env, game);
@@ -608,9 +628,8 @@ async function tallySheriff(env, game) {
 async function tallyDayVote(env, game) {
   const bomb = resolveBombVote(game, game.dayVotes || {});
   const counts = voteCounts(game, bomb.votes, { sheriffWeight: true, invalidMasochist: true });
-  const rawCounts = voteCounts(game, game.dayVotes || {}, { sheriffWeight: true, invalidMasochist: false });
-  const topRaw = highestTargets(rawCounts);
-  const cultist = topRaw.length === 1 ? playerById(game, topRaw[0]) : null;
+  const top = highestTargets(counts);
+  const cultist = top.length === 1 ? playerById(game, top[0]) : null;
   if (cultist?.roleId === "masochist_cultist" && game.config.groupCount <= 1) {
     game.winner = { team: "masochist_cultist", playerIds: [cultist.id], text: `${cultist.name} 成为白天唯一最高得票者，抖M教徒个人胜利。` };
     game.status = "ended"; game.phase = "ended"; game.endedAt = nowMs();
@@ -619,8 +638,8 @@ async function tallyDayVote(env, game) {
     await sendGroup(env, game.groupId, `【狼人杀结束】${game.winner.text}`).catch(() => null);
     return;
   }
-  const top = highestTargets(counts);
   if (bomb.invalidVoterId) appendPublic(game, `炸弹最终停在 ${playerById(game, bomb.invalidVoterId)?.name || bomb.invalidVoterId}，该玩家本日投票无效。`, "bomb");
+  const deathStart = game.deaths.length;
   const dead = [];
   if (top.length === 1) {
     const target = playerById(game, top[0]);
@@ -633,7 +652,8 @@ async function tallyDayVote(env, game) {
   game.dayVotes = {};
   promoteApprentice(game);
   if (await finishIfWon(env, game)) return;
-  if (checkPendingDeathSkill(game, dead)) return;
+  const resolvedDead = game.deaths.slice(deathStart).map(item => ({ player: playerById(game, item.userId), cause: item.cause })).filter(item => item.player);
+  if (checkPendingDeathSkill(game, resolvedDead)) { await runAiPhase(env, game); return; }
   game.night += 1;
   setPhase(game, "night", `第 ${game.night} 夜`);
   await runAiPhase(env, game);
@@ -670,6 +690,8 @@ async function advanceGame(env, game, reason = "manual") {
     game.pendingDeathSkill = null;
     if (!activateNextDeathSkill(game, resume, resumeIncrement)) {
       resumeAfterDeathSkill(game, resume, resumeIncrement, "死亡技能超时");
+      await runAiPhase(env, game);
+    } else {
       await runAiPhase(env, game);
     }
   }
@@ -781,6 +803,15 @@ async function runAiNightAction(env, game, player) {
   }
   const decision = await aiDecision(env, game, player, "night", choices);
   const targetId = decision?.targetId || choices[0];
+  if (player.roleId === "gravedigger" && player.roleState?.copiedRoleId && !player.roleState?.copiedSkillUsed) {
+    const secondTargetId = choices.find(id => id !== targetId) || "";
+    await handlePlayerAction(env, game, { userId: player.id }, "copied_action", targetId, { secondTargetId, roleId: "villager" });
+    return;
+  }
+  if (player.roleId === "thief" && !player.roleState?.used && targetId) {
+    await handlePlayerAction(env, game, { userId: player.id }, "swap_role", targetId, {});
+    return;
+  }
   if (isWolfRole(player.roleId)) {
     const nonWolfChoices = choices.filter(id => !isWolfRole(playerById(game, id)?.roleId));
     const wolfTargetId = nonWolfChoices.includes(targetId) ? targetId : nonWolfChoices[0];
@@ -821,7 +852,28 @@ async function runAiNightAction(env, game, player) {
   if (player.roleId === "villager" && !player.roleState?.used) { player.roleState.used = true; player.roleState.vigilanceActive = true; }
 }
 
+async function runAiDeathSkill(env, game) {
+  let safety = 0;
+  while (game.phase === "death_skill" && game.pendingDeathSkill && safety++ < WEREWOLF_MAX_PLAYERS) {
+    const actor = playerById(game, game.pendingDeathSkill.actorId);
+    if (!actor || !isAiPlayer(actor)) return;
+    const choices = livingPlayers(game).filter(player => player.id !== actor.id).map(player => player.id);
+    const decision = await aiDecision(env, game, actor, "death_shot", choices);
+    const targetId = decision?.targetId || choices[0];
+    if (!targetId) {
+      const resume = game.pendingDeathSkill.resumePhase || "night";
+      const resumeIncrement = game.pendingDeathSkill.resumeIncrement !== false;
+      game.pendingDeathSkill = null;
+      if (!activateNextDeathSkill(game, resume, resumeIncrement)) resumeAfterDeathSkill(game, resume, resumeIncrement, "AI 死亡技能无有效目标");
+      continue;
+    }
+    const result = await handlePlayerAction(env, game, { userId: actor.id }, "death_shot", targetId, {});
+    if (!result.ok) return;
+  }
+}
+
 async function runAiPhase(env, game) {
+  if (game.phase === "death_skill") { await runAiDeathSkill(env, game); return; }
   const aiPlayers = livingPlayers(game).filter(isAiPlayer).sort((left, right) => Number(isWolfRole(right.roleId)) - Number(isWolfRole(left.roleId)));
   if (!aiPlayers.length) return;
   if (game.phase === "sheriff_nomination") {
@@ -837,7 +889,24 @@ async function runAiPhase(env, game) {
     for (const player of aiPlayers) await runAiNightAction(env, game, player);
   } else if (game.phase === "day_discussion") {
     for (const player of aiPlayers) {
-      const decision = await aiDecision(env, game, player, "day_speech", targetablePlayers(game, player.id).map(item => item.id));
+      if (player.alive === false || game.phase !== "day_discussion") break;
+      const choices = targetablePlayers(game, player.id).map(item => item.id);
+      if (player.roleId === "bomb_wolf" && !player.roleState?.[`bombDay${game.day}`] && choices.length) {
+        const decision = await aiDecision(env, game, player, "plant_bomb", choices);
+        if (decision?.targetId) await handlePlayerAction(env, game, { userId: player.id }, "plant_bomb", decision.targetId, {});
+      }
+      if (game.day >= 2 && player.roleId === "knight" && !player.roleState?.used && choices.length) {
+        const decision = await aiDecision(env, game, player, "duel", choices);
+        if (decision?.targetId) await handlePlayerAction(env, game, { userId: player.id }, "duel", decision.targetId, {});
+        if (game.phase !== "day_discussion") return;
+      }
+      if (game.day >= 2 && player.roleId === "white_wolf_king" && !player.roleState?.used && choices.length) {
+        const decision = await aiDecision(env, game, player, "white_judgement", choices);
+        if (decision?.targetId) await handlePlayerAction(env, game, { userId: player.id }, "white_judgement", decision.targetId, {});
+        if (game.phase !== "day_discussion") return;
+      }
+      if (player.alive === false || game.phase !== "day_discussion") continue;
+      const decision = await aiDecision(env, game, player, "day_speech", choices);
       const speech = String(decision?.speech || "我先听大家发言，暂时保留判断。").slice(0, 100);
       appendPublic(game, `${player.name}：${speech}`, "ai_speech", { userId: player.id });
       await sendGroup(env, game.groupId, `${player.name}：${speech}`).catch(() => null);
@@ -952,7 +1021,7 @@ async function handlePlayerAction(env, game, actor, action, targetId = "", extra
     const cause = isWolfRole(target.roleId) ? `骑士 ${player.name} 决斗命中狼人` : `骑士决斗判断错误`;
     queueDeath(game, dead, cause, player.id);
     appendPublic(game, `${player.name} 发起骑士决斗；${dead.name} 死亡。`, "duel");
-    if (!(await finishIfWon(env, game))) checkPendingDeathSkill(game, [{ player: dead, cause }], "day_discussion", false);
+    if (!(await finishIfWon(env, game)) && checkPendingDeathSkill(game, [{ player: dead, cause }], "day_discussion", false)) await runAiPhase(env, game);
     await saveGame(env, game);
     return { ok: true, message: "骑士决斗已结算。" };
   }
@@ -965,6 +1034,8 @@ async function handlePlayerAction(env, game, actor, action, targetId = "", extra
     if (!(await finishIfWon(env, game))) {
       if (!checkPendingDeathSkill(game, [{ player, cause: "白狼王正式牺牲技能" }, { player: target, cause: "白狼王审判带走" }], "night", true)) {
         resumeAfterDeathSkill(game, "night", true, "白狼王审判强制结束白天");
+        await runAiPhase(env, game);
+      } else {
         await runAiPhase(env, game);
       }
       await saveGame(env, game);
@@ -988,6 +1059,8 @@ async function handlePlayerAction(env, game, actor, action, targetId = "", extra
     if (!(await finishIfWon(env, game))) {
       if (!checkPendingDeathSkill(game, [{ player: target, cause: shotCause }], resume, resumeIncrement)) {
         resumeAfterDeathSkill(game, resume, resumeIncrement);
+        await runAiPhase(env, game);
+      } else {
         await runAiPhase(env, game);
       }
       await saveGame(env, game);
@@ -1344,6 +1417,6 @@ function injectWerewolfPortalClient(html) {
 
 export {
   ROLE_DEFINITIONS, ROLE_IDS, WEREWOLF_MAX_PLAYERS, WEREWOLF_MIN_PLAYERS,
-  activateNextDeathSkill, buildBalancedRoleDeck, checkPendingDeathSkill, createGame, createRoleState, handlePlayerAction, handleWerewolfOneBotEvent, handleWerewolfPortalApi, injectWerewolfPortalClient, newPlayer,
+  activateNextDeathSkill, buildBalancedRoleDeck, checkPendingDeathSkill, createGame, createRoleState, handlePlayerAction, handleWerewolfOneBotEvent, handleWerewolfPortalApi, injectWerewolfPortalClient, newPlayer, queueDeath, runAiPhase, tallyDayVote,
   normalizeWerewolfConfig, processWerewolfTimers, publicWerewolfState, resolveWerewolfWin
 };
