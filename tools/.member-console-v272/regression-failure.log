@@ -18,13 +18,17 @@ verify-partner-bindings: ok
 verify-self-mute-reapply: ok
 verify-master-bindings: ok
 verify-portal-relationships: ok
-<anonymous_script>:23
-  function exportMembers(){var rows=[['QQ','名称','身份','禁言状态','剩余禁言秒数','关系身份','入群时间','最近发言时间']];cachedMembers.forEach(function(item){var relation=relationshipFor(item.qq),relationRole=relation?(relation.mode==='master'?(String(relation.masterId)===String(item.qq)?'主人':'所属成员'):'对象'):'';rows.push([item.qq,item.name||'',roleText(item.role),item.muted?'禁言中':'可发言',item.muteRemainingSeconds||0,relationRole,dateText(item.joinTime),dateText(item.lastSentTime)])});var csv='﻿'+rows.map(function(row){return row.map(csvCell).join(',')}).join('
-                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      ^
+verify-portal-members-client: ok
+verify-community-suite: ok
+verify-social-boundaries: ok
+werewolf verification passed
+file:///home/runner/work/qqaibot/qqaibot/verify-member-cleanup.mjs:14
+  if (!condition) throw new Error(message);
+                        ^
 
-SyntaxError: Invalid or unexpected token
-    at new Function (<anonymous>)
-    at file:///home/runner/work/qqaibot/qqaibot/verify-portal-members-client.mjs:7:1
+Error: Cleanup UI must expose sync and reviewed cleanup controls
+    at assert (file:///home/runner/work/qqaibot/qqaibot/verify-member-cleanup.mjs:14:25)
+    at file:///home/runner/work/qqaibot/qqaibot/verify-member-cleanup.mjs:96:1
     at ModuleJob.run (node:internal/modules/esm/module_job:343:25)
     at async onImport.tracePromise.__proto__ (node:internal/modules/esm/loader:681:26)
     at async asyncRunEntryPointWithESMLoader (node:internal/modules/run_main:117:5)
