@@ -51,12 +51,32 @@ jobs:
           cat /tmp/v274-apply.log
           exit 1
       - name: Validate source syntax
+        id: syntax
+        continue-on-error: true
         run: |
-          node --check src/portal/layout.js
-          node --check src/games/werewolf.js
-          node --check worker.js
-          node --check verify-portal-layout.mjs
-          node --check verify-werewolf-gameplay.mjs
+          set -o pipefail
+          {
+            node --check src/portal/layout.js
+            node --check src/games/werewolf.js
+            node --check worker.js
+            node --check verify-portal-layout.mjs
+            node --check verify-werewolf-gameplay.mjs
+          } 2>&1 | tee /tmp/v274-syntax.log
+      - name: Upload syntax diagnostics
+        if: steps.syntax.outcome == 'failure'
+        uses: actions/upload-artifact@v4
+        with:
+          name: v274-syntax-diagnostics
+          path: |
+            /tmp/v274-syntax.log
+            src/portal/layout.js
+            src/games/werewolf.js
+          if-no-files-found: error
+      - name: Stop after syntax failure
+        if: steps.syntax.outcome == 'failure'
+        run: |
+          cat /tmp/v274-syntax.log
+          exit 1
       - name: Run focused validation
         run: |
           node verify-portal-layout.mjs
