@@ -26,13 +26,25 @@ jobs:
           cache: npm
           cache-dependency-path: package.json
       - name: Extract staged implementation
+        id: extract
+        shell: bash
         run: |
-          cat tools/werewolf_payload/part-* | base64 -d > /tmp/werewolf-payload.tgz
-          tar -xzf /tmp/werewolf-payload.tgz
-          node --check tools/apply-werewolf-v2.6.0.mjs
-          node --check tools/fix-werewolf-boundaries.mjs
-          node tools/fix-werewolf-boundaries.mjs
-          node tools/apply-werewolf-v2.6.0.mjs
+          set -o pipefail
+          {
+            cat tools/werewolf_payload/part-* | base64 -d > /tmp/werewolf-payload.tgz
+            tar -tzf /tmp/werewolf-payload.tgz
+            tar -xzf /tmp/werewolf-payload.tgz
+            node --check tools/apply-werewolf-v2.6.0.mjs
+            node --check tools/fix-werewolf-boundaries.mjs
+            node tools/fix-werewolf-boundaries.mjs
+            node tools/apply-werewolf-v2.6.0.mjs
+          } 2>&1 | tee /tmp/werewolf-extract.log
+      - name: Upload extraction diagnostics
+        if: failure() && steps.extract.outcome == 'failure'
+        uses: actions/upload-artifact@v4
+        with:
+          name: werewolf-extract-log
+          path: /tmp/werewolf-extract.log
       - name: Validate generated source
         run: |
           node --check src/games/werewolf.js
