@@ -1,12 +1,13 @@
 name: Build werewolf v2.6.0 candidate
 
 on:
-  push:
-    branches:
-      - feature/werewolf-v2.6.0
   pull_request:
     branches:
       - main
+
+concurrency:
+  group: werewolf-v2.6.0-candidate
+  cancel-in-progress: true
 
 permissions:
   contents: write
@@ -79,18 +80,15 @@ jobs:
         run: npm run check:bundle
       - name: Commit clean candidate
         run: |
-          rm -rf tools/werewolf_payload
-          rm -f tools/apply-werewolf-v2.6.0.mjs tools/fix-werewolf-boundaries.mjs
+          git show origin/main:.github/workflows/validate.yml > .github/workflows/validate.yml
+          rm -rf tools/werewolf_payload tools/werewolf_recovery tools/werewolf_tail
+          rm -f tools/apply-werewolf-v2.6.0.mjs tools/fix-werewolf-boundaries.mjs tools/recover-werewolf-v2.6.0.py
           test ! -e tools/werewolf_payload
-          test ! -e tools/apply-werewolf-v2.6.0.mjs
-          test ! -e tools/fix-werewolf-boundaries.mjs
+          test ! -e tools/werewolf_recovery
+          test ! -e tools/werewolf_tail
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add -A
           git status --short
-          if git diff --cached --quiet; then
-            echo "No generated changes to commit."
-          else
-            git commit -m "Add debate-style werewolf game and Portal"
-            git push origin HEAD:feature/werewolf-v2.6.0
-          fi
+          git commit -m "Add debate-style werewolf game and Portal"
+          git push origin HEAD:feature/werewolf-v2.6.0
