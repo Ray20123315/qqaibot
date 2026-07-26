@@ -91,6 +91,9 @@ jobs:
           prompt_marker = "（如 **、#、```）。"
           assert script.count(prompt_marker) == 2
           script = script.replace(prompt_marker, "（如 **、#、\\\\`\\\\`\\\\`）。")
+          lease_indent = "r'''      const definitions = ["
+          assert script.count(lease_indent) == 2
+          script = script.replace(lease_indent, "r'''    const definitions = [")
           Path('/tmp/apply-v275.py').write_text(script, encoding='utf-8')
           PY
               python /tmp/apply-v275.py
