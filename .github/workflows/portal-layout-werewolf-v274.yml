@@ -1,0 +1,64 @@
+name: Build Portal layout and Werewolf v2.7.4
+
+on:
+  push:
+    branches:
+      - fix/portal-layout-werewolf-v2.7.4
+
+permissions:
+  contents: write
+
+concurrency:
+  group: portal-layout-werewolf-v274
+  cancel-in-progress: false
+
+jobs:
+  build-candidate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/portal-layout-werewolf-v2.7.4
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: package.json
+      - name: Apply v2.7.4 candidate
+        run: |
+          if grep -q 'qqai-portal-layout-v274' src/portal/layout.js 2>/dev/null && grep -q '"version": "2.7.4"' package.json; then
+            echo 'Permanent candidate already applied.'
+          else
+            python tools/.portal-layout-werewolf-v274/apply.py
+          fi
+      - name: Validate source syntax
+        run: |
+          node --check src/portal/layout.js
+          node --check src/games/werewolf.js
+          node --check worker.js
+          node --check verify-portal-layout.mjs
+          node --check verify-werewolf-gameplay.mjs
+      - name: Run focused validation
+        run: |
+          node verify-portal-layout.mjs
+          node verify-werewolf.mjs
+          node verify-werewolf-gameplay.mjs
+      - name: Install dependencies
+        run: npm install --ignore-scripts
+      - name: Run complete regression suite
+        run: npm run check
+      - name: Build single Worker bundle
+        run: npm run check:bundle
+      - name: Commit verified permanent candidate
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add worker.js package.json release-notes.json src/config/runtime.js src/games/werewolf.js src/portal/layout.js src/portal/community-suite.js src/portal/member-cleanup.js verify-*.mjs
+          if git diff --cached --quiet; then
+            echo 'No permanent changes to commit.'
+          else
+            git commit -m 'Polish Portal layout and harden Werewolf gameplay'
+            git push origin HEAD:fix/portal-layout-werewolf-v2.7.4
+          fi
