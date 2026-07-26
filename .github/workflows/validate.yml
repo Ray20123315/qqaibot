@@ -4,6 +4,9 @@ on:
   push:
     branches:
       - feature/member-console-split-v2.7.2
+  pull_request:
+    branches:
+      - main
 
 permissions:
   contents: write
@@ -48,6 +51,7 @@ jobs:
           git rm -r tools/.member-console-v272
           rm -f tools/apply-member-console-v2.7.2.mjs
           git restore --source=origin/main -- .github/workflows/validate.yml
+          git rm .github/workflows/member-console-v272.yml
           git add -A
           git commit -m "Split member console and improve member data sync"
           git push
