@@ -10,7 +10,7 @@ concurrency:
   cancel-in-progress: true
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   build-candidate:
@@ -78,17 +78,34 @@ jobs:
           path: /tmp/werewolf-regression.log
       - name: Build single Worker bundle
         run: npm run check:bundle
-      - name: Commit clean candidate
+      - name: Prepare clean candidate artifact
+        shell: bash
         run: |
+          set -euo pipefail
           git show origin/main:.github/workflows/validate.yml > .github/workflows/validate.yml
           rm -rf tools/werewolf_payload tools/werewolf_recovery tools/werewolf_tail
           rm -f tools/apply-werewolf-v2.6.0.mjs tools/fix-werewolf-boundaries.mjs tools/recover-werewolf-v2.6.0.py
-          test ! -e tools/werewolf_payload
-          test ! -e tools/werewolf_recovery
-          test ! -e tools/werewolf_tail
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add -A
-          git status --short
-          git commit -m "Add debate-style werewolf game and Portal"
-          git push origin HEAD:feature/werewolf-v2.6.0
+          git diff --name-status origin/main > /tmp/werewolf-changed-files.txt
+          cat /tmp/werewolf-changed-files.txt
+          python - <<'PY'
+          import pathlib, tarfile
+          changed = pathlib.Path('/tmp/werewolf-changed-files.txt').read_text(encoding='utf-8').splitlines()
+          with tarfile.open('/tmp/werewolf-clean-candidate.tar.gz', 'w:gz') as tar:
+              tar.add('/tmp/werewolf-changed-files.txt', arcname='werewolf-changed-files.txt')
+              for line in changed:
+                  fields = line.split('\t')
+                  if len(fields) < 2:
+                      continue
+                  path = pathlib.Path(fields[-1])
+                  if path.exists() and path.is_file():
+                      tar.add(path, arcname=str(path))
+          PY
+          tar -tzf /tmp/werewolf-clean-candidate.tar.gz
+          sha256sum /tmp/werewolf-clean-candidate.tar.gz > /tmp/werewolf-clean-candidate.tar.gz.sha256
+      - name: Upload clean candidate
+        uses: actions/upload-artifact@v4
+        with:
+          name: werewolf-clean-candidate
+          path: |
+            /tmp/werewolf-clean-candidate.tar.gz
+            /tmp/werewolf-clean-candidate.tar.gz.sha256
