@@ -82,23 +82,28 @@ jobs:
         id: commit
         shell: bash
         run: |
-          set -euo pipefail
-          git checkout -- .github/workflows/validate.yml
-          rm -rf tools/werewolf_payload tools/werewolf_recovery tools/werewolf_tail
-          rm -f tools/apply-werewolf-v2.6.0.mjs tools/fix-werewolf-boundaries.mjs tools/recover-werewolf-v2.6.0.py
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add -A
-          git status --short
-          if git diff --cached --quiet; then
-            echo "Candidate is already clean; nothing to commit."
-          else
-            git commit -m "Add debate-style werewolf game and Portal"
-            git push origin HEAD:feature/werewolf-v2.6.0
-          fi
+          set -o pipefail
+          {
+            set -euo pipefail
+            git checkout -- .github/workflows/validate.yml
+            rm -rf tools/werewolf_payload tools/werewolf_recovery tools/werewolf_tail
+            rm -f tools/apply-werewolf-v2.6.0.mjs tools/fix-werewolf-boundaries.mjs tools/recover-werewolf-v2.6.0.py
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add -A
+            git status --short
+            if git diff --cached --quiet; then
+              echo "Candidate is already clean; nothing to commit."
+            else
+              git commit -m "Add debate-style werewolf game and Portal"
+              git push origin HEAD:feature/werewolf-v2.6.0
+            fi
+          } 2>&1 | tee /tmp/werewolf-commit.log
       - name: Upload commit diagnostics
         if: failure() && steps.commit.outcome == 'failure'
         uses: actions/upload-artifact@v4
         with:
           name: werewolf-commit-diagnostics
-          path: /tmp/werewolf-regression.log
+          path: |
+            /tmp/werewolf-commit.log
+            /tmp/werewolf-regression.log
