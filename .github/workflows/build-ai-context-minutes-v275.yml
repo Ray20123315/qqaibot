@@ -34,18 +34,34 @@ jobs:
         continue-on-error: true
         run: |
           set -o pipefail
+          : > /tmp/v275-apply.log
           if grep -q '"version": "2.7.5"' package.json; then
-            echo 'Permanent candidate already applied.' | tee /tmp/v275-apply.log
+            echo 'Permanent candidate already applied.' | tee -a /tmp/v275-apply.log
           else
-            base64 -d tools/.ai-context-minutes-v275/apply.py.gz.b64 | gzip -d > /tmp/apply-v275.py
-            python /tmp/apply-v275.py 2>&1 | tee /tmp/v275-apply.log
+            {
+              wc -c tools/.ai-context-minutes-v275/apply.py.gz.b64
+              sha256sum tools/.ai-context-minutes-v275/apply.py.gz.b64
+              python - <<'PY'
+          from pathlib import Path
+          import base64, gzip, hashlib
+          source = Path('tools/.ai-context-minutes-v275/apply.py.gz.b64').read_text(encoding='utf-8').strip()
+          print('payload_chars', len(source))
+          raw = gzip.decompress(base64.b64decode(source, validate=True))
+          print('decoded_bytes', len(raw))
+          print('decoded_sha256', hashlib.sha256(raw).hexdigest())
+          Path('/tmp/apply-v275.py').write_bytes(raw)
+          PY
+              python /tmp/apply-v275.py
+            } 2>&1 | tee -a /tmp/v275-apply.log
           fi
       - name: Upload builder diagnostics
         if: steps.apply.outcome == 'failure'
         uses: actions/upload-artifact@v4
         with:
           name: v275-builder-diagnostics
-          path: /tmp/v275-apply.log
+          path: |
+            /tmp/v275-apply.log
+            tools/.ai-context-minutes-v275/apply.py.gz.b64
           if-no-files-found: error
       - name: Stop after builder failure
         if: steps.apply.outcome == 'failure'
