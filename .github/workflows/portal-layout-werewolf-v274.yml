@@ -4,6 +4,9 @@ on:
   push:
     branches:
       - fix/portal-layout-werewolf-v2.7.4
+  pull_request:
+    branches:
+      - main
 
 permissions:
   contents: write
