@@ -88,6 +88,9 @@ jobs:
           for marker_old, marker_new in raw_literal_markers:
               assert marker_old in script, marker_old
               script = script.replace(marker_old, marker_new, 1)
+          prompt_marker = "（如 **、#、```）。"
+          assert script.count(prompt_marker) == 2
+          script = script.replace(prompt_marker, "（如 **、#、\\\\`\\\\`\\\\`）。")
           Path('/tmp/apply-v275.py').write_text(script, encoding='utf-8')
           PY
               python /tmp/apply-v275.py
