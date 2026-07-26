@@ -6,12 +6,17 @@ import {
   honorMapFromResponse,
   injectMemberCleanupClient,
   normalizeFullMember,
-  normalizePolicy
+  normalizePolicy,
+  normalizeRequestedMemberIds
 } from './src/portal/member-cleanup.js';
 
 function assert(condition, message) {
   if (!condition) throw new Error(message);
 }
+
+const unlimitedSelection = normalizeRequestedMemberIds(Array.from({ length: 75 }, (_, index) => String(100000 + index)));
+assert(unlimitedSelection.length === 75, 'Cleanup preview must not truncate selections above 20 members');
+assert(normalizeRequestedMemberIds(['100001', '100001', 'bad']).length === 1, 'Unlimited selection normalization must still deduplicate and reject empty ids');
 
 const raw = {
   group_id: '123456789',
@@ -89,20 +94,26 @@ assert(summary.total === 4 && summary.cleanupCandidates === 2 && summary.protect
 const html = injectMemberCleanupClient('<html><head></head><body><div id="memberList" class="list"><div class="empty">尚未读取群友列表</div></div></body></html>');
 assert(html.includes('qqai-member-cleanup-client'), 'Cleanup client must be injected into the member console');
 assert(html.includes('快速同步') && html.includes('深度补全所选') && html.includes('建立清理预览'), 'Cleanup UI must expose sync and reviewed cleanup controls');
+assert(html.includes('所选清理人数不设上限'), 'Cleanup UI must explain unlimited selection with automatic internal batching');
 for (const match of html.matchAll(/<script[^>]*>([\s\S]*?)<\/script>/g)) new Function(match[1]);
 
 const cleanupModule = fs.readFileSync('src/portal/member-cleanup.js', 'utf8');
 assert(cleanupModule.includes('确认清理 ${preview.eligible.length} 人'), 'Execution must require an exact preview-bound confirmation phrase');
 assert(cleanupModule.includes('get_group_member_info') && cleanupModule.includes('no_cache: true'), 'Execution must revalidate live QQ member roles without cache before removal');
-assert(cleanupModule.includes('await dbDel(env, `${PREVIEW_PREFIX}${token}`)'), 'Cleanup preview tokens must be consumed before execution to prevent replay');
+assert(cleanupModule.includes('UPDATE kv_store SET value = ? WHERE key = ? AND value = ?'), 'Each preview or continuation token must be claimed atomically before use');
+assert(cleanupModule.includes('await dbDel(env, key)'), 'Claimed cleanup tokens must be removed before execution');
 assert(cleanupModule.includes('liveHonors.get(userId)'), 'Execution must refresh group honors before the final cleanup decision');
+const cleanupSource = fs.readFileSync('src/portal/member-cleanup.js', 'utf8');
+assert(!cleanupSource.includes('EXECUTE_BATCH_LIMIT'), 'Legacy 20-member hard limit must be removed');
+assert(cleanupSource.includes('continuationToken') && cleanupSource.includes('while(token)'), 'Unlimited cleanup must continue automatically across internal chunks');
+assert(cleanupSource.includes('UPDATE kv_store SET value = ? WHERE key = ? AND value = ?'), 'Each continuation token must be claimed atomically before use');
 const members = fs.readFileSync('src/portal/members.js', 'utf8');
 assert(members.includes('handleMemberCleanupApi'), 'Member API must route cleanup endpoints');
 assert(members.includes('injectMemberCleanupClient'), 'Portal HTML must inject the cleanup client');
 const pkg = JSON.parse(fs.readFileSync('package.json', 'utf8'));
-assert(pkg.version === '2.7.0', 'Package version must be 2.7.0');
+assert(pkg.version === '2.7.1', 'Package version must be 2.7.1');
 assert(pkg.scripts.check.includes('verify-member-cleanup.mjs'), 'Member cleanup verification must run in the permanent test suite');
 const notes = JSON.parse(fs.readFileSync('release-notes.json', 'utf8'));
-assert(notes.version === '2.7.0', 'Release notes must be 2.7.0');
+assert(notes.version === '2.7.1', 'Release notes must be 2.7.1');
 
 console.log('verify-member-cleanup: ok');
