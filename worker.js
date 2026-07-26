@@ -10,7 +10,7 @@ import { normalizeMultilingualCommand, toSimplifiedChinese } from "./src/i18n/co
 import { handleBilibiliWebhook, pollAutomaticBilibiliConnectors } from "./src/integrations/bilibili.js";
 import { attachModerationProposalMessage, createGroupWorkRequest, createJoinRequestAssist, createModerationProposal, decideJoinRequestAssist, detectNaturalModerationProposal, findLatestActiveRuleViolationForUser, formatModerationPermissionDenied, formatModerationProposal, getGroupMemberSafe, handleGroupWorkDecision, handleModerationConfirmation, inspectMessageAgainstGroupRules, normalizeRuleProxyMode, normalizeRuleStrictness, parseModerationConfirmation, parseUnlimitedNonNegativeInteger, recordRuleViolationFeedback, ruleStrictnessLabel } from "./src/moderation/runtime.js";
 import { MAX_MUTE_SECONDS as MUTE_LOCK_MAX_SECONDS, canUnlockMute, clearMuteLock, createMasterMuteLock, createPartnerMuteLock, createSelfMuteLock, getMuteLock, listActiveSelfMuteLocks, markMuteLockReapplied, markMuteUnlockBlocked, muteLockRemainingSeconds, putMuteLock } from "./src/moderation/mute-locks.js";
-import { MASTER_RELATIONSHIP_DEFAULTS, clearPartnerBinding, createMasterBindingRequest, createPartnerBindingRequest, decidePartnerBindingRequest, getBindingRequest, getPartnerBinding } from "./src/moderation/partner-bindings.js";
+import { MASTER_RELATIONSHIP_DEFAULTS, MASTER_RELATIONSHIP_MAX_LEVEL, clearPartnerBinding, createMasterBindingRequest, createPartnerBindingRequest, decidePartnerBindingRequest, getBindingRequest, getPartnerBinding } from "./src/moderation/partner-bindings.js";
 import { appendPortalConversationRecord, applyConversationOutputGuards, auditIgnoredRobotMessage, botInteractionAllowKey, buildReplyPlan, cacheBotSenderClassification, clearRegisteredThinkingIndicators, detectLiteralPseudoElementLabels, eventHasBotMention, eventMentionedQqs, eventPlainText, eventSenderDisplayName, eventSenderRobotHint, extractFileDescriptors, extractForwardIds, extractMediaDescriptor, extractMessageText, extractOutboundMediaTypes, extractTextMentionIds, filterRobotMentionIds, formatForwardContext, getForwardMessageSnapshot, getQuotedMessage, getTaipeiTimeContext, isExplicitCurrentTimeQuestion, isExplicitRoleplayRequest, isGroupRobotInteractionAllowed, isIgnoredGroupRobotSender, isStandaloneCurrentTimeQuestion, looksLikeRobotDisplayName, normalizeFileDescriptor, parseDurationSeconds, prepareConversationHistory, purgeLegacyBotRepliesFromRecentLogs, qqaiTruthyRobotFlag, recordStructuredMessage, registerThinkingIndicator, removeTextMentionTokens, resolveOneBotMediaAsBase64, runOneBotGroupOperation, sanitizeAiReply, sendThinkingIndicator, thinkingIndicatorRegistryKey } from "./src/onebot/messages.js";
 import { classifyCollaborationNaturalIntent, classifyNaturalLanguageCommandIntent, normalizeNaturalLanguageCommandText, opsGetGroupMember, opsGetSettings, opsHandleActivityCommand, opsHandleMemberLeave, opsProcessAutomations } from "./src/operations/runtime.js";
 import { processPlatformJobs } from "./src/platform/runtime.js";
@@ -1836,7 +1836,7 @@ const QQAIWorker = {
         if (!result.ok) return jsonReply(`${atSender}${result.message}`);
         await writeSystemAudit(env, { type: "master_binding_decision", groupId: currentGroupId, actorId: userId, targetId: pending.requesterId, action: approve ? "approve" : "reject", requestId: pending.id, masterId: pending.masterId, memberId: pending.memberId }).catch(() => {});
         return jsonReply(approve
-          ? `[CQ:at,qq=${pending.masterId}] 已成为主人；[CQ:at,qq=${pending.memberId}] 已成为所属成员。主人可直接禁言、解除主人禁言、踢出、修改群名片及撤回所属成员的消息；其他来源的处罚不能由主人解除。`
+          ? `[CQ:at,qq=${pending.masterId}] 已成为主人；[CQ:at,qq=${pending.memberId}] 已成为所属成员。关系从 Lv.1 开始，仅解锁短时禁言；提升等级后可依序解锁解禁、撤回与修改群名片。任何等级都没有踢出权限。`
           : `[CQ:at,qq=${pending.requesterId}] 主人关系申请已拒绝。`);
       }
 
@@ -1872,8 +1872,8 @@ const QQAIWorker = {
         const otherName = other?.card || other?.nickname || binding.partnerId;
         if (binding.mode === "master") {
           return jsonReply(binding.relationshipRole === "master"
-            ? `${atSender}你是主人；所属成员是 ${otherName}（QQ:${binding.memberId}）。可使用「!主人功能」查看权限。`
-            : `${atSender}你的主人是 ${otherName}（QQ:${binding.masterId}）。主人只可直接管理你，不能解除其他来源的处罚。`);
+            ? `${atSender}你是主人；所属成员是 ${otherName}（QQ:${binding.memberId}），当前等级 Lv.${binding.level || 1}。可使用「!主人功能」查看权限。`
+            : `${atSender}你的主人是 ${otherName}（QQ:${binding.masterId}），当前等级 Lv.${binding.level || 1}。主人只可使用该等级已解锁能力，且任何等级都不能踢出你。`);
         }
         return jsonReply(`${atSender}你当前的对象是 ${otherName}（QQ:${binding.partnerId}）。`);
       }
@@ -1891,14 +1891,15 @@ const QQAIWorker = {
         const control = await resolveMasterControl();
         if (!control.ok) return jsonReply(`${atSender}${control.message}`);
         const permissions = control.binding.permissions || MASTER_RELATIONSHIP_DEFAULTS;
+        const level = Math.max(1, Math.min(MASTER_RELATIONSHIP_MAX_LEVEL, Number(control.binding.level || 1)));
         const lines = [
-          permissions.mute ? `!主人禁言 10分（上限 ${permissions.maxMuteSeconds} 秒）` : "禁言：未开放",
-          permissions.unmute ? "!主人解除禁言" : "解禁：未开放",
-          permissions.kick ? "!主人踢出" : "踢出：未开放",
-          permissions.rename ? "!主人改名 新群名片" : "改名：未开放",
-          permissions.recall ? "回复所属成员消息后发送 !主人撤回" : "撤回：未开放"
+          permissions.mute ? `!主人禁言 10分（实际最多 ${permissions.maxMuteSeconds} 秒）` : "禁言：未开放",
+          permissions.unmute ? "!主人解除禁言" : "解禁：Lv.2 解锁",
+          permissions.recall ? "回复所属成员消息后发送 !主人撤回" : "撤回：Lv.3 解锁",
+          permissions.rename ? "!主人改名 新群名片" : "改名：Lv.4 解锁"
         ];
-        return jsonReply(`${atSender}当前主人权限：\n${lines.join("\n")}\n主人只能解除自己造成的主人禁言，不能解除群规、自我禁言、对象禁言或管理防解除。`);
+        const next = level < MASTER_RELATIONSHIP_MAX_LEVEL ? `下一等级：Lv.${level + 1}` : "已达到最高等级";
+        return jsonReply(`${atSender}主人等级：Lv.${level}/${MASTER_RELATIONSHIP_MAX_LEVEL}\n${lines.join("\n")}\n${next}\n任何等级都没有踢出权限。主人只能解除自己造成的主人禁言，不能解除群规、自我禁言、对象禁言或管理防解除。`);
       }
 
       const masterMuteCommand = cleanMessage.match(/^[!！](?:主人禁言|禁言所属成员|禁言所屬成員)(?:\s+([\s\S]+))?$/i);
@@ -1949,19 +1950,7 @@ const QQAIWorker = {
       }
 
       if (/^[!！](?:主人踢出|踢出所属成员|踢出所屬成員)$/i.test(cleanMessage)) {
-        if (!isGroup) return new Response(null, { status: 204 });
-        const control = await resolveMasterControl();
-        if (!control.ok) return jsonReply(`${atSender}${control.message}`);
-        if (!(control.binding.permissions || MASTER_RELATIONSHIP_DEFAULTS).kick) return jsonReply(`${atSender}主人权限未开放踢出。`);
-        try {
-          await callOneBotAction(env, { action: "set_group_kick", params: { group_id: numericId(currentGroupId), user_id: numericId(control.binding.memberId), reject_add_request: false } }, 15000);
-        } catch (error) {
-          return jsonReply(`${atSender}主人踢出失败：${String(error?.message || error).slice(0, 300)}`);
-        }
-        await clearMuteLock(env, currentGroupId, control.binding.memberId).catch(() => {});
-        await clearPartnerBinding(env, currentGroupId, userId).catch(() => {});
-        await writeSystemAudit(env, { type: "master_member_kicked", groupId: currentGroupId, actorId: userId, targetId: control.binding.memberId, action: "kick" }).catch(() => {});
-        return jsonReply(`${atSender}已踢出所属成员 QQ:${control.binding.memberId}，主人关系同时解除。`);
+        return jsonReply(`${atSender}主人关系任何等级都没有踢出权限。`);
       }
 
       const masterRenameCommand = cleanMessage.match(/^[!！](?:主人改名|修改所属成员名片|修改所屬成員名片)\s+([\s\S]+)$/i);

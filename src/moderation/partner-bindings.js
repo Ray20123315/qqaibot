@@ -1,25 +1,42 @@
 import { dbDel, dbGet, dbPut } from "../data/store.js";
 
 const PARTNER_REQUEST_TTL_MS = 10 * 60 * 1000;
-const MASTER_RELATIONSHIP_DEFAULTS = Object.freeze({
-  mute: true,
-  unmute: true,
-  recall: true,
-  rename: true,
-  kick: false,
-  maxMuteSeconds: 30 * 60
+const MASTER_RELATIONSHIP_DEFAULT_LEVEL = 1;
+const MASTER_RELATIONSHIP_MAX_LEVEL = 4;
+const MASTER_RELATIONSHIP_LEVELS = Object.freeze({
+  1: Object.freeze({ level: 1, label: "Lv.1", mute: true, unmute: false, recall: false, rename: false, kick: false, maxMuteSeconds: 60, unlock: "禁言" }),
+  2: Object.freeze({ level: 2, label: "Lv.2", mute: true, unmute: true, recall: false, rename: false, kick: false, maxMuteSeconds: 10 * 60, unlock: "禁言、解除主人禁言" }),
+  3: Object.freeze({ level: 3, label: "Lv.3", mute: true, unmute: true, recall: true, rename: false, kick: false, maxMuteSeconds: 30 * 60, unlock: "禁言、解除主人禁言、撤回" }),
+  4: Object.freeze({ level: 4, label: "Lv.4", mute: true, unmute: true, recall: true, rename: true, kick: false, maxMuteSeconds: 2 * 60 * 60, unlock: "禁言、解除主人禁言、撤回、修改群名片" })
 });
+const MASTER_RELATIONSHIP_DEFAULTS = MASTER_RELATIONSHIP_LEVELS[MASTER_RELATIONSHIP_DEFAULT_LEVEL];
 
-function normalizeMasterPermissions(value) {
-  const source = value && typeof value === "object" ? value : {};
-  return {
-    mute: source.mute !== false,
-    unmute: source.unmute !== false,
-    recall: source.recall !== false,
-    rename: source.rename !== false,
-    kick: source.kick === true,
-    maxMuteSeconds: Math.max(1, Math.min(30 * 24 * 60 * 60, Math.trunc(Number(source.maxMuteSeconds || MASTER_RELATIONSHIP_DEFAULTS.maxMuteSeconds))))
-  };
+function normalizeMasterLevel(value, fallback = MASTER_RELATIONSHIP_DEFAULT_LEVEL) {
+  const parsed = Math.trunc(Number(value));
+  if (Number.isFinite(parsed) && parsed >= 1 && parsed <= MASTER_RELATIONSHIP_MAX_LEVEL) return parsed;
+  const safeFallback = Math.trunc(Number(fallback));
+  return Number.isFinite(safeFallback) && safeFallback >= 1 && safeFallback <= MASTER_RELATIONSHIP_MAX_LEVEL ? safeFallback : MASTER_RELATIONSHIP_DEFAULT_LEVEL;
+}
+
+function inferMasterLevelFromLegacyPermissions(value) {
+  const source = value && typeof value === "object" ? value : null;
+  if (!source) return MASTER_RELATIONSHIP_MAX_LEVEL;
+  if (source.rename === true) return 4;
+  if (source.recall === true) return 3;
+  if (source.unmute === true) return 2;
+  return 1;
+}
+
+function masterPermissionsForLevel(value) {
+  const level = normalizeMasterLevel(value);
+  return { ...MASTER_RELATIONSHIP_LEVELS[level], kick: false };
+}
+
+function normalizeMasterPermissions(value, levelValue) {
+  const fallback = levelValue === undefined || levelValue === null
+    ? inferMasterLevelFromLegacyPermissions(value)
+    : MASTER_RELATIONSHIP_DEFAULT_LEVEL;
+  return masterPermissionsForLevel(normalizeMasterLevel(levelValue, fallback));
 }
 
 function cleanId(value) {
@@ -56,6 +73,7 @@ function normalizeBinding(value) {
     ? userId === masterId ? "master" : userId === memberId ? "member" : ""
     : "partner";
   const validMasterPair = mode !== "master" || Boolean(masterId && memberId && masterId !== memberId && relationshipRole);
+  const level = mode === "master" ? normalizeMasterLevel(source.level, inferMasterLevelFromLegacyPermissions(source.permissions)) : 0;
   return {
     active: Boolean(source.active && groupId && userId && partnerId && userId !== partnerId && validMasterPair),
     groupId,
@@ -65,7 +83,8 @@ function normalizeBinding(value) {
     relationshipRole,
     masterId,
     memberId,
-    permissions: mode === "master" ? normalizeMasterPermissions(source.permissions) : null,
+    level,
+    permissions: mode === "master" ? masterPermissionsForLevel(level) : null,
     createdAt: Number(source.createdAt || 0),
     requestId: String(source.requestId || "")
   };
@@ -182,7 +201,7 @@ async function decidePartnerBindingRequest(env, { groupId, requestId, actorId, a
     return { ok: false, message: "其中一方已经绑定了其他关系，本次申请无法通过。" };
   }
   const now = Date.now();
-  const common = { active: true, groupId: group, mode: request.mode === "master" ? "master" : "partner", permissions: request.mode === "master" ? { ...MASTER_RELATIONSHIP_DEFAULTS } : null, createdAt: now, requestId: request.id };
+  const common = { active: true, groupId: group, mode: request.mode === "master" ? "master" : "partner", level: request.mode === "master" ? MASTER_RELATIONSHIP_DEFAULT_LEVEL : 0, permissions: request.mode === "master" ? masterPermissionsForLevel(MASTER_RELATIONSHIP_DEFAULT_LEVEL) : null, createdAt: now, requestId: request.id };
   const left = {
     ...common,
     userId: request.requesterId,
@@ -237,6 +256,7 @@ async function listGroupBindings(env, groupId) {
       masterId: binding.masterId,
       memberId: binding.memberId,
       userIds: [binding.masterId, binding.memberId],
+      level: binding.level,
       permissions: binding.permissions,
       createdAt: binding.createdAt,
       requestId: binding.requestId
@@ -280,7 +300,7 @@ async function createDirectMasterBinding(env, { groupId, masterId, memberId, cre
   }
   const now = Date.now();
   const requestId = `direct_${now.toString(36)}_${crypto.randomUUID().slice(0, 6)}`;
-  const common = { active: true, groupId: group, mode: "master", masterId: master, memberId: member, permissions: { ...MASTER_RELATIONSHIP_DEFAULTS }, createdAt: now, requestId, direct: true, createdBy: actor };
+  const common = { active: true, groupId: group, mode: "master", masterId: master, memberId: member, level: MASTER_RELATIONSHIP_DEFAULT_LEVEL, permissions: masterPermissionsForLevel(MASTER_RELATIONSHIP_DEFAULT_LEVEL), createdAt: now, requestId, direct: true, createdBy: actor };
   const masterBindingRecord = { ...common, userId: master, partnerId: member, relationshipRole: "master" };
   const memberBindingRecord = { ...common, userId: member, partnerId: master, relationshipRole: "member" };
   await Promise.all([
@@ -289,10 +309,11 @@ async function createDirectMasterBinding(env, { groupId, masterId, memberId, cre
   ]);
   return { ok: true, requestId, bindings: [normalizeBinding(masterBindingRecord), normalizeBinding(memberBindingRecord)] };
 }
-async function updateMasterBindingPermissions(env, groupId, userId, patch, updatedBy = "") {
+async function updateMasterBindingLevel(env, groupId, userId, requestedLevel, updatedBy = "") {
   const binding = await getPartnerBinding(env, groupId, userId);
   if (!binding || binding.mode !== "master") return { ok: false, message: "找不到有效的主人关系。" };
-  const permissions = normalizeMasterPermissions({ ...binding.permissions, ...(patch && typeof patch === "object" ? patch : {}) });
+  const level = normalizeMasterLevel(requestedLevel, binding.level || MASTER_RELATIONSHIP_DEFAULT_LEVEL);
+  const permissions = masterPermissionsForLevel(level);
   const [leftRaw, rightRaw] = await Promise.all([
     readJsonKey(env, partnerBindingKey(binding.groupId, binding.userId), null),
     readJsonKey(env, partnerBindingKey(binding.groupId, binding.partnerId), null)
@@ -300,13 +321,19 @@ async function updateMasterBindingPermissions(env, groupId, userId, patch, updat
   if (!leftRaw || !rightRaw) return { ok: false, message: "主人关系资料不完整。" };
   const updatedAt = Date.now();
   await Promise.all([
-    dbPut(env, partnerBindingKey(binding.groupId, binding.userId), JSON.stringify({ ...leftRaw, permissions, permissionsUpdatedAt: updatedAt, permissionsUpdatedBy: cleanId(updatedBy) })),
-    dbPut(env, partnerBindingKey(binding.groupId, binding.partnerId), JSON.stringify({ ...rightRaw, permissions, permissionsUpdatedAt: updatedAt, permissionsUpdatedBy: cleanId(updatedBy) }))
+    dbPut(env, partnerBindingKey(binding.groupId, binding.userId), JSON.stringify({ ...leftRaw, level, permissions, permissionsUpdatedAt: updatedAt, permissionsUpdatedBy: cleanId(updatedBy) })),
+    dbPut(env, partnerBindingKey(binding.groupId, binding.partnerId), JSON.stringify({ ...rightRaw, level, permissions, permissionsUpdatedAt: updatedAt, permissionsUpdatedBy: cleanId(updatedBy) }))
   ]);
   const next = await getPartnerBinding(env, binding.groupId, binding.userId);
   return { ok: true, binding: next };
 }
 
+async function updateMasterBindingPermissions(env, groupId, userId, patch, updatedBy = "") {
+  const requestedLevel = patch && typeof patch === "object" && patch.level !== undefined
+    ? patch.level
+    : inferMasterLevelFromLegacyPermissions(patch);
+  return updateMasterBindingLevel(env, groupId, userId, requestedLevel, updatedBy);
+}
 async function clearPartnerBinding(env, groupId, userId) {
   const binding = await getPartnerBinding(env, groupId, userId);
   if (!binding) return null;
@@ -318,7 +345,10 @@ async function clearPartnerBinding(env, groupId, userId) {
 }
 
 export {
+  MASTER_RELATIONSHIP_DEFAULT_LEVEL,
   MASTER_RELATIONSHIP_DEFAULTS,
+  MASTER_RELATIONSHIP_LEVELS,
+  MASTER_RELATIONSHIP_MAX_LEVEL,
   PARTNER_REQUEST_TTL_MS,
   clearPartnerBinding,
   createDirectMasterBinding,
@@ -328,7 +358,10 @@ export {
   getBindingRequest,
   getPartnerBinding,
   listGroupBindings,
+  masterPermissionsForLevel,
+  normalizeMasterLevel,
   normalizeMasterPermissions,
   partnerBindingKey,
+  updateMasterBindingLevel,
   updateMasterBindingPermissions
 };

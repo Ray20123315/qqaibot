@@ -23,7 +23,7 @@ assert(worker.includes('masterId === String(botId || "")'), 'The bot account mus
 assert(worker.includes('no_cache: true'), 'Master relationship roles must use live OneBot checks');
 assert(worker.includes('createMasterMuteLock'), 'Master mute must use a distinct lock source');
 assert(worker.includes('masterCommand: true'), 'Master unmute must use the restricted master permission path');
-assert(worker.includes('!主人踢出'), 'Master must be able to kick the sole subordinate member');
+assert(worker.includes('主人关系任何等级都没有踢出权限'), 'Master kick commands must be permanently denied at every level');
 assert(worker.includes('!主人改名'), 'Master must be able to change the subordinate member card');
 assert(worker.includes('!主人撤回'), 'Master must be able to recall only the subordinate member messages');
 assert(worker.includes('binding.mode !== "partner"'), 'Symmetric partner commands must not operate on master relationships');
@@ -34,6 +34,6 @@ assert(portal.includes('主人禁言锁'), 'Portal must label master-source lock
 assert(portal.includes('if (!protect && previousLock)'), 'Normal Portal moderation must clear an old relationship lock after overriding it');
 
 const pkg = JSON.parse(fs.readFileSync('package.json', 'utf8'));
-assert(pkg.version === '2.5.0', 'Package version must be 2.5.0');
+assert(pkg.version === '2.5.1', 'Package version must be 2.5.1');
 assert(pkg.scripts.check.includes('verify-master-bindings.mjs'), 'Master relationship verification must run permanently');
 console.log('verify-master-bindings: ok');
