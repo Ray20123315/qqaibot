@@ -64,6 +64,18 @@ source = replaceOnce(
   `  if (!game) {\n    if (/^[!！](?:投票|竞选警长|競選警長|退出竞选|退出競選|警长投票|警長投票|白狼王审判|白狼王審判|骑士决斗|騎士決鬥|炸弹植入|炸彈植入)/i.test(text)) return null;\n    await reply("没有找到你参与中的狼人杀；私讯技能时请附群号。");\n    return { handled: true };\n  }\n`,
   "no game generic command handoff"
 );
+source = replaceOnce(
+  source,
+  `    roleId: game.status === "ended" || canManage ? item.roleId : undefined,\n    roleName: game.status === "ended" || canManage ? roleDef(item.roleId).name : undefined,\n    groupTeam: game.status === "ended" || canManage ? item.groupTeam : undefined\n`,
+  `    roleId: game.status === "ended" ? item.roleId : undefined,\n    roleName: game.status === "ended" ? roleDef(item.roleId).name : undefined,\n    groupTeam: game.status === "ended" ? item.groupTeam : undefined\n`,
+  "active role secrecy"
+);
+source = replaceOnce(
+  source,
+  `    sheriff: game.sheriff, lovers: game.status === "ended" || canManage ? game.lovers : undefined, winner: game.winner,\n`,
+  `    sheriff: game.sheriff, lovers: game.status === "ended" ? game.lovers : undefined, winner: game.winner,\n`,
+  "active lovers secrecy"
+);
 fs.writeFileSync(path, source);
 
 const verifyPath = "verify-werewolf.mjs";
@@ -75,4 +87,4 @@ verify = replaceOnce(
   "werewolf boundary assertions"
 );
 fs.writeFileSync(verifyPath, verify);
-console.log("Applied werewolf public discussion and command handoff fixes");
+console.log("Applied werewolf public discussion, command handoff, and active-role secrecy fixes");
