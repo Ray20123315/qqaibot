@@ -1,168 +1,31 @@
-name: Harden member console v2.7.2 data merging
+name: Validate single-Worker build
 
 on:
   push:
     branches:
-      - feature/member-console-split-v2.7.2
+      - main
+      - refactor/v2-modular-worker
   pull_request:
     branches:
       - main
 
 permissions:
-  contents: write
-
-concurrency:
-  group: member-console-v272-hardening
-  cancel-in-progress: true
+  contents: read
 
 jobs:
-  harden-candidate:
-    if: github.actor != 'github-actions[bot]'
+  validate:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
-        with:
-          ref: feature/member-console-split-v2.7.2
-          fetch-depth: 0
       - uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: npm
           cache-dependency-path: package.json
-      - name: Apply data merge hardening
-        run: |
-          python - <<'PY'
-          from pathlib import Path
-
-          path = Path('src/portal/member-cleanup.js')
-          source = path.read_text()
-
-          old_merge = '''function mergeRawMember(groupRaw, strangerRaw) {
-            const group = groupRaw && typeof groupRaw === "object" ? groupRaw : {};
-            const stranger = strangerRaw && typeof strangerRaw === "object" ? strangerRaw : {};
-            const merged = { ...stranger, ...group };
-            if (normalizeSex(group.sex) === "unknown" && normalizeSex(stranger.sex) !== "unknown") merged.sex = stranger.sex;
-            if (!Number(group.age || 0) && Number(stranger.age || 0)) merged.age = stranger.age;
-            if (!String(group.area || "").trim()) merged.area = String(stranger.area || stranger.location || [stranger.province, stranger.city].filter(Boolean).join(" ") || "");
-            if (!Number(group.qq_level ?? group.qqLevel ?? 0)) merged.qq_level = Number(stranger.qq_level ?? stranger.qqLevel ?? stranger.level ?? 0);
-            merged._data_sources = ["group_member_info", ...(Object.keys(stranger).length ? ["stranger_info"] : [])];
-            return merged;
-          }'''.replace('          ', '')
-          new_merge = '''function mergeRawMember(groupRaw, strangerRaw) {
-            const group = groupRaw && typeof groupRaw === "object" ? groupRaw : {};
-            const stranger = strangerRaw && typeof strangerRaw === "object" ? strangerRaw : {};
-            const merged = { ...group };
-            if (!cleanId(group.user_id || group.userId || group.qq)) merged.user_id = stranger.user_id ?? stranger.userId ?? stranger.qq;
-            if (!String(group.nickname || group.name || "").trim() && String(stranger.nickname || stranger.name || "").trim()) merged.nickname = stranger.nickname || stranger.name;
-            if (normalizeSex(group.sex) === "unknown" && normalizeSex(stranger.sex) !== "unknown") merged.sex = stranger.sex;
-            if (!Number(group.age || 0) && Number(stranger.age || 0)) merged.age = stranger.age;
-            const groupArea = String(group.area || group.location || [group.province, group.city].filter(Boolean).join(" ") || "").trim();
-            if (!groupArea) merged.area = String(stranger.area || stranger.location || [stranger.province, stranger.city].filter(Boolean).join(" ") || "");
-            if (!Number(group.qq_level ?? group.qqLevel ?? 0)) merged.qq_level = Number(stranger.qq_level ?? stranger.qqLevel ?? stranger.level ?? 0);
-            merged._data_sources = ["group_member_info", ...(Object.keys(stranger).length ? ["stranger_info"] : [])];
-            return merged;
-          }'''.replace('          ', '')
-          if old_merge not in source:
-              raise SystemExit('mergeRawMember anchor not found')
-          source = source.replace(old_merge, new_merge, 1)
-
-          old_preserve = '''function preserveEnrichedMember(previous, current) {
-            const before = previous && typeof previous === "object" ? previous : {};
-            const next = current && typeof current === "object" ? current : {};
-            const merged = {
-              ...before,
-              ...next,
-              sex: normalizeSex(next.sex) !== "unknown" ? normalizeSex(next.sex) : normalizeSex(before.sex),
-              age: Number(next.age || 0) || Number(before.age || 0),
-              area: String(next.area || before.area || ""),
-              qqLevel: Number(next.qqLevel || 0) || Number(before.qqLevel || 0),
-              titleExpireTime: Number(next.titleExpireTime || 0) || Number(before.titleExpireTime || 0),
-              extra: { ...(before.extra || {}), ...(next.extra || {}) },
-              rawFields: [...new Set([...(before.rawFields || []), ...(next.rawFields || [])])].slice(0, 100),
-              dataSources: [...new Set([...(before.dataSources || []), ...(next.dataSources || [])])]
-            };
-            merged.missingFields = memberMissingFields(merged);
-            return merged;
-          }'''.replace('          ', '')
-          new_preserve = '''function preserveEnrichedMember(previous, current) {
-            const before = previous && typeof previous === "object" ? previous : {};
-            const next = current && typeof current === "object" ? current : {};
-            const nextRawFields = Array.isArray(next.rawFields) ? next.rawFields : [];
-            const hasTitleField = nextRawFields.some(field => ["title", "special_title", "specialTitle"].includes(String(field)));
-            const hasTitleExpireField = nextRawFields.some(field => ["title_expire_time", "titleExpireTime"].includes(String(field)));
-            const title = hasTitleField ? String(next.title || "") : String(next.title || before.title || "");
-            let titleExpireTime = 0;
-            if (title) {
-              if (hasTitleExpireField) titleExpireTime = Number(next.titleExpireTime || 0);
-              else if (title === String(before.title || "")) titleExpireTime = Number(before.titleExpireTime || 0);
-              else titleExpireTime = Number(next.titleExpireTime || 0);
-            }
-            const merged = {
-              ...before,
-              ...next,
-              sex: normalizeSex(next.sex) !== "unknown" ? normalizeSex(next.sex) : normalizeSex(before.sex),
-              age: Number(next.age || 0) || Number(before.age || 0),
-              area: String(next.area || before.area || ""),
-              qqLevel: Number(next.qqLevel || 0) || Number(before.qqLevel || 0),
-              title,
-              specialTitle: title,
-              titleExpireTime,
-              titleStatus: !title ? "none" : titleExpireTime ? "expires" : "unspecified",
-              cardChangeable: next.cardChangeable ?? before.cardChangeable ?? null,
-              extra: { ...(before.extra || {}), ...(next.extra || {}) },
-              rawFields: [...new Set([...(before.rawFields || []), ...nextRawFields])].slice(0, 100),
-              dataSources: [...new Set([...(before.dataSources || []), ...(next.dataSources || [])])]
-            };
-            merged.missingFields = memberMissingFields(merged);
-            return merged;
-          }'''.replace('          ', '')
-          if old_preserve not in source:
-              raise SystemExit('preserveEnrichedMember anchor not found')
-          source = source.replace(old_preserve, new_preserve, 1)
-
-          source = source.replace('if (known.has(key)) continue;', 'if (known.has(key) || String(key).startsWith("_")) continue;', 1)
-          source = source.replace('honors: liveHonors || previous.honors || [],', 'honors: honors.ok === false ? (previous.honors || []) : (liveHonors || []),', 1)
-          source = source.replace('snapshot.honors = honors.get(userId) || existing.get(userId)?.honors || [];', 'snapshot.honors = honors.ok === false ? (existing.get(userId)?.honors || []) : (honors.get(userId) || []);', 1)
-          source = source.replace('  normalizeFullMember,\n  normalizeSex,', '  mergeRawMember,\n  normalizeFullMember,\n  normalizeSex,\n  preserveEnrichedMember,', 1)
-          path.write_text(source)
-
-          test_path = Path('verify-member-console-split.mjs')
-          test = test_path.read_text()
-          test = test.replace("import { honorMapFromResponse, injectMemberCleanupClient, normalizeFullMember, normalizeSex } from './src/portal/member-cleanup.js';", "import { honorMapFromResponse, injectMemberCleanupClient, mergeRawMember, normalizeFullMember, normalizeSex, preserveEnrichedMember } from './src/portal/member-cleanup.js';")
-          insertion = """
-          const mergedRaw = mergeRawMember({ user_id: '10001', level: 'group-8', sex: 'unknown', age: 0, area: '' }, { user_id: '10001', level: 88, sex: 'male', age: 20, area: '补全地区' });
-          const mergedMember = normalizeFullMember(mergedRaw);
-          assert(mergedMember.level === 'group-8' && mergedMember.qqLevel === 88, 'Stranger level must supplement QQ level without replacing the group level');
-          const previousTitle = { title: '保留头衔', specialTitle: '保留头衔', titleExpireTime: 1900000000000, sex: 'female', age: 20, area: '地区', rawFields: ['title', 'title_expire_time'] };
-          const listRefresh = normalizeFullMember({ user_id: '10001', sex: 'unknown', age: 0, area: '' });
-          const preservedTitle = preserveEnrichedMember(previousTitle, listRefresh);
-          assert(preservedTitle.title === '保留头衔' && preservedTitle.titleExpireTime === 1900000000000, 'Fast sync must preserve a title when the list response omits title fields');
-          const explicitNoTitle = preserveEnrichedMember(previousTitle, normalizeFullMember({ user_id: '10001', title: '', title_expire_time: 0 }));
-          assert(explicitNoTitle.title === '' && explicitNoTitle.titleStatus === 'none', 'An explicit empty title from the member API must clear a stale title');
-          """.strip() + "\n"
-          anchor = "assert(normalized.titleStatus === 'none' && normalized.titleExpireTime === 0, 'No title must be not-applicable rather than ambiguous expiry');\n"
-          if anchor not in test:
-              raise SystemExit('test insertion anchor not found')
-          test = test.replace(anchor, anchor + insertion, 1)
-          static_anchor = "assert(cleanupSource.includes('preserveEnrichedMember'), 'Fast sync must preserve enriched fields');\n"
-          test = test.replace(static_anchor, static_anchor + "assert(cleanupSource.includes('honors.ok === false ? (previous.honors || []) : (liveHonors || [])'), 'Successful honor sync must clear stale honors while failed sync preserves the last known value');\n", 1)
-          test_path.write_text(test)
-          PY
-      - name: Validate generated source
-        run: |
-          node --check src/portal/member-cleanup.js
-          node --check verify-member-console-split.mjs
       - name: Install dependencies
         run: npm install --ignore-scripts
-      - name: Run complete regression suite
+      - name: Run regression checks
         run: npm run check
-      - name: Build single Worker bundle
+      - name: Build the single Worker bundle
         run: npm run check:bundle
-      - name: Commit verified hardening
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add src/portal/member-cleanup.js verify-member-console-split.mjs
-          git commit -m "Harden member data merge consistency"
-          git push origin HEAD:feature/member-console-split-v2.7.2
