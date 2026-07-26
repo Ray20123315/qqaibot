@@ -38,6 +38,22 @@ jobs:
           echo "e5d90978cd91cf4415dd5d4e5f79550906b0aad22a17042c4bcce4a0fb7fd1bb  /tmp/member-cleanup-v270.tgz" | sha256sum -c -
           tar -tzf /tmp/member-cleanup-v270.tgz
           tar -xzf /tmp/member-cleanup-v270.tgz
+          python - <<'PY'
+          from pathlib import Path
+          path = Path('src/portal/member-cleanup.js')
+          source = path.read_text(encoding='utf-8')
+          replacements = [
+              ("+'\\n地区：'", "+'\\\\n地区：'"),
+              ("?'\\n扩展字段：'", "?'\\\\n扩展字段：'"),
+              (".join('\\r\\n')", ".join('\\\\r\\\\n')"),
+          ]
+          for old, new in replacements:
+              if old not in source:
+                  raise SystemExit(f'Missing generated-client escape anchor: {old!r}')
+              source = source.replace(old, new)
+          path.write_text(source, encoding='utf-8')
+          print('Fixed generated Portal client escape sequences')
+          PY
           node --check src/portal/member-cleanup.js
           node --check verify-member-cleanup.mjs
           node --check tools/apply-member-cleanup-v2.7.0.mjs
