@@ -47,10 +47,7 @@ jobs:
           from pathlib import Path
           import base64, gzip, hashlib
           source = Path('tools/.ai-context-minutes-v275/apply.py.gz.b64').read_text(encoding='utf-8').strip()
-          print('payload_chars', len(source))
           raw = gzip.decompress(base64.b64decode(source, validate=True))
-          print('decoded_bytes', len(raw))
-          print('decoded_sha256', hashlib.sha256(raw).hexdigest())
           assert hashlib.sha256(raw).hexdigest() == 'bcb1a972a798f2ba03cd0f26812b1c9171a5e4b3b4435cb04defa341058448f3'
           script = raw.decode('utf-8')
           old = '''def sub_once(text: str, pattern: str, replacement: str, label: str, flags: int = 0) -> str:
@@ -102,6 +99,14 @@ jobs:
               python /tmp/apply-v275.py
             } 2>&1 | tee -a /tmp/v275-apply.log
           fi
+          python - <<'PY'
+          from pathlib import Path
+          path = Path('worker.js')
+          text = path.read_text(encoding='utf-8')
+          text = text.replace('''      // ==========================================\n      // ==========================================\n      // 📋 群组精华分析：会议纪要（支持 10–500 条与分段输出）''', '''      // ==========================================\n      // 📋 群组精华分析：会议纪要（支持 10–500 条与分段输出）''', 1)
+          text = text.replace('''      // ==========================================\n      // 🍉 群组轻松吃瓜：聊天总结 (八卦语气)      // ==========================================\n      // 🍉 群组轻松吃瓜：聊天总结 (八卦语气)\n      // ==========================================''', '''      // ==========================================\n      // 🍉 群组轻松吃瓜：聊天总结（八卦语气）\n      // ==========================================''', 1)
+          path.write_text(text, encoding='utf-8')
+          PY
       - name: Upload builder diagnostics
         if: steps.apply.outcome == 'failure'
         uses: actions/upload-artifact@v4
