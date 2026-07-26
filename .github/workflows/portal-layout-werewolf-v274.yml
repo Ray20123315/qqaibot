@@ -30,12 +30,26 @@ jobs:
           cache: npm
           cache-dependency-path: package.json
       - name: Apply v2.7.4 candidate
+        id: apply
+        continue-on-error: true
         run: |
           if grep -q 'qqai-portal-layout-v274' src/portal/layout.js 2>/dev/null && grep -q '"version": "2.7.4"' package.json; then
-            echo 'Permanent candidate already applied.'
+            echo 'Permanent candidate already applied.' | tee /tmp/v274-apply.log
           else
-            python tools/.portal-layout-werewolf-v274/apply.py
+            python tools/.portal-layout-werewolf-v274/apply.py 2>&1 | tee /tmp/v274-apply.log
           fi
+      - name: Upload builder diagnostics
+        if: steps.apply.outcome == 'failure'
+        uses: actions/upload-artifact@v4
+        with:
+          name: v274-builder-diagnostics
+          path: /tmp/v274-apply.log
+          if-no-files-found: error
+      - name: Stop after builder failure
+        if: steps.apply.outcome == 'failure'
+        run: |
+          cat /tmp/v274-apply.log
+          exit 1
       - name: Validate source syntax
         run: |
           node --check src/portal/layout.js
