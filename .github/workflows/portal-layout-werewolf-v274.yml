@@ -33,6 +33,7 @@ jobs:
         id: apply
         continue-on-error: true
         run: |
+          set -o pipefail
           if grep -q 'qqai-portal-layout-v274' src/portal/layout.js 2>/dev/null && grep -q '"version": "2.7.4"' package.json; then
             echo 'Permanent candidate already applied.' | tee /tmp/v274-apply.log
           else
