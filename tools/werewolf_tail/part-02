@@ -1,0 +1,30 @@
+  bind('wwAbort',function(){postW('/werewolf/abort',{})});
+  bind('wwSubmitAction',function(){
+    var action=byId('wwAction').value,targetId=byId('wwTarget').value,secondTargetId=byId('wwSecondTarget').value,text=byId('wwActionText').value.trim();
+    var body={action:action,targetId:targetId,secondTargetId:secondTargetId};
+    if(action==='wolf_chat')body.text=text;
+    if(action==='disguise')body.roleId=text;
+    postW('/werewolf/action',body);
+  });
+  bind('wwWolfChatSend',function(){var input=byId('wwWolfChatText'),text=input.value.trim();if(!text)return notifyW('请输入狼聊内容');postW('/werewolf/action',{action:'wolf_chat',text:text}).then(function(r){if(r&&r.ok)input.value=''})});
+  document.addEventListener('click',function(event){if(event.target&&event.target.id==='werewolfNav')setTimeout(loadW,0)});
+  window.addEventListener('hashchange',function(){if(location.hash==='#werewolf')loadW()});
+  if(location.hash==='#werewolf')setTimeout(loadW,0);
+})();
+</script>`;
+
+  if (!source.includes('id="qqai-werewolf-client"')) {
+    if (source.includes("</body>")) source = source.replace("</body>", script + "\n</body>");
+    else source += script;
+  }
+  return source;
+}
+
+export {
+  ROLE_DEFINITIONS as WEREWOLF_ROLE_DEFINITIONS,
+  handleWerewolfOneBotEvent,
+  handleWerewolfPortalApi,
+  injectWerewolfPortalClient,
+  processWerewolfTimers,
+  publicWerewolfState
+};
