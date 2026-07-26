@@ -3,10 +3,10 @@
 
 
 
-const VERSION = "2.7.4";
+const VERSION = "2.7.5";
 
 
-const BUILD_DATE = "2026-07-26";
+const BUILD_DATE = "2026-07-27";
 
 
 const DEFAULT_DEVELOPER_ID = "3569028262";
@@ -16,9 +16,14 @@ const DEFAULTS = Object.freeze({
   deepseekFlashModel: "deepseek-v4-flash",
   interjectRate: 25,
   contextSummaryThreshold: 20,
-  groupContextExactMessages: 60,
-  groupContextMaximumMessages: 240,
-  conversationHistoryItems: 32,
+  groupContextExactMessages: 80,
+  groupContextMaximumMessages: 600,
+  conversationHistoryItems: 48,
+  meetingMinutesMaximumMessages: 500,
+  meetingMinutesBatchLimit: 3,
+  outboundChunkChars: 1400,
+  outboundMaxParts: 10,
+  replyHardChars: 12000,
   aiDecisionLogLimit: 2000,
   thinkingDelayMs: 1200,
   inputDebounceMs: 1200,

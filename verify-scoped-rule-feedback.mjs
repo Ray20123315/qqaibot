@@ -39,7 +39,7 @@ assert.ok(source.includes("resolveAdaptiveRuleStrictness(env, groupId, recentCon
 
 const pkg = JSON.parse(fs.readFileSync("package.json", "utf8"));
 const notes = JSON.parse(fs.readFileSync("release-notes.json", "utf8"));
-assert.equal(pkg.version, "2.7.4");
-assert.equal(notes.version, "2.7.4");
+assert.equal(pkg.version, "2.7.5");
+assert.equal(notes.version, "2.7.5");
 assert.match(pkg.scripts.check, /verify-scoped-rule-feedback\.mjs/);
 console.log("verify-scoped-rule-feedback: ok");

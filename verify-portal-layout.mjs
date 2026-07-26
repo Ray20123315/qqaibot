@@ -22,6 +22,6 @@ for (const path of ["src/portal/community-suite.js", "src/portal/member-cleanup.
   assert.ok(!source.includes("var(--border)"), `${path} must use the Portal --line token`);
 }
 const pkg = JSON.parse(fs.readFileSync("package.json", "utf8"));
-assert.equal(pkg.version, "2.7.4");
+assert.equal(pkg.version, "2.7.5");
 assert.match(pkg.scripts.check, /verify-portal-layout\.mjs/);
 console.log("verify-portal-layout: ok");

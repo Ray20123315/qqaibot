@@ -2,6 +2,7 @@
 // The module stores aggregate style statistics only; it does not copy raw private speech into a persona.
 
 import { callGoogleDecision } from "../ai/runtime.js";
+import { compactInterjectionAtBoundary, completeTextAtBoundary } from "../ai/conversation-quality.js";
 import { dbGet, dbPut } from "../data/store.js";
 import { readJson } from "../portal/auth.js";
 
@@ -468,7 +469,7 @@ ${emojiPolicy}。禁止客服腔、教程腔、“作为 AI”、过量礼貌和
 互怼规则：玩笑可以回“你才是”“哼”“你皮痒了？”等轻度回嘴或卖惨，但不得升级到外貌、家庭、疾病、智力缺陷、现实创伤和恶毒诅咒。真攻击只回一次边界或低频向管理卖惨，随后降温。
 道歉规则：小情绪可用“好嘛，对不起”“不气了，抱抱”；明确伤到人时必须诚恳承担责任，不能只用抱抱敷衍。
 人格连续性：${facts.length ? facts.join("；") : "尚无固定个人资料"}。已存在的资料绝不能改变；没有资料且被直接询问时可以形成一个普通设定，但不能伪造可验证的现实行为、游戏账号、在线状态或线下承诺。别人邀请打游戏而资料没有确认玩过时，只能自然说没玩、没空、正在忙或不了解。
-${direct ? "当前是直接互动，应给出符合场景的自然回应。" : "当前是候选主动插话；接不上话题时只输出 [SKIP]。"}`;
+${direct ? "当前是直接互动，应优先完整回答当前问题；建议字数只是风格软上限，禁止在句子中途截断。" : "当前是候选主动插话；接不上话题时只输出 [SKIP]。"}`;
 }
 
 function removeEmoji(text, maxCount) {
@@ -517,7 +518,7 @@ function personaFactAnswer(profile, userText) {
   return "";
 }
 
-function applySocialOutputPolicy({ text, userText = "", decision, profile, isGroup = true, explicitLong = false }) {
+function applySocialOutputPolicy({ text, userText = "", decision, profile, isGroup = true, explicitLong = false, direct = false }) {
   const style = normalizeStyle(profile?.style || DEFAULT_STYLE);
   const fixedAnswer = personaFactAnswer(profile, userText);
   if (fixedAnswer) return fixedAnswer;
@@ -543,6 +544,11 @@ function applySocialOutputPolicy({ text, userText = "", decision, profile, isGro
     else if (decision.outputType === "punctuation") output = "？";
     else output = "嗯？";
   }
+  const cleaned = output.replace(/\s+([，。！？!?])/g, "$1").trim();
+  if (direct) {
+    const hardMax = isGroup ? (explicitLong ? 12000 : 6000) : 12000;
+    return completeTextAtBoundary(cleaned, hardMax);
+  }
   let maxChars = clamp(decision.maxChars || 60, 4, isGroup ? 300 : 2000);
   if (isGroup && explicitLong) maxChars = Math.max(maxChars, 260);
   if (isGroup && !explicitLong) {
@@ -550,7 +556,7 @@ function applySocialOutputPolicy({ text, userText = "", decision, profile, isGro
     if (decision.outputType === "micro_chat") maxChars = Math.min(maxChars, Math.max(24, Math.round(style.averageChars * 2.5)));
     if (decision.outputType === "normal_chat") maxChars = Math.min(maxChars, Math.max(80, Math.round(style.averageChars * 7)));
   }
-  return compactToChars(output.replace(/\s+([，。！？!?])/g, "$1").trim(), Math.round(maxChars));
+  return compactInterjectionAtBoundary(cleaned, Math.round(maxChars));
 }
 
 function extractGeneratedFact(userText, replyText) {
