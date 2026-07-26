@@ -14,6 +14,20 @@ replacements = [
         "night_end = werewolf.index('  player.lastActionAt = nowMs();', night_start)",
         "night action block end",
     ),
+    (
+        '''for path in ROOT.glob("verify-*.mjs"):
+    text = path.read_text(encoding="utf-8").replace('"2.7.3"', '"2.7.4"')
+    path.write_text(text, encoding="utf-8")''',
+        '''for path in ROOT.glob("verify-*.mjs"):
+    source = path.read_text(encoding="utf-8")
+    updated_lines = []
+    for line in source.splitlines(keepends=True):
+        if "version" in line.lower():
+            line = re.sub(r"(?P<quote>['\\\"])\\d+\\.\\d+\\.\\d+(?P=quote)", lambda match: f"{match.group('quote')}2.7.4{match.group('quote')}", line)
+        updated_lines.append(line)
+    path.write_text("".join(updated_lines), encoding="utf-8")''',
+        "version assertion updater",
+    ),
 ]
 
 for old, new, label in replacements:
