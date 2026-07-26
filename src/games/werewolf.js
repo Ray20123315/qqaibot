@@ -12,6 +12,9 @@ const WEREWOLF_DEFAULT_PHASE_SECONDS = Object.freeze({ sheriff: 180, night: 180,
 const WOLF_ROLES = new Set(["werewolf", "black_wolf_king", "white_wolf_king", "snow_wolf", "shapeshifter_wolf", "original_wolf", "berserk_wolf", "bomb_wolf", "blood_wolf"]);
 const SEER_ROLES = new Set(["seer", "apprentice_seer"]);
 const ACTIVE_PHASES = new Set(["sheriff_nomination", "sheriff_vote", "night", "day_discussion", "day_vote", "death_skill"]);
+const COPYABLE_ROLE_ACTIONS = Object.freeze({ seer: "inspect", witch: "witch_poison", ninja: "decoy", shapeshifter_wolf: "disguise", blood_wolf: "blood_moon", mermaid: "redirect", guard: "protect", detective: "track", lecher: "visit", villager: "vigilance", voodoo_girl: "curse", enchanter: "hex" });
+const QQAI_WEREWOLF_V274_COMPLETION_MARKER = "QQAI_WEREWOLF_V274_COMPLETION_MARKER";
+const QQAI_WEREWOLF_V274_WIN_ORDER_MARKER = "QQAI_WEREWOLF_V274_WIN_ORDER_MARKER";
 
 const ROLE_DEFINITIONS = Object.freeze({
   werewolf: { id: "werewolf", name: "狼人", team: "wolf", summary: "每晚与狼队共同选择一名非狼人玩家袭击。", action: "wolf_kill" },
@@ -142,7 +145,7 @@ function createGame({ groupId, creatorId, creatorName, config }) {
     config: normalized,
     players: [],
     sheriff: { enabled: normalized.sheriffEnabled, holderId: "", candidates: [], alternates: [], voteRound: 0, votes: {} },
-    dayVotes: {}, nightActions: {}, publicLog: [], wolfChat: [], deaths: [], pendingDeathSkill: null,
+    dayVotes: {}, nightActions: {}, publicLog: [], wolfChat: [], deaths: [], pendingDeathSkill: null, pendingDeathSkills: [],
     lovers: [], bloodMoonActive: false, bomb: null, winner: null, pausedAt: 0,
     createdAt: nowMs(), updatedAt: nowMs(), startedAt: 0, endedAt: 0
   };
@@ -252,6 +255,28 @@ function assignGroups(players, groupCount) {
   return players.map(player => ({ ...player, groupTeam: map.get(player.id) || 1 }));
 }
 
+function createRoleState(roleId = "villager") {
+  return {
+    used: false,
+    healAvailable: roleId === "witch",
+    poisonAvailable: roleId === "witch",
+    lastProtectedId: "",
+    curseStacks: 0,
+    visitedIds: [],
+    frenzy: 0,
+    disguiseRoleId: "villager",
+    copiedRoleId: "",
+    copiedRoleState: null,
+    copiedSkillUsed: false,
+    vigilanceActive: false,
+    shieldTargetId: "",
+    hexed: false,
+    seerBlocked: false,
+    deathSkillUsed: false
+  };
+}
+
+
 async function distributeRoles(env, game) {
   const deck = buildBalancedRoleDeck(game.players.length, game.config.selectedRoles);
   const shuffledPlayers = shuffle(game.players);
@@ -260,11 +285,7 @@ async function distributeRoles(env, game) {
     player.roleId = deck[index] || "villager";
     player.originalRoleId = player.roleId;
     player.team = roleDef(player.roleId).team;
-    player.roleState = {
-      used: false, healAvailable: player.roleId === "witch", poisonAvailable: player.roleId === "witch",
-      lastProtectedId: "", curseStacks: 0, visitedIds: [], frenzy: 0, disguiseRoleId: "villager", copiedRoleId: "",
-      vigilanceActive: false, shieldTargetId: "", hexed: false, seerBlocked: false
-    };
+    player.roleState = createRoleState(player.roleId);
   }
   game.players = assignGroups(game.players, game.config.groupCount);
   for (const player of game.players) {
@@ -335,7 +356,7 @@ function nextSheriff(game) {
   if (next) appendPublic(game, `${playerById(game, next)?.name || next} 继任警长。`, "sheriff");
 }
 
-function queueDeath(game, player, cause, killerId = "") {
+function queueDeath(game, player, cause, killerId = "", chainLover = true) {
   if (!player || player.alive === false) return false;
   player.alive = false;
   player.diedAt = nowMs();
@@ -343,24 +364,78 @@ function queueDeath(game, player, cause, killerId = "") {
   game.deaths.push({ userId: player.id, name: player.name, roleId: player.roleId, cause, killerId, at: nowMs() });
   appendPublic(game, `${player.name} 死亡。原因：${cause}。`, "death", { userId: player.id, cause });
   if (game.sheriff?.holderId === player.id) nextSheriff(game);
+  if (chainLover && Array.isArray(game.lovers) && game.lovers.includes(player.id)) {
+    const loverId = game.lovers.find(id => id !== player.id);
+    const lover = playerById(game, loverId);
+    if (lover?.alive !== false) queueDeath(game, lover, `恋人 ${player.name} 死亡，随之殉情`, player.id, false);
+  }
   return true;
 }
 
 function deathSkillEligible(player, cause) {
   if (!player || !["hunter", "black_wolf_king"].includes(player.roleId)) return false;
   if (/毒|诅咒/.test(String(cause || ""))) return false;
-  return player.roleState?.used !== true;
+  return player.roleState?.deathSkillUsed !== true;
 }
 
-function checkPendingDeathSkill(game, deadPlayers) {
-  const eligible = (deadPlayers || []).find(({ player, cause }) => deathSkillEligible(player, cause));
-  if (!eligible) return false;
-  eligible.player.roleState.used = true;
-  game.pendingDeathSkill = { actorId: eligible.player.id, roleId: eligible.player.roleId, cause: eligible.cause, expiresAt: nowMs() + phaseDuration(game, "death_skill") * 1000, resumePhase: game.phase === "night" ? "day_discussion" : "night" };
-  setPhase(game, "death_skill", `${eligible.player.name} 可发动带走技能`);
-  appendPrivate(eligible.player, `你可在时限内私讯「!狼人杀技能 ${game.groupId} 带走 目标QQ」。`, "death_skill");
+function deathSkillQueue(game) {
+  game.pendingDeathSkills = Array.isArray(game.pendingDeathSkills) ? game.pendingDeathSkills : [];
+  return game.pendingDeathSkills;
+}
+
+function activateNextDeathSkill(game, fallbackResumePhase = "", fallbackResumeIncrement = true) {
+  if (game.pendingDeathSkill) return true;
+  const next = deathSkillQueue(game).shift();
+  if (!next) return false;
+  const player = playerById(game, next.actorId);
+  if (!player) return activateNextDeathSkill(game, fallbackResumePhase, fallbackResumeIncrement);
+  game.pendingDeathSkill = {
+    ...next,
+    resumePhase: next.resumePhase || fallbackResumePhase || "night",
+    resumeIncrement: next.resumeIncrement !== false && fallbackResumeIncrement !== false,
+    expiresAt: nowMs() + phaseDuration(game, "death_skill") * 1000
+  };
+  setPhase(game, "death_skill", `${player.name} 可发动带走技能`);
+  appendPrivate(player, `你可在时限内私讯「!狼人杀技能 ${game.groupId} 带走 目标QQ」。`, "death_skill");
   return true;
 }
+
+function checkPendingDeathSkill(game, deadPlayers, resumePhase = "", resumeIncrement = true) {
+  const resolvedResumePhase = resumePhase || (game.phase === "night" ? "day_discussion" : "night");
+  const queue = deathSkillQueue(game);
+  const entries = [];
+  const seen = new Set();
+  for (const entry of [
+    ...(Array.isArray(deadPlayers) ? deadPlayers : []),
+    ...(game.players || []).filter(player => player.alive === false).map(player => ({ player, cause: player.deathCause || "" }))
+  ]) {
+    const id = String(entry?.player?.id || "");
+    if (!id || seen.has(id)) continue;
+    seen.add(id);
+    entries.push(entry);
+  }
+  for (const entry of entries) {
+    const player = entry?.player;
+    const cause = entry?.cause || player?.deathCause || "";
+    if (!deathSkillEligible(player, cause)) continue;
+    player.roleState = player.roleState || createRoleState(player.roleId);
+    player.roleState.deathSkillUsed = true;
+    if (game.pendingDeathSkill?.actorId === player.id || queue.some(item => item.actorId === player.id)) continue;
+    queue.push({ actorId: player.id, roleId: player.roleId, cause, resumePhase: resolvedResumePhase, resumeIncrement });
+  }
+  return activateNextDeathSkill(game, resolvedResumePhase, resumeIncrement);
+}
+
+function resumeAfterDeathSkill(game, resumePhase, increment = true, reason = "死亡技能结算完成") {
+  if (resumePhase === "day_discussion") {
+    if (increment) game.day += 1;
+    setPhase(game, "day_discussion", `${reason}${increment ? `，进入第 ${game.day} 天` : "，继续白天讨论"}`);
+  } else {
+    if (increment) game.night += 1;
+    setPhase(game, "night", `${reason}${increment ? `，进入第 ${game.night} 夜` : "，继续当前夜晚"}`);
+  }
+}
+
 
 function promoteApprentice(game) {
   const seerAlive = livingPlayers(game).some(player => player.roleId === "seer");
@@ -390,16 +465,18 @@ function resolveWerewolfWin(game) {
     const groups = unique(alive.map(player => player.groupTeam).filter(Boolean));
     return groups.length === 1 ? { team: `group_${groups[0]}`, playerIds: alive.map(player => player.id), text: `隐藏分组第 ${groups[0]} 组成为最后存活组，分组模式获胜。` } : null;
   }
-  const specialVisit = alive.find(player => player.roleId === "lecher" && unique(player.roleState?.visitedIds || []).length >= 3);
+  const aliveIds = new Set(alive.map(player => String(player.id)));
+  const specialVisit = alive.find(player => player.roleId === "lecher" && unique(player.roleState?.visitedIds || []).filter(id => id !== player.id && aliveIds.has(String(id))).length >= 3);
   if (specialVisit) return { team: "lecher", playerIds: [specialVisit.id], text: `${specialVisit.name} 已完成三次不同夜访，触发个人胜利。` };
   const lovers = loversWinState(game);
   if (lovers) return lovers;
   const wolves = alive.filter(player => isWolfRole(player.roleId));
+  const spirits = alive.filter(player => player.team === "spirit");
+  const good = alive.filter(player => player.team === "good");
   const nonWolves = alive.filter(player => !isWolfRole(player.roleId));
   if (!wolves.length) {
-    const wraith = alive.find(player => player.roleId === "wraith");
-    if (wraith) return { team: "spirit", playerIds: [wraith.id], text: `狼人已经全灭，但怨灵 ${wraith.name} 仍潜伏在人群中，怨灵阵营获胜。` };
-    return { team: "good", playerIds: nonWolves.map(player => player.id), text: "狼人已经全灭，好人阵营获胜。" };
+    if (spirits.length) return { team: "spirit", playerIds: spirits.map(player => player.id), text: `狼人已经全灭，仍存活的怨灵阵营成员（${spirits.map(player => player.name).join("、")}）获胜。` };
+    return { team: "good", playerIds: good.map(player => player.id), text: "狼人和怨灵阵营均已全灭，好人阵营获胜。" };
   }
   if (wolves.length >= nonWolves.length) return { team: "wolf", playerIds: wolves.map(player => player.id), text: "狼人数量已不低于其他存活玩家，狼人阵营获胜。" };
   return null;
@@ -436,7 +513,7 @@ function resolveBombVote(game, votes) {
   return { votes: nextVotes, invalidVoterId: holderId };
 }
 
-function resolveWolfTarget(game) {
+function resolveWolfTarget(game, { consumeBoost = true } = {}) {
   const votes = getNightActions(game, "wolf_kill");
   const counts = {};
   for (const vote of votes) {
@@ -444,7 +521,7 @@ function resolveWolfTarget(game) {
     if (!actor || actor.alive === false || !isWolfRole(actor.roleId)) continue;
     const weight = vote.boosted === true && actor.roleId === "berserk_wolf" && Number(actor.roleState?.frenzy || 0) > 0 ? 2 : 1;
     counts[vote.targetId] = Number(counts[vote.targetId] || 0) + weight;
-    if (weight > 1) actor.roleState.frenzy = Math.max(0, Number(actor.roleState.frenzy || 0) - 1);
+    if (weight > 1 && consumeBoost) actor.roleState.frenzy = Math.max(0, Number(actor.roleState.frenzy || 0) - 1);
   }
   const top = highestTargets(counts);
   return top.length ? playerById(game, top[Math.floor(Math.random() * top.length)]) : null;
@@ -452,6 +529,7 @@ function resolveWolfTarget(game) {
 
 async function resolveNight(env, game) {
   const dead = [];
+  const deathStart = game.deaths.length;
   let wolfTarget = resolveWolfTarget(game);
   const bloodMoon = getNightActions(game, "blood_moon").some(action => playerById(game, action.playerId)?.alive !== false);
   game.bloodMoonActive = bloodMoon;
@@ -464,11 +542,11 @@ async function resolveNight(env, game) {
     wolfTarget.roleState.used = true;
     wolfTarget = playerById(game, ninja.targetId) || wolfTarget;
   }
-  const guardAction = getNightActions(game, "protect").find(action => action.targetId === wolfTarget?.id);
+  const guardAction = getNightActions(game, "protect").find(action => action.targetId === wolfTarget?.id && playerById(game, action.playerId)?.alive !== false);
   const villageGuard = wolfTarget?.roleId === "villager" && wolfTarget.roleState?.vigilanceActive;
   const nightImmune = wolfTarget?.roleId === "wraith";
   const protectedFromWolf = Boolean(guardAction && !bloodMoon) || villageGuard || nightImmune;
-  const healAction = getNightActions(game, "witch_heal")[0];
+  const healAction = getNightActions(game, "witch_heal").find(action => playerById(game, action.playerId)?.alive !== false);
   if (wolfTarget && !protectedFromWolf && !(healAction && healAction.targetId === wolfTarget.id)) {
     if (queueDeath(game, wolfTarget, bloodMoon ? "血月狼袭" : "狼人夜袭", "wolf_team")) dead.push({ player: wolfTarget, cause: "狼人夜袭" });
     for (const player of livingPlayers(game).filter(player => isWolfRole(player.roleId))) player.roleState.frenzy = Number(player.roleState?.frenzy || 0) + 1;
@@ -497,15 +575,17 @@ async function resolveNight(env, game) {
   }
   for (const action of getNightActions(game, "visit")) {
     const actor = playerById(game, action.playerId);
-    if (actor?.alive !== false) actor.roleState.visitedIds = unique([...(actor.roleState?.visitedIds || []), action.targetId]);
+    const target = playerById(game, action.targetId);
+    if (actor?.alive !== false && target?.alive !== false) actor.roleState.visitedIds = unique([...(actor.roleState?.visitedIds || []), action.targetId]);
   }
   for (const player of game.players) player.roleState.vigilanceActive = false;
   promoteApprentice(game);
   game.nightActions = {};
   game.bloodMoonActive = false;
-  appendPublic(game, dead.length ? `天亮了，本夜死亡：${dead.map(item => item.player.name).join("、")}。` : "天亮了，本夜无人死亡。", "dawn");
+  const resolvedDead = game.deaths.slice(deathStart).map(item => ({ player: playerById(game, item.userId), cause: item.cause })).filter(item => item.player);
+  appendPublic(game, resolvedDead.length ? `天亮了，本夜死亡：${resolvedDead.map(item => item.player.name).join("、")}。` : "天亮了，本夜无人死亡。", "dawn");
+  if (checkPendingDeathSkill(game, resolvedDead)) { await runAiPhase(env, game); return; }
   if (await finishIfWon(env, game)) return;
-  if (checkPendingDeathSkill(game, dead)) return;
   game.day += 1;
   setPhase(game, "day_discussion", `第 ${game.day} 天公开讨论`);
   await runAiPhase(env, game);
@@ -549,9 +629,8 @@ async function tallySheriff(env, game) {
 async function tallyDayVote(env, game) {
   const bomb = resolveBombVote(game, game.dayVotes || {});
   const counts = voteCounts(game, bomb.votes, { sheriffWeight: true, invalidMasochist: true });
-  const rawCounts = voteCounts(game, game.dayVotes || {}, { sheriffWeight: true, invalidMasochist: false });
-  const topRaw = highestTargets(rawCounts);
-  const cultist = topRaw.length === 1 ? playerById(game, topRaw[0]) : null;
+  const top = highestTargets(counts);
+  const cultist = top.length === 1 ? playerById(game, top[0]) : null;
   if (cultist?.roleId === "masochist_cultist" && game.config.groupCount <= 1) {
     game.winner = { team: "masochist_cultist", playerIds: [cultist.id], text: `${cultist.name} 成为白天唯一最高得票者，抖M教徒个人胜利。` };
     game.status = "ended"; game.phase = "ended"; game.endedAt = nowMs();
@@ -560,8 +639,8 @@ async function tallyDayVote(env, game) {
     await sendGroup(env, game.groupId, `【狼人杀结束】${game.winner.text}`).catch(() => null);
     return;
   }
-  const top = highestTargets(counts);
   if (bomb.invalidVoterId) appendPublic(game, `炸弹最终停在 ${playerById(game, bomb.invalidVoterId)?.name || bomb.invalidVoterId}，该玩家本日投票无效。`, "bomb");
+  const deathStart = game.deaths.length;
   const dead = [];
   if (top.length === 1) {
     const target = playerById(game, top[0]);
@@ -573,8 +652,9 @@ async function tallyDayVote(env, game) {
   }
   game.dayVotes = {};
   promoteApprentice(game);
+  const resolvedDead = game.deaths.slice(deathStart).map(item => ({ player: playerById(game, item.userId), cause: item.cause })).filter(item => item.player);
+  if (checkPendingDeathSkill(game, resolvedDead)) { await runAiPhase(env, game); return; }
   if (await finishIfWon(env, game)) return;
-  if (checkPendingDeathSkill(game, dead)) return;
   game.night += 1;
   setPhase(game, "night", `第 ${game.night} 夜`);
   await runAiPhase(env, game);
@@ -607,15 +687,16 @@ async function advanceGame(env, game, reason = "manual") {
     await tallyDayVote(env, game);
   } else if (game.phase === "death_skill") {
     const resume = game.pendingDeathSkill?.resumePhase || "night";
+    const resumeIncrement = game.pendingDeathSkill?.resumeIncrement !== false;
     game.pendingDeathSkill = null;
-    if (resume === "day_discussion") {
-      game.day += 1;
-      setPhase(game, "day_discussion", `死亡技能超时，进入第 ${game.day} 天`);
+    if (!activateNextDeathSkill(game, resume, resumeIncrement)) {
+      if (!(await finishIfWon(env, game))) {
+        resumeAfterDeathSkill(game, resume, resumeIncrement, "死亡技能超时");
+        await runAiPhase(env, game);
+      }
     } else {
-      game.night += 1;
-      setPhase(game, "night", `死亡技能超时，进入第 ${game.night} 夜`);
+      await runAiPhase(env, game);
     }
-    await runAiPhase(env, game);
   }
   appendPublic(game, `阶段推进来源：${reason}`, "audit");
   await saveGame(env, game);
@@ -695,24 +776,110 @@ async function broadcastWolfChat(env, game, sender, text) {
 
 async function runAiNightAction(env, game, player) {
   const choices = targetablePlayers(game, player.id).map(item => item.id);
+  if (player.roleId === "cupid" && !player.roleState?.used && livingPlayers(game).length >= 2) {
+    const first = choices[0] || player.id;
+    const second = livingPlayers(game).map(item => item.id).find(id => id !== first) || player.id;
+    if (first !== second) {
+      player.roleState.used = true;
+      game.lovers = [first, second];
+      for (const loverId of game.lovers) appendPrivate(playerById(game, loverId), `你与 ${playerById(game, game.lovers.find(id => id !== loverId))?.name} 成为恋人。`, "lover");
+    }
+    return;
+  }
+  if (player.roleId === "witch") {
+    const predicted = resolveWolfTarget(game, { consumeBoost: false });
+    if (predicted && player.roleState?.healAvailable && !player.roleState?.[`witchPotionNight${game.night}`]) {
+      player.roleState.healAvailable = false;
+      player.roleState[`witchPotionNight${game.night}`] = true;
+      setNightAction(game, player.id, "witch_heal", { targetId: predicted.id });
+      return;
+    }
+    if (game.night > 1 && player.roleState?.poisonAvailable && !player.roleState?.[`witchPotionNight${game.night}`] && choices.length) {
+      const decision = await aiDecision(env, game, player, "witch_poison", choices);
+      if (decision?.targetId) {
+        player.roleState.poisonAvailable = false;
+        player.roleState[`witchPotionNight${game.night}`] = true;
+        setNightAction(game, player.id, "witch_poison", { targetId: decision.targetId });
+      }
+    }
+    return;
+  }
   const decision = await aiDecision(env, game, player, "night", choices);
   const targetId = decision?.targetId || choices[0];
-  if (!targetId) return;
-  if (isWolfRole(player.roleId)) {
-    setNightAction(game, player.id, "wolf_kill", { targetId, boosted: player.roleId === "berserk_wolf" && Number(player.roleState?.frenzy || 0) > 0 });
-    if (decision?.wolfChat) await broadcastWolfChat(env, game, player, decision.wolfChat);
+  if (player.roleId === "gravedigger" && player.roleState?.copiedRoleId && !player.roleState?.copiedSkillUsed) {
+    const secondTargetId = choices.find(id => id !== targetId) || "";
+    await handlePlayerAction(env, game, { userId: player.id }, "copied_action", targetId, { secondTargetId, roleId: "villager" });
+    return;
   }
+  if (player.roleId === "thief" && !player.roleState?.used && targetId) {
+    await handlePlayerAction(env, game, { userId: player.id }, "swap_role", targetId, {});
+    return;
+  }
+  if (isWolfRole(player.roleId)) {
+    const nonWolfChoices = choices.filter(id => !isWolfRole(playerById(game, id)?.roleId));
+    const wolfTargetId = nonWolfChoices.includes(targetId) ? targetId : nonWolfChoices[0];
+    if (player.roleId === "shapeshifter_wolf") {
+      const disguises = ROLE_IDS.filter(id => !isWolfRole(id) && id !== "wraith");
+      const disguiseRoleId = disguises[Math.abs(String(game.id).length + String(player.id).length + game.night) % disguises.length] || "villager";
+      player.roleState.disguiseRoleId = disguiseRoleId;
+      setNightAction(game, player.id, "disguise", { roleId: disguiseRoleId });
+    }
+    if (player.roleId === "blood_wolf" && !player.roleState?.used && game.night >= 2) {
+      player.roleState.used = true;
+      setNightAction(game, player.id, "blood_moon", {});
+    }
+    if (wolfTargetId) setNightAction(game, player.id, "wolf_kill", { targetId: wolfTargetId, boosted: player.roleId === "berserk_wolf" && Number(player.roleState?.frenzy || 0) > 0 });
+    if (decision?.wolfChat) await broadcastWolfChat(env, game, player, decision.wolfChat);
+    return;
+  }
+  if (!targetId) return;
   if (player.roleId === "seer") setNightAction(game, player.id, "inspect", { targetId });
-  if (player.roleId === "guard") setNightAction(game, player.id, "protect", { targetId });
+  if (player.roleId === "guard" && player.roleState?.lastProtectedId !== targetId) { player.roleState.lastProtectedId = targetId; setNightAction(game, player.id, "protect", { targetId }); }
   if (player.roleId === "detective") setNightAction(game, player.id, "track", { targetId });
   if (player.roleId === "voodoo_girl") setNightAction(game, player.id, "curse", { targetId });
   if (player.roleId === "enchanter") setNightAction(game, player.id, "hex", { targetId });
   if (player.roleId === "lecher") setNightAction(game, player.id, "visit", { targetId });
+  if (player.roleId === "ninja") setNightAction(game, player.id, "decoy", { targetId });
+  if (player.roleId === "sadist_leader" && !player.roleState?.used) {
+    const cultist = livingPlayers(game).find(item => item.roleId === "masochist_cultist");
+    if (cultist) { player.roleState.used = true; setNightAction(game, player.id, "meat_shield", { targetId: cultist.id }); }
+  }
+  if (player.roleId === "mermaid" && choices.length > 1) {
+    const redirectTargetId = choices.find(id => id !== targetId);
+    if (redirectTargetId) setNightAction(game, player.id, "redirect", { originalTargetId: targetId, redirectTargetId });
+  }
+  if (player.roleId === "gravedigger" && !player.roleState?.used) {
+    const dead = (game.players || []).find(item => item.alive === false && COPYABLE_ROLE_ACTIONS[item.roleId]);
+    if (dead) { player.roleState.used = true; player.roleState.copiedRoleId = dead.roleId; player.roleState.copiedRoleState = createRoleState(dead.roleId); player.roleState.copiedSkillUsed = false; }
+  }
   if (player.roleId === "villager" && !player.roleState?.used) { player.roleState.used = true; player.roleState.vigilanceActive = true; }
 }
 
+async function runAiDeathSkill(env, game) {
+  let safety = 0;
+  while (game.phase === "death_skill" && game.pendingDeathSkill && safety++ < WEREWOLF_MAX_PLAYERS) {
+    const actor = playerById(game, game.pendingDeathSkill.actorId);
+    if (!actor || !isAiPlayer(actor)) return;
+    const choices = livingPlayers(game).filter(player => player.id !== actor.id).map(player => player.id);
+    const decision = await aiDecision(env, game, actor, "death_shot", choices);
+    const targetId = decision?.targetId || choices[0];
+    if (!targetId) {
+      const resume = game.pendingDeathSkill.resumePhase || "night";
+      const resumeIncrement = game.pendingDeathSkill.resumeIncrement !== false;
+      game.pendingDeathSkill = null;
+      if (!activateNextDeathSkill(game, resume, resumeIncrement)) {
+        if (!(await finishIfWon(env, game))) resumeAfterDeathSkill(game, resume, resumeIncrement, "AI 死亡技能无有效目标");
+      }
+      continue;
+    }
+    const result = await handlePlayerAction(env, game, { userId: actor.id }, "death_shot", targetId, {});
+    if (!result.ok) return;
+  }
+}
+
 async function runAiPhase(env, game) {
-  const aiPlayers = livingPlayers(game).filter(isAiPlayer);
+  if (game.phase === "death_skill") { await runAiDeathSkill(env, game); return; }
+  const aiPlayers = livingPlayers(game).filter(isAiPlayer).sort((left, right) => Number(isWolfRole(right.roleId)) - Number(isWolfRole(left.roleId)));
   if (!aiPlayers.length) return;
   if (game.phase === "sheriff_nomination") {
     for (const player of aiPlayers) player.sheriffCandidate = Math.random() < 0.35;
@@ -727,7 +894,24 @@ async function runAiPhase(env, game) {
     for (const player of aiPlayers) await runAiNightAction(env, game, player);
   } else if (game.phase === "day_discussion") {
     for (const player of aiPlayers) {
-      const decision = await aiDecision(env, game, player, "day_speech", targetablePlayers(game, player.id).map(item => item.id));
+      if (player.alive === false || game.phase !== "day_discussion") break;
+      const choices = targetablePlayers(game, player.id).map(item => item.id);
+      if (player.roleId === "bomb_wolf" && !player.roleState?.[`bombDay${game.day}`] && choices.length) {
+        const decision = await aiDecision(env, game, player, "plant_bomb", choices);
+        if (decision?.targetId) await handlePlayerAction(env, game, { userId: player.id }, "plant_bomb", decision.targetId, {});
+      }
+      if (game.day >= 2 && player.roleId === "knight" && !player.roleState?.used && choices.length) {
+        const decision = await aiDecision(env, game, player, "duel", choices);
+        if (decision?.targetId) await handlePlayerAction(env, game, { userId: player.id }, "duel", decision.targetId, {});
+        if (game.phase !== "day_discussion") return;
+      }
+      if (game.day >= 2 && player.roleId === "white_wolf_king" && !player.roleState?.used && choices.length) {
+        const decision = await aiDecision(env, game, player, "white_judgement", choices);
+        if (decision?.targetId) await handlePlayerAction(env, game, { userId: player.id }, "white_judgement", decision.targetId, {});
+        if (game.phase !== "day_discussion") return;
+      }
+      if (player.alive === false || game.phase !== "day_discussion") continue;
+      const decision = await aiDecision(env, game, player, "day_speech", choices);
       const speech = String(decision?.speech || "我先听大家发言，暂时保留判断。").slice(0, 100);
       appendPublic(game, `${player.name}：${speech}`, "ai_speech", { userId: player.id });
       await sendGroup(env, game.groupId, `${player.name}：${speech}`).catch(() => null);
@@ -780,9 +964,26 @@ async function findPrivateGame(env, userId, groupId = "") {
 async function handlePlayerAction(env, game, actor, action, targetId = "", extra = {}) {
   const player = playerById(game, actor.userId);
   if (!player) return { ok: false, message: "你不是这局游戏的玩家。" };
-  if (player.alive === false && action !== "death_shot") return { ok: false, message: "你已经出局，不能执行该操作。" };
+  const requestedAction = String(action || "");
+  if (player.alive === false && requestedAction !== "death_shot") return { ok: false, message: "你已经出局，不能执行该操作。" };
+  let actingRoleId = player.roleId;
+  let abilityState = player.roleState || (player.roleState = createRoleState(player.roleId));
+  let copiedAction = false;
+  if (requestedAction === "copied_action") {
+    const copiedRoleId = String(player.roleState?.copiedRoleId || "");
+    const copied = COPYABLE_ROLE_ACTIONS[copiedRoleId];
+    if (player.roleId !== "gravedigger" || !copied || player.roleState?.copiedSkillUsed) return { ok: false, message: "当前没有可使用的掘墓者复制技能。" };
+    action = copied;
+    actingRoleId = copiedRoleId;
+    abilityState = player.roleState.copiedRoleState || (player.roleState.copiedRoleState = createRoleState(copiedRoleId));
+    copiedAction = true;
+  } else if (requestedAction === "berserk_vote") {
+    if (player.roleId !== "berserk_wolf" || Number(player.roleState?.frenzy || 0) <= 0) return { ok: false, message: "当前没有可消耗的狂暴层数。" };
+    action = "wolf_kill";
+    extra = { ...extra, boosted: true };
+  }
   const target = targetId ? playerById(game, targetId) : null;
-  const requireTarget = () => target && target.alive !== false && target.id !== player.id;
+  const requireTarget = ({ includeSelf = false, alive = true } = {}) => Boolean(target && (alive ? target.alive !== false : target.alive === false) && (includeSelf || target.id !== player.id));
   if (action === "wolf_chat") {
     if (!isWolfRole(player.roleId) || game.phase !== "night") return { ok: false, message: "只有存活狼人能在夜晚使用狼人密谈。" };
     await broadcastWolfChat(env, game, player, extra.text);
@@ -822,9 +1023,11 @@ async function handlePlayerAction(env, game, actor, action, targetId = "", extra
     if (game.phase !== "day_discussion" || player.roleId !== "knight" || player.roleState?.used || !requireTarget()) return { ok: false, message: "骑士决斗当前不可用。" };
     player.roleState.used = true;
     const dead = isWolfRole(target.roleId) ? target : player;
-    queueDeath(game, dead, isWolfRole(target.roleId) ? `骑士 ${player.name} 决斗命中狼人` : `骑士决斗判断错误`, player.id);
+    const cause = isWolfRole(target.roleId) ? `骑士 ${player.name} 决斗命中狼人` : `骑士决斗判断错误`;
+    queueDeath(game, dead, cause, player.id);
     appendPublic(game, `${player.name} 发起骑士决斗；${dead.name} 死亡。`, "duel");
-    await finishIfWon(env, game);
+    if (checkPendingDeathSkill(game, [{ player: dead, cause }], "day_discussion", false)) await runAiPhase(env, game);
+    else await finishIfWon(env, game);
     await saveGame(env, game);
     return { ok: true, message: "骑士决斗已结算。" };
   }
@@ -834,12 +1037,15 @@ async function handlePlayerAction(env, game, actor, action, targetId = "", extra
     queueDeath(game, player, "白狼王正式牺牲技能", player.id);
     queueDeath(game, target, "白狼王审判带走", player.id);
     appendPublic(game, `白狼王 ${player.name} 发动正式审判并带走 ${target.name}；普通自爆规则仍为禁止。`, "white_judgement");
-    if (!(await finishIfWon(env, game))) {
-      game.night += 1;
-      setPhase(game, "night", `白狼王审判强制结束白天，进入第 ${game.night} 夜`);
+    if (!checkPendingDeathSkill(game, [{ player, cause: "白狼王正式牺牲技能" }, { player: target, cause: "白狼王审判带走" }], "night", true)) {
+      if (!(await finishIfWon(env, game))) {
+        resumeAfterDeathSkill(game, "night", true, "白狼王审判强制结束白天");
+        await runAiPhase(env, game);
+      }
+    } else {
       await runAiPhase(env, game);
-      await saveGame(env, game);
     }
+    await saveGame(env, game);
     return { ok: true, message: "白狼王审判已结算。" };
   }
   if (action === "plant_bomb") {
@@ -851,27 +1057,37 @@ async function handlePlayerAction(env, game, actor, action, targetId = "", extra
   }
   if (action === "death_shot") {
     if (game.phase !== "death_skill" || game.pendingDeathSkill?.actorId !== player.id || !target || target.alive === false) return { ok: false, message: "当前没有可用的带走技能或目标无效。" };
-    queueDeath(game, target, `${roleDef(player.roleId).name} 死亡带走`, player.id);
+    const shotCause = `${roleDef(player.roleId).name} 死亡带走`;
+    queueDeath(game, target, shotCause, player.id);
     const resume = game.pendingDeathSkill.resumePhase || "night";
+    const resumeIncrement = game.pendingDeathSkill.resumeIncrement !== false;
     game.pendingDeathSkill = null;
-    if (!(await finishIfWon(env, game))) {
-      if (resume === "day_discussion") { game.day += 1; setPhase(game, "day_discussion", `死亡技能结算后进入第 ${game.day} 天`); }
-      else { game.night += 1; setPhase(game, "night", `死亡技能结算后进入第 ${game.night} 夜`); }
+    if (!checkPendingDeathSkill(game, [{ player: target, cause: shotCause }], resume, resumeIncrement)) {
+      if (!(await finishIfWon(env, game))) {
+        resumeAfterDeathSkill(game, resume, resumeIncrement);
+        await runAiPhase(env, game);
+      }
+    } else {
       await runAiPhase(env, game);
-      await saveGame(env, game);
     }
+    await saveGame(env, game);
     return { ok: true, message: `已带走 ${target.name}。` };
   }
   if (game.phase !== "night") return { ok: false, message: "该职业技能只能在夜晚使用。" };
-  if (!requireTarget() && !["blood_moon", "vigilance"].includes(action)) return { ok: false, message: "请选择一名仍存活的其他玩家。" };
+  const targetAllowed = action === "copy_dead" ? requireTarget({ alive: false }) : action === "couple" ? requireTarget({ includeSelf: true }) : ["blood_moon", "vigilance", "disguise"].includes(action) ? true : requireTarget();
+  if (!targetAllowed) return { ok: false, message: action === "copy_dead" ? "请选择一名已经死亡的玩家。" : "请选择一名有效目标。" };
   const usedKey = `${action}Night${game.night}`;
-  if (player.roleState?.[usedKey]) return { ok: false, message: "你本夜已经使用过该技能。" };
+  const replaceable = ["wolf_kill", "disguise"].includes(action);
+  if (abilityState?.[usedKey] && !replaceable) return { ok: false, message: "你本夜已经使用过该技能。" };
+  const witchNightKey = `witchPotionNight${game.night}`;
+  if (["witch_heal", "witch_poison"].includes(action) && abilityState?.[witchNightKey]) return { ok: false, message: "女巫每晚最多使用一瓶药。" };
 
-  if (action === "wolf_kill" && isWolfRole(player.roleId)) {
-    setNightAction(game, player.id, "wolf_kill", { targetId, boosted: extra.boosted === true && player.roleId === "berserk_wolf" && Number(player.roleState?.frenzy || 0) > 0 });
-  } else if (action === "inspect" && player.roleId === "seer") {
-    if (player.roleState?.seerBlocked) {
-      player.roleState.seerBlocked = false;
+  if (action === "wolf_kill" && isWolfRole(actingRoleId)) {
+    if (isWolfRole(target?.roleId)) return { ok: false, message: "狼人不能把狼刀提交给狼人阵营目标。" };
+    setNightAction(game, player.id, "wolf_kill", { targetId, boosted: extra.boosted === true && actingRoleId === "berserk_wolf" && Number(abilityState?.frenzy || 0) > 0 });
+  } else if (action === "inspect" && actingRoleId === "seer") {
+    if (abilityState?.seerBlocked) {
+      abilityState.seerBlocked = false;
       appendPrivate(player, "你的查验受到蛊惑，本夜没有得到结果。", "inspect");
       player.roleState[usedKey] = true;
       await saveGame(env, game);
@@ -881,58 +1097,67 @@ async function handlePlayerAction(env, game, actor, action, targetId = "", extra
     player.diary.push({ night: game.night, targetId, text, at: nowMs() });
     appendPrivate(player, text, "inspect");
     setNightAction(game, player.id, "inspect", { targetId });
-  } else if (action === "witch_heal" && player.roleId === "witch" && player.roleState?.healAvailable) {
-    player.roleState.healAvailable = false; setNightAction(game, player.id, "witch_heal", { targetId });
-  } else if (action === "witch_poison" && player.roleId === "witch" && player.roleState?.poisonAvailable) {
-    player.roleState.poisonAvailable = false; setNightAction(game, player.id, "witch_poison", { targetId });
-  } else if (action === "protect" && player.roleId === "guard" && player.roleState?.lastProtectedId !== targetId) {
-    player.roleState.lastProtectedId = targetId; setNightAction(game, player.id, "protect", { targetId });
-  } else if (action === "decoy" && player.roleId === "ninja") {
+  } else if (action === "witch_heal" && actingRoleId === "witch" && abilityState?.healAvailable) {
+    abilityState.healAvailable = false; setNightAction(game, player.id, "witch_heal", { targetId });
+  } else if (action === "witch_poison" && actingRoleId === "witch" && abilityState?.poisonAvailable) {
+    abilityState.poisonAvailable = false; setNightAction(game, player.id, "witch_poison", { targetId });
+  } else if (action === "protect" && actingRoleId === "guard" && abilityState?.lastProtectedId !== targetId) {
+    abilityState.lastProtectedId = targetId; setNightAction(game, player.id, "protect", { targetId });
+  } else if (action === "decoy" && actingRoleId === "ninja") {
     setNightAction(game, player.id, "decoy", { targetId });
-  } else if (action === "disguise" && player.roleId === "shapeshifter_wolf") {
+  } else if (action === "disguise" && actingRoleId === "shapeshifter_wolf") {
     const disguiseRoleId = ROLE_DEFINITIONS[extra.roleId] ? extra.roleId : "villager";
-    player.roleState.disguiseRoleId = disguiseRoleId; setNightAction(game, player.id, "disguise", { roleId: disguiseRoleId });
-  } else if (action === "blood_moon" && player.roleId === "blood_wolf" && !player.roleState?.used) {
-    player.roleState.used = true; setNightAction(game, player.id, "blood_moon", {});
-  } else if (action === "couple" && player.roleId === "cupid" && !player.roleState?.used) {
+    abilityState.disguiseRoleId = disguiseRoleId; setNightAction(game, player.id, "disguise", { roleId: disguiseRoleId });
+  } else if (action === "blood_moon" && actingRoleId === "blood_wolf" && !abilityState?.used) {
+    abilityState.used = true; setNightAction(game, player.id, "blood_moon", {});
+  } else if (action === "couple" && actingRoleId === "cupid" && !abilityState?.used) {
     const second = playerById(game, extra.secondTargetId);
     if (!second || second.alive === false || second.id === targetId) return { ok: false, message: "请选择两名不同的存活玩家。" };
-    player.roleState.used = true; game.lovers = [targetId, second.id];
+    abilityState.used = true; game.lovers = [targetId, second.id];
     for (const loverId of game.lovers) appendPrivate(playerById(game, loverId), `你与 ${playerById(game, game.lovers.find(id => id !== loverId))?.name} 成为恋人。`, "lover");
-  } else if (action === "meat_shield" && player.roleId === "sadist_leader" && !player.roleState?.used && target.roleId === "masochist_cultist") {
-    player.roleState.used = true; setNightAction(game, player.id, "meat_shield", { targetId });
-  } else if (action === "redirect" && player.roleId === "mermaid") {
+  } else if (action === "meat_shield" && actingRoleId === "sadist_leader" && !abilityState?.used && target.roleId === "masochist_cultist") {
+    abilityState.used = true; setNightAction(game, player.id, "meat_shield", { targetId });
+  } else if (action === "redirect" && actingRoleId === "mermaid") {
     const redirectTarget = playerById(game, extra.secondTargetId);
     if (!redirectTarget || redirectTarget.alive === false || redirectTarget.id === targetId) return { ok: false, message: "请选择不同的原目标与引导目标。" };
     setNightAction(game, player.id, "redirect", { originalTargetId: targetId, redirectTargetId: redirectTarget.id });
-  } else if (action === "copy_dead" && player.roleId === "gravedigger" && !player.roleState?.used && target.alive === false) {
-    player.roleState.used = true; player.roleState.copiedRoleId = target.roleId; appendPrivate(player, `你复制了 ${target.name} 的职业：${roleDef(target.roleId).name}。阵营仍为好人。`, "copy");
-  } else if (action === "track" && player.roleId === "detective") {
+  } else if (action === "copy_dead" && actingRoleId === "gravedigger" && !abilityState?.used && target.alive === false) {
+    abilityState.used = true;
+    abilityState.copiedRoleId = target.roleId;
+    abilityState.copiedRoleState = createRoleState(target.roleId);
+    abilityState.copiedSkillUsed = false;
+    const copiedActionName = COPYABLE_ROLE_ACTIONS[target.roleId] || "该职业没有可复制的夜间主动技能";
+    appendPrivate(player, `你复制了 ${target.name} 的职业：${roleDef(target.roleId).name}。阵营仍为好人；可用技能：${copiedActionName}。`, "copy");
+  } else if (action === "track" && actingRoleId === "detective") {
     const actionRows = Object.values(game.nightActions || {}).filter(row => row.playerId === targetId);
     const text = actionRows.length ? `${target.name} 本夜使用了主动技能，目标类别：${actionRows.some(row => row.targetId) ? "其他玩家" : "全局效果"}。真实职业线索：${roleDef(target.roleId).name}。` : `${target.name} 本夜尚未记录主动技能。`;
     appendPrivate(player, text, "track"); setNightAction(game, player.id, "track", { targetId });
-  } else if (action === "visit" && player.roleId === "lecher") {
+  } else if (action === "visit" && actingRoleId === "lecher") {
     setNightAction(game, player.id, "visit", { targetId });
-  } else if (action === "swap_role" && player.roleId === "thief" && !player.roleState?.used) {
-    player.roleState.used = true;
+  } else if (action === "swap_role" && actingRoleId === "thief" && !abilityState?.used) {
+    abilityState.used = true;
     const roleA = player.roleId, roleB = target.roleId;
-    player.roleId = roleB; player.team = roleDef(roleB).team;
-    target.roleId = roleA; target.team = roleDef(roleA).team;
+    const stateA = player.roleState, stateB = target.roleState;
+    const diaryA = player.diary, diaryB = target.diary;
+    player.roleId = roleB; player.team = roleDef(roleB).team; player.roleState = stateB; player.diary = diaryB;
+    target.roleId = roleA; target.team = roleDef(roleA).team; target.roleState = stateA; target.diary = diaryA;
     appendPrivate(player, `你与 ${target.name} 交换职业，现在是 ${roleDef(player.roleId).name}。`, "swap");
     appendPrivate(target, `你与 ${player.name} 交换职业，现在是 ${roleDef(target.roleId).name}。`, "swap");
-  } else if (action === "vigilance" && player.roleId === "villager" && !player.roleState?.used) {
-    player.roleState.used = true; player.roleState.vigilanceActive = true;
-  } else if (action === "curse" && player.roleId === "voodoo_girl") {
+  } else if (action === "vigilance" && actingRoleId === "villager" && !abilityState?.used) {
+    abilityState.used = true; abilityState.vigilanceActive = true;
+  } else if (action === "curse" && actingRoleId === "voodoo_girl") {
     setNightAction(game, player.id, "curse", { targetId });
-  } else if (action === "hex" && player.roleId === "enchanter") {
+  } else if (action === "hex" && actingRoleId === "enchanter") {
     setNightAction(game, player.id, "hex", { targetId });
   } else {
     return { ok: false, message: "你的职业不能执行该技能，或技能次数已经用完。" };
   }
-  player.roleState[usedKey] = true;
+  if (!replaceable) abilityState[usedKey] = true;
+  if (["witch_heal", "witch_poison"].includes(action)) abilityState[witchNightKey] = true;
+  if (copiedAction) player.roleState.copiedSkillUsed = true;
   player.lastActionAt = nowMs();
   await saveGame(env, game);
-  return { ok: true, message: `技能已登记：${action}${target ? ` → ${target.name}` : ""}。夜晚结束前可再次提交同类选择覆盖目标。` };
+  return { ok: true, message: replaceable ? `选择已更新：${requestedAction}${target ? ` → ${target.name}` : ""}。阶段结束前可再次覆盖。` : `技能已登记：${requestedAction}${target ? ` → ${target.name}` : ""}。` };
 }
 
 function privateStateFor(game, viewerId, canManage = false) {
@@ -948,7 +1173,9 @@ function privateStateFor(game, viewerId, canManage = false) {
     id: player.id, name: player.name, alive: player.alive !== false, roleId: player.roleId, roleName: roleDef(player.roleId).name,
     team: player.team, summary: roleDef(player.roleId).summary, diary: player.diary || [], roleState: player.roleState || {}, groupTeam: player.groupTeam,
     privateNotices: (player.privateNotices || []).slice(-100), visibleWolfIds: visibleWolfIds(game, player),
-    wolfChat: isWolfRole(player.roleId) ? (game.wolfChat || []).slice(-100) : []
+    wolfChat: isWolfRole(player.roleId) ? (game.wolfChat || []).slice(-100) : [],
+    canUseDeathSkill: game.phase === "death_skill" && game.pendingDeathSkill?.actorId === player.id,
+    copiedAction: player.roleId === "gravedigger" && player.roleState?.copiedRoleId && !player.roleState?.copiedSkillUsed ? COPYABLE_ROLE_ACTIONS[player.roleState.copiedRoleId] || "" : ""
   } : null;
   return {
     id: game.id, groupId: game.groupId, status: game.status, phase: game.phase, phaseLabel: phaseLabel(game.phase), phaseEndsAt: game.phaseEndsAt,
@@ -1175,17 +1402,20 @@ function injectWerewolfPortalClient(html) {
   if (membersIndex >= 0) source = source.slice(0, membersIndex) + section + source.slice(membersIndex);
   else if (source.includes('</main>')) source = source.replace('</main>', section + '</main>');
   else source += section;
-  const style = `<style id="qqai-werewolf-style">#werewolfNav::before{content:none!important;display:none!important}.ww-layout{display:grid;grid-template-columns:minmax(0,1.25fr) minmax(300px,.75fr);gap:14px}.ww-grid{display:grid;grid-template-columns:repeat(4,minmax(130px,1fr));gap:10px}.ww-grid label,.ww-action{display:flex;flex-direction:column;gap:6px}.ww-role-pool{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:6px;margin:10px 0}.ww-role-pool label{display:flex;gap:6px;align-items:center}.ww-player{display:grid;grid-template-columns:1fr auto;gap:8px}.ww-log{max-height:360px;overflow:auto;display:flex;flex-direction:column;gap:8px;margin-top:10px}.ww-log-row{padding:8px 10px;border:1px solid var(--border);border-radius:10px;white-space:pre-wrap}.ww-action{margin-top:12px}.ww-secret{padding:12px;border:1px solid #7c3aed;border-radius:12px}.ww-dead{opacity:.6;text-decoration:line-through}@media(max-width:900px){.ww-layout,.ww-grid{grid-template-columns:1fr}.ww-layout>.card,.ww-create{padding:12px}.ww-action{display:grid;grid-template-columns:1fr}.ww-role-pool{grid-template-columns:1fr 1fr}}</style>`;
+  const style = `<style id="qqai-werewolf-style">#werewolfNav::before{content:none!important;display:none!important}.ww-layout{display:grid;grid-template-columns:minmax(0,1.25fr) minmax(300px,.75fr);gap:14px}.ww-grid{display:grid;grid-template-columns:repeat(4,minmax(130px,1fr));gap:10px}.ww-grid label,.ww-action{display:flex;flex-direction:column;gap:6px}.ww-role-pool{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:6px;margin:10px 0}.ww-role-pool label{display:flex;gap:6px;align-items:center}.ww-player{display:grid;grid-template-columns:1fr auto;gap:8px}.ww-log{max-height:360px;overflow:auto;display:flex;flex-direction:column;gap:8px;margin-top:10px}.ww-log-row{padding:8px 10px;border:1px solid var(--line);border-radius:10px;white-space:pre-wrap}.ww-action{margin-top:12px}.ww-secret{padding:12px;border:1px solid #7c3aed;border-radius:12px}.ww-dead{opacity:.6;text-decoration:line-through}@media(max-width:900px){.ww-layout,.ww-grid{grid-template-columns:1fr}.ww-layout>.card,.ww-create{padding:12px}.ww-action{display:grid;grid-template-columns:1fr}.ww-role-pool{grid-template-columns:1fr 1fr}}</style>`;
   source = source.includes('</head>') ? source.replace('</head>', style + '</head>') : style + source;
   const script = `<script id="qqai-werewolf-client">(function(){
     var wwState=null,roles={};function e(id){return document.getElementById(id)}function s(v){return typeof esc==='function'?esc(v):String(v==null?'':v).replace(/[&<>"']/g,function(c){return({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'})[c]})}function n(m){if(typeof toast==='function')toast(m);else alert(m)}
     async function c(path,method,body){if(typeof api==='function')return api(path,method||'GET',body);var r=await fetch('/api/portal'+path,{method:method||'GET',headers:{'Content-Type':'application/json'},credentials:'same-origin',body:body?JSON.stringify(body):undefined});var t=await r.text(),d={};try{d=t?JSON.parse(t):{}}catch{}if(!r.ok){d.ok=false;d.message=d.message||('HTTP '+r.status)}return d}
     function rolePool(){var root=e('wwRolePool');if(!root)return;root.innerHTML=Object.keys(roles).map(function(id){var r=roles[id];return '<label><input type="checkbox" value="'+s(id)+'">'+s(r.name)+'｜'+s(r.team)+'</label>'}).join('')}
-    function optionsForOwn(own){var map={werewolf:['wolf_kill','wolf_chat'],black_wolf_king:['wolf_kill','death_shot'],white_wolf_king:['wolf_kill','white_judgement'],snow_wolf:['wolf_kill'],shapeshifter_wolf:['wolf_kill','disguise'],original_wolf:['wolf_kill'],berserk_wolf:['wolf_kill'],bomb_wolf:['wolf_kill','plant_bomb'],blood_wolf:['wolf_kill','blood_moon'],cupid:['couple'],seer:['inspect'],witch:['witch_heal','witch_poison'],hunter:['death_shot'],ninja:['decoy'],sadist_leader:['meat_shield'],mermaid:['redirect'],gravedigger:['copy_dead'],knight:['duel'],guard:['protect'],detective:['track'],lecher:['visit'],thief:['swap_role'],villager:['vigilance'],voodoo_girl:['curse'],enchanter:['hex']};return (map[own&&own.roleId]||[]).concat(wwState&&wwState.config.groupCount>1?['group_inspect']:[]).concat(wwState&&wwState.phase==='sheriff_nomination'?['sheriff_nominate']:[]).concat(wwState&&wwState.phase==='sheriff_vote'?['sheriff_vote']:[]).concat(wwState&&wwState.phase==='day_vote'?['day_vote']:[])}
-    function render(){var g=wwState;if(e('wwCreatePanel'))e('wwCreatePanel').classList.toggle('hidden',!!(g&&g.status!=='ended'&&g.status!=='aborted'));if(!g){e('wwStatus').textContent='当前群没有狼人杀房间。';e('wwPlayers').innerHTML='';e('wwPublicLog').innerHTML='';e('wwOwn').innerHTML='<div class="empty">尚未加入游戏。</div>';return}e('wwStatus').textContent=g.phaseLabel+'｜第 '+g.day+' 天／第 '+g.night+' 夜｜'+(g.phaseEndsAt?('截止 '+new Date(g.phaseEndsAt).toLocaleTimeString()):'无倒计时');e('wwPhaseText').textContent=g.status+'｜'+g.phaseLabel;e('wwPlayers').innerHTML=(g.players||[]).map(function(p){return '<div class="item ww-player '+(p.alive?'':'ww-dead')+'"><div><b>'+s(p.name)+'</b><div class="item-meta">'+s(p.id)+(p.isSheriff?'｜警长':'')+(p.sheriffCandidate?'｜候选':'')+'</div></div><span>'+s(p.alive?'存活':'死亡')+(p.roleName?'｜'+s(p.roleName):'')+'</span></div>'}).join('');e('wwPublicLog').innerHTML=(g.publicLog||[]).slice().reverse().map(function(x){return '<div class="ww-log-row"><small>'+new Date(x.at).toLocaleTimeString()+'｜'+s(x.type)+'</small><div>'+s(x.text)+'</div></div>'}).join('');var own=g.own;if(!own){e('wwOwn').innerHTML='<div class="empty">你尚未加入这局。</div>';e('wwPrivateLog').innerHTML='';return}e('wwOwn').innerHTML='<div class="ww-secret"><b>'+s(own.roleName)+'</b><div>'+s(own.summary)+'</div><div>阵营：'+s(own.team)+(g.config.groupCount>1?'｜隐藏组 '+s(own.groupTeam):'')+'</div></div>';var action=e('wwAction');action.innerHTML=optionsForOwn(own).map(function(x){return '<option value="'+s(x)+'">'+s(x)+'</option>'}).join('');var targets=(g.players||[]).filter(function(p){return p.alive&&p.id!==own.id});var targetHtml='<option value="">选择目标</option>'+targets.map(function(p){return '<option value="'+s(p.id)+'">'+s(p.name)+'</option>'}).join('');e('wwTarget').innerHTML=targetHtml;e('wwSecondTarget').innerHTML=targetHtml;e('wwPrivateLog').innerHTML=(own.privateNotices||[]).slice().reverse().map(function(x){return '<div class="ww-log-row"><small>'+new Date(x.at).toLocaleTimeString()+'｜'+s(x.type)+'</small><div>'+s(x.text)+'</div></div>'}).join('')}
+    var actionLabels={wolf_kill:'狼人刀票',berserk_vote:'狂暴双票刀',wolf_chat:'狼人密谈',white_judgement:'白狼王审判',plant_bomb:'秘密植入炸弹',couple:'配对恋人',inspect:'预言家查验',witch_heal:'使用解药',witch_poison:'使用毒药',decoy:'设置替身',disguise:'选择伪装职业',blood_moon:'发动血月',meat_shield:'指定肉盾',redirect:'人鱼引导',copy_dead:'复制死者职业',copied_action:'使用复制技能',duel:'骑士决斗',protect:'守护',track:'追踪',visit:'夜访',swap_role:'交换职业',vigilance:'夜间警戒',curse:'施加诅咒',hex:'施加蛊惑',group_inspect:'分组查验',sheriff_nominate:'竞选警长',sheriff_vote:'警长投票',day_vote:'放逐投票',death_shot:'死亡带走'};
+    function optionsForOwn(own){if(!own||!wwState)return[];var phase=wwState.phase,list=[];if(own.canUseDeathSkill)return['death_shot'];if(!own.alive)return[];if(phase==='night'){var map={werewolf:['wolf_kill','wolf_chat'],black_wolf_king:['wolf_kill','wolf_chat'],white_wolf_king:['wolf_kill','wolf_chat'],snow_wolf:['wolf_kill','wolf_chat'],shapeshifter_wolf:['wolf_kill','disguise','wolf_chat'],original_wolf:['wolf_kill','wolf_chat'],berserk_wolf:['wolf_kill','berserk_vote','wolf_chat'],bomb_wolf:['wolf_kill','wolf_chat'],blood_wolf:['wolf_kill','blood_moon','wolf_chat'],cupid:['couple'],seer:['inspect'],witch:['witch_heal','witch_poison'],ninja:['decoy'],sadist_leader:['meat_shield'],mermaid:['redirect'],gravedigger:['copy_dead'],guard:['protect'],detective:['track'],lecher:['visit'],thief:['swap_role'],villager:['vigilance'],voodoo_girl:['curse'],enchanter:['hex']};list=(map[own.roleId]||[]).slice();if(own.copiedAction)list.push('copied_action');if(wwState.config.groupCount>1)list.push('group_inspect')}if(phase==='day_discussion'){if(own.roleId==='white_wolf_king')list.push('white_judgement');if(own.roleId==='bomb_wolf')list.push('plant_bomb');if(own.roleId==='knight')list.push('duel')}if(phase==='sheriff_nomination')list.push('sheriff_nominate');if(phase==='sheriff_vote')list.push('sheriff_vote');if(phase==='day_vote')list.push('day_vote');return list.filter(function(x,i,a){return a.indexOf(x)===i})}
+    function targetRowsFor(action,second){var g=wwState,own=g&&g.own;if(!g||!own)return[];if(action==='copy_dead')return(g.players||[]).filter(function(p){return!p.alive});if(action==='couple')return(g.players||[]).filter(function(p){return p.alive});return(g.players||[]).filter(function(p){return p.alive&&p.id!==own.id})}
+    function refreshActionInputs(){var own=wwState&&wwState.own,action=e('wwAction')&&e('wwAction').value,target=e('wwTarget'),second=e('wwSecondTarget'),text=e('wwActionText');if(!own||!target||!second)return;function html(rows){return'<option value="">选择目标</option>'+rows.map(function(p){return'<option value="'+s(p.id)+'">'+s(p.name)+'</option>'}).join('')}target.innerHTML=html(targetRowsFor(action,false));second.innerHTML=html(targetRowsFor(action,true));second.classList.toggle('hidden',!['couple','redirect'].includes(action));target.classList.toggle('hidden',['blood_moon','vigilance','disguise','wolf_chat'].includes(action));text.classList.toggle('hidden',!['wolf_chat','disguise'].includes(action));text.placeholder=action==='disguise'?'输入职业 ID，例如 villager':'狼人密谈内容'}
+    function render(){var g=wwState;if(e('wwCreatePanel'))e('wwCreatePanel').classList.toggle('hidden',!!(g&&g.status!=='ended'&&g.status!=='aborted'));if(!g){e('wwStatus').textContent='当前群没有狼人杀房间。';e('wwPlayers').innerHTML='';e('wwPublicLog').innerHTML='';e('wwOwn').innerHTML='<div class="empty">尚未加入游戏。</div>';return}e('wwStatus').textContent=g.phaseLabel+'｜第 '+g.day+' 天／第 '+g.night+' 夜｜'+(g.phaseEndsAt?('截止 '+new Date(g.phaseEndsAt).toLocaleTimeString()):'无倒计时');e('wwPhaseText').textContent=g.status+'｜'+g.phaseLabel;e('wwPlayers').innerHTML=(g.players||[]).map(function(p){return '<div class="item ww-player '+(p.alive?'':'ww-dead')+'"><div><b>'+s(p.name)+'</b><div class="item-meta">'+s(p.id)+(p.isSheriff?'｜警长':'')+(p.sheriffCandidate?'｜候选':'')+'</div></div><span>'+s(p.alive?'存活':'死亡')+(p.roleName?'｜'+s(p.roleName):'')+'</span></div>'}).join('');e('wwPublicLog').innerHTML=(g.publicLog||[]).slice().reverse().map(function(x){return '<div class="ww-log-row"><small>'+new Date(x.at).toLocaleTimeString()+'｜'+s(x.type)+'</small><div>'+s(x.text)+'</div></div>'}).join('');var own=g.own;if(!own){e('wwOwn').innerHTML='<div class="empty">你尚未加入这局。</div>';e('wwPrivateLog').innerHTML='';return}e('wwOwn').innerHTML='<div class="ww-secret"><b>'+s(own.roleName)+'</b><div>'+s(own.summary)+'</div><div>阵营：'+s(own.team)+(g.config.groupCount>1?'｜隐藏组 '+s(own.groupTeam):'')+'</div></div>';var action=e('wwAction');action.innerHTML=optionsForOwn(own).map(function(x){return '<option value="'+s(x)+'">'+s(actionLabels[x]||x)+'</option>'}).join('');refreshActionInputs();e('wwPrivateLog').innerHTML=(own.privateNotices||[]).slice().reverse().map(function(x){return '<div class="ww-log-row"><small>'+new Date(x.at).toLocaleTimeString()+'｜'+s(x.type)+'</small><div>'+s(x.text)+'</div></div>'}).join('')}
     async function load(){var r=await c('/werewolf/state');if(!r.ok){n(r.message||'读取狼人杀失败');return}wwState=r.game;roles=r.roles||{};rolePool();render()}async function post(path,data){var r=await c(path,'POST',data||{});n(r.message||'完成');if(r.game)wwState=r.game;else await load();render()}
     document.addEventListener('click',function(ev){var b=ev.target.closest&&ev.target.closest('button');if(!b)return;if(b.id==='werewolfNav'||b.dataset.view==='werewolf')setTimeout(load,0);else if(b.id==='wwRefresh')load();else if(b.id==='wwCreate'){var selected=[].slice.call(e('wwRolePool').querySelectorAll('input:checked')).map(function(x){return x.value});post('/werewolf/create',{config:{maxPlayers:Number(e('wwMaxPlayers').value||12),aiCount:Number(e('wwAiCount').value||0),groupCount:Number(e('wwGroupCount').value||0),sheriffEnabled:e('wwSheriff').checked,selectedRoles:selected}})}else if(b.id==='wwJoin')post('/werewolf/join',{});else if(b.id==='wwLeave')post('/werewolf/leave',{});else if(b.id==='wwStart')post('/werewolf/start',{});else if(b.id==='wwAdvance')post('/werewolf/advance',{});else if(b.id==='wwAbort')post('/werewolf/abort',{});else if(b.id==='wwSubmitAction')post('/werewolf/action',{action:e('wwAction').value,targetId:e('wwTarget').value,secondTargetId:e('wwSecondTarget').value,text:e('wwActionText').value,roleId:e('wwActionText').value})});
-    var group=e('groupSelect');if(group)group.addEventListener('change',function(){var v=document.querySelector('.view.active');if(v&&v.id==='v-werewolf')load()});
+    document.addEventListener('change',function(ev){if(ev.target&&ev.target.id==='wwAction')refreshActionInputs()});var group=e('groupSelect');if(group)group.addEventListener('change',function(){var v=document.querySelector('.view.active');if(v&&v.id==='v-werewolf')load()});
   })();</script>`;
   source = source.includes('</body>') ? source.replace('</body>', script + '</body>') : source + script;
   return source;
@@ -1193,6 +1423,6 @@ function injectWerewolfPortalClient(html) {
 
 export {
   ROLE_DEFINITIONS, ROLE_IDS, WEREWOLF_MAX_PLAYERS, WEREWOLF_MIN_PLAYERS,
-  buildBalancedRoleDeck, handleWerewolfOneBotEvent, handleWerewolfPortalApi, injectWerewolfPortalClient,
+  activateNextDeathSkill, buildBalancedRoleDeck, checkPendingDeathSkill, createGame, createRoleState, handlePlayerAction, handleWerewolfOneBotEvent, handleWerewolfPortalApi, injectWerewolfPortalClient, newPlayer, queueDeath, runAiPhase, tallyDayVote,
   normalizeWerewolfConfig, processWerewolfTimers, publicWerewolfState, resolveWerewolfWin
 };
