@@ -75,8 +75,29 @@ jobs:
         run: npm run check:bundle
       - name: Commit verified permanent candidate files
         run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add package.json release-notes.json src/config/runtime.js src/portal/member-cleanup.js src/portal/members.js src/games/werewolf.js verify-*.mjs
-          git commit -m "Split member console and improve member data sync"
-          git push origin HEAD:feature/member-console-split-v2.7.2
+          set +e
+          (
+            set -x
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git status --short
+            git add package.json release-notes.json src/config/runtime.js src/portal/member-cleanup.js src/portal/members.js src/games/werewolf.js verify-*.mjs
+            git status --short
+            git diff --cached --stat
+            git commit -m "Split member console and improve member data sync"
+            git push origin HEAD:feature/member-console-split-v2.7.2
+          ) > /tmp/member-console-commit.log 2>&1
+          status=$?
+          cat /tmp/member-console-commit.log
+          if [ "$status" -ne 0 ]; then
+            git reset --hard origin/feature/member-console-split-v2.7.2
+            git clean -fd
+            mkdir -p tools/.member-console-v272
+            cp /tmp/member-console-commit.log tools/.member-console-v272/commit-failure.log
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add tools/.member-console-v272/commit-failure.log
+            git commit -m "[skip ci] Capture member console commit failure"
+            git push origin HEAD:feature/member-console-split-v2.7.2
+            exit "$status"
+          fi
