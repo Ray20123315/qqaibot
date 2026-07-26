@@ -1,103 +1,36 @@
-name: Build member console v2.7.2 candidate
+name: Cleanup member console v2.7.2 candidate
 
 on:
   push:
     branches:
       - feature/member-console-split-v2.7.2
-  pull_request:
-    branches:
-      - main
 
 permissions:
   contents: write
 
+concurrency:
+  group: member-console-v272-cleanup
+  cancel-in-progress: true
+
 jobs:
-  build-candidate:
+  cleanup-candidate:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 5
     steps:
       - uses: actions/checkout@v4
         with:
           ref: feature/member-console-split-v2.7.2
           fetch-depth: 0
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          cache: npm
-          cache-dependency-path: package.json
-      - name: Decode and validate patch builder
+      - name: Remove temporary builder files and restore permanent CI
         run: |
-          cat tools/.member-console-v272/part-*.b64 | base64 -d -i > tools/apply-member-console-v2.7.2.mjs
-          echo "5333968b02df79d9dfedbe4a67886d81464ccfac32f650747b1a4ef5e5077c67  tools/apply-member-console-v2.7.2.mjs" | sha256sum -c -
-          node --check tools/apply-member-console-v2.7.2.mjs
-      - name: Apply member console patch
-        run: |
-          node tools/apply-member-console-v2.7.2.mjs
-          python - <<'PY'
-          from pathlib import Path
-          for path, marker in [
-              ('src/portal/members.js', 'function injectPortalMembersClient'),
-              ('src/portal/member-cleanup.js', 'function injectMemberCleanupClient'),
-          ]:
-              source = Path(path).read_text()
-              anchor = source.index(marker)
-              start = source.index('const script = `<script', anchor)
-              end = source.index('</script>`;', start) + len('</script>`;')
-              inner = source[start:end]
-              inner = inner.replace(r'\ufeff', r'\\ufeff').replace(r'\r', r'\\r').replace(r'\n', r'\\n')
-              Path(path).write_text(source[:start] + inner + source[end:])
-          cleanup_path = Path('src/portal/member-cleanup.js')
-          cleanup_path.write_text(cleanup_path.read_text().replace('>补全所选</button>', '>深度补全所选</button>'))
-          PY
-      - name: Validate generated source
-        run: |
-          node --check src/portal/members.js
-          node --check src/portal/member-cleanup.js
-          node --check src/games/werewolf.js
-          node --check verify-member-console-split.mjs
-      - name: Install dependencies
-        run: npm install --ignore-scripts
-      - name: Run complete regression suite
-        run: |
-          if npm run check > /tmp/member-console-regression.log 2>&1; then
-            cat /tmp/member-console-regression.log
-          else
-            cp /tmp/member-console-regression.log tools/.member-console-v272/regression-failure.log
-            git config user.name "github-actions[bot]"
-            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-            git add tools/.member-console-v272/regression-failure.log
-            git commit -m "[skip ci] Capture member console regression failure"
-            git push
-            cat /tmp/member-console-regression.log
-            exit 1
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          rm -rf tools/.member-console-v272
+          git restore --source=origin/main -- .github/workflows/validate.yml
+          git add -A
+          if git diff --cached --quiet; then
+            echo "No cleanup changes remain"
+            exit 0
           fi
-      - name: Build single Worker bundle
-        run: npm run check:bundle
-      - name: Commit verified permanent candidate files
-        run: |
-          set +e
-          (
-            set -x
-            git config user.name "github-actions[bot]"
-            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-            git status --short
-            git add package.json release-notes.json src/config/runtime.js src/portal/member-cleanup.js src/portal/members.js src/games/werewolf.js verify-*.mjs
-            git status --short
-            git diff --cached --stat
-            git commit -m "Split member console and improve member data sync"
-            git push origin HEAD:feature/member-console-split-v2.7.2
-          ) > /tmp/member-console-commit.log 2>&1
-          status=$?
-          cat /tmp/member-console-commit.log
-          if [ "$status" -ne 0 ]; then
-            git reset --hard origin/feature/member-console-split-v2.7.2
-            git clean -fd
-            mkdir -p tools/.member-console-v272
-            cp /tmp/member-console-commit.log tools/.member-console-v272/commit-failure.log
-            git config user.name "github-actions[bot]"
-            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-            git add tools/.member-console-v272/commit-failure.log
-            git commit -m "[skip ci] Capture member console commit failure"
-            git push origin HEAD:feature/member-console-split-v2.7.2
-            exit "$status"
-          fi
+          git commit -m "Remove member console candidate builder files"
+          git push origin HEAD:feature/member-console-split-v2.7.2
