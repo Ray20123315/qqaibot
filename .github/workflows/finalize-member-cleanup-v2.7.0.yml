@@ -1,0 +1,51 @@
+name: Finalize member cleanup v2.7.0
+
+on:
+  push:
+    branches:
+      - feature/member-cleanup-v2.7.0
+
+permissions:
+  contents: write
+
+jobs:
+  finalize:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/member-cleanup-v2.7.0
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: package.json
+      - name: Apply final safety hardening
+        run: |
+          node --check tools/finalize-member-cleanup-v2.7.0.mjs
+          node tools/finalize-member-cleanup-v2.7.0.mjs
+          node --check src/portal/member-cleanup.js
+          node --check verify-member-cleanup.mjs
+          node verify-member-cleanup.mjs
+      - name: Install dependencies
+        run: npm install --ignore-scripts
+      - name: Run complete regression suite
+        run: npm run check
+      - name: Build single Worker bundle
+        run: npm run check:bundle
+      - name: Commit permanent hardening
+        run: |
+          set -euo pipefail
+          rm -rf node_modules dist
+          rm -f package-lock.json
+          rm -f tools/finalize-member-cleanup-v2.7.0.mjs
+          rm -f .github/workflows/finalize-member-cleanup-v2.7.0.yml
+          git add -A
+          test ! -e tools/finalize-member-cleanup-v2.7.0.mjs
+          test ! -e .github/workflows/finalize-member-cleanup-v2.7.0.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "Harden reviewed member cleanup execution"
+          git push origin HEAD:feature/member-cleanup-v2.7.0
