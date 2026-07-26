@@ -1,16 +1,9 @@
 name: Build werewolf v2.6.0 candidate
 
 on:
-  push:
-    branches:
-      - feature/werewolf-v2.6.0
   pull_request:
     branches:
       - main
-
-concurrency:
-  group: werewolf-v2.6.0-candidate
-  cancel-in-progress: true
 
 permissions:
   contents: read
