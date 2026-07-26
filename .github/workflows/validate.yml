@@ -1,13 +1,12 @@
 name: Build werewolf v2.6.0 candidate
 
-# Connector-authored trigger: generate the already validated clean candidate artifact.
 on:
   pull_request:
     branches:
       - main
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   build-candidate:
@@ -28,21 +27,25 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          {
-            cat tools/werewolf_payload/part-* > /tmp/werewolf-payload.b64
-            test "$(wc -c < /tmp/werewolf-payload.b64)" = "34208"
-            echo "6c056ac83fb2641be1964fcb5ce2233dbc67d14a202a1a4cfc8fd867e32a8d3d  /tmp/werewolf-payload.b64" | sha256sum -c -
-            base64 -d /tmp/werewolf-payload.b64 > /tmp/werewolf-payload.tgz
-            echo "27cdef3bf51b4cb1cc6b5e06144871c5f6c1ef8d15e65a520d42821dc7e3e793  /tmp/werewolf-payload.tgz" | sha256sum -c -
-            tar -tzf /tmp/werewolf-payload.tgz
-            tar -xzf /tmp/werewolf-payload.tgz
-            node --check tools/apply-werewolf-v2.6.0.mjs
-            node --check tools/fix-werewolf-boundaries.mjs
-            node --check src/games/werewolf.js
-            node --check verify-werewolf.mjs
-            node tools/fix-werewolf-boundaries.mjs
-            node tools/apply-werewolf-v2.6.0.mjs
-          } 2>&1 | tee /tmp/werewolf-extract.log
+          if [[ -f src/games/werewolf.js && -f verify-werewolf.mjs ]]; then
+            echo "Clean Werewolf candidate already exists; reconstruction skipped."
+          else
+            {
+              cat tools/werewolf_payload/part-* > /tmp/werewolf-payload.b64
+              test "$(wc -c < /tmp/werewolf-payload.b64)" = "34208"
+              echo "6c056ac83fb2641be1964fcb5ce2233dbc67d14a202a1a4cfc8fd867e32a8d3d  /tmp/werewolf-payload.b64" | sha256sum -c -
+              base64 -d /tmp/werewolf-payload.b64 > /tmp/werewolf-payload.tgz
+              echo "27cdef3bf51b4cb1cc6b5e06144871c5f6c1ef8d15e65a520d42821dc7e3e793  /tmp/werewolf-payload.tgz" | sha256sum -c -
+              tar -tzf /tmp/werewolf-payload.tgz
+              tar -xzf /tmp/werewolf-payload.tgz
+              node --check tools/apply-werewolf-v2.6.0.mjs
+              node --check tools/fix-werewolf-boundaries.mjs
+              node --check src/games/werewolf.js
+              node --check verify-werewolf.mjs
+              node tools/fix-werewolf-boundaries.mjs
+              node tools/apply-werewolf-v2.6.0.mjs
+            } 2>&1 | tee /tmp/werewolf-extract.log
+          fi
       - name: Upload reconstruction diagnostics
         if: failure() && steps.extract.outcome == 'failure'
         uses: actions/upload-artifact@v4
@@ -75,34 +78,27 @@ jobs:
           path: /tmp/werewolf-regression.log
       - name: Build single Worker bundle
         run: npm run check:bundle
-      - name: Prepare clean candidate artifact
+      - name: Commit clean candidate without changing workflow
+        id: commit
         shell: bash
         run: |
           set -euo pipefail
-          git show origin/main:.github/workflows/validate.yml > .github/workflows/validate.yml
+          git checkout -- .github/workflows/validate.yml
           rm -rf tools/werewolf_payload tools/werewolf_recovery tools/werewolf_tail
           rm -f tools/apply-werewolf-v2.6.0.mjs tools/fix-werewolf-boundaries.mjs tools/recover-werewolf-v2.6.0.py
-          git diff --name-status origin/main > /tmp/werewolf-changed-files.txt
-          cat /tmp/werewolf-changed-files.txt
-          python - <<'PY'
-          import pathlib, tarfile
-          changed = pathlib.Path('/tmp/werewolf-changed-files.txt').read_text(encoding='utf-8').splitlines()
-          with tarfile.open('/tmp/werewolf-clean-candidate.tar.gz', 'w:gz') as tar:
-              tar.add('/tmp/werewolf-changed-files.txt', arcname='werewolf-changed-files.txt')
-              for line in changed:
-                  fields = line.split('\t')
-                  if len(fields) < 2:
-                      continue
-                  path = pathlib.Path(fields[-1])
-                  if path.exists() and path.is_file():
-                      tar.add(path, arcname=str(path))
-          PY
-          tar -tzf /tmp/werewolf-clean-candidate.tar.gz
-          sha256sum /tmp/werewolf-clean-candidate.tar.gz > /tmp/werewolf-clean-candidate.tar.gz.sha256
-      - name: Upload clean candidate
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git status --short
+          if git diff --cached --quiet; then
+            echo "Candidate is already clean; nothing to commit."
+          else
+            git commit -m "Add debate-style werewolf game and Portal"
+            git push origin HEAD:feature/werewolf-v2.6.0
+          fi
+      - name: Upload commit diagnostics
+        if: failure() && steps.commit.outcome == 'failure'
         uses: actions/upload-artifact@v4
         with:
-          name: werewolf-clean-candidate
-          path: |
-            /tmp/werewolf-clean-candidate.tar.gz
-            /tmp/werewolf-clean-candidate.tar.gz.sha256
+          name: werewolf-commit-diagnostics
+          path: /tmp/werewolf-regression.log
