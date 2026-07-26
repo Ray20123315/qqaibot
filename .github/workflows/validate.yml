@@ -25,13 +25,54 @@ jobs:
           node-version: 22
           cache: npm
           cache-dependency-path: package.json
-      - name: Extract staged implementation
+      - name: Recover and extract staged implementation
         id: extract
         shell: bash
         run: |
           set -o pipefail
           {
-            cat tools/werewolf_payload/part-* | base64 -d > /tmp/werewolf-payload.tgz
+            rm -rf /tmp/werewolf-parts
+            mkdir -p /tmp/werewolf-parts
+            for name in part-00 part-01 part-02; do
+              git show 34f659e60186a3295e614840668fa56acfdbe3e4:tools/werewolf_payload/$name > /tmp/werewolf-parts/$name
+            done
+            python - <<'PY'
+          import base64, gzip, pathlib, re
+          root = pathlib.Path('/tmp/werewolf-parts')
+          parts = [root / f'part-0{i}' for i in range(3)]
+          blobs = []
+          report = []
+          for path in parts:
+              raw = path.read_bytes().strip()
+              invalid = [(i, b) for i, b in enumerate(raw) if not (65 <= b <= 90 or 97 <= b <= 122 or 48 <= b <= 57 or b in b'+/=')]
+              report.append(f'{path.name}: bytes={len(raw)} mod4={len(raw)%4} invalid={invalid[:5]} tail={raw[-12:]!r}')
+              blobs.append(raw)
+          combined = b''.join(blobs)
+          candidates = []
+          try:
+              candidates.append(('combined', base64.b64decode(combined, validate=True)))
+          except Exception as exc:
+              report.append(f'combined decode failed: {exc}')
+          try:
+              candidates.append(('per-part', b''.join(base64.b64decode(blob, validate=True) for blob in blobs)))
+          except Exception as exc:
+              report.append(f'per-part decode failed: {exc}')
+          chosen = None
+          for mode, data in candidates:
+              report.append(f'{mode}: decoded={len(data)} magic={data[:4]!r}')
+              try:
+                  gzip.decompress(data)
+                  chosen = (mode, data)
+                  break
+              except Exception as exc:
+                  report.append(f'{mode} gzip failed: {exc}')
+          pathlib.Path('/tmp/werewolf-payload-diagnostics.txt').write_text('\n'.join(report), encoding='utf-8')
+          if not chosen:
+              raise SystemExit('\n'.join(report))
+          pathlib.Path('/tmp/werewolf-payload.tgz').write_bytes(chosen[1])
+          print('\n'.join(report))
+          print(f'using {chosen[0]} payload')
+          PY
             tar -tzf /tmp/werewolf-payload.tgz
             tar -xzf /tmp/werewolf-payload.tgz
             node --check tools/apply-werewolf-v2.6.0.mjs
@@ -44,7 +85,9 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: werewolf-extract-log
-          path: /tmp/werewolf-extract.log
+          path: |
+            /tmp/werewolf-extract.log
+            /tmp/werewolf-payload-diagnostics.txt
       - name: Validate generated source
         run: |
           node --check src/games/werewolf.js
@@ -58,6 +101,7 @@ jobs:
       - name: Build single Worker bundle
         run: npm run check:bundle
       - name: Commit clean candidate
+        if: github.event_name == 'push'
         run: |
           rm -rf tools/werewolf_payload
           rm -f tools/apply-werewolf-v2.6.0.mjs tools/fix-werewolf-boundaries.mjs
