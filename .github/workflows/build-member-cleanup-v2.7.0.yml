@@ -4,12 +4,16 @@ on:
   push:
     branches:
       - feature/member-cleanup-v2.7.0
+  pull_request:
+    branches:
+      - main
 
 permissions:
   contents: write
 
 jobs:
   build-candidate:
+    if: github.head_ref == 'feature/member-cleanup-v2.7.0' || github.ref == 'refs/heads/feature/member-cleanup-v2.7.0'
     runs-on: ubuntu-latest
     timeout-minutes: 18
     steps:
@@ -70,6 +74,7 @@ jobs:
       - name: Build single Worker bundle
         run: npm run check:bundle
       - name: Commit permanent candidate files
+        if: github.event_name == 'push'
         id: publish
         shell: bash
         run: |
@@ -110,5 +115,4 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: member-cleanup-publish-diagnostics
-          path: |
-            /tmp/member-cleanup-regression.log
+          path: /tmp/member-cleanup-regression.log
