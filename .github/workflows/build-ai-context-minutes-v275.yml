@@ -70,6 +70,10 @@ jobs:
               return text[:match.start()] + rendered + text[match.end():]'''
           assert old in script
           script = script.replace(old, new, 1)
+          anchor_old = "r'''function sanitizeAiReply\\(text\\) \\{[\\s\\S]*?\\n\\}\\n\\n\\nfunction getTaipeiTimeContext'''"
+          anchor_new = "r'''function sanitizeAiReply\\(text\\) \\{[\\s\\S]*?\\n\\}\\s*function getTaipeiTimeContext'''"
+          assert anchor_old in script
+          script = script.replace(anchor_old, anchor_new, 1)
           Path('/tmp/apply-v275.py').write_text(script, encoding='utf-8')
           PY
               python /tmp/apply-v275.py
