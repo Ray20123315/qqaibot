@@ -42,7 +42,7 @@ function mergeContinuationText(first, continuation) {
   const rightChars = [...right];
   const maxOverlap = Math.min(160, leftChars.length, rightChars.length);
   let overlap = 0;
-  for (let size = maxOverlap; size >= 6; size -= 1) {
+  for (let size = maxOverlap; size >= 3; size -= 1) {
     if (leftChars.slice(-size).join("") === rightChars.slice(0, size).join("")) {
       overlap = size;
       break;
