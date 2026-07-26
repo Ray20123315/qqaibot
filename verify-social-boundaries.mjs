@@ -48,7 +48,9 @@ assert(moderation.includes('warn_recall_mute'), 'Flirt moderation must support w
 assert(moderation.includes('群聊文字调情可以'), 'Public warning text must state that proportionate flirting is allowed');
 
 const worker = fs.readFileSync('worker.js', 'utf8');
-assert(worker.includes('senderRole, mentionedQqs, quotedSenderId'), 'Worker must pass relationship and role context to social boundary handlers');
+assert(worker.includes('senderRole: isDeveloper ? "developer" : senderRole'), 'Worker must pass the live sender role to social boundary handlers');
+assert(worker.includes('mentionedQqs'), 'Worker must pass mention context to social boundary handlers');
+assert(worker.includes('quotedSenderId: String(quotedMessage?.senderId || "")'), 'Worker must pass quoted-sender context to social boundary handlers');
 
 const pkg = JSON.parse(fs.readFileSync('package.json', 'utf8'));
 assert(pkg.version === '2.5.2', 'Package version must be 2.5.2');
