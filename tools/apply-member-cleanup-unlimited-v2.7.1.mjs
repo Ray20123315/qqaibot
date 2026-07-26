@@ -192,6 +192,10 @@ verify = replaceOnce(verify,
   "assert(html.includes('快速同步') && html.includes('深度补全所选') && html.includes('建立清理预览'), 'Cleanup UI must expose sync and reviewed cleanup controls');\nassert(html.includes('所选清理人数不设上限'), 'Cleanup UI must explain unlimited selection with automatic internal batching');\n",
   'Portal unlimited explanation regression');
 verify = replaceOnce(verify,
+  "assert(cleanupModule.includes('await dbDel(env, `${PREVIEW_PREFIX}${token}`)'), 'Cleanup preview tokens must be consumed before execution to prevent replay');\n",
+  "assert(cleanupModule.includes('UPDATE kv_store SET value = ? WHERE key = ? AND value = ?'), 'Each preview or continuation token must be claimed atomically before use');\nassert(cleanupModule.includes('await dbDel(env, key)'), 'Claimed cleanup tokens must be removed before execution');\n",
+  'atomic token claim regression');
+verify = replaceOnce(verify,
   "const members = fs.readFileSync('src/portal/members.js', 'utf8');\n",
   "const cleanupSource = fs.readFileSync('src/portal/member-cleanup.js', 'utf8');\nassert(!cleanupSource.includes('EXECUTE_BATCH_LIMIT'), 'Legacy 20-member hard limit must be removed');\nassert(cleanupSource.includes('continuationToken') && cleanupSource.includes('while(token)'), 'Unlimited cleanup must continue automatically across internal chunks');\nassert(cleanupSource.includes('UPDATE kv_store SET value = ? WHERE key = ? AND value = ?'), 'Each continuation token must be claimed atomically before use');\nconst members = fs.readFileSync('src/portal/members.js', 'utf8');\n",
   'unlimited execution regression');
