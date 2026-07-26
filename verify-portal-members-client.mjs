@@ -9,7 +9,7 @@ assert(html.includes('memberRoleFilter'), 'Role filter must be present');
 assert(html.includes('memberMuteFilter'), 'Mute filter must be present');
 assert(html.includes('memberRelationshipFilter'), 'Relationship filter must be present');
 assert(html.includes('memberExport'), 'CSV export must be present');
-assert(match[1].includes('if(isMembersView())setTimeout(loadMembers,0);'), 'Member console must initialize when already active');
+assert(match[1].includes('if(memberAreaActive())setTimeout(loadMembers,0)'), 'Member console must initialize across split member views');
 assert(!match[1].includes('syncNav()'), 'Injected member client must not hide navigation by guessing private session state');
 assert(!match[1].includes("确定直接建立主人关系？\n主人："), 'Generated script must not contain a literal newline in a single-quoted confirmation string');
 console.log('verify-portal-members-client: ok');
