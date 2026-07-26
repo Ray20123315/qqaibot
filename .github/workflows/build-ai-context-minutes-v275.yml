@@ -39,8 +39,11 @@ jobs:
             echo 'Permanent candidate already applied.' | tee -a /tmp/v275-apply.log
           else
             {
+              # The connector transfer changed one base64 character; repair the verified byte before decoding.
+              sed -i 's/XQigc7bcoKe3CsysGzDIEU2iJ/XQigc7bcoKe3BsysGzDIEU2iJ/' tools/.ai-context-minutes-v275/apply.py.gz.b64
               wc -c tools/.ai-context-minutes-v275/apply.py.gz.b64
               sha256sum tools/.ai-context-minutes-v275/apply.py.gz.b64
+              test "$(sha256sum tools/.ai-context-minutes-v275/apply.py.gz.b64 | cut -d' ' -f1)" = "d5ac15851b54a07d1b0bf4c8e61f441417dee74a9f797aad66970224dcb87783"
               python - <<'PY'
           from pathlib import Path
           import base64, gzip, hashlib
@@ -49,6 +52,7 @@ jobs:
           raw = gzip.decompress(base64.b64decode(source, validate=True))
           print('decoded_bytes', len(raw))
           print('decoded_sha256', hashlib.sha256(raw).hexdigest())
+          assert hashlib.sha256(raw).hexdigest() == 'bcb1a972a798f2ba03cd0f26812b1c9171a5e4b3b4435cb04defa341058448f3'
           Path('/tmp/apply-v275.py').write_bytes(raw)
           PY
               python /tmp/apply-v275.py
