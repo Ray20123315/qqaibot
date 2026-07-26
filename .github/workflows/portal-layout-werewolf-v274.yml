@@ -41,6 +41,7 @@ jobs:
             python tools/.portal-layout-werewolf-v274/apply.py 2>&1 | tee /tmp/v274-apply.log
           fi
           python tools/.portal-layout-werewolf-v274/post.py 2>&1 | tee -a /tmp/v274-apply.log
+          python tools/.portal-layout-werewolf-v274/finalize.py 2>&1 | tee -a /tmp/v274-apply.log
       - name: Upload builder diagnostics
         if: steps.apply.outcome == 'failure'
         uses: actions/upload-artifact@v4
@@ -115,6 +116,6 @@ jobs:
           if git diff --cached --quiet; then
             echo 'No permanent changes to commit.'
           else
-            git commit -m 'Complete Werewolf role interactions and AI actions'
+            git commit -m 'Finalize Werewolf death skill resolution order'
             git push origin HEAD:fix/portal-layout-werewolf-v2.7.4
           fi
