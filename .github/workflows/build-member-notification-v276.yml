@@ -78,6 +78,9 @@ jobs:
           new = "pattern = r'async function notifyModerationProposalGroup\\(env, proposal\\) \\{[\\s\\S]*?\\n\\}\\s*async function getLiveGroupMemberList'"
           assert script.count(old) == 1
           script = script.replace(old, new, 1)
+          raw_marker = "replacement = '''async function notifyModerationProposalGroup(env, proposal) {"
+          assert script.count(raw_marker) == 1
+          script = script.replace(raw_marker, "replacement = r'''async function notifyModerationProposalGroup(env, proposal) {", 1)
           Path('/tmp/apply-v276.py').write_text(script, encoding='utf-8')
           PY
               python /tmp/apply-v276.py
