@@ -6,6 +6,8 @@ import { PORTAL_PAGE_SIZE_MAX, collectFilteredPage, normalizePortalPagination } 
 assert.equal(classifyPoliticalTopic("法国现任总统是谁？").blocked, true);
 assert.equal(classifyPoliticalTopic("你怎么看最近的选举和政党政策").blocked, true);
 assert.equal(classifyPoliticalTopic("讨论两岸主权争议").blocked, true);
+assert.equal(classifyPoliticalTopic("特朗普最近怎么样").blocked, true, "只写政治人物姓名也必须过滤");
+assert.equal(classifyPoliticalTopic("俄乌战争现在进展如何").blocked, true, "地缘政治冲突名称必须过滤");
 assert.equal(classifyPoliticalTopic("这个游戏里的总统角色怎么升级").blocked, false, "明确虚构／游戏语境不应误挡");
 assert.equal(classifyPoliticalTopic("大众汽车是哪国的").blocked, false);
 
