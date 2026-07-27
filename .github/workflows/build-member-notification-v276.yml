@@ -42,10 +42,33 @@ jobs:
               python - <<'PY'
           from pathlib import Path
           import base64, gzip, hashlib
-          source = Path('tools/.member-notification-v276/apply.py.gz.b64').read_text(encoding='utf-8').strip()
-          print('payload_chars', len(source))
-          print('payload_sha256', hashlib.sha256(source.encode()).hexdigest())
-          assert hashlib.sha256(source.encode()).hexdigest() == '75b81e807d174228e3a29701fe8f7f6549c7f5c29faf685999bd6658c432b474'
+          path = Path('tools/.member-notification-v276/apply.py.gz.b64')
+          source = path.read_text(encoding='utf-8').strip()
+          current_hash = hashlib.sha256(source.encode()).hexdigest()
+          print('payload_chars_before', len(source))
+          print('payload_sha256_before', current_hash)
+          target_hash = '75b81e807d174228e3a29701fe8f7f6549c7f5c29faf685999bd6658c432b474'
+          drift_hash = '02bd38055ee5fc3c1c2d7cd10c61c00c5cee0a5d49b5828144bf23fa6d086dbd'
+          if current_hash == drift_hash:
+              fixes = [
+                  (2134, 2135, 'u', 'q'),
+                  (3020, 3117, '5SeVz/rN2vJFb/oh6JQd47Q6g5yN6vU7tZkboNDiZWj06Fa0kTTf5JZgA4FDmFZpQ+Y5aLJ25Xj9dkWpRzWCuRIx26WvsM3uf', 'xeelb9N6ZfGcM/kYdMqmYVqdRs5G+cqdytQ1UGjRIjR6ejPcSJpvckuwgcAhTBtoQ+bZa7Jy8Uj1dilQj2oEcyVitvPXsc22n'),
+                  (3485, 3490, 'Q8J9O', 'fcK9G'),
+                  (4342, 4343, 'Y', 'U')
+              ]
+              chars = list(source)
+              for start, end, expected, replacement in fixes:
+                  actual = ''.join(chars[start:end])
+                  assert actual == expected, (start, end, actual, expected)
+                  assert len(expected) == len(replacement)
+                  chars[start:end] = replacement
+              source = ''.join(chars)
+              path.write_text(source, encoding='utf-8')
+              print('payload_repair', 'known_transfer_drift_repaired')
+          final_hash = hashlib.sha256(source.encode()).hexdigest()
+          print('payload_chars_after', len(source))
+          print('payload_sha256_after', final_hash)
+          assert final_hash == target_hash
           raw = gzip.decompress(base64.b64decode(source, validate=True))
           print('decoded_bytes', len(raw))
           print('decoded_sha256', hashlib.sha256(raw).hexdigest())
