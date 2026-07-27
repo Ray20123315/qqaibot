@@ -1,0 +1,59 @@
+name: Audit member details and notification routing v2.7.6 PR
+
+on:
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: write
+
+concurrency:
+  group: audit-member-notification-v276-pr
+  cancel-in-progress: false
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/member-details-notification-routing-v2.7.6
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: package.json
+      - name: Apply audited fixes
+        run: |
+          python tools/audit-member-notification-v276.py
+          rm -f package-lock.json
+      - name: Validate focused syntax and behavior
+        run: |
+          node --check src/notifications/routing.js
+          node --check src/members/details.js
+          node --check src/portal/notification-routing.js
+          node --check worker.js
+          node verify-member-details.mjs
+          node verify-notification-routing.mjs
+      - name: Install dependencies
+        run: npm install --ignore-scripts
+      - name: Run complete regression suite
+        run: npm run check
+      - name: Build single Worker bundle
+        run: npm run check:bundle
+      - name: Commit verified permanent audit fixes
+        run: |
+          rm -f package-lock.json
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add worker.js src/notifications/routing.js src/members/details.js verify-member-details.mjs verify-notification-routing.mjs
+          if git ls-files --error-unmatch package-lock.json >/dev/null 2>&1; then git add -A -- package-lock.json; fi
+          if git diff --cached --quiet; then
+            echo 'No permanent audit changes to commit.'
+          else
+            git commit -m 'Harden notification routing fallbacks and member detail tests'
+            git push origin HEAD:feature/member-details-notification-routing-v2.7.6
+          fi
