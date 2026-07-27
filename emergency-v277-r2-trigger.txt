@@ -1,2 +1,2 @@
-triggered_at: 2026-07-27T22:02:37+08:00
-purpose: apply, test, bundle, and self-clean v2.7.7 r2
+triggered_at: 2026-07-27T22:08:00+08:00
+purpose: rerun corrected anchor normalization, regression, bundle, and self-clean
