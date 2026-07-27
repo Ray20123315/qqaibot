@@ -53,21 +53,11 @@ jobs:
               raise RuntimeError(f'old helper anchor count={text.count(old_marker)}')
           text = text.replace(old_marker, new_marker, 1)
 
-          old_failure = '''failure_anchor = ''' + "'''" + '''  async notifyExplicitReplyFailureOnce(body, disposition, extra = {}) {
-             if (!eventHasBotMention(body) && body?.__qqai_explicit_question !== true) return;
-             const messageId = String(body?.message_id || "");''' + "'''"
-          new_failure = '''failure_anchor = ''' + "'''" + '''  async notifyExplicitReplyFailureOnce(body, disposition, extra = {}) {
-             if (!eventHasBotMention(body) && body?.__qqai_explicit_question !== true) return;
-             const key = `${this.explicitReplyQuestionId(body)}:${String(disposition || "unknown")}`;''' + "'''"
-          if text.count(old_failure) != 1:
-              raise RuntimeError(f'old failure anchor count={text.count(old_failure)}')
-          text = text.replace(old_failure, new_failure, 1)
-
-          old_failure_replacement_tail = '    const messageId = String(body?.message_id || "");' + "'''"
-          new_failure_replacement_tail = '    const key = `${this.explicitReplyQuestionId(body)}:${String(disposition || "unknown")}`;' + "'''"
-          if text.count(old_failure_replacement_tail) != 1:
-              raise RuntimeError(f'failure replacement tail count={text.count(old_failure_replacement_tail)}')
-          text = text.replace(old_failure_replacement_tail, new_failure_replacement_tail, 1)
+          old_failure_tail = '    const messageId = String(body?.message_id || "");'
+          new_failure_tail = '    const key = `${this.explicitReplyQuestionId(body)}:${String(disposition || "unknown")}`;'
+          if text.count(old_failure_tail) != 2:
+              raise RuntimeError(f'failure tail count={text.count(old_failure_tail)}')
+          text = text.replace(old_failure_tail, new_failure_tail)
 
           p.write_text(text, encoding='utf-8')
           print('Historical patch script anchors updated.')
