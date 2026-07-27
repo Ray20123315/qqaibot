@@ -65,16 +65,20 @@ jobs:
           import re
           pattern = re.compile(r"assert\((\w+)\.version === ['\"]2\.7\.6['\"], ['\"]Package version must be [^'\"]+['\"]\);")
           replacement = r'''assert(\1.version === fs.readFileSync('src/config/runtime.js', 'utf8').match(/const VERSION = "([^"]+)"/)?.[1], 'Package and runtime versions must match');'''
-          changed = 0
+          normalized = 0
+          fixture_updates = 0
           for verify_path in Path('.').glob('verify-*.mjs'):
               source = verify_path.read_text(encoding='utf-8')
               next_source, count = pattern.subn(replacement, source)
-              if count:
+              normalized += count
+              if '2.7.6' in next_source:
+                  fixture_updates += next_source.count('2.7.6')
+                  next_source = next_source.replace('2.7.6', '2.7.7')
+              if next_source != source:
                   verify_path.write_text(next_source, encoding='utf-8')
-                  changed += count
-          if changed < 1:
+          if normalized < 1:
               raise RuntimeError('no remaining stale package version assertions found')
-          print(f'Normalized {changed} stale package version assertions.')
+          print(f'Normalized {normalized} package assertions and updated {fixture_updates} version fixtures.')
           PY
             status=$?
           fi
