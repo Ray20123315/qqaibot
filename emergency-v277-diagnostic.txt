@@ -1,6 +1,6 @@
 Applied emergency v2.7.7 patches successfully.
 
-added 35 packages, and audited 36 packages in 5s
+added 35 packages, and audited 36 packages in 8s
 
 7 packages are looking for funding
   run `npm fund` for details
@@ -24,13 +24,14 @@ deployment notification checks passed
 verify-subgroup-join: ok
 spam detection checks passed
 meme-aware moderation and member console checks passed
-file:///home/runner/work/qqaibot/qqaibot/verify-social-digital-twin.mjs:12
+verify-social-digital-twin: ok
+file:///home/runner/work/qqaibot/qqaibot/verify-explicit-question-priority.mjs:10
   if (!condition) throw new Error(message);
                         ^
 
 Error: Package version must be 2.5.2
-    at assert (file:///home/runner/work/qqaibot/qqaibot/verify-social-digital-twin.mjs:12:25)
-    at file:///home/runner/work/qqaibot/qqaibot/verify-social-digital-twin.mjs:77:1
+    at assert (file:///home/runner/work/qqaibot/qqaibot/verify-explicit-question-priority.mjs:10:25)
+    at file:///home/runner/work/qqaibot/qqaibot/verify-explicit-question-priority.mjs:59:1
     at ModuleJob.run (node:internal/modules/esm/module_job:343:25)
     at async onImport.tracePromise.__proto__ (node:internal/modules/esm/loader:681:26)
     at async asyncRunEntryPointWithESMLoader (node:internal/modules/run_main:117:5)
