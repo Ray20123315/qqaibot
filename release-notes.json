@@ -1,6 +1,7 @@
 {
   "version": "2.7.10",
   "notificationPolicy": "developer-only-by-default-with-explicit-opt-in",
+  "verification": "full-regression-and-single-worker-bundle",
   "added": [
     "新增聊天与群规监控的确定性政治静默规则，政治内容不调用聊天回答或群规处罚模型",
     "新增种族歧视确定性识别与固定公开警告，禁止自动撤回、禁言、踢出和累进处罚",
