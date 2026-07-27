@@ -43,8 +43,12 @@ jobs:
           from pathlib import Path
           import base64, gzip, hashlib
           source = Path('tools/.member-notification-v276/apply.py.gz.b64').read_text(encoding='utf-8').strip()
+          print('payload_chars', len(source))
+          print('payload_sha256', hashlib.sha256(source.encode()).hexdigest())
           assert hashlib.sha256(source.encode()).hexdigest() == '75b81e807d174228e3a29701fe8f7f6549c7f5c29faf685999bd6658c432b474'
           raw = gzip.decompress(base64.b64decode(source, validate=True))
+          print('decoded_bytes', len(raw))
+          print('decoded_sha256', hashlib.sha256(raw).hexdigest())
           assert hashlib.sha256(raw).hexdigest() == 'fc115612e43014645b173d79782b3d513ec542d57c2fa687edf4ce78dad29023'
           Path('/tmp/apply-v276.py').write_bytes(raw)
           PY
