@@ -1427,7 +1427,7 @@ async function performRuleProxyAction(env, item, review) {
   if (mode === "record" && !warningOnlyRacial) return updateRuleViolationRecord(env, item, { actionTaken: "record_only", actionResult: "仅记录，未启用警告或处罚代理", strikeCounted: false, progressiveCount: 0 });
 
   const remaining = await ruleProxyCooldownRemaining(env, item.groupId, item.userId);
-  if (remaining > 0) return updateRuleViolationRecord(env, item, { actionTaken: "cooldown", actionResult: `处置冷却剩余 ${remaining} 秒；本次仍已记录`, strikeCounted: false });
+  if (remaining > 0 && !warningOnlyRacial) return updateRuleViolationRecord(env, item, { actionTaken: "cooldown", actionResult: `处置冷却剩余 ${remaining} 秒；本次仍已记录`, strikeCounted: false });
 
   const eligibleForStrike = !warningOnlyRacial && severity !== "minor" && intentional;
   let action = "warn";
