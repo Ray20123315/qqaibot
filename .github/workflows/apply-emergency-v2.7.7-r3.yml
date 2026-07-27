@@ -1,0 +1,170 @@
+name: Apply and verify emergency v2.7.7 r3
+
+on:
+  push:
+    branches:
+      - chatgpt/emergency-v2.7.7-r3
+    paths:
+      - .github/workflows/apply-emergency-v2.7.7-r3.yml
+      - emergency-v277-r3-trigger.txt
+
+permissions:
+  contents: write
+
+concurrency:
+  group: emergency-v277-r3
+  cancel-in-progress: true
+
+jobs:
+  apply-test-bundle-clean:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: chatgpt/emergency-v2.7.7-r3
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Apply, test, bundle, and self-clean
+        shell: bash
+        run: |
+          set +e
+          LOG=/tmp/emergency-v277-r3.log
+          : > "$LOG"
+
+          git fetch origin d16891357cc8274b031281eb27f4781bcba943f8 >>"$LOG" 2>&1
+          status=$?
+          if [ "$status" -eq 0 ]; then
+            git show d16891357cc8274b031281eb27f4781bcba943f8:tools/apply-emergency-v2.7.7.py > /tmp/apply-emergency-v277.py 2>>"$LOG"
+            status=$?
+          fi
+
+          if [ "$status" -eq 0 ]; then
+            python3 - <<'PY' >>"$LOG" 2>&1
+          from pathlib import Path
+          p = Path('/tmp/apply-emergency-v277.py')
+          text = p.read_text(encoding='utf-8')
+
+          old_marker = 'const QQAI_V1_R54_REMOVED_FEATURE_KEYS = Object.freeze(["schedule_template", "draft", "dashboard", "quality-dashboard", "quality_dashboard", "growth", "growth-admin", "growth_admin", "schedule-template"]);'
+          new_marker = 'const QQAI_V1_R54_PROGRESSIVE_MULTI_ACTION_MARKER = "QQAI_V1_R54_PROGRESSIVE_MULTI_ACTION_MARKER";'
+          if text.count(old_marker) != 1:
+              raise RuntimeError(f'old helper anchor count={text.count(old_marker)}')
+          text = text.replace(old_marker, new_marker, 1)
+
+          old_failure_tail = '    const messageId = String(body?.message_id || "");'
+          new_failure_tail = '    const key = `${this.explicitReplyQuestionId(body)}:${String(disposition || "unknown")}`;'
+          if text.count(old_failure_tail) != 2:
+              raise RuntimeError(f'failure tail count={text.count(old_failure_tail)}')
+          text = text.replace(old_failure_tail, new_failure_tail)
+
+          p.write_text(text, encoding='utf-8')
+          print('Historical patch script anchors updated.')
+          PY
+            status=$?
+          fi
+
+          if [ "$status" -eq 0 ]; then
+            python3 /tmp/apply-emergency-v277.py >>"$LOG" 2>&1
+            status=$?
+          fi
+
+          if [ "$status" -eq 0 ]; then
+            python3 - <<'PY' >>"$LOG" 2>&1
+          from pathlib import Path
+          import json
+
+          config_path = Path('src/config/runtime.js')
+          config = config_path.read_text(encoding='utf-8')
+          old = '  ruleStrictness: "medium",'
+          if config.count(old) != 1:
+              raise RuntimeError(f'rule strictness anchor count={config.count(old)}')
+          config_path.write_text(config.replace(old, '  ruleStrictness: "smart",', 1), encoding='utf-8')
+
+          fixture_updates = 0
+          for verify_path in Path('.').glob('verify-*.mjs'):
+              source = verify_path.read_text(encoding='utf-8')
+              count = source.count('2.7.6')
+              if count:
+                  verify_path.write_text(source.replace('2.7.6', '2.7.7'), encoding='utf-8')
+                  fixture_updates += count
+
+          emergency_path = Path('verify-emergency-v2.7.7.mjs')
+          emergency = emergency_path.read_text(encoding='utf-8')
+          old_contract = 'check(portal.includes(\'url.searchParams.get("pageSize")\') && portal.includes("pageSize: String(conversationPageSize)"), "conversation pageSize contract missing");'
+          new_contract = 'check(portal.includes(\'url.searchParams.get("pageSize")\') && /pageSize:\\s*String\\(conversationPageSize\\)/.test(portal), "conversation pageSize contract missing");'
+          if emergency.count(old_contract) != 1:
+              raise RuntimeError(f'pageSize assertion count={emergency.count(old_contract)}')
+          emergency = emergency.replace(old_contract, new_contract, 1)
+          old_legacy = 'check(!portal.includes("limit:\'500\'"), "legacy 500-row initial conversation load still present");'
+          new_legacy = '''const loadStart = portal.indexOf("async function loadConversations(");
+          const loadEnd = portal.indexOf("function safeAttachmentUrl", loadStart);
+          const loadFunction = loadStart >= 0 ? portal.slice(loadStart, loadEnd > loadStart ? loadEnd : loadStart + 8000) : "";
+          check(loadFunction && !loadFunction.includes("limit:'500'"), "legacy 500-row conversation load still present in loadConversations");'''
+          if emergency.count(old_legacy) != 1:
+              raise RuntimeError(f'legacy assertion count={emergency.count(old_legacy)}')
+          emergency = emergency.replace(old_legacy, new_legacy, 1)
+          old_adaptive = 'check(moderation.includes(\'"智慧": "smart"\') && moderation.includes("resolveAdaptiveRuleStrictness"), "adaptive violation strictness missing");'
+          new_adaptive = 'check(config.includes(\'ruleStrictness: "smart"\'), "default rule strictness must be smart");\n' + old_adaptive
+          if emergency.count(old_adaptive) != 1:
+              raise RuntimeError(f'adaptive assertion count={emergency.count(old_adaptive)}')
+          emergency_path.write_text(emergency.replace(old_adaptive, new_adaptive, 1), encoding='utf-8')
+
+          release_path = Path('release-notes.json')
+          release = json.loads(release_path.read_text(encoding='utf-8'))
+          release['version'] = '2.7.7'
+          release['added'] = [
+              '群规严格度默认改为智慧模式，会依据近期误判撤销、确认处置、管理介入与群聊边界变化自动调整',
+              '政治相关普通聊天会在进入自然语言意图分类器与聊天模型前静默过滤；明确管理指令仍可使用',
+              'Portal 对话记录改为服务器端分页，默认先加载 20 条，可切换每页 20、50 或 100 条并显示总页数',
+              '新增群级短回复重复防护，连续相同的问号、重复单字或极短确认词在一分钟内不会重复刷屏',
+              '新增 v2.7.7 永久回归测试，覆盖同号操作、政治静默、白名单提示、短回复去重、分页与智慧违规严格度'
+          ]
+          release['fixed'] = [
+              '非白名单群即使触发 @ 或处理失败，也不再公开发送 worker_no_reply 等系统维护提示，只保留内部诊断',
+              '补强机器人账号人工操作路径的回归保障：//、??、/! 与 ! 指令可用，同时继续以 outbound message ID 与指纹阻止自我回覆循环',
+              '移除 Portal 首次固定读取 500 条并逐笔扫描大量记录的高延迟路径；无筛选时只读取当前页',
+              '修复多支 verify 脚本硬编码旧版本号造成正式 npm run check 无法随版本升级通过的问题',
+              '一次性验证 workflow、patch script、trigger 与诊断文件在成功后自动删除，不进入正式 main'
+          ]
+          release_path.write_text(json.dumps(release, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
+          print(f'Post-patch normalization complete; version fixtures updated={fixture_updates}.')
+          PY
+            status=$?
+          fi
+
+          if [ "$status" -eq 0 ]; then
+            npm install --ignore-scripts --no-package-lock >>"$LOG" 2>&1
+            status=$?
+          fi
+          if [ "$status" -eq 0 ]; then
+            npm run check >>"$LOG" 2>&1
+            status=$?
+          fi
+          if [ "$status" -eq 0 ]; then
+            npm run check:bundle >>"$LOG" 2>&1
+            status=$?
+          fi
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          if [ "$status" -ne 0 ]; then
+            git reset --hard HEAD
+            cp "$LOG" emergency-v277-r3-diagnostic.txt
+            git add emergency-v277-r3-diagnostic.txt
+            git commit -m "ci: record emergency v2.7.7 r3 diagnostics" || true
+            git push origin HEAD:chatgpt/emergency-v2.7.7-r3
+            exit "$status"
+          fi
+
+          rm -f \
+            .github/workflows/apply-emergency-v2.7.7-r3.yml \
+            emergency-v277-r3-trigger.txt \
+            emergency-v277-r3-diagnostic.txt
+          rm -rf dist
+          git add -A
+          git diff --cached --quiet && exit 0
+          git commit -m "feat: emergency filtering and Portal pagination v2.7.7"
+          git push origin HEAD:chatgpt/emergency-v2.7.7-r3
