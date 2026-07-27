@@ -1,0 +1,99 @@
+name: Build member details and notification routing v2.7.6
+
+on:
+  push:
+    branches:
+      - feature/member-details-notification-routing-v2.7.6
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: write
+
+concurrency:
+  group: member-details-notification-v276
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/member-details-notification-routing-v2.7.6
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: package.json
+      - name: Apply permanent v2.7.6 integration
+        id: apply
+        continue-on-error: true
+        run: |
+          set -o pipefail
+          : > /tmp/v276-apply.log
+          if grep -q '"version": "2.7.6"' package.json && grep -q 'member_full_details' worker.js; then
+            echo 'Permanent v2.7.6 integration already applied.' | tee -a /tmp/v276-apply.log
+          else
+            {
+              python - <<'PY'
+          from pathlib import Path
+          import base64, gzip, hashlib
+          source = Path('tools/.member-notification-v276/apply.py.gz.b64').read_text(encoding='utf-8').strip()
+          assert hashlib.sha256(source.encode()).hexdigest() == '0c382907949ae658233f4c94c2a9cd0d27e951cdc3fb98ae0e36c1b6cb4288ae'
+          raw = gzip.decompress(base64.b64decode(source, validate=True))
+          assert hashlib.sha256(raw).hexdigest() == 'a8534dbf925f2cd456f4dc8267ecab48f294b67d082ca1b5eb0125fa6633fffb'
+          Path('/tmp/apply-v276.py').write_bytes(raw)
+          PY
+              python /tmp/apply-v276.py
+            } 2>&1 | tee -a /tmp/v276-apply.log
+          fi
+      - name: Upload apply diagnostics
+        if: steps.apply.outcome == 'failure'
+        uses: actions/upload-artifact@v4
+        with:
+          name: v276-apply-diagnostics
+          path: /tmp/v276-apply.log
+          if-no-files-found: error
+      - name: Stop after apply failure
+        if: steps.apply.outcome == 'failure'
+        run: |
+          cat /tmp/v276-apply.log
+          exit 1
+      - name: Validate JavaScript syntax
+        run: |
+          node --check src/notifications/routing.js
+          node --check src/members/details.js
+          node --check src/portal/notification-routing.js
+          node --check src/moderation/runtime.js
+          node --check src/group/runtime.js
+          node --check src/operations/runtime.js
+          node --check src/portal/members.js
+          node --check src/portal/runtime.js
+          node --check worker.js
+          node --check verify-member-details.mjs
+          node --check verify-notification-routing.mjs
+      - name: Run focused executable tests
+        run: |
+          node verify-member-details.mjs
+          node verify-notification-routing.mjs
+      - name: Install dependencies
+        run: npm install --ignore-scripts
+      - name: Run complete regression suite
+        run: npm run check
+      - name: Build single Worker bundle
+        run: npm run check:bundle
+      - name: Commit verified permanent candidate
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add worker.js package.json release-notes.json src/config/runtime.js src/notifications/routing.js src/members/details.js src/portal/notification-routing.js src/moderation/runtime.js src/group/runtime.js src/operations/runtime.js src/portal/members.js src/portal/runtime.js verify-member-details.mjs verify-notification-routing.mjs
+          if git diff --cached --quiet; then
+            echo 'No permanent changes to commit.'
+          else
+            git commit -m 'Add full member details and notification routing'
+            git push origin HEAD:feature/member-details-notification-routing-v2.7.6
+          fi
