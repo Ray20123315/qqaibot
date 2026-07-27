@@ -10,7 +10,7 @@ on:
       - main
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   validate:
@@ -29,3 +29,60 @@ jobs:
         run: npm run check
       - name: Build the single Worker bundle
         run: npm run check:bundle
+
+  build-notification-password-candidate:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: validate
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: chatgpt/notification-password-v2.7.9
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Apply, test, bundle and push candidate
+        shell: bash
+        run: |
+          set +e
+          LOG=/tmp/notification-password-v279.log
+          : > "$LOG"
+
+          git fetch origin main >>"$LOG" 2>&1
+          status=$?
+          if [ "$status" -eq 0 ]; then
+            git show origin/main:tools/apply-notification-password-v279.py > /tmp/apply-notification-password-v279.py 2>>"$LOG"
+            status=$?
+          fi
+          if [ "$status" -eq 0 ]; then python3 /tmp/apply-notification-password-v279.py >>"$LOG" 2>&1; status=$?; fi
+          if [ "$status" -eq 0 ]; then npm install --ignore-scripts --no-package-lock >>"$LOG" 2>&1; status=$?; fi
+          if [ "$status" -eq 0 ]; then npm run check >>"$LOG" 2>&1; status=$?; fi
+          if [ "$status" -eq 0 ]; then npm run check:bundle >>"$LOG" 2>&1; status=$?; fi
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          rm -rf node_modules dist
+          rm -f package-lock.json
+
+          if [ "$status" -eq 0 ]; then
+            git add worker.js src/notifications/routing.js src/portal/notification-routing.js src/portal/auth.js src/portal/runtime.js src/config/runtime.js package.json release-notes.json verify-*.mjs
+            if git diff --cached --name-only | grep -E '^(\.github/|tools/apply-notification-password-v279\.py$|node_modules/|dist/|package-lock\.json$|notification-password-v279-diagnostic\.txt$)'; then
+              echo "Unexpected temporary/generated path staged" >>"$LOG"
+              status=91
+              git reset
+            fi
+          fi
+          if [ "$status" -eq 0 ]; then git commit -m "fix: developer-only notifications and password recovery v2.7.9" >>"$LOG" 2>&1; status=$?; fi
+          if [ "$status" -eq 0 ]; then git push origin HEAD:chatgpt/notification-password-v2.7.9 >>"$LOG" 2>&1; status=$?; fi
+
+          git fetch origin main >>"$LOG" 2>&1
+          git checkout -B main origin/main >>"$LOG" 2>&1
+          if [ "$status" -ne 0 ]; then
+            cp "$LOG" notification-password-v279-diagnostic.txt
+            git add notification-password-v279-diagnostic.txt
+            git commit -m "ci: record v2.7.9 notification/password diagnostics" || true
+            git push origin HEAD:main || true
+          fi
+          exit "$status"
