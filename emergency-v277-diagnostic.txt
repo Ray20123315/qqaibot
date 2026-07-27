@@ -1,6 +1,6 @@
 Traceback (most recent call last):
-  File "/home/runner/work/qqaibot/qqaibot/tools/apply-emergency-v2.7.7.py", line 79, in <module>
-    replace_once('worker.js', worker_helpers_anchor, worker_helpers + worker_helpers_anchor)
+  File "/home/runner/work/qqaibot/qqaibot/tools/apply-emergency-v2.7.7.py", line 154, in <module>
+    replace_once('worker.js', failure_anchor, failure_replacement)
   File "/home/runner/work/qqaibot/qqaibot/tools/apply-emergency-v2.7.7.py", line 19, in replace_once
     raise RuntimeError(f'{path}: expected one exact anchor, found {count}: {old[:120]!r}')
-RuntimeError: worker.js: expected one exact anchor, found 0: 'const QQAI_V1_R54_REMOVED_FEATURE_KEYS = Object.freeze(["schedule_template", "draft", "dashboard", "quality-dashboard", '
+RuntimeError: worker.js: expected one exact anchor, found 0: '  async notifyExplicitReplyFailureOnce(body, disposition, extra = {}) {\n    if (!eventHasBotMention(body) && body?.__qqa'
