@@ -1,94 +1,31 @@
-name: Build and verify v2.7.10 candidate
+name: Validate single-Worker build
 
 on:
   push:
     branches:
       - main
+      - refactor/v2-modular-worker
+  pull_request:
+    branches:
+      - main
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
-  build-candidate:
+  validate:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 10
     steps:
-      - name: Checkout candidate branch
-        uses: actions/checkout@v4
-        with:
-          ref: agent/politics-discrimination-v2.7.10
-          fetch-depth: 0
-
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: npm
           cache-dependency-path: package.json
-
-      - name: Apply patch and run complete validation
-        shell: bash
-        run: |
-          set -o pipefail
-          {
-            node tools/apply-v2.7.10.mjs
-            rm -f tools/apply-v2.7.10.mjs
-            npm install --ignore-scripts --no-package-lock
-            npm run check
-            npm run check:bundle
-            rm -rf node_modules dist package-lock.json
-            test ! -e tools/apply-v2.7.10.mjs
-            test ! -e package-lock.json
-            test ! -e node_modules
-            test ! -e dist
-            git diff -- .github | grep -q '^$' || { echo 'candidate unexpectedly changes .github'; exit 1; }
-            git diff --check
-          } 2>&1 | tee /tmp/v2710.log
-
-      - name: Commit and push passing candidate
-        shell: bash
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add -A
-          if git diff --cached --quiet; then
-            echo "No candidate changes were produced"
-            exit 1
-          fi
-          if git diff --cached --name-only | grep -E '^(\.github/|tools/apply-v2\.7\.10\.mjs$|node_modules/|dist/|package-lock\.json$)'; then
-            echo "Temporary or generated file was staged"
-            exit 1
-          fi
-          while IFS= read -r file; do
-            [ -f "$file" ] || continue
-            size=$(wc -c < "$file")
-            if [ "$size" -gt 20000000 ]; then
-              echo "Staged file exceeds 20 MB: $file"
-              exit 1
-            fi
-          done < <(git diff --cached --name-only)
-          git commit -m "fix: political boundaries discrimination warnings and group persona v2.7.10"
-          git push origin HEAD:agent/politics-discrimination-v2.7.10
-
-      - name: Persist failure diagnostic to main
-        if: failure()
-        shell: bash
-        run: |
-          git fetch origin main
-          rm -rf /tmp/v2710-main
-          git worktree add /tmp/v2710-main origin/main
-          cd /tmp/v2710-main
-          mkdir -p tools
-          {
-            echo "v2.7.10 candidate builder failed"
-            echo "candidate_ref=agent/politics-discrimination-v2.7.10"
-            echo "runner_sha=${GITHUB_SHA}"
-            echo "run_id=${GITHUB_RUN_ID}"
-            echo "---- log tail ----"
-            tail -c 60000 /tmp/v2710.log 2>/dev/null || true
-          } > tools/v2710-diagnostic.txt
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add tools/v2710-diagnostic.txt
-          git commit -m "diagnostic: v2.7.10 candidate builder failure" || true
-          git push origin HEAD:main
+      - name: Install dependencies
+        run: npm install --ignore-scripts
+      - name: Run regression checks
+        run: npm run check
+      - name: Build the single Worker bundle
+        run: npm run check:bundle
