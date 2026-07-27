@@ -144,7 +144,7 @@ async function collectFullMemberDetails(env, { groupId, targetId, actorId, actor
     readStoredMemberSources(env, group, target),
     getMuteLock(env, group, target).catch(error => ({ readError: String(error?.message || error).slice(0, 500) })),
     getPartnerBinding(env, group, target).catch(error => ({ readError: String(error?.message || error).slice(0, 500) })),
-    getAffinityProfile(env, group, target).catch(error => ({ readError: String(error?.message || error).slice(0, 500) })),
+    getAffinityProfile(env, { groupId: group, userId: target, refreshAi: false }).catch(error => ({ readError: String(error?.message || error).slice(0, 500) })),
     recentConversationMessagesForUser(env, group, target, 200).catch(() => [])
   ]);
 

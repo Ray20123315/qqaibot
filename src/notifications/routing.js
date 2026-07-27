@@ -13,7 +13,8 @@ const NOTIFICATION_EVENT_DEFINITIONS = Object.freeze([
   { id: "group_work_request", label: "群务请求待处理", description: "机器人建立需要管理人工决定的群务工作单时通知。", defaultEnabled: true, defaultMode: "managers" },
   { id: "appeal_created", label: "申诉待处理", description: "成员提交新的申诉对话串时通知。", defaultEnabled: true, defaultMode: "managers" },
   { id: "suggestion_created", label: "建议箱有新内容", description: "成员提交新建议时通知。", defaultEnabled: false, defaultMode: "managers" },
-  { id: "bug_created", label: "问题追踪有新回报", description: "成员提交新问题追踪时通知。", defaultEnabled: true, defaultMode: "developer" }
+  { id: "bug_created", label: "问题追踪有新回报", description: "成员提交新问题追踪时通知。", defaultEnabled: true, defaultMode: "developer" },
+  { id: "quality_feedback_created", label: "质量回报待处理", description: "成员提交新的质量回报时通知。", defaultEnabled: true, defaultMode: "managers" }
 ]);
 
 const EVENT_BY_ID = new Map(NOTIFICATION_EVENT_DEFINITIONS.map(item => [item.id, item]));
@@ -111,7 +112,7 @@ function selectNotificationRecipientIds({ route, ownerEnabled = false, managers 
   if (normalizedRoute.mode === "owner") return ownerEnabled && cleanId(owner?.qq) ? [cleanId(owner.qq)] : [];
   const eligible = new Set((Array.isArray(managers) ? managers : []).map(item => cleanId(item?.qq || item)).filter(Boolean));
   const selected = normalizedRoute.managerIds.filter(id => eligible.has(id));
-  return selected.length ? selected : [...eligible];
+  return normalizedRoute.managerIds.length ? selected : [...eligible];
 }
 
 async function saveNotificationRoutingConfig(env, groupId, value, actorId = "") {

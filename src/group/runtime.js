@@ -5,6 +5,7 @@ import { DEFAULTS } from "../config/runtime.js";
 import { isDeveloperId } from "../core/identity.js";
 import { appendIndex, callOneBotAction, getEffectivePermissions, writeSystemAudit } from "../core/permissions.js";
 import { dbDel, dbGet, dbPut } from "../data/store.js";
+import { dispatchHumanAttentionNotification } from "../notifications/routing.js";
 import { toSimplifiedChinese } from "../i18n/commands.js";
 import { waitMs } from "../integrations/bilibili.js";
 import { attachModerationProposalMessage, extractOneBotMessageId, getGroupMemberSafe, moderationActionLabel, moderationActionNeedsTarget } from "../moderation/runtime.js";
@@ -134,18 +135,14 @@ async function notifyModerationProposalGroup(env, proposal) {
     : "\n目标：全群";
   const durationLine = proposal.action === "mute" ? `\n时长：${formatDuration(proposal.durationSeconds || 600)}` : "";
   const reasonLine = proposal.reason ? `\n补充原因：${proposal.reason}` : "";
-  const message = `【Portal 群管理待确认】\n编号：${proposal.id}\n提出者：${proposalActorText(proposal)}\n动作：${moderationActionLabel(proposal.action)}${targetLine}${durationLine}${reasonLine}\n状态：待确认\n请由本群 QQ 管理员、群主或开发者在 2 分钟内发送“确认 ${proposal.id}”或“取消 ${proposal.id}”。未确认不会执行。`;
-  try {
-    const sent = await callOneBotAction(env, { action: "send_group_msg", params: { group_id: numericId(proposal.groupId), message, auto_escape: false } }, 20000);
-    const messageId = sent?.message_id ?? sent?.messageId ?? sent?.data?.message_id ?? sent?.data?.messageId;
-    if (messageId) await attachModerationProposalMessage(env, proposal.id, messageId, proposal.groupId);
-    return { ok: true, messageId: messageId ? String(messageId) : "" };
-  } catch (error) {
-    await writeSystemAudit(env, { type: "moderation_notification_failed", groupId: proposal.groupId, actorId: proposal.actorId, proposalId: proposal.id, error: String(error?.message || error) });
-    return { ok: false, error: String(error?.message || error) };
-  }
+  const message = `【Portal 群管理待确认】\n编号：${proposal.id}\n群号：${proposal.groupId}\n提出者：${proposalActorText(proposal)}\n动作：${moderationActionLabel(proposal.action)}${targetLine}${durationLine}${reasonLine}\n状态：待确认\n请在对应群聊于 2 分钟内发送“确认 ${proposal.id}”或“取消 ${proposal.id}”。未确认不会执行。`;
+  return dispatchHumanAttentionNotification(env, {
+    groupId: proposal.groupId,
+    eventId: "moderation_proposal",
+    message,
+    audit: { actorId: proposal.actorId, proposalId: proposal.id, actionName: proposal.action }
+  });
 }
-
 
 
 async function getLiveGroupMemberList(env, groupId) {

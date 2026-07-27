@@ -8,6 +8,7 @@ import { announceDeployedVersionFallback, getDeploymentStatusForViewer, handleDe
 import { botCanRunRuleMonitor, getBotGroupRole, getGroupFamilyForGroup, getGroupJoinPage, isVerifiedGroupOwner } from "./src/group/runtime.js";
 import { buildHealthState } from "./src/health/runtime.js";
 import { normalizeMultilingualCommand, toSimplifiedChinese } from "./src/i18n/commands.js";
+import { collectFullMemberDetails, formatFullMemberDetailsReport } from "./src/members/details.js";
 import { handleBilibiliWebhook, pollAutomaticBilibiliConnectors } from "./src/integrations/bilibili.js";
 import { attachModerationProposalMessage, createGroupWorkRequest, createJoinRequestAssist, createModerationProposal, decideJoinRequestAssist, detectNaturalModerationProposal, findLatestActiveRuleViolationForUser, formatModerationPermissionDenied, formatModerationProposal, getGroupMemberSafe, handleGroupWorkDecision, handleModerationConfirmation, inspectMessageAgainstGroupRules, normalizeRuleProxyMode, normalizeRuleStrictness, parseModerationConfirmation, parseUnlimitedNonNegativeInteger, recordRuleViolationFeedback, ruleStrictnessLabel } from "./src/moderation/runtime.js";
 import { MAX_MUTE_SECONDS as MUTE_LOCK_MAX_SECONDS, canUnlockMute, clearMuteLock, createMasterMuteLock, createPartnerMuteLock, createSelfMuteLock, getMuteLock, listActiveSelfMuteLocks, markMuteLockReapplied, markMuteUnlockBlocked, muteLockRemainingSeconds, putMuteLock } from "./src/moderation/mute-locks.js";
@@ -2393,6 +2394,30 @@ const QQAIWorker = {
         return jsonReply(`${atSender}❌ 翻译失败，AI 查字典查晕了。`);
       }
 
+
+      // ==========================================
+      // 🔎 成员完整资料：即时 OneBot + D1 隐藏字段（权限化、遮罩、审计）
+      // ==========================================
+      const fullMemberDetailsMatch = cleanMessage.match(/^[!！](?:详细资料|詳細資料)(?:\s+@?(\d{5,}))?\s*$/i);
+      if (fullMemberDetailsMatch) {
+        if (!isGroup) return jsonReply(`${atSender}该指令只能在群聊中使用，以确定资料所属群组。`);
+        const mentionedTarget = (targetMentionQqs || []).map(String).find(id => id && id !== String(botId || ""));
+        const targetId = String(mentionedTarget || fullMemberDetailsMatch[1] || userId).replace(/\D/g, "");
+        try {
+          const details = await collectFullMemberDetails(env, {
+            groupId: currentGroupId,
+            targetId,
+            actorId: userId,
+            actorRole: senderRole,
+            permissions: permissionSet
+          });
+          const report = `${atSender}${formatFullMemberDetailsReport(details)}`;
+          const chunks = splitOutboundText(report, { maxChars: 1400, maxParts: 20, hardTotalChars: 28000 });
+          return jsonReplyChunks(chunks, { reply_kind: "member_full_details", target_user_id: targetId, sensitive_fields_redacted: true });
+        } catch (error) {
+          return jsonReply(`${atSender}${String(error?.message || error).slice(0, 500)}`);
+        }
+      }
 
       // 第三段到此完美結束，準備進入第四段的會議紀要、吃瓜總結與查成分模組...
 

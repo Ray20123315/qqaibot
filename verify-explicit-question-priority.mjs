@@ -56,7 +56,7 @@ assert(worker.includes('processingFinished = true'), 'Delayed indicators must be
 assert(worker.includes('oneBotEventHasMedia(body));'), 'Worker content validation must recognize native face/media payloads');
 
 const pkg = JSON.parse(fs.readFileSync('package.json', 'utf8'));
-assert(pkg.version === '2.7.5', 'Package version must be 2.5.2');
+assert(pkg.version === '2.7.6', 'Package version must be 2.5.2');
 assert(pkg.scripts.check.includes('verify-explicit-question-priority.mjs'), 'Priority regression test must run in the permanent suite');
 
 console.log('verify-explicit-question-priority: ok');

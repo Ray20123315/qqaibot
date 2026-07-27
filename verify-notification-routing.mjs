@@ -32,6 +32,13 @@ assert.deepEqual(selectNotificationRecipientIds({
 }), ["10001", "10002"], "empty manager selection falls back to all current QQ admins");
 
 assert.deepEqual(selectNotificationRecipientIds({
+  route: { enabled: true, mode: "managers", managerIds: ["99999"] },
+  managers,
+  owner,
+  developer: "90001"
+}), [], "a stale explicit manager selection must not silently broaden to every manager");
+
+assert.deepEqual(selectNotificationRecipientIds({
   route: { enabled: true, mode: "developer", managerIds: [] },
   managers,
   owner,
