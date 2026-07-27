@@ -44,8 +44,15 @@ jobs:
           if text.count(old_failure_tail) != 2:
               raise RuntimeError(f'unable to fix failure notice anchor: {text.count(old_failure_tail)}')
           text = text.replace(old_failure_tail, new_failure_tail)
-
           path.write_text(text, encoding='utf-8')
+
+          social_path = Path('verify-social-digital-twin.mjs')
+          social = social_path.read_text(encoding='utf-8')
+          old_social = "assert(pkg.version === '2.7.6', 'Package version must be 2.5.2');"
+          new_social = "const runtimeVersion = fs.readFileSync('src/config/runtime.js', 'utf8').match(/const VERSION = \\\"([^\\\"]+)\\\"/)?.[1];\nassert(pkg.version === runtimeVersion, 'Package and runtime versions must match');"
+          if social.count(old_social) != 1:
+              raise RuntimeError('unable to update stale social version assertion')
+          social_path.write_text(social.replace(old_social, new_social, 1), encoding='utf-8')
           PY
           status=$?
           if [ "$status" -eq 0 ]; then
