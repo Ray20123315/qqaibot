@@ -1,7 +1,7 @@
 Applied emergency v2.7.7 patches successfully.
 Normalized 9 package assertions, updated 9 version fixtures, and wrote release notes.
 
-added 35 packages, and audited 36 packages in 7s
+added 35 packages, and audited 36 packages in 6s
 
 7 packages are looking for funding
   run `npm fund` for details
@@ -49,9 +49,9 @@ file:///home/runner/work/qqaibot/qqaibot/verify-emergency-v2.7.7.mjs:10
   if (!condition) throw new Error(message);
                         ^
 
-Error: conversation pageSize contract missing
+Error: legacy 500-row initial conversation load still present
     at check (file:///home/runner/work/qqaibot/qqaibot/verify-emergency-v2.7.7.mjs:10:25)
-    at file:///home/runner/work/qqaibot/qqaibot/verify-emergency-v2.7.7.mjs:41:1
+    at file:///home/runner/work/qqaibot/qqaibot/verify-emergency-v2.7.7.mjs:44:1
     at ModuleJob.run (node:internal/modules/esm/module_job:343:25)
     at async onImport.tracePromise.__proto__ (node:internal/modules/esm/loader:681:26)
     at async asyncRunEntryPointWithESMLoader (node:internal/modules/run_main:117:5)
