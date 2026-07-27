@@ -4,6 +4,9 @@ on:
   push:
     branches:
       - feature/member-details-notification-routing-v2.7.6
+  pull_request:
+    branches:
+      - main
 
 permissions:
   contents: read
