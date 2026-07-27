@@ -86,7 +86,12 @@ jobs:
           new_contract = "check(portal.includes('url.searchParams.get(\"pageSize\")') && /pageSize:\\s*String\\(conversationPageSize\\)/.test(portal), \"conversation pageSize contract missing\");"
           if emergency.count(old_contract) != 1:
               raise RuntimeError('unable to relax emergency pagination assertion')
-          emergency_path.write_text(emergency.replace(old_contract, new_contract, 1), encoding='utf-8')
+          emergency = emergency.replace(old_contract, new_contract, 1)
+          old_legacy = "check(!portal.includes(\"limit:'500'\"), \"legacy 500-row initial conversation load still present\");"
+          new_legacy = "check(!portal.includes(\"new URLSearchParams({q:$('convSearch').value||'',limit:'500'})\"), \"legacy 500-row initial conversation load still present\");"
+          if emergency.count(old_legacy) != 1:
+              raise RuntimeError('unable to scope legacy conversation assertion')
+          emergency_path.write_text(emergency.replace(old_legacy, new_legacy, 1), encoding='utf-8')
 
           release_path = Path('release-notes.json')
           release = json.loads(release_path.read_text(encoding='utf-8'))
