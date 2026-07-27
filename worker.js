@@ -27,6 +27,42 @@ import { handleWerewolfOneBotEvent, injectWerewolfPortalClient, processWerewolfT
 import { fetchPublicUrl, getFeatureFlag, getPrivateAccessMode, isGroupWhitelisted, numericId, verifyOneBotAccess } from "./src/security/network.js";
 
 
+const POLITICAL_TOPIC_PATTERN = /(?:政治|政党|政黨|选举|選舉|总统|總統|国会|國會|立法院|立法委员|立法委員|立委|议员|議員|首相|总理|總理|内阁|內閣|政权|政權|政治人物|政治制度|公共政策|民进党|民進黨|国民党|國民黨|共产党|共產黨|民主党|民主黨|共和党|共和黨|两岸政治|兩岸政治|罢免|罷免|公投|\b(?:politics|political|election|parliament|congress)\b)/i;
+
+function isPoliticalTopicText(value) {
+  return POLITICAL_TOPIC_PATTERN.test(String(value || "").normalize("NFKC"));
+}
+
+function normalizeShortReplyFingerprint(value) {
+  return String(value || "")
+    .normalize("NFKC")
+    .replace(/\[CQ:[^\]]+\]/g, "")
+    .replace(/@\d{5,}/g, "")
+    .replace(/\s+/g, "")
+    .toLowerCase()
+    .slice(0, 80);
+}
+
+function isRepeatedShortReplyCandidate(value) {
+  const text = normalizeShortReplyFingerprint(value);
+  if (!text || text.length > 24) return false;
+  if (/^[?？!！.。~～…]{2,24}$/.test(text)) return true;
+  if (/^(.)\1{1,23}$/u.test(text)) return true;
+  return /^(?:嗯+|哦+|啊+|蛤+|欸+|诶+|哈+|呵+|6+|草+|收到|好|行|可以|笑死|不知道|不懂|无语|無語)$/i.test(text);
+}
+
+async function shouldSuppressRepeatedShortReply(env, { isGroup, groupId, text, windowMs = 60000 } = {}) {
+  if (!isGroup || !groupId || !isRepeatedShortReplyCandidate(text)) return false;
+  const fingerprint = normalizeShortReplyFingerprint(text);
+  const key = `short_reply_guard:${String(groupId)}`;
+  const raw = await dbGet(env, key);
+  let previous = null;
+  try { previous = raw ? JSON.parse(raw) : null; } catch {}
+  const duplicate = Boolean(previous && previous.fingerprint === fingerprint && Date.now() - Number(previous.at || 0) < windowMs);
+  if (!duplicate) await dbPut(env, key, JSON.stringify({ fingerprint, at: Date.now() }));
+  return duplicate;
+}
+
 const QQAI_V1_R54_PROGRESSIVE_MULTI_ACTION_MARKER = "QQAI_V1_R54_PROGRESSIVE_MULTI_ACTION_MARKER";
 
 
@@ -780,6 +816,20 @@ const QQAIWorker = {
       let naturalLanguageIntent = null;
       let privateAccessMode = "";
       let privateAccessChecked = false;
+
+      // 政治相关普通聊天在进入任何意图分类器或聊天模型前静默丢弃；明确 ! 指令仍可用于管理设置。
+      if (!isCommandMessage && isPoliticalTopicText(cleanMessage)) {
+        await clearThinkingIndicator();
+        ctx.waitUntil(writeSystemAudit(env, {
+          type: "political_topic_silent_drop",
+          groupId: currentGroupId,
+          actorId: userId,
+          action: "silent_drop",
+          messageId: replyMessageId,
+          detector: "local_v1"
+        }).catch(() => {}));
+        return new Response(null, { status: 204 });
+      }
 
       // 自我禁言只能由本人私讯解除。该命令独立于私聊 AI 开关，成功或失败都不发送聊天提示。
       const privateSelfUnmuteCommand = isPrivate && cleanMessage.match(/^[!！](?:解除禁言|解禁)(?:\s+(\d{5,}))?$/i);
@@ -3052,7 +3102,7 @@ const QQAIWorker = {
 1. 政治红线（智能求生欲）：严格遵守中国大陆平台（QQ）的审查底线，防范真正的封号风险。
 - 【允许回答】：公开的国际地理、普通历史百科事实、外国元首名字等纯客观常识（例如问“法国现任总统是谁”、“大众汽车是哪国的”）。请用群友的口吻极简、客观地直接回答，绝对不要进行任何政治体制、意识形态的延伸讨论。
 - 【绝对禁止】：任何涉及中国本土当代政治、国家领导人、敏感历史事件、领土争议、时政热点新闻评论或任何带有主观立场的敏感话题。
-- 【严厉警告机制】：只有当群友故意聊起【绝对禁止】的严重违规话题时，你才必须立刻收起人设，切换为极度严肃的语气明确警告对方：“无法回答此类问题。您的发言已涉嫌违反平台政治敏感内容管理规范，请立即停止相关话题，否则将面临封禁风险”。
+- 【静默机制】：遇到【绝对禁止】的政治敏感话题只输出 [SKIP]，不得警告、解释、拒绝或延伸讨论；Worker 会把 [SKIP] 静默丢弃。
 2. 格式规则：默认聊天尽量精炼，普通闲聊可控制在约 250 字内；但用户明确提问、要求解释、总结、列出步骤或完整说明时，回答完整性优先，可以超过 250 字，并由系统按完整句子自动分段发送。绝对禁止在句子中途为了字数上限硬截断。回复没有最小字数；语境适合时仍可只回复“6”“666”“nb”“?”“？”“？？？”或“???”。绝对禁止输出任何 Markdown 格式（如 **、#、\`\`\`）。
 3. 记忆隔离：历史记录仅供参考事实。你「绝对不准」模仿、复制或代入历史记录中其他人的说话风格、人设或口头禅，对别人的风格完全免疫。
 4. 表情与动作控制：每说完一段话最多配 1 到 2 个标准 Emoji，禁止泛滥。绝对禁止输出任何 [CQ:...] 底层代码。Worker 会根据语境决定引用、@ 或纯文字发送。
@@ -3544,8 +3594,9 @@ ${deepseekContextSummary}`;
         return jsonReply(`${atSender}${classified.userText}`);
       }
 
-      if (isAutoInterject && /^\s*\[SKIP\]\s*$/i.test(baseText)) {
-        ctx.waitUntil(writeAiDecisionLog(env, { ...aiDecisionBase, decision: "skipped", reason: "model_declined_interjection", triggerType, provider: usedProvider, model: usedModel, interjectJudgement, searchRequired: searchInfo.required, searchAttempted: searchInfo.attempted, searchPerformed: searchInfo.performed, searchQuery: searchInfo.query, searchContext: searchInfo.context, searchSources: searchInfo.sources, searchQueries: searchInfo.queries, searchProvider: searchInfo.provider, searchModel: searchInfo.model, searchError: searchInfo.error, contextMessageCount: groupConversationLogs.length, contextSummaryProvider: longGroupContext?.summaryProvider || "" }));
+      if (/^\s*\[SKIP\]\s*$/i.test(baseText)) {
+        ctx.waitUntil(writeAiDecisionLog(env, { ...aiDecisionBase, decision: "skipped", reason: isAutoInterject ? "model_declined_interjection" : "model_declined_response", triggerType, provider: usedProvider, model: usedModel, interjectJudgement, searchRequired: searchInfo.required, searchAttempted: searchInfo.attempted, searchPerformed: searchInfo.performed, searchQuery: searchInfo.query, searchContext: searchInfo.context, searchSources: searchInfo.sources, searchQueries: searchInfo.queries, searchProvider: searchInfo.provider, searchModel: searchInfo.model, searchError: searchInfo.error, contextMessageCount: groupConversationLogs.length, contextSummaryProvider: longGroupContext?.summaryProvider || "" }));
+        await clearThinkingIndicator();
         return new Response(null, { status: 204 });
       }
 
@@ -3589,6 +3640,24 @@ ${deepseekContextSummary}`;
         replyText = searchInfo.performed && searchInfo.context
           ? appendSearchSources(searchInfo.context, searchInfo.sources || [])
           : "这个问题需要查证，但本轮没有成功取得可验证的联网检索结果。我不会假装稍后还会继续处理，请稍后重新提问。";
+      }
+
+      if (await shouldSuppressRepeatedShortReply(env, {
+        isGroup,
+        groupId: currentGroupId,
+        text: replyText
+      })) {
+        await clearThinkingIndicator();
+        ctx.waitUntil(writeAiDecisionLog(env, {
+          ...aiDecisionBase,
+          decision: "skipped",
+          reason: "repeated_short_reply_guard",
+          triggerType,
+          provider: usedProvider,
+          model: usedModel,
+          generatedReply: replyText.slice(0, 80)
+        }).catch(() => {}));
+        return new Response(null, { status: 204 });
       }
 
       // 1. 群聊使用每回合独立行追加，避免同群多人并发时整份历史互相覆盖；私聊仍按单用户顺序保存。
@@ -4254,6 +4323,16 @@ export class OneBotHub {
 
   async notifyExplicitReplyFailureOnce(body, disposition, extra = {}) {
     if (!eventHasBotMention(body) && body?.__qqai_explicit_question !== true) return;
+    if (body?.message_type === "group") {
+      const groupId = String(body?.group_id || "");
+      if (!groupId || !(await isGroupWhitelisted(this.env, groupId))) {
+        await this.recordIngress(body, "failure_notice_suppressed_non_whitelist", {
+          disposition: String(disposition || "worker_no_reply"),
+          status: Number(extra.status || 0)
+        }).catch(() => {});
+        return;
+      }
+    }
     const key = `${this.explicitReplyQuestionId(body)}:${String(disposition || "unknown")}`;
     if (this.explicitReplyFailureNotified.has(key)) return;
 

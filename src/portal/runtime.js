@@ -1565,20 +1565,60 @@ ${summary}`.slice(0, 4000),
     const ids = await readJson(env, `conversation:index:${groupId}`, []);
     const q = String(url.searchParams.get("q") || "").trim().toLowerCase();
     const violationOnly = url.searchParams.get("violation") === "1";
-    const limit = Math.max(1, Math.min(1000, Number(url.searchParams.get("limit") || 300)));
+    const requestedPage = Math.max(1, Math.floor(Number(url.searchParams.get("page") || 1) || 1));
+    const requestedPageSize = Math.floor(Number(url.searchParams.get("pageSize") || url.searchParams.get("limit") || 20) || 20);
+    const pageSize = Math.max(1, Math.min(100, requestedPageSize));
+    const orderedIds = ids.slice(-5000).reverse();
     const botRuleState = await getBotGroupRole(env, groupId);
     const recordViolationAvailable = botCanRunRuleMonitor(botRuleState);
-    const items = [];
-    for (const id of ids.slice(-5000).reverse()) {
+
+    const readConversation = async id => {
       const item = await readJson(env, `conversation:${groupId}:${id}`, null);
-      if (!item || item.source !== "group_member") continue;
-      if (q && !`${item.senderName || ""} ${item.userId || ""} ${item.text || ""} ${JSON.stringify(item.forwardSnapshots || [])}`.toLowerCase().includes(q)) continue;
-      if (violationOnly && !item.violationActive) continue;
+      return item && item.source === "group_member" ? item : null;
+    };
+    const enrichConversation = async item => {
+      if (!item) return null;
       const violation = item.violationId ? await readJson(env, `ruleviolation:${item.violationId}`, null) : null;
-      items.push({ ...item, violation: violation ? { id: violation.id, type: violation.violationType, reason: violation.reason, actionTaken: violation.actionTaken, actionResult: violation.actionResult, humanVerdict: violation.humanVerdict } : null });
-      if (items.length >= limit) break;
+      return { ...item, violation: violation ? { id: violation.id, type: violation.violationType, reason: violation.reason, actionTaken: violation.actionTaken, actionResult: violation.actionResult, humanVerdict: violation.humanVerdict } : null };
+    };
+
+    let total = 0;
+    let page = requestedPage;
+    let items = [];
+    if (!q && !violationOnly) {
+      total = orderedIds.length;
+      const totalPages = Math.max(1, Math.ceil(total / pageSize));
+      page = Math.min(page, totalPages);
+      const pageIds = orderedIds.slice((page - 1) * pageSize, page * pageSize);
+      const rows = await Promise.all(pageIds.map(readConversation));
+      items = (await Promise.all(rows.filter(Boolean).map(enrichConversation))).filter(Boolean);
+    } else {
+      const matches = [];
+      for (let offset = 0; offset < orderedIds.length; offset += 50) {
+        const batchIds = orderedIds.slice(offset, offset + 50);
+        const rows = await Promise.all(batchIds.map(readConversation));
+        for (const item of rows) {
+          if (!item) continue;
+          if (q && !`${item.senderName || ""} ${item.userId || ""} ${item.text || ""} ${JSON.stringify(item.forwardSnapshots || [])}`.toLowerCase().includes(q)) continue;
+          if (violationOnly && !item.violationActive) continue;
+          matches.push(item);
+        }
+      }
+      total = matches.length;
+      const totalPages = Math.max(1, Math.ceil(total / pageSize));
+      page = Math.min(page, totalPages);
+      const selected = matches.slice((page - 1) * pageSize, page * pageSize);
+      items = (await Promise.all(selected.map(enrichConversation))).filter(Boolean);
     }
-    return jsonResponse({ ok: true, items, capabilities: {
+    const totalPages = Math.max(1, Math.ceil(total / pageSize));
+    return jsonResponse({ ok: true, items, pagination: {
+      page,
+      pageSize,
+      total,
+      totalPages,
+      hasPrevious: page > 1,
+      hasNext: page < totalPages
+    }, capabilities: {
       reply: true,
       setEssence: true,
       deleteEssence: true,
@@ -2639,7 +2679,7 @@ function getPortalHomePage(host) {
 <script>
 (function(){
 'use strict';
-var token='';var currentGroup='';var session=null;var conversationCapabilities={recordViolation:true};var PORTAL_SIDEBAR_COLLAPSIBLE='v1';
+var token='';var currentGroup='';var session=null;var conversationCapabilities={recordViolation:true};var conversationPage=1,conversationPageSize=20,conversationTotalPages=1,conversationRequestSerial=0;var PORTAL_SIDEBAR_COLLAPSIBLE='v1';
 var $=function(id){return document.getElementById(id)};
 function activeTheme(){return document.documentElement.dataset.theme==='dark'?'dark':'light'}
 function updateThemeButtons(){var dark=activeTheme()==='dark';if($('loginThemeToggle'))$('loginThemeToggle').textContent=dark?'切换白色模式':'切换黑色模式';if($('themeToggle'))$('themeToggle').textContent=dark?'白色模式':'黑色模式'}
@@ -2805,7 +2845,8 @@ function healthStatusText(v){return({ok:'正常',warning:'警告',error:'错误'
 function humanizeHealthDetail(value){if(value==null||value==='')return '无详细信息';if(typeof value==='string')return value;var labels={connected:'已连接',sockets:'连接数',transportMode:'连接保存模式',connectionId:'连接编号',connectedAt:'连接建立时间',heartbeatAgeMs:'距离最后心跳（毫秒）',reconnectCount:'累计连接次数',closeCount:'累计关闭次数',errorCount:'累计错误次数',lastClose:'最近关闭详情',lastSocketError:'最近连接错误',recentGroupIngress:'最近各群收件诊断',pendingRpc:'等待中的 RPC',inFlightQuestions:'执行中的问题',queuedQuestions:'排队中的问题',lastHeartbeatAt:'最后心跳时间',configured:'已配置',enabled:'已启用',keys:'Key 数量',key:'使用的 Key',reachable:'可连接',model:'模型',provider:'提供者',responsePreview:'响应预览',preview:'响应预览',latencyMs:'耗时毫秒',keyPool:'Key 池',checkedAt:'检查时间',usage:'用量',attempts:'尝试记录',status:'状态',message:'消息',dimensions:'向量维度',matches:'匹配数量',lastRunAt:'上次执行时间',mode:'模式'};return Object.keys(value).map(function(k){var v=value[k];if((k==='lastHeartbeatAt'||k==='connectedAt'||k==='lastRunAt'||/At$/.test(k))&&v){try{v=new Date(Number(v)||v).toLocaleString('zh-CN',{timeZone:'Asia/Taipei'})}catch(e){}}if(typeof v==='boolean')v=v?'是':'否';else if(v&&typeof v==='object')v=JSON.stringify(v);return(labels[k]||k)+'：'+v}).join('\n')}
 async function loadModelCheckCandidates(){var box=$('singleModelHealth');if(!box||!session)return;var dev=!!((session.permissions||{}).developer);box.classList.toggle('hidden',!dev);if(!dev)return;var r=await api('/health/model-candidates');if(!r.ok){$('modelCheckResult').textContent=r.message||'无法读取模型列表';return}var list=[];(r.candidates||[]).forEach(function(x){list.push(x)});$('modelCheckCandidates').innerHTML=list.map(function(x){return '<option value="'+esc(x.model||x.id||x)+'">'+esc((x.provider||'')+' '+(x.keyPool||''))+'</option>'}).join('');if(!$('modelCheckModel').value&&list.length){$('modelCheckModel').value=list[0].model||list[0].id||list[0];if(list[0].provider)$('modelCheckProvider').value=list[0].provider;if(list[0].keyPool)$('modelCheckKeyPool').value=list[0].keyPool}var m=r.limits||{};var rows=[['图片 AI 读取上限',(m.imageMiB||0)+' MiB'],['语音 AI 读取上限',(m.audioMiB||0)+' MiB'],['视频 AI 读取上限',(m.videoMiB||0)+' MiB'],['转发包数量',Number(m.forwardBundles||0).toLocaleString()],['每包转发节点',Number(m.forwardNodes||0).toLocaleString()],['转发文字',Number(m.forwardTextChars||0).toLocaleString()+' 字符'],['文件正文',m.documentMode||'仅记录元数据']];$('mediaLimitList').innerHTML=rows.map(function(x){return '<div class="media-limit-row"><span>'+esc(x[0])+'</span><b>'+esc(x[1])+'</b></div>'}).join('')}
 async function runSingleModelCheck(){var b=$('runModelCheck'),model=$('modelCheckModel').value.trim();if(!model){toast('请输入模型 ID');return}b.disabled=true;b.textContent='检查中…';$('modelCheckResult').textContent='正在向指定模型发送最小请求。';var r=await api('/health/model-check','POST',{provider:$('modelCheckProvider').value,model:model,keyPool:$('modelCheckKeyPool').value});b.disabled=false;b.textContent='检查此模型';$('modelCheckResult').textContent=r.ok?humanizeHealthDetail(r.result||r):String(r.message||'模型检查失败')}
-async function loadConversations(){if(!currentGroup){$('conversationList').innerHTML='<div class="empty">请先选择群组</div>';return}var p=new URLSearchParams({q:$('convSearch').value||'',limit:'500'});if($('convViolationOnly').checked)p.set('violation','1');var r=await api('/conversations?'+p.toString());if(!r.ok){$('conversationList').innerHTML='<div class="empty">'+esc(r.message)+'</div>';return}conversationCapabilities=r.capabilities||{recordViolation:false};$('conversationList').innerHTML=(r.items||[]).map(renderConversationRecord).join('')||'<div class="empty">没有符合条件的群友消息</div>';$('conversationList').querySelectorAll('[data-conv-action]').forEach(function(b){b.onclick=function(){handleConversationAction(this.dataset.id,this.dataset.convAction)}});$('conversationList').querySelectorAll('[data-attachment-preview]').forEach(function(b){b.onclick=function(){openAttachmentPreview(this.dataset.attachmentPreview,this.dataset.attachmentType,this.dataset.attachmentName)}})}
+function ensureConversationPager(){if($('conversationPager')||!$('conversationList'))return;var wrap=document.createElement('div');wrap.id='conversationPager';wrap.className='card';wrap.style.marginBottom='12px';wrap.innerHTML='<div class="row"><label class="row" style="gap:6px">每页<select id="conversationPageSize"><option value="20">20</option><option value="50">50</option><option value="100">100</option></select></label><button id="conversationPrev" class="btn">上一页</button><span id="conversationPageStatus" class="grow muted">第 1 / 1 页</span><button id="conversationNext" class="btn">下一页</button></div>';$('conversationList').parentNode.insertBefore(wrap,$('conversationList'));$('conversationPageSize').value=String(conversationPageSize);if($('convSearch')){$('convSearch').onkeydown=function(e){if(e.key==='Enter')loadConversations(1)}}if($('convViolationOnly'))$('convViolationOnly').onchange=function(){loadConversations(1)};if($('convSearchBtn'))$('convSearchBtn').onclick=function(){loadConversations(1)};$('conversationPageSize').onchange=function(){conversationPageSize=Math.max(1,Math.min(100,Number(this.value)||20));loadConversations(1)};$('conversationPrev').onclick=function(){if(conversationPage>1)loadConversations(conversationPage-1)};$('conversationNext').onclick=function(){if(conversationPage<conversationTotalPages)loadConversations(conversationPage+1)}}
+async function loadConversations(page){if(!currentGroup){$('conversationList').innerHTML='<div class="empty">请先选择群组</div>';return}ensureConversationPager();conversationPage=Math.max(1,Number(page||conversationPage)||1);var serial=++conversationRequestSerial;var p=new URLSearchParams({q:$('convSearch').value||'',page:String(conversationPage),pageSize:String(conversationPageSize)});if($('convViolationOnly').checked)p.set('violation','1');$('conversationList').innerHTML='<div class="empty">正在加载第 '+conversationPage+' 页…</div>';var r=await api('/conversations?'+p.toString());if(serial!==conversationRequestSerial)return;if(!r.ok){$('conversationList').innerHTML='<div class="empty">'+esc(r.message)+'</div>';return}conversationCapabilities=r.capabilities||{recordViolation:false};var pg=r.pagination||{};conversationPage=Math.max(1,Number(pg.page||conversationPage)||1);conversationPageSize=Math.max(1,Math.min(100,Number(pg.pageSize||conversationPageSize)||20));conversationTotalPages=Math.max(1,Number(pg.totalPages||1)||1);if($('conversationPageSize'))$('conversationPageSize').value=String(conversationPageSize);if($('conversationPageStatus'))$('conversationPageStatus').textContent='第 '+conversationPage+' / '+conversationTotalPages+' 页｜共 '+Number(pg.total||0)+' 条';if($('conversationPrev'))$('conversationPrev').disabled=!pg.hasPrevious;if($('conversationNext'))$('conversationNext').disabled=!pg.hasNext;$('conversationList').innerHTML=(r.items||[]).map(renderConversationRecord).join('')||'<div class="empty">没有符合条件的群友消息</div>';$('conversationList').querySelectorAll('[data-conv-action]').forEach(function(b){b.onclick=function(){handleConversationAction(this.dataset.id,this.dataset.convAction)}});$('conversationList').querySelectorAll('[data-attachment-preview]').forEach(function(b){b.onclick=function(){openAttachmentPreview(this.dataset.attachmentPreview,this.dataset.attachmentType,this.dataset.attachmentName)}})}
 function safeAttachmentUrl(value){try{var u=new URL(String(value||''),location.href);return /^https?:$/.test(u.protocol)?u.href:''}catch(e){return''}}
 function attachmentTypeText(type){return({image:'图片',record:'语音',audio:'语音',video:'视频',file:'文件'})[String(type||'').toLowerCase()]||'附件'}
 function conversationAttachmentProxy(x,source,index,download){var p=new URLSearchParams({id:String(x.messageId||''),source:source,index:String(index)});if(download)p.set('download','1');return'/api/portal/conversations/attachment?'+p.toString()}
