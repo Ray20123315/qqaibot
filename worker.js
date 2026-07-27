@@ -16,7 +16,7 @@ import { MASTER_RELATIONSHIP_DEFAULTS, MASTER_RELATIONSHIP_MAX_LEVEL, clearPartn
 import { appendPortalConversationRecord, applyConversationOutputGuards, auditIgnoredRobotMessage, botInteractionAllowKey, buildReplyPlan, cacheBotSenderClassification, clearRegisteredThinkingIndicators, detectLiteralPseudoElementLabels, eventHasBotMention, eventMentionedQqs, eventPlainText, eventSenderDisplayName, eventSenderRobotHint, extractFileDescriptors, extractForwardIds, extractMediaDescriptor, extractMessageText, extractOutboundMediaTypes, extractTextMentionIds, filterRobotMentionIds, formatForwardContext, getForwardMessageSnapshot, getQuotedMessage, getTaipeiTimeContext, isExplicitCurrentTimeQuestion, isExplicitRoleplayRequest, isGroupRobotInteractionAllowed, isIgnoredGroupRobotSender, isStandaloneCurrentTimeQuestion, looksLikeRobotDisplayName, normalizeFileDescriptor, parseDurationSeconds, prepareConversationHistory, purgeLegacyBotRepliesFromRecentLogs, qqaiTruthyRobotFlag, recordStructuredMessage, registerThinkingIndicator, removeTextMentionTokens, resolveOneBotMediaAsBase64, runOneBotGroupOperation, sanitizeAiReply, sendThinkingIndicator, thinkingIndicatorRegistryKey } from "./src/onebot/messages.js";
 import { classifyCollaborationNaturalIntent, classifyNaturalLanguageCommandIntent, normalizeNaturalLanguageCommandText, opsGetGroupMember, opsGetSettings, opsHandleActivityCommand, opsHandleMemberLeave, opsProcessAutomations } from "./src/operations/runtime.js";
 import { processPlatformJobs } from "./src/platform/runtime.js";
-import { authDbDelStrict, authDbGetStrict, authDbPutStrict, clearPasswordLoginGuard, commandChangesWebSettings, constantTimeEqual, createPortalSession, decryptPortalAuthSecret, deleteMemoryVector, generateSixDigitCode, getOneBotHub, getPortalSession, getPublicNebulaSeed, hashBackupCode, isMemoryBanned, jsonResponse, markGroupMemberLeft, notePasswordLoginFailure, portalSessionCookie, readCookie, readJson, readPasswordLoginGuard, readPortalAuthJson, sendOneBotAction, sendOneBotHttpAction, sendPortalVerificationMessage, upsertGroupMember, upsertMemoryVector, verifyPortalPassword, verifyPortalVerificationCode, verifyTotpCode, writeMemoryAudit, writeSystemError } from "./src/portal/auth.js";
+import { authDbDelStrict, authDbGetStrict, authDbPutStrict, clearPasswordLoginGuard, commandChangesWebSettings, constantTimeEqual, createPortalPasswordRecord, createPortalSession, decryptPortalAuthSecret, deleteMemoryVector, generateSixDigitCode, getOneBotHub, getPortalSession, getPublicNebulaSeed, hashBackupCode, isMemoryBanned, isValidPortalPasswordRecord, jsonResponse, markGroupMemberLeft, notePasswordLoginFailure, portalSessionCookie, readCookie, readJson, readPasswordLoginGuard, readPortalAuthJson, sendOneBotAction, sendOneBotHttpAction, sendPortalVerificationMessage, upsertGroupMember, upsertMemoryVector, validatePortalPassword, verifyPortalPassword, verifyPortalVerificationCode, verifyTotpCode, writeMemoryAudit, writeSystemError } from "./src/portal/auth.js";
 import { getLiveHtmlPage, getPortalHomePage, handleGeminiLiveUpgrade, handlePortalApi } from "./src/portal/runtime.js";
 import { injectPortalLayoutClient } from "./src/portal/layout.js";
 import { injectPortalMembersClient } from "./src/portal/members.js";
@@ -295,6 +295,29 @@ const QQAIWorker = {
       }, 200, { "Set-Cookie": portalSessionCookie(session.token, session.persistent ? DEFAULTS.portalSessionCookieSeconds : null) });
     }
 
+    if (request.method === 'POST' && url.pathname === '/api/auth/reset-password') {
+      let payload = {};
+      try { payload = await request.json(); } catch (e) {}
+      const qq = String(payload.qq || "").replace(/\D/g, "");
+      const code = String(payload.code || "").replace(/\D/g, "");
+      const newPassword = String(payload.newPassword || "");
+      if (!/^\d{5,12}$/.test(qq) || !/^\d{6}$/.test(code)) return jsonResponse({ ok: false, message: "请输入正确的 QQ 号和六位验证码。" }, 400);
+      const validation = validatePortalPassword(newPassword);
+      if (!validation.ok) return jsonResponse({ ok: false, code: "PASSWORD_POLICY", message: validation.message }, 400);
+      try {
+        const verified = await verifyPortalVerificationCode(env, qq, code, { consume: false });
+        if (!verified.ok) return jsonResponse(verified, 400);
+        const record = await createPortalPasswordRecord(validation.value);
+        await authDbPutStrict(env, `portal_auth_password:${qq}`, JSON.stringify(record));
+        await authDbDelStrict(env, `portal_auth_code:${qq}`);
+        await clearPasswordLoginGuard(env, qq);
+        await writeSystemAudit(env, { type: "portal_auth_security", actorId: qq, action: "password_reset_by_qq_code" }).catch(() => {});
+        return jsonResponse({ ok: true, message: "密码已通过 QQ 验证码重设。现在可以使用新密码登录。" });
+      } catch (error) {
+        return jsonResponse({ ok: false, code: error?.code || "AUTH_STORAGE_UNAVAILABLE", message: "密码重设失败，验证码尚未消耗，请稍后重试。" }, 503);
+      }
+    }
+
     if (request.method === 'POST' && url.pathname === '/api/auth/login-password') {
       let payload = {};
       try { payload = await request.json(); } catch (e) {}
@@ -308,6 +331,7 @@ const QQAIWorker = {
         }
         const passwordRecord = await readPortalAuthJson(env, `portal_auth_password:${qq}`, null);
         if (!passwordRecord) return jsonResponse({ ok: false, code: "PASSWORD_NOT_SET", message: "此 QQ 尚未设置密码，请先使用 QQ 验证码登录。" }, 404);
+        if (!isValidPortalPasswordRecord(passwordRecord)) return jsonResponse({ ok: false, code: "PASSWORD_RECORD_INVALID", message: "密码记录已损坏或格式过旧，请使用 QQ 验证码重设密码。" }, 409);
         if (!(await verifyPortalPassword(password, passwordRecord))) {
           await notePasswordLoginFailure(env, qq);
           return jsonResponse({ ok: false, code: "PASSWORD_INVALID", message: "QQ 号或密码错误。" }, 401);

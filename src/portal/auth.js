@@ -183,10 +183,28 @@ async function createPortalPasswordRecord(password) {
 
 
 
+function isValidPortalPasswordRecord(record) {
+  if (!record || typeof record !== "object" || record.algorithm !== "PBKDF2-SHA-256") return false;
+  const iterations = Number(record.iterations || 0);
+  if (!Number.isInteger(iterations) || iterations < 10000 || iterations > 2000000) return false;
+  if (typeof record.salt !== "string" || typeof record.hash !== "string") return false;
+  try {
+    const salt = base64UrlToBytes(record.salt);
+    const hash = base64UrlToBytes(record.hash);
+    return salt.length >= 16 && salt.length <= 64 && hash.length === 32;
+  } catch {
+    return false;
+  }
+}
+
 async function verifyPortalPassword(password, record) {
-  if (!record || record.algorithm !== "PBKDF2-SHA-256") return false;
-  const actual = await derivePortalPassword(String(password || ""), base64UrlToBytes(record.salt), Number(record.iterations || 120000));
-  return constantTimeEqual(actual, base64UrlToBytes(record.hash));
+  if (!isValidPortalPasswordRecord(record)) return false;
+  try {
+    const actual = await derivePortalPassword(String(password || ""), base64UrlToBytes(record.salt), Number(record.iterations));
+    return constantTimeEqual(actual, base64UrlToBytes(record.hash));
+  } catch {
+    return false;
+  }
 }
 
 
@@ -928,4 +946,4 @@ async function writePortalSettingValue(env, definition, groupId, targetQq, value
   }
 }
 
-export { BASE32_ALPHABET, PORTAL_SETTING_DEFINITIONS, authDbDelStrict, authDbGetStrict, authDbPutStrict, authDbRetry, authStorageError, base32Decode, base32Encode, base64UrlToBytes, buildGroupReplyMessage, bytesToBase64Url, bytesToHex, clearPasswordLoginGuard, commandChangesWebSettings, constantTimeEqual, createPortalPasswordRecord, createPortalSession, decryptPortalAuthSecret, deleteMemoryVector, derivePortalPassword, encryptPortalAuthSecret, extractGroupId, generateBackupCodes, generateSixDigitCode, generateTotpCode, getOneBotHub, getPortalSession, getPublicNebulaSeed, getUserQuota, hasAdminRole, hashBackupCode, isMemoryBanned, jsonResponse, markGroupMemberLeft, migratePortalMemories, normalizeBackupCode, notePasswordLoginFailure, oneBotHttpActionUrl, portalAuthEncryptionKey, portalAuthEncryptionMaterial, portalRoleRank, portalSessionCookie, randomBytes, readCookie, readJson, readPasswordLoginGuard, readPortalAuthJson, readPortalSettingValue, resolvePortalRole, searchPortalVectors, sendOneBotAction, sendOneBotHttpAction, sendPortalVerificationMessage, sha256Hex, simplifyJsonValue, upsertGroupMember, upsertMemoryVector, validatePortalPassword, verifyPortalPassword, verifyPortalVerificationCode, verifyTotpCode, writeMemoryAudit, writePortalSettingValue, writeSystemError };
+export { BASE32_ALPHABET, PORTAL_SETTING_DEFINITIONS, authDbDelStrict, authDbGetStrict, authDbPutStrict, authDbRetry, authStorageError, base32Decode, base32Encode, base64UrlToBytes, buildGroupReplyMessage, bytesToBase64Url, bytesToHex, clearPasswordLoginGuard, commandChangesWebSettings, constantTimeEqual, createPortalPasswordRecord, createPortalSession, decryptPortalAuthSecret, deleteMemoryVector, derivePortalPassword, encryptPortalAuthSecret, extractGroupId, generateBackupCodes, generateSixDigitCode, generateTotpCode, getOneBotHub, getPortalSession, getPublicNebulaSeed, getUserQuota, hasAdminRole, hashBackupCode, isMemoryBanned, isValidPortalPasswordRecord, jsonResponse, markGroupMemberLeft, migratePortalMemories, normalizeBackupCode, notePasswordLoginFailure, oneBotHttpActionUrl, portalAuthEncryptionKey, portalAuthEncryptionMaterial, portalRoleRank, portalSessionCookie, randomBytes, readCookie, readJson, readPasswordLoginGuard, readPortalAuthJson, readPortalSettingValue, resolvePortalRole, searchPortalVectors, sendOneBotAction, sendOneBotHttpAction, sendPortalVerificationMessage, sha256Hex, simplifyJsonValue, upsertGroupMember, upsertMemoryVector, validatePortalPassword, verifyPortalPassword, verifyPortalVerificationCode, verifyTotpCode, writeMemoryAudit, writePortalSettingValue, writeSystemError };

@@ -7,14 +7,14 @@ const ROUTING_KEY_PREFIX = "human_notification_routing:";
 const NOTIFICATION_ROUTE_MODES = Object.freeze(["managers", "developer", "none", "owner"]);
 
 const NOTIFICATION_EVENT_DEFINITIONS = Object.freeze([
-  { id: "join_request_pending", label: "入群申请待人工审核", description: "AI 无法安全自动处理，或资料不足时通知。", defaultEnabled: true, defaultMode: "managers" },
-  { id: "join_request_failed", label: "入群申请自动处理失败", description: "自动同意、拒绝或分群成员直通执行失败时通知。", defaultEnabled: true, defaultMode: "managers" },
-  { id: "moderation_proposal", label: "群管理操作待确认", description: "Portal 建立禁言、踢出、管理员调整等待确认操作时通知。", defaultEnabled: true, defaultMode: "managers" },
-  { id: "group_work_request", label: "群务请求待处理", description: "机器人建立需要管理人工决定的群务工作单时通知。", defaultEnabled: true, defaultMode: "managers" },
-  { id: "appeal_created", label: "申诉待处理", description: "成员提交新的申诉对话串时通知。", defaultEnabled: true, defaultMode: "managers" },
-  { id: "suggestion_created", label: "建议箱有新内容", description: "成员提交新建议时通知。", defaultEnabled: false, defaultMode: "managers" },
+  { id: "join_request_pending", label: "入群申请待人工审核", description: "AI 无法安全自动处理，或资料不足时通知。", defaultEnabled: true, defaultMode: "developer" },
+  { id: "join_request_failed", label: "入群申请自动处理失败", description: "自动同意、拒绝或分群成员直通执行失败时通知。", defaultEnabled: true, defaultMode: "developer" },
+  { id: "moderation_proposal", label: "群管理操作待确认", description: "Portal 建立禁言、踢出、管理员调整等待确认操作时通知。", defaultEnabled: true, defaultMode: "developer" },
+  { id: "group_work_request", label: "群务请求待处理", description: "机器人建立需要管理人工决定的群务工作单时通知。", defaultEnabled: true, defaultMode: "developer" },
+  { id: "appeal_created", label: "申诉待处理", description: "成员提交新的申诉对话串时通知。", defaultEnabled: true, defaultMode: "developer" },
+  { id: "suggestion_created", label: "建议箱有新内容", description: "成员提交新建议时通知。", defaultEnabled: false, defaultMode: "developer" },
   { id: "bug_created", label: "问题追踪有新回报", description: "成员提交新问题追踪时通知。", defaultEnabled: true, defaultMode: "developer" },
-  { id: "quality_feedback_created", label: "质量回报待处理", description: "成员提交新的质量回报时通知。", defaultEnabled: true, defaultMode: "managers" }
+  { id: "quality_feedback_created", label: "质量回报待处理", description: "成员提交新的质量回报时通知。", defaultEnabled: true, defaultMode: "developer" }
 ]);
 
 const EVENT_BY_ID = new Map(NOTIFICATION_EVENT_DEFINITIONS.map(item => [item.id, item]));
@@ -35,24 +35,30 @@ function defaultRouteFor(definition) {
   };
 }
 
-function normalizeRoute(value, definition) {
+function normalizeRoute(value, definition, { migrateLegacyImplicitManagers = false } = {}) {
   const source = value && typeof value === "object" ? value : {};
   const fallback = defaultRouteFor(definition);
+  const managerIds = cleanManagerIds(source.managerIds);
+  let mode = NOTIFICATION_ROUTE_MODES.includes(String(source.mode || "")) ? String(source.mode) : fallback.mode;
+  if (migrateLegacyImplicitManagers && mode === "managers" && managerIds.length === 0) mode = "developer";
   return {
     enabled: typeof source.enabled === "boolean" ? source.enabled : fallback.enabled,
-    mode: NOTIFICATION_ROUTE_MODES.includes(String(source.mode || "")) ? String(source.mode) : fallback.mode,
-    managerIds: cleanManagerIds(source.managerIds)
+    mode,
+    managerIds
   };
 }
 
 function normalizeNotificationRoutingConfig(value, groupId = "") {
   const source = value && typeof value === "object" ? value : {};
+  const sourceVersion = Number(source.version || 0);
+  const hasStoredRoutes = Boolean(source.routes && typeof source.routes === "object");
+  const migrateLegacyImplicitManagers = hasStoredRoutes && sourceVersion < 2;
   const routes = {};
   for (const definition of NOTIFICATION_EVENT_DEFINITIONS) {
-    routes[definition.id] = normalizeRoute(source?.routes?.[definition.id], definition);
+    routes[definition.id] = normalizeRoute(source?.routes?.[definition.id], definition, { migrateLegacyImplicitManagers });
   }
   return {
-    version: 1,
+    version: 2,
     groupId: cleanId(source.groupId || groupId),
     ownerEnabled: source.ownerEnabled === true,
     routes,

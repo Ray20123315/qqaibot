@@ -1,12 +1,15 @@
 {
-  "version": "2.7.8",
-  "notificationPolicy": "portal-only-with-private-developer-failure-details",
+  "version": "2.7.9",
+  "notificationPolicy": "developer-only-by-default-with-explicit-opt-in",
   "added": [
-    "新增同号自身输出的 Durable Object 前置拦截，API 回覆在进入狼人杀、问题队列或 Worker 前即被识别",
-    "新增永久回归测试，确保机器人账号人工指令仍可使用，同时阻止 message_sent 与 message 双重上报造成循环"
+    "新增 QQ 验证码重设 Portal 密码流程，不需要旧密码即可建立新的安全密码记录",
+    "新增真实 PBKDF2 密码建立、正确验证、错误密码与损坏记录回归测试",
+    "新增通知路由旧版隐式全管理员配置迁移，只保留明确指定的管理员选择"
   ],
   "fixed": [
-    "修复 outbound_pending 指纹首次命中后立即删除，导致第二份重复自身事件被当成新输入的问题",
-    "修复使用机器人账号执行指令后，机器人回覆并 @ 自己，随后继续自我回覆和重复 @ 的循环"
+    "修复通知路由网页调用错误 API 路径，导致读取与保存收到非 JSON 响应",
+    "修复通知路由存储或成员资料读取异常时没有稳定 JSON 错误响应",
+    "修复默认通知多个管理员造成干扰，所有事件现在默认只通知开发者",
+    "修复损坏密码记录被误报为资料库故障且无法自行恢复的问题"
   ]
 }

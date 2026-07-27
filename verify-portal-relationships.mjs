@@ -2,7 +2,7 @@ import fs from 'node:fs';
 
 function assert(condition, message) { if (!condition) throw new Error(message); }
 const pkg = JSON.parse(fs.readFileSync('package.json', 'utf8'));
-assert(pkg.version === '2.7.8', 'Package version must be 2.5.2');
+assert(pkg.version === '2.7.9', 'Package version must be 2.5.2');
 assert(pkg.scripts.check.includes('verify-portal-relationships.mjs'), 'Portal relationship verification must run permanently');
 const bindings = fs.readFileSync('src/moderation/partner-bindings.js', 'utf8');
 assert(bindings.includes('createDirectMasterBinding'), 'Storage must support direct master pairing');
