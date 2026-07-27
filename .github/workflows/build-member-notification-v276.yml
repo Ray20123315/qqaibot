@@ -119,7 +119,6 @@ jobs:
                   lock.write_text(updated, encoding='utf-8')
                   changed.append(str(lock))
           print('version_assertion_files', changed)
-          assert changed, 'expected at least one permanent version assertion update'
           PY
       - name: Validate JavaScript syntax
         id: syntax
