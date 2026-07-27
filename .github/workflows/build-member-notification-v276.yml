@@ -43,9 +43,9 @@ jobs:
           from pathlib import Path
           import base64, gzip, hashlib
           source = Path('tools/.member-notification-v276/apply.py.gz.b64').read_text(encoding='utf-8').strip()
-          assert hashlib.sha256(source.encode()).hexdigest() == '0c382907949ae658233f4c94c2a9cd0d27e951cdc3fb98ae0e36c1b6cb4288ae'
+          assert hashlib.sha256(source.encode()).hexdigest() == '75b81e807d174228e3a29701fe8f7f6549c7f5c29faf685999bd6658c432b474'
           raw = gzip.decompress(base64.b64decode(source, validate=True))
-          assert hashlib.sha256(raw).hexdigest() == 'a8534dbf925f2cd456f4dc8267ecab48f294b67d082ca1b5eb0125fa6633fffb'
+          assert hashlib.sha256(raw).hexdigest() == 'fc115612e43014645b173d79782b3d513ec542d57c2fa687edf4ce78dad29023'
           Path('/tmp/apply-v276.py').write_bytes(raw)
           PY
               python /tmp/apply-v276.py
