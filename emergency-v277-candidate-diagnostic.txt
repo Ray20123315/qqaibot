@@ -1,0 +1,96 @@
+From https://github.com/Ray20123315/qqaibot
+ * branch            d16891357cc8274b031281eb27f4781bcba943f8 -> FETCH_HEAD
+Historical patch script anchors updated.
+Applied emergency v2.7.7 patches successfully.
+Post-patch normalization complete; version fixtures updated=19.
+
+added 35 packages, and audited 36 packages in 9s
+
+7 packages are looking for funding
+  run `npm fund` for details
+
+3 high severity vulnerabilities
+
+To address all issues, run:
+  npm audit fix --force
+
+Run `npm audit` for details.
+
+> qqai-bot-worker@2.7.7 check
+> node verify-config.mjs && node verify-migration.mjs && node verify-model-routing.mjs && node verify-modules.mjs && node verify-routes.mjs && node verify-deployment-notifications.mjs && node verify-subgroup-join.mjs && node verify-spam-detection.mjs && node verify-meme-member-console.mjs && node verify-social-digital-twin.mjs && node verify-explicit-question-priority.mjs && node verify-mute-locks.mjs && node verify-partner-bindings.mjs && node verify-self-mute-reapply.mjs && node verify-master-bindings.mjs && node verify-portal-relationships.mjs && node verify-portal-members-client.mjs && node verify-community-suite.mjs && node verify-social-boundaries.mjs && node verify-werewolf.mjs && node verify-member-cleanup.mjs && node verify-member-console-split.mjs && node verify-scoped-rule-feedback.mjs && node verify-portal-layout.mjs && node verify-werewolf-gameplay.mjs && node verify-ai-context-output.mjs && node verify-meeting-minutes.mjs && node verify-member-details.mjs && node verify-notification-routing.mjs && node verify-emergency-v2.7.7.mjs
+
+verify-config: ok (32 modules, single worker.js entry)
+verify-migration: ok
+verify-model-routing: ok
+verify-modules: ok (33 JavaScript files)
+verify-routes: ok (7 public routes)
+deployment notification checks passed
+verify-subgroup-join: ok
+spam detection checks passed
+meme-aware moderation and member console checks passed
+verify-social-digital-twin: ok
+verify-explicit-question-priority: ok
+verify-mute-locks: ok
+verify-partner-bindings: ok
+verify-self-mute-reapply: ok
+verify-master-bindings: ok
+verify-portal-relationships: ok
+verify-portal-members-client: ok
+verify-community-suite: ok
+verify-social-boundaries: ok
+werewolf verification passed
+verify-member-cleanup: ok
+verify-member-console-split: ok
+verify-scoped-rule-feedback: ok
+verify-portal-layout: ok
+verify-werewolf-gameplay: ok
+verify-ai-context-output: ok
+verify-meeting-minutes: ok
+verify-member-details: ok
+verify-notification-routing: ok
+Emergency v2.7.7 regression checks passed.
+
+> qqai-bot-worker@2.7.7 check:bundle
+> wrangler deploy --config wrangler.toml --dry-run --outdir dist --no-assets
+
+
+ ⛅️ wrangler 4.112.0
+────────────────────
+Total Upload: 2201.45 KiB / gzip: 527.39 KiB
+Your Worker has access to the following bindings:
+Binding                                                                                    Resource                  
+env.ONEBOT_HUB (OneBotHub)                                                                 Durable Object            
+env.DB (qqaibot)                                                                           D1 Database               
+env.VECTORIZE (qqai)                                                                       Vectorize Index           
+env.AI                                                                                     AI                        
+env.MY_RATE_LIMITER (1 requests/10s)                                                       Rate Limit                
+env.DEVELOPER_ID ("3569028262")                                                            Environment Variable      
+env.DEPLOY_NOTIFY_WORKER_NAME ("qqai")                                                     Environment Variable      
+env.DEPLOY_NOTIFY_BRANCH ("main")                                                          Environment Variable      
+env.DEPLOY_NOTIFY_START_COOLDOWN_SECONDS ("600")                                           Environment Variable      
+env.DEPLOY_NOTIFY_SELF_GRACE_SECONDS ("90")                                                Environment Variable      
+env.ENABLE_ONEBOT_HTTP_EVENTS ("false")                                                    Environment Variable      
+env.DEEPSEEK_FLASH_MODEL ("deepseek-v4-flash")                                             Environment Variable      
+env.DEEPSEEK_PRO_MODEL ("deepseek-v4-pro")                                                 Environment Variable      
+env.DEEPSEEK_DAILY_BUDGET_CNY ("0.35")                                                     Environment Variable      
+env.GEMINI_CHAT_MODELS ("gemini-3.5-flash,gemini-3.1-flash-lit...")                        Environment Variable      
+env.GEMMA_DECISION_MODELS ("gemma-4-26b-a4b-it,gemma-4-31b-it")                            Environment Variable      
+env.GEMINI_IMAGE_MODELS ("")                                                               Environment Variable      
+env.IMAGEN_MODELS ("imagen-4.0-fast-generate-001,imagen-4...")                             Environment Variable      
+env.GEMINI_TTS_MODELS ("gemini-3.1-flash-tts-preview,gemini-2...")                         Environment Variable      
+env.GEMINI_LIVE_MODEL ("models/gemini-3.1-flash-live-preview")                             Environment Variable      
+
+--dry-run: exiting now.
+
+Cloudflare collects anonymous telemetry about your usage of Wrangler. Learn more at https://github.com/cloudflare/workers-sdk/tree/main/packages/wrangler/telemetry.md
+remote: error: Trace: d77edde442ae1ca6f66ba44b793f035884fe294add73e178cf426c5013859312        
+remote: error: See https://gh.io/lfs for more information.        
+remote: error: File node_modules/@cloudflare/workerd-linux-64/bin/workerd is 121.56 MB; this exceeds GitHub's file size limit of 100.00 MB        
+remote: error: GH001: Large files detected. You may want to try Git Large File Storage - https://git-lfs.github.com.        
+To https://github.com/Ray20123315/qqaibot
+ ! [remote rejected] HEAD -> chatgpt/emergency-v2.7.7-candidate (pre-receive hook declined)
+error: failed to push some refs to 'https://github.com/Ray20123315/qqaibot'
+From https://github.com/Ray20123315/qqaibot
+ * branch            main       -> FETCH_HEAD
+Switched to a new branch 'main'
+branch 'main' set up to track 'origin/main'.
