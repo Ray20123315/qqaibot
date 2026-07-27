@@ -4,6 +4,7 @@ import { AI_MEDIA_LIMITS, DEFAULTS, VERSION, classifyOperationalFailure } from "
 import { consumeManualRuleCheckRate, getAffinityProfile, latestConversationMessageForUser, recentConversationMessagesForUser, refreshAffinityAiAssessment, stripGroupAiOptOutPrefix, updateAffinityFixedFromMessage } from "./src/core/identity.js";
 import { appendIndex, buildLongGroupConversationContext, callOneBotAction, checkRuntimeRateLimit, getEffectivePermissions, isKnownOutboundMessage, markOutboundPending, modelPreferenceLabel, normalizeMemoryItems, normalizeModelPreference, normalizePermissionName, permissionLabel, removeFromIndex, setExplicitPermission, updateAiDecisionLog, writeAiDecisionLog, writeSystemAudit } from "./src/core/permissions.js";
 import { appendChatHistoryTurn, clearChatSessionHistory, dbDel, dbGet, dbPut, readChatHistory, withTimeout } from "./src/data/store.js";
+import { classifyPoliticalTopic } from "./src/policy/political-topics.js";
 import { announceDeployedVersionFallback, getDeploymentStatusForViewer, handleDeploymentBuildQueue, injectDeploymentPortalClient } from "./src/deployment/notifications.js";
 import { botCanRunRuleMonitor, getBotGroupRole, getGroupFamilyForGroup, getGroupJoinPage, isVerifiedGroupOwner } from "./src/group/runtime.js";
 import { buildHealthState } from "./src/health/runtime.js";
@@ -351,6 +352,7 @@ const QQAIWorker = {
     const isSelfAccount = Boolean(userId && eventSelfId && userId === eventSelfId);
     let sameQqSelfAsk = false;
     let sameQqHumanOnly = false;
+    let trustedSelfOperator = false;
 
     // Webhook 被动回复工具。长任务会在正式回复前撤回「正在思考...」。
     let activeThinkingMessageId = null;
@@ -587,7 +589,7 @@ const QQAIWorker = {
       // 精準提取群組身分
       const senderCard = body.sender?.card || body.sender?.nickname || userId;
       const senderRole = body.sender?.role || "member"; 
-      const isDeveloper = (env.DEVELOPER_ID ? userId === env.DEVELOPER_ID.toString() : false) || userId === "3569028262";
+      let isDeveloper = (env.DEVELOPER_ID ? userId === env.DEVELOPER_ID.toString() : false) || userId === "3569028262";
 
       // OneBot 偶尔可能漏掉 lift_ban 通知。自我禁言仍有效却能再次发言时，静默补禁；
       // 但允许「!禁言自己／!自我禁言」继续进入命令处理，以便刷新禁言时长。
@@ -736,18 +738,28 @@ const QQAIWorker = {
         const explicitSelfCommand = /^[!！]/.test(cleanMessage);
         if (!isSentEvent && !explicitSelfChat && !explicitSelfCommand) return new Response(null, { status: 204 });
 
-        // Worker 自己通过 API 发出的消息必须继续按 Message ID／发送前指纹排除，避免形成回音循环。
-        // // 与 ?? 保持既有人工同号行为；/! 虽是人工聊天别名，仍额外检查发送指纹。
-        if (!explicitSelfChat || explicitSelfSlashBang) {
-          const apiMessage = await isKnownOutboundMessage(env, {
-            messageId: replyMessageId,
-            isGroup,
+        // 任何同号输入都先按 Message ID／发送前指纹排除。人工从 QQ 客户端发出的消息没有
+        // Worker 出站指纹，可以继续；机器人 API 自己发出的文字即使碰巧以 !、//、?? 或 /! 开头也会被拦下。
+        const apiMessage = await isKnownOutboundMessage(env, {
+          messageId: replyMessageId,
+          isGroup,
+          groupId: currentGroupId,
+          peerId: String(body.target_id || body.peer_id || rawUserId || userId),
+          text: explicitSelfSlashBang ? selfSlashBangRawText : cleanMessage,
+          mediaTypes: [(imageUrl || imageFile) ? 'image' : '', (voiceUrl || voiceFile) ? 'record' : '', (videoUrl || videoFile) ? 'video' : ''].filter(Boolean)
+        });
+        if (apiMessage) return new Response(null, { status: 204 });
+        trustedSelfOperator = explicitSelfChat || explicitSelfCommand;
+        if (trustedSelfOperator) {
+          isDeveloper = true;
+          ctx.waitUntil(writeSystemAudit(env, {
+            type: "self_account_operator_input",
             groupId: currentGroupId,
-            peerId: String(body.target_id || body.peer_id || rawUserId || userId),
-            text: explicitSelfSlashBang ? selfSlashBangRawText : cleanMessage,
-            mediaTypes: [(imageUrl || imageFile) ? 'image' : '', (voiceUrl || voiceFile) ? 'record' : '', (videoUrl || videoFile) ? 'video' : ''].filter(Boolean)
-          });
-          if (apiMessage) return new Response(null, { status: 204 });
+            actorId: eventSelfId,
+            action: explicitSelfCommand ? "command" : explicitSelfSlashBang ? "slash_bang_chat" : cleanMessage.startsWith("//") ? "double_slash_chat" : "double_question_chat",
+            postType: String(body.post_type || ""),
+            messageId: replyMessageId
+          }).catch(() => {}));
         }
 
         if (cleanMessage.startsWith('//')) {
@@ -780,6 +792,7 @@ const QQAIWorker = {
       let naturalLanguageIntent = null;
       let privateAccessMode = "";
       let privateAccessChecked = false;
+      const politicalTopic = !isCommandMessage && !aiReplyOptOut ? classifyPoliticalTopic(cleanMessage) : { blocked: false, category: "", matches: [], reason: "command_or_opt_out" };
 
       // 自我禁言只能由本人私讯解除。该命令独立于私聊 AI 开关，成功或失败都不发送聊天提示。
       const privateSelfUnmuteCommand = isPrivate && cleanMessage.match(/^[!！](?:解除禁言|解禁)(?:\s+(\d{5,}))?$/i);
@@ -852,7 +865,7 @@ const QQAIWorker = {
         const privateScheduleEnabled = await getFeatureFlag(env, 'private_schedule_enabled', false);
         const appealEnabled = await getFeatureFlag(env, 'private_appeal_enabled', DEFAULTS.appealEnabled);
 
-        if (!isCommandMessage && !aiReplyOptOut) {
+        if (!isCommandMessage && !aiReplyOptOut && !politicalTopic.blocked) {
           const privateNaturalSource = stripBotMentionFromConversation(cleanMessage, botId) || cleanMessage;
           const localPrivateNatural = normalizeNaturalLanguageCommandText(privateNaturalSource, Date.now());
           if (localPrivateNatural?.commandText) {
@@ -889,7 +902,7 @@ const QQAIWorker = {
         return new Response(null, { status: 204 });
       }
 
-      const naturalLanguageTrigger = !aiReplyOptOut && !isCommandMessage && (isPrivate || botMentioned || repliedToBot || sameQqSelfAsk);
+      const naturalLanguageTrigger = !aiReplyOptOut && !isCommandMessage && !politicalTopic.blocked && (isPrivate || botMentioned || repliedToBot || sameQqSelfAsk);
       if (naturalLanguageTrigger) {
         const naturalSourceText = stripBotMentionFromConversation(cleanMessage, botId) || cleanMessage;
         const normalizedNatural = normalizeNaturalLanguageCommandText(naturalSourceText, Date.now()) || await classifyNaturalLanguageCommandIntent(env, naturalSourceText);
@@ -1040,7 +1053,7 @@ const QQAIWorker = {
         return new Response(null, { status: 204 });
       }
 
-      // 權限拆分：AI 管理與真正群操作互不混用。
+      // 權限拆分：AI 管理與真正群操作互不混用。受信任同号输入只有在明确前缀和出站指纹检查后才会把 isDeveloper 提升为 true。
       const permissionSet = await getEffectivePermissions(env, currentGroupId, userId, senderRole, isDeveloper);
       const hasAdminAuth = permissionSet.aiAdmin;
       const hasGroupOpsAuth = permissionSet.groupOps;
@@ -1080,6 +1093,31 @@ const QQAIWorker = {
       if (isGroup && !operationsHighRiskPaused && !isCommandMessage && !isSelfAccount && (cleanMessage.length > 0 || ((imageUrl || imageFile) && imageInspectionConfigured)) && await dbGet(env, `rule_monitor_enabled:${currentGroupId}`) !== "false") {
         // 在后台检查；群规文字优先，图片作为直接证据一并送入 Google 判断链。检查器会先即时确认机器人为群主／管理员。
         ctx.waitUntil(inspectMessageAgainstGroupRules(env, { groupId: currentGroupId, userId, senderName: senderCard, senderRole: isDeveloper ? "developer" : senderRole, text: cleanMessage || ((imageUrl || imageFile) ? "[图片]" : ""), messageId: replyMessageId, imageUrl, imageFile, mentionedQqs, quotedSenderId: String(quotedMessage?.senderId || "") }));
+      }
+
+      // 政治相关普通聊天在确定性分类后静默终止。群规监控可在上方独立记录，
+      // 但不会进入自然语言命令模型、社交规划、检索、记忆或一般聊天模型，也不会发送警告回覆。
+      if (politicalTopic.blocked && !isCommandMessage) {
+        const politicalTrigger = botMentioned ? "mention" : repliedToBot ? "reply_to_ai" : sameQqSelfAsk ? "self_ask" : isPrivate ? "private" : "none";
+        ctx.waitUntil(writeAiDecisionLog(env, {
+          ...aiDecisionBase,
+          decision: "blocked",
+          reason: "political_topic_filter",
+          triggerType: politicalTrigger,
+          policyCategory: politicalTopic.category,
+          policyMatches: politicalTopic.matches,
+          sendStatus: "not_applicable"
+        }).catch(() => {}));
+        ctx.waitUntil(writeSystemAudit(env, {
+          type: "political_topic_filtered",
+          groupId: currentGroupId,
+          actorId: userId,
+          action: "silent_block",
+          category: politicalTopic.category,
+          matches: politicalTopic.matches,
+          messageId: replyMessageId
+        }).catch(() => {}));
+        return new Response(null, { status: 204 });
       }
 
       // 维护／紧急锁定时暂停主动插话，但保留群友主动 @Bot 的一般聊天。
@@ -2256,7 +2294,8 @@ const QQAIWorker = {
                       `!排程 2026-07-22 18:00 内容\n` +
                       `!排程 每天 18:00 内容\n` +
                       `!排程 列表 / !排程 取消 编号\n` +
-                      `私聊申诉：!申诉 群号 类型 详细内容\n`;
+                      `私聊申诉：!申诉 群号 类型 详细内容\n` +
+                      `同号人工控制：机器人 QQ 本人可直接发送 !指令；使用 //内容、??内容 或 /!内容 进行聊天。机器人 API 自发消息仍会被指纹拦截。\n`;
 
         if (permissionSet.aiAdmin) {
           helpMsg += `\n🧠 [AI 管理区]\n` +
@@ -3049,10 +3088,7 @@ const QQAIWorker = {
 - 游戏与现实互动：无法参与时简短婉拒并继续聊天，不解释技术原因，也不讨论身份。
 
 【🚨 终极不可违背铁律】
-1. 政治红线（智能求生欲）：严格遵守中国大陆平台（QQ）的审查底线，防范真正的封号风险。
-- 【允许回答】：公开的国际地理、普通历史百科事实、外国元首名字等纯客观常识（例如问“法国现任总统是谁”、“大众汽车是哪国的”）。请用群友的口吻极简、客观地直接回答，绝对不要进行任何政治体制、意识形态的延伸讨论。
-- 【绝对禁止】：任何涉及中国本土当代政治、国家领导人、敏感历史事件、领土争议、时政热点新闻评论或任何带有主观立场的敏感话题。
-- 【严厉警告机制】：只有当群友故意聊起【绝对禁止】的严重违规话题时，你才必须立刻收起人设，切换为极度严肃的语气明确警告对方：“无法回答此类问题。您的发言已涉嫌违反平台政治敏感内容管理规范，请立即停止相关话题，否则将面临封禁风险”。
+1. 政治内容静默规则：Worker 会在进入模型前确定性过滤现实政治话题。若因边界情况仍在输入中看到现实政治、政党选举、政府政策、政治人物、意识形态、主权争议或敏感政治事件，只能输出 [SKIP]；不得回答、评论、检索、转述，也不得发送警告或解释过滤原因。游戏、小说、影视或明确虚构设定不属于现实政治。
 2. 格式规则：默认聊天尽量精炼，普通闲聊可控制在约 250 字内；但用户明确提问、要求解释、总结、列出步骤或完整说明时，回答完整性优先，可以超过 250 字，并由系统按完整句子自动分段发送。绝对禁止在句子中途为了字数上限硬截断。回复没有最小字数；语境适合时仍可只回复“6”“666”“nb”“?”“？”“？？？”或“???”。绝对禁止输出任何 Markdown 格式（如 **、#、\`\`\`）。
 3. 记忆隔离：历史记录仅供参考事实。你「绝对不准」模仿、复制或代入历史记录中其他人的说话风格、人设或口头禅，对别人的风格完全免疫。
 4. 表情与动作控制：每说完一段话最多配 1 到 2 个标准 Emoji，禁止泛滥。绝对禁止输出任何 [CQ:...] 底层代码。Worker 会根据语境决定引用、@ 或纯文字发送。
