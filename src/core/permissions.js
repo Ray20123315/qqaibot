@@ -4,6 +4,7 @@
 import { callDeepSeekSummaryTask } from "../ai/runtime.js";
 import { DEFAULTS } from "../config/runtime.js";
 import { developerId, isDeveloperId } from "./identity.js";
+import { collectFilteredPage } from "../data/pagination.js";
 import { dbDel, dbGet, dbPut } from "../data/store.js";
 import { parseUnlimitedNonNegativeInteger } from "../moderation/runtime.js";
 import { getOneBotHub, readJson, sha256Hex } from "../portal/auth.js";
@@ -351,6 +352,26 @@ async function listAiDecisionLogs(env, { groupId = "", query = "", decision = ""
 }
 
 
+async function listAiDecisionLogPage(env, { groupId = "", query = "", decision = "", triggerType = "", page = 1, pageSize = 50 } = {}) {
+  const ids = await readJson(env, groupId ? `ai_decision_log:index:${groupId}` : "ai_decision_log:index", []);
+  const q = String(query || "").trim().toLowerCase();
+  const result = await collectFilteredPage(ids.slice().reverse(), {
+    page,
+    pageSize,
+    defaultPageSize: 50,
+    maxScan: DEFAULTS.aiDecisionLogLimit,
+    load: id => readJson(env, `ai_decision_log:${id}`, null),
+    match: item => {
+      if (groupId && String(item.groupId || "") !== String(groupId)) return false;
+      if (decision && String(item.decision || "") !== String(decision)) return false;
+      if (triggerType && String(item.triggerType || "") !== String(triggerType)) return false;
+      if (q && !JSON.stringify(item).toLowerCase().includes(q)) return false;
+      return true;
+    }
+  });
+  return { logs: result.items, pageInfo: result.pageInfo };
+}
+
 
 async function buildLongGroupConversationContext(env, { groupId, userId, logs, currentText, relationContext }) {
   const list = (Array.isArray(logs) ? logs : []).map(String).filter(Boolean).slice(-DEFAULTS.groupContextMaximumMessages);
@@ -529,4 +550,4 @@ async function callOneBotAction(env, actionPayload, timeoutMs = 15000) {
   return data.data;
 }
 
-export { PERMISSIONS, appendIndex, buildLongGroupConversationContext, callOneBotAction, checkRuntimeRateLimit, enrichAuditLogsForPortal, explicitProgramPermissionIndexKey, getEffectivePermissions, getRuntimeRateLimitSeconds, isKnownOutboundMessage, listAiDecisionLogs, listExplicitProgramPermissions, markOutboundPending, modelCapabilityLabel, modelHealthStatusLabel, modelHealthStatusRank, modelPreferenceLabel, normalizeFingerprintText, normalizeMemoryItems, normalizeModelPreference, normalizePermissionName, outboundFingerprint, permissionLabel, removeFromIndex, setExplicitPermission, updateAiDecisionLog, updateExplicitProgramPermissionIndex, writeAiDecisionLog, writeSystemAudit };
+export { PERMISSIONS, appendIndex, buildLongGroupConversationContext, callOneBotAction, checkRuntimeRateLimit, enrichAuditLogsForPortal, explicitProgramPermissionIndexKey, getEffectivePermissions, getRuntimeRateLimitSeconds, isKnownOutboundMessage, listAiDecisionLogPage, listAiDecisionLogs, listExplicitProgramPermissions, markOutboundPending, modelCapabilityLabel, modelHealthStatusLabel, modelHealthStatusRank, modelPreferenceLabel, normalizeFingerprintText, normalizeMemoryItems, normalizeModelPreference, normalizePermissionName, outboundFingerprint, permissionLabel, removeFromIndex, setExplicitPermission, updateAiDecisionLog, updateExplicitProgramPermissionIndex, writeAiDecisionLog, writeSystemAudit };
