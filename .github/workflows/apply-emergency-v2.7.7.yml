@@ -49,7 +49,7 @@ jobs:
           social_path = Path('verify-social-digital-twin.mjs')
           social = social_path.read_text(encoding='utf-8')
           old_social = "assert(pkg.version === '2.7.6', 'Package version must be 2.5.2');"
-          new_social = "const runtimeVersion = fs.readFileSync('src/config/runtime.js', 'utf8').match(/const VERSION = \\\"([^\\\"]+)\\\"/)?.[1];\nassert(pkg.version === runtimeVersion, 'Package and runtime versions must match');"
+          new_social = "assert(pkg.version === fs.readFileSync('src/config/runtime.js', 'utf8').match(/const VERSION = \\\"([^\\\"]+)\\\"/)?.[1], 'Package and runtime versions must match');"
           if social.count(old_social) != 1:
               raise RuntimeError('unable to update stale social version assertion')
           social_path.write_text(social.replace(old_social, new_social, 1), encoding='utf-8')
@@ -57,6 +57,25 @@ jobs:
           status=$?
           if [ "$status" -eq 0 ]; then
             python3 tools/apply-emergency-v2.7.7.py >> /tmp/emergency-v277.log 2>&1
+            status=$?
+          fi
+          if [ "$status" -eq 0 ]; then
+            python3 - <<'PY' >> /tmp/emergency-v277.log 2>&1
+          from pathlib import Path
+          import re
+          pattern = re.compile(r"assert\((\w+)\.version === ['\"]2\.7\.6['\"], ['\"]Package version must be [^'\"]+['\"]\);")
+          replacement = r'''assert(\1.version === fs.readFileSync('src/config/runtime.js', 'utf8').match(/const VERSION = "([^"]+)"/)?.[1], 'Package and runtime versions must match');'''
+          changed = 0
+          for verify_path in Path('.').glob('verify-*.mjs'):
+              source = verify_path.read_text(encoding='utf-8')
+              next_source, count = pattern.subn(replacement, source)
+              if count:
+                  verify_path.write_text(next_source, encoding='utf-8')
+                  changed += count
+          if changed < 1:
+              raise RuntimeError('no remaining stale package version assertions found')
+          print(f'Normalized {changed} stale package version assertions.')
+          PY
             status=$?
           fi
           if [ "$status" -eq 0 ]; then
