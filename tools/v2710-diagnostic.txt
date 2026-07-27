@@ -1,7 +1,7 @@
 v2.7.10 candidate builder failed
 candidate_ref=agent/politics-discrimination-v2.7.10
-runner_sha=d78714a0455610d9a84c80469bb2cba6ff630860
-run_id=30299101122
+runner_sha=4f98952830c71350ccdab0b1b969b47b4982773a
+run_id=30299198943
 ---- log tail ----
 file:///home/runner/work/qqaibot/qqaibot/tools/apply-v2.7.10.mjs:7
   if (count !== 1) throw new Error(`${label}: expected exactly one anchor, found ${count}`);
