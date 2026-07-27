@@ -4,6 +4,9 @@ on:
   push:
     branches:
       - feature/self-account-politics-pagination-v2.7.7
+  pull_request:
+    branches:
+      - main
 
 permissions:
   contents: read
@@ -34,4 +37,3 @@ jobs:
           name: v277-source-audit
           path: /tmp/v277-source
           if-no-files-found: error
-# trigger after workflow registration
