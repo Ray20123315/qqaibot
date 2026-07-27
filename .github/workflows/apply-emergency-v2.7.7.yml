@@ -28,8 +28,21 @@ jobs:
         run: |
           set +e
           : > /tmp/emergency-v277.log
-          python3 tools/apply-emergency-v2.7.7.py >> /tmp/emergency-v277.log 2>&1
+          python3 - <<'PY' >> /tmp/emergency-v277.log 2>&1
+          from pathlib import Path
+          path = Path('tools/apply-emergency-v2.7.7.py')
+          text = path.read_text(encoding='utf-8')
+          old = 'const QQAI_V1_R54_REMOVED_FEATURE_KEYS = Object.freeze(["schedule_template", "draft", "dashboard", "quality-dashboard", "quality_dashboard", "growth", "growth-admin", "growth_admin", "schedule-template"]);'
+          new = 'const QQAI_V1_R54_PROGRESSIVE_MULTI_ACTION_MARKER = "QQAI_V1_R54_PROGRESSIVE_MULTI_ACTION_MARKER";'
+          if text.count(old) != 1:
+              raise RuntimeError('unable to fix one-time helper anchor')
+          path.write_text(text.replace(old, new, 1), encoding='utf-8')
+          PY
           status=$?
+          if [ "$status" -eq 0 ]; then
+            python3 tools/apply-emergency-v2.7.7.py >> /tmp/emergency-v277.log 2>&1
+            status=$?
+          fi
           if [ "$status" -eq 0 ]; then
             npm install --ignore-scripts --no-package-lock >> /tmp/emergency-v277.log 2>&1
             status=$?
