@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import fs from "node:fs";
 import {
   SENSITIVE_KEY_RE,
   memberDetailAllowed,
@@ -38,5 +39,11 @@ assert.equal(sanitized.array[0].authorization, "[已遮罩]");
 assert.equal(sanitized.array[1].area, "Taipei");
 assert.equal(SENSITIVE_KEY_RE.test("refresh_token"), true);
 assert.equal(SENSITIVE_KEY_RE.test("nickname"), false);
+
+const workerSource = fs.readFileSync("worker.js", "utf8");
+assert.match(workerSource, /fullMemberDetailsMatch/, "member_full_details command integration must exist");
+assert.match(workerSource, /reply_kind: "member_full_details"/);
+assert.match(workerSource, /!详细资料 \[@成员\]/, "help must document the privileged full-detail command");
+assert.match(workerSource, /permissions: permissionSet/);
 
 console.log("verify-member-details: ok");

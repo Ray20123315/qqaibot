@@ -106,7 +106,10 @@ async function readStoredMemberSources(env, groupId, targetId) {
     selfMute: `self_mute:${groupId}:${targetId}`,
     contextSummary: `context_summary:chat:${groupId}:${targetId}`
   };
-  const entries = await Promise.all(Object.entries(keys).map(async ([name, key]) => [name, safeJsonParse(await dbGet(env, key), null)]));
+  const entries = await Promise.all(Object.entries(keys).map(async ([name, key]) => {
+    try { return [name, safeJsonParse(await dbGet(env, key), null)]; }
+    catch (error) { return [name, { readError: String(error?.message || error).slice(0, 500) }]; }
+  }));
   const stored = Object.fromEntries(entries);
   const cachedList = Array.isArray(stored.cachedMembers) ? stored.cachedMembers : [];
   stored.cachedMember = cachedList.find(item => cleanId(item?.qq || item?.user_id) === targetId) || null;
@@ -170,9 +173,9 @@ async function collectFullMemberDetails(env, { groupId, targetId, actorId, actor
       muteUntil: normalizeEpochMs(liveMember.shut_up_timestamp ?? liveMember.muteUntil ?? stored?.snapshot?.muteUntil),
       qqLevel: Number(liveMember.qq_level ?? liveMember.qqLevel ?? strangerInfo.value?.qq_level ?? stored?.snapshot?.qqLevel ?? 0),
       groupLevel: String(liveMember.level || stored?.snapshot?.level || ""),
-      unfriendly: Boolean(liveMember.unfriendly ?? stored?.snapshot?.unfriendly),
+      unfriendly: liveMember.unfriendly ?? stored?.snapshot?.unfriendly ?? null,
       cardChangeable: liveMember.card_changeable ?? liveMember.cardChangeable ?? stored?.snapshot?.cardChangeable ?? null,
-      isRobot: Boolean(liveMember.is_robot || liveMember.isRobot || stored?.snapshot?.isRobot || stored?.cachedMember?.isRobot)
+      isRobot: liveMember.is_robot ?? liveMember.isRobot ?? stored?.snapshot?.isRobot ?? stored?.cachedMember?.isRobot ?? null
     },
     liveSources: {
       groupMemberInfo: groupInfo,

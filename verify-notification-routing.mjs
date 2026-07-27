@@ -1,7 +1,9 @@
 import assert from "node:assert/strict";
+import fs from "node:fs";
 import {
   NOTIFICATION_EVENT_DEFINITIONS,
   normalizeNotificationRoutingConfig,
+  resolveNotificationRecipientIds,
   selectNotificationRecipientIds
 } from "./src/notifications/routing.js";
 
@@ -76,5 +78,22 @@ assert.deepEqual(selectNotificationRecipientIds({
   owner,
   developer: "90001"
 }), []);
+
+assert.deepEqual(resolveNotificationRecipientIds({
+  route: { enabled: true, mode: "managers", managerIds: ["10002"] },
+  candidates: { managers: [], owner: null, source: "none" },
+  developer: "90001"
+}), ["10002"], "configured recipients survive a temporary directory outage");
+
+const routingSource = fs.readFileSync("src/notifications/routing.js", "utf8");
+const portalSource = fs.readFileSync("src/portal/notification-routing.js", "utf8");
+const moderationSource = fs.readFileSync("src/moderation/runtime.js", "utf8");
+const operationsSource = fs.readFileSync("src/operations/runtime.js", "utf8");
+assert.match(routingSource, /group_members:/, "D1 member cache must back up live manager discovery");
+assert.match(routingSource, /candidates\.source !== "none"/, "saving during a directory outage must preserve configured manager IDs");
+assert.match(portalSource, /\/notification-routing/);
+assert.match(portalSource, /notificationOwnerEnabled/);
+for (const eventId of ["join_request_pending", "join_request_failed", "group_work_request"]) assert.match(moderationSource, new RegExp(eventId));
+for (const eventId of ["appeal_created", "suggestion_created", "bug_created", "quality_feedback_created"]) assert.match(operationsSource, new RegExp(eventId));
 
 console.log("verify-notification-routing: ok");

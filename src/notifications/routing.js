@@ -78,18 +78,33 @@ async function readNotificationRoutingConfig(env, groupId) {
 async function listNotificationCandidates(env, groupId) {
   let source = [];
   let warning = "";
+  let sourceType = "none";
   try {
     const response = await callOneBotAction(env, {
       action: "get_group_member_list",
       params: { group_id: numericId(groupId), no_cache: false }
     }, 20000);
     source = Array.isArray(response) ? response : Array.isArray(response?.data) ? response.data : [];
+    if (source.length) sourceType = "onebot";
   } catch (error) {
-    warning = String(error?.message || error).slice(0, 500);
+    warning = `OneBot 管理名单读取失败：${String(error?.message || error).slice(0, 400)}`;
+  }
+  if (!source.length) {
+    try {
+      const cachedRaw = await dbGet(env, `group_members:${cleanId(groupId)}`);
+      const cached = cachedRaw ? JSON.parse(String(cachedRaw)) : [];
+      if (Array.isArray(cached) && cached.length) {
+        source = cached;
+        sourceType = "cache";
+        warning = warning ? `${warning}；已使用 D1 群成员缓存。` : "OneBot 未返回成员名单，已使用 D1 群成员缓存。";
+      }
+    } catch (error) {
+      if (!warning) warning = `群成员缓存读取失败：${String(error?.message || error).slice(0, 400)}`;
+    }
   }
   const members = source.map(item => ({
     qq: cleanId(item?.user_id || item?.qq),
-    name: String(item?.card || item?.nickname || item?.name || item?.user_id || "").slice(0, 200),
+    name: String(item?.card || item?.nickname || item?.name || item?.user_id || item?.qq || "").slice(0, 200),
     role: String(item?.role || "member"),
     isRobot: Boolean(item?.is_robot || item?.isRobot)
   })).filter(item => item.qq && !item.isRobot);
@@ -97,7 +112,8 @@ async function listNotificationCandidates(env, groupId) {
     managers: members.filter(item => item.role === "admin"),
     owner: members.find(item => item.role === "owner") || null,
     members,
-    warning
+    warning,
+    source: sourceType
   };
 }
 
@@ -115,6 +131,22 @@ function selectNotificationRecipientIds({ route, ownerEnabled = false, managers 
   return normalizedRoute.managerIds.length ? selected : [...eligible];
 }
 
+function resolveNotificationRecipientIds({ route, ownerEnabled = false, candidates = {}, developer = "" } = {}) {
+  const resolved = selectNotificationRecipientIds({
+    route,
+    ownerEnabled,
+    managers: candidates?.managers || [],
+    owner: candidates?.owner || null,
+    developer
+  });
+  if (resolved.length) return resolved;
+  const explicitManagerIds = cleanManagerIds(route?.managerIds);
+  if (route?.enabled !== false && String(route?.mode || "") === "managers" && candidates?.source === "none" && explicitManagerIds.length) {
+    return explicitManagerIds;
+  }
+  return resolved;
+}
+
 async function saveNotificationRoutingConfig(env, groupId, value, actorId = "") {
   const current = await readNotificationRoutingConfig(env, groupId);
   const candidates = await listNotificationCandidates(env, groupId);
@@ -127,8 +159,10 @@ async function saveNotificationRoutingConfig(env, groupId, value, actorId = "") 
     updatedAt: Date.now(),
     updatedBy: actorId
   }, groupId);
-  for (const definition of NOTIFICATION_EVENT_DEFINITIONS) {
-    requested.routes[definition.id].managerIds = requested.routes[definition.id].managerIds.filter(id => eligibleManagerIds.has(id));
+  if (candidates.source !== "none") {
+    for (const definition of NOTIFICATION_EVENT_DEFINITIONS) {
+      requested.routes[definition.id].managerIds = requested.routes[definition.id].managerIds.filter(id => eligibleManagerIds.has(id));
+    }
   }
   await dbPut(env, routingKey(groupId), JSON.stringify(requested));
   await writeSystemAudit(env, {
@@ -159,7 +193,8 @@ async function getNotificationRoutingPortalState(env, groupId) {
     managers: candidates.managers,
     owner: candidates.owner,
     developerId: cleanId(developerId(env)),
-    warning: candidates.warning
+    warning: candidates.warning,
+    candidateSource: candidates.source
   };
 }
 
@@ -172,11 +207,10 @@ async function dispatchHumanAttentionNotification(env, { groupId, eventId, messa
     listNotificationCandidates(env, group)
   ]);
   const route = config.routes[definition.id] || defaultRouteFor(definition);
-  const recipientIds = selectNotificationRecipientIds({
+  const recipientIds = resolveNotificationRecipientIds({
     route,
     ownerEnabled: config.ownerEnabled,
-    managers: candidates.managers,
-    owner: candidates.owner,
+    candidates,
     developer: developerId(env)
   });
   const suppressedOwner = route.enabled && route.mode === "owner" && !config.ownerEnabled;
@@ -242,6 +276,7 @@ export {
   listNotificationCandidates,
   normalizeNotificationRoutingConfig,
   readNotificationRoutingConfig,
+  resolveNotificationRecipientIds,
   saveNotificationRoutingConfig,
   selectNotificationRecipientIds
 };
