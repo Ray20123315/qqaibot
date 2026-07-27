@@ -457,14 +457,16 @@ function personaFactsForPrompt(profile) {
   return rows;
 }
 
-function buildSocialPromptBlock({ decision, profile, relationship, direct = false }) {
+function buildSocialPromptBlock({ decision, profile, relationship, direct = false, personaConfigured = false }) {
   const style = normalizeStyle(profile?.style || DEFAULT_STYLE);
   const facts = personaFactsForPrompt(profile);
-  const emojiPolicy = style.samples >= 20 && style.emojiRate >= 0.05 ? "最多一个普通表情符号" : "不要使用 Emoji 或颜文字";
+  const emojiPolicy = personaConfigured
+    ? "表情、颜文字、动作描写、称呼和段落结构必须服从已配置人格；社交统计不得覆盖人格"
+    : style.samples >= 20 && style.emojiRate >= 0.05 ? "最多一个普通表情符号" : "不要使用 Emoji 或颜文字";
   return `【社交决策层：脑与嘴分离】
 本轮场景=${decision.sceneType}；行为=${decision.action}；输出形态=${decision.outputType}；建议上限=${Math.round(decision.maxChars || 60)}字；判断信心=${Number(decision.confidence || 0).toFixed(2)}。
 必须执行行为决策，不要在回复中解释这些标签。允许只回“.”、“...”、“？”、“？？？”、极短口语或括号动作，不得为了完整而扩写。
-群体风格统计：平均约 ${Math.round(style.averageChars)} 字；重复问号比例 ${Math.round(style.repeatedQuestionRate * 100)}%；省略号比例 ${Math.round(style.ellipsisRate * 100)}%；括号动作比例 ${Math.round(style.actionTextRate * 100)}%。只模仿句长、标点、拆句和口语程度，不复制任何单一群友的秘密、攻击词或专属口癖。
+群体风格统计：平均约 ${Math.round(style.averageChars)} 字；重复问号比例 ${Math.round(style.repeatedQuestionRate * 100)}%；省略号比例 ${Math.round(style.ellipsisRate * 100)}%；括号动作比例 ${Math.round(style.actionTextRate * 100)}%。${personaConfigured ? "当前已配置人格，这些统计只能帮助判断聊天节奏，不能改变人格中的固定称呼、语气、动作描写、分段方式或禁用项。" : "只模仿句长、标点、拆句和口语程度，不复制任何单一群友的秘密、攻击词或专属口癖。"}
 ${emojiPolicy}。禁止客服腔、教程腔、“作为 AI”、过量礼貌和机械总结。
 互怼规则：玩笑可以回“你才是”“哼”“你皮痒了？”等轻度回嘴或卖惨，但不得升级到外貌、家庭、疾病、智力缺陷、现实创伤和恶毒诅咒。真攻击只回一次边界或低频向管理卖惨，随后降温。
 道歉规则：小情绪可用“好嘛，对不起”“不气了，抱抱”；明确伤到人时必须诚恳承担责任，不能只用抱抱敷衍。
@@ -518,7 +520,7 @@ function personaFactAnswer(profile, userText) {
   return "";
 }
 
-function applySocialOutputPolicy({ text, userText = "", decision, profile, isGroup = true, explicitLong = false, direct = false }) {
+function applySocialOutputPolicy({ text, userText = "", decision, profile, isGroup = true, explicitLong = false, direct = false, personaConfigured = false }) {
   const style = normalizeStyle(profile?.style || DEFAULT_STYLE);
   const fixedAnswer = personaFactAnswer(profile, userText);
   if (fixedAnswer) return fixedAnswer;
@@ -527,9 +529,11 @@ function applySocialOutputPolicy({ text, userText = "", decision, profile, isGro
     .replace(/(?:作为一个?AI|作为人工智能|很高兴为你解答|希望以上内容对你有所帮助|如果你愿意的话)/gi, "")
     .replace(/\n{3,}/g, "\n\n")
     .trim();
-  const emojiMax = style.samples >= 20 && style.emojiRate >= 0.05 ? 1 : 0;
-  output = removeEmoji(output, emojiMax);
-  if (!(style.samples >= 20 && style.kaomojiRate >= 0.04)) output = removeKaomoji(output);
+  if (!personaConfigured) {
+    const emojiMax = style.samples >= 20 && style.emojiRate >= 0.05 ? 1 : 0;
+    output = removeEmoji(output, emojiMax);
+    if (!(style.samples >= 20 && style.kaomojiRate >= 0.04)) output = removeKaomoji(output);
+  }
   output = safeAggressiveReply(output, decision);
   if (decision.action === "apology_serious" && !/(?:对不起|抱歉)/.test(output)) output = "对不起，刚才那句确实过分了。我会停下，不再拿这件事开玩笑。";
   if (decision.action === "apology_light" && (!output || output.length > 50 || /(?:深表歉意|造成困扰|作为)/.test(output))) output = "好嘛，对不起，抱抱";

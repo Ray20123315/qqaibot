@@ -841,7 +841,7 @@ const PORTAL_SETTING_DEFINITIONS = Object.freeze([
   { key: "join_assist_enabled", label: "入群申请辅助", command: "!入群辅助 开/关", minRole: "admin", scope: "group", type: "boolean", defaultValue: true },
   { key: "join_ai_approve_enabled", label: "Gemma 审查后自动同意入群", command: "网页设置", minRole: "admin", scope: "group", type: "boolean", defaultValue: true },
   { key: "join_pattern_threshold", label: "重复申请方式自动同意门槛", command: "网页设置", minRole: "admin", scope: "group", type: "number", min: 1, defaultValue: 2 },
-  { key: "group_persona", label: "群组人格", command: "!切换人格 / !恢复人格", minRole: "admin", scope: "group", type: "textarea", defaultValue: "" },
+  { key: "group_persona", label: "群组人格", command: "!切换人格 / !恢复人格", minRole: "admin", scope: "group", type: "textarea", maxLength: 12000, defaultValue: "" },
   { key: "keyword_filter", label: "群组关键字过滤", command: "网页设置", minRole: "admin", scope: "group", type: "textarea", defaultValue: "" },
   { key: "group_rules", label: "群规", command: "!set群规", minRole: "admin", scope: "group", type: "textarea", defaultValue: "" },
   { key: "welcome_enabled", label: "自动欢迎", command: "!自动欢迎 开/关", minRole: "owner", scope: "group", type: "boolean", defaultValue: false },
@@ -923,7 +923,7 @@ async function writePortalSettingValue(env, definition, groupId, targetQq, value
     case "join_assist_enabled": return dbPut(env, `join_assist_enabled:${groupId}`, value ? "true" : "false");
     case "join_ai_approve_enabled": return dbPut(env, `join_ai_approve_enabled:${groupId}`, value ? "true" : "false");
     case "join_pattern_threshold": return dbPut(env, `join_pattern_auto_approve_threshold:${groupId}`, String(Math.max(1, parseUnlimitedNonNegativeInteger(value, DEFAULTS.joinPatternAutoApproveThreshold))));
-    case "group_persona": return dbPut(env, `group_persona:${groupId}`, String(value || "").slice(0, 4000));
+    case "group_persona": return dbPut(env, `group_persona:${groupId}`, String(value || "").slice(0, 12000));
     case "keyword_filter": return dbPut(env, `keyword_filter:${groupId}`, JSON.stringify(String(value || "").split(/\n|,/).map(item => item.trim()).filter(Boolean).slice(0, 500)));
     case "group_rules": return dbPut(env, `group_rules:${groupId}`, String(value || "").slice(0, 10000));
     case "welcome_enabled": return dbPut(env, `welcome_enabled:${groupId}`, value ? "true" : "false");

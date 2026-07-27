@@ -15,6 +15,38 @@ import { opsActiveRuleRecords, opsFuseAllows, opsGetSettings, opsRecordAutomatio
 import { getOneBotHub, readJson, resolvePortalRole, sendPortalVerificationMessage, sha256Hex } from "../portal/auth.js";
 import { assertSafePublicUrl, fetchPublicUrl, numericId } from "../security/network.js";
 
+const POLITICAL_MODERATION_PATTERN = /(?:政治|政党|政黨|选举|選舉|总统|總統|主席|国会|國會|立法院|立法委员|立法委員|立委|议员|議員|首相|总理|總理|内阁|內閣|政府|政权|政權|执政|執政|在野|政治人物|政治制度|公共政策|外交|制裁|领土争议|領土爭議|两岸|兩岸|统一|統一|台独|台獨|罢免|罷免|公投|意识形态|意識形態|民进党|民進黨|国民党|國民黨|共产党|共產黨|民主党|民主黨|共和党|共和黨|\b(?:politics|political|election|government|parliament|congress|president|prime minister)\b)/i;
+const RACIAL_GROUP_PATTERN = /(?:黑人|白人|黄种人|黃種人|亚洲人|亞洲人|非洲人|印度人|犹太人|猶太人|阿拉伯人|拉丁裔|少数民族|少數民族|种族|種族|族群|民族)/i;
+const RACIAL_ABUSE_PATTERN = /(?:最低贱|最低賤|低贱|低賤|低等|劣等|下等|不配做人|不是人|农具|農具|奴隶|奴隸|棉花种植园|棉花種植園|种族洁癖|種族潔癖|不歧视就完蛋|不歧視就完蛋|应该隔离|應該隔離|应该清除|應該清除|天生愚蠢|天生肮脏|天生骯髒|污染血统|污染血統|拒绝.*(?:黑人|白人|黄种人|黃種人|印度人)|远离.*(?:黑人|白人|黄种人|黃種人|印度人)|遠離.*(?:黑人|白人|黃種人|印度人)|接受不了.*(?:黑人|白人|黄种人|黃種人|印度人))/i;
+const ANTI_RACISM_PATTERN = /(?:反对|反對|制止|停止|不要|不能|不该|不該|谴责|譴責|抵制|这是|這是|属于|屬於|算是|疑似|举报|舉報).{0,18}(?:种族歧视|種族歧視|种歧|種歧)|(?:种族歧视|種族歧視|种歧|種歧).{0,18}(?:不对|不對|错误|錯誤|过分|過分|违法|違法)/i;
+
+function isPoliticalModerationTopic(value) {
+  return POLITICAL_MODERATION_PATTERN.test(String(value || "").normalize("NFKC"));
+}
+
+function detectExplicitRacialDiscrimination(value, recentContext = "") {
+  const text = String(value || "").normalize("NFKC").trim();
+  const context = String(recentContext || "").normalize("NFKC");
+  if (!text || ANTI_RACISM_PATTERN.test(text)) return null;
+  const directGroup = RACIAL_GROUP_PATTERN.test(text);
+  const contextualGroup = directGroup || RACIAL_GROUP_PATTERN.test(context.slice(-2500));
+  const abusive = RACIAL_ABUSE_PATTERN.test(text);
+  const explicitIdeology = /(?:种族洁癖|種族潔癖|不歧视就完蛋|不歧視就完蛋)/i.test(text);
+  if (!(abusive && contextualGroup) && !explicitIdeology) return null;
+  return {
+    matched: true,
+    violationType: "种族歧视",
+    reason: "把某一种族或族群描述为低等、低贱、工具，或主张因族群身份排斥他人，属于种族歧视。请停止此类表达。",
+    confidence: directGroup || explicitIdeology ? 0.99 : 0.93
+  };
+}
+
+function isRacialDiscriminationReview(item, review) {
+  if (review?.forceWarning === true) return true;
+  const text = [item?.violationType, item?.rule, item?.reason, review?.violationType, review?.rule, review?.reason].map(value => String(value || "")).join(" ");
+  return /(?:种族歧视|種族歧視|族群歧视|族群歧視|racial discrimination|racism)/i.test(text);
+}
+
 
 
 
@@ -1390,13 +1422,14 @@ async function performRuleProxyAction(env, item, review) {
   const progressivePolicy = await getRuleProgressivePolicy(env, item.groupId);
   const severity = normalizeRuleSeverity(review?.severity || item.severity || "moderate");
   const intentional = review?.intentional !== false;
-  item = await updateRuleViolationRecord(env, item, { policyAction: policy.punishment, policyActions: policy.actions, policyNote: policy.note, severity, intentional, proxyMode: mode });
-  if (mode === "record") return updateRuleViolationRecord(env, item, { actionTaken: "record_only", actionResult: "仅记录，未启用警告或处罚代理", strikeCounted: false, progressiveCount: 0 });
+  const warningOnlyRacial = isRacialDiscriminationReview(item, review);
+  item = await updateRuleViolationRecord(env, item, { policyAction: warningOnlyRacial ? "warn" : policy.punishment, policyActions: warningOnlyRacial ? [] : policy.actions, policyNote: warningOnlyRacial ? "种族歧视固定公开警告，不自动撤回、禁言、踢出或累计处罚" : policy.note, severity, intentional, proxyMode: mode, warningOnlyRacial });
+  if (mode === "record" && !warningOnlyRacial) return updateRuleViolationRecord(env, item, { actionTaken: "record_only", actionResult: "仅记录，未启用警告或处罚代理", strikeCounted: false, progressiveCount: 0 });
 
   const remaining = await ruleProxyCooldownRemaining(env, item.groupId, item.userId);
   if (remaining > 0) return updateRuleViolationRecord(env, item, { actionTaken: "cooldown", actionResult: `处置冷却剩余 ${remaining} 秒；本次仍已记录`, strikeCounted: false });
 
-  const eligibleForStrike = severity !== "minor" && intentional;
+  const eligibleForStrike = !warningOnlyRacial && severity !== "minor" && intentional;
   let action = "warn";
   let progressiveCount = 0;
   let duration = 0;
@@ -1404,8 +1437,11 @@ async function performRuleProxyAction(env, item, review) {
   let fallbackNote = "";
   let progressiveStepActions = [];
 
-  const explicitRecallPolicy = normalizeRulePolicyPunishment(policy.punishment) === "recall";
-  if (mode === "warn") {
+  const explicitRecallPolicy = !warningOnlyRacial && normalizeRulePolicyPunishment(policy.punishment) === "recall";
+  if (warningOnlyRacial) {
+    action = "warn";
+    fallbackNote = "种族歧视固定采用公开警告；本次不自动撤回、禁言、踢出或计入累进处罚";
+  } else if (mode === "warn") {
     if (eligibleForStrike) {
       progressiveCount = await addRuleStrike(env, item, progressivePolicy.windowDays);
       strikeCounted = true;
@@ -1576,7 +1612,7 @@ ${appealHint}`).catch(() => null);
     result = { ok: false, message: String(error?.message || error) };
   }
 
-  const additionalSpecs = [
+  const additionalSpecs = warningOnlyRacial ? [] : [
     ...progressiveStepActions,
     ...(policy.actions || []).slice(1)
   ];
@@ -2015,6 +2051,10 @@ async function inspectMessageAgainstGroupRules(env, { groupId, userId, senderNam
   if (!manual && automationPaused) return { status: "disabled", message: "维护或紧急锁定期间暂停自动群规监控。" };
   const content = String(text || "").trim();
   if (!content) return { status: "error", error: "待检查消息为空" };
+  if (isPoliticalModerationTopic(content)) {
+    await writeSystemAudit(env, { type: "rule_political_topic_skipped", groupId, actorId: String(userId || ""), action: "skip", messageId: String(messageId || "") }).catch(() => {});
+    return { status: "no_violation", review: { violation: false, confidence: 1, reason: "政治相关内容不由 AI 群规监控处理。", politicalTopicSkipped: true } };
+  }
   const activeRuleRecords = await opsActiveRuleRecords(env, groupId);
   const matchedException = opsRuleExceptionMatch(content, activeRuleRecords.exceptions);
   if (matchedException) {
@@ -2062,15 +2102,16 @@ async function inspectMessageAgainstGroupRules(env, { groupId, userId, senderNam
 
   const recentLogRows = (await readJson(env, `recent_logs:${groupId}`, [])).slice(-30);
   const recentContext = recentLogRows.slice(-18).join("\n").slice(-5000);
+  const racialDiscrimination = detectExplicitRacialDiscrimination(content, recentContext);
   const recentConversationRecords = await readRecentConversationRecords(env, groupId, 30);
   const managerExchange = managerExchangeContext(recentConversationRecords, { userId, senderRole, text: content, mentionedQqs, quotedSenderId });
-  if (!manual && looksLikeRoughBanter(content) && (managerExchange.managerParticipating || managerExchange.managerStopActive)) {
+  if (!manual && !racialDiscrimination && looksLikeRoughBanter(content) && (managerExchange.managerParticipating || managerExchange.managerStopActive)) {
     await writeSystemAudit(env, { type: "rule_banter_manager_participation_skip", groupId, actorId: String(userId || ""), action: managerExchange.managerStopActive ? "handled_by_manager_stop" : "manager_participating", messageId: String(messageId || "") }).catch(() => {});
     return { status: "no_violation", review: { violation: false, confidence: 1, reason: managerExchange.managerStopActive ? "管理已明确介入，后续由冲突守卫记录并警告，不重复执行群规处罚" : "管理层正在参与该段熟人互呛，视为已有人工分寸判断" } };
   }
   const flirtBoundary = await handleFlirtBoundary(env, { groupId, userId, senderName, senderRole, content, messageId, recentRecords: recentConversationRecords, canEnforce });
   if (flirtBoundary) return flirtBoundary;
-  if (!rules && !spamEvidence) return { status: "no_rules" };
+  if (!rules && !spamEvidence && !racialDiscrimination) return { status: "no_rules" };
   const recentTargetRecords = await recentConversationMessagesForUser(env, groupId, userId, 12);
   const targetRecentMessages = recentTargetRecords.map(item => ({
     messageId: String(item.messageId || item.id || ""),
@@ -2146,13 +2187,30 @@ async function inspectMessageAgainstGroupRules(env, { groupId, userId, senderNam
       imageInspection = { ok: false, error: String(error?.message || error).slice(0, 500) };
     }
   }
+  const deterministicRacialReview = racialDiscrimination ? {
+    violation: true,
+    confidence: racialDiscrimination.confidence,
+    violationType: racialDiscrimination.violationType,
+    rule: "禁止种族歧视、族群贬损与去人化表达",
+    reason: racialDiscrimination.reason,
+    severity: "moderate",
+    intentional: true,
+    action: "warn",
+    muteSeconds: 0,
+    testContext: false,
+    linkAssessment: "无链接",
+    deterministic: true,
+    forceWarning: true
+  } : null;
   let review;
-  if (deterministicSpamReview) {
+  if (deterministicRacialReview) {
+    review = deterministicRacialReview;
+  } else if (deterministicSpamReview) {
     review = deterministicSpamReview;
   } else {
   try {
     const result = await callGoogleDecision(env, {
-      system: `你是 QQ 群规合规分类器。只能输出 JSON：{"violation":true|false,"confidence":0到1,"violationType":"违规项目分类","rule":"涉及群规","reason":"简短且具体的原因","severity":"minor|moderate|severe|critical","intentional":true|false,"action":"record|warn|mute|kick","muteSeconds":整数,"testContext":true|false,"linkAssessment":"无链接或简短判断"}。
+      system: `你是 QQ 群规合规分类器。只能输出 JSON：{"violation":true|false,"confidence":0到1,"violationType":"违规项目分类","rule":"涉及群规","reason":"简短且具体的原因","severity":"minor|moderate|severe|critical","intentional":true|false,"action":"record|warn|mute|kick","muteSeconds":整数,"testContext":true|false,"linkAssessment":"无链接或简短判断","forceWarning":true|false}。
 当前判断等级：${strictness.configuredLevel === "smart" ? `智慧→${ruleStrictnessLabel(strictness.level)}` : ruleStrictnessLabel(strictness.level)}。${strictness.instruction}
 智慧校准原因：${strictness.adaptiveReason || "无"}
 证据优先级（不得颠倒）：明确群规与有效临时规则 > 群规例外 > 图片直接内容证据 > 分类备注与“仅限当前相似表达”的人工纠错样本 > 最近语境与模型常识。
@@ -2161,7 +2219,7 @@ async function inspectMessageAgainstGroupRules(env, { groupId, userId, senderNam
 2. “禁言、踢人、攻击”等词只是词语；必须判断发言者是否真的在针对他人实施骚扰或煽动现实伤害。类似“找一个人试禁言”“测试一下禁言”不得判成人身攻击。
 3. 出现网址不等于拉人、宣传或引流。必须结合域名、页面标题/说明和发送意图；正常工具链接、Control Center、资料引用、个人正常分享不得判违规。
 4. 无法访问链接时只能写入不确定性，不能仅因无法访问就判违规。
-5. “建政/涉政”必须是对现实国家政治制度、领导人、公共政策、政治事件的实质讨论、宣传、攻击、批评或动员。游戏、军事梗、影视台词、虚构阵营、普通玩笑和比喻不得单独判为建政。
+5. 现实政治、政党、选举、领导人、政府、公共政策、政治事件、外交、领土争议与意识形态内容必须 violation=false；AI 群规监控不得评论、记录为违规或处罚政治内容。游戏、影视与虚构阵营只有在明确映射现实政治时才按此静默略过。
 6. violationType 必须优先选择“分类与处罚设置”中已有的分类。群规正文与有效临时规则具有最高优先级；分类备注和人工纠错用于解释群规，不得反过来覆盖明确群规。
 7. 管理人工复核结果是单条学习样本，只能影响内容实质相似的表达；禁止把某一人的单笔纠错备注当成整个分类或所有后续消息的规则。被标记为误判的相似表达不得再次仅凭表面词语判违规。
 8. severity 必须按实际影响判断：minor 是轻微、初次、无明显恶意或可通过提醒改善；moderate 是明确违规；severe 是重复、明显恶意或造成较大影响；critical 是需要立即制止的严重行为。
@@ -2176,7 +2234,8 @@ async function inspectMessageAgainstGroupRules(env, { groupId, userId, senderNam
 17. 流行梗、多人自愿接龙、复读梗、双方都在参与的玩笑或群内既有梗不等于恶意刷屏；除非明确群规禁止，或有人明确制止、正常聊天已被持续打断，才可按公共秩序处理。
 18. memeVerification 是联网搜索、群内上下文和管理员历史纠错的综合核查。likelyMeme=true 且 disruptive=false 时优先不处罚；搜不到只能视为未知，不能直接判定“不是梗”。
 19. 管理员、群主或开发者正在参与一段熟人互呛时，不得仅凭“滚、神经、笨蛋”等短词判违规；管理明确要求停止后仍继续的情况由独立冲突守卫记录并警告，避免重复处罚。
-20. 群内普通、双方自愿且不过度露骨的文字调情允许。只有明确拒绝后仍持续、公开内容明显露骨、强迫纠缠或持续影响正常聊天时才越界；独立调情边界最多禁言300秒。`,
+20. 群内普通、双方自愿且不过度露骨的文字调情允许。只有明确拒绝后仍持续、公开内容明显露骨、强迫纠缠或持续影响正常聊天时才越界；独立调情边界最多禁言300秒。
+21. 明确宣称某一种族／族群天生低等、低贱、不是人或只配当工具，使用奴隶／农具／棉花种植园等语境去人化特定族群，或主张必须歧视、隔离、排斥某族群，必须判为“种族歧视”，action=warn，forceWarning=true。此类项目固定公开警告，不建议撤回、禁言或踢出；反对、引用并批评种族歧视不得误判。`,
       prompt: JSON.stringify({
         currentMessage: content,
         userId,
@@ -2728,4 +2787,4 @@ async function listModerationProposals(env, groupId, { limit = 100 } = {}) {
   return items;
 }
 
-export { addRuleStrike, detectRepeatedMessageBurst, appendHumanCorrectionToRulePolicy, appendRuleViolationRecord, attachModerationProposalMessage, classifyNaturalModerationIntent, createGroupWorkRequest, createJoinRequestAssist, createModerationProposal, decideJoinRequestAssist, defaultRuleCategoryPolicies, defaultRuleProgressivePolicy, detectNaturalModerationProposal, executeGroupWorkRequest, executeModerationProposal, explicitPromotionLanguage, extractHtmlMetadata, extractOneBotMessageId, extractRuleReviewUrls, findLatestActiveRuleViolationForUser, findLatestPendingModerationProposalId, formatModerationPermissionDenied, formatModerationProposal, getGroupMemberSafe, getRuleCategoryPolicies, getRuleProgressivePolicy, handleGroupWorkDecision, handleModerationConfirmation, inspectMessageAgainstGroupRules, inspectUrlsForRuleReview, joinRequestPatternHash, listModerationProposals, localModerationIntent, matchRuleCategoryPolicy, moderationActionLabel, moderationActionNeedsTarget, moderationPermissionLevelLabel, normalizeProgressiveAction, normalizeProgressiveActionSpecs, normalizeRuleCategoryPolicies, normalizeRulePolicyActionSpec, normalizeRulePolicyActions, normalizeRulePolicyPunishment, normalizeRuleProgressivePolicy, normalizeRuleProxyMode, normalizeRuleSeverity, normalizeRuleStrictness, sanitizeLegacyRuleViolationRecord, selectRelevantRuleFeedbackExamples, stripLegacyHumanCorrectionLines, parseModerationConfirmation, parseUnlimitedNonNegativeInteger, performRuleAdditionalActions, performRuleProxyAction, progressiveMuteFallback, readJoinPattern, readRecentRuleFeedbackExamples, readResponseTextPrefix, readRuleMemeExamples, rememberRuleMemeExample, recordJoinPatternDecision, recordRuleViolationFeedback, removeRuleStrike, requestRuleManagerClarification, resolveAdaptiveRuleStrictness, resolveModerationTarget, findApplicantBranchMembership, resolveHeadJoinFamily, resolveRuleProgressiveStep, retractModerationProposalMessage, reverseRuleViolationAction, reviewGroupWorkWithGemma, reviewJoinRequestAssist, ruleBaseActionName, ruleContentNeedsWebVerification, ruleProxyCooldownRemaining, ruleStrictnessConfig, ruleStrictnessLabel, updateRuleViolationRecord, validateModerationProposalTarget, verifyRuleMemeContext, verifyRuleNewsContext };
+export { addRuleStrike, detectExplicitRacialDiscrimination, detectRepeatedMessageBurst, isPoliticalModerationTopic, appendHumanCorrectionToRulePolicy, appendRuleViolationRecord, attachModerationProposalMessage, classifyNaturalModerationIntent, createGroupWorkRequest, createJoinRequestAssist, createModerationProposal, decideJoinRequestAssist, defaultRuleCategoryPolicies, defaultRuleProgressivePolicy, detectNaturalModerationProposal, executeGroupWorkRequest, executeModerationProposal, explicitPromotionLanguage, extractHtmlMetadata, extractOneBotMessageId, extractRuleReviewUrls, findLatestActiveRuleViolationForUser, findLatestPendingModerationProposalId, formatModerationPermissionDenied, formatModerationProposal, getGroupMemberSafe, getRuleCategoryPolicies, getRuleProgressivePolicy, handleGroupWorkDecision, handleModerationConfirmation, inspectMessageAgainstGroupRules, inspectUrlsForRuleReview, joinRequestPatternHash, listModerationProposals, localModerationIntent, matchRuleCategoryPolicy, moderationActionLabel, moderationActionNeedsTarget, moderationPermissionLevelLabel, normalizeProgressiveAction, normalizeProgressiveActionSpecs, normalizeRuleCategoryPolicies, normalizeRulePolicyActionSpec, normalizeRulePolicyActions, normalizeRulePolicyPunishment, normalizeRuleProgressivePolicy, normalizeRuleProxyMode, normalizeRuleSeverity, normalizeRuleStrictness, sanitizeLegacyRuleViolationRecord, selectRelevantRuleFeedbackExamples, stripLegacyHumanCorrectionLines, parseModerationConfirmation, parseUnlimitedNonNegativeInteger, performRuleAdditionalActions, performRuleProxyAction, progressiveMuteFallback, readJoinPattern, readRecentRuleFeedbackExamples, readResponseTextPrefix, readRuleMemeExamples, rememberRuleMemeExample, recordJoinPatternDecision, recordRuleViolationFeedback, removeRuleStrike, requestRuleManagerClarification, resolveAdaptiveRuleStrictness, resolveModerationTarget, findApplicantBranchMembership, resolveHeadJoinFamily, resolveRuleProgressiveStep, retractModerationProposalMessage, reverseRuleViolationAction, reviewGroupWorkWithGemma, reviewJoinRequestAssist, ruleBaseActionName, ruleContentNeedsWebVerification, ruleProxyCooldownRemaining, ruleStrictnessConfig, ruleStrictnessLabel, updateRuleViolationRecord, validateModerationProposalTarget, verifyRuleMemeContext, verifyRuleNewsContext };

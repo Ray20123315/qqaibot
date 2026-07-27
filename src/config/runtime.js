@@ -3,10 +3,10 @@
 
 
 
-const VERSION = "2.7.9";
+const VERSION = "2.7.10";
 
 
-const BUILD_DATE = "2026-07-27";
+const BUILD_DATE = "2026-07-28";
 
 
 const DEFAULT_DEVELOPER_ID = "3569028262";
