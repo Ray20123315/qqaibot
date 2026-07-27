@@ -1,0 +1,43 @@
+name: Apply emergency v2.7.7
+
+on:
+  push:
+    branches:
+      - chatgpt/emergency-v2.7.7
+    paths:
+      - tools/apply-emergency-v2.7.7.py
+      - .github/workflows/apply-emergency-v2.7.7.yml
+
+permissions:
+  contents: write
+
+jobs:
+  apply-and-verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: chatgpt/emergency-v2.7.7
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Apply precise patches
+        run: python3 tools/apply-emergency-v2.7.7.py
+      - name: Install dependencies without lockfile
+        run: npm install --ignore-scripts --no-package-lock
+      - name: Run full regression suite
+        run: npm run check
+      - name: Run Wrangler bundle dry-run
+        run: npm run check:bundle
+      - name: Remove one-time patch infrastructure
+        run: rm -f tools/apply-emergency-v2.7.7.py .github/workflows/apply-emergency-v2.7.7.yml
+      - name: Commit verified result
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git diff --cached --quiet && exit 0
+          git commit -m "feat: emergency response and portal pagination v2.7.7"
+          git push origin HEAD:chatgpt/emergency-v2.7.7
