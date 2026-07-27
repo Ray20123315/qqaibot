@@ -1,0 +1,138 @@
+from pathlib import Path
+import json
+
+
+def read(path):
+    return Path(path).read_text(encoding="utf-8")
+
+
+def write(path, text):
+    Path(path).write_text(text, encoding="utf-8")
+
+
+def replace_once(path, old, new):
+    text = read(path)
+    count = text.count(old)
+    if count != 1:
+        raise RuntimeError(f"{path}: expected one anchor, found {count}: {old[:120]!r}")
+    write(path, text.replace(old, new, 1))
+
+
+replace_once("src/config/runtime.js", 'const VERSION = "2.7.7";', 'const VERSION = "2.7.8";')
+replace_once("package.json", '"version": "2.7.7"', '"version": "2.7.8"')
+replace_once(
+    "package.json",
+    'verify-emergency-v2.7.7.mjs"',
+    'verify-emergency-v2.7.7.mjs && node verify-self-outbound-loop.mjs"',
+)
+
+permissions_path = Path("src/core/permissions.js")
+permissions = permissions_path.read_text(encoding="utf-8")
+start = permissions.index("async function isKnownOutboundMessage")
+end = permissions.index("async function callOneBotAction", start)
+block = permissions[start:end]
+fresh_delete = "  await dbDel(env, key);\n  return true;"
+if block.count(fresh_delete) != 1:
+    raise RuntimeError(f"isKnownOutboundMessage fresh delete count={block.count(fresh_delete)}")
+block = block.replace(
+    fresh_delete,
+    "  // One API send can be reported more than once (for example message_sent plus message).\n"
+    "  // Keep the fresh fingerprint until its fixed TTL expires so every duplicate echo is rejected.\n"
+    "  return true;",
+    1,
+)
+permissions_path.write_text(permissions[:start] + block + permissions[end:], encoding="utf-8")
+
+ingress_anchor = '    if (!body) return;\n    const werewolfHandled = await handleWerewolfOneBotEvent(this.env, body).catch(async error => {'
+ingress_replacement = '''    if (!body) return;
+
+    // NapCat may report one API send as both message_sent and message. Reject every event
+    // proven to be our own outbound before games, queues or Worker processing can see it.
+    const inboundPostType = String(body.post_type || "");
+    const inboundSelfId = String(body.self_id || "");
+    const inboundUserId = String(body.user_id || "");
+    const selfMessageEvent = ["message", "message_sent"].includes(inboundPostType)
+      && (inboundPostType === "message_sent" || Boolean(inboundSelfId && inboundUserId === inboundSelfId));
+    if (selfMessageEvent) {
+      const outboundEcho = await isKnownOutboundMessage(this.env, {
+        messageId: String(body.message_id || ""),
+        isGroup: body.message_type === "group",
+        groupId: body.message_type === "group" ? String(body.group_id || "") : "",
+        peerId: body.message_type === "group" ? "" : String(body.target_id || body.peer_id || body.user_id || body.self_id || ""),
+        text: extractMessageText(body.message || body.raw_message || ""),
+        mediaTypes: extractOutboundMediaTypes(body.message || body.raw_message || "")
+      });
+      if (outboundEcho) {
+        await this.recordIngress(body, "self_outbound_echo_ignored", {
+          explicit: eventHasBotMention(body),
+          force: true,
+          postType: inboundPostType
+        }).catch(() => {});
+        return;
+      }
+    }
+
+    const werewolfHandled = await handleWerewolfOneBotEvent(this.env, body).catch(async error => {'''
+replace_once("worker.js", ingress_anchor, ingress_replacement)
+
+fixture_updates = 0
+for verify_path in Path(".").glob("verify-*.mjs"):
+    source = verify_path.read_text(encoding="utf-8")
+    count = source.count("2.7.7")
+    if count:
+        verify_path.write_text(source.replace("2.7.7", "2.7.8"), encoding="utf-8")
+        fixture_updates += count
+
+verify = r'''import fs from "node:fs";
+
+const worker = fs.readFileSync("worker.js", "utf8");
+const permissions = fs.readFileSync("src/core/permissions.js", "utf8");
+const config = fs.readFileSync("src/config/runtime.js", "utf8");
+const pkg = JSON.parse(fs.readFileSync("package.json", "utf8"));
+
+function check(condition, message) {
+  if (!condition) throw new Error(message);
+}
+
+check(config.includes('const VERSION = "2.7.8";'), "runtime version must be 2.7.8");
+check(pkg.version === "2.7.8", "package version must be 2.7.8");
+
+const knownStart = permissions.indexOf("async function isKnownOutboundMessage");
+const knownEnd = permissions.indexOf("async function callOneBotAction", knownStart);
+const known = knownStart >= 0 ? permissions.slice(knownStart, knownEnd) : "";
+check(known.includes("outbound_pending:${outboundFingerprint(info)}"), "pending outbound fingerprint lookup missing");
+check(known.includes("Date.now() - Number(item.at || 0) > 2 * 60 * 1000"), "fixed outbound fingerprint TTL missing");
+check(known.includes("Keep the fresh fingerprint until its fixed TTL expires"), "non-consuming outbound marker rationale missing");
+check(!/await dbDel\(env, key\);\s*return true;/.test(known), "fresh outbound marker must not be deleted on a successful match");
+
+const handlerStart = worker.indexOf("async handleMessage(socket, request, event)");
+const echoGuard = worker.indexOf("self_outbound_echo_ignored", handlerStart);
+const werewolf = worker.indexOf("const werewolfHandled", handlerStart);
+const queueCheck = worker.indexOf("const explicitGroupQuestion = await this.shouldQueueUserQuestion", handlerStart);
+check(handlerStart >= 0 && echoGuard > handlerStart, "Durable Object outbound echo guard missing");
+check(echoGuard < werewolf && echoGuard < queueCheck, "outbound echo guard must run before games and question queueing");
+check(worker.includes('inboundPostType === "message_sent" || Boolean(inboundSelfId && inboundUserId === inboundSelfId)'), "self message event detection missing");
+check(worker.includes('text: extractMessageText(body.message || body.raw_message || "")'), "ingress fingerprint text must match sendAction normalization");
+check(worker.includes('mediaTypes: extractOutboundMediaTypes(body.message || body.raw_message || "")'), "ingress media fingerprint must match sendAction normalization");
+check(worker.includes("cleanMessage.startsWith('//')") && worker.includes("cleanMessage.startsWith('??')"), "same-account chat prefixes missing");
+check(worker.includes("const explicitSelfCommand = /^[!！]/.test(cleanMessage);"), "same-account command path missing");
+check(worker.includes("if (apiMessage) return new Response(null, { status: 204 });"), "inner Worker outbound defense missing");
+
+console.log("Self-account outbound loop regression checks passed.");
+'''
+write("verify-self-outbound-loop.mjs", verify)
+
+release_path = Path("release-notes.json")
+release = json.loads(release_path.read_text(encoding="utf-8"))
+release["version"] = "2.7.8"
+release["added"] = [
+    "新增同号自身输出的 Durable Object 前置拦截，API 回覆在进入狼人杀、问题队列或 Worker 前即被识别",
+    "新增永久回归测试，确保机器人账号人工指令仍可使用，同时阻止 message_sent 与 message 双重上报造成循环",
+]
+release["fixed"] = [
+    "修复 outbound_pending 指纹首次命中后立即删除，导致第二份重复自身事件被当成新输入的问题",
+    "修复使用机器人账号执行指令后，机器人回覆并 @ 自己，随后继续自我回覆和重复 @ 的循环",
+]
+release_path.write_text(json.dumps(release, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
+print(f"Applied v2.7.8 self-outbound loop fix; version fixtures updated={fixture_updates}.")
