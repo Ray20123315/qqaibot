@@ -1,0 +1,2 @@
+trigger: 2026-07-27T00:00:00+08:00
+purpose: run the verified emergency patch workflow
