@@ -33,5 +33,5 @@ for (const match of html.matchAll(/<script[^>]*>([\s\S]*?)<\/script>/g)) new Fun
 const werewolfSource = fs.readFileSync('src/games/werewolf.js', 'utf8');
 assert(werewolfSource.includes('qqai-nav-glyph') && werewolfSource.includes('>狼<'), 'Werewolf nav must have explicit glyph');
 const pkg = JSON.parse(fs.readFileSync('package.json','utf8'));
-assert(pkg.version === '2.7.7' && pkg.scripts.check.includes('verify-member-console-split.mjs'), 'v2.7.3 permanent check must be registered');
+assert(pkg.version === '2.7.8' && pkg.scripts.check.includes('verify-member-console-split.mjs'), 'v2.7.3 permanent check must be registered');
 console.log('verify-member-console-split: ok');

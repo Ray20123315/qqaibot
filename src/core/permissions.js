@@ -510,7 +510,8 @@ async function isKnownOutboundMessage(env, info) {
   let item = null;
   try { item = JSON.parse(raw); } catch {}
   if (!item || Date.now() - Number(item.at || 0) > 2 * 60 * 1000) { await dbDel(env, key); return false; }
-  await dbDel(env, key);
+  // One API send can be reported more than once (for example message_sent plus message).
+  // Keep the fresh fingerprint until its fixed TTL expires so every duplicate echo is rejected.
   return true;
 }
 

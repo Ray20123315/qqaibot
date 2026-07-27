@@ -53,6 +53,6 @@ assert(worker.includes('mentionedQqs'), 'Worker must pass mention context to soc
 assert(worker.includes('quotedSenderId: String(quotedMessage?.senderId || "")'), 'Worker must pass quoted-sender context to social boundary handlers');
 
 const pkg = JSON.parse(fs.readFileSync('package.json', 'utf8'));
-assert(pkg.version === '2.7.7', 'Package version must be 2.5.2');
+assert(pkg.version === '2.7.8', 'Package version must be 2.5.2');
 assert(pkg.scripts.check.includes('verify-social-boundaries.mjs'), 'Social boundary verification must run permanently');
 console.log('verify-social-boundaries: ok');

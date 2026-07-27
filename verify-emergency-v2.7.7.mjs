@@ -10,8 +10,8 @@ function check(condition, message) {
   if (!condition) throw new Error(message);
 }
 
-check(config.includes('const VERSION = "2.7.7";'), "runtime version must be 2.7.7");
-check(pkg.version === "2.7.7", "package version must be 2.7.7");
+check(config.includes('const VERSION = "2.7.8";'), "runtime version must be 2.7.8");
+check(pkg.version === "2.7.8", "package version must be 2.7.8");
 
 // Robot-account manual input remains allowed while outbound echoes remain blocked.
 check(worker.includes("const isSelfAccount = Boolean(userId && eventSelfId && userId === eventSelfId);"), "same-account identity detection missing");
@@ -51,4 +51,4 @@ check(config.includes('ruleStrictness: "smart"'), "default rule strictness must 
 check(moderation.includes('"智慧": "smart"') && moderation.includes("resolveAdaptiveRuleStrictness"), "adaptive violation strictness missing");
 check(moderation.includes("近期人工复核或撤销发现") && moderation.includes("暂时提高敏感度"), "adaptive violation feedback signals missing");
 
-console.log("Emergency v2.7.7 regression checks passed.");
+console.log("Emergency v2.7.8 regression checks passed.");
