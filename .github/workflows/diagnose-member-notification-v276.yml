@@ -17,9 +17,9 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
-      - name: Print integration anchors
+      - name: Capture integration anchors
         run: |
-          python - <<'PY'
+          python - <<'PY' > /tmp/v276-anchors.txt
           from pathlib import Path
           targets = {
             'worker.js': ['const isDeveloper', 'getEffectivePermissions(env, currentGroupId', 'const translateMatch', 'const meetingMatch', 'import { AI_MEDIA_LIMITS'],
@@ -40,7 +40,13 @@ jobs:
               hits = [i for i, line in enumerate(lines) if needle in line]
               print(f'--- NEEDLE {needle!r} HITS {hits} ---')
               for hit in hits[:5]:
-                start=max(0, hit-10); end=min(len(lines), hit+28)
+                start=max(0, hit-12); end=min(len(lines), hit+36)
                 for i in range(start,end): print(f'{i+1:06d}: {lines[i]}')
                 print('---')
           PY
+          cat /tmp/v276-anchors.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: v276-source-anchors
+          path: /tmp/v276-anchors.txt
+          if-no-files-found: error
