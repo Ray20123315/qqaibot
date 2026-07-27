@@ -6,6 +6,7 @@ import { DEFAULTS, DEFAULT_DEVELOPER_ID, VERSION } from "../config/runtime.js";
 import { developerId, isDeveloperId, recentConversationMessagesForUser } from "../core/identity.js";
 import { appendIndex, callOneBotAction, getEffectivePermissions, writeSystemAudit } from "../core/permissions.js";
 import { dbDel, dbGet, dbPut } from "../data/store.js";
+import { dispatchHumanAttentionNotification } from "../notifications/routing.js";
 import { canUnlockMute, clearMuteLock, createManualMuteLock, getMuteLock, putMuteLock } from "./mute-locks.js";
 import { FLIRT_MUTE_MAX_SECONDS, clampFlirtMuteSeconds, isFlirtRefusalSignal, isManagementRole, looksLikeFlirtCandidate, looksLikeRoughBanter, managerExchangeContext, normalizeFlirtAction, readRecentConversationRecords } from "./social-boundaries.js";
 import { botCanRunRuleMonitor, canUseBotGroupOperations, getBotGroupRole, isBotVerifiedGroupOwner } from "../group/runtime.js";
@@ -272,6 +273,32 @@ async function findApplicantBranchMembership(env, family, userId) {
 }
 
 
+function joinRequestAttentionMessage(item, heading = "入群申请待人工处理") {
+  const review = item?.review || {};
+  const decision = review.decision === "suggest_approve" ? "建议同意" : review.decision === "suggest_reject" ? "建议人工核对拒绝" : "请人工核对";
+  return `【${heading}】
+编号：${item?.id || "未生成"}
+群号：${item?.groupId || ""}
+申请人：${item?.userId || ""}
+附言：${item?.comment || "无"}
+AI 意见：${decision}${review.reason ? `（${review.reason}）` : ""}
+当前状态：${item?.status || "unknown"}
+处理方式：请在对应群聊发送“确认入群 ${item?.id || "编号"}”或“忽略入群 ${item?.id || "编号"}”。`;
+}
+
+
+async function notifyJoinRequestAttention(env, item, eventId, heading) {
+  const result = await dispatchHumanAttentionNotification(env, {
+    groupId: item.groupId,
+    eventId,
+    message: joinRequestAttentionMessage(item, heading),
+    audit: { actorId: "system:join_assist", targetId: item.userId, requestId: item.id, status: item.status }
+  });
+  item.notification = result;
+  return result;
+}
+
+
 async function createJoinRequestAssist(env, body) {
   const groupId = String(body.group_id || "").replace(/\D/g, "");
   const userId = String(body.user_id || "").replace(/\D/g, "");
@@ -334,6 +361,9 @@ async function createJoinRequestAssist(env, body) {
         headGroupId: headFamily.headGroupId,
         sourceGroupId: branchMembership.groupId
       }).catch(() => {});
+      await notifyJoinRequestAttention(env, item, "join_request_failed", "分群成员入群自动同意失败").catch(error => {
+        console.warn("notify subgroup join failure failed", error?.message || error);
+      });
     }
     await dbPut(env, `joinrequest:${id}`, JSON.stringify(item));
     await appendIndex(env, `joinrequest:index:${groupId}`, id, 1000);
@@ -355,7 +385,13 @@ async function createJoinRequestAssist(env, body) {
       await appendIndex(env, `joinrequest:index:${groupId}`, id, 1000);
       await recordJoinPatternDecision(env, groupId, patternHash, comment, "approved");
       return item;
-    } catch (error) { console.warn("cached join approval failed", error); }
+    } catch (error) {
+      console.warn("cached join approval failed", error);
+      const failed = { id: `jr_${Date.now().toString(36)}_${crypto.randomUUID().slice(0, 6)}`, groupId, userId, flag: String(body.flag || ""), subType, comment, patternHash, review: { decision: "cached_approve", reason: `相同申请方式已获准 ${pattern.approvedCount} 次` }, status: "approve_failed", result: String(error?.message || error), createdAt: Date.now() };
+      await dbPut(env, `joinrequest:${failed.id}`, JSON.stringify(failed));
+      await appendIndex(env, `joinrequest:index:${groupId}`, failed.id, 1000);
+      await notifyJoinRequestAttention(env, failed, "join_request_failed", "缓存规则自动同意失败").catch(() => {});
+    }
   }
 
   const review = await reviewJoinRequestAssist(env, {
@@ -382,6 +418,8 @@ async function createJoinRequestAssist(env, body) {
       item.result = String(error?.message || error);
       await dbPut(env, `joinrequest:${id}`, JSON.stringify(item));
       await appendIndex(env, `joinrequest:index:${groupId}`, id, 1000);
+      await notifyJoinRequestAttention(env, item, "join_request_failed", "AI 自动同意入群失败").catch(() => {});
+      await dbPut(env, `joinrequest:${id}`, JSON.stringify(item));
     }
   }
   const rejectAuthorized = await dbGet(env, `join_reject_authorized:${groupId}`) === "true";
@@ -391,7 +429,11 @@ async function createJoinRequestAssist(env, body) {
     try {
       await callOneBotAction(env, { action: "set_group_add_request", params: { flag: item.flag, sub_type: subType, approve: false, reason: String(review.reason || "不符合入群要求").slice(0, 120) } }, 15000);
       await recordJoinPatternDecision(env, groupId, patternHash, comment, "rejected");
-    } catch (error) { item.status = "reject_failed"; item.result = String(error?.message || error); }
+    } catch (error) {
+      item.status = "reject_failed";
+      item.result = String(error?.message || error);
+      await notifyJoinRequestAttention(env, item, "join_request_failed", "AI 自动拒绝入群失败").catch(() => {});
+    }
     await dbPut(env, `joinrequest:${id}`, JSON.stringify(item));
     await appendIndex(env, `joinrequest:index:${groupId}`, id, 1000);
     return item;
@@ -401,13 +443,10 @@ async function createJoinRequestAssist(env, body) {
   const item = { id, groupId, userId: String(body.user_id || ""), flag: String(body.flag || ""), subType, comment, patternHash, review, status: "pending_management", createdAt: Date.now() };
   await dbPut(env, `joinrequest:${id}`, JSON.stringify(item));
   await appendIndex(env, `joinrequest:index:${groupId}`, id, 1000);
-  try {
-    const members = await callOneBotAction(env, { action: "get_group_member_list", params: { group_id: numericId(groupId), no_cache: false } }, 15000);
-    const list = Array.isArray(members) ? members : members?.data || [];
-    for (const manager of list.filter(member => ["owner", "admin"].includes(member.role)).slice(0, 10)) {
-      await callOneBotAction(env, { action: "send_private_msg", params: { user_id: numericId(manager.user_id), message: `【入群申请辅助】\n编号：${id}\n群号：${groupId}\n申请人：${item.userId}\n附言：${item.comment || "无"}\nAI 意见：${review.decision === "suggest_approve" ? "建议同意" : review.decision === "suggest_reject" ? "建议人工核对拒绝" : "请人工核对"}（${review.reason}）\n同意：确认入群 ${id}\n忽略：忽略入群 ${id}`, auto_escape: false } }, 12000);
-    }
-  } catch (error) { console.warn("notify management for join request failed", error); }
+  await notifyJoinRequestAttention(env, item, "join_request_pending", "入群申请待人工处理").catch(error => {
+    console.warn("route join request notification failed", error?.message || error);
+  });
+  await dbPut(env, `joinrequest:${id}`, JSON.stringify(item));
   return item;
 }
 
@@ -431,7 +470,9 @@ async function decideJoinRequestAssist(env, { groupId, actorId, id, decision }) 
     if (item.patternHash) await recordJoinPatternDecision(env, groupId, item.patternHash, item.comment, "approved");
     return { ok: true, message: "已由管理确认同意入群申请；相同申请方式已计入缓存。" };
   } catch (error) {
-    item.status = "failed"; item.result = String(error?.message || error); await dbPut(env, `joinrequest:${id}`, JSON.stringify(item));
+    item.status = "failed"; item.result = String(error?.message || error);
+    await notifyJoinRequestAttention(env, item, "join_request_failed", "管理确认入群执行失败").catch(() => {});
+    await dbPut(env, `joinrequest:${id}`, JSON.stringify(item));
     return { ok: false, message: `同意申请失败：${item.result}` };
   }
 }
@@ -2277,6 +2318,18 @@ async function createGroupWorkRequest(env, data) {
   await dbPut(env, `groupwork:${id}`, JSON.stringify(item));
   await appendIndex(env, `groupwork:index:${item.groupId}`, id, 500);
   await writeSystemAudit(env, { type: "groupwork_requested", groupId: item.groupId, actorId: item.creatorId, action: item.type, requestId: id });
+  item.notification = await dispatchHumanAttentionNotification(env, {
+    groupId: item.groupId,
+    eventId: "group_work_request",
+    message: `【群务请求待处理】
+编号：${item.id}
+提出者：${item.creatorName}（QQ:${item.creatorId}）
+类型：${item.type}
+内容：${item.content || item.fileName || "未提供"}
+请由获通知的管理人员进入 Portal 或使用现有群务决定指令处理。`,
+    audit: { actorId: item.creatorId, requestId: item.id, requestType: item.type }
+  }).catch(error => ({ ok: false, error: String(error?.message || error).slice(0, 500) }));
+  await dbPut(env, `groupwork:${id}`, JSON.stringify(item));
   return item;
 }
 

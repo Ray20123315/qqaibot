@@ -3,7 +3,7 @@
 
 
 
-const VERSION = "2.7.5";
+const VERSION = "2.7.6";
 
 
 const BUILD_DATE = "2026-07-27";

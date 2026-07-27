@@ -6,6 +6,7 @@ import { DEFAULTS, VERSION } from "../config/runtime.js";
 import { isDeveloperId } from "../core/identity.js";
 import { appendIndex, callOneBotAction, listAiDecisionLogs, writeSystemAudit } from "../core/permissions.js";
 import { dbDel, dbGet, dbPut } from "../data/store.js";
+import { dispatchHumanAttentionNotification } from "../notifications/routing.js";
 import { canUseBotGroupOperations, getBotGroupRole, getBotIdentity } from "../group/runtime.js";
 import { createGroupWorkRequest, extractOneBotMessageId, normalizeRuleStrictness } from "../moderation/runtime.js";
 import { PORTAL_SETTING_DEFINITIONS, jsonResponse, readJson, readPortalSettingValue, resolvePortalRole, sendPortalVerificationMessage, writePortalSettingValue } from "../portal/auth.js";
@@ -392,6 +393,24 @@ async function opsSaveRecord(env, { type, existing = null, groupId, actorId, act
     await dbPut(env, opsVersionKey(type, id), JSON.stringify(versions.slice(-50)));
   }
   await writeSystemAudit(env, { type: `ops_${type}`, groupId: item.groupId, actorId: String(actorId || ""), action: existing ? "update" : "create", recordId: id, title: item.title });
+  if (!existing) {
+    const eventId = ({ appeal_thread: "appeal_created", suggestion: "suggestion_created", bug: "bug_created", quality_feedback: "quality_feedback_created" })[type] || "";
+    if (eventId) {
+      item.notification = await dispatchHumanAttentionNotification(env, {
+        groupId: item.groupId,
+        eventId,
+        message: `【${def.name}待处理】
+编号：${item.publicCode || item.id}
+群号：${item.groupId}
+提出者：${item.creatorName || item.creatorId}（QQ:${item.creatorId}）
+标题：${item.title || def.name}
+内容：${String(item.description || "未提供").slice(0, 1800)}
+请进入 Portal 对应页面处理。`,
+        audit: { actorId: item.creatorId, recordId: item.id, recordType: type }
+      }).catch(error => ({ ok: false, error: String(error?.message || error).slice(0, 500) }));
+      await dbPut(env, opsRecordKey(type, id), JSON.stringify(item));
+    }
+  }
   return item;
 }
 

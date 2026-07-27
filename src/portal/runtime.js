@@ -71,9 +71,11 @@ async function handleOpsPortalApi(request, env, url, path, body, authed) {
       pendingConfirmation: true,
       proposal: await readJson(env, `moderation:proposal:${proposal.id}`, proposal),
       notification,
-      message: notification.ok
-        ? `已建立待确认操作 ${proposal.id}，并已通知当前群。尚未执行。`
-        : `已建立待确认操作 ${proposal.id}，但群内通知发送失败：${notification.error}`
+      message: notification.skipped
+        ? `已建立待确认操作 ${proposal.id}；当前通知路由未发送消息（${notification.reason || "已关闭"}）。尚未执行。`
+        : notification.ok
+          ? `已建立待确认操作 ${proposal.id}，并已按通知路由私讯 ${notification.sentRecipientIds?.length || 0} 位接收者。尚未执行。`
+          : `已建立待确认操作 ${proposal.id}，但通知路由发送失败：${notification.error || notification.failures?.[0]?.error || "未知错误"}`
     });
   }
 

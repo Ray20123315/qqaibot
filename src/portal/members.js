@@ -8,6 +8,7 @@ import { jsonResponse, readJson } from "./auth.js";
 import { numericId } from "../security/network.js";
 import { handleCommunitySuiteApi, injectCommunitySuiteClient, listMemberProfileSummaries } from "./community-suite.js";
 import { handleMemberCleanupApi, injectMemberCleanupClient } from "./member-cleanup.js";
+import { handleNotificationRoutingApi, injectNotificationRoutingClient } from "./notification-routing.js";
 
 const MEMBER_CACHE_TTL_MS = 5 * 60 * 1000;
 const MAX_MUTE_SECONDS = 30 * 24 * 60 * 60;
@@ -171,7 +172,9 @@ function protectedTargetReason(member, authed, action) {
 }
 
 async function handlePortalMemberApi(request, env, url, path, body, authed) {
-  if (!path.startsWith("/members")) return null;
+  if (!path.startsWith("/members") && !path.startsWith("/notification-routing")) return null;
+  const notificationRoutingResponse = await handleNotificationRoutingApi(request, env, path, body, authed);
+  if (notificationRoutingResponse) return notificationRoutingResponse;
   const groupId = String(authed?.groupId || "").replace(/\D/g, "");
   if (!groupId) return jsonResponse({ ok: false, message: "请先选择群组。" }, 400);
   if (!memberConsoleAllowed(authed)) return jsonResponse({ ok: false, message: "群友列表、历史消息与禁言操作仅限本群 QQ 管理员、群主、获授群操作权限者或开发者。" }, 403);
@@ -453,7 +456,7 @@ function injectPortalMembersClient(html) {
 })();
 </script>`;
   const output = source.includes("</body>") ? source.replace("</body>", script + "\n</body>") : source + script;
-  return injectMemberCleanupClient(injectCommunitySuiteClient(output));
+  return injectNotificationRoutingClient(injectMemberCleanupClient(injectCommunitySuiteClient(output)));
 }
 
 
