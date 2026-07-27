@@ -1,4 +1,5 @@
 Applied emergency v2.7.7 patches successfully.
+Normalized 9 stale package version assertions.
 
 added 35 packages, and audited 36 packages in 8s
 
@@ -25,15 +26,33 @@ verify-subgroup-join: ok
 spam detection checks passed
 meme-aware moderation and member console checks passed
 verify-social-digital-twin: ok
-file:///home/runner/work/qqaibot/qqaibot/verify-explicit-question-priority.mjs:10
-  if (!condition) throw new Error(message);
-                        ^
+verify-explicit-question-priority: ok
+verify-mute-locks: ok
+verify-partner-bindings: ok
+verify-self-mute-reapply: ok
+verify-master-bindings: ok
+verify-portal-relationships: ok
+verify-portal-members-client: ok
+verify-community-suite: ok
+verify-social-boundaries: ok
+node:internal/modules/run_main:123
+    triggerUncaughtException(
+    ^
 
-Error: Package version must be 2.5.2
-    at assert (file:///home/runner/work/qqaibot/qqaibot/verify-explicit-question-priority.mjs:10:25)
-    at file:///home/runner/work/qqaibot/qqaibot/verify-explicit-question-priority.mjs:59:1
+AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+
+'2.7.7' !== '2.7.6'
+
+    at file:///home/runner/work/qqaibot/qqaibot/verify-werewolf.mjs:81:8
     at ModuleJob.run (node:internal/modules/esm/module_job:343:25)
     at async onImport.tracePromise.__proto__ (node:internal/modules/esm/loader:681:26)
-    at async asyncRunEntryPointWithESMLoader (node:internal/modules/run_main:117:5)
+    at async asyncRunEntryPointWithESMLoader (node:internal/modules/run_main:117:5) {
+  generatedMessage: true,
+  code: 'ERR_ASSERTION',
+  actual: '2.7.7',
+  expected: '2.7.6',
+  operator: 'strictEqual',
+  diff: 'simple'
+}
 
 Node.js v22.23.1
