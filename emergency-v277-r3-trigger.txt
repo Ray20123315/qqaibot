@@ -1,2 +1,0 @@
-triggered_at: 2026-07-27T22:10:00+08:00
-purpose: clean apply, regression, bundle, and self-clean run
