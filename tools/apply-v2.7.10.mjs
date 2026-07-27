@@ -470,8 +470,8 @@ update("worker.js", source => {
   );
   source = replaceOnce(
     source,
-    `        direct: !isAutoInterject\n      });`,
-    `        direct: !isAutoInterject,\n        personaConfigured: hasConfiguredPersona\n      });`,
+    `      replyText = applySocialOutputPolicy({\n        text: replyText,\n        userText: conversationText,\n        decision: socialDecision,\n        profile: socialDecision.profile,\n        isGroup,\n        explicitLong: explicitLongReply,\n        direct: !isAutoInterject\n      });`,
+    `      replyText = applySocialOutputPolicy({\n        text: replyText,\n        userText: conversationText,\n        decision: socialDecision,\n        profile: socialDecision.profile,\n        isGroup,\n        explicitLong: explicitLongReply,\n        direct: !isAutoInterject,\n        personaConfigured: hasConfiguredPersona\n      });`,
     "social output persona flag"
   );
   source = replaceOnce(
