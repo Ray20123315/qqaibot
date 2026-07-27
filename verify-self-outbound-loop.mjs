@@ -9,8 +9,8 @@ function check(condition, message) {
   if (!condition) throw new Error(message);
 }
 
-check(config.includes('const VERSION = "2.7.9";'), "runtime version must be 2.7.9");
-check(pkg.version === "2.7.9", "package version must be 2.7.9");
+check(config.includes('const VERSION = "2.7.10";'), "runtime version must be 2.7.10");
+check(pkg.version === "2.7.10", "package version must be 2.7.10");
 
 const knownStart = permissions.indexOf("async function isKnownOutboundMessage");
 const knownEnd = permissions.indexOf("async function callOneBotAction", knownStart);

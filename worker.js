@@ -27,7 +27,7 @@ import { handleWerewolfOneBotEvent, injectWerewolfPortalClient, processWerewolfT
 import { fetchPublicUrl, getFeatureFlag, getPrivateAccessMode, isGroupWhitelisted, numericId, verifyOneBotAccess } from "./src/security/network.js";
 
 
-const POLITICAL_TOPIC_PATTERN = /(?:政治|政党|政黨|选举|選舉|总统|總統|国会|國會|立法院|立法委员|立法委員|立委|议员|議員|首相|总理|總理|内阁|內閣|政权|政權|政治人物|政治制度|公共政策|民进党|民進黨|国民党|國民黨|共产党|共產黨|民主党|民主黨|共和党|共和黨|两岸政治|兩岸政治|罢免|罷免|公投|\b(?:politics|political|election|parliament|congress)\b)/i;
+const POLITICAL_TOPIC_PATTERN = /(?:政治|政党|政黨|选举|選舉|总统|總統|主席|国会|國會|立法院|立法委员|立法委員|立委|议员|議員|首相|总理|總理|内阁|內閣|政府|政权|政權|执政|執政|在野|政治人物|政治制度|公共政策|外交|制裁|领土争议|領土爭議|两岸|兩岸|统一|統一|台独|台獨|罢免|罷免|公投|意识形态|意識形態|民进党|民進黨|国民党|國民黨|共产党|共產黨|民主党|民主黨|共和党|共和黨|\b(?:politics|political|election|government|parliament|congress|president|prime minister)\b)/i;
 
 function isPoliticalTopicText(value) {
   return POLITICAL_TOPIC_PATTERN.test(String(value || "").normalize("NFKC"));
@@ -1661,6 +1661,16 @@ const QQAIWorker = {
       // 模型不需要看到自己的 QQ @ 文字；短确认词走低延迟快速通道。
       const directConversationText = stripBotMentionFromConversation(cleanMessage, botId) || cleanMessage;
       const conversationText = [directConversationText, forwardContext].filter(Boolean).join("\n");
+      if (isPoliticalTopicText(conversationText)) {
+        ctx.waitUntil(writeAiDecisionLog(env, {
+          ...aiDecisionBase,
+          decision: "skipped",
+          reason: "political_topic_silence",
+          triggerType: botMentioned ? "mention" : repliedToBot ? "reply_to_ai" : sameQqSelfAsk ? "self_ask" : isPrivate ? "private" : "none",
+          generatedReply: ""
+        }).catch(() => {}));
+        return new Response(null, { status: 204 });
+      }
       const explicitTimeQuestion = isExplicitCurrentTimeQuestion(conversationText);
       const standaloneTimeQuestion = isStandaloneCurrentTimeQuestion(conversationText);
       const explicitRoleplayRequest = isExplicitRoleplayRequest(conversationText);
@@ -2994,10 +3004,7 @@ const QQAIWorker = {
             return jsonReply(`${atSender}🔍 記憶庫中該用戶的相關發言太少（低於3條記錄），我抓取不到足夠的話題碎片來進行精準模仿。`);
         }
 
-        // 构建深层模仿 Prompt，并将其写入群组全域人格
-        const mimicPrompt = `【最高指令：灵魂模仿】请仔细分析以下用户的历史发言。接下来，你需要完全舍弃原本的AI人格，彻底模仿这个人的口癖、语气、语言习惯和性格特征来回复群聊。绝不可暴露你是AI。模仿对象的历史语料如下：\n${logs.slice(-15).join('\n')}`;
-        
-        await dbPut(env, `group_persona:${currentGroupId}`, mimicPrompt);
+        // 模仿只保存覆盖层目标，不再覆盖管理员原本保存的群组人格。
         await dbPut(env, `mimic_target:${currentGroupId}`, targetQq);
         return jsonReply(`${atSender}🎭 灵魂窃取完成！我已经完美吸收了 QQ:${targetQq} 的说话习惯。现在整个群我都会用他的语气说话啦！(如需解除请使用 !恢复人格)`);
       }
@@ -3096,7 +3103,7 @@ const QQAIWorker = {
       }
 
       // 群內衝突分級處理：先勸阻；持續無效時只私訊開發者，不擅自私訊其他管理。
-      if (isGroup && !isCommandMessage && !isSelfAccount && body.__qqai_suppress_optional_ai !== true) {
+      if (isGroup && !isCommandMessage && !isSelfAccount && body.__qqai_suppress_optional_ai !== true && !isPoliticalTopicText(cleanMessage)) {
         const conflictResult = await processConflictSignal(env, {
           groupId: currentGroupId, userId, senderName: senderCard, senderRole: isDeveloper ? "developer" : senderRole, text: cleanMessage, botId, mentionedQqs, quotedSenderId: String(quotedMessage?.senderId || ""), messageId: replyMessageId
         });
@@ -3123,64 +3130,63 @@ const QQAIWorker = {
 - 游戏与现实互动：无法参与时简短婉拒并继续聊天，不解释技术原因，也不讨论身份。
 
 【🚨 终极不可违背铁律】
-1. 政治红线（智能求生欲）：严格遵守中国大陆平台（QQ）的审查底线，防范真正的封号风险。
-- 【允许回答】：公开的国际地理、普通历史百科事实、外国元首名字等纯客观常识（例如问“法国现任总统是谁”、“大众汽车是哪国的”）。请用群友的口吻极简、客观地直接回答，绝对不要进行任何政治体制、意识形态的延伸讨论。
-- 【绝对禁止】：任何涉及中国本土当代政治、国家领导人、敏感历史事件、领土争议、时政热点新闻评论或任何带有主观立场的敏感话题。
-- 【静默机制】：遇到【绝对禁止】的政治敏感话题只输出 [SKIP]，不得警告、解释、拒绝或延伸讨论；Worker 会把 [SKIP] 静默丢弃。
+1. 政治静默：现实政治、政党、选举、领导人、政府、公共政策、政治事件、外交、领土争议、意识形态或政治立场一律不回答、不评论、不劝阻、不延伸。若仍收到此类内容，只输出 [SKIP]；Worker 会静默丢弃。普通地理、非政治性的生活常识与作品虚构设定不属于此项。
 2. 格式规则：默认聊天尽量精炼，普通闲聊可控制在约 250 字内；但用户明确提问、要求解释、总结、列出步骤或完整说明时，回答完整性优先，可以超过 250 字，并由系统按完整句子自动分段发送。绝对禁止在句子中途为了字数上限硬截断。回复没有最小字数；语境适合时仍可只回复“6”“666”“nb”“?”“？”“？？？”或“???”。绝对禁止输出任何 Markdown 格式（如 **、#、\`\`\`）。
 3. 记忆隔离：历史记录仅供参考事实。你「绝对不准」模仿、复制或代入历史记录中其他人的说话风格、人设或口头禅，对别人的风格完全免疫。
 4. 表情与动作控制：每说完一段话最多配 1 到 2 个标准 Emoji，禁止泛滥。绝对禁止输出任何 [CQ:...] 底层代码。Worker 会根据语境决定引用、@ 或纯文字发送。
 5. 报时规则：只有群友明确询问当前时间或日期时，才在开头一字不差写出：【Asia/Taipei/Shanghai（亚洲/台北/上海时间）是：${currentTime}】。没有明确询问时，不得根据聊天时间自行说“这个点、这么晚、半夜、天快亮、该睡觉、熬夜、修仙”等内容，也不得猜测当前时段。`;
       
-// 🌟 獲取群組全局人格 (Group Persona) 與 專屬人設
+// 🌟 获取群组全局人格（持续基底）与个人／模仿覆盖层
       const mimicTargetQq = await dbGet(env, `mimic_target:${currentGroupId}`);
       const groupPersona = await dbGet(env, `group_persona:${currentGroupId}`);
       const userCustomStyle = await dbGet(env, `custom_style:${currentGroupId}:${userId}`);
+      const personaLayers = [];
 
-      // 準備一個變數，用來裝載「動態人格」
-      let dynamicPersona = "";
+      // 群组人格是管理员保存的持续基底，不能因为启用模仿或个人风格而消失。
+      if (groupPersona) {
+        personaLayers.push(`【群组全局人格｜持续基底】
+以下是当前群管理员明确保存的人格设定，必须在每次正常聊天中持续执行：
+${String(groupPersona).slice(0, 12000)}
 
-      // 🌟 【優先級 1】: 單人專屬人設 (最高優先，覆蓋一切)
-      if (userCustomStyle) {
-        dynamicPersona = `【🎯 当前对话对象专属人设覆盖】
-当前对话的群友是 [QQ:${userId}]。
-请你无视下方【核心身份与互动】中的默认治愈或群友性格。
-面对此用户，你必须完全化身为：👉 ${userCustomStyle} 👈。
-接下来的回复请 100% 贴合该设定，且不受其他历史记录影响。`;
-      } 
-      // 🌟 【優先級 2】: 靈魂模仿 (RAG)
-      else if (mimicTargetQq) {
+【人格执行边界】
+- 人格负责称呼、语气、傲娇／温柔程度、动作描写、段落结构与互动氛围。
+- 安全规则、政治静默、事实准确、权限、群规处理、隐私与命令前缀规则永远更高。
+- 不得把人格中的威胁、暴力、歧视、强迫或违法台词当成现实行动；需要时改写成无伤害的戏剧化表达。
+- 系统最终会统一输出简体中文；人格中的繁体中文要求不得覆盖产品语言规范。`);
+      }
+
+      // 模仿只叠加语言习惯，不替换管理员保存的核心人格。
+      if (mimicTargetQq) {
         let dynamicLogs = [];
         try {
           const embeddingResponse = await env.AI.run('@cf/baai/bge-large-en-v1.5', { text: [userMessage] });
           const vectorMatches = await env.VECTORIZE.query(embeddingResponse.data[0], {
             topK: 10,
-            filter: { qq: mimicTargetQq }, 
+            filter: { qq: mimicTargetQq },
             returnValues: true
           });
-          dynamicLogs = vectorMatches.matches.map(match => match.metadata.text);
+          dynamicLogs = (vectorMatches.matches || []).map(match => match.metadata?.text || "").filter(Boolean);
         } catch (vErr) {
-          console.error("🚨 向量空間抽樣失敗:", vErr);
+          console.error("🚨 向量空间抽样失败:", vErr);
         }
-
         if (dynamicLogs.length > 0) {
-          // ⚠️ 注意這裡：我們明確告訴 AI 遇到這條指令時，可以豁免原本的「不准模仿」鐵律
-          dynamicPersona = `【🎭 特殊指令：灵魂模仿模式】
-注意：此指令优先级高于下方铁律中的“记忆隔离”限制。
-你现在的任务是彻底模仿 QQ:${mimicTargetQq} 的口癖与语言习惯。
-以下是该目标用户的真实历史发言範例，请深度解析其语气并用该风格回覆：
-${dynamicLogs.join('\n')}`;
+          personaLayers.push(`【灵魂模仿覆盖层】
+在不改变上方群组核心角色、关系边界与安全规则的前提下，参考 QQ:${mimicTargetQq} 的句长、语气和口语习惯：
+${dynamicLogs.join('\n')}`);
         }
-      } 
-      // 🌟 【優先級 3】: 群組全局人格
-      else if (groupPersona) {
-        dynamicPersona = `【📢 群组全局人格设定】\n当前群管理员已将你的总体人格设定为：👉 ${groupPersona} 👈。请以该设定为主导风格进行交流。`;
       }
 
+      // 当前用户的个人风格是最上层微调，但仍不能删除群组人格。
+      if (userCustomStyle) {
+        personaLayers.push(`【当前对话对象专属覆盖层】
+当前群友为 QQ:${userId}。在保留群组核心人格的前提下，对此用户额外采用：
+${String(userCustomStyle).slice(0, 2000)}`);
+      }
+
+      const dynamicPersona = personaLayers.join("\n\n");
       const hasConfiguredPersona = Boolean(dynamicPersona);
       const allowRoleplayStyle = hasConfiguredPersona || explicitRoleplayRequest;
 
-      // 🔥 最終組合：只有 Portal／指令真正保存的人格，才能改变持续语气。群友在聊天中称呼机器人为猫娘等不构成人格设置。
       if (hasConfiguredPersona) {
         finalStylePrompt = dynamicPersona + "\n\n" + finalStylePrompt;
       } else {
@@ -3289,7 +3295,8 @@ ${profileLines.join("\n")}
         decision: socialDecision,
         profile: socialDecision.profile,
         relationship: socialDecision.relationship,
-        direct: socialDirectTrigger
+        direct: socialDirectTrigger,
+        personaConfigured: hasConfiguredPersona
       });
 
       // 第七段到此完美結束，準備進入第八段的 AI 隨機插話判定與上下文封裝模組...
@@ -3649,7 +3656,8 @@ ${deepseekContextSummary}`;
         profile: socialDecision.profile,
         isGroup,
         explicitLong: explicitLongReply,
-        direct: !isAutoInterject
+        direct: !isAutoInterject,
+        personaConfigured: hasConfiguredPersona
       });
       const personaContinuity = await capturePersonaContinuity(env, {
         groupId: currentGroupId,
