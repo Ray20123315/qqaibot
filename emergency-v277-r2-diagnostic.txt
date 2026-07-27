@@ -1,5 +1,0 @@
-From https://github.com/Ray20123315/qqaibot
- * branch            d16891357cc8274b031281eb27f4781bcba943f8 -> FETCH_HEAD
-Traceback (most recent call last):
-  File "<stdin>", line 18, in <module>
-RuntimeError: old failure anchor count=0
