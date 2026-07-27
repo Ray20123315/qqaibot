@@ -60,7 +60,9 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: v276-apply-diagnostics
-          path: /tmp/v276-apply.log
+          path: |
+            /tmp/v276-apply.log
+            tools/.member-notification-v276/apply.py.gz.b64
           if-no-files-found: error
       - name: Stop after apply failure
         if: steps.apply.outcome == 'failure'
