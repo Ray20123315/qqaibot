@@ -23,20 +23,39 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-      - name: Apply precise patches
-        run: python3 tools/apply-emergency-v2.7.7.py
-      - name: Install dependencies without lockfile
-        run: npm install --ignore-scripts --no-package-lock
-      - name: Run full regression suite
-        run: npm run check
-      - name: Run Wrangler bundle dry-run
-        run: npm run check:bundle
-      - name: Remove one-time patch infrastructure
-        run: rm -f tools/apply-emergency-v2.7.7.py .github/workflows/apply-emergency-v2.7.7.yml
-      - name: Commit verified result
+      - name: Apply and verify with persisted diagnostics
+        shell: bash
         run: |
+          set +e
+          : > /tmp/emergency-v277.log
+          python3 tools/apply-emergency-v2.7.7.py >> /tmp/emergency-v277.log 2>&1
+          status=$?
+          if [ "$status" -eq 0 ]; then
+            npm install --ignore-scripts --no-package-lock >> /tmp/emergency-v277.log 2>&1
+            status=$?
+          fi
+          if [ "$status" -eq 0 ]; then
+            npm run check >> /tmp/emergency-v277.log 2>&1
+            status=$?
+          fi
+          if [ "$status" -eq 0 ]; then
+            npm run check:bundle >> /tmp/emergency-v277.log 2>&1
+            status=$?
+          fi
+
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          if [ "$status" -ne 0 ]; then
+            git reset --hard HEAD
+            cp /tmp/emergency-v277.log emergency-v277-diagnostic.txt
+            git add emergency-v277-diagnostic.txt
+            git commit -m "ci: record emergency v2.7.7 failure diagnostics" || true
+            git push origin HEAD:chatgpt/emergency-v2.7.7
+            exit "$status"
+          fi
+
+          rm -f tools/apply-emergency-v2.7.7.py .github/workflows/apply-emergency-v2.7.7.yml emergency-v277-diagnostic.txt
           git add -A
           git diff --cached --quiet && exit 0
           git commit -m "feat: emergency response and portal pagination v2.7.7"
