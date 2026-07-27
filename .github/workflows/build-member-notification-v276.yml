@@ -98,26 +98,86 @@ jobs:
           cat /tmp/v276-apply.log
           exit 1
       - name: Validate JavaScript syntax
+        id: syntax
+        continue-on-error: true
         run: |
-          node --check src/notifications/routing.js
-          node --check src/members/details.js
-          node --check src/portal/notification-routing.js
-          node --check src/moderation/runtime.js
-          node --check src/group/runtime.js
-          node --check src/operations/runtime.js
-          node --check src/portal/members.js
-          node --check src/portal/runtime.js
-          node --check worker.js
-          node --check verify-member-details.mjs
-          node --check verify-notification-routing.mjs
+          set -o pipefail
+          {
+            node --check src/notifications/routing.js
+            node --check src/members/details.js
+            node --check src/portal/notification-routing.js
+            node --check src/moderation/runtime.js
+            node --check src/group/runtime.js
+            node --check src/operations/runtime.js
+            node --check src/portal/members.js
+            node --check src/portal/runtime.js
+            node --check worker.js
+            node --check verify-member-details.mjs
+            node --check verify-notification-routing.mjs
+          } 2>&1 | tee /tmp/v276-syntax.log
+      - name: Upload syntax diagnostics
+        if: steps.syntax.outcome == 'failure'
+        uses: actions/upload-artifact@v4
+        with:
+          name: v276-syntax-diagnostics
+          path: |
+            /tmp/v276-syntax.log
+            src/notifications/routing.js
+            src/members/details.js
+            src/portal/notification-routing.js
+            src/moderation/runtime.js
+            src/group/runtime.js
+            src/operations/runtime.js
+            src/portal/members.js
+            src/portal/runtime.js
+            worker.js
+          if-no-files-found: error
+      - name: Stop after syntax failure
+        if: steps.syntax.outcome == 'failure'
+        run: |
+          cat /tmp/v276-syntax.log
+          exit 1
       - name: Run focused executable tests
+        id: focused
+        continue-on-error: true
         run: |
-          node verify-member-details.mjs
-          node verify-notification-routing.mjs
+          set -o pipefail
+          {
+            node verify-member-details.mjs
+            node verify-notification-routing.mjs
+          } 2>&1 | tee /tmp/v276-focused.log
+      - name: Upload focused diagnostics
+        if: steps.focused.outcome == 'failure'
+        uses: actions/upload-artifact@v4
+        with:
+          name: v276-focused-diagnostics
+          path: /tmp/v276-focused.log
+          if-no-files-found: error
+      - name: Stop after focused failure
+        if: steps.focused.outcome == 'failure'
+        run: |
+          cat /tmp/v276-focused.log
+          exit 1
       - name: Install dependencies
         run: npm install --ignore-scripts
       - name: Run complete regression suite
-        run: npm run check
+        id: regression
+        continue-on-error: true
+        run: |
+          set -o pipefail
+          npm run check 2>&1 | tee /tmp/v276-regression.log
+      - name: Upload regression diagnostics
+        if: steps.regression.outcome == 'failure'
+        uses: actions/upload-artifact@v4
+        with:
+          name: v276-regression-diagnostics
+          path: /tmp/v276-regression.log
+          if-no-files-found: error
+      - name: Stop after regression failure
+        if: steps.regression.outcome == 'failure'
+        run: |
+          tail -n 260 /tmp/v276-regression.log
+          exit 1
       - name: Build single Worker bundle
         run: npm run check:bundle
       - name: Commit verified permanent candidate
