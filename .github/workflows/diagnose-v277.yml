@@ -1,0 +1,36 @@
+name: Diagnose v2.7.7 self account politics pagination
+
+on:
+  push:
+    branches:
+      - feature/self-account-politics-pagination-v2.7.7
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/self-account-politics-pagination-v2.7.7
+      - name: Collect source audit
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/v277-source/src/{moderation,portal,onebot,core,config}
+          cp worker.js /tmp/v277-source/
+          cp src/moderation/runtime.js /tmp/v277-source/src/moderation/
+          cp src/portal/runtime.js src/portal/auth.js src/portal/members.js /tmp/v277-source/src/portal/
+          cp src/onebot/messages.js /tmp/v277-source/src/onebot/
+          cp src/core/permissions.js src/core/identity.js /tmp/v277-source/src/core/
+          cp src/config/runtime.js /tmp/v277-source/src/config/
+          cp package.json release-notes.json /tmp/v277-source/
+          grep -RInE '群友对话|群友對話|AI回复|AI回覆|conversation:index|ai_decision|listAiDecisionLogs|recent_logs|message_sent|isSelfAccount|botId|政治|涉政|ruleStrictness|resolveAdaptiveRuleStrictness' worker.js src verify-*.mjs > /tmp/v277-source/audit-grep.txt || true
+          find /tmp/v277-source -type f -maxdepth 5 -print | sort > /tmp/v277-source/files.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: v277-source-audit
+          path: /tmp/v277-source
+          if-no-files-found: error
