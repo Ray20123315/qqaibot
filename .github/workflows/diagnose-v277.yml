@@ -34,3 +34,4 @@ jobs:
           name: v277-source-audit
           path: /tmp/v277-source
           if-no-files-found: error
+# trigger after workflow registration
