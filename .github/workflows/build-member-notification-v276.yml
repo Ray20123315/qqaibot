@@ -100,6 +100,27 @@ jobs:
         run: |
           cat /tmp/v276-apply.log
           exit 1
+      - name: Update permanent version assertions
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          changed = []
+          for path in Path('.').glob('verify-*.mjs'):
+              text = path.read_text(encoding='utf-8')
+              updated = text.replace('2.7.5', '2.7.6')
+              if updated != text:
+                  path.write_text(updated, encoding='utf-8')
+                  changed.append(str(path))
+          lock = Path('package-lock.json')
+          if lock.exists():
+              text = lock.read_text(encoding='utf-8')
+              updated = text.replace('"version": "2.7.5"', '"version": "2.7.6"')
+              if updated != text:
+                  lock.write_text(updated, encoding='utf-8')
+                  changed.append(str(lock))
+          print('version_assertion_files', changed)
+          assert changed, 'expected at least one permanent version assertion update'
+          PY
       - name: Validate JavaScript syntax
         id: syntax
         continue-on-error: true
@@ -187,7 +208,7 @@ jobs:
         run: |
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add worker.js package.json release-notes.json src/config/runtime.js src/notifications/routing.js src/members/details.js src/portal/notification-routing.js src/moderation/runtime.js src/group/runtime.js src/operations/runtime.js src/portal/members.js src/portal/runtime.js verify-member-details.mjs verify-notification-routing.mjs
+          git add worker.js package.json package-lock.json release-notes.json src/config/runtime.js src/notifications/routing.js src/members/details.js src/portal/notification-routing.js src/moderation/runtime.js src/group/runtime.js src/operations/runtime.js src/portal/members.js src/portal/runtime.js verify-*.mjs
           if git diff --cached --quiet; then
             echo 'No permanent changes to commit.'
           else
