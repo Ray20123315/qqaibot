@@ -62,6 +62,7 @@ jobs:
           if [ "$status" -eq 0 ]; then
             python3 - <<'PY' >> /tmp/emergency-v277.log 2>&1
           from pathlib import Path
+          import json
           import re
           pattern = re.compile(r"assert\((\w+)\.version === ['\"]2\.7\.6['\"], ['\"]Package version must be [^'\"]+['\"]\);")
           replacement = r'''assert(\1.version === fs.readFileSync('src/config/runtime.js', 'utf8').match(/const VERSION = "([^"]+)"/)?.[1], 'Package and runtime versions must match');'''
@@ -78,7 +79,24 @@ jobs:
                   verify_path.write_text(next_source, encoding='utf-8')
           if normalized < 1:
               raise RuntimeError('no remaining stale package version assertions found')
-          print(f'Normalized {normalized} package assertions and updated {fixture_updates} version fixtures.')
+
+          release_path = Path('release-notes.json')
+          release = json.loads(release_path.read_text(encoding='utf-8'))
+          release['version'] = '2.7.7'
+          release['added'] = [
+              '政治相关普通聊天会在进入意图分类器与聊天模型前静默过滤；明确管理指令仍可正常执行',
+              'Portal 对话记录改为服务器端分页，默认先加载 20 条，可切换每页 20、50 或 100 条，并显示总页数',
+              '新增群级短回复重复防护，连续相同的问号、重复单字或极短确认词在一分钟内不会重复刷屏',
+              '新增 v2.7.7 永久回归测试，覆盖机器人同号指令、政治静默、白名单提示、短回复去重、分页及智慧违规严格度'
+          ]
+          release['fixed'] = [
+              '非白名单群即使触发 @ 或处理失败，也不再公开发送 worker_no_reply 等系统维护提示，只保留内部诊断',
+              '补强机器人账号人工操作路径的回归保障：//、??、/! 与 ! 指令可用，同时继续以 outbound message ID 与指纹阻止自我回覆循环',
+              '移除 Portal 首次固定读取 500 条并顺序扫描最多 5000 笔记录的高延迟路径；无筛选时只读取当前页',
+              '修复多支 verify 脚本硬编码旧版本号造成正式 npm run check 无法随版本升级通过的问题'
+          ]
+          release_path.write_text(json.dumps(release, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
+          print(f'Normalized {normalized} package assertions, updated {fixture_updates} version fixtures, and wrote release notes.')
           PY
             status=$?
           fi
