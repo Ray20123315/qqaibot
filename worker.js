@@ -4203,6 +4203,33 @@ export class OneBotHub {
       pending.resolve(body); return;
     }
     if (!body) return;
+
+    // NapCat may report one API send as both message_sent and message. Reject every event
+    // proven to be our own outbound before games, queues or Worker processing can see it.
+    const inboundPostType = String(body.post_type || "");
+    const inboundSelfId = String(body.self_id || "");
+    const inboundUserId = String(body.user_id || "");
+    const selfMessageEvent = ["message", "message_sent"].includes(inboundPostType)
+      && (inboundPostType === "message_sent" || Boolean(inboundSelfId && inboundUserId === inboundSelfId));
+    if (selfMessageEvent) {
+      const outboundEcho = await isKnownOutboundMessage(this.env, {
+        messageId: String(body.message_id || ""),
+        isGroup: body.message_type === "group",
+        groupId: body.message_type === "group" ? String(body.group_id || "") : "",
+        peerId: body.message_type === "group" ? "" : String(body.target_id || body.peer_id || body.user_id || body.self_id || ""),
+        text: extractMessageText(body.message || body.raw_message || ""),
+        mediaTypes: extractOutboundMediaTypes(body.message || body.raw_message || "")
+      });
+      if (outboundEcho) {
+        await this.recordIngress(body, "self_outbound_echo_ignored", {
+          explicit: eventHasBotMention(body),
+          force: true,
+          postType: inboundPostType
+        }).catch(() => {});
+        return;
+      }
+    }
+
     const werewolfHandled = await handleWerewolfOneBotEvent(this.env, body).catch(async error => {
       await writeSystemAudit(this.env, { type: "werewolf_event_failed", groupId: String(body?.group_id || ""), actorId: String(body?.user_id || ""), action: "handle_event", error: String(error?.message || error).slice(0, 500) }).catch(() => {});
       return null;
