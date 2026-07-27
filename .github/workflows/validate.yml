@@ -5,55 +5,27 @@ on:
     branches:
       - main
       - refactor/v2-modular-worker
-      - chatgpt/emergency-v2.7.7
   pull_request:
     branches:
       - main
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   validate:
-    if: github.event_name == 'push'
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
       - uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: npm
           cache-dependency-path: package.json
-      - name: Apply emergency branch changes
-        if: github.ref == 'refs/heads/chatgpt/emergency-v2.7.7'
-        run: python3 tools/run-emergency-v277.py
       - name: Install dependencies
-        run: npm install --ignore-scripts --no-package-lock
+        run: npm install --ignore-scripts
       - name: Run regression checks
         run: npm run check
       - name: Build the single Worker bundle
         run: npm run check:bundle
-      - name: Finalize verified emergency branch
-        if: github.ref == 'refs/heads/chatgpt/emergency-v2.7.7'
-        shell: bash
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git show origin/main:.github/workflows/validate.yml > .github/workflows/validate.yml
-          rm -f \
-            tools/apply-emergency-v2.7.7.py \
-            tools/run-emergency-v277.py \
-            .github/workflows/apply-emergency-v2.7.7.yml \
-            .github/workflows/apply-emergency-v2.7.7-final.yml \
-            emergency-v277-diagnostic.txt \
-            emergency-v277-final-diagnostic.txt \
-            emergency-v277-trigger.txt \
-            emergency-v277-final-trigger.txt
-          rm -rf dist
-          git add -A
-          git diff --cached --quiet && exit 0
-          git commit -m "feat: emergency response and portal pagination v2.7.7"
-          git push origin HEAD:chatgpt/emergency-v2.7.7
