@@ -7,6 +7,7 @@ on:
     paths:
       - tools/apply-emergency-v2.7.7.py
       - .github/workflows/apply-emergency-v2.7.7.yml
+      - emergency-v277-trigger.txt
 
 permissions:
   contents: write
@@ -138,7 +139,7 @@ jobs:
             exit "$status"
           fi
 
-          rm -f tools/apply-emergency-v2.7.7.py .github/workflows/apply-emergency-v2.7.7.yml emergency-v277-diagnostic.txt
+          rm -f tools/apply-emergency-v2.7.7.py .github/workflows/apply-emergency-v2.7.7.yml emergency-v277-diagnostic.txt emergency-v277-trigger.txt
           git add -A
           git diff --cached --quiet && exit 0
           git commit -m "feat: emergency response and portal pagination v2.7.7"
