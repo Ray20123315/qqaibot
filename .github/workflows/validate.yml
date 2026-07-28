@@ -1,89 +1,31 @@
-name: Validate integrated v2.7.11 candidate
+name: Validate single-Worker build
 
 on:
   push:
     branches:
       - main
+      - refactor/v2-modular-worker
   pull_request:
     branches:
       - main
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
-  validate-candidate:
-    if: ${{ github.event_name == 'push' || github.head_ref == 'chatgpt/entertainment-help-readme-v2.7.11' }}
+  validate:
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
-        with:
-          ref: chatgpt/entertainment-help-readme-v2.7.11
-          fetch-depth: 0
       - uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: npm
           cache-dependency-path: package.json
-      - name: Repair generated retry regexes when needed
-        shell: bash
-        run: |
-          set -o pipefail
-          if [ -f tools/fix-v2711-runtime-regex.mjs ]; then
-            node tools/fix-v2711-runtime-regex.mjs 2>&1 | tee -a /tmp/v2711.log
-          else
-            echo "runtime regex fixer already consumed" | tee -a /tmp/v2711.log
-          fi
       - name: Install dependencies
-        shell: bash
-        run: |
-          set -o pipefail
-          npm install --ignore-scripts --no-package-lock 2>&1 | tee -a /tmp/v2711.log
-      - name: Run full regression
-        shell: bash
-        run: |
-          set -o pipefail
-          npm run check 2>&1 | tee -a /tmp/v2711.log
-      - name: Build single Worker bundle
-        shell: bash
-        run: |
-          set -o pipefail
-          npm run check:bundle 2>&1 | tee -a /tmp/v2711.log
-      - name: Save failure diagnostic
-        if: failure()
-        shell: bash
-        run: |
-          rm -rf node_modules dist package-lock.json
-          {
-            echo "v2.7.11 integrated candidate failed"
-            echo "runner_commit=${GITHUB_SHA}"
-            echo
-            cat /tmp/v2711.log 2>/dev/null || true
-          } > tools/v2711-diagnostic.txt
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add tools/v2711-diagnostic.txt
-          git commit -m "diagnostic: v2.7.11 integrated candidate [skip builder]" || true
-          git push origin HEAD:chatgpt/entertainment-help-readme-v2.7.11 || true
-      - name: Clean temporary files
-        if: success()
-        run: |
-          rm -rf node_modules dist package-lock.json
-          rm -f tools/apply-v2.7.11.mjs tools/fix-v2711-patcher.mjs tools/fix-v2711-runtime-regex.mjs tools/v2711-diagnostic.txt tools/v2711-trigger.txt
-          rm -f .github/scripts/apply-v2.7.11.mjs
-          rmdir .github/scripts 2>/dev/null || true
-          test "$(node -p "require('./package.json').version")" = "2.7.11"
-          test ! -e tools/v2711-diagnostic.txt
-      - name: Commit verified candidate
-        if: success()
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add -A
-          if git diff --cached --quiet; then
-            echo "candidate already clean"
-          else
-            git commit -m "feat: 娱乐指令、条列帮助与现况 README [v2.7.11 candidate]"
-            git push origin HEAD:chatgpt/entertainment-help-readme-v2.7.11
-          fi
+        run: npm install --ignore-scripts
+      - name: Run regression checks
+        run: npm run check
+      - name: Build the single Worker bundle
+        run: npm run check:bundle
