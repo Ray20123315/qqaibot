@@ -1,4 +1,0 @@
-v2.7.11 candidate integration failed
-runner_commit=aecd2d27063c3c716b4ca112672037754dedf6bd
-
-Applied permanent v2.7.11 integration patch.
