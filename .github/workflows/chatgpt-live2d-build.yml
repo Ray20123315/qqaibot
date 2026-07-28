@@ -7,6 +7,12 @@ on:
     paths:
       - '.chatgpt_live2d/**'
       - '.github/workflows/chatgpt-live2d-build.yml'
+  pull_request:
+    branches:
+      - main
+    paths:
+      - '.chatgpt_live2d/**'
+      - '.github/workflows/chatgpt-live2d-build.yml'
   workflow_dispatch:
 
 permissions:
