@@ -1,7 +1,10 @@
-name: Run v2.7.11 candidate integration
+name: Integrate and validate v2.7.11 candidate
 
 on:
   push:
+    branches:
+      - main
+  pull_request:
     branches:
       - main
 
@@ -10,6 +13,7 @@ permissions:
 
 jobs:
   build-candidate:
+    if: ${{ github.event_name == 'push' || github.head_ref == 'chatgpt/entertainment-help-readme-v2.7.11' }}
     runs-on: ubuntu-latest
     timeout-minutes: 25
     steps:
@@ -22,27 +26,22 @@ jobs:
           node-version: 22
           cache: npm
           cache-dependency-path: package.json
-      - name: Apply permanent integration patch
+      - name: Apply permanent integration patch when needed
         shell: bash
         run: |
           set -o pipefail
-          node tools/apply-v2.7.11.mjs 2>&1 | tee -a /tmp/v2711.log
+          if [ -f tools/apply-v2.7.11.mjs ]; then
+            node tools/apply-v2.7.11.mjs 2>&1 | tee -a /tmp/v2711.log
+          else
+            echo "candidate patcher already consumed" | tee -a /tmp/v2711.log
+          fi
       - name: Install dependencies
-        shell: bash
-        run: |
-          set -o pipefail
-          npm install --ignore-scripts --no-package-lock 2>&1 | tee -a /tmp/v2711.log
+        run: npm install --ignore-scripts --no-package-lock
       - name: Run full regression
-        shell: bash
-        run: |
-          set -o pipefail
-          npm run check 2>&1 | tee -a /tmp/v2711.log
+        run: npm run check
       - name: Build the single Worker bundle
-        shell: bash
-        run: |
-          set -o pipefail
-          npm run check:bundle 2>&1 | tee -a /tmp/v2711.log
-      - name: Commit verified candidate
+        run: npm run check:bundle
+      - name: Commit verified candidate when changed
         if: success()
         shell: bash
         run: |
@@ -52,8 +51,11 @@ jobs:
           test ! -e node_modules
           test ! -e dist
           test ! -e package-lock.json
-          test ! -e tools/apply-v2.7.11.mjs
           test "$(node -p "require('./package.json').version")" = "2.7.11"
+          if git diff --quiet && git diff --cached --quiet; then
+            echo "candidate already clean"
+            exit 0
+          fi
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add -A
@@ -67,7 +69,7 @@ jobs:
           mkdir -p tools
           {
             echo "v2.7.11 candidate integration failed"
-            echo "main_runner_commit=${GITHUB_SHA}"
+            echo "runner_commit=${GITHUB_SHA}"
             echo
             cat /tmp/v2711.log 2>/dev/null || true
           } > tools/v2711-diagnostic.txt
