@@ -40,7 +40,7 @@ jobs:
       - name: Upload verified artifact
         uses: actions/upload-artifact@v4
         with:
-          name: Aye_Live2D_runtime_v0.0.1
+          name: Aye_Live2D_runtime_v0.0.2
           path: .chatgpt_live2d/dist/*
           if-no-files-found: error
           retention-days: 1
