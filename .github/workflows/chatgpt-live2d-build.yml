@@ -1,0 +1,40 @@
+name: ChatGPT Live2D Aye Build
+
+on:
+  push:
+    branches:
+      - chatgpt/live2d-aye-v0.0.1
+    paths:
+      - '.chatgpt_live2d/**'
+      - '.github/workflows/chatgpt-live2d-build.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout temporary branch
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install image dependency
+        run: python -m pip install --disable-pip-version-check pillow==11.3.0
+
+      - name: Build and verify Live2D runtime package
+        run: python .chatgpt_live2d/build.py
+
+      - name: Upload verified artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Aye_Live2D_runtime_v0.0.1
+          path: .chatgpt_live2d/dist/*
+          if-no-files-found: error
+          retention-days: 1
