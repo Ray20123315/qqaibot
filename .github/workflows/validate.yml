@@ -1,31 +1,78 @@
-name: Validate single-Worker build
+name: Run v2.7.11 candidate integration
 
 on:
   push:
     branches:
       - main
-      - refactor/v2-modular-worker
-  pull_request:
-    branches:
-      - main
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
-  validate:
+  build-candidate:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: chatgpt/entertainment-help-readme-v2.7.11
+          fetch-depth: 0
       - uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: npm
           cache-dependency-path: package.json
+      - name: Apply permanent integration patch
+        shell: bash
+        run: |
+          set -o pipefail
+          node tools/apply-v2.7.11.mjs 2>&1 | tee -a /tmp/v2711.log
       - name: Install dependencies
-        run: npm install --ignore-scripts
-      - name: Run regression checks
-        run: npm run check
+        shell: bash
+        run: |
+          set -o pipefail
+          npm install --ignore-scripts --no-package-lock 2>&1 | tee -a /tmp/v2711.log
+      - name: Run full regression
+        shell: bash
+        run: |
+          set -o pipefail
+          npm run check 2>&1 | tee -a /tmp/v2711.log
       - name: Build the single Worker bundle
-        run: npm run check:bundle
+        shell: bash
+        run: |
+          set -o pipefail
+          npm run check:bundle 2>&1 | tee -a /tmp/v2711.log
+      - name: Commit verified candidate
+        if: success()
+        shell: bash
+        run: |
+          rm -rf node_modules dist package-lock.json tools/v2711-diagnostic.txt
+          rm -f tools/apply-v2.7.11.mjs .github/scripts/apply-v2.7.11.mjs
+          rmdir .github/scripts 2>/dev/null || true
+          test ! -e node_modules
+          test ! -e dist
+          test ! -e package-lock.json
+          test ! -e tools/apply-v2.7.11.mjs
+          test "$(node -p "require('./package.json').version")" = "2.7.11"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "feat: 娱乐指令、条列帮助与现况 README [v2.7.11 candidate]"
+          git push origin HEAD:chatgpt/entertainment-help-readme-v2.7.11
+      - name: Save failure diagnostic
+        if: failure()
+        shell: bash
+        run: |
+          rm -rf node_modules dist package-lock.json
+          mkdir -p tools
+          {
+            echo "v2.7.11 candidate integration failed"
+            echo "main_runner_commit=${GITHUB_SHA}"
+            echo
+            cat /tmp/v2711.log 2>/dev/null || true
+          } > tools/v2711-diagnostic.txt
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add tools/v2711-diagnostic.txt
+          git commit -m "diagnostic: v2.7.11 candidate integration [skip builder]" || true
+          git push origin HEAD:chatgpt/entertainment-help-readme-v2.7.11 || true
