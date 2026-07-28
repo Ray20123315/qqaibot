@@ -8,6 +8,10 @@ on:
 permissions:
   contents: write
 
+concurrency:
+  group: v2.7.11-finalize-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
 jobs:
   finalize-candidate:
     if: github.head_ref == 'chatgpt/entertainment-help-readme-v2.7.11'
@@ -52,7 +56,7 @@ jobs:
             echo "v2.7.11 PR candidate integration failed"
             echo "workflow_commit=${GITHUB_SHA}"
             echo
-            cat /tmp/v2711.log 2>/dev/null || true
+            tail -n 180 /tmp/v2711.log 2>/dev/null || true
           } > tools/v2711-diagnostic.txt
           rm -rf node_modules dist package-lock.json
           git config user.name "github-actions[bot]"
