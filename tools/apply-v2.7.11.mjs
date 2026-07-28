@@ -90,6 +90,13 @@ function patchRuntime() {
 
 function parseRetryAfterSeconds(source, fallbackSeconds = 0) {
   const text = String(source || "").normalize("NFKC");
+  const englishSeconds = text.match(/retry[_ -]?after[^0-9]{0,8}([0-9]+(?:[.][0-9]+)?)/i);
+  if (englishSeconds) {
+    const amount = Number(englishSeconds[1]);
+    if (Number.isFinite(amount) && amount > 0) {
+      return Math.max(1, Math.min(30 * 86400, Math.ceil(amount)));
+    }
+  }
   const patterns = [
     /retry[_ -]?after\s*[:=]?\s*(\d+(?:\.\d+)?)\s*(seconds?|secs?|s)?/i,
     /(?:请|請)?\s*(\d+(?:\.\d+)?)\s*(秒|分钟|分鐘|分|小时|小時|时|時|天)后(?:再试|重试|重試)/i,
