@@ -46,7 +46,7 @@ jobs:
         shell: bash
         run: |
           rm -rf node_modules dist package-lock.json tools/v2711-diagnostic.txt
-          rm -f tools/apply-v2.7.11.mjs .github/scripts/apply-v2.7.11.mjs
+          rm -f tools/apply-v2.7.11.mjs tools/v2711-trigger.txt .github/scripts/apply-v2.7.11.mjs
           rmdir .github/scripts 2>/dev/null || true
           test ! -e node_modules
           test ! -e dist
