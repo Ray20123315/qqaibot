@@ -30,7 +30,7 @@ assert.ok(parts.length > 1);
 assert.equal(parts.join("").replace(/\s+/g, ""), minuteText.trim().replace(/\s+/g, ""));
 
 const pkg = JSON.parse(fs.readFileSync("package.json", "utf8"));
-assert.equal(pkg.version, "2.7.10");
+assert.equal(pkg.version, "2.7.11");
 assert.match(pkg.scripts.check, /verify-ai-context-output\.mjs/);
 assert.match(pkg.scripts.check, /verify-meeting-minutes\.mjs/);
 console.log("verify-meeting-minutes: ok");

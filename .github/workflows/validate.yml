@@ -1,126 +1,31 @@
-name: Finalize v2.7.11 candidate
+name: Validate single-Worker build
 
 on:
+  push:
+    branches:
+      - main
+      - refactor/v2-modular-worker
   pull_request:
     branches:
       - main
 
 permissions:
-  contents: write
-
-concurrency:
-  group: v2.7.11-finalize-${{ github.event.pull_request.number }}
-  cancel-in-progress: true
+  contents: read
 
 jobs:
-  finalize-candidate:
-    if: github.head_ref == 'chatgpt/entertainment-help-readme-v2.7.11'
+  validate:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
-        with:
-          ref: chatgpt/entertainment-help-readme-v2.7.11
-          fetch-depth: 0
       - uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: npm
           cache-dependency-path: package.json
-      - name: Apply permanent integration patch
-        shell: bash
-        run: |
-          set -o pipefail
-          node tools/apply-v2.7.11.mjs 2>&1 | tee -a /tmp/v2711.log
       - name: Install dependencies
-        shell: bash
-        run: |
-          set -o pipefail
-          npm install --ignore-scripts --no-package-lock 2>&1 | tee -a /tmp/v2711.log
-      - name: Run full regression
-        shell: bash
-        run: |
-          set -o pipefail
-          npm run check 2>&1 | tee -a /tmp/v2711.log
-      - name: Build single Worker bundle
-        shell: bash
-        run: |
-          set -o pipefail
-          npm run check:bundle 2>&1 | tee -a /tmp/v2711.log
-      - name: Save failure diagnostic
-        if: failure()
-        shell: bash
-        run: |
-          mkdir -p tools
-          {
-            echo "v2.7.11 PR candidate integration failed"
-            echo "workflow_commit=${GITHUB_SHA}"
-            echo
-            tail -n 180 /tmp/v2711.log 2>/dev/null || true
-          } > tools/v2711-diagnostic.txt
-          rm -rf node_modules dist package-lock.json
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add tools/v2711-diagnostic.txt
-          git commit -m "diagnostic: v2.7.11 PR integration" || true
-          git push origin HEAD:chatgpt/entertainment-help-readme-v2.7.11 || true
-      - name: Remove generated and temporary files
-        if: success()
-        shell: bash
-        run: |
-          rm -rf node_modules dist package-lock.json
-          rm -f tools/apply-v2.7.11.mjs tools/v2711-diagnostic.txt
-          rm -f .github/workflows/branch-builder-v2.7.11.yml
-          cat > .github/workflows/validate.yml <<'YAML'
-          name: Validate single-Worker build
-
-          on:
-            push:
-              branches:
-                - main
-                - refactor/v2-modular-worker
-            pull_request:
-              branches:
-                - main
-
-          permissions:
-            contents: read
-
-          jobs:
-            validate:
-              runs-on: ubuntu-latest
-              timeout-minutes: 10
-              steps:
-                - uses: actions/checkout@v4
-                - uses: actions/setup-node@v4
-                  with:
-                    node-version: 22
-                    cache: npm
-                    cache-dependency-path: package.json
-                - name: Install dependencies
-                  run: npm install --ignore-scripts
-                - name: Run regression checks
-                  run: npm run check
-                - name: Build the single Worker bundle
-                  run: npm run check:bundle
-          YAML
-      - name: Verify candidate tree
-        if: success()
-        shell: bash
-        run: |
-          test ! -e node_modules
-          test ! -e dist
-          test ! -e package-lock.json
-          test ! -e tools/apply-v2.7.11.mjs
-          test ! -e tools/v2711-diagnostic.txt
-          test ! -e .github/workflows/branch-builder-v2.7.11.yml
-          test "$(git hash-object .github/workflows/validate.yml)" = "7be7e206a01dab3e6680a224b191b510c0aa36a1"
-      - name: Commit candidate
-        if: success()
-        shell: bash
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add -A
-          git commit -m "feat: 娱乐指令、条列帮助与现况 README [v2.7.11 candidate]"
-          git push origin HEAD:chatgpt/entertainment-help-readme-v2.7.11
+        run: npm install --ignore-scripts
+      - name: Run regression checks
+        run: npm run check
+      - name: Build the single Worker bundle
+        run: npm run check:bundle
