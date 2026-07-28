@@ -4,12 +4,16 @@ on:
   push:
     branches:
       - main
+  pull_request:
+    branches:
+      - main
 
 permissions:
   contents: write
 
 jobs:
   validate-candidate:
+    if: ${{ github.event_name == 'push' || github.head_ref == 'chatgpt/entertainment-help-readme-v2.7.11' }}
     runs-on: ubuntu-latest
     timeout-minutes: 25
     steps:
@@ -22,11 +26,15 @@ jobs:
           node-version: 22
           cache: npm
           cache-dependency-path: package.json
-      - name: Repair generated retry regexes
+      - name: Repair generated retry regexes when needed
         shell: bash
         run: |
           set -o pipefail
-          node tools/fix-v2711-runtime-regex.mjs 2>&1 | tee -a /tmp/v2711.log
+          if [ -f tools/fix-v2711-runtime-regex.mjs ]; then
+            node tools/fix-v2711-runtime-regex.mjs 2>&1 | tee -a /tmp/v2711.log
+          else
+            echo "runtime regex fixer already consumed" | tee -a /tmp/v2711.log
+          fi
       - name: Install dependencies
         shell: bash
         run: |
@@ -73,5 +81,9 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add -A
-          git commit -m "feat: 娱乐指令、条列帮助与现况 README [v2.7.11 candidate]"
-          git push origin HEAD:chatgpt/entertainment-help-readme-v2.7.11
+          if git diff --cached --quiet; then
+            echo "candidate already clean"
+          else
+            git commit -m "feat: 娱乐指令、条列帮助与现况 README [v2.7.11 candidate]"
+            git push origin HEAD:chatgpt/entertainment-help-readme-v2.7.11
+          fi
