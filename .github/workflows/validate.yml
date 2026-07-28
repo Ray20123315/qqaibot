@@ -1,4 +1,4 @@
-name: Finalize v2.7.11 candidate
+name: Validate integrated v2.7.11 candidate
 
 on:
   push:
@@ -9,7 +9,7 @@ permissions:
   contents: write
 
 jobs:
-  finalize-candidate:
+  validate-candidate:
     runs-on: ubuntu-latest
     timeout-minutes: 25
     steps:
@@ -22,13 +22,11 @@ jobs:
           node-version: 22
           cache: npm
           cache-dependency-path: package.json
-      - name: Repair patcher regex escaping
-        run: node tools/fix-v2711-patcher.mjs
-      - name: Apply permanent integration patch
+      - name: Repair generated retry regexes
         shell: bash
         run: |
           set -o pipefail
-          node tools/apply-v2.7.11.mjs 2>&1 | tee -a /tmp/v2711.log
+          node tools/fix-v2711-runtime-regex.mjs 2>&1 | tee -a /tmp/v2711.log
       - name: Install dependencies
         shell: bash
         run: |
@@ -50,7 +48,7 @@ jobs:
         run: |
           rm -rf node_modules dist package-lock.json
           {
-            echo "v2.7.11 final candidate failed"
+            echo "v2.7.11 integrated candidate failed"
             echo "runner_commit=${GITHUB_SHA}"
             echo
             cat /tmp/v2711.log 2>/dev/null || true
@@ -58,16 +56,17 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add tools/v2711-diagnostic.txt
-          git commit -m "diagnostic: v2.7.11 final candidate [skip builder]" || true
+          git commit -m "diagnostic: v2.7.11 integrated candidate [skip builder]" || true
           git push origin HEAD:chatgpt/entertainment-help-readme-v2.7.11 || true
       - name: Clean temporary files
         if: success()
         run: |
           rm -rf node_modules dist package-lock.json
-          rm -f tools/apply-v2.7.11.mjs tools/fix-v2711-patcher.mjs tools/v2711-diagnostic.txt tools/v2711-trigger.txt
+          rm -f tools/apply-v2.7.11.mjs tools/fix-v2711-patcher.mjs tools/fix-v2711-runtime-regex.mjs tools/v2711-diagnostic.txt tools/v2711-trigger.txt
           rm -f .github/scripts/apply-v2.7.11.mjs
           rmdir .github/scripts 2>/dev/null || true
           test "$(node -p "require('./package.json').version")" = "2.7.11"
+          test ! -e tools/v2711-diagnostic.txt
       - name: Commit verified candidate
         if: success()
         run: |
