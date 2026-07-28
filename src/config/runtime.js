@@ -100,9 +100,9 @@ function parseRetryAfterSeconds(source, fallbackSeconds = 0) {
     }
   }
   const patterns = [
-    /retry[_ -]?afters*[:=]?s*(d+(?:.d+)?)s*(seconds?|secs?|s)?/i,
-    /(?:请|請)?s*(d+(?:.d+)?)s*(秒|分钟|分鐘|分|小时|小時|时|時|天)后(?:再试|重试|重試)/i,
-    /(?:retry|重试|重試)[^d]{0,16}(d+(?:.d+)?)s*(秒|分钟|分鐘|分|小时|小時|时|時|天)/i
+    /retry[_ -]?after\s*[:=]?\s*(\d+(?:\.\d+)?)\s*(seconds?|secs?|s)?/i,
+    /(?:请|請)?\s*(\d+(?:\.\d+)?)\s*(秒|分钟|分鐘|分|小时|小時|时|時|天)后(?:再试|重试|重試)/i,
+    /(?:retry|重试|重試)[^\d]{0,16}(\d+(?:\.\d+)?)\s*(秒|分钟|分鐘|分|小时|小時|时|時|天)/i
   ];
   for (const pattern of patterns) {
     const match = text.match(pattern);
