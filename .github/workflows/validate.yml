@@ -35,6 +35,11 @@ jobs:
           end = source.index(end_marker, start)
           lines = source[start:end].splitlines()
           script = "\n".join(line[10:] if line.startswith("          ") else line for line in lines) + "\n"
+          script = script.replace('if (value < 60) return `\\${value} 秒`;', 'if (value < 60) return String(value) + " 秒";')
+          script = script.replace('if (value < 3600) return `\\${Math.ceil(value / 60)} 分钟`;', 'if (value < 3600) return String(Math.ceil(value / 60)) + " 分钟";')
+          script = script.replace('if (value < 86400) return `\\${Math.ceil(value / 3600)} 小时`;', 'if (value < 86400) return String(Math.ceil(value / 3600)) + " 小时";')
+          script = script.replace('return `\\${Math.ceil(value / 86400)} 天`;', 'return String(Math.ceil(value / 86400)) + " 天";')
+          script = script.replace('return `\\${problem}，请 \\${formatRetryDelay(seconds)}后再试。`;', 'return String(problem) + "，请 " + formatRetryDelay(seconds) + "后再试。";')
           Path("/tmp/apply-v2.7.11.js").write_text(script, encoding="utf-8")
           PY
           node --check /tmp/apply-v2.7.11.js 2>&1 | tee -a /tmp/v2711.log
