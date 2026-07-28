@@ -1,9 +1,9 @@
 v2.7.11 candidate integration failed
-main_runner_commit=4a6a0cc4a487e97b0ea295cc06d64f2abea8fc10
+workflow_commit=ae87b542c6ee6e1eef171e8a90c705b01bbdcea6
 
 Applied permanent v2.7.11 integration patch.
 
-added 35 packages, and audited 36 packages in 7s
+added 35 packages, and audited 36 packages in 5s
 
 7 packages are looking for funding
   run `npm fund` for details
