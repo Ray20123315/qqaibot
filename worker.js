@@ -23,7 +23,9 @@ import { injectPortalMembersClient } from "./src/portal/members.js";
 import { applySocialOutputPolicy, buildSocialDecision, buildSocialPromptBlock, capturePersonaContinuity, oneBotBotMentionCount, oneBotEventHasMedia, oneBotEventIsBareMention, oneBotEventIsPunctuationOnly, observeSocialStyle, shouldSendSocialBufferNotice, socialInputDelayMs, waitForSocialTyping } from "./src/social/runtime.js";
 import { pickSticker, pickStickerForText, stickerCqMessage } from "./src/social/sticker-library.js";
 import { cancelSchedule, cleanupExpiredModerationProposals, cleanupTransientState, countActiveSchedulesForUser, createAppealFromText, createScheduleRecord, extractScheduleMentionIds, formatScheduleLine, listUserSchedules, parseManagementScheduleAction, parseScheduleRequest, performManualGroupCheckins, processConflictSignal, processDueSchedules, reviewScheduleWithGemma, reviseScheduleRecord, runAutomaticGroupCheckins, skipScheduleOnce } from "./src/scheduler/runtime.js";
+import { handleEntertainmentCommand } from "./src/games/entertainment.js";
 import { handleWerewolfOneBotEvent, injectWerewolfPortalClient, processWerewolfTimers } from "./src/games/werewolf.js";
+import { buildHelpText } from "./src/help/commands.js";
 import { fetchPublicUrl, getFeatureFlag, getPrivateAccessMode, isGroupWhitelisted, numericId, verifyOneBotAccess } from "./src/security/network.js";
 
 
@@ -2298,91 +2300,35 @@ const QQAIWorker = {
       // ==========================================
       // 📜 基础系统帮助与状态模组 (权限阶梯动态版)
       // ==========================================
+      const entertainmentResult = handleEntertainmentCommand({
+        text: cleanMessage,
+        userId,
+        groupId: currentGroupId || "private",
+        now: new Date()
+      });
+      if (entertainmentResult.handled) {
+        return jsonReply(`${atSender}${entertainmentResult.text}`, {
+          reply_kind: "entertainment",
+          entertainment_kind: entertainmentResult.kind || "unknown"
+        });
+      }
+
       if (['!help', '!帮助', '!幫助', '！help', '！帮助', '！幫助'].includes(msgLower)) {
-        const isSuperAuth = senderRole === 'owner' || isDeveloper;
-        let roleTxt = isOnlyMe ? '开发者' :
-                      senderRole === 'owner' ? '群主' :
-                      senderRole === 'admin' ? 'QQ管理员' :
-                      permissionSet.groupOps && permissionSet.aiAdmin ? 'AI管理＋群操作' :
-                      permissionSet.groupOps ? '群操作权限' :
-                      permissionSet.aiAdmin ? 'AI管理权限' : '群成员';
-
-        let helpMsg = `🤖 QQAI 机器人指令清单\n权限等级：${roleTxt}\n` +
-                      `🌐 Control Center：https://qqai.ray2025.com/\n` +
-                      `🎙️ Live：https://qqai.ray2025.com/live\n` +
-                      `📝 匿名申诉：请登录 Control Center 后使用“匿名申诉”功能\n\n` +
-                      `自然语言会先做完整意图判断；讨论、引用、假设或只出现关键词不会执行。活动／投票的建立、通知与结束还会二次确认。固定后备：!活动、!报名 名称、!取消报名 名称、!投票、!投票 选择 编号 1、!投票 建立 标题 | 选项一 | 选项二。\n` +
-                      `群友不想触发任何 AI：发送“@我 /!普通聊天内容”，该消息只进入群聊上下文，不调用聊天、群规或插话模型。机器人自身账号人工发送“/!普通聊天内容”时则作为同号聊天触发别名。\n\n` +
-                      `🔹 [日常与多模态]\n` +
-                      `!live (取得即时语音网页)\n` +
-                      `!status / !配额 (系统状态)\n` +
-                      `!模型 [自动/Gemma 26B/Gemma 31B/Gemini${isDeveloper ? "/DeepSeek/DeepSeek High/DeepSeek Max" : ""}]${isDeveloper ? "" : "（DeepSeek 仅连续失败后临时开放）"}\n` +
-                      `!语音 [问题] (语音回覆)\n` +
-                      `!读网页 [网址] (提取精华摘要)\n` +
-                      `!翻译 [语言] [内容]\n` +
-                      `图片理解：把图片和问题放在同一则消息，或回复图片后 @我\n\n` +
-                      `🔹 [娱乐与分析]\n` +
-                      `!会议纪要 [数字] (提取重点结论)\n` +
-                      `!总结 [数字] (八卦轻松吃瓜)\n` +
-                      `!查成分 [@成员] (AI属性分析)\n` +
-                      `!详细资料 [@成员]（本人可查自己；查询他人仅限管理、群主、获授群操作权限者或开发者）\n` +
-                      `!模仿 [@成员] (全群灵魂窃取)\n\n` +
-                      `🔹 [专属记忆与个人设置]\n` +
-                      `!群规 / !rules\n` +
-                      `!免打扰 / !取消免打扰\n` +
-                      `!好感度 [@成员]（固定规则分 + AI 互动评估；开发者永久 100）\n` +
-                      `!检查 [具体违规原因]（回复目标消息，或 @目标；任何群友可补检）\n` +
-                      `!记住 [@成员] <内容> / !忘记 [@成员] <内容>\n` +
-                      `!你记住了什么 [@成员]\n` +
-                      `!set人格 [风格] / !del人格\n` +
-                      `!协助撤回（回复自己的消息，仅能撤回自己的消息）\n\n` +
-                      `🔹 [排程]\n` +
-                      `!排程 2026-07-22 18:00 内容\n` +
-                      `!排程 每天 18:00 内容\n` +
-                      `!排程 列表 / !排程 取消 编号\n` +
-                      `私聊申诉：!申诉 群号 类型 详细内容\n`;
-
-        if (permissionSet.aiAdmin) {
-          helpMsg += `\n🧠 [AI 管理区]\n` +
-                     `!关闭ai / !开启ai\n` +
-                     `!记忆开 / !记忆关\n` +
-                     `!拉黑 [@成员] / !洗白 [@成员]\n` +
-                     `!set群规 [内容]\n` +
-                     `!切换人格 [风格] / !恢复人格\n` +
-                     `!设置插话率 0-100\n` +
-                     `!好感度注入 开/关/状态\n` +
-                     `!清空群上下文\n`;
-        }
-
-        if (permissionSet.groupOps) {
-          helpMsg += `\n🛡️ [群操作管理区]\n` +
-                     `!禁言 [@成员] [时长] / !解禁 [@成员]\n` +
-                     `!撤回（管理员回复目标消息）\n` +
-                     `!踢出 [@成员]\n` +
-                     `!全员禁言 / !解除全员禁言\n` +
-                     `自然语言也可发起确认操作，例如「把 @某人 杀了」\n` +
-                     `以上高风险操作只建立待确认操作；发送「确认op」后才执行\n` +
-                     `发送「取消op」可取消；也可使用完整操作编号\n` +
-                     `!改群名 [新名称]\n` +
-                     `!改名片 [@成员] [新名片]\n`;
-        }
-
-        if (isSuperAuth || isOnlyMe) {
-          helpMsg += `\n💠 [群主/开发者 核心设定区]\n` +
-                     `!群白名单 [群号] / !删群白名单 [群号]\n` +
-                     `!取消使用 (删除全局性格或模仿)\n`;
-        }
-
-        if (isOnlyMe) {
-          helpMsg += `\n👑 [开发者专属指令]\n` +
-                     `!授权 [@成员] [权限类型]\n` +
-                     `!撤销授权 [@成员] [权限类型]\n` +
-                     `!禁记忆 [@成员] / !解禁记忆 [@成员]\n` +
-                     `!自我调整 / !自我修正\n` +
-                     `!重置 或 !clear\n` +
-                     `(额度只能由开发者在 Root 后台设置)\n`;
-        }
-        return jsonReply(`${atSender}${helpMsg.trim()}`);
+        const roleTxt = isOnlyMe ? '开发者' :
+          senderRole === 'owner' ? '群主' :
+          senderRole === 'admin' ? 'QQ管理员' :
+          permissionSet.groupOps && permissionSet.aiAdmin ? 'AI管理＋群操作' :
+          permissionSet.groupOps ? '群操作权限' :
+          permissionSet.aiAdmin ? 'AI管理权限' : '群成员';
+        const helpMsg = buildHelpText({
+          roleLabel: roleTxt,
+          permissionSet,
+          isDeveloper,
+          isOwner: senderRole === 'owner',
+          portalUrl: 'https://qqai.ray2025.com/',
+          liveUrl: 'https://qqai.ray2025.com/live'
+        });
+        return jsonReply(`${atSender}${helpMsg}`);
       }
 
       if (['!status', '!配额', '!配額', '！status', '！配额', '！配額'].includes(msgLower)) {

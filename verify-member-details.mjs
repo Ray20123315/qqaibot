@@ -43,7 +43,8 @@ assert.equal(SENSITIVE_KEY_RE.test("nickname"), false);
 const workerSource = fs.readFileSync("worker.js", "utf8");
 assert.match(workerSource, /fullMemberDetailsMatch/, "member_full_details command integration must exist");
 assert.match(workerSource, /reply_kind: "member_full_details"/);
-assert.match(workerSource, /!详细资料 \[@成员\]/, "help must document the privileged full-detail command");
+const helpSource = fs.readFileSync("src/help/commands.js", "utf8");
+assert.match(workerSource + "\n" + helpSource, /!详细资料 \[@成员\]/, "help must document the privileged full-detail command");
 assert.match(workerSource, /permissions: permissionSet/);
 
 console.log("verify-member-details: ok");
