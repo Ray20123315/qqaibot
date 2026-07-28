@@ -1,9 +1,9 @@
 v2.7.11 PR candidate integration failed
-workflow_commit=ab589f0b3bcf2c661c092fa3978c5f9f4cb00323
+workflow_commit=7f2c0bceea1cd49b6d80f212885db4acc0a00a48
 
 Applied permanent v2.7.11 integration patch.
 
-added 35 packages, and audited 36 packages in 4s
+added 35 packages, and audited 36 packages in 5s
 
 7 packages are looking for funding
   run `npm fund` for details
