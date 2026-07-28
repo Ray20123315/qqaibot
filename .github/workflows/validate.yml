@@ -1,109 +1,31 @@
-name: Run v2.7.11 candidate builder
+name: Validate single-Worker build
 
 on:
   push:
     branches:
       - main
+      - refactor/v2-modular-worker
+  pull_request:
+    branches:
+      - main
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
-  build-candidate:
+  validate:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
-        with:
-          ref: chatgpt/entertainment-help-readme-v2.7.11
-          fetch-depth: 0
       - uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: npm
           cache-dependency-path: package.json
-      - name: Extract candidate patch
-        shell: bash
-        run: |
-          set -o pipefail
-          python <<'PY' 2>&1 | tee -a /tmp/v2711.log
-          from pathlib import Path
-          source = Path(".github/workflows/validate.yml").read_text(encoding="utf-8")
-          start_marker = "          node <<'NODE'\n"
-          end_marker = "\n          NODE"
-          start = source.index(start_marker) + len(start_marker)
-          end = source.index(end_marker, start)
-          lines = source[start:end].splitlines()
-          script = "\n".join(line[10:] if line.startswith("          ") else line for line in lines) + "\n"
-          script = script.replace('if (value < 60) return `\\${value} 秒`;', 'if (value < 60) return String(value) + " 秒";')
-          script = script.replace('if (value < 3600) return `\\${Math.ceil(value / 60)} 分钟`;', 'if (value < 3600) return String(Math.ceil(value / 60)) + " 分钟";')
-          script = script.replace('if (value < 86400) return `\\${Math.ceil(value / 3600)} 小时`;', 'if (value < 86400) return String(Math.ceil(value / 3600)) + " 小时";')
-          script = script.replace('return `\\${Math.ceil(value / 86400)} 天`;', 'return String(Math.ceil(value / 86400)) + " 天";')
-          script = script.replace('return `\\${problem}，请 \\${formatRetryDelay(seconds)}后再试。`;', 'return String(problem) + "，请 " + formatRetryDelay(seconds) + "后再试。";')
-          Path("/tmp/apply-v2.7.11.js").write_text(script, encoding="utf-8")
-          PY
-          node --check /tmp/apply-v2.7.11.js 2>&1 | tee -a /tmp/v2711.log
-      - name: Apply permanent source patch
-        shell: bash
-        run: |
-          set -o pipefail
-          node /tmp/apply-v2.7.11.js 2>&1 | tee -a /tmp/v2711.log
       - name: Install dependencies
-        shell: bash
-        run: |
-          set -o pipefail
-          npm install --ignore-scripts --no-package-lock 2>&1 | tee -a /tmp/v2711.log
-      - name: Run full regression
-        shell: bash
-        run: |
-          set -o pipefail
-          npm run check 2>&1 | tee -a /tmp/v2711.log
-      - name: Build single Worker bundle
-        shell: bash
-        run: |
-          set -o pipefail
-          npm run check:bundle 2>&1 | tee -a /tmp/v2711.log
-      - name: Save failure diagnostic
-        if: failure()
-        shell: bash
-        run: |
-          mkdir -p tools
-          {
-            echo "v2.7.11 candidate builder failed"
-            echo "commit=${GITHUB_SHA}"
-            echo
-            cat /tmp/v2711.log 2>/dev/null || true
-          } > tools/v2711-diagnostic.txt
-          rm -rf node_modules dist package-lock.json
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add tools/v2711-diagnostic.txt
-          git commit -m "diagnostic: v2.7.11 candidate builder failure" || true
-          git push origin HEAD:chatgpt/entertainment-help-readme-v2.7.11 || true
-      - name: Remove generated and temporary files
-        if: success()
-        run: |
-          rm -rf node_modules dist package-lock.json tools/v2711-diagnostic.txt
-          git show db776a60c7e63544f9678ecf98141cf59f1202bc:.github/workflows/validate.yml > .github/workflows/validate.yml
-          rm -rf .github/scripts
-      - name: Verify candidate tree
-        if: success()
-        run: |
-          test ! -e node_modules
-          test ! -e dist
-          test ! -e package-lock.json
-          test ! -e .github/scripts
-          test ! -e tools/v2711-diagnostic.txt
-          test "$(git hash-object .github/workflows/validate.yml)" = "7be7e206a01dab3e6680a224b191b510c0aa36a1"
-          if git diff --name-only | grep -E '^\.github/scripts|^tools/.*diagnostic|^(node_modules|dist)/|package-lock\.json$'; then
-            echo "Temporary or generated file remained"
-            exit 1
-          fi
-      - name: Commit candidate
-        if: success()
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add -A
-          git commit -m "feat: 娱乐指令、条列帮助与现况 README [v2.7.11 candidate]"
-          git push origin HEAD:chatgpt/entertainment-help-readme-v2.7.11
+        run: npm install --ignore-scripts
+      - name: Run regression checks
+        run: npm run check
+      - name: Build the single Worker bundle
+        run: npm run check:bundle
