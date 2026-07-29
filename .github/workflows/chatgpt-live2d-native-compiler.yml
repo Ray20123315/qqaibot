@@ -39,6 +39,15 @@ jobs:
       - name: Compile minimal original MOC3
         run: python .chatgpt_live2d_native/build_minimal.py
 
+      - name: Diagnose valid reference format without packaging it
+        run: |
+          curl --fail --location --retry 3 \
+            'https://raw.githubusercontent.com/Live2D/CubismWebSamples/develop/Samples/Resources/Mao/Mao.moc3' \
+            --output .chatgpt_live2d_native/reference_mao.moc3
+          python .chatgpt_live2d_native/diagnose_reference.py
+          rm -f .chatgpt_live2d_native/reference_mao.moc3 \
+            .chatgpt_live2d_native/reference_mao.roundtrip.moc3
+
       - name: Fetch official Cubism Core hosting build
         run: |
           curl --fail --location --retry 3 \
@@ -49,6 +58,8 @@ jobs:
             .chatgpt_live2d_native/dist_minimal/validate_minimal.html
 
       - name: Validate with official Cubism Core in headless Chrome
+        id: core_gate
+        continue-on-error: true
         shell: bash
         run: |
           set -euo pipefail
@@ -74,13 +85,10 @@ jobs:
             >core_dom.txt 2>chrome.log || true
 
           cat core_dom.txt
-          if ! grep -q 'data-status="PASS"' core_dom.txt; then
-            echo 'Official Core gate did not pass.' >&2
-            cat chrome.log >&2 || true
-            exit 1
-          fi
+          grep -q 'data-status="PASS"' core_dom.txt
 
       - name: Generate hashes and artifact manifest
+        if: always()
         run: |
           cd .chatgpt_live2d_native/dist_minimal
           sha256sum Aye_Minimal.moc3 Aye_Minimal.roundtrip.moc3 \
@@ -89,18 +97,24 @@ jobs:
           python - <<'PY'
           import json
           from pathlib import Path
-          root = Path('.chatgpt_live2d_native/dist_minimal')
+          root = Path('.')
           report = json.loads((root / 'PY_MOC3_VERIFY.json').read_text())
-          report['official_core_gate'] = 'passed'
-          report['core_dom_contains_pass'] = 'data-status="PASS"' in (root / 'core_dom.txt').read_text(errors='replace')
+          dom = (root / 'core_dom.txt').read_text(errors='replace') if (root / 'core_dom.txt').exists() else ''
+          report['official_core_gate'] = 'passed' if 'data-status="PASS"' in dom else 'failed'
+          report['core_dom_contains_pass'] = 'data-status="PASS"' in dom
           report['files'] = sorted(p.name for p in root.iterdir() if p.is_file())
           (root / 'FINAL_VERIFY.json').write_text(json.dumps(report, ensure_ascii=False, indent=2) + '\n')
           PY
 
-      - name: Upload minimal compiler gate artifact
+      - name: Upload minimal compiler diagnostics
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: Aye_Native_MOC3_Minimal_Core_Gate
           path: .chatgpt_live2d_native/dist_minimal/*
           if-no-files-found: error
           retention-days: 1
+
+      - name: Enforce official Core gate
+        if: steps.core_gate.outcome != 'success'
+        run: exit 1
