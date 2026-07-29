@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import shutil
+import urllib.error
 import urllib.request
 import zipfile
 from pathlib import Path
@@ -12,7 +13,11 @@ DIST = ROOT / "dist"
 RUNTIME = DIST / "Aye_Live2D_runtime_v0.0.2"
 PROJECT = DIST / "Aye_Live2D_project_v0.0.3"
 SOURCE_ZIP = ROOT / "mao_pro_en_official.zip"
-SOURCE_URL = "https://cubism.live2d.com/sample-data/bin/mao_pro/mao_pro_en.zip"
+SOURCE_URLS = [
+    "https://cubism.live2d.com/sample-data/bin/mao_pro/mao_pro_en.zip",
+    "https://s3.ap-northeast-1.amazonaws.com/cubism-dev.live2d.com/sample-data/bin/mao_pro/mao_pro_en.zip",
+    "https://s3.ap-northeast-1.amazonaws.com/cubism-dev.live2d.com/sample-data/js/mao_pro/mao_pro_en.zip",
+]
 
 
 def sha256(path: Path) -> str:
@@ -23,17 +28,33 @@ def sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
-def download() -> None:
-    request = urllib.request.Request(
-        SOURCE_URL,
-        headers={
-            "User-Agent": "Mozilla/5.0 Aye-Live2D-project-builder/0.0.3",
-            "Accept": "application/zip,application/octet-stream,*/*;q=0.8",
-            "Referer": "https://www.live2d.com/en/learn/sample/niziiro-mao/",
-        },
-    )
-    with urllib.request.urlopen(request, timeout=300) as response, SOURCE_ZIP.open("wb") as fp:
-        shutil.copyfileobj(response, fp)
+def download() -> tuple[str, list[dict[str, object]]]:
+    attempts: list[dict[str, object]] = []
+    for url in SOURCE_URLS:
+        request = urllib.request.Request(
+            url,
+            headers={
+                "User-Agent": "Mozilla/5.0 Aye-Live2D-project-builder/0.0.3",
+                "Accept": "application/zip,application/octet-stream,*/*;q=0.8",
+                "Referer": "https://www.live2d.com/en/learn/sample/niziiro-mao/",
+            },
+        )
+        try:
+            with urllib.request.urlopen(request, timeout=300) as response:
+                first = response.read(4)
+                if first != b"PK\x03\x04":
+                    attempts.append({"url": url, "status": response.status, "error": "not_zip"})
+                    continue
+                with SOURCE_ZIP.open("wb") as fp:
+                    fp.write(first)
+                    shutil.copyfileobj(response, fp)
+                attempts.append({"url": url, "status": response.status, "bytes": SOURCE_ZIP.stat().st_size})
+                return url, attempts
+        except urllib.error.HTTPError as exc:
+            attempts.append({"url": url, "status": exc.code, "error": str(exc)})
+        except Exception as exc:
+            attempts.append({"url": url, "error": repr(exc)})
+    raise RuntimeError(f"All official download candidates failed: {attempts}")
 
 
 def main() -> None:
@@ -43,9 +64,7 @@ def main() -> None:
     shutil.rmtree(PROJECT, ignore_errors=True)
     PROJECT.mkdir(parents=True)
 
-    download()
-    if SOURCE_ZIP.read_bytes()[:4] != b"PK\x03\x04":
-        raise RuntimeError("Official source download is not a ZIP archive")
+    source_url, download_attempts = download()
 
     extract_root = ROOT / "official_mao_source_extracted"
     shutil.rmtree(extract_root, ignore_errors=True)
@@ -115,7 +134,8 @@ def main() -> None:
 
     manifest = {
         "package": "Aye_Live2D_project_v0.0.3",
-        "official_download": SOURCE_URL,
+        "official_download": source_url,
+        "download_attempts": download_attempts,
         "official_zip_bytes": SOURCE_ZIP.stat().st_size,
         "official_zip_sha256": sha256(SOURCE_ZIP),
         "editable_cmo3_count": len(cmo3_files),
@@ -141,6 +161,8 @@ def main() -> None:
             raise RuntimeError(f"Final project archive is corrupt: {bad}")
 
     print(json.dumps({
+        "source_url": source_url,
+        "download_attempts": download_attempts,
         "project_archive": str(archive_path),
         "project_archive_bytes": archive_path.stat().st_size,
         "project_archive_sha256": sha256(archive_path),
