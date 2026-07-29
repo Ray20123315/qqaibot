@@ -10,10 +10,14 @@
 <script>
 (async () => {
   const result = document.getElementById('result');
+  const params = new URLSearchParams(location.search);
+  const file = params.get('file') || 'Aye_Minimal.moc3';
+
   const fail = (error) => {
     const text = String(error && error.stack ? error.stack : error);
     document.body.dataset.status = 'FAIL';
-    result.textContent = 'FAIL\n' + text;
+    document.body.dataset.file = file;
+    result.textContent = 'FAIL\n' + JSON.stringify({ file, error: text }, null, 2);
     console.error(error);
   };
 
@@ -22,7 +26,7 @@
       throw new Error('Live2DCubismCore global is missing');
     }
 
-    const response = await fetch('Aye_Minimal.moc3', { cache: 'no-store' });
+    const response = await fetch(file, { cache: 'no-store' });
     if (!response.ok) {
       throw new Error(`MOC3 fetch failed: ${response.status}`);
     }
@@ -46,6 +50,7 @@
 
     const payload = {
       status: 'PASS',
+      file,
       consistency,
       mocVersion: Live2DCubismCore.Version.csmGetMocVersion(bytes),
       latestMocVersion: Live2DCubismCore.Version.csmGetLatestMocVersion(),
@@ -56,8 +61,9 @@
     };
 
     document.body.dataset.status = 'PASS';
+    document.body.dataset.file = file;
     result.textContent = JSON.stringify(payload, null, 2);
-    console.log('AYE_NATIVE_MOC3_PASS', payload);
+    console.log('MOC3_CORE_PASS', payload);
 
     if (typeof model.release === 'function') model.release();
     if (typeof moc._release === 'function') moc._release();
