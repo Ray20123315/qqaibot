@@ -21,7 +21,7 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 30
     steps:
       - name: Checkout temporary branch
         uses: actions/checkout@v4
@@ -43,7 +43,10 @@ jobs:
       - name: Discover official editable Mao source package
         run: python .chatgpt_live2d/discover_official_source.py
 
-      - name: Repack after render verification
+      - name: Prepare editable project package
+        run: python .chatgpt_live2d/prepare_editable_project.py
+
+      - name: Repack runtime after render verification
         run: |
           rm -f .chatgpt_live2d/dist/Aye_Live2D_runtime_v0.0.2.tar.gz
           tar -C .chatgpt_live2d/dist -czf .chatgpt_live2d/dist/Aye_Live2D_runtime_v0.0.2.tar.gz Aye_Live2D_runtime_v0.0.2
@@ -52,7 +55,19 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: Aye_Live2D_runtime_v0.0.2-render-verified
-          path: .chatgpt_live2d/dist/*
+          path: |
+            .chatgpt_live2d/dist/Aye_Live2D_runtime_v0.0.2
+            .chatgpt_live2d/dist/Aye_Live2D_runtime_v0.0.2.tar.gz
+          if-no-files-found: error
+          retention-days: 1
+
+      - name: Upload editable Live2D project artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Aye_Live2D_project_v0.0.3
+          path: |
+            .chatgpt_live2d/dist/Aye_Live2D_project_v0.0.3
+            .chatgpt_live2d/dist/Aye_Live2D_project_v0.0.3.zip
           if-no-files-found: error
           retention-days: 1
 
