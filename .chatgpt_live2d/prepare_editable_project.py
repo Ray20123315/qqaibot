@@ -12,11 +12,12 @@ ROOT = Path(__file__).resolve().parent
 DIST = ROOT / "dist"
 RUNTIME = DIST / "Aye_Live2D_runtime_v0.0.2"
 PROJECT = DIST / "Aye_Live2D_project_v0.0.3"
-SOURCE_ZIP = ROOT / "mao_pro_en_official.zip"
+SOURCE_ZIP = ROOT / "mao_en_official.zip"
 SOURCE_URLS = [
-    "https://cubism.live2d.com/sample-data/bin/mao_pro/mao_pro_en.zip",
-    "https://s3.ap-northeast-1.amazonaws.com/cubism-dev.live2d.com/sample-data/bin/mao_pro/mao_pro_en.zip",
-    "https://s3.ap-northeast-1.amazonaws.com/cubism-dev.live2d.com/sample-data/js/mao_pro/mao_pro_en.zip",
+    "https://cubism.live2d.com/sample-data/bin/mao/mao_en.zip?event=sampledata_download&data_name=mao&lang=en",
+    "https://cubism.live2d.com/sample-data/bin/mao/mao_en.zip",
+    "https://s3.ap-northeast-1.amazonaws.com/cubism-dev.live2d.com/sample-data/bin/mao/mao_en.zip",
+    "https://s3.ap-northeast-1.amazonaws.com/cubism-dev.live2d.com/sample-data/js/mao/mao_en.zip",
 ]
 
 
