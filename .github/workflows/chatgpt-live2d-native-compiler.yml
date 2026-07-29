@@ -39,14 +39,15 @@ jobs:
       - name: Compile minimal original MOC3
         run: python .chatgpt_live2d_native/build_minimal.py
 
-      - name: Diagnose valid reference format without packaging it
+      - name: Download v4.02 reference for format diagnostics only
         run: |
           curl --fail --location --retry 3 \
-            'https://raw.githubusercontent.com/Live2D/CubismWebSamples/develop/Samples/Resources/Mao/Mao.moc3' \
+            'https://raw.githubusercontent.com/Live2D/CubismWebSamples/4-r.7/Samples/Resources/Mao/Mao.moc3' \
             --output .chatgpt_live2d_native/reference_mao.moc3
-          python .chatgpt_live2d_native/diagnose_reference.py
-          rm -f .chatgpt_live2d_native/reference_mao.moc3 \
-            .chatgpt_live2d_native/reference_mao.roundtrip.moc3
+          cp .chatgpt_live2d_native/reference_mao.moc3 \
+            .chatgpt_live2d_native/dist_minimal/reference_mao.moc3
+          python .chatgpt_live2d_native/diagnose_reference.py \
+            > .chatgpt_live2d_native/dist_minimal/reference_diagnostic_stdout.txt
 
       - name: Fetch official Cubism Core hosting build
         run: |
@@ -57,7 +58,7 @@ jobs:
           cp .chatgpt_live2d_native/validate_minimal.html \
             .chatgpt_live2d_native/dist_minimal/validate_minimal.html
 
-      - name: Validate with official Cubism Core in headless Chrome
+      - name: Validate reference and original with official Cubism Core
         id: core_gate
         continue-on-error: true
         shell: bash
@@ -75,17 +76,27 @@ jobs:
             exit 1
           fi
 
-          timeout 60s "$CHROME" \
-            --headless=new \
-            --no-sandbox \
-            --disable-gpu \
-            --disable-dev-shm-usage \
-            --virtual-time-budget=15000 \
-            --dump-dom 'http://127.0.0.1:8765/validate_minimal.html' \
-            >core_dom.txt 2>chrome.log || true
+          run_gate() {
+            local file="$1"
+            local output="$2"
+            local chrome_log="$3"
+            timeout 60s "$CHROME" \
+              --headless=new \
+              --no-sandbox \
+              --disable-gpu \
+              --disable-dev-shm-usage \
+              --virtual-time-budget=15000 \
+              --dump-dom "http://127.0.0.1:8765/validate_minimal.html?file=${file}" \
+              >"$output" 2>"$chrome_log" || true
+          }
 
-          cat core_dom.txt
-          grep -q 'data-status="PASS"' core_dom.txt
+          run_gate reference_mao.moc3 reference_core_dom.txt reference_chrome.log
+          cat reference_core_dom.txt
+          grep -q 'data-status="PASS"' reference_core_dom.txt
+
+          run_gate Aye_Minimal.moc3 minimal_core_dom.txt minimal_chrome.log
+          cat minimal_core_dom.txt
+          grep -q 'data-status="PASS"' minimal_core_dom.txt
 
       - name: Generate hashes and artifact manifest
         if: always()
@@ -99,12 +110,18 @@ jobs:
           from pathlib import Path
           root = Path('.')
           report = json.loads((root / 'PY_MOC3_VERIFY.json').read_text())
-          dom = (root / 'core_dom.txt').read_text(errors='replace') if (root / 'core_dom.txt').exists() else ''
-          report['official_core_gate'] = 'passed' if 'data-status="PASS"' in dom else 'failed'
-          report['core_dom_contains_pass'] = 'data-status="PASS"' in dom
-          report['files'] = sorted(p.name for p in root.iterdir() if p.is_file())
+          reference_dom = (root / 'reference_core_dom.txt').read_text(errors='replace') if (root / 'reference_core_dom.txt').exists() else ''
+          minimal_dom = (root / 'minimal_core_dom.txt').read_text(errors='replace') if (root / 'minimal_core_dom.txt').exists() else ''
+          report['reference_core_gate'] = 'passed' if 'data-status="PASS"' in reference_dom else 'failed'
+          report['official_core_gate'] = 'passed' if 'data-status="PASS"' in minimal_dom else 'failed'
+          report['reference_binary_packaged'] = False
+          report['files_before_reference_cleanup'] = sorted(p.name for p in root.iterdir() if p.is_file())
           (root / 'FINAL_VERIFY.json').write_text(json.dumps(report, ensure_ascii=False, indent=2) + '\n')
           PY
+          rm -f reference_mao.moc3
+          test ! -e reference_mao.moc3
+          cd ..
+          rm -f reference_mao.moc3 reference_mao.roundtrip.moc3
 
       - name: Upload minimal compiler diagnostics
         if: always()
