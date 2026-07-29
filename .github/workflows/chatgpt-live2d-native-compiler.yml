@@ -1,0 +1,100 @@
+name: ChatGPT Aye Native MOC3 Compiler
+
+on:
+  push:
+    branches:
+      - chatgpt/live2d-aye-v0.0.1
+    paths:
+      - '.chatgpt_live2d_native/**'
+      - '.github/workflows/chatgpt-live2d-native-compiler.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  minimal-core-gate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout temporary branch
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install compiler dependencies
+        run: |
+          python -m pip install --disable-pip-version-check pillow
+          python -m pip install --disable-pip-version-check 'git+https://github.com/Ludentes/py-moc3.git@2fb112e11a2d495557cfd09fbea72015cbfd47c5'
+
+      - name: Compile minimal original MOC3
+        run: python .chatgpt_live2d_native/build_minimal.py
+
+      - name: Fetch official Cubism Core hosting build
+        run: |
+          curl --fail --location --retry 3 \
+            'https://cubism.live2d.com/sdk-web/cubismcore/live2dcubismcore.min.js' \
+            --output .chatgpt_live2d_native/dist_minimal/live2dcubismcore.min.js
+          test -s .chatgpt_live2d_native/dist_minimal/live2dcubismcore.min.js
+          cp .chatgpt_live2d_native/validate_minimal.html \
+            .chatgpt_live2d_native/dist_minimal/validate_minimal.html
+
+      - name: Validate with official Cubism Core in headless Chrome
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd .chatgpt_live2d_native/dist_minimal
+          python -m http.server 8765 >server.log 2>&1 &
+          SERVER_PID=$!
+          trap 'kill "$SERVER_PID" 2>/dev/null || true' EXIT
+          sleep 2
+
+          CHROME="$(command -v google-chrome || command -v chromium || command -v chromium-browser)"
+          if [ -z "$CHROME" ]; then
+            echo 'Chrome/Chromium not found' >&2
+            exit 1
+          fi
+
+          timeout 60s "$CHROME" \
+            --headless=new \
+            --no-sandbox \
+            --disable-gpu \
+            --disable-dev-shm-usage \
+            --virtual-time-budget=15000 \
+            --dump-dom 'http://127.0.0.1:8765/validate_minimal.html' \
+            >core_dom.txt 2>chrome.log || true
+
+          cat core_dom.txt
+          if ! grep -q 'data-status="PASS"' core_dom.txt; then
+            echo 'Official Core gate did not pass.' >&2
+            cat chrome.log >&2 || true
+            exit 1
+          fi
+
+      - name: Generate hashes and artifact manifest
+        run: |
+          cd .chatgpt_live2d_native/dist_minimal
+          sha256sum Aye_Minimal.moc3 Aye_Minimal.roundtrip.moc3 \
+            Aye_Minimal.model3.json texture_00.png \
+            live2dcubismcore.min.js > SHA256SUMS.txt
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          root = Path('.chatgpt_live2d_native/dist_minimal')
+          report = json.loads((root / 'PY_MOC3_VERIFY.json').read_text())
+          report['official_core_gate'] = 'passed'
+          report['core_dom_contains_pass'] = 'data-status="PASS"' in (root / 'core_dom.txt').read_text(errors='replace')
+          report['files'] = sorted(p.name for p in root.iterdir() if p.is_file())
+          (root / 'FINAL_VERIFY.json').write_text(json.dumps(report, ensure_ascii=False, indent=2) + '\n')
+          PY
+
+      - name: Upload minimal compiler gate artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Aye_Native_MOC3_Minimal_Core_Gate
+          path: .chatgpt_live2d_native/dist_minimal/*
+          if-no-files-found: error
+          retention-days: 1
