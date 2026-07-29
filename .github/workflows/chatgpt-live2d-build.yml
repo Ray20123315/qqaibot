@@ -21,7 +21,7 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 25
     steps:
       - name: Checkout temporary branch
         uses: actions/checkout@v4
@@ -40,15 +40,26 @@ jobs:
       - name: Render model in headless Chrome
         run: bash .chatgpt_live2d/render_preview.sh
 
+      - name: Discover official editable Mao source package
+        run: python .chatgpt_live2d/discover_official_source.py
+
       - name: Repack after render verification
         run: |
           rm -f .chatgpt_live2d/dist/Aye_Live2D_runtime_v0.0.2.tar.gz
           tar -C .chatgpt_live2d/dist -czf .chatgpt_live2d/dist/Aye_Live2D_runtime_v0.0.2.tar.gz Aye_Live2D_runtime_v0.0.2
 
-      - name: Upload verified artifact
+      - name: Upload verified runtime artifact
         uses: actions/upload-artifact@v4
         with:
           name: Aye_Live2D_runtime_v0.0.2-render-verified
           path: .chatgpt_live2d/dist/*
+          if-no-files-found: error
+          retention-days: 1
+
+      - name: Upload official source discovery report
+        uses: actions/upload-artifact@v4
+        with:
+          name: Live2D_official_source_discovery
+          path: .chatgpt_live2d/official_source_discovery/*
           if-no-files-found: error
           retention-days: 1
