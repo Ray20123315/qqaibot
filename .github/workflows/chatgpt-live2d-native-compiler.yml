@@ -21,7 +21,7 @@ permissions:
 jobs:
   minimal-core-gate:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 25
     steps:
       - name: Checkout temporary branch
         uses: actions/checkout@v4
@@ -36,7 +36,7 @@ jobs:
           python -m pip install --disable-pip-version-check pillow
           python -m pip install --disable-pip-version-check 'git+https://github.com/Ludentes/py-moc3.git@2fb112e11a2d495557cfd09fbea72015cbfd47c5'
 
-      - name: Compile minimal original MOC3
+      - name: Compile original MOC3 candidate matrix
         run: python .chatgpt_live2d_native/build_minimal.py
 
       - name: Download v4.02 reference for format diagnostics only
@@ -58,7 +58,7 @@ jobs:
           cp .chatgpt_live2d_native/validate_minimal.html \
             .chatgpt_live2d_native/dist_minimal/validate_minimal.html
 
-      - name: Validate reference and original with official Cubism Core
+      - name: Validate reference and candidate matrix with official Cubism Core
         id: core_gate
         continue-on-error: true
         shell: bash
@@ -94,26 +94,59 @@ jobs:
           cat reference_core_dom.txt
           grep -q 'data-status="PASS"' reference_core_dom.txt
 
-          run_gate Aye_Minimal.moc3 minimal_core_dom.txt minimal_chrome.log
-          cat minimal_core_dom.txt
-          grep -q 'data-status="PASS"' minimal_core_dom.txt
+          : > CANDIDATE_CORE_RESULTS.txt
+          : > PASSING_CANDIDATES.txt
+          while IFS= read -r file; do
+            [ -n "$file" ] || continue
+            base="${file%.moc3}"
+            dom="${base}_core_dom.txt"
+            log="${base}_chrome.log"
+            run_gate "$file" "$dom" "$log"
+            if grep -q 'data-status="PASS"' "$dom"; then
+              echo "$file PASS" | tee -a CANDIDATE_CORE_RESULTS.txt
+              echo "$file" >> PASSING_CANDIDATES.txt
+            else
+              echo "$file FAIL" | tee -a CANDIDATE_CORE_RESULTS.txt
+            fi
+          done < CANDIDATE_FILES.txt
+
+          test -s PASSING_CANDIDATES.txt
+          selected="$(head -n 1 PASSING_CANDIDATES.txt)"
+          printf '%s\n' "$selected" > SELECTED_CANDIDATE.txt
+          cp "$selected" Aye_Minimal.passing.moc3
 
       - name: Generate hashes and artifact manifest
         if: always()
         run: |
           cd .chatgpt_live2d_native/dist_minimal
-          sha256sum Aye_Minimal.moc3 Aye_Minimal.roundtrip.moc3 \
+          sha256sum Aye_Candidate_*.moc3 Aye_Minimal.moc3 \
             Aye_Minimal.model3.json texture_00.png \
             live2dcubismcore.min.js > SHA256SUMS.txt
           python - <<'PY'
           import json
           from pathlib import Path
+
           root = Path('.')
           report = json.loads((root / 'PY_MOC3_VERIFY.json').read_text())
           reference_dom = (root / 'reference_core_dom.txt').read_text(errors='replace') if (root / 'reference_core_dom.txt').exists() else ''
-          minimal_dom = (root / 'minimal_core_dom.txt').read_text(errors='replace') if (root / 'minimal_core_dom.txt').exists() else ''
           report['reference_core_gate'] = 'passed' if 'data-status="PASS"' in reference_dom else 'failed'
-          report['official_core_gate'] = 'passed' if 'data-status="PASS"' in minimal_dom else 'failed'
+
+          results = []
+          passing = []
+          for candidate in report.get('candidates', []):
+              filename = f"Aye_Candidate_{candidate['name']}.moc3"
+              dom_path = root / f"Aye_Candidate_{candidate['name']}_core_dom.txt"
+              dom = dom_path.read_text(errors='replace') if dom_path.exists() else ''
+              status = 'passed' if 'data-status="PASS"' in dom else 'failed'
+              candidate['official_core_gate'] = status
+              results.append({'file': filename, 'status': status})
+              if status == 'passed':
+                  passing.append(filename)
+
+          report['candidate_core_results'] = results
+          report['passing_candidates'] = passing
+          report['selected_candidate'] = passing[0] if passing else None
+          report['official_core_gate'] = 'passed' if passing else 'failed'
           report['reference_binary_packaged'] = False
           report['files_before_reference_cleanup'] = sorted(p.name for p in root.iterdir() if p.is_file())
           (root / 'FINAL_VERIFY.json').write_text(json.dumps(report, ensure_ascii=False, indent=2) + '\n')
