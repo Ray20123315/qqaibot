@@ -11,8 +11,8 @@ ROOT = Path(__file__).resolve().parent
 DIST = ROOT / "dist"
 RUNTIME = DIST / "Aye_Live2D_runtime_v0.0.2"
 PROJECT = DIST / "Aye_Live2D_project_v0.0.3"
-SOURCE_ZIP = ROOT / "mao_en_official.zip"
-SOURCE_URL = "https://cubism.live2d.com/sample-data/js/mao/mao_en.zip"
+SOURCE_ZIP = ROOT / "mao_pro_en_official.zip"
+SOURCE_URL = "https://cubism.live2d.com/sample-data/bin/mao_pro/mao_pro_en.zip"
 
 
 def sha256(path: Path) -> str:
@@ -29,22 +29,11 @@ def download() -> None:
         headers={
             "User-Agent": "Mozilla/5.0 Aye-Live2D-project-builder/0.0.3",
             "Accept": "application/zip,application/octet-stream,*/*;q=0.8",
+            "Referer": "https://www.live2d.com/en/learn/sample/niziiro-mao/",
         },
     )
-    with urllib.request.urlopen(request, timeout=180) as response, SOURCE_ZIP.open("wb") as fp:
+    with urllib.request.urlopen(request, timeout=300) as response, SOURCE_ZIP.open("wb") as fp:
         shutil.copyfileobj(response, fp)
-
-
-def locate_source_root(extract_root: Path) -> Path:
-    cmo3_files = list(extract_root.rglob("*.cmo3"))
-    if not cmo3_files:
-        raise RuntimeError("Official sample archive does not contain a .cmo3 file")
-    # Use the nearest common parent containing the editable source and runtime folders.
-    source = cmo3_files[0]
-    current = source.parent
-    while current.parent != extract_root and not list(current.glob("*.can3")):
-        current = current.parent
-    return current
 
 
 def main() -> None:
