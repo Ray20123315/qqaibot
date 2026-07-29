@@ -32,6 +32,12 @@
     }
     const bytes = await response.arrayBuffer();
 
+    // Query version before fromArrayBuffer(): Core may take ownership of or
+    // mutate the supplied ArrayBuffer when it creates the native Moc object.
+    const mocVersion = Live2DCubismCore.Version.csmGetMocVersion(bytes);
+    const latestMocVersion =
+      Live2DCubismCore.Version.csmGetLatestMocVersion();
+
     const consistency =
       Live2DCubismCore.Moc.prototype.hasMocConsistency(bytes);
     if (consistency !== 1) {
@@ -52,8 +58,8 @@
       status: 'PASS',
       file,
       consistency,
-      mocVersion: Live2DCubismCore.Version.csmGetMocVersion(bytes),
-      latestMocVersion: Live2DCubismCore.Version.csmGetLatestMocVersion(),
+      mocVersion,
+      latestMocVersion,
       modelCreated: true,
       parameterCount: model.parameters ? model.parameters.count : null,
       partCount: model.parts ? model.parts.count : null,
