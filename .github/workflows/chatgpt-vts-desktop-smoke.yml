@@ -1,0 +1,186 @@
+name: ChatGPT VTube Studio Desktop Smoke
+
+on:
+  push:
+    branches:
+      - chatgpt/live2d-aye-v0.0.1
+    paths:
+      - '.github/workflows/chatgpt-vts-desktop-smoke.yml'
+      - '.chatgpt_live2d_native/**'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  vts-desktop-smoke:
+    runs-on: windows-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout temporary branch
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Build original minimal MOC3
+        shell: pwsh
+        run: |
+          python -m pip install --disable-pip-version-check pillow
+          python -m pip install --disable-pip-version-check 'git+https://github.com/Ludentes/py-moc3.git@2fb112e11a2d495557cfd09fbea72015cbfd47c5'
+          python .chatgpt_live2d_native/build_minimal.py
+
+          $src = Join-Path $env:GITHUB_WORKSPACE '.chatgpt_live2d_native\dist_minimal'
+          $model = Join-Path $env:GITHUB_WORKSPACE 'vts_smoke_model\AyeMinimalSmoke'
+          New-Item -ItemType Directory -Force -Path $model | Out-Null
+          Copy-Item (Join-Path $src 'Aye_Minimal.moc3') (Join-Path $model 'AyeMinimal.moc3')
+          Copy-Item (Join-Path $src 'texture_00.png') (Join-Path $model 'texture_00.png')
+
+          @'
+          {
+            "Version": 3,
+            "FileReferences": {
+              "Moc": "AyeMinimal.moc3",
+              "Textures": ["texture_00.png"],
+              "Physics": "AyeMinimal.physics3.json"
+            },
+            "Groups": [],
+            "HitAreas": []
+          }
+          '@ | Set-Content -Encoding UTF8 (Join-Path $model 'AyeMinimal.model3.json')
+
+          @'
+          {
+            "Version": 3,
+            "Meta": {
+              "PhysicsSettingCount": 0,
+              "TotalInputCount": 0,
+              "TotalOutputCount": 0,
+              "VertexCount": 0,
+              "Fps": 30,
+              "EffectiveForces": {
+                "Gravity": {"X": 0, "Y": -1},
+                "Wind": {"X": 0, "Y": 0}
+              },
+              "PhysicsDictionary": []
+            },
+            "PhysicsSettings": []
+          }
+          '@ | Set-Content -Encoding UTF8 (Join-Path $model 'AyeMinimal.physics3.json')
+
+          Add-Type -AssemblyName System.Drawing
+          $bmp = New-Object System.Drawing.Bitmap 512,512
+          $g = [System.Drawing.Graphics]::FromImage($bmp)
+          $g.Clear([System.Drawing.Color]::FromArgb(255,255,238,246))
+          $g.DrawEllipse([System.Drawing.Pens]::DeepPink,96,96,320,320)
+          $bmp.Save((Join-Path $model 'icon.png'), [System.Drawing.Imaging.ImageFormat]::Png)
+          $g.Dispose(); $bmp.Dispose()
+
+      - name: Download SteamCMD and public VTube Studio
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $steam = Join-Path $env:GITHUB_WORKSPACE 'steamcmd'
+          $vts = Join-Path $env:GITHUB_WORKSPACE 'vts_public'
+          New-Item -ItemType Directory -Force -Path $steam,$vts | Out-Null
+          Invoke-WebRequest 'https://steamcdn-a.akamaihd.net/client/installer/steamcmd.zip' -OutFile (Join-Path $steam 'steamcmd.zip')
+          Expand-Archive (Join-Path $steam 'steamcmd.zip') -DestinationPath $steam -Force
+          & (Join-Path $steam 'steamcmd.exe') +force_install_dir $vts +login anonymous +app_update 1325860 validate +quit | Tee-Object -FilePath (Join-Path $env:GITHUB_WORKSPACE 'steamcmd_vts.log')
+          if ($LASTEXITCODE -ne 0) { throw "SteamCMD failed with $LASTEXITCODE" }
+          Get-ChildItem $vts -Recurse -File | Select-Object FullName,Length | ConvertTo-Json -Depth 3 | Set-Content -Encoding UTF8 (Join-Path $env:GITHUB_WORKSPACE 'vts_install_files.json')
+
+      - name: Install model into Live2DModels
+        shell: pwsh
+        run: |
+          $vts = Join-Path $env:GITHUB_WORKSPACE 'vts_public'
+          $destRoot = Join-Path $vts 'VTube Studio_Data\StreamingAssets\Live2DModels'
+          $dest = Join-Path $destRoot 'AyeMinimalSmoke'
+          New-Item -ItemType Directory -Force -Path $destRoot | Out-Null
+          if (Test-Path $dest) { Remove-Item $dest -Recurse -Force }
+          Copy-Item (Join-Path $env:GITHUB_WORKSPACE 'vts_smoke_model\AyeMinimalSmoke') $dest -Recurse
+          Get-ChildItem $dest -Recurse -File | Select-Object FullName,Length | ConvertTo-Json -Depth 3 | Set-Content -Encoding UTF8 (Join-Path $env:GITHUB_WORKSPACE 'installed_model_files.json')
+
+      - name: Launch VTube Studio and collect native logs
+        id: launch
+        continue-on-error: true
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Continue'
+          $vts = Join-Path $env:GITHUB_WORKSPACE 'vts_public'
+          $out = Join-Path $env:GITHUB_WORKSPACE 'vts_smoke_output'
+          New-Item -ItemType Directory -Force -Path $out | Out-Null
+          $exe = Get-ChildItem $vts -Recurse -Filter 'VTube Studio.exe' | Select-Object -First 1
+          if (-not $exe) { throw 'VTube Studio.exe not found' }
+          $exe.FullName | Set-Content -Encoding UTF8 (Join-Path $out 'exe_path.txt')
+
+          $args = @('-batchmode','-nographics','-logFile',(Join-Path $out 'VTS_batchmode.log'))
+          $p = Start-Process -FilePath $exe.FullName -ArgumentList $args -WorkingDirectory $exe.DirectoryName -PassThru
+          $p.Id | Set-Content -Encoding ASCII (Join-Path $out 'pid.txt')
+          Start-Sleep -Seconds 90
+          if (-not $p.HasExited) { Stop-Process -Id $p.Id -Force }
+          Start-Sleep -Seconds 3
+
+          $candidateLogs = @(
+            (Join-Path $out 'VTS_batchmode.log'),
+            (Join-Path $env:USERPROFILE 'AppData\LocalLow\DenchiSoft\VTube Studio\Player.log'),
+            (Join-Path $env:USERPROFILE 'AppData\LocalLow\DenchiSoft\VTube Studio\Player-prev.log'),
+            (Join-Path $vts 'VTube Studio_Data\StreamingAssets\Logs')
+          )
+          $found = @()
+          foreach ($c in $candidateLogs) {
+            if (Test-Path $c) {
+              if ((Get-Item $c).PSIsContainer) {
+                Get-ChildItem $c -Recurse -File | ForEach-Object {
+                  Copy-Item $_.FullName (Join-Path $out ('Logs_' + $_.Name)) -Force
+                  $found += $_.FullName
+                }
+              } else {
+                Copy-Item $c (Join-Path $out ('Collected_' + (Split-Path $c -Leaf))) -Force
+                $found += $c
+              }
+            }
+          }
+          $found | Set-Content -Encoding UTF8 (Join-Path $out 'found_logs.txt')
+          Get-ChildItem (Join-Path $vts 'VTube Studio_Data\StreamingAssets\Live2DModels\AyeMinimalSmoke') -Recurse -File |
+            Select-Object Name,FullName,Length,LastWriteTimeUtc |
+            ConvertTo-Json -Depth 4 | Set-Content -Encoding UTF8 (Join-Path $out 'model_folder_after_launch.json')
+
+      - name: Analyze VTube Studio evidence
+        if: always()
+        shell: pwsh
+        run: |
+          $out = Join-Path $env:GITHUB_WORKSPACE 'vts_smoke_output'
+          New-Item -ItemType Directory -Force -Path $out | Out-Null
+          $texts = Get-ChildItem $out -File -ErrorAction SilentlyContinue | Where-Object { $_.Extension -in '.log','.txt' }
+          $all = ($texts | ForEach-Object { "===== $($_.Name) =====`n" + (Get-Content $_.FullName -Raw -ErrorAction SilentlyContinue) }) -join "`n"
+          $all | Set-Content -Encoding UTF8 (Join-Path $out 'ALL_LOGS.txt')
+          $modelFolder = Join-Path $env:GITHUB_WORKSPACE 'vts_public\VTube Studio_Data\StreamingAssets\Live2DModels\AyeMinimalSmoke'
+          $vtubeFiles = @(Get-ChildItem $modelFolder -Filter '*.vtube.json' -File -ErrorAction SilentlyContinue)
+          $errorLines = @($all -split "`r?`n" | Where-Object { $_ -match '(?i)(error|exception|moc3|model3|live2d|failed|invalid|corrupt)' })
+          $report = [ordered]@{
+            utc = (Get-Date).ToUniversalTime().ToString('o')
+            app_id = 1325860
+            launch_step_outcome = '${{ steps.launch.outcome }}'
+            vtube_json_created = ($vtubeFiles.Count -gt 0)
+            vtube_json_files = @($vtubeFiles | ForEach-Object Name)
+            log_file_count = $texts.Count
+            relevant_log_lines = $errorLines | Select-Object -First 500
+          }
+          $report | ConvertTo-Json -Depth 8 | Set-Content -Encoding UTF8 (Join-Path $out 'VTS_SMOKE_REPORT.json')
+          Get-Content (Join-Path $out 'VTS_SMOKE_REPORT.json')
+
+      - name: Upload VTube Studio smoke artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Aye_VTubeStudio_Desktop_Smoke
+          path: |
+            vts_smoke_output/**
+            installed_model_files.json
+            steamcmd_vts.log
+            vts_install_files.json
+            vts_smoke_model/**
+          if-no-files-found: error
+          retention-days: 2
