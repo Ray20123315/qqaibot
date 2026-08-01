@@ -34,7 +34,29 @@ jobs:
           Copy-Item $env:ComSpec (Join-Path $fake 'VTube Studio.exe')
           $fake | Set-Content -Encoding UTF8 (Join-Path $env:GITHUB_WORKSPACE 'fake_vts_path.txt')
 
-      - name: Parse PowerShell script
+      - name: Parse as UTF-8 with PowerShell 7
+        shell: pwsh
+        run: |
+          $path = '.chatgpt_live2d_native\v09\InstallAndDiagnose.ps1'
+          $tokens = $null
+          $errors = $null
+          [void][System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path $path), [ref]$tokens, [ref]$errors)
+          if ($errors.Count -gt 0) {
+            $errors | Format-List *
+            exit 1
+          }
+          Write-Host "PowerShell 7 parse passed; tokens=$($tokens.Count)"
+
+      - name: Convert test copy to UTF-8 BOM for Windows PowerShell 5.1
+        shell: pwsh
+        run: |
+          $path = Resolve-Path '.chatgpt_live2d_native\v09\InstallAndDiagnose.ps1'
+          $text = [System.IO.File]::ReadAllText($path, [System.Text.UTF8Encoding]::new($false))
+          [System.IO.File]::WriteAllText($path, $text, [System.Text.UTF8Encoding]::new($true))
+          $bytes = [System.IO.File]::ReadAllBytes($path)
+          if (-not ($bytes[0] -eq 0xEF -and $bytes[1] -eq 0xBB -and $bytes[2] -eq 0xBF)) { throw 'UTF-8 BOM missing' }
+
+      - name: Parse with Windows PowerShell 5.1
         shell: powershell
         run: |
           $path = '.chatgpt_live2d_native\v09\InstallAndDiagnose.ps1'
@@ -45,7 +67,7 @@ jobs:
             $errors | Format-List *
             exit 1
           }
-          Write-Host "PowerShell parse passed; tokens=$($tokens.Count)"
+          Write-Host "Windows PowerShell parse passed; tokens=$($tokens.Count)"
 
       - name: Execute noninteractive dry-run
         shell: powershell
