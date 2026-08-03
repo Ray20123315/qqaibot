@@ -1,0 +1,93 @@
+"$schema" = "./node_modules/wrangler/config-schema.json"
+
+# Copy to wrangler.toml for a new deployment, then replace every REPLACE_* value.
+name = "replace-with-worker-name"
+main = "worker.js"
+compatibility_date = "2026-07-21"
+compatibility_flags = ["nodejs_compat"]
+workers_dev = true
+
+# Remove this block when no custom domain is used.
+[[routes]]
+pattern = "bot.example.com"
+custom_domain = true
+
+[ai]
+binding = "AI"
+
+[[durable_objects.bindings]]
+name = "ONEBOT_HUB"
+class_name = "OneBotHub"
+
+# Keep the migration order unchanged for this codebase.
+[[migrations]]
+tag = "v1_onebot_hub"
+new_sqlite_classes = ["OneBotHub"]
+
+[[migrations]]
+tag = "v2_budget_guard"
+new_sqlite_classes = ["BudgetGuard"]
+
+[[migrations]]
+tag = "v3_remove_budget_guard"
+deleted_classes = ["BudgetGuard"]
+
+[[d1_databases]]
+binding = "DB"
+database_name = "replace-with-d1-name"
+database_id = "REPLACE_WITH_D1_DATABASE_ID"
+
+[[vectorize]]
+binding = "VECTORIZE"
+index_name = "replace-with-vectorize-index"
+
+# Needed by schedules, automation, cleanup and automatic group check-in.
+[triggers]
+crons = ["* * * * *"]
+
+[[ratelimits]]
+name = "MY_RATE_LIMITER"
+namespace_id = "REPLACE_WITH_RATE_LIMITER_NAMESPACE_ID"
+
+  [ratelimits.simple]
+  limit = 1
+  period = 10
+
+[vars]
+# Required operator identity. Comma-separate multiple QQ IDs.
+DEVELOPER_IDS = "123456789,987654321"
+# Legacy single-value fallback; normally leave empty.
+DEVELOPER_ID = ""
+
+# Public URL used in !help and generated links. No trailing slash.
+PUBLIC_BASE_URL = "https://bot.example.com"
+BOT_DISPLAY_NAME = "QQAI"
+
+# Deployment notifications.
+DEPLOY_NOTIFY_WORKER_NAME = "replace-with-worker-name"
+DEPLOY_NOTIFY_BRANCH = "main"
+DEPLOY_NOTIFY_DEVELOPER_IDS = ""
+DEPLOY_NOTIFY_START_COOLDOWN_SECONDS = "600"
+DEPLOY_NOTIFY_SELF_GRACE_SECONDS = "90"
+
+# OneBot HTTP event fallback.
+ENABLE_ONEBOT_HTTP_EVENTS = "false"
+
+# Automatic group check-in. The execution window remains Asia/Taipei 23:59–00:01:59.
+AUTO_CHECKIN_ENABLED = "true"
+AUTO_CHECKIN_RETRY_INTERVAL_MS = "1000"
+AUTO_CHECKIN_CONCURRENCY = "12"
+
+# Model names and paid-model budget.
+DEEPSEEK_FLASH_MODEL = "deepseek-v4-flash"
+DEEPSEEK_PRO_MODEL = "deepseek-v4-pro"
+DEEPSEEK_DAILY_BUDGET_CNY = "0.35"
+GEMINI_CHAT_MODELS = "gemini-3.5-flash,gemini-3.1-flash-lite,gemini-2.5-flash"
+GEMMA_DECISION_MODELS = "gemma-4-26b-a4b-it,gemma-4-31b-it"
+GEMINI_IMAGE_MODELS = ""
+IMAGEN_MODELS = ""
+GEMINI_TTS_MODELS = "gemini-3.1-flash-tts-preview,gemini-2.5-flash-preview-tts"
+GEMINI_LIVE_MODEL = "models/gemini-3.1-flash-live-preview"
+
+[observability]
+enabled = false
