@@ -14,5 +14,11 @@ worker = worker.replace(
 );
 `;
 source = source.replace(marker, addition + marker);
+
+const oldFixtureLine = '  if (source.includes("2.7.11")) write(path, source.replaceAll("2.7.11", "2.7.12"));';
+const newFixtureLine = '  if (source.includes("2.7.11") || source.includes("2\\\\.7\\\\.11")) write(path, source.replaceAll("2.7.11", "2.7.12").replaceAll("2\\\\.7\\\\.11", "2\\\\.7\\\\.12"));';
+if (!source.includes(oldFixtureLine)) throw new Error("version fixture replacement line not found");
+source = source.replace(oldFixtureLine, newFixtureLine);
+
 fs.writeFileSync(path, source, "utf8");
-console.log("patched remaining multi-developer worker checks");
+console.log("patched remaining multi-developer checks and escaped version fixtures");
