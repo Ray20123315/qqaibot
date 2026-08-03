@@ -7,7 +7,7 @@ import {
   stripLegacyHumanCorrectionLines
 } from "./src/moderation/runtime.js";
 
-const polluted = "无法归入明确分类时只记录，交由管理复核。\n人工纠错 2026-07-25（QQ:3569028262）：这属于近期的一个梗 by.叶北尘喵 QQ 473204883";
+const polluted = "无法归入明确分类时只记录，交由管理复核。\n人工纠错 2026-07-25（QQ:999999999）：这属于近期的一个梗 by.叶北尘喵 QQ 473204883";
 assert.equal(stripLegacyHumanCorrectionLines(polluted), "无法归入明确分类时只记录，交由管理复核。", "legacy per-record correction line must be removed");
 assert.equal(stripLegacyHumanCorrectionLines("管理员自定义说明：人工纠错流程需复核"), "管理员自定义说明：人工纠错流程需复核", "legitimate administrator-authored note must remain");
 
@@ -39,7 +39,7 @@ assert.ok(source.includes("resolveAdaptiveRuleStrictness(env, groupId, recentCon
 
 const pkg = JSON.parse(fs.readFileSync("package.json", "utf8"));
 const notes = JSON.parse(fs.readFileSync("release-notes.json", "utf8"));
-assert.equal(pkg.version, "2.7.11");
-assert.equal(notes.version, "2.7.11");
+assert.equal(pkg.version, "2.7.12");
+assert.equal(notes.version, "2.7.12");
 assert.match(pkg.scripts.check, /verify-scoped-rule-feedback\.mjs/);
 console.log("verify-scoped-rule-feedback: ok");

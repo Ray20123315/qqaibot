@@ -1,7 +1,7 @@
 // Extracted from worker.js without behavioral changes.
 // Cloudflare still deploys worker.js as the single Worker entry point.
 
-import { DEFAULT_DEVELOPER_ID, VERSION } from "../config/runtime.js";
+import { VERSION } from "../config/runtime.js";
 import { callOneBotAction, writeSystemAudit } from "../core/permissions.js";
 import { dbDel, dbGet, dbPut } from "../data/store.js";
 import { getBotGroupRole } from "../group/runtime.js";

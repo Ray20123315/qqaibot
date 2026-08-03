@@ -1,7 +1,8 @@
 import { aiReplyPromisesFutureSearch, aiReplySignalsUncertainty, appendSearchSources, buildDeepSeekContextSummary, callDeepSeekSummaryTask, callGeminiGenerate, callGoogleDecision, decideReplyMentionRouting, deepSeekApiKeys, effectiveRuntimeModels, enforceExecutedSearchForReply, generateHybridReply, googleApiKeysFor, imageInspectionEnabled, isLightweightAcknowledgement, isLowContextInterjectionFragment, mergeAbortSignal, notifyDeveloper, roundRobinKeys, stripBotMentionFromConversation } from "./src/ai/runtime.js";
 import { buildImmediateConversationContext, buildMeetingMinuteBatches, normalizeMeetingMinuteCount, splitOutboundText } from "./src/ai/conversation-quality.js";
 import { AI_MEDIA_LIMITS, DEFAULTS, VERSION, classifyOperationalFailure } from "./src/config/runtime.js";
-import { consumeManualRuleCheckRate, getAffinityProfile, latestConversationMessageForUser, recentConversationMessagesForUser, refreshAffinityAiAssessment, stripGroupAiOptOutPrefix, updateAffinityFixedFromMessage } from "./src/core/identity.js";
+import { publicBaseUrl } from "./src/config/deployment.js";
+import { consumeManualRuleCheckRate, developerIds, getAffinityProfile, isDeveloperId, latestConversationMessageForUser, recentConversationMessagesForUser, refreshAffinityAiAssessment, stripGroupAiOptOutPrefix, updateAffinityFixedFromMessage } from "./src/core/identity.js";
 import { appendIndex, buildLongGroupConversationContext, callOneBotAction, checkRuntimeRateLimit, getEffectivePermissions, isKnownOutboundMessage, markOutboundPending, modelPreferenceLabel, normalizeMemoryItems, normalizeModelPreference, normalizePermissionName, permissionLabel, removeFromIndex, setExplicitPermission, updateAiDecisionLog, writeAiDecisionLog, writeSystemAudit } from "./src/core/permissions.js";
 import { appendChatHistoryTurn, clearChatSessionHistory, dbDel, dbGet, dbPut, readChatHistory, withTimeout } from "./src/data/store.js";
 import { announceDeployedVersionFallback, getDeploymentStatusForViewer, handleDeploymentBuildQueue, injectDeploymentPortalClient } from "./src/deployment/notifications.js";
@@ -518,7 +519,7 @@ const QQAIWorker = {
             liveOperatorRole = String(liveOperator?.role || liveOperator?.data?.role || '');
           } catch {}
         }
-        const developerOperator = Boolean(operatorId && (operatorId === String(env.DEVELOPER_ID || '3569028262') || operatorId === '3569028262'));
+        const developerOperator = isDeveloperId(env, operatorId);
         const liveOwner = operatorId ? await isVerifiedGroupOwner(env, currentGroupId, operatorId).catch(() => false) : false;
         const permission = canUnlockMute(env, protectedLock, {
           actorId: operatorId,
@@ -649,7 +650,7 @@ const QQAIWorker = {
       // 精準提取群組身分
       const senderCard = body.sender?.card || body.sender?.nickname || userId;
       const senderRole = body.sender?.role || "member"; 
-      const isDeveloper = (env.DEVELOPER_ID ? userId === env.DEVELOPER_ID.toString() : false) || userId === "3569028262";
+      const isDeveloper = isDeveloperId(env, userId);
 
       // OneBot 偶尔可能漏掉 lift_ban 通知。自我禁言仍有效却能再次发言时，静默补禁；
       // 但允许「!禁言自己／!自我禁言」继续进入命令处理，以便刷新禁言时长。
@@ -1887,12 +1888,12 @@ const QQAIWorker = {
           return null;
         }
       };
-      const relationshipDeveloperId = String(env.DEVELOPER_ID || "3569028262");
+      const relationshipDeveloperIds = new Set(developerIds(env));
       const relationshipMemberEligible = member => Boolean(
         member
         && member.qq
         && member.qq !== String(botId || "")
-        && member.qq !== relationshipDeveloperId
+        && !relationshipDeveloperIds.has(member.qq)
         && member.role === "member"
       );
       const resolveMasterControl = async () => {
@@ -2116,10 +2117,10 @@ const QQAIWorker = {
       if (partnerBindCommand) {
         if (!isGroup) return new Response(null, { status: 204 });
         const requester = await getGroupMemberSafe(env, currentGroupId, userId);
-        if (userId === String(env.DEVELOPER_ID || "") || String(requester?.role || "") === "owner") return jsonReply(`${atSender}群主与核心开发者不能建立对象绑定。`);
+        if (isDeveloperId(env, userId) || String(requester?.role || "") === "owner") return jsonReply(`${atSender}群主与核心开发者不能建立对象绑定。`);
         const targetId = String(targetMentionQqs[0] || partnerBindCommand[1] || "").replace(/\D/g, "");
         if (!targetId) return jsonReply(`${atSender}格式：!绑定对象 @群友`);
-        if (targetId === userId || targetId === botId || targetId === String(env.DEVELOPER_ID || "")) return jsonReply(`${atSender}不能绑定这个账号。`);
+        if (targetId === userId || targetId === botId || isDeveloperId(env, targetId)) return jsonReply(`${atSender}不能绑定这个账号。`);
         const target = await getGroupMemberSafe(env, currentGroupId, targetId);
         if (!target) return jsonReply(`${atSender}找不到该群友。`);
         if (String(target.role || "") === "owner") return jsonReply(`${atSender}群主无法作为对象禁言目标。`);
@@ -2320,13 +2321,14 @@ const QQAIWorker = {
           permissionSet.groupOps && permissionSet.aiAdmin ? 'AI管理＋群操作' :
           permissionSet.groupOps ? '群操作权限' :
           permissionSet.aiAdmin ? 'AI管理权限' : '群成员';
+        const configuredHelpBaseUrl = publicBaseUrl(env, url.origin);
         const helpMsg = buildHelpText({
           roleLabel: roleTxt,
           permissionSet,
           isDeveloper,
           isOwner: senderRole === 'owner',
-          portalUrl: 'https://qqai.ray2025.com/',
-          liveUrl: 'https://qqai.ray2025.com/live'
+          portalUrl: configuredHelpBaseUrl ? `${configuredHelpBaseUrl}/` : "",
+          liveUrl: configuredHelpBaseUrl ? `${configuredHelpBaseUrl}/live` : ""
         });
         return jsonReply(`${atSender}${helpMsg}`);
       }
@@ -2714,7 +2716,7 @@ const QQAIWorker = {
         if (!restText) return jsonReply(`${atSender}⚠️ 风格内容不能为空哦！格式：!set人格 [@成员] 傲娇妹妹`);
 
         // 🔒 【最高核心锁】绝对防御：禁止任何人更改开发者的个人设定
-        if (targetUserId === "3569028262" || (env.DEVELOPER_ID && targetUserId === env.DEVELOPER_ID.toString())) {
+        if (isDeveloperId(env, targetUserId)) {
            if (!isOnlyMe) return jsonReply(`${atSender}❌ 安全警告：拒绝访问！您无权修改最高核心开发者的专属个人设定！`);
         }
 
@@ -2735,7 +2737,7 @@ const QQAIWorker = {
         if (isSettingOthers && !hasAdminAuth) return jsonReply(`${atSender}⚠️ 权限不足。您无法帮他人清除人格。`);
 
         // 🔒 【最高核心锁】绝对防御：禁止任何人删除开发者的个人设定
-        if (targetUserId === "3569028262" || (env.DEVELOPER_ID && targetUserId === env.DEVELOPER_ID.toString())) {
+        if (isDeveloperId(env, targetUserId)) {
            if (!isOnlyMe) return jsonReply(`${atSender}❌ 安全警告：拒绝访问！您无权删除最高核心开发者的专属个人设定！`);
         }
 
@@ -2755,7 +2757,7 @@ const QQAIWorker = {
         if (isSettingOthers && !hasAdminAuth) return jsonReply(`${atSender}⚠️ 权限不足。您无法帮他人开启免打扰。`);
 
         // 🔒 【最高核心锁】保护开发者
-        if (targetUserId === "3569028262" || (env.DEVELOPER_ID && targetUserId === env.DEVELOPER_ID.toString())) {
+        if (isDeveloperId(env, targetUserId)) {
            if (!isOnlyMe) return jsonReply(`${atSender}❌ 安全警告：您无权修改核心开发者的免打扰状态！`);
         }
 
@@ -2772,7 +2774,7 @@ const QQAIWorker = {
         if (isSettingOthers && !hasAdminAuth) return jsonReply(`${atSender}⚠️ 权限不足。您无法帮他人取消免打扰。`);
 
         // 🔒 【最高核心锁】保护开发者
-        if (targetUserId === "3569028262" || (env.DEVELOPER_ID && targetUserId === env.DEVELOPER_ID.toString())) {
+        if (isDeveloperId(env, targetUserId)) {
            if (!isOnlyMe) return jsonReply(`${atSender}❌ 安全警告：您无权修改核心开发者的免打扰状态！`);
         }
 
@@ -2862,7 +2864,7 @@ const QQAIWorker = {
         if (!targetQq) return jsonReply(`${atSender}⚠️ 请指定要拉黑的 QQ 号或直接 @ 对方。`);
         
         // 🔒 【最高核心锁】绝对防御：禁止任何人拉黑核心开发者
-        if (targetQq === "3569028262" || (env.DEVELOPER_ID && targetQq === env.DEVELOPER_ID.toString())) {
+        if (isDeveloperId(env, targetQq)) {
            return jsonReply(`${atSender}❌ 致命警告：系统拒绝访问！您无权将最高核心开发者列入黑名单！`);
         }
 
@@ -2901,7 +2903,7 @@ const QQAIWorker = {
         if (!targetQq) return jsonReply(`${atSender}⚠️ 请 @ 你想让我模仿的人，或者输入他的 QQ 号。`);
 
         // 🔒 保护开发者灵魂不被随意窃取
-        if (targetQq === "3569028262" || (env.DEVELOPER_ID && targetQq === env.DEVELOPER_ID.toString())) {
+        if (isDeveloperId(env, targetQq)) {
             if (!isOnlyMe) return jsonReply(`${atSender}❌ 警告：核心开发者的灵魂过于强大，精神防护网已拦截本次窃取尝试！`);
         }
 
