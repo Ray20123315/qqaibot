@@ -3,6 +3,7 @@
 
 import { callGeminiGenerate, callGoogleDecision, notifyDeveloper, parseList, taipeiDateKey } from "../ai/runtime.js";
 import { DEFAULTS } from "../config/runtime.js";
+import { envBoolean } from "../config/deployment.js";
 import { appendIndex, callOneBotAction, removeFromIndex, writeSystemAudit } from "../core/permissions.js";
 import { dbDel, dbGet, dbPut } from "../data/store.js";
 import { getAppealEligibleGroupsForUser } from "../group/runtime.js";
@@ -558,6 +559,7 @@ async function heartbeatAutomaticCheckinWindow(env, dayKey, owner) {
 
 
 async function runAutomaticGroupCheckins(env, now = Date.now()) {
+  if (!envBoolean(env?.AUTO_CHECKIN_ENABLED, true)) return;
   const parts = taipeiParts(now);
   const hour = Number(parts.hour);
   const minute = Number(parts.minute);

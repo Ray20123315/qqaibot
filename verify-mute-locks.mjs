@@ -5,7 +5,7 @@ function assert(condition, message) {
   if (!condition) throw new Error(message);
 }
 
-const env = { DEVELOPER_ID: '3569028262' };
+const env = { DEVELOPER_ID: '999999999' };
 const manual = {
   active: true,
   groupId: '10001',
@@ -14,14 +14,14 @@ const manual = {
   allowOwnerUnmute: false,
   expiresAt: Date.now() + 60000
 };
-assert(canUnlockMute(env, manual, { actorId: '3569028262', actorRole: 'member' }).allowed, 'Developer must always be able to release a protected manual mute');
+assert(canUnlockMute(env, manual, { actorId: '999999999', actorRole: 'member' }).allowed, 'Developer must always be able to release a protected manual mute');
 assert(!canUnlockMute(env, manual, { actorId: '30003', actorRole: 'owner' }).allowed, 'Owner must not release a protected mute unless explicitly allowed');
 manual.allowOwnerUnmute = true;
 assert(canUnlockMute(env, manual, { actorId: '30003', actorRole: 'owner' }).allowed, 'Owner must be able to release only when the lock allows it');
 assert(!canUnlockMute(env, manual, { actorId: '40004', actorRole: 'admin' }).allowed, 'Admin must not release a protected mute');
 
 const selfLock = { ...manual, source: 'self', userId: '50005', allowOwnerUnmute: false };
-assert(!canUnlockMute(env, selfLock, { actorId: '3569028262', actorRole: 'developer' }).allowed, 'Even developer must not bypass self mute through management paths');
+assert(!canUnlockMute(env, selfLock, { actorId: '999999999', actorRole: 'developer' }).allowed, 'Even developer must not bypass self mute through management paths');
 assert(!canUnlockMute(env, selfLock, { actorId: '50005', actorRole: 'member' }).allowed, 'Self mute must not be released from a group command');
 assert(canUnlockMute(env, selfLock, { actorId: '50005', privateSelfCommand: true }).allowed, 'Self mute must be releasable by the member through the private command');
 assert(muteLockRemainingSeconds(selfLock) > 0, 'Active lock must expose remaining seconds');
@@ -53,7 +53,7 @@ assert(worker.includes('isVerifiedGroupOwner(this.env, groupId, operatorId)'), '
 assert(worker.includes('!解除禁言'), 'Worker must document the private silent self-unmute command in the guard message');
 
 const pkg = JSON.parse(fs.readFileSync('package.json', 'utf8'));
-assert(pkg.version === '2.7.11', 'Package version must be 2.5.2');
+assert(pkg.version === '2.7.12', 'Package version must be 2.5.2');
 assert(pkg.scripts.check.includes('verify-mute-locks.mjs'), 'Mute lock verification must run in the permanent suite');
 
 console.log('verify-mute-locks: ok');

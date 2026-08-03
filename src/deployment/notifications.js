@@ -1,5 +1,6 @@
 import releaseNotes from "../../release-notes.json" with { type: "json" };
-import { DEFAULT_DEVELOPER_ID, VERSION } from "../config/runtime.js";
+import { VERSION } from "../config/runtime.js";
+import { developerIds, isDeveloperId } from "../config/deployment.js";
 import { callOneBotAction } from "../core/permissions.js";
 import { sendOneBotHttpAction } from "../portal/auth.js";
 import { numericId } from "../security/network.js";
@@ -152,8 +153,10 @@ async function notifyGroups(env, text) {
   return results;
 }
 
-function developerId(env) {
-  return String(env?.DEPLOY_NOTIFY_DEVELOPER_ID || env?.DEVELOPER_ID || DEFAULT_DEVELOPER_ID || "").replace(/\D/g, "");
+function deploymentDeveloperIds(env) {
+  const override = String(env?.DEPLOY_NOTIFY_DEVELOPER_IDS || env?.DEPLOY_NOTIFY_DEVELOPER_ID || "").trim();
+  if (!override) return developerIds(env);
+  return developerIds({ ...env, DEVELOPER_IDS: override, ROOT_QQ_IDS: "", DEVELOPER_ID: "" });
 }
 
 async function fetchBuildLogs(env, accountId, buildUuid) {
@@ -174,8 +177,8 @@ async function fetchBuildLogs(env, accountId, buildUuid) {
 }
 
 async function notifyDeveloperFailure(env, record, accountId) {
-  const qq = developerId(env);
-  if (!/^\d{5,}$/.test(qq)) return { ok: false, skipped: true, reason: "developer_id_missing" };
+  const qqs = deploymentDeveloperIds(env);
+  if (!qqs.length) return { ok: false, skipped: true, reason: "developer_id_missing" };
   const logs = await fetchBuildLogs(env, accountId, record.buildUuid);
   const detail = logs || record.failureDetail || "事件没有附带错误日志。请在 Cloudflare Workers Builds 中按 Build UUID 查看。";
   const text = [
@@ -189,7 +192,11 @@ async function notifyDeveloperFailure(env, record, accountId) {
     "",
     `错误详情：\n${detail.slice(0, 5000)}`
   ].filter(Boolean).join("\n");
-  return sendOneBotWithFallback(env, "send_private_msg", { user_id: numericId(qq), message: text, auto_escape: false });
+  const recipients = [];
+  for (const qq of qqs) {
+    recipients.push({ qq, ...(await sendOneBotWithFallback(env, "send_private_msg", { user_id: numericId(qq), message: text, auto_escape: false })) });
+  }
+  return { ok: recipients.some(item => item.ok), recipients };
 }
 
 async function appendHistory(env, record) {
@@ -303,7 +310,7 @@ async function handleDeploymentBuildQueue(batch, env) {
 async function getDeploymentStatusForViewer(env, session) {
   const current = parseJson(await kvGet(env, STATUS_KEY), null);
   if (!current) return { ok: true, configured: false, status: null };
-  const isDeveloper = Boolean(session?.permissions?.developer || session?.role === "developer" || String(session?.qq || "") === developerId(env));
+  const isDeveloper = Boolean(session?.permissions?.developer || session?.role === "developer" || isDeveloperId(env, session?.qq));
   const base = {
     ok: true,
     configured: true,

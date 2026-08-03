@@ -74,7 +74,7 @@ assert(worker.includes('waitForSocialTyping({'), 'Group replies must use bounded
 assert(worker.includes('social_thinking_indicator_enabled'), 'Visible thinking indicators must be opt-in for group chat');
 
 const pkg = JSON.parse(fs.readFileSync('package.json', 'utf8'));
-assert(pkg.version === '2.7.11', 'Package version must be 2.5.2');
+assert(pkg.version === '2.7.12', 'Package version must be 2.5.2');
 assert(pkg.scripts.check.includes('verify-social-digital-twin.mjs'), 'Social regression test must run in the main check suite');
 
 console.log('verify-social-digital-twin: ok');

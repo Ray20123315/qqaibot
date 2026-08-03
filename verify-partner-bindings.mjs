@@ -5,7 +5,7 @@ function assert(condition, message) {
   if (!condition) throw new Error(message);
 }
 
-const env = { DEVELOPER_ID: '3569028262' };
+const env = { DEVELOPER_ID: '999999999' };
 const partnerLock = {
   active: true,
   groupId: '10001',
@@ -59,7 +59,7 @@ assert(!fallbackBody.includes('notifyGroups(env'), 'Runtime deployment fallback 
 assert(deployment.includes('reason: "portal_only"'), 'Deployment status must explicitly record Portal-only notification policy');
 
 const pkg = JSON.parse(fs.readFileSync('package.json', 'utf8'));
-assert(pkg.version === '2.7.11', 'Package version must be 2.5.2');
+assert(pkg.version === '2.7.12', 'Package version must be 2.5.2');
 assert(pkg.scripts.check.includes('verify-partner-bindings.mjs'), 'Partner and Portal regressions must run in the permanent suite');
 
 console.log('verify-partner-bindings: ok');

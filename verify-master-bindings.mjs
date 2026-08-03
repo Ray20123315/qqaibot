@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import { canUnlockMute } from './src/moderation/mute-locks.js';
 
 function assert(condition, message) { if (!condition) throw new Error(message); }
-const env = { DEVELOPER_ID: '3569028262' };
+const env = { DEVELOPER_ID: '999999999' };
 const masterLock = { active: true, groupId: '10001', userId: '20002', source: 'master', masterId: '30003', createdBy: '30003', expiresAt: Date.now() + 60000 };
 assert(canUnlockMute(env, masterLock, { actorId: '30003', masterCommand: true }).allowed, 'The matching master must release a master-source mute');
 assert(!canUnlockMute(env, masterLock, { actorId: '40004', masterCommand: true }).allowed, 'Another member must not release a master-source mute');
@@ -34,6 +34,6 @@ assert(portal.includes('主人禁言锁'), 'Portal must label master-source lock
 assert(portal.includes('if (!protect && previousLock)'), 'Normal Portal moderation must clear an old relationship lock after overriding it');
 
 const pkg = JSON.parse(fs.readFileSync('package.json', 'utf8'));
-assert(pkg.version === '2.7.11', 'Package version must be 2.5.2');
+assert(pkg.version === '2.7.12', 'Package version must be 2.5.2');
 assert(pkg.scripts.check.includes('verify-master-bindings.mjs'), 'Master relationship verification must run permanently');
 console.log('verify-master-bindings: ok');

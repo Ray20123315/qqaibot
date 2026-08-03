@@ -2,7 +2,7 @@
 // Cloudflare still deploys worker.js as the single Worker entry point.
 
 import { callGeminiGenerate, callGoogleDecision, geminiSearchApiKeys, notifyDeveloper, parseList } from "../ai/runtime.js";
-import { DEFAULTS, DEFAULT_DEVELOPER_ID, VERSION } from "../config/runtime.js";
+import { DEFAULTS, VERSION } from "../config/runtime.js";
 import { developerId, isDeveloperId, recentConversationMessagesForUser } from "../core/identity.js";
 import { appendIndex, callOneBotAction, getEffectivePermissions, writeSystemAudit } from "../core/permissions.js";
 import { dbDel, dbGet, dbPut } from "../data/store.js";

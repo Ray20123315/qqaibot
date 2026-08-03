@@ -3,13 +3,13 @@
 
 
 
-const VERSION = "2.7.11";
+const VERSION = "2.7.12";
 
 
-const BUILD_DATE = "2026-07-28";
+const BUILD_DATE = "2026-08-03";
 
 
-const DEFAULT_DEVELOPER_ID = "3569028262";
+const DEFAULT_DEVELOPER_ID = "";
 
 
 const DEFAULTS = Object.freeze({

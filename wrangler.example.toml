@@ -1,15 +1,15 @@
 "$schema" = "./node_modules/wrangler/config-schema.json"
 
-# Active maintainer deployment. New installations should start from wrangler.example.toml.
-name = "qqai"
+# Copy to wrangler.toml for a new deployment, then replace every REPLACE_* value.
+name = "replace-with-worker-name"
 main = "worker.js"
 compatibility_date = "2026-07-21"
 compatibility_flags = ["nodejs_compat"]
 workers_dev = true
 
-# Custom domain for this deployment; fork owners may replace or remove this block.
+# Remove this block when no custom domain is used.
 [[routes]]
-pattern = "qqai.ray2025.com"
+pattern = "bot.example.com"
 custom_domain = true
 
 [ai]
@@ -19,7 +19,7 @@ binding = "AI"
 name = "ONEBOT_HUB"
 class_name = "OneBotHub"
 
-# Durable Object migration history must not be deleted, renamed or reordered.
+# Keep the migration order unchanged for this codebase.
 [[migrations]]
 tag = "v1_onebot_hub"
 new_sqlite_classes = ["OneBotHub"]
@@ -32,41 +32,39 @@ new_sqlite_classes = ["BudgetGuard"]
 tag = "v3_remove_budget_guard"
 deleted_classes = ["BudgetGuard"]
 
-# Active production resources. Fork owners must create and substitute their own IDs.
 [[d1_databases]]
 binding = "DB"
-database_name = "qqaibot"
-database_id = "569a01fe-3297-40e1-832f-09c3793056ed"
+database_name = "replace-with-d1-name"
+database_id = "REPLACE_WITH_D1_DATABASE_ID"
 
 [[vectorize]]
 binding = "VECTORIZE"
-index_name = "qqai"
+index_name = "replace-with-vectorize-index"
 
-# Schedules, automation, cleanup and automatic group check-in.
+# Needed by schedules, automation, cleanup and automatic group check-in.
 [triggers]
 crons = ["* * * * *"]
 
 [[ratelimits]]
 name = "MY_RATE_LIMITER"
-namespace_id = "999"
+namespace_id = "REPLACE_WITH_RATE_LIMITER_NAMESPACE_ID"
 
   [ratelimits.simple]
   limit = 1
   period = 10
 
 [vars]
-# Configure operator QQ IDs before the next deployment. Comma-separate multiple IDs.
-# This is intentionally empty in source so a fork never inherits the maintainer's privileges.
-DEVELOPER_IDS = ""
-# Backward-compatible single-ID fallback. Prefer DEVELOPER_IDS.
+# Required operator identity. Comma-separate multiple QQ IDs.
+DEVELOPER_IDS = "123456789,987654321"
+# Legacy single-value fallback; normally leave empty.
 DEVELOPER_ID = ""
 
-# Public links shown by the bot. Change this when using another domain or workers.dev URL.
-PUBLIC_BASE_URL = "https://qqai.ray2025.com"
+# Public URL used in !help and generated links. No trailing slash.
+PUBLIC_BASE_URL = "https://bot.example.com"
 BOT_DISPLAY_NAME = "QQAI"
 
-# Deployment notification scope and timing.
-DEPLOY_NOTIFY_WORKER_NAME = "qqai"
+# Deployment notifications.
+DEPLOY_NOTIFY_WORKER_NAME = "replace-with-worker-name"
 DEPLOY_NOTIFY_BRANCH = "main"
 DEPLOY_NOTIFY_DEVELOPER_IDS = ""
 DEPLOY_NOTIFY_START_COOLDOWN_SECONDS = "600"
@@ -75,19 +73,19 @@ DEPLOY_NOTIFY_SELF_GRACE_SECONDS = "90"
 # OneBot HTTP event fallback.
 ENABLE_ONEBOT_HTTP_EVENTS = "false"
 
-# Automatic group check-in runtime controls.
+# Automatic group check-in. The execution window remains Asia/Taipei 23:59–00:01:59.
 AUTO_CHECKIN_ENABLED = "true"
 AUTO_CHECKIN_RETRY_INTERVAL_MS = "1000"
 AUTO_CHECKIN_CONCURRENCY = "12"
 
-# Paid-model policy and model lists.
+# Model names and paid-model budget.
 DEEPSEEK_FLASH_MODEL = "deepseek-v4-flash"
 DEEPSEEK_PRO_MODEL = "deepseek-v4-pro"
 DEEPSEEK_DAILY_BUDGET_CNY = "0.35"
-GEMINI_CHAT_MODELS = "gemini-3.5-flash,gemini-3.1-flash-lite,gemini-3-flash-preview,gemini-2.5-flash,gemini-2.5-flash-lite,gemma-4-26b-a4b-it,gemma-4-31b-it"
+GEMINI_CHAT_MODELS = "gemini-3.5-flash,gemini-3.1-flash-lite,gemini-2.5-flash"
 GEMMA_DECISION_MODELS = "gemma-4-26b-a4b-it,gemma-4-31b-it"
 GEMINI_IMAGE_MODELS = ""
-IMAGEN_MODELS = "imagen-4.0-fast-generate-001,imagen-4.0-generate-001,imagen-4.0-ultra-generate-001"
+IMAGEN_MODELS = ""
 GEMINI_TTS_MODELS = "gemini-3.1-flash-tts-preview,gemini-2.5-flash-preview-tts"
 GEMINI_LIVE_MODEL = "models/gemini-3.1-flash-live-preview"
 

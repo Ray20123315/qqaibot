@@ -1,15 +1,17 @@
 {
-  "version": "2.7.11",
+  "version": "2.7.12",
   "notificationPolicy": "developer-only-by-default-with-explicit-opt-in",
   "verification": "full-regression-and-single-worker-bundle",
   "added": [
-    "新增不调用模型 API 的骰子、随机数、硬币、猜拳、选择、今日运势、真心话与大冒险指令",
-    "新增集中式、权限感知的条列式 !help 指令目录",
-    "新增秒、分钟、小时与天的用户友好重试时间格式"
+    "新增 DEVELOPER_IDS 多开发者 QQ 配置与旧版 DEVELOPER_ID 相容支持",
+    "新增 PUBLIC_BASE_URL、自动群打卡与部署通知等公开运行变量的统一解析",
+    "新增可复用的 wrangler.example.toml 与仅含占位符的 .dev.vars.example",
+    "README 重写为完整的基础设施、公开变量、Secrets、Portal 动态设置与安全边界部署指南"
   ],
   "fixed": [
-    "重写 README，使架构、Portal、群规、人格、绑定、验证与部署说明符合 2.7.11 现况",
-    "修复 !help 指令遗漏、权限混杂及长段落难以阅读的问题",
-    "修复无回复与 API 故障提示过长、暴露内部维护入口且缺少明确重试时间的问题"
+    "移除源代码与默认配置中的个人开发者 QQ，避免 Fork 继承原作者权限",
+    "修复 !help 与公开链接固定指向维护者域名的问题",
+    "新增 AUTO_CHECKIN_ENABLED 全局开关，同时保留重试间隔与并发限制",
+    "明确可配置项目与不可任意关闭的权限、安全、资料隔离及 migration 不变量"
   ]
 }

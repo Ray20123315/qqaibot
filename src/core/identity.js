@@ -2,7 +2,8 @@
 // Cloudflare still deploys worker.js as the single Worker entry point.
 
 import { callGoogleDecision } from "../ai/runtime.js";
-import { AFFINITY_DEFAULTS, DEFAULT_DEVELOPER_ID } from "../config/runtime.js";
+import { AFFINITY_DEFAULTS } from "../config/runtime.js";
+import { developerId, developerIds, isDeveloperId } from "../config/deployment.js";
 import { writeSystemAudit } from "./permissions.js";
 import { dbGet, dbPut } from "../data/store.js";
 import { readJson } from "../portal/auth.js";
@@ -13,18 +14,6 @@ import { taipeiParts } from "../scheduler/runtime.js";
 // -----------------------------------------------------------------------------
 // v0.2 core helpers: security, permissions, OneBot RPC, hybrid models, schedules
 // -----------------------------------------------------------------------------
-
-function developerId(env) {
-  return String(env?.DEVELOPER_ID || DEFAULT_DEVELOPER_ID);
-}
-
-
-
-function isDeveloperId(env, qq) {
-  return Boolean(qq && String(qq) === developerId(env));
-}
-
-
 
 function stripGroupAiOptOutPrefix(value, botId = "") {
   const source = String(value || "");
@@ -253,4 +242,4 @@ function neutralizeAiCommandPrefix(value) {
   return /^(?:\/\/|\/!|[!！])/.test(output) ? `AI 回复：${output}` : output;
 }
 
-export { affinityAiKey, affinityClamp, affinityFixedKey, affinityLevel, consumeManualRuleCheckRate, developerId, getAffinityProfile, isDeveloperId, latestConversationMessageForUser, neutralizeAiCommandPrefix, readAffinityAiAssessment, readAffinityFixedScore, recentConversationMessagesForUser, refreshAffinityAiAssessment, stripGroupAiOptOutPrefix, updateAffinityFixedFromMessage };
+export { affinityAiKey, affinityClamp, affinityFixedKey, affinityLevel, consumeManualRuleCheckRate, developerId, developerIds, getAffinityProfile, isDeveloperId, latestConversationMessageForUser, neutralizeAiCommandPrefix, readAffinityAiAssessment, readAffinityFixedScore, recentConversationMessagesForUser, refreshAffinityAiAssessment, stripGroupAiOptOutPrefix, updateAffinityFixedFromMessage };

@@ -69,6 +69,6 @@ assert(worker.includes('【管理层群友资料｜仅供内部判断，严禁�
 assert(worker.includes('memberProfile.aiUseAllowed !== false'), 'The AI context must honor the member-note opt-out');
 
 const pkg = JSON.parse(fs.readFileSync('package.json', 'utf8'));
-assert(pkg.version === '2.7.11', 'Package version must be 2.5.2');
+assert(pkg.version === '2.7.12', 'Package version must be 2.5.2');
 assert(pkg.scripts.check.includes('verify-community-suite.mjs'), 'Community suite verification must run permanently');
 console.log('verify-community-suite: ok');

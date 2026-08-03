@@ -1,5 +1,7 @@
 // Permission-aware command catalog for `!help`.
 
+import { VERSION } from "../config/runtime.js";
+
 const COMMON_SECTIONS = Object.freeze([
   {
     title: "基础与多模态",
@@ -58,6 +60,7 @@ const COMMON_SECTIONS = Object.freeze([
       "!投票：查看帮助；支持建立、选择与结束",
       "!排程 时间 内容：支持绝对时间、每天与其他重复规则",
       "!排程 列表／!排程 取消 编号",
+      "!自动打卡／!打卡时间：查看自动群打卡状态与执行窗口",
       "私聊 !申诉 群号 类型 详细内容"
     ]
   },
@@ -88,7 +91,6 @@ const AI_ADMIN_SECTION = Object.freeze({
     "!好感度注入 开／关／状态",
     "!自动欢迎 开／关／!欢迎词 内容",
     "!入群辅助 开／关／状态",
-    "!自动打卡／!打卡时间",
     "!指令开／!指令关",
     "!清空群上下文"
   ]
@@ -125,6 +127,7 @@ const DEVELOPER_SECTION = Object.freeze({
     "!群白名单 群号／!删群白名单 群号",
     "!授权 @成员 权限类型／!撤销授权 @成员 权限类型",
     "!禁记忆 @成员／!解禁记忆 @成员",
+    "私聊 !群打卡 [群号／全部]：立即执行群签到",
     "!重置／!clear",
     "!自我调整／!自我修正",
     "Root 与 Portal 可管理模型、通知、权限、资料与系统维护"
@@ -140,8 +143,8 @@ function buildHelpText({
   permissionSet = {},
   isDeveloper = false,
   isOwner = false,
-  portalUrl = "https://qqai.ray2025.com/",
-  liveUrl = "https://qqai.ray2025.com/live"
+  portalUrl = "",
+  liveUrl = ""
 } = {}) {
   const sections = [...COMMON_SECTIONS];
   if (permissionSet.aiAdmin) sections.push(AI_ADMIN_SECTION);
@@ -149,11 +152,15 @@ function buildHelpText({
   if (isOwner || isDeveloper) sections.push(OWNER_SECTION);
   if (isDeveloper) sections.push(DEVELOPER_SECTION);
 
+  const publicLinks = [
+    portalUrl ? `• Portal：${portalUrl}` : "",
+    liveUrl ? `• Live：${liveUrl}` : ""
+  ].filter(Boolean);
+
   return [
-    "QQAI 2.7.11 指令帮助",
+    `QQAI ${VERSION} 指令帮助`,
     `当前权限：${roleLabel}`,
-    `• Portal：${portalUrl}`,
-    `• Live：${liveUrl}`,
+    ...publicLinks,
     "• 指令同时接受半角 ! 与全角 ！",
     "• 高风险群操作必须二次确认",
     "",
