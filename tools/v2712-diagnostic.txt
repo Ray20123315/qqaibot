@@ -1,0 +1,14 @@
+v2.7.12 configurable deployment candidate failed
+workflow_commit=572a719a341264f7f2b217882b9832de19749f51
+
+file:///home/runner/work/qqaibot/qqaibot/tools/apply-v2.7.12.mjs:159
+  throw new Error("worker.js still contains a personal or single-developer hardcoded check");
+        ^
+
+Error: worker.js still contains a personal or single-developer hardcoded check
+    at file:///home/runner/work/qqaibot/qqaibot/tools/apply-v2.7.12.mjs:159:9
+    at ModuleJob.run (node:internal/modules/esm/module_job:343:25)
+    at async onImport.tracePromise.__proto__ (node:internal/modules/esm/loader:681:26)
+    at async asyncRunEntryPointWithESMLoader (node:internal/modules/run_main:117:5)
+
+Node.js v22.23.1
