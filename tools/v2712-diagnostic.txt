@@ -1,5 +1,5 @@
 v2.7.12 configurable deployment candidate failed
-workflow_commit=572a719a341264f7f2b217882b9832de19749f51
+workflow_commit=96386949dc22c96a54fcefd3015ec49b039bda63
 
 file:///home/runner/work/qqaibot/qqaibot/tools/apply-v2.7.12.mjs:159
   throw new Error("worker.js still contains a personal or single-developer hardcoded check");
