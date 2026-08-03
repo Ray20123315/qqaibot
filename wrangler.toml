@@ -1,29 +1,25 @@
 "$schema" = "./node_modules/wrangler/config-schema.json"
 
+# Active maintainer deployment. New installations should start from wrangler.example.toml.
 name = "qqai"
 main = "worker.js"
 compatibility_date = "2026-07-21"
 compatibility_flags = ["nodejs_compat"]
 workers_dev = true
 
-# 自訂網域
+# Custom domain for this deployment; fork owners may replace or remove this block.
 [[routes]]
 pattern = "qqai.ray2025.com"
 custom_domain = true
 
-# Cloudflare Workers AI
 [ai]
 binding = "AI"
 
-# Durable Object
-# 目前 worker.js 只匯出並使用 OneBotHub。
 [[durable_objects.bindings]]
 name = "ONEBOT_HUB"
 class_name = "OneBotHub"
 
-# Durable Object migration 歷史不可刪除或改名。
-# Cloudflare 已部署到 v2_budget_guard；即使目前不再綁定 BudgetGuard，
-# 仍必須保留 v1、v2，否則 Wrangler 會嘗試從 v1 重新套用並失敗。
+# Durable Object migration history must not be deleted, renamed or reordered.
 [[migrations]]
 tag = "v1_onebot_hub"
 new_sqlite_classes = ["OneBotHub"]
@@ -32,28 +28,24 @@ new_sqlite_classes = ["OneBotHub"]
 tag = "v2_budget_guard"
 new_sqlite_classes = ["BudgetGuard"]
 
-# Cloudflare 遠端目前已部署至 v2_budget_guard。
-# 新部署只會執行此 v3，移除已不再由 worker.js 匯出或綁定的 BudgetGuard。
 [[migrations]]
 tag = "v3_remove_budget_guard"
 deleted_classes = ["BudgetGuard"]
 
-# D1
+# Active production resources. Fork owners must create and substitute their own IDs.
 [[d1_databases]]
 binding = "DB"
 database_name = "qqaibot"
 database_id = "569a01fe-3297-40e1-832f-09c3793056ed"
 
-# Vectorize
 [[vectorize]]
 binding = "VECTORIZE"
 index_name = "qqai"
 
-# 排程、主動發話與暫存清理：每分鐘觸發
+# Schedules, automation, cleanup and automatic group check-in.
 [triggers]
 crons = ["* * * * *"]
 
-# Cloudflare Rate Limiter
 [[ratelimits]]
 name = "MY_RATE_LIMITER"
 namespace_id = "999"
@@ -62,19 +54,36 @@ namespace_id = "999"
   limit = 1
   period = 10
 
-# 可安全提交到 GitHub 的公開變數
 [vars]
-DEVELOPER_ID = "3569028262"
+# Configure operator QQ IDs before the next deployment. Comma-separate multiple IDs.
+# This is intentionally empty in source so a fork never inherits the maintainer's privileges.
+DEVELOPER_IDS = ""
+# Backward-compatible single-ID fallback. Prefer DEVELOPER_IDS.
+DEVELOPER_ID = ""
+
+# Public links shown by the bot. Change this when using another domain or workers.dev URL.
+PUBLIC_BASE_URL = "https://qqai.ray2025.com"
+BOT_DISPLAY_NAME = "QQAI"
+
+# Deployment notification scope and timing.
 DEPLOY_NOTIFY_WORKER_NAME = "qqai"
 DEPLOY_NOTIFY_BRANCH = "main"
+DEPLOY_NOTIFY_DEVELOPER_IDS = ""
 DEPLOY_NOTIFY_START_COOLDOWN_SECONDS = "600"
 DEPLOY_NOTIFY_SELF_GRACE_SECONDS = "90"
+
+# OneBot HTTP event fallback.
 ENABLE_ONEBOT_HTTP_EVENTS = "false"
 
+# Automatic group check-in runtime controls.
+AUTO_CHECKIN_ENABLED = "true"
+AUTO_CHECKIN_RETRY_INTERVAL_MS = "1000"
+AUTO_CHECKIN_CONCURRENCY = "12"
+
+# Paid-model policy and model lists.
 DEEPSEEK_FLASH_MODEL = "deepseek-v4-flash"
 DEEPSEEK_PRO_MODEL = "deepseek-v4-pro"
 DEEPSEEK_DAILY_BUDGET_CNY = "0.35"
-
 GEMINI_CHAT_MODELS = "gemini-3.5-flash,gemini-3.1-flash-lite,gemini-3-flash-preview,gemini-2.5-flash,gemini-2.5-flash-lite,gemma-4-26b-a4b-it,gemma-4-31b-it"
 GEMMA_DECISION_MODELS = "gemma-4-26b-a4b-it,gemma-4-31b-it"
 GEMINI_IMAGE_MODELS = ""
@@ -82,6 +91,5 @@ IMAGEN_MODELS = "imagen-4.0-fast-generate-001,imagen-4.0-generate-001,imagen-4.0
 GEMINI_TTS_MODELS = "gemini-3.1-flash-tts-preview,gemini-2.5-flash-preview-tts"
 GEMINI_LIVE_MODEL = "models/gemini-3.1-flash-live-preview"
 
-# 持久化 Workers Logs；需要時可改成 true
 [observability]
 enabled = false
