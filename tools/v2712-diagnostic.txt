@@ -1,14 +1,185 @@
 v2.7.12 configurable deployment candidate failed
-workflow_commit=96386949dc22c96a54fcefd3015ec49b039bda63
+workflow_commit=81575db33c7dc1c2c20eb763eac670d8e01fdaba
 
-file:///home/runner/work/qqaibot/qqaibot/tools/apply-v2.7.12.mjs:159
-  throw new Error("worker.js still contains a personal or single-developer hardcoded check");
-        ^
+patched remaining multi-developer worker checks
+Applied v2.7.12 configurable deployment integration.
 
-Error: worker.js still contains a personal or single-developer hardcoded check
-    at file:///home/runner/work/qqaibot/qqaibot/tools/apply-v2.7.12.mjs:159:9
+added 35 packages, and audited 36 packages in 7s
+
+7 packages are looking for funding
+  run `npm fund` for details
+
+3 high severity vulnerabilities
+
+To address all issues, run:
+  npm audit fix --force
+
+Run `npm audit` for details.
+
+> qqai-bot-worker@2.7.12 check
+> node verify-config.mjs && node verify-migration.mjs && node verify-model-routing.mjs && node verify-modules.mjs && node verify-routes.mjs && node verify-deployment-notifications.mjs && node verify-subgroup-join.mjs && node verify-spam-detection.mjs && node verify-meme-member-console.mjs && node verify-social-digital-twin.mjs && node verify-explicit-question-priority.mjs && node verify-mute-locks.mjs && node verify-partner-bindings.mjs && node verify-self-mute-reapply.mjs && node verify-master-bindings.mjs && node verify-portal-relationships.mjs && node verify-portal-members-client.mjs && node verify-community-suite.mjs && node verify-social-boundaries.mjs && node verify-werewolf.mjs && node verify-member-cleanup.mjs && node verify-member-console-split.mjs && node verify-scoped-rule-feedback.mjs && node verify-portal-layout.mjs && node verify-werewolf-gameplay.mjs && node verify-ai-context-output.mjs && node verify-meeting-minutes.mjs && node verify-member-details.mjs && node verify-notification-routing.mjs && node verify-emergency-v2.7.7.mjs && node verify-self-outbound-loop.mjs && node verify-portal-auth-password.mjs && node verify-politics-racism-persona.mjs && node verify-entertainment-help-readme-errors.mjs && node verify-configurable-deployment.mjs
+
+verify-config: ok (35 modules, single worker.js entry)
+verify-migration: ok
+verify-model-routing: ok
+verify-modules: ok (36 JavaScript files)
+verify-routes: ok (7 public routes)
+deployment notification checks passed
+verify-subgroup-join: ok
+spam detection checks passed
+meme-aware moderation and member console checks passed
+verify-social-digital-twin: ok
+verify-explicit-question-priority: ok
+verify-mute-locks: ok
+verify-partner-bindings: ok
+verify-self-mute-reapply: ok
+verify-master-bindings: ok
+verify-portal-relationships: ok
+verify-portal-members-client: ok
+verify-community-suite: ok
+verify-social-boundaries: ok
+werewolf verification passed
+verify-member-cleanup: ok
+verify-member-console-split: ok
+verify-scoped-rule-feedback: ok
+verify-portal-layout: ok
+verify-werewolf-gameplay: ok
+verify-ai-context-output: ok
+verify-meeting-minutes: ok
+verify-member-details: ok
+verify-notification-routing: ok
+Emergency v2.7.12 regression checks passed.
+Self-account outbound loop regression checks passed.
+verify-portal-auth-password: ok
+verify-politics-racism-persona: ok
+node:internal/modules/run_main:123
+    triggerUncaughtException(
+    ^
+
+AssertionError [ERR_ASSERTION]: The input did not match the regular expression /^QQAI 2\.7\.11 指令帮助/. Input:
+
+'QQAI 2.7.12 指令帮助\n' +
+  '当前权限：群成员\n' +
+  '• 指令同时接受半角 ! 与全角 ！\n' +
+  '• 高风险群操作必须二次确认\n' +
+  '\n' +
+  '【基础与多模态】\n' +
+  '• !help／!帮助：查看当前权限可用的指令\n' +
+  '• !status／!配额：查看模型、AI、记忆与调用状态\n' +
+  '• !模型 自动／Gemma 26B／Gemma 31B／Gemini：切换个人模型偏好\n' +
+  '• !live：取得实时语音网页\n' +
+  '• !语音 问题：生成语音回答\n' +
+  '• !读网页 URL：抓取公开网页并摘要\n' +
+  '• !翻译 语言 内容：翻译文字\n' +
+  '• 图片理解：图片与问题同一则发送，或回复图片后 @机器人\n' +
+  '• /!普通内容：群友明确跳过所有 AI；机器人同号人工发送时为聊天别名\n' +
+  '\n' +
+  '【娱乐】\n' +
+  '• !娱乐：查看娱乐指令\n' +
+  '• !骰子 [面数／NdM]：例如 !骰子 2d6\n' +
+  '• !随机数 [最小] [最大]：默认 1～100\n' +
+  '• !硬币：抛硬币\n' +
+  '• !猜拳 石头／剪刀／布\n' +
+  '• !选择 A | B | C：随机选择\n' +
+  '• !今日运势：同一人每日固定\n' +
+  '• !真心话／!大冒险：随机安全题目\n' +
+  '\n' +
+  '【群聊整理与分析】\n' +
+  '• !会议纪要 [10～500]：整理重点、分歧与待办\n' +
+  '• !总结 [5～100]／!吃瓜：轻松总结群聊\n' +
+  '• !查成分 [@成员]：娱乐性质的近期发言分析\n' +
+  '• !详细资料 [@成员]：本人查自己；查询他人受权限限制\n' +
+  '• !群状态：查看 AI、记忆、插话率与群人格\n' +
+  '\n' +
+  '【记忆、人格与个人设置】\n' +
+  '• !群规／!rules：查看群规\n' +
+  '• !记住 内容／!忘记 内容／!你记住了什么\n' +
+  '• !set人格 风格／!del人格\n' +
+  '• !免打扰／!取消免打扰\n' +
+  '• !好感度 [@成员]\n' +
+  '• !协助撤回：回复自己的消息后使用\n' +
+  '\n' +
+  '【活动、投票与排程】\n' +
+  '• !活动：建立或查看活动；建立流程需要确认\n' +
+  '• !报名 活动名／!取消报名 活动名／!活动名单 活动名\n' +
+  '• !活动通知 活动名\n' +
+  '• !投票：查看帮助；支持建立、选择与结束\n' +
+  '• !排程 时间 内容：支持绝对时间、每天与其他重复规则\n' +
+  '• !排程 列表／!排程 取消 编号\n' +
+  '• !自动打卡／!打卡时间：查看自动群打卡状态与执行窗口\n' +
+  '• 私聊 !申诉 群号 类型 详细内容\n' +
+  '\n' +
+  '【群规协作】\n' +
+  '• !检查 具体原因：回复目标消息或 @目标进行人工补检\n' +
+  '• !无违规 @成员 说明：管理员撤销最近一笔误判\n' +
+  '• 政治内容由聊天与群规系统静默略过\n' +
+  '• 明确种族歧视固定公开警告，不自动禁言、撤回或踢出'
+
+    at file:///home/runner/work/qqaibot/qqaibot/verify-entertainment-help-readme-errors.mjs:47:8
     at ModuleJob.run (node:internal/modules/esm/module_job:343:25)
     at async onImport.tracePromise.__proto__ (node:internal/modules/esm/loader:681:26)
-    at async asyncRunEntryPointWithESMLoader (node:internal/modules/run_main:117:5)
+    at async asyncRunEntryPointWithESMLoader (node:internal/modules/run_main:117:5) {
+  generatedMessage: true,
+  code: 'ERR_ASSERTION',
+  actual: 'QQAI 2.7.12 指令帮助\n' +
+    '当前权限：群成员\n' +
+    '• 指令同时接受半角 ! 与全角 ！\n' +
+    '• 高风险群操作必须二次确认\n' +
+    '\n' +
+    '【基础与多模态】\n' +
+    '• !help／!帮助：查看当前权限可用的指令\n' +
+    '• !status／!配额：查看模型、AI、记忆与调用状态\n' +
+    '• !模型 自动／Gemma 26B／Gemma 31B／Gemini：切换个人模型偏好\n' +
+    '• !live：取得实时语音网页\n' +
+    '• !语音 问题：生成语音回答\n' +
+    '• !读网页 URL：抓取公开网页并摘要\n' +
+    '• !翻译 语言 内容：翻译文字\n' +
+    '• 图片理解：图片与问题同一则发送，或回复图片后 @机器人\n' +
+    '• /!普通内容：群友明确跳过所有 AI；机器人同号人工发送时为聊天别名\n' +
+    '\n' +
+    '【娱乐】\n' +
+    '• !娱乐：查看娱乐指令\n' +
+    '• !骰子 [面数／NdM]：例如 !骰子 2d6\n' +
+    '• !随机数 [最小] [最大]：默认 1～100\n' +
+    '• !硬币：抛硬币\n' +
+    '• !猜拳 石头／剪刀／布\n' +
+    '• !选择 A | B | C：随机选择\n' +
+    '• !今日运势：同一人每日固定\n' +
+    '• !真心话／!大冒险：随机安全题目\n' +
+    '\n' +
+    '【群聊整理与分析】\n' +
+    '• !会议纪要 [10～500]：整理重点、分歧与待办\n' +
+    '• !总结 [5～100]／!吃瓜：轻松总结群聊\n' +
+    '• !查成分 [@成员]：娱乐性质的近期发言分析\n' +
+    '• !详细资料 [@成员]：本人查自己；查询他人受权限限制\n' +
+    '• !群状态：查看 AI、记忆、插话率与群人格\n' +
+    '\n' +
+    '【记忆、人格与个人设置】\n' +
+    '• !群规／!rules：查看群规\n' +
+    '• !记住 内容／!忘记 内容／!你记住了什么\n' +
+    '• !set人格 风格／!del人格\n' +
+    '• !免打扰／!取消免打扰\n' +
+    '• !好感度 [@成员]\n' +
+    '• !协助撤回：回复自己的消息后使用\n' +
+    '\n' +
+    '【活动、投票与排程】\n' +
+    '• !活动：建立或查看活动；建立流程需要确认\n' +
+    '• !报名 活动名／!取消报名 活动名／!活动名单 活动名\n' +
+    '• !活动通知 活动名\n' +
+    '• !投票：查看帮助；支持建立、选择与结束\n' +
+    '• !排程 时间 内容：支持绝对时间、每天与其他重复规则\n' +
+    '• !排程 列表／!排程 取消 编号\n' +
+    '• !自动打卡／!打卡时间：查看自动群打卡状态与执行窗口\n' +
+    '• 私聊 !申诉 群号 类型 详细内容\n' +
+    '\n' +
+    '【群规协作】\n' +
+    '• !检查 具体原因：回复目标消息或 @目标进行人工补检\n' +
+    '• !无违规 @成员 说明：管理员撤销最近一笔误判\n' +
+    '• 政治内容由聊天与群规系统静默略过\n' +
+    '• 明确种族歧视固定公开警告，不自动禁言、撤回或踢出',
+  expected: /^QQAI 2\.7\.11 指令帮助/,
+  operator: 'match',
+  diff: 'simple'
+}
 
 Node.js v22.23.1
