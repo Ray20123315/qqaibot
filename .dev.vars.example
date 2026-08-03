@@ -1,0 +1,25 @@
+# Copy this file to .dev.vars for local development only.
+# Never commit .dev.vars or real credentials.
+
+# At least one Google key is required for AI chat.
+GEMINI_API_KEYS=replace_with_google_api_key
+
+# Optional dedicated key pools. Comma-separate multiple keys.
+GEMINI_CHAT_API_KEYS=
+GEMMA_CHAT_API_KEYS=
+GEMMA_DECISION_API_KEYS=
+GEMINI_SEARCH_API_KEYS=
+GEMINI_VISION_API_KEYS=
+DEEPSEEK_API_KEYS=
+
+# OneBot / NapCat authentication.
+ONEBOT_ACCESS_TOKEN=replace_with_random_onebot_token
+ONEBOT_HTTP_URL=
+ONEBOT_HTTP_ACCESS_TOKEN=
+
+# Portal authentication and encryption. Generate long random values.
+PORTAL_AUTH_SECRET=replace_with_at_least_32_random_bytes
+TOTP_ENCRYPTION_KEY=replace_with_at_least_32_random_bytes
+
+# Optional Cloudflare Builds detail lookup.
+CLOUDFLARE_BUILDS_API_TOKEN=
