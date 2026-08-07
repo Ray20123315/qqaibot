@@ -1,0 +1,94 @@
+name: ChatGPT VTS RepairKit Script Test
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.chatgpt_live2d_native/v09/**'
+      - '.github/workflows/chatgpt-vts-repairkit-script-test.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  powershell-dry-run:
+    runs-on: windows-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Prepare mock model folders and VTS root
+        shell: pwsh
+        run: |
+          $root = Join-Path $env:GITHUB_WORKSPACE '.chatgpt_live2d_native\v09'
+          foreach ($name in @('Aye_VTS_v0_9_CORE','Aye_VTS_v0_9_FULL')) {
+            $d = Join-Path $root $name
+            New-Item -ItemType Directory -Force -Path (Join-Path $d 'Aye.4096') | Out-Null
+            Set-Content -Encoding ASCII (Join-Path $d 'Aye.moc3') 'MOC3'
+            Set-Content -Encoding UTF8 (Join-Path $d 'Aye.model3.json') '{"Version":3,"FileReferences":{"Moc":"Aye.moc3","Textures":["Aye.4096/texture_00.png"]},"Groups":[],"HitAreas":[]}'
+            Set-Content -Encoding ASCII (Join-Path $d 'Aye.4096\texture_00.png') 'PNG'
+          }
+          $fake = Join-Path $env:GITHUB_WORKSPACE 'Fake VTube Studio'
+          New-Item -ItemType Directory -Force -Path $fake | Out-Null
+          Copy-Item $env:ComSpec (Join-Path $fake 'VTube Studio.exe')
+          $fake | Set-Content -Encoding UTF8 (Join-Path $env:GITHUB_WORKSPACE 'fake_vts_path.txt')
+
+      - name: Parse as UTF-8 with PowerShell 7
+        shell: pwsh
+        run: |
+          $path = '.chatgpt_live2d_native\v09\InstallAndDiagnose.ps1'
+          $tokens = $null
+          $errors = $null
+          [void][System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path $path), [ref]$tokens, [ref]$errors)
+          if ($errors.Count -gt 0) {
+            $errors | Format-List *
+            exit 1
+          }
+          Write-Host "PowerShell 7 parse passed; tokens=$($tokens.Count)"
+
+      - name: Convert test copy to UTF-8 BOM for Windows PowerShell 5.1
+        shell: pwsh
+        run: |
+          $path = Resolve-Path '.chatgpt_live2d_native\v09\InstallAndDiagnose.ps1'
+          $text = [System.IO.File]::ReadAllText($path, [System.Text.UTF8Encoding]::new($false))
+          [System.IO.File]::WriteAllText($path, $text, [System.Text.UTF8Encoding]::new($true))
+          $bytes = [System.IO.File]::ReadAllBytes($path)
+          if (-not ($bytes[0] -eq 0xEF -and $bytes[1] -eq 0xBB -and $bytes[2] -eq 0xBF)) { throw 'UTF-8 BOM missing' }
+
+      - name: Parse with Windows PowerShell 5.1
+        shell: powershell
+        run: |
+          $path = '.chatgpt_live2d_native\v09\InstallAndDiagnose.ps1'
+          $tokens = $null
+          $errors = $null
+          [void][System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path $path), [ref]$tokens, [ref]$errors)
+          if ($errors.Count -gt 0) {
+            $errors | Format-List *
+            exit 1
+          }
+          Write-Host "Windows PowerShell parse passed; tokens=$($tokens.Count)"
+
+      - name: Execute noninteractive dry-run
+        shell: powershell
+        run: |
+          $fake = Get-Content '.\fake_vts_path.txt' -Raw
+          $fake = $fake.Trim()
+          & '.\.chatgpt_live2d_native\v09\InstallAndDiagnose.ps1' -Mode CORE -VTSRootOverride $fake -WaitSeconds 1 -NonInteractive
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $target = Join-Path $fake 'VTube Studio_Data\StreamingAssets\Live2DModels\Aye_VTS_v0_9_Compat'
+          if (-not (Test-Path (Join-Path $target 'Aye.model3.json'))) { throw 'Model copy missing' }
+          $desktop = [Environment]::GetFolderPath('Desktop')
+          $diag = @(Get-ChildItem $desktop -Filter 'Aye_VTS_Diagnostic_*.zip' -File)
+          if ($diag.Count -lt 1) { throw 'Diagnostic ZIP missing' }
+          $diag | Select-Object Name,Length,FullName | ConvertTo-Json -Depth 3 | Set-Content -Encoding UTF8 repairkit_test_result.json
+
+      - name: Upload dry-run evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: Aye_VTS_RepairKit_Script_Test
+          path: |
+            repairkit_test_result.json
+            Fake VTube Studio/VTube Studio_Data/StreamingAssets/Live2DModels/Aye_VTS_v0_9_Compat/**
+          if-no-files-found: error
+          retention-days: 2

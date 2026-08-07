@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Aye Native MOC3 Gate</title>
+</head>
+<body data-status="STARTING">
+<pre id="result">STARTING</pre>
+<script src="live2dcubismcore.min.js"></script>
+<script>
+(async () => {
+  const result = document.getElementById('result');
+  const params = new URLSearchParams(location.search);
+  const file = params.get('file') || 'Aye_Minimal.moc3';
+
+  const fail = (error) => {
+    const text = String(error && error.stack ? error.stack : error);
+    document.body.dataset.status = 'FAIL';
+    document.body.dataset.file = file;
+    result.textContent = 'FAIL\n' + JSON.stringify({ file, error: text }, null, 2);
+    console.error(error);
+  };
+
+  try {
+    if (!window.Live2DCubismCore) {
+      throw new Error('Live2DCubismCore global is missing');
+    }
+
+    const response = await fetch(file, { cache: 'no-store' });
+    if (!response.ok) {
+      throw new Error(`MOC3 fetch failed: ${response.status}`);
+    }
+    const bytes = await response.arrayBuffer();
+
+    const consistency =
+      Live2DCubismCore.Moc.prototype.hasMocConsistency(bytes);
+    if (consistency !== 1) {
+      throw new Error(`Core consistency check failed: ${consistency}`);
+    }
+
+    const moc = Live2DCubismCore.Moc.fromArrayBuffer(bytes);
+    if (!moc) {
+      throw new Error('Moc.fromArrayBuffer returned null');
+    }
+
+    // The current official hosting build accepts (moc, originalBytes), while
+    // some Framework wrappers expose a one-argument helper. Call the Core API
+    // according to its actual runtime signature.
+    const mocVersion =
+      Live2DCubismCore.Version.csmGetMocVersion(moc, bytes);
+    const latestMocVersion =
+      Live2DCubismCore.Version.csmGetLatestMocVersion();
+
+    const model = Live2DCubismCore.Model.fromMoc(moc);
+    if (!model) {
+      throw new Error('Model.fromMoc returned null');
+    }
+
+    const payload = {
+      status: 'PASS',
+      file,
+      consistency,
+      mocVersion,
+      latestMocVersion,
+      modelCreated: true,
+      parameterCount: model.parameters ? model.parameters.count : null,
+      partCount: model.parts ? model.parts.count : null,
+      drawableCount: model.drawables ? model.drawables.count : null,
+    };
+
+    document.body.dataset.status = 'PASS';
+    document.body.dataset.file = file;
+    result.textContent = JSON.stringify(payload, null, 2);
+    console.log('MOC3_CORE_PASS', payload);
+
+    if (typeof model.release === 'function') model.release();
+    if (typeof moc._release === 'function') moc._release();
+  } catch (error) {
+    fail(error);
+  }
+})();
+</script>
+</body>
+</html>
