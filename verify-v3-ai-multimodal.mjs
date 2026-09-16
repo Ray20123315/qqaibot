@@ -49,12 +49,15 @@ assert.ok(compiled.parts.some(part => String(part.text || "").includes("逐項�
 const localOnly = createCanonicalMessage({ messageId: "2", scope: "group", groupId: "123", userId: "456" }, [
   { kind: "image", media: { path: "C:\\NapCat\\cache\\x.jpg", file: "C:\\NapCat\\cache\\x.jpg" } }
 ]);
-const degraded = await compileCanonicalMessageToGemini(localOnly, {}, { strictMedia: false });
+const localOnlyDeps = {
+  async onebotCall() { throw new Error("NapCat returned no remote media source"); }
+};
+const degraded = await compileCanonicalMessageToGemini(localOnly, localOnlyDeps, { strictMedia: false });
 assert.equal(degraded.stats.mediaParts, 0);
 assert.ok(degraded.issues.some(issue => issue.code === "MEDIA_LOCAL_PATH_UNREACHABLE"));
 assert.ok(degraded.parts.some(part => String(part.text || "").includes("圖片無法解析")));
 await assert.rejects(
-  () => compileCanonicalMessageToGemini(localOnly, {}, { strictMedia: true }),
+  () => compileCanonicalMessageToGemini(localOnly, localOnlyDeps, { strictMedia: true }),
   error => error instanceof MultimodalCompileError && error.code === "MULTIMODAL_MEDIA_RESOLVE_FAILED"
 );
 
