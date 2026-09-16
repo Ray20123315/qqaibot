@@ -8,6 +8,7 @@ const PLUGIN_CAPABILITIES = Object.freeze([
   "onebot.call",
   "ai.chat",
   "ai.vision",
+  "ai.multimodal",
   "ai.tts",
   "storage",
   "scheduler",
