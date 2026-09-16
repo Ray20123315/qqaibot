@@ -13,6 +13,7 @@ QQAI v3 treats plugins as first-class extensions. Official and third-party plugi
 - `media.read` is separate from `message.read`; without it, URL/file/path/Base64 identifiers are redacted from canonical media parts.
 - Sending image/audio/video/file/market-face content requires `media.send` even when the plugin also has `message.send`.
 - `ai.multimodal` additionally requires `media.read`, preventing AI calls from bypassing media visibility permissions.
+- `ai.tts` generates speech but does not grant permission to send the generated media; outbound audio still requires `media.send` and a message-send capability.
 - Raw `onebot.call` is capability-gated and additionally restricted by the host action allowlist.
 
 ## Manifest
@@ -43,6 +44,8 @@ The host context exposes only capability-gated services. Initial API surface inc
 
 `ctx.ai.multimodal(input)` compiles the current canonical message into bounded Gemini multimodal input. Native QQ `face` remains semantic text; resolvable `mface` keeps its QQ expression summary and adds image bytes; image/audio/video/supported files are resolved through the v3 Media Resolver. The call requires both `ai.multimodal` and `media.read`.
 
-The v3 host adapter currently provides message send/reply, media send/resolve, namespaced D1 storage, safe-network fetch, AI chat/vision/multimodal, and an allowlisted raw OneBot bridge. TTS and scheduler services are only exposed when the host supplies an implementation, so unavailable features fail explicitly instead of silently degrading.
+`ctx.ai.tts(input)` uses the v3 Gemini TTS adapter and returns normalized audio metadata plus a canonical `audio` part. The host requests inline audio through the Gemini Interactions API, normalizes raw L16/PCM to WAV when necessary, and keeps generated audio size-bounded. Sending the returned part still requires outbound media permission. Before the first outbound audio part, the Host Adapter probes OneBot `can_send_record`; an explicit negative result blocks the send, while probe errors remain diagnostic and do not create false negatives.
+
+The v3 host adapter currently provides message send/reply, media send/resolve, namespaced D1 storage, safe-network fetch, AI chat/vision/multimodal/TTS, and an allowlisted raw OneBot bridge. Scheduler services are only exposed when the host supplies an implementation, so unavailable features fail explicitly instead of silently degrading.
 
 The current v3 foundation intentionally does not load arbitrary JavaScript from D1 or remote URLs at runtime. Distribution layout and marketplace repository placement are deferred; the public Plugin API should remain independent from that choice.
