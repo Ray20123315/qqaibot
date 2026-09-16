@@ -14,17 +14,21 @@ function memoryStorage(map = new Map()) {
   };
 }
 
+async function rejectsWithCode(fn, code) {
+  await assert.rejects(fn, error => error?.code === code);
+}
+
 let now = 1_800_000_000_000;
 const directDb = memoryStorage();
 const scheduler = createPluginScheduler(directDb.adapter, { nowProvider: () => now });
 
-await assert.rejects(
+await rejectsWithCode(
   () => scheduler.create("plugin.a", { name: "too-fast", intervalMs: 30_000 }),
-  /PLUGIN_SCHEDULER_INTERVAL_OUT_OF_RANGE/
+  "PLUGIN_SCHEDULER_INTERVAL_OUT_OF_RANGE"
 );
-await assert.rejects(
+await rejectsWithCode(
   () => scheduler.create("plugin.a", { name: "huge", delayMs: 1000, payload: { text: "x".repeat(20_000) } }),
-  /PLUGIN_SCHEDULER_PAYLOAD_TOO_LARGE/
+  "PLUGIN_SCHEDULER_PAYLOAD_TOO_LARGE"
 );
 
 const onceA = await scheduler.create("plugin.a", { name: "once", delayMs: 1000, payload: { owner: "a" } });
@@ -32,7 +36,7 @@ const intervalB = await scheduler.create("plugin.b", { name: "poll", intervalMs:
 assert.equal((await scheduler.list("plugin.a")).length, 1);
 assert.equal((await scheduler.list("plugin.b")).length, 1);
 assert.equal(await scheduler.get("plugin.a", intervalB.id), null, "plugins must not read another plugin job");
-await assert.rejects(() => scheduler.cancel("plugin.a", intervalB.id), /PLUGIN_SCHEDULER_JOB_NOT_FOUND/);
+await rejectsWithCode(() => scheduler.cancel("plugin.a", intervalB.id), "PLUGIN_SCHEDULER_JOB_NOT_FOUND");
 
 const directEvents = [];
 const directRun = await scheduler.runDue(async (pluginId, event) => {
