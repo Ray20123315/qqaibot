@@ -5,6 +5,7 @@ on:
     branches:
       - main
       - refactor/v2-modular-worker
+      - v3-rewrite
   pull_request:
     branches:
       - main
