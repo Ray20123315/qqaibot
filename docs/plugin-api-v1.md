@@ -36,8 +36,10 @@ Plugins may expose commands with a canonical name, aliases, description, and asy
 
 ## Context
 
-The host context exposes only capability-gated services. Initial API surface includes `reply`, `send`, `media.send`, `onebot.call`, `ai.chat`, `ai.vision`, `ai.tts`, `storage`, `scheduler.create`, and `network.fetch`.
+The host context exposes only capability-gated services. Initial API surface includes `reply`, `send`, `media.send`, `media.resolve`, `onebot.call`, `ai.chat`, `ai.vision`, `ai.tts`, `storage`, `scheduler.create`, and `network.fetch`.
 
-The v3 host adapter currently provides message send/reply, media send, namespaced D1 storage, safe-network fetch, AI chat/vision, and an allowlisted raw OneBot bridge. TTS and scheduler services are only exposed when the host supplies an implementation, so unavailable features fail explicitly instead of silently degrading.
+`ctx.media.resolve(index)` requires `media.read` and can only resolve a media/forward part from the current canonical message. Plugins cannot submit an arbitrary URL or file token to this service. The host performs bounded media resolution through QQAI's OneBot refresh and SSRF-safe download pipeline.
+
+The v3 host adapter currently provides message send/reply, media send/resolve, namespaced D1 storage, safe-network fetch, AI chat/vision, and an allowlisted raw OneBot bridge. TTS and scheduler services are only exposed when the host supplies an implementation, so unavailable features fail explicitly instead of silently degrading.
 
 The current v3 foundation intentionally does not load arbitrary JavaScript from D1 or remote URLs at runtime. Distribution layout and marketplace repository placement are deferred; the public Plugin API should remain independent from that choice.
