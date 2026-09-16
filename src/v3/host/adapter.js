@@ -7,6 +7,7 @@ import { runV3MultimodalAi } from "../ai/runtime.js";
 import { synthesizeGeminiTts } from "../ai/tts.js";
 import { fromOneBotEvent, toOneBotSegments } from "../message/onebot.js";
 import { resolveMediaPart } from "../media/resolver.js";
+import { createPluginScheduler } from "../scheduler/runtime.js";
 
 const DEFAULT_PLUGIN_ONEBOT_ACTIONS = Object.freeze([
   "get_login_info",
@@ -183,6 +184,7 @@ function createV3HostAdapter(env, {
   };
   const onebotAllowlist = new Set((allowedOneBotActions || []).map(value => String(value || "").trim()).filter(Boolean));
   const storageAdapter = Object.freeze({ get: deps.dbGet, put: deps.dbPut, del: deps.dbDel });
+  const pluginScheduler = dependencies.scheduler || createPluginScheduler(storageAdapter, dependencies.schedulerOptions || {});
   let recordCapability = null;
 
   async function ensureRecordCapability(parts) {
@@ -248,6 +250,12 @@ function createV3HostAdapter(env, {
       return deps.aiMultimodal(message, input);
     },
     "ai.tts": async ({ input }) => deps.aiTts(input),
+    "scheduler.create": async ({ plugin, input }) => typeof deps.schedulerCreate === "function"
+      ? deps.schedulerCreate({ plugin, input })
+      : pluginScheduler.create(plugin.id, input),
+    "scheduler.list": async ({ plugin, input }) => pluginScheduler.list(plugin.id, input || {}),
+    "scheduler.get": async ({ plugin, id }) => pluginScheduler.get(plugin.id, id),
+    "scheduler.cancel": async ({ plugin, id }) => pluginScheduler.cancel(plugin.id, id),
     "network.fetch": async ({ input }) => {
       const source = typeof input === "string" ? { url: input } : (input && typeof input === "object" ? input : {});
       const url = String(source.url || "").trim();
@@ -257,7 +265,6 @@ function createV3HostAdapter(env, {
       return deps.safeFetch(url, init);
     }
   };
-  if (typeof deps.schedulerCreate === "function") services["scheduler.create"] = async ({ plugin, input }) => deps.schedulerCreate({ plugin, input });
 
   const host = createPluginHost({ services, storageAdapter, logger });
   for (const plugin of plugins) host.register(plugin);
@@ -275,12 +282,22 @@ function createV3HostAdapter(env, {
     return { handled: false, eventName: "", message: null, results: [] };
   }
 
+  async function runDuePluginJobs(options = {}) {
+    return pluginScheduler.runDue(async (pluginId, event) => {
+      const dispatched = await host.dispatchTo(pluginId, "cron", event, { pluginId });
+      if (!dispatched.handled) throw new Error(`PLUGIN_CRON_HANDLER_MISSING:${pluginId}`);
+      return dispatched.results;
+    }, options);
+  }
+
   return Object.freeze({
     dispatchOneBotEvent,
     host,
     listPlugins: host.listPlugins,
+    pluginScheduler,
     register: host.register,
     runCommand: host.runCommand,
+    runDuePluginJobs,
     start: host.start,
     stop: host.stop
   });
