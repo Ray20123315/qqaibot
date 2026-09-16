@@ -1,5 +1,6 @@
 import { helloPlugin } from "./hello.js";
+import { shadowDiagnosticsPlugin } from "./shadow-diagnostics.js";
 
 const OFFICIAL_BUNDLED_PLUGINS = Object.freeze([helloPlugin]);
 
-export { OFFICIAL_BUNDLED_PLUGINS, helloPlugin };
+export { OFFICIAL_BUNDLED_PLUGINS, helloPlugin, shadowDiagnosticsPlugin };
