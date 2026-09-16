@@ -50,9 +50,9 @@ force_offline
 
 A future Portal/site control can write this same config instead of inventing a second live-state system.
 
-## Failure fallback
+## Failure fallback and provider backoff
 
-Successful polls update two plugin-storage records:
+The plugin uses three namespaced storage records:
 
 ```text
 config
@@ -68,6 +68,9 @@ If Bilibili returns an HTTP/API/parsing error:
 - `lastError` is recorded
 - effective rows become `stale: true`
 - the last valid title/cover/room/live state remains available
+- `nextPollNotBefore` prevents the scheduler from hammering a failing provider
+
+Transient failures back off approximately 2, 5, 10, then 30 minutes. Risk-control responses such as HTTP 412/429 or Bilibili `-412` use a longer sequence of approximately 5, 15, 30, 60 minutes, then 3 and 6 hours. While backoff is active, cron checks return the stale last-good state without issuing another Bilibili request. A manual refresh may bypass ordinary transient backoff, but it does not bypass an active Bilibili risk-control block.
 
 If a batch succeeds but one configured UID is missing, that creator's prior record is preserved and marked stale/partial instead of being interpreted as offline.
 
@@ -113,4 +116,4 @@ browser UI refresh every 20-30 seconds
 
 ## YouTube follow-up
 
-As of the 2026 granular YouTube Data API quota model, `search.list` has its own default quota bucket of 100 calls/day. Polling every 15 minutes consumes 96 calls/day, leaving almost no operational headroom. The future YouTube provider should prefer roughly 20-minute polling (72 calls/day) or adaptive polling that becomes more frequent only near expected live windows.
+Under the current YouTube Data API granular quota model, `search.list` has its own default quota bucket of 100 calls/day. Polling every 15 minutes consumes 96 calls/day, leaving almost no operational headroom. The future YouTube provider should prefer roughly 20-minute polling (72 calls/day) or adaptive polling that becomes more frequent only near expected live windows.
