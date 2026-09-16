@@ -1,9 +1,10 @@
-import { callGeminiGenerate, effectiveRuntimeModels, geminiVisionApiKeys, parseList } from "../../ai/runtime.js";
+import { callGeminiGenerate, effectiveRuntimeModels, geminiVisionApiKeys, googleApiKeysFor, parseList } from "../../ai/runtime.js";
 import { callOneBotAction } from "../../core/permissions.js";
 import { dbDel, dbGet, dbPut } from "../../data/store.js";
 import { createPluginHost } from "../../plugins/runtime.js";
 import { fetchPublicUrl } from "../../security/network.js";
 import { runV3MultimodalAi } from "../ai/runtime.js";
+import { synthesizeGeminiTts } from "../ai/tts.js";
 import { fromOneBotEvent, toOneBotSegments } from "../message/onebot.js";
 import { resolveMediaPart } from "../media/resolver.js";
 
@@ -51,6 +52,10 @@ function hasOutboundMedia(parts) {
   return parts.some(part => ["image", "audio", "video", "file", "mface"].includes(part?.kind));
 }
 
+function hasOutboundAudio(parts) {
+  return parts.some(part => part?.kind === "audio");
+}
+
 function resolveTarget(target, fallbackMessage = null) {
   const source = target && typeof target === "object" && !Array.isArray(target) ? target : {};
   const fallback = fallbackMessage && typeof fallbackMessage === "object" ? fallbackMessage : {};
@@ -66,6 +71,24 @@ function resolveTarget(target, fallbackMessage = null) {
     return { scope: "private", groupId: "", userId };
   }
   throw new Error("PLUGIN_MESSAGE_TARGET_REQUIRED");
+}
+
+function ttsApiKeys(env) {
+  return [...new Set([
+    ...parseList(env?.GEMINI_TTS_API_KEYS),
+    ...parseList(env?.GEMINI_TTS_API_KEY),
+    ...googleApiKeysFor(env || {}, "gemini_chat")
+  ].map(String).map(value => value.trim()).filter(Boolean))];
+}
+
+function oneBotCapabilityValue(value) {
+  const data = value && typeof value === "object" && Object.prototype.hasOwnProperty.call(value, "data") ? value.data : value;
+  if (typeof data === "boolean") return data;
+  if (!data || typeof data !== "object") return null;
+  for (const key of ["yes", "ok", "supported", "can_send_record", "canSendRecord"]) {
+    if (typeof data[key] === "boolean") return data[key];
+  }
+  return null;
 }
 
 async function defaultAiChat(env, input) {
@@ -123,6 +146,20 @@ async function defaultAiVision(env, input) {
   return safeAiResult(result);
 }
 
+async function defaultAiTts(env, input, dependencies = {}) {
+  const models = Array.isArray(dependencies.models) && dependencies.models.length
+    ? dependencies.models
+    : await effectiveRuntimeModels(env, "tts");
+  const apiKeys = Array.isArray(dependencies.apiKeys) && dependencies.apiKeys.length
+    ? dependencies.apiKeys
+    : ttsApiKeys(env);
+  return synthesizeGeminiTts(input, {
+    models,
+    apiKeys,
+    fetchImpl: dependencies.fetchImpl || fetch
+  });
+}
+
 function createV3HostAdapter(env, {
   plugins = [],
   logger = console,
@@ -141,11 +178,30 @@ function createV3HostAdapter(env, {
     aiChat: dependencies.aiChat || (input => defaultAiChat(env, input)),
     aiVision: dependencies.aiVision || (input => defaultAiVision(env, input)),
     aiMultimodal: dependencies.aiMultimodal || ((message, input) => runV3MultimodalAi(env, message, input, { onebotCall, safeFetch })),
-    aiTts: dependencies.aiTts || null,
+    aiTts: dependencies.aiTts || (input => defaultAiTts(env, input)),
     schedulerCreate: dependencies.schedulerCreate || null
   };
   const onebotAllowlist = new Set((allowedOneBotActions || []).map(value => String(value || "").trim()).filter(Boolean));
   const storageAdapter = Object.freeze({ get: deps.dbGet, put: deps.dbPut, del: deps.dbDel });
+  let recordCapability = null;
+
+  async function ensureRecordCapability(parts) {
+    if (!hasOutboundAudio(parts)) return;
+    if (recordCapability === false) throw new Error("PLUGIN_AUDIO_SEND_UNAVAILABLE");
+    if (recordCapability === true) return;
+    try {
+      const probe = await deps.onebotCall("can_send_record", {}, 5000);
+      const supported = oneBotCapabilityValue(probe);
+      if (supported === false) {
+        recordCapability = false;
+        throw new Error("PLUGIN_AUDIO_SEND_UNAVAILABLE");
+      }
+      if (supported === true) recordCapability = true;
+    } catch (error) {
+      if (String(error?.message || error) === "PLUGIN_AUDIO_SEND_UNAVAILABLE") throw error;
+      logger?.warn?.("[v3-host] can_send_record probe failed; attempting real send", String(error?.message || error).slice(0, 240));
+    }
+  }
 
   async function sendParts(plugin, value, fallbackMessage, explicitTarget = null) {
     const targetEnvelope = explicitTarget && typeof explicitTarget === "object" && !Array.isArray(explicitTarget) ? explicitTarget : {};
@@ -154,6 +210,7 @@ function createV3HostAdapter(env, {
     if (hasOutboundMedia(parts) && !plugin.capabilities.includes("media.send")) {
       throw new Error(`PLUGIN_CAPABILITY_DENIED:${plugin.id}:media.send`);
     }
+    await ensureRecordCapability(parts);
     const target = resolveTarget(targetEnvelope, fallbackMessage);
     const message = toOneBotSegments(parts);
     if (target.scope === "group") return deps.onebotCall("send_group_msg", { group_id: target.groupId, message, auto_escape: false }, 15000);
@@ -190,6 +247,7 @@ function createV3HostAdapter(env, {
       if (!message || !Array.isArray(message.parts)) throw new Error("PLUGIN_MULTIMODAL_MESSAGE_REQUIRED");
       return deps.aiMultimodal(message, input);
     },
+    "ai.tts": async ({ input }) => deps.aiTts(input),
     "network.fetch": async ({ input }) => {
       const source = typeof input === "string" ? { url: input } : (input && typeof input === "object" ? input : {});
       const url = String(source.url || "").trim();
@@ -199,7 +257,6 @@ function createV3HostAdapter(env, {
       return deps.safeFetch(url, init);
     }
   };
-  if (typeof deps.aiTts === "function") services["ai.tts"] = async ({ input }) => deps.aiTts(input);
   if (typeof deps.schedulerCreate === "function") services["scheduler.create"] = async ({ plugin, input }) => deps.schedulerCreate({ plugin, input });
 
   const host = createPluginHost({ services, storageAdapter, logger });
@@ -233,9 +290,13 @@ export {
   DEFAULT_PLUGIN_ONEBOT_ACTIONS,
   createV3HostAdapter,
   defaultAiChat,
+  defaultAiTts,
   defaultAiVision,
+  hasOutboundAudio,
   hasOutboundMedia,
   normalizePluginMessage,
+  oneBotCapabilityValue,
   resolveTarget,
-  safeAiResult
+  safeAiResult,
+  ttsApiKeys
 };
