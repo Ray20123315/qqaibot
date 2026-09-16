@@ -1,4 +1,5 @@
 import { callOneBotAction, writeSystemAudit } from "../../core/permissions.js";
+import { fetchPublicUrl } from "../../security/network.js";
 import { runV3MultimodalAi } from "../ai/runtime.js";
 import { fromOneBotEvent, toOneBotSegments } from "../message/onebot.js";
 
@@ -56,10 +57,11 @@ async function runV3MultimodalCanary(env, body = {}, dependencies = {}) {
   if (!canaryEligible(message, config)) return { handled: false, eligible: false, mode: config.mode };
 
   const onebotCall = dependencies.onebotCall || ((action, params, timeoutMs) => callOneBotAction(env, { action, params }, timeoutMs));
+  const safeFetch = dependencies.safeFetch || ((url, options) => fetchPublicUrl(url, options, 3));
   const audit = dependencies.audit || (entry => writeSystemAudit(env, entry));
   const aiRun = dependencies.aiRun || ((currentMessage, input) => runV3MultimodalAi(env, currentMessage, input, {
     onebotCall,
-    safeFetch: dependencies.safeFetch
+    safeFetch
   }));
 
   try {
