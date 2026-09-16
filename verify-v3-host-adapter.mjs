@@ -5,7 +5,7 @@ import { createV3HostAdapter } from "./src/v3/host/adapter.js";
 
 const db = new Map();
 const onebotCalls = [];
-const seen = { rich: null, redacted: null, deniedRan: false };
+const seen = { rich: null, redacted: null, deniedRan: false, resolved: null };
 const richPlugin = definePlugin({
   manifest: {
     id: "test.rich",
@@ -25,6 +25,7 @@ const richPlugin = definePlugin({
     assert.equal(ai.text, "AI:hello");
     const response = await ctx.network.fetch("https://example.com/data");
     assert.equal(response.status, 200);
+    seen.resolved = await ctx.media.resolve(1);
   }
 });
 const redactedPlugin = definePlugin({
@@ -55,7 +56,9 @@ const adapter = createV3HostAdapter({}, {
     onebotCall: async (action, params) => { onebotCalls.push({ action, params }); return action === "get_login_info" ? { ok: true } : { message_id: 123 }; },
     aiChat: async input => ({ text: `AI:${typeof input === "string" ? input : input.text}`, model: "test" }),
     aiVision: async () => ({ text: "vision", model: "test" }),
-    safeFetch: async url => new Response("ok", { status: url.includes("example.com") ? 200 : 500 })
+    safeFetch: async url => String(url).endsWith(".png")
+      ? new Response(new Uint8Array([1,2,3]), { status: 200, headers: { "content-type": "image/png" } })
+      : new Response("ok", { status: url.includes("example.com") ? 200 : 500 })
   }
 });
 await adapter.start();
@@ -83,6 +86,9 @@ assert.equal(seen.redacted.parts[1].media.path, "");
 assert.equal(seen.redacted.parts[2].emojiId, "");
 assert.equal(seen.redacted.parts[2].key, "");
 assert.equal(seen.redacted.parts[2].summary, "猫");
+assert.equal(seen.resolved.kind, "image");
+assert.equal(seen.resolved.size, 3);
+assert.equal(seen.resolved.source, "direct:url");
 assert.equal(onebotCalls[0].action, "send_group_msg");
 assert.deepEqual(onebotCalls[0].params.message.map(x => x.type), ["text","image"]);
 assert(onebotCalls.some(x => x.action === "get_login_info"));
@@ -106,6 +112,15 @@ const bypassAdapter = createV3HostAdapter({}, { plugins: [mediaBypassPlugin], de
 await bypassAdapter.start();
 await assert.rejects(() => bypassAdapter.runCommand("media-bypass", {}, { message: result.message }), /PLUGIN_CAPABILITY_DENIED:test\.media-bypass:media\.send/);
 
+const mediaReadDeniedPlugin = definePlugin({
+  manifest: { id: "test.media-read-denied", name: "MediaReadDenied", version: "1.0.0", apiVersion: "1", capabilities: ["message.read"] },
+  commands: [{ name: "media-read-denied", async run(ctx) { return ctx.media.resolve(1); } }]
+});
+const mediaReadDeniedAdapter = createV3HostAdapter({}, { plugins: [mediaReadDeniedPlugin], dependencies: { onebotCall: async () => ({ ok: true }) } });
+await mediaReadDeniedAdapter.start();
+await assert.rejects(() => mediaReadDeniedAdapter.runCommand("media-read-denied", {}, { message: result.message }), /PLUGIN_CAPABILITY_DENIED:test\.media-read-denied:media\.read/);
+
+// Low-level runtime also fails closed if the host forgets to supply a canonical message.
 let leaked = "unset";
 const failClosed = createPluginHost();
 failClosed.register(definePlugin({
@@ -119,5 +134,6 @@ assert.equal(leaked, null);
 await adapter.stop();
 await rawAdapter.stop();
 await bypassAdapter.stop();
+await mediaReadDeniedAdapter.stop();
 await failClosed.stop();
 console.log("verify-v3-host-adapter: ok");
