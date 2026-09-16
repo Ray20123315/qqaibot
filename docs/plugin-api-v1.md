@@ -12,6 +12,7 @@ QQAI v3 treats plugins as first-class extensions. Official and third-party plugi
 - Message events are fail-closed: plugins without `message.read` are not invoked for message hooks.
 - `media.read` is separate from `message.read`; without it, URL/file/path/Base64 identifiers are redacted from canonical media parts.
 - Sending image/audio/video/file/market-face content requires `media.send` even when the plugin also has `message.send`.
+- `ai.multimodal` additionally requires `media.read`, preventing AI calls from bypassing media visibility permissions.
 - Raw `onebot.call` is capability-gated and additionally restricted by the host action allowlist.
 
 ## Manifest
@@ -22,7 +23,7 @@ Required fields: `id`, `name`, `version`, `apiVersion`.
 
 Supported capabilities:
 
-`message.read`, `message.send`, `media.read`, `media.send`, `onebot.call`, `ai.chat`, `ai.vision`, `ai.tts`, `storage`, `scheduler`, `network`, `group.read`, `group.manage`, `member.read`, `member.manage`, `portal.route`.
+`message.read`, `message.send`, `media.read`, `media.send`, `onebot.call`, `ai.chat`, `ai.vision`, `ai.multimodal`, `ai.tts`, `storage`, `scheduler`, `network`, `group.read`, `group.manage`, `member.read`, `member.manage`, `portal.route`.
 
 ## Lifecycle and events
 
@@ -36,10 +37,12 @@ Plugins may expose commands with a canonical name, aliases, description, and asy
 
 ## Context
 
-The host context exposes only capability-gated services. Initial API surface includes `reply`, `send`, `media.send`, `media.resolve`, `onebot.call`, `ai.chat`, `ai.vision`, `ai.tts`, `storage`, `scheduler.create`, and `network.fetch`.
+The host context exposes only capability-gated services. Initial API surface includes `reply`, `send`, `media.send`, `media.resolve`, `onebot.call`, `ai.chat`, `ai.vision`, `ai.multimodal`, `ai.tts`, `storage`, `scheduler.create`, and `network.fetch`.
 
-`ctx.media.resolve(index)` requires `media.read` and can only resolve a media/forward part from the current canonical message. Plugins cannot submit an arbitrary URL or file token to this service. The host performs bounded media resolution through QQAI's OneBot refresh and SSRF-safe download pipeline.
+`ctx.media.resolve(index)` requires `media.read` and only resolves media/forward parts from the current canonical message. It cannot be used as an arbitrary URL downloader.
 
-The v3 host adapter currently provides message send/reply, media send/resolve, namespaced D1 storage, safe-network fetch, AI chat/vision, and an allowlisted raw OneBot bridge. TTS and scheduler services are only exposed when the host supplies an implementation, so unavailable features fail explicitly instead of silently degrading.
+`ctx.ai.multimodal(input)` compiles the current canonical message into bounded Gemini multimodal input. Native QQ `face` remains semantic text; resolvable `mface` keeps its QQ expression summary and adds image bytes; image/audio/video/supported files are resolved through the v3 Media Resolver. The call requires both `ai.multimodal` and `media.read`.
+
+The v3 host adapter currently provides message send/reply, media send/resolve, namespaced D1 storage, safe-network fetch, AI chat/vision/multimodal, and an allowlisted raw OneBot bridge. TTS and scheduler services are only exposed when the host supplies an implementation, so unavailable features fail explicitly instead of silently degrading.
 
 The current v3 foundation intentionally does not load arbitrary JavaScript from D1 or remote URLs at runtime. Distribution layout and marketplace repository placement are deferred; the public Plugin API should remain independent from that choice.
