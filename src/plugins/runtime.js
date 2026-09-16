@@ -130,6 +130,12 @@ function createPluginHost({ services = {}, storageAdapter = null, logger = conso
         send: async target => {
           assertCapability(plugin, "media.send");
           return requireService("media.send")({ plugin: plugin.manifest, target, payload: visiblePayload, eventContext: { ...eventContext, message: readableMessage } });
+        },
+        resolve: async index => {
+          assertCapability(plugin, "media.read");
+          const partIndex = Number(index);
+          if (!Number.isInteger(partIndex) || partIndex < 0) throw new Error("PLUGIN_MEDIA_INDEX_INVALID");
+          return requireService("media.resolve")({ plugin: plugin.manifest, index: partIndex, payload: visiblePayload, eventContext: { ...eventContext, message: readableMessage } });
         }
       }),
       onebot: Object.freeze({
