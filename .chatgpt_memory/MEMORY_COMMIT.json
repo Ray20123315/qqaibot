@@ -1,8 +1,0 @@
-{
-  "state": "DIRTY",
-  "revision": 1,
-  "branch": "fix/d1-prefix-scan",
-  "base_ref": "main",
-  "task": "Eliminate D1 scheduler prefix full scans without reducing Cron precision",
-  "next_action": "Implement bounded prefix-range queries and regression verification"
-}
