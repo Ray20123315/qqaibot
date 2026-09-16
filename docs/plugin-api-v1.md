@@ -14,6 +14,7 @@ QQAI v3 treats plugins as first-class extensions. Official and third-party plugi
 - Sending image/audio/video/file/market-face content requires `media.send` even when the plugin also has `message.send`.
 - `ai.multimodal` additionally requires `media.read`, preventing AI calls from bypassing media visibility permissions.
 - `ai.tts` generates speech but does not grant permission to send the generated media; outbound audio still requires `media.send` and a message-send capability.
+- Scheduler jobs are plugin-owned; one plugin cannot list, read, cancel, or receive cron events for another plugin's jobs.
 - Raw `onebot.call` is capability-gated and additionally restricted by the host action allowlist.
 
 ## Manifest
@@ -32,13 +33,15 @@ Plugins may implement `onLoad`, `onMessage`, `onGroupMessage`, `onPrivateMessage
 
 Message hooks receive the QQAI canonical message rather than the raw OneBot body. This keeps protocol-specific fields and transport secrets inside the host adapter.
 
+`onCron(ctx, event)` is targeted to the plugin that owns the due scheduler job. Cron events are not broadcast to every installed plugin.
+
 ## Commands
 
 Plugins may expose commands with a canonical name, aliases, description, and async `run(ctx, input)` handler.
 
 ## Context
 
-The host context exposes only capability-gated services. Initial API surface includes `reply`, `send`, `media.send`, `media.resolve`, `onebot.call`, `ai.chat`, `ai.vision`, `ai.multimodal`, `ai.tts`, `storage`, `scheduler.create`, and `network.fetch`.
+The host context exposes only capability-gated services. Initial API surface includes `reply`, `send`, `media.send`, `media.resolve`, `onebot.call`, `ai.chat`, `ai.vision`, `ai.multimodal`, `ai.tts`, `storage`, `scheduler.create/list/get/cancel`, and `network.fetch`.
 
 `ctx.media.resolve(index)` requires `media.read` and only resolves media/forward parts from the current canonical message. It cannot be used as an arbitrary URL downloader.
 
@@ -46,6 +49,8 @@ The host context exposes only capability-gated services. Initial API surface inc
 
 `ctx.ai.tts(input)` uses the v3 Gemini TTS adapter and returns normalized audio metadata plus a canonical `audio` part. The host requests inline audio through the Gemini Interactions API, normalizes raw L16/PCM to WAV when necessary, and keeps generated audio size-bounded. Sending the returned part still requires outbound media permission. Before the first outbound audio part, the Host Adapter probes OneBot `can_send_record`; an explicit negative result blocks the send, while probe errors remain diagnostic and do not create false negatives.
 
-The v3 host adapter currently provides message send/reply, media send/resolve, namespaced D1 storage, safe-network fetch, AI chat/vision/multimodal/TTS, and an allowlisted raw OneBot bridge. Scheduler services are only exposed when the host supplies an implementation, so unavailable features fail explicitly instead of silently degrading.
+The `scheduler` capability exposes plugin-owned scheduled code execution. `ctx.scheduler.create()` supports one-time timestamps/delays and bounded recurring intervals; `list()`, `get()`, and `cancel()` are automatically scoped to the calling plugin. Due jobs invoke only that plugin's `onCron`. Payload size, job counts, execution duration, retry backoff, and leases are bounded by the host runtime.
+
+The v3 host adapter currently provides message send/reply, media send/resolve, namespaced D1 storage, safe-network fetch, AI chat/vision/multimodal/TTS, plugin-owned scheduler services, and an allowlisted raw OneBot bridge. `runDuePluginJobs()` is available as the scheduler execution entrypoint, but it is not wired to the production Worker cron until the v3 bootstrap/cutover phase.
 
 The current v3 foundation intentionally does not load arbitrary JavaScript from D1 or remote URLs at runtime. Distribution layout and marketplace repository placement are deferred; the public Plugin API should remain independent from that choice.
