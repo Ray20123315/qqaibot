@@ -1,7 +1,7 @@
 import { resolveMediaPart } from "../media/resolver.js";
 
 const DEFAULT_MULTIMODAL_LIMITS = Object.freeze({
-  maxInlineBytes: 18 * 1024 * 1024,
+  maxInlineBytes: 12 * 1024 * 1024,
   maxMediaParts: 6,
   maxTextChars: 40000,
   maxForwardNodes: 20,
@@ -26,7 +26,7 @@ function clampInteger(value, fallback, min, max) {
 
 function compileLimits(options = {}) {
   return Object.freeze({
-    maxInlineBytes: clampInteger(options.maxInlineBytes, DEFAULT_MULTIMODAL_LIMITS.maxInlineBytes, 1024, 19 * 1024 * 1024),
+    maxInlineBytes: clampInteger(options.maxInlineBytes, DEFAULT_MULTIMODAL_LIMITS.maxInlineBytes, 1024, 14 * 1024 * 1024),
     maxMediaParts: clampInteger(options.maxMediaParts, DEFAULT_MULTIMODAL_LIMITS.maxMediaParts, 1, 12),
     maxTextChars: clampInteger(options.maxTextChars, DEFAULT_MULTIMODAL_LIMITS.maxTextChars, 1000, 100000),
     maxForwardNodes: clampInteger(options.maxForwardNodes, DEFAULT_MULTIMODAL_LIMITS.maxForwardNodes, 1, 80),
