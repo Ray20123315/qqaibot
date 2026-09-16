@@ -1,9 +1,0 @@
-state: DIRTY
-canonical:
-  task: ACTIVE_TASK.md
-  current_state: CURRENT_STATE.md
-  requirements: USER_REQUIREMENTS.md
-  decisions: DECISIONS.md
-  verification: VERIFY.md
-entrypoint: 00_START_HERE.md
-archive: []
