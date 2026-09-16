@@ -24,6 +24,12 @@ function clampInteger(value, fallback, min, max) {
   return Math.max(min, Math.min(max, Math.trunc(n)));
 }
 
+function nullableNumber(value) {
+  if (value === undefined || value === null || value === "") return null;
+  const n = Number(value);
+  return Number.isFinite(n) ? n : null;
+}
+
 function schedulerRecordKey(id) {
   return `${PLUGIN_SCHEDULER_RECORD_PREFIX}${String(id || "")}`;
 }
@@ -122,9 +128,9 @@ function publicJob(record) {
     type: String(record.type || ""),
     status: String(record.status || ""),
     enabled: record.enabled === true,
-    nextRunAt: Number.isFinite(Number(record.nextRunAt)) ? Number(record.nextRunAt) : null,
-    intervalMs: Number.isFinite(Number(record.intervalMs)) ? Number(record.intervalMs) : null,
-    maxRuns: Number.isFinite(Number(record.maxRuns)) ? Number(record.maxRuns) : null,
+    nextRunAt: nullableNumber(record.nextRunAt),
+    intervalMs: nullableNumber(record.intervalMs),
+    maxRuns: nullableNumber(record.maxRuns),
     runCount: Number(record.runCount || 0),
     failureCount: Number(record.failureCount || 0),
     createdAt: String(record.createdAt || ""),
@@ -182,7 +188,7 @@ function createPluginScheduler(storage, options = {}) {
       if (!includeTerminal && ["completed", "cancelled", "paused"].includes(String(record.status || ""))) continue;
       rows.push(publicJob(record));
     }
-    return Object.freeze(rows.sort((a, b) => Number(a.nextRunAt || Infinity) - Number(b.nextRunAt || Infinity)));
+    return Object.freeze(rows.sort((a, b) => Number(a.nextRunAt ?? Infinity) - Number(b.nextRunAt ?? Infinity)));
   }
 
   async function create(pluginId, input = {}) {
@@ -288,7 +294,8 @@ function createPluginScheduler(storage, options = {}) {
         fresh.leaseUntil = 0;
         fresh.leaseToken = "";
         fresh.updatedAt = new Date(now).toISOString();
-        const reachedMaxRuns = Number.isFinite(Number(fresh.maxRuns)) && fresh.runCount >= Number(fresh.maxRuns);
+        const hasMaxRuns = fresh.maxRuns !== undefined && fresh.maxRuns !== null && fresh.maxRuns !== "" && Number.isFinite(Number(fresh.maxRuns));
+        const reachedMaxRuns = hasMaxRuns && fresh.runCount >= Number(fresh.maxRuns);
         if (fresh.type === "once" || reachedMaxRuns) {
           fresh.enabled = false;
           fresh.status = "completed";
@@ -344,6 +351,7 @@ export {
   PluginSchedulerError,
   createPluginScheduler,
   normalizeScheduleInput,
+  nullableNumber,
   publicJob,
   safePayload,
   schedulerRecordKey
