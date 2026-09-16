@@ -1,5 +1,6 @@
 import { handleWerewolfOneBotEvent as handleLegacyWerewolfOneBotEvent } from "./werewolf-legacy.js";
 import { runV3ShadowEvent, shadowEnabled } from "../v3/shadow/runtime.js";
+import { runV3MultimodalCanary } from "../v3/canary/multimodal.js";
 
 export * from "./werewolf-legacy.js";
 
@@ -16,6 +17,12 @@ async function handleWerewolfOneBotEvent(env, body) {
     } catch (error) {
       console.warn("[v3-shadow] observer failed", String(error?.message || error).slice(0, 300));
     }
+  }
+  try {
+    const canary = await runV3MultimodalCanary(env, body);
+    if (canary?.handled) return canary;
+  } catch (error) {
+    console.warn("[v3-canary] multimodal canary failed", String(error?.message || error).slice(0, 300));
   }
   return handleLegacyWerewolfOneBotEvent(env, body);
 }
