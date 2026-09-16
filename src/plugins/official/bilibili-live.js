@@ -8,11 +8,19 @@ const MIN_POLL_INTERVAL_MS = 60 * 1000;
 const MAX_POLL_INTERVAL_MS = 30 * 60 * 1000;
 const MAX_CREATORS = 20;
 const VALID_MODES = new Set(["auto", "force_live", "force_offline"]);
+const TRANSIENT_BACKOFF_MS = Object.freeze([2 * 60 * 1000, 5 * 60 * 1000, 10 * 60 * 1000, 30 * 60 * 1000]);
+const BLOCKED_BACKOFF_MS = Object.freeze([5 * 60 * 1000, 15 * 60 * 1000, 30 * 60 * 1000, 60 * 60 * 1000, 3 * 60 * 60 * 1000, 6 * 60 * 60 * 1000]);
 
 function clampInteger(value, fallback, min, max) {
   const n = Number(value);
   if (!Number.isFinite(n)) return fallback;
   return Math.max(min, Math.min(max, Math.trunc(n)));
+}
+
+function nullableNumber(value) {
+  if (value === undefined || value === null || value === "") return null;
+  const n = Number(value);
+  return Number.isFinite(n) ? n : null;
 }
 
 function normalizeUid(value) {
@@ -42,7 +50,7 @@ function normalizeCreator(value) {
     forceTitle: String(source.forceTitle || "").trim().slice(0, 200),
     forceUrl: normalizeHttpsUrl(source.forceUrl),
     forceCover: normalizeHttpsUrl(source.forceCover),
-    forceUpdatedAt: Number.isFinite(Number(source.forceUpdatedAt)) ? Number(source.forceUpdatedAt) : null,
+    forceUpdatedAt: nullableNumber(source.forceUpdatedAt),
     forceUpdatedBy: String(source.forceUpdatedBy || "").trim().slice(0, 64)
   });
 }
@@ -74,7 +82,7 @@ function normalizeConfig(value = {}, defaults = {}) {
   return Object.freeze({
     creators,
     pollIntervalMs,
-    updatedAt: Number.isFinite(Number(source.updatedAt)) ? Number(source.updatedAt) : null,
+    updatedAt: nullableNumber(source.updatedAt),
     updatedBy: String(source.updatedBy || "").trim().slice(0, 64)
   });
 }
@@ -112,6 +120,16 @@ function normalizeProviderRecord(uid, value, checkedAt = Date.now()) {
     url: roomId ? `https://live.bilibili.com/${roomId}` : `https://space.bilibili.com/${normalizeUid(data.uid || uid)}`,
     checkedAt: Number(checkedAt)
   });
+}
+
+function isBlockedProviderError(error) {
+  return /BILIBILI_LIVE_HTTP_(?:412|429)|BILIBILI_LIVE_API_-412|rate.?limit|request was banned|風控|风控/i.test(String(error?.message || error || ""));
+}
+
+function providerBackoffMs(failureCount, blocked = false) {
+  const table = blocked ? BLOCKED_BACKOFF_MS : TRANSIENT_BACKOFF_MS;
+  const index = Math.max(0, Math.min(table.length - 1, Number(failureCount || 1) - 1));
+  return table[index];
 }
 
 function transitionFor(previous, current) {
@@ -200,7 +218,7 @@ async function fetchBilibiliLiveBatch(ctx, creators, checkedAt = Date.now()) {
     }
     byUid[creator.uid] = normalizeProviderRecord(creator.uid, raw, checkedAt);
   }
-  return Object.freeze({ byUid: Object.freeze(byUid), missingUids: Object.freeze(missingUids), checkedAt });
+  return Object.freeze({ byUid: Object.freeze(byUid), missingUids: Object.freeze(missingUids), checkdAt });
 }
 
 function mergeSnapshot(config, previous = {}, batch = {}) {
@@ -255,7 +273,7 @@ function updateCreatorMode(config, uid, mode, meta = {}) {
 
 function createBilibiliLivePlugin(options = {}) {
   const initialConfig = normalizeConfig({
-    creators: options.creators ?? options.creator ?? (options.uid ? [{ uid: options.uid, label: options.label }] : []),
+    creators: options.creators ?? options.creator ?? (options.uid ? �[{ uid: options.uid, label: options.label }] : []),
     pollIntervalMs: options.pollIntervalMs
   });
   const adminUserIds = new Set((Array.isArray(options.adminUserIds) ? options.adminUserIds : [])
@@ -295,8 +313,20 @@ function createBilibiliLivePlugin(options = {}) {
     const config = await readConfig(ctx);
     if (!config.creators.length) return Object.freeze({ ok: true, skipped: "no_creators", reason });
     const previousSnapshot = await ctx.storage.get("snapshot", { checkedAt: null, byUid: {}, transitions: [] });
-    const previousHealth = await ctx.storage.get("health", { ok: true, consecutiveFailures: 0, lastSuccessAt: null });
+    const previousHealth = await ctx.storage.get("health", { ok: true, consecutiveFailures: 0, lastSuccessAt: null, nextPollNotBefore: null, blocked: false });
     const attemptedAt = Date.now();
+    const nextPollNotBefore = nullableNumber(previousHealth?.nextPollNotBefore);
+    const backoffActive = nextPollNotBefore !== null && nextPollNotBefore > attemptedAt;
+    if (backoffActive && (reason === "cron" || previousHealth?.blocked === true)) {
+      return Object.freeze({
+        ok: false,
+        stale: true,
+        skipped: "provider_backoff",
+        snapshot: previousSnapshot,
+        health: previousHealth,
+        effective: effectiveSnapshot(config, previousSnapshot, previousHealth)
+      });
+    }
     try {
       const batch = await fetchBilibiliLiveBatch(ctx, config.creators, attemptedAt);
       const snapshot = mergeSnapshot(config, previousSnapshot, batch);
@@ -308,20 +338,28 @@ function createBilibiliLivePlugin(options = {}) {
         lastSuccessAt: attemptedAt,
         consecutiveFailures: 0,
         lastError: "",
+        blocked: false,
+        nextPollNotBefore: null,
         reason
       });
       await ctx.storage.set("snapshot", snapshot);
       await ctx.storage.set("health", health);
       return Object.freeze({ ok: true, partial: health.partial, snapshot, health, effective: effectiveSnapshot(config, snapshot, health) });
     } catch (error) {
+      const consecutiveFailures = Number(previousHealth?.consecutiveFailures || 0) + 1;
+      const blocked = isBlockedProviderError(error);
+      const backoffMs = providerBackoffMs(consecutiveFailures, blocked);
       const health = Object.freeze({
         ok: false,
         partial: false,
         missingUids: [],
         lastAttemptAt: attemptedAt,
         lastSuccessAt: previousHealth?.lastSuccessAt || previousSnapshot?.checkedAt || null,
-        consecutiveFailures: Number(previousHealth?.consecutiveFailures || 0) + 1,
+        consecutiveFailures,
         lastError: String(error?.message || error).slice(0, 500),
+        blocked,
+        nextPollNotBefore: attemptedAt + backoffMs,
+        backoffMs,
         reason
       });
       await ctx.storage.set("health", health);
@@ -411,6 +449,8 @@ export {
   MAX_CREATORS,
   MAX_POLL_INTERVAL_MS,
   MIN_POLL_INTERVAL_MS,
+  BLOCKED_BACKOFF_MS,
+  TRANSIENT_BACKOFF_MS,
   buildEffectiveState,
   createBilibiliLivePlugin,
   effectiveSnapshot,
@@ -419,9 +459,12 @@ export {
   normalizeConfig,
   normalizeCreator,
   normalizeCreators,
+  isBlockedProviderError,
   normalizeMode,
   normalizeProviderRecord,
   normalizeUid,
+  nullableNumber,
+  providerBackoffMs,
   transitionFor,
   updateCreatorMode
 };

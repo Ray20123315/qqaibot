@@ -144,7 +144,12 @@ assert.equal(failed.ok, false);
 assert.equal(failed.stale, true);
 assert.equal(failed.effective.find(row => row.uid === "123").title, "Game");
 assert.equal(storage.get("health").consecutiveFailures, 1);
+assert(storage.get("health").nextPollNotBefore > storage.get("health").lastAttemptAt);
 assert.equal(storage.get("snapshot").byUid["123"].title, "Game");
+const callsAfterFailure = providerCalls;
+const backoffCron = await plugin.onCron(makeCtx(), { name: "live-poll", payload: { task: "poll" } });
+assert.equal(backoffCron.skipped, "provider_backoff");
+assert.equal(providerCalls, callsAfterFailure, "cron backoff must avoid another provider request");
 
 // FORCE mode remains effective even while the provider is stale.
 assert.equal(failed.effective.find(row => row.uid === "123").source, "force_offline");
