@@ -3,6 +3,7 @@ import { callOneBotAction } from "../../core/permissions.js";
 import { dbDel, dbGet, dbPut } from "../../data/store.js";
 import { createPluginHost } from "../../plugins/runtime.js";
 import { fetchPublicUrl } from "../../security/network.js";
+import { runV3MultimodalAi } from "../ai/runtime.js";
 import { fromOneBotEvent, toOneBotSegments } from "../message/onebot.js";
 import { resolveMediaPart } from "../media/resolver.js";
 
@@ -129,14 +130,17 @@ function createV3HostAdapter(env, {
   allowedOneBotActions = DEFAULT_PLUGIN_ONEBOT_ACTIONS
 } = {}) {
   if (!env || typeof env !== "object") throw new Error("V3_HOST_ENV_REQUIRED");
+  const onebotCall = dependencies.onebotCall || ((action, params, timeoutMs) => callOneBotAction(env, { action, params }, timeoutMs));
+  const safeFetch = dependencies.safeFetch || ((url, options) => fetchPublicUrl(url, options, 3));
   const deps = {
     dbGet: dependencies.dbGet || (key => dbGet(env, key)),
     dbPut: dependencies.dbPut || ((key, value) => dbPut(env, key, value)),
     dbDel: dependencies.dbDel || (key => dbDel(env, key)),
-    onebotCall: dependencies.onebotCall || ((action, params, timeoutMs) => callOneBotAction(env, { action, params }, timeoutMs)),
-    safeFetch: dependencies.safeFetch || ((url, options) => fetchPublicUrl(url, options, 3)),
+    onebotCall,
+    safeFetch,
     aiChat: dependencies.aiChat || (input => defaultAiChat(env, input)),
     aiVision: dependencies.aiVision || (input => defaultAiVision(env, input)),
+    aiMultimodal: dependencies.aiMultimodal || ((message, input) => runV3MultimodalAi(env, message, input, { onebotCall, safeFetch })),
     aiTts: dependencies.aiTts || null,
     schedulerCreate: dependencies.schedulerCreate || null
   };
@@ -181,6 +185,11 @@ function createV3HostAdapter(env, {
     },
     "ai.chat": async ({ input }) => deps.aiChat(input),
     "ai.vision": async ({ input }) => deps.aiVision(input),
+    "ai.multimodal": async ({ input, eventContext }) => {
+      const message = eventContext?.message;
+      if (!message || !Array.isArray(message.parts)) throw new Error("PLUGIN_MULTIMODAL_MESSAGE_REQUIRED");
+      return deps.aiMultimodal(message, input);
+    },
     "network.fetch": async ({ input }) => {
       const source = typeof input === "string" ? { url: input } : (input && typeof input === "object" ? input : {});
       const url = String(source.url || "").trim();
