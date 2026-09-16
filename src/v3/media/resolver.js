@@ -179,13 +179,22 @@ async function resolveBinaryPart(part, context = {}, deps = {}) {
   const kind = String(part?.kind || "");
   const attempts = [];
   const direct = directMediaSource(part?.media || {});
+  let directError = null;
   if (direct) {
-    attempts.push({ stage: "direct", ok: true, sourceType: direct.type });
-    const data = await downloadSource(direct, kind, deps);
-    return Object.freeze({ kind, ...data, source: `direct:${direct.type}`, attempts: Object.freeze(attempts) });
+    try {
+      const data = await downloadSource(direct, kind, deps);
+      attempts.push({ stage: "direct", ok: true, sourceType: direct.type });
+      return Object.freeze({ kind, ...data, source: `direct:${direct.type}`, attempts: Object.freeze(attempts) });
+    } catch (error) {
+      directError = error;
+      attempts.push({ stage: "direct", ok: false, sourceType: direct.type, errorCode: String(error?.code || error?.message || "MEDIA_DIRECT_ERROR").slice(0, 120) });
+    }
   }
 
-  const plan = planMediaResolution(part);
+  const refreshPart = directError && part?.media?.file
+    ? { ...part, media: { ...part.media, url: "", base64: "", path: "" } }
+    : part;
+  const plan = planMediaResolution(refreshPart);
   attempts.push({ stage: "plan", ok: plan.strategy !== "none", strategy: plan.strategy, action: plan.action || "" });
   if (plan.strategy === "onebot") {
     if (typeof deps.onebotCall !== "function") throw new MediaResolutionError("ONEBOT_UNAVAILABLE", "onebot", kind);
@@ -231,6 +240,9 @@ async function resolveBinaryPart(part, context = {}, deps = {}) {
 
   const ref = cleanMediaRef(part?.media || {});
   const hasLocalOnly = Boolean(ref.path || (ref.file && (/^[/\\]/.test(ref.file) || /^[A-Za-z]:[\\/]/.test(ref.file))));
+  if (directError instanceof MediaResolutionError && !hasLocalOnly) {
+    throw new MediaResolutionError(directError.code, directError.stage, kind, directError.message, { ...directError.details, attempts });
+  }
   throw new MediaResolutionError(hasLocalOnly ? "MEDIA_LOCAL_PATH_UNREACHABLE" : "MEDIA_UNRESOLVED", "resolve", kind, hasLocalOnly ? "NapCat local path is not reachable from Cloudflare" : "no resolvable media source", { attempts });
 }
 
