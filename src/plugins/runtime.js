@@ -167,6 +167,18 @@ function createPluginHost({ services = {}, storageAdapter = null, logger = conso
         create: async input => {
           assertCapability(plugin, "scheduler");
           return requireService("scheduler.create")({ plugin: plugin.manifest, input, payload: visiblePayload, eventContext: { ...eventContext, message: readableMessage } });
+        },
+        list: async query => {
+          assertCapability(plugin, "scheduler");
+          return requireService("scheduler.list")({ plugin: plugin.manifest, input: query || {}, payload: visiblePayload, eventContext: { ...eventContext, message: readableMessage } });
+        },
+        get: async id => {
+          assertCapability(plugin, "scheduler");
+          return requireService("scheduler.get")({ plugin: plugin.manifest, id: String(id || ""), payload: visiblePayload, eventContext: { ...eventContext, message: readableMessage } });
+        },
+        cancel: async id => {
+          assertCapability(plugin, "scheduler");
+          return requireService("scheduler.cancel")({ plugin: plugin.manifest, id: String(id || ""), payload: visiblePayload, eventContext: { ...eventContext, message: readableMessage } });
         }
       }),
       network: Object.freeze({
@@ -201,20 +213,33 @@ function createPluginHost({ services = {}, storageAdapter = null, logger = conso
     }
   }
 
-  async function dispatch(eventName, payload, eventContext = {}) {
+  async function dispatchTo(pluginId, eventName, payload, eventContext = {}) {
     if (!started) throw new Error("PLUGIN_HOST_NOT_STARTED");
+    const plugin = registry.get(String(pluginId || ""));
+    if (!plugin) throw new Error(`PLUGIN_NOT_FOUND:${String(pluginId || "")}`);
     const specificHook = PLUGIN_EVENT_HOOKS[eventName];
     if (!specificHook) throw new Error(`PLUGIN_EVENT_UNKNOWN:${eventName}`);
     const messageEvent = MESSAGE_EVENT_NAMES.has(eventName);
+    if (messageEvent && !pluginHasCapability(plugin, "message.read")) {
+      return { handled: false, pluginId: plugin.manifest.id, eventName, results: [] };
+    }
+    const ctx = makeContext(plugin, eventName, payload, eventContext);
+    const hookPayload = messageEvent ? ctx.message : payload;
+    const results = [];
+    if (eventName !== "message" && ["group_message", "private_message"].includes(eventName) && typeof plugin.onMessage === "function") {
+      results.push(await plugin.onMessage(ctx, hookPayload));
+    }
+    if (typeof plugin[specificHook] === "function") results.push(await plugin[specificHook](ctx, hookPayload));
+    return { handled: results.length > 0, pluginId: plugin.manifest.id, eventName, results };
+  }
+
+  async function dispatch(eventName, payload, eventContext = {}) {
+    if (!started) throw new Error("PLUGIN_HOST_NOT_STARTED");
+    if (!PLUGIN_EVENT_HOOKS[eventName]) throw new Error(`PLUGIN_EVENT_UNKNOWN:${eventName}`);
     const results = [];
     for (const plugin of registry.values()) {
-      if (messageEvent && !pluginHasCapability(plugin, "message.read")) continue;
-      const ctx = makeContext(plugin, eventName, payload, eventContext);
-      const hookPayload = messageEvent ? ctx.message : payload;
-      if (eventName !== "message" && ["group_message", "private_message"].includes(eventName) && typeof plugin.onMessage === "function") {
-        results.push(await plugin.onMessage(ctx, hookPayload));
-      }
-      if (typeof plugin[specificHook] === "function") results.push(await plugin[specificHook](ctx, hookPayload));
+      const dispatched = await dispatchTo(plugin.manifest.id, eventName, payload, eventContext);
+      results.push(...dispatched.results);
     }
     return results;
   }
@@ -240,7 +265,7 @@ function createPluginHost({ services = {}, storageAdapter = null, logger = conso
     return [...registry.values()].map(plugin => ({ ...plugin.manifest, commands: plugin.commands.map(command => command.name) }));
   }
 
-  return Object.freeze({ dispatch, listPlugins, register, runCommand, start, stop });
+  return Object.freeze({ dispatch, dispatchTo, listPlugins, register, runCommand, start, stop });
 }
 
 export { createPluginHost, createScopedLogger, pluginHasCapability, sanitizeMessageForPlugin };
