@@ -153,6 +153,11 @@ function createPluginHost({ services = {}, storageAdapter = null, logger = conso
           assertCapability(plugin, "ai.vision");
           return requireService("ai.vision")({ plugin: plugin.manifest, input, payload: visiblePayload, eventContext: { ...eventContext, message: readableMessage } });
         },
+        multimodal: async input => {
+          assertCapability(plugin, "ai.multimodal");
+          assertCapability(plugin, "media.read");
+          return requireService("ai.multimodal")({ plugin: plugin.manifest, input, payload: visiblePayload, eventContext: { ...eventContext, message: readableMessage } });
+        },
         tts: async input => {
           assertCapability(plugin, "ai.tts");
           return requireService("ai.tts")({ plugin: plugin.manifest, input, payload: visiblePayload, eventContext: { ...eventContext, message: readableMessage } });
