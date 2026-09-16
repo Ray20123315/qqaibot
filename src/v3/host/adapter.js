@@ -4,6 +4,7 @@ import { dbDel, dbGet, dbPut } from "../../data/store.js";
 import { createPluginHost } from "../../plugins/runtime.js";
 import { fetchPublicUrl } from "../../security/network.js";
 import { fromOneBotEvent, toOneBotSegments } from "../message/onebot.js";
+import { resolveMediaPart } from "../media/resolver.js";
 
 const DEFAULT_PLUGIN_ONEBOT_ACTIONS = Object.freeze([
   "get_login_info",
@@ -163,6 +164,15 @@ function createV3HostAdapter(env, {
         ? target
         : { message: target };
       return sendParts(plugin, envelope.message, eventContext?.message || null, envelope);
+    },
+    "media.resolve": async ({ index, eventContext }) => {
+      const message = eventContext?.message;
+      if (!message || !Array.isArray(message.parts)) throw new Error("PLUGIN_MEDIA_MESSAGE_REQUIRED");
+      const partIndex = Number(index);
+      if (!Number.isInteger(partIndex) || partIndex < 0 || partIndex >= message.parts.length) throw new Error("PLUGIN_MEDIA_INDEX_INVALID");
+      const part = message.parts[partIndex];
+      if (!["image", "audio", "video", "file", "mface", "forward"].includes(part?.kind)) throw new Error(`PLUGIN_MEDIA_PART_NOT_RESOLVABLE:${String(part?.kind || "unknown")}`);
+      return resolveMediaPart(part, { messageId: message.messageId, groupId: message.groupId }, { onebotCall: deps.onebotCall, safeFetch: deps.safeFetch });
     },
     "onebot.call": async ({ action, params, timeoutMs }) => {
       const name = String(action || "").trim();
