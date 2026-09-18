@@ -16,10 +16,22 @@ function normalizePluginCommand(command) {
   });
 }
 
+function normalizePluginSurface(input) {
+  const source = input && typeof input === "object" && !Array.isArray(input) ? input : {};
+  const result = {};
+  for (const name of ["readSettings", "updateSettings", "status"]) {
+    if (source[name] === undefined) continue;
+    if (typeof source[name] !== "function") throw new Error("PLUGIN_SURFACE_INVALID:" + name);
+    result[name] = source[name];
+  }
+  return Object.freeze(result);
+}
+
 function definePlugin(definition) {
   const source = definition && typeof definition === "object" ? definition : {};
   const manifest = normalizePluginManifest(source.manifest || source);
   const commands = Object.freeze((Array.isArray(source.commands) ? source.commands : []).map(normalizePluginCommand));
+  const surface = normalizePluginSurface(source.surface);
   const names = new Set();
   for (const command of commands) {
     for (const name of [command.name, ...command.aliases]) {
@@ -38,8 +50,9 @@ function definePlugin(definition) {
   return Object.freeze({
     manifest,
     commands,
+    surface,
     ...hooks
   });
 }
 
-export { definePlugin, normalizePluginCommand };
+export { definePlugin, normalizePluginCommand, normalizePluginSurface };

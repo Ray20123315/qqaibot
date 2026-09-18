@@ -2,9 +2,62 @@ import { PLUGIN_CAPABILITIES, QQAI_PLUGIN_API_VERSION } from "./constants.js";
 
 const PLUGIN_ID_PATTERN = /^[a-z0-9][a-z0-9._-]{1,79}$/;
 const PLUGIN_VERSION_PATTERN = /^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$/;
+const PLUGIN_SETTING_KEY_PATTERN = /^[a-z][a-z0-9._-]{0,63}$/;
+const PLUGIN_SETTING_TYPES = new Set(["string", "number", "boolean", "select", "json"]);
 
 function cleanManifestText(value, maxLength = 160) {
   return String(value || "").trim().slice(0, maxLength);
+}
+
+function normalizePluginSettingDescriptor(key, input) {
+  const name = cleanManifestText(key, 64).toLowerCase();
+  if (!PLUGIN_SETTING_KEY_PATTERN.test(name)) throw new Error("PLUGIN_SETTING_INVALID_KEY:" + (name || "missing"));
+  const source = input && typeof input === "object" && !Array.isArray(input) ? input : {};
+  const type = cleanManifestText(source.type || "string", 20).toLowerCase();
+  if (!PLUGIN_SETTING_TYPES.has(type)) throw new Error("PLUGIN_SETTING_INVALID_TYPE:" + name + ":" + (type || "missing"));
+  const descriptor = {
+    key: name,
+    type,
+    label: cleanManifestText(source.label || name, 120),
+    description: cleanManifestText(source.description, 500),
+    required: source.required === true,
+    secret: source.secret === true,
+    readOnly: source.readOnly === true
+  };
+  if (type === "number") {
+    const min = Number(source.min);
+    const max = Number(source.max);
+    const step = Number(source.step);
+    if (Number.isFinite(min)) descriptor.min = min;
+    if (Number.isFinite(max)) descriptor.max = max;
+    if (Number.isFinite(step) && step > 0) descriptor.step = step;
+    if (descriptor.min !== undefined && descriptor.max !== undefined && descriptor.min > descriptor.max) {
+      throw new Error("PLUGIN_SETTING_INVALID_RANGE:" + name);
+    }
+  }
+  if (type === "select") {
+    const options = (Array.isArray(source.options) ? source.options : []).slice(0, 100).map(option => {
+      const item = option && typeof option === "object" ? option : { value: option, label: option };
+      const value = cleanManifestText(item.value, 120);
+      if (!value) throw new Error("PLUGIN_SETTING_INVALID_OPTION:" + name);
+      return Object.freeze({ value, label: cleanManifestText(item.label || value, 120) });
+    });
+    if (!options.length) throw new Error("PLUGIN_SETTING_SELECT_OPTIONS_REQUIRED:" + name);
+    descriptor.options = Object.freeze(options);
+  }
+  return Object.freeze(descriptor);
+}
+
+function normalizePluginSettings(input) {
+  const source = input && typeof input === "object" && !Array.isArray(input) ? input : {};
+  const entries = Object.entries(source);
+  if (entries.length > 64) throw new Error("PLUGIN_SETTING_LIMIT_EXCEEDED");
+  const result = {};
+  for (const [key, value] of entries) {
+    const descriptor = normalizePluginSettingDescriptor(key, value);
+    result[descriptor.key] = descriptor;
+  }
+  return Object.freeze(result);
 }
 
 function normalizePluginManifest(input) {
@@ -30,9 +83,7 @@ function normalizePluginManifest(input) {
     if (!known.has(capability)) throw new Error(`PLUGIN_MANIFEST_UNKNOWN_CAPABILITY:${capability}`);
   }
 
-  const settings = source.settings && typeof source.settings === "object" && !Array.isArray(source.settings)
-    ? source.settings
-    : {};
+  const settings = normalizePluginSettings(source.settings);
 
   return Object.freeze({
     id,
@@ -44,8 +95,8 @@ function normalizePluginManifest(input) {
     minQQAI,
     official: source.official === true,
     capabilities: Object.freeze(capabilities),
-    settings: Object.freeze({ ...settings })
+    settings
   });
 }
 
-export { normalizePluginManifest, PLUGIN_ID_PATTERN, PLUGIN_VERSION_PATTERN };
+export { normalizePluginManifest, normalizePluginSettingDescriptor, normalizePluginSettings, PLUGIN_ID_PATTERN, PLUGIN_SETTING_KEY_PATTERN, PLUGIN_SETTING_TYPES, PLUGIN_VERSION_PATTERN };

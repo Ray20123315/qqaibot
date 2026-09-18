@@ -380,7 +380,22 @@ function createBilibiliLivePlugin(options = {}) {
       description: "Webhook-free Bilibili live-status polling with AUTO/FORCE fallback state.",
       author: "QQAI",
       official: true,
-      capabilities: ["network", "storage", "scheduler"]
+      capabilities: ["network", "storage", "scheduler"],
+      settings: {
+        creators: {
+          type: "json",
+          label: "Creators",
+          description: "Array of Bilibili creator objects: uid, label, mode and optional FORCE metadata."
+        },
+        pollintervalms: {
+          type: "number",
+          label: "Poll interval (ms)",
+          description: "Bilibili live-status polling interval.",
+          min: MIN_POLL_INTERVAL_MS,
+          max: MAX_POLL_INTERVAL_MS,
+          step: 60000
+        }
+      }
     },
     commands: [
       {
@@ -430,6 +445,47 @@ function createBilibiliLivePlugin(options = {}) {
         }
       }
     ],
+    surface: {
+      async readSettings(ctx) {
+        const config = await readConfig(ctx);
+        return {
+          creators: config.creators,
+          pollintervalms: config.pollIntervalMs,
+          updatedAt: config.updatedAt,
+          updatedBy: config.updatedBy
+        };
+      },
+      async updateSettings(ctx, input) {
+        assertAdmin(ctx);
+        const current = await readConfig(ctx);
+        const source = input && typeof input === "object" ? input : {};
+        const next = normalizeConfig({
+          creators: Object.prototype.hasOwnProperty.call(source, "creators") ? source.creators : current.creators,
+          pollIntervalMs: Object.prototype.hasOwnProperty.call(source, "pollintervalms") ? source.pollintervalms : current.pollIntervalMs,
+          updatedAt: Date.now(),
+          updatedBy: ctx.userId
+        }, initialConfig);
+        await ctx.storage.set("config", next);
+        await ensurePollJob(ctx, next);
+        return next;
+      },
+      async status(ctx) {
+        const config = await readConfig(ctx);
+        const snapshot = await ctx.storage.get("snapshot", { checkedAt: null, byUid: {}, transitions: [] });
+        const health = await ctx.storage.get("health", { ok: true, consecutiveFailures: 0, lastSuccessAt: null });
+        const rows = effectiveSnapshot(config, snapshot, health);
+        const state = !config.creators.length ? "DISABLED" : health?.ok === false ? "DEGRADED" : "OK";
+        return {
+          state,
+          provider: "bilibili",
+          creatorCount: config.creators.length,
+          checkedAt: snapshot?.checkedAt || null,
+          stale: health?.ok === false || health?.partial === true,
+          rows,
+          health
+        };
+      }
+    },
     async onLoad(ctx) {
       const config = await ensureConfig(ctx);
       await ensurePollJob(ctx, config);

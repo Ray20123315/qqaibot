@@ -54,3 +54,12 @@ The `scheduler` capability exposes plugin-owned scheduled code execution. `ctx.s
 The v3 host adapter currently provides message send/reply, media send/resolve, namespaced D1 storage, safe-network fetch, AI chat/vision/multimodal/TTS, plugin-owned scheduler services, and an allowlisted raw OneBot bridge. `runDuePluginJobs()` is available as the scheduler execution entrypoint, but it is not wired to the production Worker cron until the v3 bootstrap/cutover phase.
 
 The current v3 foundation intentionally does not load arbitrary JavaScript from D1 or remote URLs at runtime. Distribution layout and marketplace repository placement are deferred; the public Plugin API should remain independent from that choice.
+
+
+## Plugin management surface
+
+Plugin API v1 includes a host-owned management surface for Portal and diagnostics. A plugin may declare a normalized `manifest.settings` schema and optional `surface.readSettings(ctx)`, `surface.updateSettings(ctx, input)`, and `surface.status(ctx)` callbacks.
+
+Supported setting descriptor types are `string`, `number`, `boolean`, `select`, and `json`. The host bounds serialized surface values to 64 KiB, rejects non-serializable output, and redacts top-level settings marked `secret: true` before returning them to a management client.
+
+The host exposes `getPluginSurface(pluginId, eventContext)` and `updatePluginSettings(pluginId, input, eventContext)`. These calls still execute inside the normal capability-scoped plugin context and never reveal the raw Worker `env`. Authentication/authorization belongs to the caller plus any plugin-specific validation; the Bilibili official plugin retains its admin allowlist for mutations.

@@ -3,6 +3,7 @@ import { PLUGIN_EVENT_HOOKS } from "./constants.js";
 import { createPluginStorage } from "./storage.js";
 
 const MESSAGE_EVENT_NAMES = new Set(["message", "group_message", "private_message"]);
+const PLUGIN_SURFACE_MAX_BYTES = 64 * 1024;
 
 function pluginHasCapability(plugin, capability) {
   return plugin?.manifest?.capabilities?.includes(capability) === true;
@@ -64,6 +65,36 @@ function sanitizeMessageForPlugin(message, { allowMedia = false } = {}) {
     selfId: String(message.selfId || ""),
     time: Number.isFinite(Number(message.time)) ? Number(message.time) : null,
     parts: Object.freeze(message.parts.map(part => sanitizePartForPlugin(part, allowMedia)))
+  });
+}
+
+function boundedSurfaceValue(value, label = "value") {
+  let json;
+  try { json = JSON.stringify(value === undefined ? null : value); }
+  catch (error) { throw new Error("PLUGIN_SURFACE_NOT_SERIALIZABLE:" + label + ":" + String(error?.message || error).slice(0, 160)); }
+  const bytes = new TextEncoder().encode(json).byteLength;
+  if (bytes > PLUGIN_SURFACE_MAX_BYTES) throw new Error("PLUGIN_SURFACE_TOO_LARGE:" + label + ":" + bytes);
+  return JSON.parse(json);
+}
+
+function redactSecretSettings(schema = {}, settings = null) {
+  if (!settings || typeof settings !== "object" || Array.isArray(settings)) return settings;
+  const result = { ...settings };
+  for (const [key, descriptor] of Object.entries(schema || {})) {
+    if (descriptor?.secret !== true || !Object.prototype.hasOwnProperty.call(result, key)) continue;
+    const value = result[key];
+    result[key] = value === null || value === undefined || value === "" ? null : "[redacted]";
+  }
+  return result;
+}
+
+function pluginSurfaceDescriptor(plugin) {
+  const surface = plugin?.surface || {};
+  return Object.freeze({
+    settings: plugin?.manifest?.settings || Object.freeze({}),
+    readableSettings: typeof surface.readSettings === "function",
+    writableSettings: typeof surface.updateSettings === "function",
+    hasStatus: typeof surface.status === "function"
   });
 }
 
@@ -262,10 +293,52 @@ function createPluginHost({ services = {}, storageAdapter = null, logger = conso
   }
 
   function listPlugins() {
-    return [...registry.values()].map(plugin => ({ ...plugin.manifest, commands: plugin.commands.map(command => command.name) }));
+    return [...registry.values()].map(plugin => ({
+      ...plugin.manifest,
+      commands: plugin.commands.map(command => command.name),
+      surface: pluginSurfaceDescriptor(plugin)
+    }));
   }
 
-  return Object.freeze({ dispatch, dispatchTo, listPlugins, register, runCommand, start, stop });
+  async function getPluginSurface(pluginId, eventContext = {}) {
+    if (!started) throw new Error("PLUGIN_HOST_NOT_STARTED");
+    const plugin = registry.get(String(pluginId || ""));
+    if (!plugin) throw new Error("PLUGIN_NOT_FOUND:" + String(pluginId || ""));
+    const surface = plugin.surface || {};
+    const ctx = makeContext(plugin, "surface", null, eventContext);
+    const rawSettings = typeof surface.readSettings === "function"
+      ? boundedSurfaceValue(await surface.readSettings(ctx), "settings")
+      : null;
+    const status = typeof surface.status === "function"
+      ? boundedSurfaceValue(await surface.status(ctx), "status")
+      : null;
+    const settings = rawSettings === null ? null : redactSecretSettings(plugin.manifest.settings, rawSettings);
+    return Object.freeze({
+      plugin: Object.freeze({
+        id: plugin.manifest.id,
+        name: plugin.manifest.name,
+        version: plugin.manifest.version,
+        apiVersion: plugin.manifest.apiVersion,
+        official: plugin.manifest.official === true
+      }),
+      descriptor: pluginSurfaceDescriptor(plugin),
+      settings: settings === null ? null : Object.freeze(settings),
+      status: status === null ? null : Object.freeze(status)
+    });
+  }
+
+  async function updatePluginSettings(pluginId, input = {}, eventContext = {}) {
+    if (!started) throw new Error("PLUGIN_HOST_NOT_STARTED");
+    const plugin = registry.get(String(pluginId || ""));
+    if (!plugin) throw new Error("PLUGIN_NOT_FOUND:" + String(pluginId || ""));
+    if (typeof plugin.surface?.updateSettings !== "function") throw new Error("PLUGIN_SETTINGS_READ_ONLY:" + plugin.manifest.id);
+    const payload = boundedSurfaceValue(input, "settings_update");
+    const ctx = makeContext(plugin, "surface", payload, eventContext);
+    await plugin.surface.updateSettings(ctx, payload);
+    return getPluginSurface(plugin.manifest.id, eventContext);
+  }
+
+  return Object.freeze({ dispatch, dispatchTo, getPluginSurface, listPlugins, register, runCommand, start, stop, updatePluginSettings });
 }
 
-export { createPluginHost, createScopedLogger, pluginHasCapability, sanitizeMessageForPlugin };
+export { PLUGIN_SURFACE_MAX_BYTES, boundedSurfaceValue, createPluginHost, createScopedLogger, pluginHasCapability, pluginSurfaceDescriptor, redactSecretSettings, sanitizeMessageForPlugin };
