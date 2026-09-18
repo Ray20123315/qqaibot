@@ -91,3 +91,11 @@ GEMINI_LIVE_MODEL = "models/gemini-3.1-flash-live-preview"
 
 [observability]
 enabled = false
+
+
+# QQAI v3 runtime bridge (disabled by default).
+V3_RUNTIME_ENABLED = "false"
+V3_BILIBILI_ENABLED = "false"
+V3_BILIBILI_CREATORS_JSON = "[]"
+V3_BILIBILI_POLL_INTERVAL_MS = "120000"
+V3_PLUGIN_ADMIN_IDS = ""
