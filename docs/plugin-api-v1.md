@@ -70,3 +70,10 @@ The host exposes `getPluginSurface(pluginId, eventContext)` and `updatePluginSet
 A plugin must explicitly set `manifest.publicStatus: true` and implement `surface.publicStatus(ctx)` before any state can be exposed to an unauthenticated public-status aggregator. The public callback is separate from the authenticated management `surface.status(ctx)` callback so plugins can omit operational errors, actor IDs, secrets, or internal configuration.
 
 The host exposes `getPluginPublicStatus(pluginId)`. Public aggregation code should only call plugins whose manifest and surface descriptor both opt in.
+
+
+## V3 runtime bootstrap
+
+`createV3Runtime(env, options)` is the lifecycle boundary above the Host Adapter. It assembles explicitly configured official plugins plus caller-supplied plugins, starts the host exactly once, exposes plugin surfaces/public status, and runs the centralized Plugin Scheduler.
+
+`getV3Runtime(env, options)` caches one started runtime per Worker `env` object. The first creation fixes the plugin set for that runtime instance; importing the module alone has no side effects. The official Bilibili plugin is not enabled unless `options.official.bilibili` is supplied.
