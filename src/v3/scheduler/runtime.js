@@ -1,4 +1,5 @@
 const PLUGIN_SCHEDULER_INDEX_KEY = "plugin_scheduler:index";
+const PLUGIN_SCHEDULER_DUE_KEY = "plugin_scheduler:due";
 const PLUGIN_SCHEDULER_RECORD_PREFIX = "plugin_scheduler:job:";
 const DEFAULT_MIN_INTERVAL_MS = 60_000;
 const DEFAULT_MAX_INTERVAL_MS = 30 * 24 * 60 * 60 * 1000;
@@ -141,6 +142,21 @@ function publicJob(record) {
   });
 }
 
+function normalizeDueIndex(value) {
+  const rows = Array.isArray(value) ? value : [];
+  const map = new Map();
+  for (const row of rows) {
+    const id = String(row?.id || "").trim();
+    const nextRunAt = nullableNumber(row?.nextRunAt);
+    if (!id || nextRunAt === null) continue;
+    const previous = map.get(id);
+    if (previous === undefined || nextRunAt < previous) map.set(id, nextRunAt);
+  }
+  return [...map.entries()]
+    .map(([id, nextRunAt]) => Object.freeze({ id, nextRunAt }))
+    .sort((a, b) => a.nextRunAt - b.nextRunAt || a.id.localeCompare(b.id));
+}
+
 function nextIntervalRun(record, now) {
   const interval = Number(record.intervalMs || 0);
   if (!Number.isFinite(interval) || interval < DEFAULT_MIN_INTERVAL_MS) return null;
@@ -175,6 +191,55 @@ function createPluginScheduler(storage, options = {}) {
 
   async function getRecord(id) {
     return readJson(storage, schedulerRecordKey(id), null);
+  }
+
+  async function writeDueIndex(rows) {
+    const normalized = normalizeDueIndex(rows);
+    await writeJson(storage, PLUGIN_SCHEDULER_DUE_KEY, normalized);
+    return normalized;
+  }
+
+  async function readDueIndex({ repair = false } = {}) {
+    const raw = await storage.get(PLUGIN_SCHEDULER_DUE_KEY);
+    if (raw !== null && raw !== undefined && raw !== "") {
+      let value = raw;
+      if (typeof raw !== "object") {
+        try { value = JSON.parse(String(raw)); } catch { value = []; }
+      }
+      return normalizeDueIndex(value);
+    }
+    if (!repair) return [];
+    const index = await readIndex();
+    const rows = [];
+    for (const id of index) {
+      const record = await getRecord(id);
+      if (!record || !record.enabled || record.status !== "active") continue;
+      const nextRunAt = nullableNumber(record.nextRunAt);
+      if (nextRunAt === null) continue;
+      rows.push({ id: String(record.id || id), nextRunAt });
+    }
+    return writeDueIndex(rows);
+  }
+
+  async function upsertDueEntry(id, nextRunAt) {
+    const jobId = String(id || "");
+    const time = nullableNumber(nextRunAt);
+    const due = await readDueIndex({ repair: false });
+    const rows = due.filter(row => row.id !== jobId);
+    if (jobId && time !== null) rows.push({ id: jobId, nextRunAt: time });
+    await writeDueIndex(rows);
+  }
+
+  async function removeDueEntry(id) {
+    return upsertDueEntry(id, null);
+  }
+
+  async function syncDueRecord(record) {
+    if (record?.enabled === true && record?.status === "active" && nullableNumber(record?.nextRunAt) !== null) {
+      await upsertDueEntry(record.id, record.nextRunAt);
+    } else if (record?.id) {
+      await removeDueEntry(record.id);
+    }
   }
 
   async function list(pluginId, query = {}) {
@@ -224,6 +289,7 @@ function createPluginScheduler(storage, options = {}) {
     };
     await writeJson(storage, schedulerRecordKey(id), record);
     await writeJson(storage, PLUGIN_SCHEDULER_INDEX_KEY, [...index, id]);
+    await upsertDueEntry(id, record.nextRunAt);
     return publicJob(record);
   }
 
@@ -247,6 +313,7 @@ function createPluginScheduler(storage, options = {}) {
     record.leaseToken = "";
     record.updatedAt = new Date(now).toISOString();
     await writeJson(storage, schedulerRecordKey(id), record);
+    await removeDueEntry(id);
     return publicJob(record);
   }
 
@@ -254,13 +321,29 @@ function createPluginScheduler(storage, options = {}) {
     if (typeof execute !== "function") throw new PluginSchedulerError("PLUGIN_SCHEDULER_EXECUTOR_REQUIRED");
     const now = Number(runOptions.now ?? nowProvider());
     const limit = clampInteger(runOptions.limit, 50, 1, 200);
-    const index = await readIndex();
+    const dueIndex = await readDueIndex({ repair: true });
+    const candidates = dueIndex.filter(row => row.nextRunAt <= now).slice(0, limit);
     const due = [];
-    for (const id of index) {
-      const record = await getRecord(id);
-      if (!record || !record.enabled || record.status !== "active") continue;
-      if (Number(record.leaseUntil || 0) > now) continue;
-      if (!Number.isFinite(Number(record.nextRunAt)) || Number(record.nextRunAt) > now) continue;
+    for (const entry of candidates) {
+      const record = await getRecord(entry.id);
+      if (!record || !record.enabled || record.status !== "active") {
+        await removeDueEntry(entry.id);
+        continue;
+      }
+      const nextRunAt = nullableNumber(record.nextRunAt);
+      if (nextRunAt === null) {
+        await removeDueEntry(record.id);
+        continue;
+      }
+      const leaseUntil = Number(record.leaseUntil || 0);
+      if (leaseUntil > now) {
+        await upsertDueEntry(record.id, Math.max(nextRunAt, leaseUntil));
+        continue;
+      }
+      if (nextRunAt > now) {
+        await upsertDueEntry(record.id, nextRunAt);
+        continue;
+      }
       due.push(record);
     }
     due.sort((a, b) => Number(a.nextRunAt || 0) - Number(b.nextRunAt || 0));
@@ -272,6 +355,7 @@ function createPluginScheduler(storage, options = {}) {
       record.leaseUntil = now + leaseMs;
       record.updatedAt = new Date(now).toISOString();
       await writeJson(storage, schedulerRecordKey(record.id), record);
+      await upsertDueEntry(record.id, record.leaseUntil);
       const event = Object.freeze({
         jobId: String(record.id),
         name: String(record.name),
@@ -306,6 +390,7 @@ function createPluginScheduler(storage, options = {}) {
           fresh.retryForRunAt = null;
         }
         await writeJson(storage, schedulerRecordKey(fresh.id), fresh);
+        await syncDueRecord(fresh);
         results.push(Object.freeze({ id: fresh.id, pluginId: fresh.pluginId, ok: true, value, job: publicJob(fresh) }));
       } catch (error) {
         const fresh = await getRecord(record.id);
@@ -328,13 +413,14 @@ function createPluginScheduler(storage, options = {}) {
           fresh.nextRunAt = now + backoffs[Math.min(fresh.failureCount - 1, backoffs.length - 1)];
         }
         await writeJson(storage, schedulerRecordKey(fresh.id), fresh);
+        await syncDueRecord(fresh);
         results.push(Object.freeze({ id: fresh.id, pluginId: fresh.pluginId, ok: false, error: fresh.lastError, job: publicJob(fresh) }));
       }
     }
     return Object.freeze(results);
   }
 
-  return Object.freeze({ cancel, create, get, list, runDue });
+  return Object.freeze({ cancel, create, get, list, readDueIndex, runDue });
 }
 
 export {
@@ -346,10 +432,12 @@ export {
   DEFAULT_MIN_INTERVAL_MS,
   DEFAULT_PAYLOAD_BYTES,
   MAX_FAILURES,
+  PLUGIN_SCHEDULER_DUE_KEY,
   PLUGIN_SCHEDULER_INDEX_KEY,
   PLUGIN_SCHEDULER_RECORD_PREFIX,
   PluginSchedulerError,
   createPluginScheduler,
+  normalizeDueIndex,
   normalizeScheduleInput,
   nullableNumber,
   publicJob,

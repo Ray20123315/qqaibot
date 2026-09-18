@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { definePlugin } from "./src/plugins/api.js";
 import { createV3HostAdapter } from "./src/v3/host/adapter.js";
-import { createPluginScheduler } from "./src/v3/scheduler/runtime.js";
+import { PLUGIN_SCHEDULER_DUE_KEY, createPluginScheduler } from "./src/v3/scheduler/runtime.js";
 
 function memoryStorage(map = new Map()) {
   return {
@@ -50,6 +50,9 @@ const intervalAfter = await scheduler.get("plugin.b", intervalB.id);
 assert.equal(intervalAfter.status, "active");
 assert.equal(intervalAfter.runCount, 1);
 assert.equal(intervalAfter.nextRunAt, now + 61_000);
+const dueAfterRun = JSON.parse(directDb.map.get(PLUGIN_SCHEDULER_DUE_KEY));
+assert.equal(dueAfterRun.some(row => row.id === onceA.id), false, "completed jobs must leave due index");
+assert.equal(dueAfterRun.find(row => row.id === intervalB.id).nextRunAt, now + 61_000);
 
 const retry = await scheduler.create("plugin.a", { name: "retry", delayMs: 2000, payload: { retry: true } });
 const retryResult = await scheduler.runDue(async (pluginId, event) => {
@@ -62,6 +65,47 @@ const retryAfter = await scheduler.get("plugin.a", retry.id);
 assert.equal(retryAfter.failureCount, 1);
 assert.equal(retryAfter.status, "active");
 assert.equal(retryAfter.nextRunAt, now + 62_500);
+
+// Empty cron ticks must read the due index only, not every future job record.
+{
+  const map = new Map();
+  const reads = [];
+  const adapter = {
+    async get(key) { reads.push(key); return map.has(key) ? map.get(key) : null; },
+    async put(key, value) { map.set(key, value); },
+    async del(key) { map.delete(key); }
+  };
+  const farFuture = now + 24 * 60 * 60 * 1000;
+  map.set(PLUGIN_SCHEDULER_DUE_KEY, JSON.stringify(Array.from({ length: 200 }, (_, index) => ({ id: "future-" + index, nextRunAt: farFuture + index }))));
+  for (let index = 0; index < 200; index += 1) {
+    map.set("plugin_scheduler:job:future-" + index, JSON.stringify({ id: "future-" + index, pluginId: "plugin.future", enabled: true, status: "active", nextRunAt: farFuture + index }));
+  }
+  const dueOnly = createPluginScheduler(adapter, { nowProvider: () => now });
+  const result = await dueOnly.runDue(async () => { throw new Error("must not execute"); }, { now });
+  assert.equal(result.length, 0);
+  assert.equal(reads.filter(key => key === PLUGIN_SCHEDULER_DUE_KEY).length, 1);
+  assert.equal(reads.some(key => key.startsWith("plugin_scheduler:job:")), false, "empty tick must not read future job rows");
+  assert.equal(reads.includes("plugin_scheduler:index"), false, "existing due index must avoid global index reads");
+}
+
+// Missing due index gets a one-time repair from the legacy global index, then future empty ticks stay cheap.
+{
+  const map = new Map();
+  const reads = [];
+  const adapter = {
+    async get(key) { reads.push(key); return map.has(key) ? map.get(key) : null; },
+    async put(key, value) { map.set(key, value); },
+    async del(key) { map.delete(key); }
+  };
+  map.set("plugin_scheduler:index", JSON.stringify(["repair-1"]));
+  map.set("plugin_scheduler:job:repair-1", JSON.stringify({ id: "repair-1", pluginId: "plugin.repair", enabled: true, status: "active", nextRunAt: now + 60000 }));
+  const repaired = createPluginScheduler(adapter, { nowProvider: () => now });
+  await repaired.runDue(async () => null, { now });
+  assert(map.has(PLUGIN_SCHEDULER_DUE_KEY), "first run must persist repaired due index");
+  reads.length = 0;
+  await repaired.runDue(async () => null, { now });
+  assert.deepEqual(reads, [PLUGIN_SCHEDULER_DUE_KEY], "second empty tick must read only due index");
+}
 
 // Host integration: only the owning plugin receives its cron event.
 now = 1_900_000_000_000;

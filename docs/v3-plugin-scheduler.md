@@ -58,6 +58,7 @@ Plugin jobs use exact D1/KV-style keys:
 
 ```text
 plugin_scheduler:index
+plugin_scheduler:due
 plugin_scheduler:job:<job-id>
 ```
 
@@ -83,3 +84,12 @@ A lease token is written before execution. A stale completion cannot overwrite a
 `createV3HostAdapter()` exposes `runDuePluginJobs(options)`. This calls the scheduler runtime and performs a targeted `host.dispatchTo(pluginId, "cron", event)`.
 
 This foundation step does **not** connect `runDuePluginJobs()` to the production Cloudflare Worker scheduled handler. Production execution remains disabled until the v3 bootstrap/cutover phase explicitly wires and validates that entrypoint.
+
+
+## D1 row-read guard
+
+`runDue()` no longer walks the global job index on every cron tick. `plugin_scheduler:due` stores only job IDs plus their next-run timestamps in one exact-key row. A normal minute with no due jobs reads that single row and does not fetch any job records.
+
+When upgrading from an older v3 scheduler state that has jobs but no due index, the first `runDue()` performs a one-time repair from `plugin_scheduler:index` and persists the due index. Subsequent empty ticks stay at one exact-key read. Create/cancel/retry/completion keep the due index synchronized.
+
+`plugin_scheduler:index` remains for management operations such as list/limits; it is no longer the cron execution scan path.
