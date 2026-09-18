@@ -292,6 +292,7 @@ function createV3HostAdapter(env, {
 
   return Object.freeze({
     dispatchOneBotEvent,
+    getPluginPublicStatus: host.getPluginPublicStatus,
     getPluginSurface: host.getPluginSurface,
     host,
     listPlugins: host.listPlugins,

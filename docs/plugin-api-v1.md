@@ -63,3 +63,10 @@ Plugin API v1 includes a host-owned management surface for Portal and diagnostic
 Supported setting descriptor types are `string`, `number`, `boolean`, `select`, and `json`. The host bounds serialized surface values to 64 KiB, rejects non-serializable output, and redacts top-level settings marked `secret: true` before returning them to a management client.
 
 The host exposes `getPluginSurface(pluginId, eventContext)` and `updatePluginSettings(pluginId, input, eventContext)`. These calls still execute inside the normal capability-scoped plugin context and never reveal the raw Worker `env`. Authentication/authorization belongs to the caller plus any plugin-specific validation; the Bilibili official plugin retains its admin allowlist for mutations.
+
+
+## Public plugin status
+
+A plugin must explicitly set `manifest.publicStatus: true` and implement `surface.publicStatus(ctx)` before any state can be exposed to an unauthenticated public-status aggregator. The public callback is separate from the authenticated management `surface.status(ctx)` callback so plugins can omit operational errors, actor IDs, secrets, or internal configuration.
+
+The host exposes `getPluginPublicStatus(pluginId)`. Public aggregation code should only call plugins whose manifest and surface descriptor both opt in.

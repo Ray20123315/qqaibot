@@ -94,6 +94,7 @@ function normalizePluginManifest(input) {
     author,
     minQQAI,
     official: source.official === true,
+    publicStatus: source.publicStatus === true,
     capabilities: Object.freeze(capabilities),
     settings
   });

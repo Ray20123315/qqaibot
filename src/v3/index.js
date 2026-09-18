@@ -5,3 +5,4 @@ export * from "./host/index.js";
 export * from "./scheduler/index.js";
 export * from "./shadow/index.js";
 export * from "./canary/index.js";
+export * from "./public/index.js";

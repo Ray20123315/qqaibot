@@ -367,6 +367,46 @@ function createBilibiliLivePlugin(options = {}) {
     }
   }
 
+  async function readSurfaceStatus(ctx, publicView = false) {
+    const config = await readConfig(ctx);
+    const snapshot = await ctx.storage.get("snapshot", { checkedAt: null, byUid: {}, transitions: [] });
+    const health = await ctx.storage.get("health", { ok: true, consecutiveFailures: 0, lastSuccessAt: null });
+    const rows = effectiveSnapshot(config, snapshot, health);
+    const state = !config.creators.length ? "DISABLED" : (health?.ok === false || health?.partial === true) ? "DEGRADED" : "OK";
+    const base = {
+      state,
+      provider: "bilibili",
+      creatorCount: config.creators.length,
+      checkedAt: snapshot?.checkedAt || null,
+      stale: health?.ok === false || health?.partial === true
+    };
+    if (!publicView) return { ...base, rows, health };
+    return {
+      ...base,
+      rows: rows.map(row => ({
+        uid: row.uid,
+        available: row.available,
+        live: row.live,
+        rotating: row.rotating,
+        statusCode: row.statusCode,
+        roomId: row.roomId,
+        title: row.title,
+        creatorName: row.creatorName,
+        online: row.online,
+        areaName: row.areaName,
+        cover: row.cover,
+        keyframe: row.keyframe,
+        liveStartedAt: row.liveStartedAt,
+        url: row.url,
+        checkedAt: row.checkedAt,
+        mode: row.mode,
+        source: row.source,
+        providerLive: row.providerLive,
+        stale: row.stale
+      }))
+    };
+  }
+
   function assertAdmin(ctx) {
     if (!ctx.userId || !adminUserIds.has(String(ctx.userId))) throw new Error("BILIBILI_LIVE_ADMIN_REQUIRED");
   }
@@ -380,6 +420,7 @@ function createBilibiliLivePlugin(options = {}) {
       description: "Webhook-free Bilibili live-status polling with AUTO/FORCE fallback state.",
       author: "QQAI",
       official: true,
+      publicStatus: true,
       capabilities: ["network", "storage", "scheduler"],
       settings: {
         creators: {
@@ -470,20 +511,10 @@ function createBilibiliLivePlugin(options = {}) {
         return next;
       },
       async status(ctx) {
-        const config = await readConfig(ctx);
-        const snapshot = await ctx.storage.get("snapshot", { checkedAt: null, byUid: {}, transitions: [] });
-        const health = await ctx.storage.get("health", { ok: true, consecutiveFailures: 0, lastSuccessAt: null });
-        const rows = effectiveSnapshot(config, snapshot, health);
-        const state = !config.creators.length ? "DISABLED" : health?.ok === false ? "DEGRADED" : "OK";
-        return {
-          state,
-          provider: "bilibili",
-          creatorCount: config.creators.length,
-          checkedAt: snapshot?.checkedAt || null,
-          stale: health?.ok === false || health?.partial === true,
-          rows,
-          health
-        };
+        return readSurfaceStatus(ctx, false);
+      },
+      async publicStatus(ctx) {
+        return readSurfaceStatus(ctx, true);
       }
     },
     async onLoad(ctx) {

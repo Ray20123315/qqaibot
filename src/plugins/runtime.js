@@ -94,7 +94,8 @@ function pluginSurfaceDescriptor(plugin) {
     settings: plugin?.manifest?.settings || Object.freeze({}),
     readableSettings: typeof surface.readSettings === "function",
     writableSettings: typeof surface.updateSettings === "function",
-    hasStatus: typeof surface.status === "function"
+    hasStatus: typeof surface.status === "function",
+    hasPublicStatus: plugin?.manifest?.publicStatus === true && typeof surface.publicStatus === "function"
   });
 }
 
@@ -327,6 +328,16 @@ function createPluginHost({ services = {}, storageAdapter = null, logger = conso
     });
   }
 
+  async function getPluginPublicStatus(pluginId) {
+    if (!started) throw new Error("PLUGIN_HOST_NOT_STARTED");
+    const plugin = registry.get(String(pluginId || ""));
+    if (!plugin) throw new Error("PLUGIN_NOT_FOUND:" + String(pluginId || ""));
+    if (plugin.manifest.publicStatus !== true) throw new Error("PLUGIN_PUBLIC_STATUS_DISABLED:" + plugin.manifest.id);
+    if (typeof plugin.surface?.publicStatus !== "function") throw new Error("PLUGIN_PUBLIC_STATUS_MISSING:" + plugin.manifest.id);
+    const ctx = makeContext(plugin, "public_status", null, {});
+    return Object.freeze(boundedSurfaceValue(await plugin.surface.publicStatus(ctx), "public_status"));
+  }
+
   async function updatePluginSettings(pluginId, input = {}, eventContext = {}) {
     if (!started) throw new Error("PLUGIN_HOST_NOT_STARTED");
     const plugin = registry.get(String(pluginId || ""));
@@ -338,7 +349,7 @@ function createPluginHost({ services = {}, storageAdapter = null, logger = conso
     return getPluginSurface(plugin.manifest.id, eventContext);
   }
 
-  return Object.freeze({ dispatch, dispatchTo, getPluginSurface, listPlugins, register, runCommand, start, stop, updatePluginSettings });
+  return Object.freeze({ dispatch, dispatchTo, getPluginPublicStatus, getPluginSurface, listPlugins, register, runCommand, start, stop, updatePluginSettings });
 }
 
 export { PLUGIN_SURFACE_MAX_BYTES, boundedSurfaceValue, createPluginHost, createScopedLogger, pluginHasCapability, pluginSurfaceDescriptor, redactSecretSettings, sanitizeMessageForPlugin };

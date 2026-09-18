@@ -19,7 +19,7 @@ function normalizePluginCommand(command) {
 function normalizePluginSurface(input) {
   const source = input && typeof input === "object" && !Array.isArray(input) ? input : {};
   const result = {};
-  for (const name of ["readSettings", "updateSettings", "status"]) {
+  for (const name of ["readSettings", "updateSettings", "status", "publicStatus"]) {
     if (source[name] === undefined) continue;
     if (typeof source[name] !== "function") throw new Error("PLUGIN_SURFACE_INVALID:" + name);
     result[name] = source[name];
