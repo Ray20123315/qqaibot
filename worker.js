@@ -17,6 +17,7 @@ import { MASTER_RELATIONSHIP_DEFAULTS, MASTER_RELATIONSHIP_MAX_LEVEL, clearPartn
 import { appendPortalConversationRecord, applyConversationOutputGuards, auditIgnoredRobotMessage, botInteractionAllowKey, buildReplyPlan, cacheBotSenderClassification, clearRegisteredThinkingIndicators, detectLiteralPseudoElementLabels, eventHasBotMention, eventMentionedQqs, eventPlainText, eventSenderDisplayName, eventSenderRobotHint, extractFileDescriptors, extractForwardIds, extractMediaDescriptor, extractMessageText, extractOutboundMediaTypes, extractTextMentionIds, filterRobotMentionIds, formatForwardContext, getForwardMessageSnapshot, getQuotedMessage, getTaipeiTimeContext, isExplicitCurrentTimeQuestion, isExplicitRoleplayRequest, isGroupRobotInteractionAllowed, isIgnoredGroupRobotSender, isStandaloneCurrentTimeQuestion, looksLikeRobotDisplayName, normalizeFileDescriptor, parseDurationSeconds, prepareConversationHistory, purgeLegacyBotRepliesFromRecentLogs, qqaiTruthyRobotFlag, recordStructuredMessage, registerThinkingIndicator, removeTextMentionTokens, resolveOneBotMediaAsBase64, runOneBotGroupOperation, sanitizeAiReply, sendThinkingIndicator, thinkingIndicatorRegistryKey } from "./src/onebot/messages.js";
 import { classifyCollaborationNaturalIntent, classifyNaturalLanguageCommandIntent, normalizeNaturalLanguageCommandText, opsGetGroupMember, opsGetSettings, opsHandleActivityCommand, opsHandleMemberLeave, opsProcessAutomations } from "./src/operations/runtime.js";
 import { processPlatformJobs } from "./src/platform/runtime.js";
+import { pluginExecutionStatus } from "./src/plugins/runtime.js";
 import { authDbDelStrict, authDbGetStrict, authDbPutStrict, clearPasswordLoginGuard, commandChangesWebSettings, constantTimeEqual, createPortalPasswordRecord, createPortalSession, decryptPortalAuthSecret, deleteMemoryVector, generateSixDigitCode, getOneBotHub, getPortalSession, getPublicNebulaSeed, hashBackupCode, isMemoryBanned, isValidPortalPasswordRecord, jsonResponse, markGroupMemberLeft, notePasswordLoginFailure, portalSessionCookie, readCookie, readJson, readPasswordLoginGuard, readPortalAuthJson, sendOneBotAction, sendOneBotHttpAction, sendPortalVerificationMessage, upsertGroupMember, upsertMemoryVector, validatePortalPassword, verifyPortalPassword, verifyPortalVerificationCode, verifyTotpCode, writeMemoryAudit, writeSystemError } from "./src/portal/auth.js";
 import { getLiveHtmlPage, getPortalHomePage, handleGeminiLiveUpgrade, handlePortalApi } from "./src/portal/runtime.js";
 import { injectPortalLayoutClient } from "./src/portal/layout.js";
@@ -185,7 +186,8 @@ const QQAIWorker = {
     }
 
     if (request.method === 'GET' && ['/health', '/healthz'].includes(url.pathname)) {
-      return jsonResponse(await buildHealthState(env));
+      const health = await buildHealthState(env);
+      return jsonResponse({ ...health, plugins: pluginExecutionStatus(env) });
     }
 
     if (request.method === 'GET' && url.pathname === '/api/public/nebula') {
