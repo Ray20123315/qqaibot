@@ -86,3 +86,14 @@ The v3 Portal Plugin Manager is a developer-authenticated management client over
 Routes live under `/api/portal/v3/plugins`. Listing and detail reads use `listPlugins()` / `getPluginSurface()`. Settings updates use `updatePluginSettings()` after a generic schema/type/read-only validation layer, then the plugin's own authorization and normalization still run.
 
 The Portal route is developer-only. When `V3_RUNTIME_ENABLED` is false, the list route reports the disabled state without starting V3 or performing V3 D1 work; mutation routes return a conflict response. Secret setting values remain redacted by the host.
+
+
+## Persistent Plugin Lifecycle
+
+V3 persists lifecycle metadata in one exact key: `plugin_lifecycle:registry:v1`. The registry tracks installed/available state, desired state, effective state (`enabled | disabled | blocked`), plugin/API/QQAI compatibility, requested permissions and granted permissions.
+
+The Host registers plugin definitions as candidates, while only lifecycle-enabled plugins are activated. `activate()` runs `onLoad`; `deactivate()` runs `onUnload`. Disabled or blocked plugins do not receive events or commands and are excluded from public status. Scheduled records are not prefix-scanned or deleted; when a due job belongs to an inactive plugin, the centralized scheduler advances it as an inactive skip rather than treating it as a plugin failure.
+
+Requested capabilities remain the plugin manifest contract. Granted permissions are an additional runtime gate. Because Plugin API v1 does not yet declare optional permissions, an enabled plugin missing any requested capability becomes `blocked` until the grant is restored or the plugin is disabled.
+
+Compatibility checks cover Plugin API v1 plus optional `minQQAI` and `maxQQAI` manifest bounds. Runtime activation failures are contained per plugin and persist as a blocked lifecycle record instead of crashing the V3 host.

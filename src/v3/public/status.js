@@ -30,7 +30,12 @@ async function buildV3PublicStatus(adapter, { pluginIds = null, now = Date.now()
   }
   const allow = Array.isArray(pluginIds) && pluginIds.length ? new Set(pluginIds.map(String)) : null;
   const candidates = adapter.listPlugins().filter(plugin =>
-    plugin.publicStatus === true && plugin.surface?.hasPublicStatus === true && (!allow || allow.has(String(plugin.id)))
+    plugin.active !== false
+    && plugin.lifecycle?.state !== "disabled"
+    && plugin.lifecycle?.state !== "blocked"
+    && plugin.publicStatus === true
+    && plugin.surface?.hasPublicStatus === true
+    && (!allow || allow.has(String(plugin.id)))
   );
   const entries = [];
   for (const plugin of candidates) {

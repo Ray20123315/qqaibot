@@ -69,6 +69,7 @@ function normalizePluginManifest(input) {
   const description = cleanManifestText(source.description, 500);
   const author = cleanManifestText(source.author, 120);
   const minQQAI = cleanManifestText(source.minQQAI || source.min_qqai, 80);
+  const maxQQAI = cleanManifestText(source.maxQQAI || source.max_qqai, 80);
 
   if (!PLUGIN_ID_PATTERN.test(id)) throw new Error("PLUGIN_MANIFEST_INVALID_ID");
   if (!name) throw new Error("PLUGIN_MANIFEST_MISSING_NAME");
@@ -93,6 +94,7 @@ function normalizePluginManifest(input) {
     description,
     author,
     minQQAI,
+    maxQQAI,
     official: source.official === true,
     publicStatus: source.publicStatus === true,
     capabilities: Object.freeze(capabilities),

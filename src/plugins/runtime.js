@@ -99,13 +99,32 @@ function pluginSurfaceDescriptor(plugin) {
   });
 }
 
-function createPluginHost({ services = {}, storageAdapter = null, logger = console } = {}) {
+function createPluginHost({ services = {}, storageAdapter = null, logger = console, capabilityGrants = null } = {}) {
   const registry = new Map();
   const commandIndex = new Map();
+  const activePluginIds = new Set();
+  const grantMap = new Map();
   let started = false;
 
+  if (capabilityGrants instanceof Map) {
+    for (const [id, values] of capabilityGrants.entries()) grantMap.set(String(id || ""), new Set(Array.isArray(values) ? values.map(String) : []));
+  } else if (capabilityGrants && typeof capabilityGrants === "object") {
+    for (const [id, values] of Object.entries(capabilityGrants)) grantMap.set(String(id || ""), new Set(Array.isArray(values) ? values.map(String) : []));
+  }
+
+  function grantedCapabilities(plugin) {
+    const requested = new Set(plugin?.manifest?.capabilities || []);
+    const configured = grantMap.get(plugin?.manifest?.id);
+    if (!configured) return requested;
+    return new Set([...configured].filter(value => requested.has(value)));
+  }
+
+  function hasCapability(plugin, capability) {
+    return pluginHasCapability(plugin, capability) && grantedCapabilities(plugin).has(capability);
+  }
+
   function assertCapability(plugin, capability) {
-    if (!pluginHasCapability(plugin, capability)) {
+    if (!hasCapability(plugin, capability)) {
       throw new Error(`PLUGIN_CAPABILITY_DENIED:${plugin.manifest.id}:${capability}`);
     }
   }
@@ -137,8 +156,8 @@ function createPluginHost({ services = {}, storageAdapter = null, logger = conso
     });
     const messageEvent = MESSAGE_EVENT_NAMES.has(eventName);
     const sourceMessage = eventContext.message || (payload?.schemaVersion === 1 && Array.isArray(payload?.parts) ? payload : null);
-    const readableMessage = pluginHasCapability(plugin, "message.read")
-      ? sanitizeMessageForPlugin(sourceMessage, { allowMedia: pluginHasCapability(plugin, "media.read") })
+    const readableMessage = hasCapability(plugin, "message.read")
+      ? sanitizeMessageForPlugin(sourceMessage, { allowMedia: hasCapability(plugin, "media.read") })
       : null;
     const visiblePayload = messageEvent ? readableMessage : payload;
 
@@ -228,6 +247,7 @@ function createPluginHost({ services = {}, storageAdapter = null, logger = conso
     const id = plugin.manifest.id;
     if (registry.has(id)) throw new Error(`PLUGIN_DUPLICATE:${id}`);
     registry.set(id, plugin);
+    if (!grantMap.has(id)) grantMap.set(id, new Set(plugin.manifest.capabilities || []));
     for (const command of plugin.commands) {
       for (const name of [command.name, ...command.aliases]) {
         if (commandIndex.has(name)) throw new Error(`PLUGIN_COMMAND_CONFLICT:${name}`);
@@ -237,11 +257,59 @@ function createPluginHost({ services = {}, storageAdapter = null, logger = conso
     return plugin;
   }
 
-  async function start() {
+  function setCapabilityGrants(pluginId, values = []) {
+    const id = String(pluginId || "");
+    const plugin = registry.get(id);
+    if (!plugin) throw new Error(`PLUGIN_NOT_FOUND:${id}`);
+    const requested = new Set(plugin.manifest.capabilities || []);
+    const grants = new Set((Array.isArray(values) ? values : []).map(String).filter(value => requested.has(value)));
+    grantMap.set(id, grants);
+    return Object.freeze([...grants].sort());
+  }
+
+  function isActive(pluginId) {
+    return activePluginIds.has(String(pluginId || ""));
+  }
+
+  async function activate(pluginId) {
+    if (!started) throw new Error("PLUGIN_HOST_NOT_STARTED");
+    const id = String(pluginId || "");
+    const plugin = registry.get(id);
+    if (!plugin) throw new Error(`PLUGIN_NOT_FOUND:${id}`);
+    if (activePluginIds.has(id)) return false;
+    if (typeof plugin.onLoad === "function") await plugin.onLoad(makeContext(plugin, "load", null));
+    activePluginIds.add(id);
+    return true;
+  }
+
+  async function deactivate(pluginId) {
+    if (!started) throw new Error("PLUGIN_HOST_NOT_STARTED");
+    const id = String(pluginId || "");
+    const plugin = registry.get(id);
+    if (!plugin) throw new Error(`PLUGIN_NOT_FOUND:${id}`);
+    if (!activePluginIds.has(id)) return false;
+    try {
+      if (typeof plugin.onUnload === "function") await plugin.onUnload(makeContext(plugin, "unload", null));
+    } finally {
+      activePluginIds.delete(id);
+    }
+    return true;
+  }
+
+  async function start(options = {}) {
     if (started) return;
     started = true;
-    for (const plugin of registry.values()) {
-      if (typeof plugin.onLoad === "function") await plugin.onLoad(makeContext(plugin, "load", null));
+    const explicit = Array.isArray(options?.enabledPluginIds) ? new Set(options.enabledPluginIds.map(String)) : null;
+    try {
+      for (const plugin of registry.values()) {
+        if (!explicit || explicit.has(plugin.manifest.id)) await activate(plugin.manifest.id);
+      }
+    } catch (error) {
+      for (const id of [...activePluginIds].reverse()) {
+        try { await deactivate(id); } catch {}
+      }
+      started = false;
+      throw error;
     }
   }
 
@@ -249,10 +317,13 @@ function createPluginHost({ services = {}, storageAdapter = null, logger = conso
     if (!started) throw new Error("PLUGIN_HOST_NOT_STARTED");
     const plugin = registry.get(String(pluginId || ""));
     if (!plugin) throw new Error(`PLUGIN_NOT_FOUND:${String(pluginId || "")}`);
+    if (!activePluginIds.has(plugin.manifest.id)) {
+      return { handled: false, inactive: true, pluginId: plugin.manifest.id, eventName, results: [] };
+    }
     const specificHook = PLUGIN_EVENT_HOOKS[eventName];
     if (!specificHook) throw new Error(`PLUGIN_EVENT_UNKNOWN:${eventName}`);
     const messageEvent = MESSAGE_EVENT_NAMES.has(eventName);
-    if (messageEvent && !pluginHasCapability(plugin, "message.read")) {
+    if (messageEvent && !hasCapability(plugin, "message.read")) {
       return { handled: false, pluginId: plugin.manifest.id, eventName, results: [] };
     }
     const ctx = makeContext(plugin, eventName, payload, eventContext);
@@ -270,6 +341,7 @@ function createPluginHost({ services = {}, storageAdapter = null, logger = conso
     if (!PLUGIN_EVENT_HOOKS[eventName]) throw new Error(`PLUGIN_EVENT_UNKNOWN:${eventName}`);
     const results = [];
     for (const plugin of registry.values()) {
+      if (!activePluginIds.has(plugin.manifest.id)) continue;
       const dispatched = await dispatchTo(plugin.manifest.id, eventName, payload, eventContext);
       results.push(...dispatched.results);
     }
@@ -280,6 +352,7 @@ function createPluginHost({ services = {}, storageAdapter = null, logger = conso
     if (!started) throw new Error("PLUGIN_HOST_NOT_STARTED");
     const entry = commandIndex.get(String(name || "").trim().toLowerCase());
     if (!entry) return { handled: false };
+    if (!activePluginIds.has(entry.plugin.manifest.id)) return { handled: false, inactive: true, pluginId: entry.plugin.manifest.id };
     const ctx = makeContext(entry.plugin, "command", input, eventContext);
     const result = await entry.command.run(ctx, input);
     return { handled: true, pluginId: entry.plugin.manifest.id, command: entry.command.name, result };
@@ -287,8 +360,8 @@ function createPluginHost({ services = {}, storageAdapter = null, logger = conso
 
   async function stop() {
     if (!started) return;
-    for (const plugin of [...registry.values()].reverse()) {
-      if (typeof plugin.onUnload === "function") await plugin.onUnload(makeContext(plugin, "unload", null));
+    for (const id of [...activePluginIds].reverse()) {
+      try { await deactivate(id); } catch (error) { logger?.warn?.("[plugin-host] unload failed", id, String(error?.message || error).slice(0, 240)); }
     }
     started = false;
   }
@@ -297,7 +370,10 @@ function createPluginHost({ services = {}, storageAdapter = null, logger = conso
     return [...registry.values()].map(plugin => ({
       ...plugin.manifest,
       commands: plugin.commands.map(command => command.name),
-      surface: pluginSurfaceDescriptor(plugin)
+      surface: pluginSurfaceDescriptor(plugin),
+      active: activePluginIds.has(plugin.manifest.id),
+      requestedCapabilities: Object.freeze([...(plugin.manifest.capabilities || [])]),
+      grantedCapabilities: Object.freeze([...grantedCapabilities(plugin)].sort())
     }));
   }
 
@@ -332,6 +408,7 @@ function createPluginHost({ services = {}, storageAdapter = null, logger = conso
     if (!started) throw new Error("PLUGIN_HOST_NOT_STARTED");
     const plugin = registry.get(String(pluginId || ""));
     if (!plugin) throw new Error("PLUGIN_NOT_FOUND:" + String(pluginId || ""));
+    if (!activePluginIds.has(plugin.manifest.id)) throw new Error("PLUGIN_INACTIVE:" + plugin.manifest.id);
     if (plugin.manifest.publicStatus !== true) throw new Error("PLUGIN_PUBLIC_STATUS_DISABLED:" + plugin.manifest.id);
     if (typeof plugin.surface?.publicStatus !== "function") throw new Error("PLUGIN_PUBLIC_STATUS_MISSING:" + plugin.manifest.id);
     const ctx = makeContext(plugin, "public_status", null, {});
@@ -349,7 +426,7 @@ function createPluginHost({ services = {}, storageAdapter = null, logger = conso
     return getPluginSurface(plugin.manifest.id, eventContext);
   }
 
-  return Object.freeze({ dispatch, dispatchTo, getPluginPublicStatus, getPluginSurface, listPlugins, register, runCommand, start, stop, updatePluginSettings });
+  return Object.freeze({ activate, deactivate, dispatch, dispatchTo, getPluginPublicStatus, getPluginSurface, isActive, listPlugins, register, runCommand, setCapabilityGrants, start, stop, updatePluginSettings });
 }
 
 export { PLUGIN_SURFACE_MAX_BYTES, boundedSurfaceValue, createPluginHost, createScopedLogger, pluginHasCapability, pluginSurfaceDescriptor, redactSecretSettings, sanitizeMessageForPlugin };

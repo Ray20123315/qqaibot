@@ -4,3 +4,4 @@ export { normalizePluginManifest } from "./manifest.js";
 export { createPluginHost } from "./runtime.js";
 export { createPluginStorage, pluginStorageDatabaseKey } from "./storage.js";
 export { OFFICIAL_BUNDLED_PLUGINS } from "./official/index.js";
+export { PLUGIN_LIFECYCLE_REGISTRY_KEY, PLUGIN_LIFECYCLE_SCHEMA_VERSION, PLUGIN_LIFECYCLE_STATES, compareSemver, createPluginLifecycleRegistry, normalizePermissions, parseSemver, pluginCompatibility } from "./lifecycle.js";

@@ -1,3 +1,5 @@
+import { VERSION } from "../../config/runtime.js";
+import { createPluginLifecycleRegistry } from "../../plugins/lifecycle.js";
 import { callGeminiGenerate, effectiveRuntimeModels, geminiVisionApiKeys, googleApiKeysFor, parseList } from "../../ai/runtime.js";
 import { callOneBotAction } from "../../core/permissions.js";
 import { dbDel, dbGet, dbPut } from "../../data/store.js";
@@ -165,7 +167,8 @@ function createV3HostAdapter(env, {
   plugins = [],
   logger = console,
   dependencies = {},
-  allowedOneBotActions = DEFAULT_PLUGIN_ONEBOT_ACTIONS
+  allowedOneBotActions = DEFAULT_PLUGIN_ONEBOT_ACTIONS,
+  defaultEnabledPluginIds = null
 } = {}) {
   if (!env || typeof env !== "object") throw new Error("V3_HOST_ENV_REQUIRED");
   const onebotCall = dependencies.onebotCall || ((action, params, timeoutMs) => callOneBotAction(env, { action, params }, timeoutMs));
@@ -185,6 +188,12 @@ function createV3HostAdapter(env, {
   const onebotAllowlist = new Set((allowedOneBotActions || []).map(value => String(value || "").trim()).filter(Boolean));
   const storageAdapter = Object.freeze({ get: deps.dbGet, put: deps.dbPut, del: deps.dbDel });
   const pluginScheduler = dependencies.scheduler || createPluginScheduler(storageAdapter, dependencies.schedulerOptions || {});
+  const pluginLifecycle = dependencies.pluginLifecycle || createPluginLifecycleRegistry(storageAdapter, {
+    qqaiVersion: String(dependencies.qqaiVersion || VERSION),
+    nowProvider: dependencies.lifecycleNowProvider || Date.now
+  });
+  let lifecycleRecords = new Map();
+  let adapterStarted = false;
   let recordCapability = null;
 
   async function ensureRecordCapability(parts) {
@@ -269,6 +278,77 @@ function createV3HostAdapter(env, {
   const host = createPluginHost({ services, storageAdapter, logger });
   for (const plugin of plugins) host.register(plugin);
 
+  function lifecycleMap(snapshot) {
+    return new Map(Object.entries(snapshot?.plugins || {}));
+  }
+
+  async function applyLifecycleRecord(record, actorId = "") {
+    if (!record) return null;
+    host.setCapabilityGrants(record.id, record.grantedPermissions || []);
+    lifecycleRecords.set(record.id, record);
+    if (!adapterStarted) return record;
+    if (record.state === "enabled") {
+      try {
+        await host.activate(record.id);
+        return record;
+      } catch (error) {
+        const blocked = await pluginLifecycle.markRuntimeBlocked(record.id, String(error?.message || error), actorId);
+        lifecycleRecords.set(record.id, blocked);
+        try { await host.deactivate(record.id); } catch {}
+        logger?.error?.("[v3-host] plugin activation blocked", record.id, String(error?.message || error).slice(0, 240));
+        return blocked;
+      }
+    }
+    try { await host.deactivate(record.id); } catch (error) {
+      logger?.warn?.("[v3-host] plugin deactivation failed", record.id, String(error?.message || error).slice(0, 240));
+    }
+    return record;
+  }
+
+  async function start() {
+    if (adapterStarted) return;
+    const defaults = Array.isArray(defaultEnabledPluginIds) ? defaultEnabledPluginIds : plugins.map(plugin => plugin.manifest.id);
+    const snapshot = await pluginLifecycle.reconcile(plugins, { defaultEnabledPluginIds: defaults });
+    lifecycleRecords = lifecycleMap(snapshot);
+    for (const plugin of plugins) {
+      const record = lifecycleRecords.get(plugin.manifest.id);
+      host.setCapabilityGrants(plugin.manifest.id, record?.grantedPermissions || []);
+    }
+    await host.start({ enabledPluginIds: [] });
+    adapterStarted = true;
+    for (const record of lifecycleRecords.values()) {
+      if (record.available && record.state === "enabled") await applyLifecycleRecord(record);
+    }
+  }
+
+  async function stop() {
+    if (!adapterStarted) return;
+    await host.stop();
+    adapterStarted = false;
+  }
+
+  function listPlugins() {
+    return host.listPlugins().map(plugin => Object.freeze({ ...plugin, lifecycle: lifecycleRecords.get(plugin.id) || null }));
+  }
+
+  function getPluginLifecycle(pluginId) {
+    return lifecycleRecords.get(String(pluginId || "")) || null;
+  }
+
+  async function setPluginEnabled(pluginId, enabled, eventContext = {}) {
+    if (!adapterStarted) await start();
+    const actorId = String(eventContext?.userId || eventContext?.actorId || "");
+    const record = await pluginLifecycle.setEnabled(pluginId, Boolean(enabled), actorId);
+    return applyLifecycleRecord(record, actorId);
+  }
+
+  async function setPluginPermissions(pluginId, permissions = [], eventContext = {}) {
+    if (!adapterStarted) await start();
+    const actorId = String(eventContext?.userId || eventContext?.actorId || "");
+    const record = await pluginLifecycle.setGrantedPermissions(pluginId, permissions, actorId);
+    return applyLifecycleRecord(record, actorId);
+  }
+
   async function dispatchOneBotEvent(body = {}) {
     const postType = String(body?.post_type || "");
     if (postType === "message" || postType === "message_sent") {
@@ -284,6 +364,7 @@ function createV3HostAdapter(env, {
 
   async function runDuePluginJobs(options = {}) {
     return pluginScheduler.runDue(async (pluginId, event) => {
+      if (!host.isActive(pluginId)) return Object.freeze({ skipped: "plugin_inactive", pluginId });
       const dispatched = await host.dispatchTo(pluginId, "cron", event, { pluginId });
       if (!dispatched.handled) throw new Error(`PLUGIN_CRON_HANDLER_MISSING:${pluginId}`);
       return dispatched.results;
@@ -292,16 +373,20 @@ function createV3HostAdapter(env, {
 
   return Object.freeze({
     dispatchOneBotEvent,
+    getPluginLifecycle,
     getPluginPublicStatus: host.getPluginPublicStatus,
     getPluginSurface: host.getPluginSurface,
     host,
-    listPlugins: host.listPlugins,
+    listPlugins,
+    pluginLifecycle,
     pluginScheduler,
     register: host.register,
     runCommand: host.runCommand,
     runDuePluginJobs,
-    start: host.start,
-    stop: host.stop,
+    setPluginEnabled,
+    setPluginPermissions,
+    start,
+    stop,
     updatePluginSettings: host.updatePluginSettings
   });
 }
