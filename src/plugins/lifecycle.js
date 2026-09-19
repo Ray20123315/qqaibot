@@ -108,7 +108,7 @@ function desiredRecord(existing, manifest, { qqaiVersion, defaultEnabled = true,
   return Object.freeze(next);
 }
 
-function createPluginLifecycleRegistry(storageAdapter, { qqaiVersion = "0.0.0", nowProvider = Date.now } = {}) {
+function createPluginLifecycleRegistry(storageAdapter, { qqaiVersion = "0.0.0", nowProvider = Date.now, persist = true } = {}) {
   if (!storageAdapter || typeof storageAdapter.get !== "function" || typeof storageAdapter.put !== "function") throw new Error("PLUGIN_LIFECYCLE_STORAGE_INVALID");
   let cached = null;
 
@@ -130,7 +130,7 @@ function createPluginLifecycleRegistry(storageAdapter, { qqaiVersion = "0.0.0", 
       updatedAt: Number(next.updatedAt || nowProvider()),
       plugins: Object.freeze({ ...(next.plugins || {}) })
     });
-    await storageAdapter.put(PLUGIN_LIFECYCLE_REGISTRY_KEY, JSON.stringify(frozen));
+    if (persist) await storageAdapter.put(PLUGIN_LIFECYCLE_REGISTRY_KEY, JSON.stringify(frozen));
     cached = frozen;
     return frozen;
   }

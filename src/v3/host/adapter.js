@@ -190,7 +190,8 @@ function createV3HostAdapter(env, {
   const pluginScheduler = dependencies.scheduler || createPluginScheduler(storageAdapter, dependencies.schedulerOptions || {});
   const pluginLifecycle = dependencies.pluginLifecycle || createPluginLifecycleRegistry(storageAdapter, {
     qqaiVersion: String(dependencies.qqaiVersion || VERSION),
-    nowProvider: dependencies.lifecycleNowProvider || Date.now
+    nowProvider: dependencies.lifecycleNowProvider || Date.now,
+    persist: dependencies.lifecyclePersist !== false
   });
   let lifecycleRecords = new Map();
   let adapterStarted = false;

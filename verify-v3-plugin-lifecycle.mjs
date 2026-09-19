@@ -44,6 +44,16 @@ await assert.rejects(() => secondRegistry.setGrantedPermissions("test.lifecycle"
 assert.equal(pluginCompatibility(lifecyclePlugin.manifest, "3.0.0").ok, true);
 assert.equal(pluginCompatibility(futurePlugin.manifest, "3.0.0").ok, false);
 
+let volatileWrites = 0;
+const volatile = createPluginLifecycleRegistry({
+  async get() { return null; },
+  async put() { volatileWrites += 1; },
+  async del() {}
+}, { qqaiVersion: "3.0.0", persist: false });
+const volatileState = await volatile.reconcile([lifecyclePlugin]);
+assert.equal(volatileState.plugins["test.lifecycle"].state, "enabled");
+assert.equal(volatileWrites, 0, "non-persistent lifecycle must not write side effects");
+
 let loads = 0, unloads = 0, commands = 0;
 const runtimePlugin = definePlugin({
   manifest: { id: "test.runtime-life", name: "Runtime Lifecycle", version: "1.0.0", apiVersion: "1", capabilities: ["storage"] },

@@ -74,7 +74,8 @@ function readOnlyDependencies() {
     aiChat: blocked,
     aiVision: blocked,
     aiTts: null,
-    schedulerCreate: null
+    schedulerCreate: null,
+    lifecyclePersist: false
   });
 }
 
