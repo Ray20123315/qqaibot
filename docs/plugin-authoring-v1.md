@@ -104,3 +104,18 @@ Approval is **not** runtime execution. External JS remains blocked until a sandb
 - Unknown/untrusted/revoked/out-of-scope keys fail closed.
 - Artifact bytes are never stored in D1 by quarantine.
 - Signature validity does not grant plugin capabilities; runtime permissions remain a separate lifecycle gate.
+
+
+## Portal workflow for your own plugin
+
+The developer-only V3 package panel now includes **Self-made / External Plugins**.
+
+1. Paste/import the author's Ed25519 **public JWK** and assign a key ID.
+2. Optionally scope that key to specific plugin IDs.
+3. Paste the signed `qqai-distribution.json`.
+4. QQAI downloads the artifact through the public-URL network guard, revalidating manual redirects and refusing local/private destinations.
+5. Signature, declared byte size and SHA-256 must all pass before the record enters quarantine.
+6. A developer can approve, reject or delete the quarantine metadata.
+7. Revoking the author key immediately prevents future packages signed by that key from being verified.
+
+Approval remains a review state only. The current same-Worker runtime never evals/imports this external JavaScript.

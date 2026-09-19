@@ -73,3 +73,10 @@ The Worker routes `/api/portal/v3/packages...` before the generic Portal API and
 Third-party/self-made plugins are a first-class distribution source. They use author-owned Ed25519 signatures rather than an official-only signing key. The developer trust store can trust/revoke public keys and optionally scope a key to specific plugin IDs.
 
 External artifact acquisition is quarantined: signature, HTTPS URL/ref, size, media type and SHA-256 must all verify before metadata is stored. Artifact bytes are not persisted and no code is evaluated during quarantine.
+
+
+## Portal external/self-made quarantine
+
+The package manager now exposes developer-only author trust and quarantine operations under the existing `/api/portal/v3/packages` namespace. Public keys and quarantine metadata use exact-key storage; artifact bytes live only in request memory during verification.
+
+External downloads reuse the project's manual-redirect public URL guard, so every redirect target is revalidated rather than blindly followed. No authentication headers are forwarded to external plugin hosts.
