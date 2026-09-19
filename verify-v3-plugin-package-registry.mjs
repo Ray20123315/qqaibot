@@ -81,8 +81,10 @@ const updateTxId = committed.transaction.id;
 const rolled = await registry.rollback(updateTxId, { actorId: "42" });
 assert.equal(rolled.package.descriptor.version, "1.0.0");
 
+const artifactC = new TextEncoder().encode("c");
+const descriptorC = await descriptor("plugin.c", "1.0.0", artifactC);
 await assert.rejects(
-  () => registry.stageInstall(await descriptor("plugin.c", "1.0.0", new TextEncoder().encode("c")), { artifact: new TextEncoder().encode("c"), actorId: "42" }),
+  () => registry.stageInstall(descriptorC, { artifact: artifactC, actorId: "42" }),
   /PLUGIN_PACKAGE_CANDIDATE_NOT_BUNDLED/
 );
 
