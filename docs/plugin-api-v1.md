@@ -77,3 +77,12 @@ The host exposes `getPluginPublicStatus(pluginId)`. Public aggregation code shou
 `createV3Runtime(env, options)` is the lifecycle boundary above the Host Adapter. It assembles explicitly configured official plugins plus caller-supplied plugins, starts the host exactly once, exposes plugin surfaces/public status, and runs the centralized Plugin Scheduler.
 
 `getV3Runtime(env, options)` caches one started runtime per Worker `env` object. The first creation fixes the plugin set for that runtime instance; importing the module alone has no side effects. The official Bilibili plugin is not enabled unless `options.official.bilibili` is supplied.
+
+
+## Portal Plugin Manager
+
+The v3 Portal Plugin Manager is a developer-authenticated management client over the generic Plugin Surface. It does not read plugin storage directly and does not receive raw Worker `env`.
+
+Routes live under `/api/portal/v3/plugins`. Listing and detail reads use `listPlugins()` / `getPluginSurface()`. Settings updates use `updatePluginSettings()` after a generic schema/type/read-only validation layer, then the plugin's own authorization and normalization still run.
+
+The Portal route is developer-only. When `V3_RUNTIME_ENABLED` is false, the list route reports the disabled state without starting V3 or performing V3 D1 work; mutation routes return a conflict response. Secret setting values remain redacted by the host.

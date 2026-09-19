@@ -29,6 +29,7 @@ import { handleWerewolfOneBotEvent, injectWerewolfPortalClient, processWerewolfT
 import { buildHelpText } from "./src/help/commands.js";
 import { fetchPublicUrl, getFeatureFlag, getPrivateAccessMode, isGroupWhitelisted, numericId, verifyOneBotAccess } from "./src/security/network.js";
 import { handleV3RuntimeFetch, runV3RuntimeScheduled } from "./src/v3/runtime/bridge.js";
+import { handleV3PluginManagerApi, injectV3PluginManagerClient } from "./src/v3/portal/plugin-manager.js";
 
 
 const POLITICAL_TOPIC_PATTERN = /(?:政治|政党|政黨|选举|選舉|总统|總統|主席|国会|國會|立法院|立法委员|立法委員|立委|议员|議員|首相|总理|總理|内阁|內閣|政府|政权|政權|执政|執政|在野|政治人物|政治制度|公共政策|外交|制裁|领土争议|領土爭議|两岸|兩岸|统一|統一|台独|台獨|罢免|罷免|公投|意识形态|意識形態|民进党|民進黨|国民党|國民黨|共产党|共產黨|民主党|民主黨|共和党|共和黨|\b(?:politics|political|election|government|parliament|congress|president|prime minister)\b)/i;
@@ -170,7 +171,7 @@ const QQAIWorker = {
     // 🌌 公共首頁與記憶矩陣中心
     // ==========================================
     if (request.method === 'GET' && ['/', '/portal', '/matrix'].includes(url.pathname)) {
-      const portalHtml = injectPortalLayoutClient(injectWerewolfPortalClient(injectPortalMembersClient(injectDeploymentPortalClient(toSimplifiedChinese(getPortalHomePage(url.host))))));
+      const portalHtml = injectPortalLayoutClient(injectV3PluginManagerClient(injectWerewolfPortalClient(injectPortalMembersClient(injectDeploymentPortalClient(toSimplifiedChinese(getPortalHomePage(url.host)))))));
       return new Response(portalHtml, {
         headers: { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store" }
       });
@@ -210,6 +211,9 @@ const QQAIWorker = {
       if (!session) return jsonResponse({ ok: false, message: '请先登录 Portal。' }, 401);
       return jsonResponse(await getDeploymentStatusForViewer(env, session));
     }
+
+    const v3PluginManagerResponse = await handleV3PluginManagerApi(request, env, url);
+    if (v3PluginManagerResponse) return v3PluginManagerResponse;
 
     if (url.pathname.startsWith('/api/portal/')) {
       return handlePortalApi(request, env, url);

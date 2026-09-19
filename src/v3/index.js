@@ -7,3 +7,4 @@ export * from "./shadow/index.js";
 export * from "./canary/index.js";
 export * from "./public/index.js";
 export * from "./runtime/index.js";
+export * from "./portal/index.js";
