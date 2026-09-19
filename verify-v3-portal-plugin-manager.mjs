@@ -58,6 +58,50 @@ assert.equal(payload.pluginCount, 1);
 assert.equal(payload.plugins[0].id, "official.bilibili-live");
 assert.equal(payload.plugins[0].settings.pollintervalms, 120000);
 assert.equal(payload.plugins[0].surface.writableSettings, true);
+assert.equal(payload.plugins[0].active, true);
+assert.equal(payload.plugins[0].lifecycle.state, "enabled");
+assert.deepEqual(payload.plugins[0].requestedPermissions, ["network", "scheduler", "storage"]);
+assert.deepEqual(payload.plugins[0].grantedPermissions, ["network", "scheduler", "storage"]);
+
+response = await handleV3PluginManagerApi(
+  new Request("https://example.com/api/portal/v3/plugins/official.bilibili-live/state", {
+    method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ enabled: false })
+  }), env, null, options
+);
+assert.equal(response.status, 200);
+payload = await response.json();
+assert.equal(payload.plugin.lifecycle.state, "disabled");
+assert.equal(payload.plugin.active, false);
+
+response = await handleV3PluginManagerApi(
+  new Request("https://example.com/api/portal/v3/plugins/official.bilibili-live/permissions", {
+    method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ permissions: ["storage", "scheduler"] })
+  }), env, null, options
+);
+assert.equal(response.status, 200);
+payload = await response.json();
+assert.equal(payload.plugin.lifecycle.state, "disabled");
+assert.deepEqual(payload.plugin.lifecycle.missingPermissions, ["network"]);
+
+response = await handleV3PluginManagerApi(
+  new Request("https://example.com/api/portal/v3/plugins/official.bilibili-live/state", {
+    method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ enabled: true })
+  }), env, null, options
+);
+assert.equal(response.status, 200);
+payload = await response.json();
+assert.equal(payload.plugin.lifecycle.state, "blocked");
+assert.equal(payload.plugin.active, false);
+
+response = await handleV3PluginManagerApi(
+  new Request("https://example.com/api/portal/v3/plugins/official.bilibili-live/permissions", {
+    method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ permissions: ["network", "scheduler", "storage"] })
+  }), env, null, options
+);
+assert.equal(response.status, 200);
+payload = await response.json();
+assert.equal(payload.plugin.lifecycle.state, "enabled");
+assert.equal(payload.plugin.active, true);
 
 response = await handleV3PluginManagerApi(
   new Request("https://example.com/api/portal/v3/plugins/official.bilibili-live/settings", {
@@ -107,6 +151,9 @@ assert.match(injected, /id="v3PluginManagerNav"/);
 assert.match(injected, /id="v-v3plugins"/);
 assert.match(injected, /qqai-v3-plugin-manager-style/);
 assert.match(injected, /qqai-v3-plugin-manager-client/);
+assert.match(injected, /qqai-v3-plugin-lifecycle-style/);
+assert.match(injected, /data-v3-toggle/);
+assert.match(injected, /data-v3-permission/);
 assert.equal(injectV3PluginManagerClient(injected), injected, "Portal injection must be idempotent");
 
 const workerSource = fs.readFileSync("worker.js", "utf8");

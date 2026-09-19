@@ -36,3 +36,21 @@ The first proof plugin remains `official.bilibili-live`. Its poll interval and c
 ## Current lifecycle scope
 
 This phase manages plugins that are already assembled into the V3 runtime. Install/update/uninstall and persistent enable/disable lifecycle are intentionally the next platform layer; they are not faked by editing Cloudflare environment variables from the Portal.
+
+
+## Lifecycle controls
+
+The same developer-only Plugin Manager now exposes persistent lifecycle controls backed by `plugin_lifecycle:registry:v1`:
+
+- enable / disable immediately activates or deactivates the live Host plugin
+- requested and granted permissions are shown separately
+- removing a required Plugin API v1 capability blocks and deactivates a desired-enabled plugin
+- restoring the required grants automatically re-activates it when compatible
+- compatibility and block reason are visible in the plugin card
+
+Routes:
+
+- `POST|PATCH|PUT /api/portal/v3/plugins/:pluginId/state`
+- `POST|PATCH|PUT /api/portal/v3/plugins/:pluginId/permissions`
+
+Lifecycle audit records contain plugin ID, state, and permission names only. They never store plugin setting values or secret values.

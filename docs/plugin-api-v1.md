@@ -97,3 +97,6 @@ The Host registers plugin definitions as candidates, while only lifecycle-enable
 Requested capabilities remain the plugin manifest contract. Granted permissions are an additional runtime gate. Because Plugin API v1 does not yet declare optional permissions, an enabled plugin missing any requested capability becomes `blocked` until the grant is restored or the plugin is disabled.
 
 Compatibility checks cover Plugin API v1 plus optional `minQQAI` and `maxQQAI` manifest bounds. Runtime activation failures are contained per plugin and persist as a blocked lifecycle record instead of crashing the V3 host.
+
+
+Portal lifecycle management uses the same developer-authenticated manager. State and permission changes call `setPluginEnabled()` and `setPluginPermissions()` on the V3 runtime; the Portal does not mutate the lifecycle D1 row directly.
