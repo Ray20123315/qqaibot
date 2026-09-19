@@ -201,10 +201,7 @@ function createPluginPackageRegistry(storageAdapter, { qqaiVersion = "0.0.0", tr
     return record?.state === "installed" ? record : null;
   }
 
-  async function stageInstall(input, { artifact, actorId = "" } = {}) {
-    const descriptor = normalizePluginPackageDescriptor(input);
-    assertTrusted(descriptor.id);
-    const integrity = await verifyPluginPackageIntegrity(descriptor, artifact);
+  async function stagePreparedInstall(descriptor, integrity, actorId = "") {
     const compatibility = validateCompatibility(descriptor);
     const state = await read();
     const dependencyCheck = validateDependencies(descriptor, state.packages, { targetId: descriptor.id, targetVersion: descriptor.version });
@@ -231,6 +228,30 @@ function createPluginPackageRegistry(storageAdapter, { qqaiVersion = "0.0.0", tr
     const staged = { ...(state.staged || {}), [id]: transaction };
     await write({ ...state, staged, updatedAt: now });
     return transaction;
+  }
+
+  async function stageInstall(input, { artifact, actorId = "" } = {}) {
+    const descriptor = normalizePluginPackageDescriptor(input);
+    assertTrusted(descriptor.id);
+    const integrity = await verifyPluginPackageIntegrity(descriptor, artifact);
+    return stagePreparedInstall(descriptor, integrity, actorId);
+  }
+
+  async function stageTrustedInstall(input, { verifiedHash, actorId = "" } = {}) {
+    const descriptor = normalizePluginPackageDescriptor(input);
+    assertTrusted(descriptor.id);
+    const hash = String(verifiedHash || "").trim().toLowerCase();
+    if (!/^[0-9a-f]{64}$/.test(hash)) throw new Error("PLUGIN_PACKAGE_TRUSTED_HASH_INVALID");
+    if (descriptor.integrity !== "sha256:" + hash) throw new Error("PLUGIN_PACKAGE_TRUSTED_HASH_MISMATCH");
+    const integrity = Object.freeze({
+      ok: true,
+      algorithm: "sha256",
+      hash,
+      integrity: descriptor.integrity,
+      scope: "bundled-source",
+      preverified: true
+    });
+    return stagePreparedInstall(descriptor, integrity, actorId);
   }
 
   async function stageUninstall(pluginId, { actorId = "" } = {}) {
@@ -331,7 +352,7 @@ function createPluginPackageRegistry(storageAdapter, { qqaiVersion = "0.0.0", tr
     return true;
   }
 
-  return Object.freeze({ cancelStaged, commit, get, list, read, rollback, stageInstall, stageUninstall });
+  return Object.freeze({ cancelStaged, commit, get, list, read, rollback, stageInstall, stageTrustedInstall, stageUninstall });
 }
 
 export {

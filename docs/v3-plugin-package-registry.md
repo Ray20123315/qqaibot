@@ -32,3 +32,20 @@ Required/validated fields include:
 5. Staged transactions expire after 15 minutes.
 
 Install/update/uninstall hooks are deliberately absent. Runtime code execution remains a later trust/sandbox concern.
+
+
+## Trusted bundled catalog and Portal API
+
+The first trusted catalog entry is the already-bundled official Bilibili plugin. Its catalog record includes the source path and a SHA-256 that is verified in CI against the actual repository source file.
+
+The Portal package manager uses strict exact-key D1 reads/writes for `plugin_packages:lock:v1` and does not depend on the V3 runtime being enabled.
+
+Developer-only routes:
+
+- `GET /api/portal/v3/packages`
+- `POST /api/portal/v3/packages/:pluginId/stage` with `install | update | uninstall`
+- `POST /api/portal/v3/packages/transactions/:id/commit`
+- `DELETE /api/portal/v3/packages/transactions/:id`
+- `POST /api/portal/v3/packages/history/:id/rollback`
+
+The API deliberately reports `runtimeCodeLoaded: null`. A committed package record means metadata is registered and integrity metadata is verified; it does not mean runtime code was dynamically loaded. Bundled runtime activation remains a separate lifecycle operation.

@@ -111,3 +111,12 @@ This foundation does **not** load arbitrary JavaScript. A package can only commi
 A package descriptor includes plugin identity/version/API bounds, entry path, requested permissions, dependencies/optional dependencies, and mandatory `sha256:<hex>` artifact integrity. Staging verifies artifact bytes, Plugin API / QQAI compatibility, forward dependencies, and reverse dependency safety before any installed lock record changes.
 
 Staged transactions expire after 15 minutes. Commit persists only descriptor/hash/verification metadata, never package bytes. Update/uninstall commits retain bounded rollback history. No install hooks are executed during validation or commit.
+
+
+## Trusted Bundled Package Catalog
+
+V3 now has a trusted bundled catalog separate from the generic package registry. Catalog entries point to plugin code already present in the current Worker build and carry a build-verified source SHA-256. CI re-hashes the declared source file and fails if the catalog hash is stale.
+
+Portal package transactions may use `stageTrustedInstall()`, which accepts only IDs already present in `trustedCandidateIds` and requires the descriptor integrity to equal the build-verified source SHA-256. This path does not accept arbitrary third-party JavaScript.
+
+The developer-only package API lives under `/api/portal/v3/packages` and manages only package metadata transactions. It does not start the V3 runtime, load JavaScript, or change lifecycle activation automatically.
