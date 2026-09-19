@@ -89,5 +89,10 @@ IMAGEN_MODELS = ""
 GEMINI_TTS_MODELS = "gemini-3.1-flash-tts-preview,gemini-2.5-flash-preview-tts"
 GEMINI_LIVE_MODEL = "models/gemini-3.1-flash-live-preview"
 
+# Optional: sandboxed external plugins require Cloudflare Dynamic Workers (Workers Paid).
+# Uncomment only after confirming the production account supports Dynamic Workers.
+# [[worker_loaders]]
+# binding = "PLUGIN_LOADER"
+
 [observability]
 enabled = false
