@@ -120,3 +120,12 @@ V3 now has a trusted bundled catalog separate from the generic package registry.
 Portal package transactions may use `stageTrustedInstall()`, which accepts only IDs already present in `trustedCandidateIds` and requires the descriptor integrity to equal the build-verified source SHA-256. This path does not accept arbitrary third-party JavaScript.
 
 The developer-only package API lives under `/api/portal/v3/packages` and manages only package metadata transactions. It does not start the V3 runtime, load JavaScript, or change lifecycle activation automatically.
+
+
+## Self-made / External Plugin Distribution
+
+Plugin API v1 is not limited to official plugins. External authors own their own Ed25519 key pair and sign a canonical distribution envelope that binds the normalized package descriptor, capabilities/dependencies, immutable artifact URL/ref, byte size, SHA-256 and publisher key ID.
+
+QQAI stores only author **public** keys in `plugin_trust:authors:v1`. Private JWK material is rejected. A public key may be scoped to one or more plugin IDs and can be revoked without changing the package ID.
+
+Verified external packages enter `plugin_quarantine:registry:v1`. QQAI persists verification metadata only; downloaded artifact bytes are discarded. Verified or approved quarantine state does not imply runtime loading or capability grants.

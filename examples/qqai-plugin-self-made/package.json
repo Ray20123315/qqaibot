@@ -1,0 +1,14 @@
+{
+  "name": "qqai-plugin-self-made-hello",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "echo \"Replace with your bundler; output dist/index.js\"",
+    "qqai:keygen": "node ../../tools/qqai-plugin-author.mjs keygen --out .qqai-author",
+    "qqai:sign": "echo \"Run the author tool sign command after building your immutable artifact\""
+  },
+  "peerDependencies": {
+    "@qqai/plugin-sdk": "^1.0.0"
+  }
+}

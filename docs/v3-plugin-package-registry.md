@@ -66,3 +66,10 @@ The existing V3 Plugin Manager page now receives a separate trusted-package pane
 Every destructive control says `metadata` explicitly. The UI warns that committing metadata does not load/unload JavaScript and does not change Plugin Lifecycle automatically.
 
 The Worker routes `/api/portal/v3/packages...` before the generic Portal API and injects the package client only after the V3 Plugin Manager shell exists. Portal layout remains the final CSS/layout injector.
+
+
+## Self-made plugins
+
+Third-party/self-made plugins are a first-class distribution source. They use author-owned Ed25519 signatures rather than an official-only signing key. The developer trust store can trust/revoke public keys and optionally scope a key to specific plugin IDs.
+
+External artifact acquisition is quarantined: signature, HTTPS URL/ref, size, media type and SHA-256 must all verify before metadata is stored. Artifact bytes are not persisted and no code is evaluated during quarantine.
