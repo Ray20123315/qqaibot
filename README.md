@@ -46,6 +46,17 @@ Wrangler 會把所有模組打包成同一個 Worker，不需要建立第二個 
 
 優先順序通常是：Portal／群組明確設定 → Worker 公開變數 → 程式安全預設。Secrets 只提供憑證，不應被 Portal 回傳或顯示。
 
+## Self-made Plugin Execution Modes
+
+自製插件固定分成兩種執行模式，信任邊界不可自動降級：
+
+- `trusted_bundled`：只給自己或已信任作者的插件。插件先進 repo、完成 manifest／安全檢查與 regression，再納入 Worker bundle 並重新部署。這類插件視為 QQAI Core 的一部分，因此 code review 與來源信任是必要條件。
+- `sandboxed_external`：給未來 Marketplace／其他使用者提供的陌生插件。QQAI Core 不以 `eval`、`new Function` 或同程序 VM 執行，而是透過 Cloudflare Dynamic Workers 的 `PLUGIN_LOADER` 建立獨立 isolate。預設 `globalOutbound: null`，且不傳入 D1、AI、OneBot Hub、Vectorize、Rate Limiter、Secrets 或完整 `env`。
+- External sandbox 的回傳值一律當成不可信資料；目前 host 只接受受限的 `reply`、`log`、`metric` action，其他 action 會被丟棄。未來若要開放 DB、HTTP、OneBot 等能力，必須新增明確、可稽核、可限權的 host capability adapter。
+- 若 production 沒有設定 `PLUGIN_LOADER`，external 模式會 fail closed 為 `PLUGIN_SANDBOX_UNAVAILABLE`，不會退回 QQAI Core 同程序執行。Cloudflare Dynamic Workers 目前需要 Workers Paid plan。
+
+實作、manifest 與部署說明見 `src/plugins/README.md`。
+
 ## 快速部署
 
 ### 1. 準備環境
