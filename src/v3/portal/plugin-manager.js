@@ -86,7 +86,7 @@ function pluginDescriptor(runtime, pluginId) {
 function normalizePortalPluginSettings(plugin, input) {
   const source = input && typeof input === "object" && !Array.isArray(input) ? input : null;
   if (!source) throw Object.assign(new Error("PLUGIN_MANAGER_SETTINGS_OBJECT_REQUIRED"), { code: "PLUGIN_MANAGER_SETTINGS_OBJECT_REQUIRED" });
-  const schema = plugin?.settings && typeof plugin.settings === "object" ? plugin.settings : {};
+  const schema = plugin?.settings && typeof plugin.settings === "object" ? plugin.settings : (plugin?.settingsSchema && typeof plugin.settingsSchema === "object" ? plugin.settingsSchema : {});
   const result = {};
   for (const [key, raw] of Object.entries(source)) {
     const descriptor = schema[key];
