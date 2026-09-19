@@ -171,7 +171,7 @@ const QQAIWorker = {
     // 🌌 公共首頁與記憶矩陣中心
     // ==========================================
     if (request.method === 'GET' && ['/', '/portal', '/matrix'].includes(url.pathname)) {
-      const portalHtml = injectPortalLayoutClient(injectV3PluginManagerClient(injectWerewolfPortalClient(injectPortalMembersClient(injectDeploymentPortalClient(toSimplifiedChinese(getPortalHomePage(url.host)))))));
+      const portalHtml = injectPortalLayoutClient(injectWerewolfPortalClient(injectPortalMembersClient(injectV3PluginManagerClient(injectDeploymentPortalClient(toSimplifiedChinese(getPortalHomePage(url.host)))))));
       return new Response(portalHtml, {
         headers: { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store" }
       });
