@@ -49,3 +49,20 @@ Developer-only routes:
 - `POST /api/portal/v3/packages/history/:id/rollback`
 
 The API deliberately reports `runtimeCodeLoaded: null`. A committed package record means metadata is registered and integrity metadata is verified; it does not mean runtime code was dynamically loaded. Bundled runtime activation remains a separate lifecycle operation.
+
+
+## Portal package transaction UI
+
+The existing V3 Plugin Manager page now receives a separate trusted-package panel. It shows:
+
+- bundled catalog version and build-verified source SHA-256
+- package metadata installed/not-installed state
+- whether runtime code is bundled in the current Worker
+- whether the corresponding runtime candidate is configured
+- `runtimeCodeLoaded: unknown / not claimed`
+- staged transactions with explicit commit/cancel controls
+- recent committed transaction history with dependency-safe metadata rollback
+
+Every destructive control says `metadata` explicitly. The UI warns that committing metadata does not load/unload JavaScript and does not change Plugin Lifecycle automatically.
+
+The Worker routes `/api/portal/v3/packages...` before the generic Portal API and injects the package client only after the V3 Plugin Manager shell exists. Portal layout remains the final CSS/layout injector.

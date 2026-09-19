@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
-import { handleV3PackageManagerApi, listPortalPackageState } from "./src/v3/portal/package-manager.js";
+import fs from "node:fs";
+import { handleV3PackageManagerApi, injectV3PackageManagerClient, listPortalPackageState } from "./src/v3/portal/package-manager.js";
 import { trustedBundledPluginCatalog } from "./src/plugins/catalog.js";
 
 const db = new Map();
@@ -96,4 +97,19 @@ assert.equal(response.status,403);
 
 const state = await listPortalPackageState(env,overrides);
 assert.equal(state.packages[0].runtimeCandidateConfigured,false);
+
+const baseHtml = '<html><head></head><body><div id="v3PluginManagerNav"></div><div id="v3PluginRuntimeState"></div><div id="v3PluginList" class="v3-plugin-grid"></div></body></html>';
+const injected = injectV3PackageManagerClient(baseHtml);
+assert.match(injected,/qqai-v3-package-manager-style/);
+assert.match(injected,/qqai-v3-package-manager-client/);
+assert.match(injected,/Trusted Package Metadata/);
+assert.match(injected,/Stage metadata install/);
+assert.match(injected,/runtimeCodeLoaded/);
+assert.equal(injectV3PackageManagerClient(injected),injected,"package client injection must be idempotent");
+
+const worker = fs.readFileSync("worker.js","utf8");
+assert.match(worker,/handleV3PackageManagerApi/);
+assert.match(worker,/injectV3PackageManagerClient\(injectV3PluginManagerClient/);
+assert.match(worker,/const v3PackageManagerResponse = await handleV3PackageManagerApi\(request, env, url\)/);
+assert(worker.indexOf("v3PackageManagerResponse") < worker.indexOf("v3PluginManagerResponse"),"package route must run before generic plugin/portal routing");
 console.log("verify-v3-portal-package-manager: ok");
