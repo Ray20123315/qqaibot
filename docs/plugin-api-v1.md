@@ -100,3 +100,14 @@ Compatibility checks cover Plugin API v1 plus optional `minQQAI` and `maxQQAI` m
 
 
 Portal lifecycle management uses the same developer-authenticated manager. State and permission changes call `setPluginEnabled()` and `setPluginPermissions()` on the V3 runtime; the Portal does not mutate the lifecycle D1 row directly.
+
+
+## Package Registry Foundation
+
+Package installation metadata is intentionally separate from lifecycle state. The package lock uses one exact key, `plugin_packages:lock:v1`, and supports staged install/update/uninstall plus rollback metadata.
+
+This foundation does **not** load arbitrary JavaScript. A package can only commit when its ID is present in the registry's `trustedCandidateIds`, meaning code for that candidate is already bundled/reviewed by the current Worker build.
+
+A package descriptor includes plugin identity/version/API bounds, entry path, requested permissions, dependencies/optional dependencies, and mandatory `sha256:<hex>` artifact integrity. Staging verifies artifact bytes, Plugin API / QQAI compatibility, forward dependencies, and reverse dependency safety before any installed lock record changes.
+
+Staged transactions expire after 15 minutes. Commit persists only descriptor/hash/verification metadata, never package bytes. Update/uninstall commits retain bounded rollback history. No install hooks are executed during validation or commit.
