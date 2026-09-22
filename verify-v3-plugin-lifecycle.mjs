@@ -18,7 +18,7 @@ const futurePlugin = definePlugin({
   manifest: { id: "test.future", name: "Future", version: "1.0.0", apiVersion: "1", minQQAI: "99.0.0", capabilities: [] }
 });
 const optionalPlugin = definePlugin({
-  manifest: { id: "test.optional", name: "Optional Permission", version: "1.0.0", apiVersion: "1", capabilities: ["storage"] }
+  manifest: { id: "test.optional", name: "Optional Permission", version: "1.0.0", apiVersion: "1", capabilities: ["storage"], requiredCapabilities: [] }
 });
 
 const registry = createPluginLifecycleRegistry(storage, { qqaiVersion: "3.0.0", nowProvider: () => 1000 });

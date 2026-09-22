@@ -85,9 +85,13 @@ function normalizePluginManifest(input) {
     if (!known.has(capability)) throw new Error(`PLUGIN_MANIFEST_UNKNOWN_CAPABILITY:${capability}`);
   }
 
+  const requiredCapabilitiesDeclared = Object.prototype.hasOwnProperty.call(source, "requiredCapabilities")
+    || Object.prototype.hasOwnProperty.call(source, "required_capabilities");
   const requiredCapabilities = normalizeRequiredCapabilities(
     capabilities,
-    source.requiredCapabilities || source.required_capabilities || []
+    requiredCapabilitiesDeclared
+      ? (source.requiredCapabilities ?? source.required_capabilities ?? [])
+      : capabilities
   );
   const permissionDetails = normalizePermissionDetails(
     source.permissionDetails || source.permission_details || {},
