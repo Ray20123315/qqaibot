@@ -157,5 +157,5 @@ npx wrangler secret put CLOUDFLARE_BUILDS_API_TOKEN
 - 不要把 API Key、Token、初始密碼放入 `wrangler.toml [vars]`。
 - 不要在 GitHub Issue、commit message、Portal log 或 Ray_Chen memory 寫真實 Secret。
 - 不要把 `DEVELOPER_IDS` 開放給一般 Portal 使用者修改。
-- 開發者首次啟用的 username/password 直接由 `/register` 網頁建立；不要再新增 `PORTAL_DEVELOPER_USERNAME` / `PORTAL_DEVELOPER_INITIAL_PASSWORD`。
+- 開發者首次啟用的 username/password 直接由 `/register` 網頁建立；不要再新增 deploy-time 的開發者帳號／初始密碼變數。
 - 不要為了讓首頁「顯示已連接」而建立其實程式沒用到的 KV/R2；UI 預覽必須標示真實/預留狀態。
