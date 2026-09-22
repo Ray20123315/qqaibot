@@ -161,7 +161,7 @@ Cron 預設每分鐘執行，用於排程、自動化、暫存清理、主動發
 | `PUBLIC_BASE_URL` | `https://bot.example.com`；預設使用請求來源 | `!help`、Portal 與 Live 對外連結的基底網址，不加結尾 `/`。 |
 | `BOT_DISPLAY_NAME` | `QQAI` | 對外顯示名稱，供可支援的 UI／訊息使用。 |
 
-`DEVELOPER_IDS` 不屬於密碼，但它授予最高權限。不要允許一般 Portal 管理員修改，否則會形成自行提權。應由部署者在 Cloudflare 設定。開發者首次帳號名稱與密碼不再使用新增 env；直接在 `/register` 網頁建立，並以既有 V2 的部署管理 Secret 作一次性 bootstrap 證明。
+`DEVELOPER_IDS` 不屬於密碼，但它授予最高權限。不要允許一般 Portal 管理員修改，否則會形成自行提權。應由部署者在 Cloudflare 設定。開發者 Portal 帳號固定為保留名稱 `admin`；第一次到 `/register` 輸入 Developer/Root QQID 並直接設定 admin 密碼，不使用 QQ 驗證碼、`PORTAL_AUTH_SECRET` 或 OneBot Token 作登入前置條件。沒有預設 admin 密碼。
 
 ### 部署通知
 
@@ -304,7 +304,7 @@ npx wrangler secret put SECRET_NAME
 
 ### Portal
 
-Portal 入口由 `PUBLIC_BASE_URL` 或實際請求來源決定，不再固定指向維護者網站。開發者首次啟用可直接建立帳號密碼、不需 QQ 六位碼；日常登入預設只用帳號＋密碼。Portal 另包含密碼重設、群組與群友、權限、群規、通知、模型、對話、違規、申訴、活動、投票、狼人殺與系統維護。
+Portal 入口由 `PUBLIC_BASE_URL` 或實際請求來源決定，不再固定指向維護者網站。開發者首次啟用固定建立／綁定保留帳號 `admin` 並直接設定密碼，不需 QQ 六位碼；日常登入使用 `admin + 密碼`。Portal 另包含密碼重設、群組與群友、權限、群規、通知、模型、對話、違規、申訴、活動、投票、狼人殺與系統維護。
 
 ## 指令
 
