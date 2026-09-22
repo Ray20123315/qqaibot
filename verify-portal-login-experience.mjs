@@ -26,7 +26,7 @@ assert.doesNotMatch(login, /id="qqid"/i);
 assert.doesNotMatch(login, /QQID/);
 
 assert.match(register, /第一次使用：建立帳號/);
-assert.match(register, /QQID（僅首次身份驗證）/);
+assert.match(register, /開發者直接啟用（不用驗證碼）/);\nassert.match(register, /id="bootstrapKey"/);\nassert.match(register, /部署管理金鑰/);
 assert.match(register, /id="qqid"/);
 assert.match(register, /\/api\/auth\/register\/request-code/);
 assert.match(register, /\/api\/auth\/register/);
