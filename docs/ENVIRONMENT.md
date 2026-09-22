@@ -3,7 +3,7 @@
 本文件是 **目前 source 實際讀取** 的 Cloudflare bindings、公開 Worker 變數與 Secrets 對照表。  
 原則：公開設定放 `wrangler.toml [vars]`；憑證、密碼、Token、API Key 一律用 Cloudflare Secret；不要把真實值提交到 Git。
 
-> Developer Portal 帳號仍遵守「第一次必須 QQID 驗證」：`PORTAL_DEVELOPER_USERNAME` / `PORTAL_DEVELOPER_INITIAL_PASSWORD` 只鎖定第一次啟用要建立的帳密，不能繞過 QQID 六位驗證碼。
+> Developer Portal 開發者首次啟用現在直接在網頁輸入 QQID、帳號與密碼，不使用 QQ 六位驗證碼。為避免任何人搶先冒用已知開發者 QQID，首次建立開發者帳號時還要輸入一次既有 V2 的部署管理金鑰；後端只接受 `PORTAL_AUTH_SECRET` 或既有 OneBot 高權限 Secret，不新增開發者帳密 env。
 
 ## 1. Cloudflare bindings
 
@@ -28,22 +28,20 @@
 | `DEVELOPER_IDS` | public var | 必要 | 逗號/分號/換行分隔的最高開發者 QQID 清單。 |
 | `ROOT_QQ_IDS` | public var | 可選 | 額外 Root QQID，與 `DEVELOPER_IDS` 合併。 |
 | `DEVELOPER_ID` | public var | legacy | 單一開發者 QQID 相容欄位。 |
-| `PORTAL_DEVELOPER_USERNAME` | public var | 可選但建議開發者設定 | 鎖定開發者**第一次 QQID 驗證啟用**時建立的 username；不會直接登入。 |
-| `PORTAL_DEVELOPER_INITIAL_PASSWORD` | **Secret** | 與上項搭配可選 | 鎖定開發者第一次啟用時輸入的初始密碼。QQID 驗證成功後才比較；啟用後 D1 的 PBKDF2 hash 變成唯一登入依據。 |
+| 開發者 Portal username | Web / D1 | 首次啟用時設定 | 直接在 `/register` 填寫；不再使用 deploy-time username 變數。 |
+| 開發者 Portal password | Web / D1 PBKDF2 | 首次啟用時設定 | 直接在 `/register` 填寫；只保存 PBKDF2 salt/hash，不新增 deploy-time 初始密碼 Secret。 |
 
-建議設定：
+建議保留 V2 原本的部署設定：
 
 ```bash
 # wrangler.toml [vars]
 DEVELOPER_IDS = "你的QQID"
-PORTAL_DEVELOPER_USERNAME = "你的登入帳號"
 
-# Secret：不要寫進 wrangler.toml
-npx wrangler secret put PORTAL_DEVELOPER_INITIAL_PASSWORD
+# 既有 V2 Secret；同時可作第一次開發者 bootstrap 的部署管理金鑰
+npx wrangler secret put PORTAL_AUTH_SECRET
 ```
 
-第一次仍走 `/register`：QQID → 六位驗證碼 → 輸入上述 username/password → 建立 D1 帳號。之後走 `/login`。  
-**修改 `PORTAL_DEVELOPER_INITIAL_PASSWORD` 不會修改已啟用帳號密碼**；要改密碼請走復原流程。
+開發者第一次走 `/register`：輸入 `DEVELOPER_IDS` 中的 QQID → 輸入一次部署管理金鑰 → 在網頁建立 username/password → 建立 D1 帳號。**不傳送 QQ 六位驗證碼**。之後走 `/login`，預設只需 username/password；只有使用者自行啟用 2FA 時才追加第二因素。
 
 ## 3. 公開 Worker vars（source 目前有讀取）
 
@@ -127,7 +125,6 @@ URL 如果內含 credential/query secret，也要當 Secret 管理。
 
 - `PORTAL_AUTH_SECRET`：Portal 一般敏感資料加密 fallback。
 - `TOTP_ENCRYPTION_KEY`：**TOTP seed 的優先加密 key**；建議獨立設定，不與 OneBot token 共用。
-- `PORTAL_DEVELOPER_INITIAL_PASSWORD`：只用於開發者第一次驗證啟用的帳密約束，不作日常明文密碼儲存。
 
 ### Cloudflare build detail
 
@@ -144,11 +141,6 @@ npx wrangler secret put PORTAL_AUTH_SECRET
 npx wrangler secret put TOTP_ENCRYPTION_KEY
 ```
 
-若使用固定開發者初始帳密：
-
-```bash
-npx wrangler secret put PORTAL_DEVELOPER_INITIAL_PASSWORD
-```
 
 依功能再加：
 
@@ -165,4 +157,5 @@ npx wrangler secret put CLOUDFLARE_BUILDS_API_TOKEN
 - 不要把 API Key、Token、初始密碼放入 `wrangler.toml [vars]`。
 - 不要在 GitHub Issue、commit message、Portal log 或 Ray_Chen memory 寫真實 Secret。
 - 不要把 `DEVELOPER_IDS` 開放給一般 Portal 使用者修改。
+- 開發者首次啟用的 username/password 直接由 `/register` 網頁建立；不要再新增 `PORTAL_DEVELOPER_USERNAME` / `PORTAL_DEVELOPER_INITIAL_PASSWORD`。
 - 不要為了讓首頁「顯示已連接」而建立其實程式沒用到的 KV/R2；UI 預覽必須標示真實/預留狀態。
