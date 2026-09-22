@@ -68,39 +68,37 @@ async function shouldSuppressRepeatedShortReply(env, { isGroup, groupId, text, w
 }
 
 
-function developerPortalBootstrapPolicy(env, { qq = "", username = "", password = "" } = {}) {
+function developerPortalBootstrapSecrets(env) {
+  return [
+    env.PORTAL_AUTH_SECRET,
+    env.ONEBOT_ACCESS_TOKEN,
+    env.ONEBOT_HTTP_ACCESS_TOKEN,
+    env.ONEBOT_TOKEN,
+    env.NAPCAT_ACCESS_TOKEN
+  ].map(value => String(value || "").trim()).filter(value => value.length >= 16);
+}
+
+function developerPortalBootstrapPolicy(env, { qq = "", setupKey = "" } = {}) {
   if (!isDeveloperId(env, qq)) return { ok: true, enforced: false };
-  const configuredUsername = String(env.PORTAL_DEVELOPER_USERNAME || "").normalize("NFKC").trim();
-  const configuredPassword = String(env.PORTAL_DEVELOPER_INITIAL_PASSWORD || "");
-  if (!configuredUsername && !configuredPassword) return { ok: true, enforced: false };
-
-  if (configuredUsername) {
-    const expected = validatePortalUsername(configuredUsername);
-    if (!expected.ok) {
-      return { ok: false, status: 503, code: "DEVELOPER_BOOTSTRAP_CONFIG_INVALID", message: "開發者首次帳號變數格式無效，請修正 PORTAL_DEVELOPER_USERNAME。" };
-    }
-    const supplied = validatePortalUsername(username);
-    if (!supplied.ok || supplied.normalized !== expected.normalized) {
-      return { ok: false, status: 400, code: "DEVELOPER_BOOTSTRAP_CREDENTIAL_MISMATCH", message: "此開發者身份已設定固定的首次登入帳號，請使用部署者設定的帳號名稱。" };
-    }
+  const candidates = developerPortalBootstrapSecrets(env);
+  if (!candidates.length) {
+    return {
+      ok: false,
+      status: 503,
+      code: "DEVELOPER_BOOTSTRAP_SECRET_MISSING",
+      message: "開發者直接啟用需要既有 V2 的 PORTAL_AUTH_SECRET 或 OneBot 高權限 Secret；不需要另外新增開發者帳密變數。"
+    };
   }
-
-  if (configuredPassword) {
-    const expectedPassword = validatePortalPassword(configuredPassword);
-    if (!expectedPassword.ok) {
-      return { ok: false, status: 503, code: "DEVELOPER_BOOTSTRAP_CONFIG_INVALID", message: "開發者首次密碼 Secret 不符合密碼政策，請重新設定 PORTAL_DEVELOPER_INITIAL_PASSWORD。" };
-    }
-    if (!constantTimeEqual(configuredPassword, String(password || ""))) {
-      return { ok: false, status: 400, code: "DEVELOPER_BOOTSTRAP_CREDENTIAL_MISMATCH", message: "此開發者身份已設定固定的首次登入密碼，請使用部署者設定的密碼。" };
-    }
+  const supplied = String(setupKey || "");
+  if (!supplied || !candidates.some(secret => constantTimeEqual(secret, supplied))) {
+    return {
+      ok: false,
+      status: 403,
+      code: "DEVELOPER_BOOTSTRAP_SECRET_INVALID",
+      message: "部署管理金鑰錯誤，無法建立開發者帳號。"
+    };
   }
-
-  return {
-    ok: true,
-    enforced: true,
-    usernameConfigured: Boolean(configuredUsername),
-    passwordConfigured: Boolean(configuredPassword)
-  };
+  return { ok: true, enforced: true };
 }
 
 const QQAI_V1_R54_PROGRESSIVE_MULTI_ACTION_MARKER = "QQAI_V1_R54_PROGRESSIVE_MULTI_ACTION_MARKER";
@@ -280,6 +278,13 @@ const QQAIWorker = {
       if (!qq) {
         return jsonResponse({ ok: false, message: "请先输入 QQ 号。" }, 400);
       }
+      if (url.pathname.includes("/register/") && isDeveloperId(env, qq)) {
+        return jsonResponse({
+          ok: false,
+          code: "DEVELOPER_DIRECT_BOOTSTRAP",
+          message: "開發者首次啟用不使用 QQ 驗證碼，請直接在首次啟用頁輸入部署管理金鑰、帳號與密碼。"
+        }, 409);
+      }
 
       const code = generateSixDigitCode();
       const authKey = `portal_auth_code:${qq}`;
@@ -332,22 +337,32 @@ const QQAIWorker = {
       try { payload = await request.json(); } catch (e) {}
       const qq = String(payload.qq || "").replace(/\D/g, "");
       const code = String(payload.code || "").replace(/\D/g, "");
+      const setupKey = String(payload.setupKey || "");
       const usernameCheck = validatePortalUsername(payload.username);
       const passwordCheck = validatePortalPassword(payload.password);
-      if (!/^\d{5,12}$/.test(qq) || !/^\d{6}$/.test(code)) {
-        return jsonResponse({ ok: false, code: "IDENTITY_VERIFICATION_INVALID", message: "請輸入有效的身份驗證 ID 與六位驗證碼。" }, 400);
+      if (!/^\d{5,12}$/.test(qq)) {
+        return jsonResponse({ ok: false, code: "IDENTITY_INVALID", message: "請輸入有效的 QQID。" }, 400);
       }
       if (!usernameCheck.ok) return jsonResponse({ ok: false, code: usernameCheck.code || "USERNAME_INVALID", message: usernameCheck.message }, 400);
       if (!passwordCheck.ok) return jsonResponse({ ok: false, code: "PASSWORD_POLICY", message: passwordCheck.message }, 400);
+
+      const developerDirect = isDeveloperId(env, qq);
       try {
-        const verified = await verifyPortalVerificationCode(env, qq, code, { consume: false });
-        if (!verified.ok) return jsonResponse({ ok: false, code: "IDENTITY_VERIFICATION_FAILED", message: verified.message || "驗證碼錯誤或已過期。" }, 400);
-        const developerBootstrap = developerPortalBootstrapPolicy(env, { qq, username: usernameCheck.value, password: passwordCheck.value });
-        if (!developerBootstrap.ok) return jsonResponse({ ok: false, code: developerBootstrap.code, message: developerBootstrap.message }, developerBootstrap.status || 400);
+        if (developerDirect) {
+          const bootstrap = developerPortalBootstrapPolicy(env, { qq, setupKey });
+          if (!bootstrap.ok) return jsonResponse({ ok: false, code: bootstrap.code, message: bootstrap.message }, bootstrap.status || 403);
+        } else {
+          if (!/^\d{6}$/.test(code)) {
+            return jsonResponse({ ok: false, code: "IDENTITY_VERIFICATION_INVALID", message: "一般使用者首次啟用仍需輸入六位 QQ 驗證碼。" }, 400);
+          }
+          const verified = await verifyPortalVerificationCode(env, qq, code, { consume: false });
+          if (!verified.ok) return jsonResponse({ ok: false, code: "IDENTITY_VERIFICATION_FAILED", message: verified.message || "驗證碼錯誤或已過期。" }, 400);
+        }
+
         const account = await createPortalAccountBinding(env, { qq, username: usernameCheck.value });
         const passwordRecord = await createPortalPasswordRecord(passwordCheck.value);
         await authDbPutStrict(env, `portal_auth_password:${qq}`, JSON.stringify(passwordRecord));
-        await authDbDelStrict(env, `portal_auth_code:${qq}`);
+        if (!developerDirect) await authDbDelStrict(env, `portal_auth_code:${qq}`);
         await clearPasswordLoginGuard(env, qq);
         const remember = payload.remember !== false;
         const session = await createPortalSession(env, {
@@ -356,12 +371,17 @@ const QQAIWorker = {
           group: "",
           groupId: "",
           persistent: remember,
-          authMethod: "first_activation_identity_code"
+          authMethod: developerDirect ? "developer_direct_password_bootstrap" : "first_activation_identity_code"
         });
+        await writeSystemAudit(env, {
+          type: "portal_auth_security",
+          actorId: qq,
+          action: developerDirect ? "developer_direct_password_bootstrap" : "account_activated_by_identity_code"
+        }).catch(() => {});
         return jsonResponse({
           ok: true,
           code: "ACCOUNT_ACTIVATED",
-          message: "帳號已建立，正在進入控制中心。",
+          message: developerDirect ? "開發者帳號已直接建立，之後只需帳號與密碼登入。" : "帳號已建立，正在進入控制中心。",
           username: account.username,
           role: session.role,
           permissions: session.permissions || {}
