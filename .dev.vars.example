@@ -2,12 +2,6 @@
 # Never commit .dev.vars or real credentials.
 # Production secrets should be set with: npx wrangler secret put NAME
 
-# ── Developer first activation ───────────────────────────────────────────────
-# Public username is normally set in wrangler.toml [vars] as PORTAL_DEVELOPER_USERNAME.
-# This password is ONLY checked after the configured developer QQID passes its six-digit
-# first-activation verification. After activation, the PBKDF2 hash stored in D1 is authoritative.
-PORTAL_DEVELOPER_INITIAL_PASSWORD=replace_with_strong_initial_developer_password
-
 # ── Google / Gemini / Gemma key pools ───────────────────────────────────────
 # At least one general Google key is required for the normal Gemini path.
 GEMINI_API_KEYS=replace_with_google_api_key
