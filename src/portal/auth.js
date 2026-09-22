@@ -177,8 +177,10 @@ function validatePortalPassword(password) {
 
 
 
+const PORTAL_SYSTEM_ADMIN_USERNAME = "admin";
+
 const PORTAL_USERNAME_RESERVED = Object.freeze(new Set([
-  "admin", "administrator", "root", "developer", "system", "support", "security",
+  PORTAL_SYSTEM_ADMIN_USERNAME, "administrator", "root", "developer", "system", "support", "security",
   "api", "login", "logout", "register", "portal", "account", "accounts", "me"
 ]));
 
@@ -204,6 +206,15 @@ function validatePortalUsername(value) {
   return { ok: true, value: display, normalized };
 }
 
+function validatePortalLoginUsername(value) {
+  const display = String(value ?? "").normalize("NFKC").trim();
+  const normalized = normalizePortalUsername(display);
+  if (normalized === PORTAL_SYSTEM_ADMIN_USERNAME) {
+    return { ok: true, value: PORTAL_SYSTEM_ADMIN_USERNAME, normalized: PORTAL_SYSTEM_ADMIN_USERNAME, system: true };
+  }
+  return validatePortalUsername(display);
+}
+
 function portalAccountIdentityKey(qq) {
   return `portal_account_identity:${String(qq || "").replace(/\D/g, "")}`;
 }
@@ -217,7 +228,7 @@ function normalizePortalAccountRecord(value) {
   const qq = String(source.qq || "").replace(/\D/g, "");
   const username = String(source.username || "").normalize("NFKC").trim();
   const normalizedUsername = normalizePortalUsername(source.normalizedUsername || username);
-  if (!/^\d{5,12}$/.test(qq) || !validatePortalUsername(normalizedUsername).ok) return null;
+  if (!/^\d{5,12}$/.test(qq) || !validatePortalLoginUsername(normalizedUsername).ok) return null;
   return Object.freeze({
     qq,
     username: username || normalizedUsername,
@@ -228,7 +239,7 @@ function normalizePortalAccountRecord(value) {
 }
 
 async function readPortalAccountByUsername(env, username) {
-  const validation = validatePortalUsername(username);
+  const validation = validatePortalLoginUsername(username);
   if (!validation.ok) return null;
   const raw = await authDbGetStrict(env, portalAccountUsernameKey(validation.normalized));
   if (!raw) return null;
@@ -312,6 +323,77 @@ async function createPortalAccountBinding(env, { qq, username } = {}) {
   const finalAccount = await readPortalAccountByQq(env, normalizedQq);
   if (!finalAccount) throw authStorageError("Portal account identity write could not be verified");
   return finalAccount;
+}
+
+
+
+async function createPortalAdminAccountBinding(env, { qq } = {}) {
+  const normalizedQq = String(qq || "").replace(/\D/g, "");
+  if (!/^\d{5,12}$/.test(normalizedQq)) {
+    const error = new Error("QQID_INVALID");
+    error.code = "QQID_INVALID";
+    throw error;
+  }
+
+  const now = Date.now();
+  const existingIdentity = await readPortalAccountByQq(env, normalizedQq);
+  const existingAdmin = await readPortalAccountByUsername(env, PORTAL_SYSTEM_ADMIN_USERNAME);
+  if (existingAdmin && existingAdmin.qq !== normalizedQq) {
+    const error = new Error("ADMIN_ACCOUNT_ALREADY_BOUND");
+    error.code = "ADMIN_ACCOUNT_ALREADY_BOUND";
+    error.account = existingAdmin;
+    throw error;
+  }
+  if (existingIdentity?.normalizedUsername === PORTAL_SYSTEM_ADMIN_USERNAME) return existingIdentity;
+
+  const account = {
+    qq: normalizedQq,
+    username: PORTAL_SYSTEM_ADMIN_USERNAME,
+    normalizedUsername: PORTAL_SYSTEM_ADMIN_USERNAME,
+    createdAt: Number(existingIdentity?.createdAt || 0) || now,
+    updatedAt: now
+  };
+  const identityKey = portalAccountIdentityKey(normalizedQq);
+  const adminKey = portalAccountUsernameKey(PORTAL_SYSTEM_ADMIN_USERNAME);
+  let adminReserved = false;
+
+  try {
+    if (!existingAdmin) {
+      adminReserved = await authDbPutIfAbsentStrict(env, adminKey, JSON.stringify(account));
+      if (!adminReserved) {
+        const racedAdmin = await readPortalAccountByUsername(env, PORTAL_SYSTEM_ADMIN_USERNAME);
+        if (!racedAdmin || racedAdmin.qq !== normalizedQq) {
+          const error = new Error("ADMIN_ACCOUNT_ALREADY_BOUND");
+          error.code = "ADMIN_ACCOUNT_ALREADY_BOUND";
+          error.account = racedAdmin;
+          throw error;
+        }
+      }
+    }
+
+    await authDbPutStrict(env, identityKey, JSON.stringify(account));
+    await authDbPutStrict(env, adminKey, JSON.stringify(account));
+
+    if (existingIdentity && existingIdentity.normalizedUsername !== PORTAL_SYSTEM_ADMIN_USERNAME) {
+      const oldUsernameKey = portalAccountUsernameKey(existingIdentity.normalizedUsername);
+      const oldRaw = await authDbGetStrict(env, oldUsernameKey);
+      if (oldRaw) {
+        try {
+          const oldRecord = normalizePortalAccountRecord(JSON.parse(oldRaw));
+          if (oldRecord?.qq === normalizedQq) await authDbDelStrict(env, oldUsernameKey);
+        } catch {}
+      }
+    }
+
+    const finalAccount = await readPortalAccountByQq(env, normalizedQq);
+    if (!finalAccount || finalAccount.normalizedUsername !== PORTAL_SYSTEM_ADMIN_USERNAME) {
+      throw authStorageError("Portal admin account write could not be verified");
+    }
+    return finalAccount;
+  } catch (error) {
+    if (adminReserved) await authDbDelStrict(env, adminKey).catch(() => {});
+    throw error;
+  }
 }
 
 
@@ -1099,4 +1181,4 @@ async function writePortalSettingValue(env, definition, groupId, targetQq, value
   }
 }
 
-export { BASE32_ALPHABET, PORTAL_SETTING_DEFINITIONS, PORTAL_USERNAME_RESERVED, authDbDelStrict, authDbGetStrict, authDbPutIfAbsentStrict, authDbPutStrict, authDbRetry, authStorageError, base32Decode, base32Encode, base64UrlToBytes, buildGroupReplyMessage, bytesToBase64Url, bytesToHex, clearPasswordLoginGuard, commandChangesWebSettings, constantTimeEqual, createPortalAccountBinding, createPortalPasswordRecord, createPortalSession, decryptPortalAuthSecret, deleteMemoryVector, derivePortalPassword, encryptPortalAuthSecret, extractGroupId, generateBackupCodes, generateSixDigitCode, generateTotpCode, getOneBotHub, getPortalSession, getPublicNebulaSeed, getUserQuota, hasAdminRole, hashBackupCode, isMemoryBanned, isValidPortalPasswordRecord, jsonResponse, markGroupMemberLeft, migratePortalMemories, normalizeBackupCode, normalizePortalUsername, notePasswordLoginFailure, oneBotHttpActionUrl, portalAuthEncryptionKey, portalAuthEncryptionMaterial, portalRoleRank, portalAccountIdentityKey, portalAccountUsernameKey, portalSessionCookie, randomBytes, readCookie, readJson, readPasswordLoginGuard, readPortalAccountByQq, readPortalAccountByUsername, readPortalAuthJson, readPortalSettingValue, resolvePortalRole, searchPortalVectors, sendOneBotAction, sendOneBotHttpAction, sendPortalVerificationMessage, sha256Hex, simplifyJsonValue, upsertGroupMember, upsertMemoryVector, validatePortalPassword, validatePortalUsername, verifyPortalPassword, verifyPortalVerificationCode, verifyTotpCode, writeMemoryAudit, writePortalSettingValue, writeSystemError };
+export { BASE32_ALPHABET, PORTAL_SETTING_DEFINITIONS, PORTAL_SYSTEM_ADMIN_USERNAME, PORTAL_USERNAME_RESERVED, authDbDelStrict, authDbGetStrict, authDbPutIfAbsentStrict, authDbPutStrict, authDbRetry, authStorageError, base32Decode, base32Encode, base64UrlToBytes, buildGroupReplyMessage, bytesToBase64Url, bytesToHex, clearPasswordLoginGuard, commandChangesWebSettings, constantTimeEqual, createPortalAccountBinding, createPortalAdminAccountBinding, createPortalPasswordRecord, createPortalSession, decryptPortalAuthSecret, deleteMemoryVector, derivePortalPassword, encryptPortalAuthSecret, extractGroupId, generateBackupCodes, generateSixDigitCode, generateTotpCode, getOneBotHub, getPortalSession, getPublicNebulaSeed, getUserQuota, hasAdminRole, hashBackupCode, isMemoryBanned, isValidPortalPasswordRecord, jsonResponse, markGroupMemberLeft, migratePortalMemories, normalizeBackupCode, normalizePortalUsername, notePasswordLoginFailure, oneBotHttpActionUrl, portalAuthEncryptionKey, portalAuthEncryptionMaterial, portalRoleRank, portalAccountIdentityKey, portalAccountUsernameKey, portalSessionCookie, randomBytes, readCookie, readJson, readPasswordLoginGuard, readPortalAccountByQq, readPortalAccountByUsername, readPortalAuthJson, readPortalSettingValue, resolvePortalRole, searchPortalVectors, sendOneBotAction, sendOneBotHttpAction, sendPortalVerificationMessage, sha256Hex, simplifyJsonValue, upsertGroupMember, upsertMemoryVector, validatePortalLoginUsername, validatePortalPassword, validatePortalUsername, verifyPortalPassword, verifyPortalVerificationCode, verifyTotpCode, writeMemoryAudit, writePortalSettingValue, writeSystemError };
