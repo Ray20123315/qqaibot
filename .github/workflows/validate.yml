@@ -6,7 +6,6 @@ on:
       - main
       - refactor/v2-modular-worker
       - v3-rewrite
-      - codex/v3test-deploy-20260922
   pull_request:
     branches:
       - main
