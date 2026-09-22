@@ -996,7 +996,7 @@ async function inspectUrlsForRuleReview(env, text) {
       results.push({ url: rawUrl, ok: false, error: String(error?.message || error) });
       continue;
     }
-    const trustedInternal = parsed.hostname === "qqai.ray2025.com" || parsed.hostname.endsWith(".ray2025.com");
+    const trustedInternal = parsed.hostname === "aibot.ray2025.com" || parsed.hostname === "qqai.ray2025.com" || parsed.hostname.endsWith(".ray2025.com");
     if (trustedInternal) {
       results.push({ url: rawUrl, finalUrl: parsed.toString(), hostname: parsed.hostname, status: 200, contentType: "internal", trustedInternal: true, title: "QQAI Control Center", description: "QQAIbot 内部服务", ok: true });
       continue;
