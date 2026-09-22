@@ -12,7 +12,7 @@ const PORTAL_FEATURE_PLUGINS = Object.freeze([
         category: "community",
         icon: "◎",
         defaultView: "groups",
-        views: ["groups", "members", "member-actions", "relationships", "member-data", "member-cleanup", "notification-routing"],
+        views: ["groups", "members", "member-actions", "relationships", "member-data", "member-cleanup", "notification-routing", "settingscenter"],
         order: 10,
         legacyBridge: true
       },
