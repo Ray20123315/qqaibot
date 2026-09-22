@@ -18,7 +18,7 @@ import { appendPortalConversationRecord, applyConversationOutputGuards, auditIgn
 import { classifyCollaborationNaturalIntent, classifyNaturalLanguageCommandIntent, normalizeNaturalLanguageCommandText, opsGetGroupMember, opsGetSettings, opsHandleActivityCommand, opsHandleMemberLeave, opsProcessAutomations } from "./src/operations/runtime.js";
 import { processPlatformJobs } from "./src/platform/runtime.js";
 import { pluginExecutionStatus } from "./src/plugins/runtime.js";
-import { authDbDelStrict, authDbGetStrict, authDbPutStrict, clearPasswordLoginGuard, commandChangesWebSettings, constantTimeEqual, createPortalAccountBinding, createPortalAdminAccountBinding, createPortalPasswordRecord, createPortalSession, decryptPortalAuthSecret, deleteMemoryVector, generateSixDigitCode, getOneBotHub, getPortalSession, getPublicNebulaSeed, hashBackupCode, isMemoryBanned, isValidPortalPasswordRecord, jsonResponse, markGroupMemberLeft, notePasswordLoginFailure, portalSessionCookie, readCookie, readJson, readPasswordLoginGuard, readPortalAccountByUsername, readPortalAuthJson, sendOneBotAction, sendOneBotHttpAction, sendPortalVerificationMessage, upsertGroupMember, upsertMemoryVector, validatePortalLoginUsername, validatePortalPassword, validatePortalUsername, verifyPortalPassword, verifyPortalVerificationCode, verifyTotpCode, writeMemoryAudit, writeSystemError } from "./src/portal/auth.js";
+import { authDbDelStrict, authDbGetStrict, authDbPutStrict, clearPasswordLoginGuard, commandChangesWebSettings, classifyPortalAuthFailure, constantTimeEqual, createPortalAccountBinding, createPortalAdminAccountBinding, createPortalPasswordRecord, createPortalSession, decryptPortalAuthSecret, deleteMemoryVector, generateSixDigitCode, getOneBotHub, getPortalSession, getPublicNebulaSeed, hashBackupCode, isMemoryBanned, isValidPortalPasswordRecord, jsonResponse, markGroupMemberLeft, notePasswordLoginFailure, portalSessionCookie, readCookie, readJson, readPasswordLoginGuard, readPortalAccountByUsername, readPortalAuthJson, sendOneBotAction, sendOneBotHttpAction, sendPortalVerificationMessage, upsertGroupMember, upsertMemoryVector, validatePortalLoginUsername, validatePortalPassword, validatePortalUsername, verifyPortalPassword, verifyPortalVerificationCode, verifyTotpCode, writeMemoryAudit, writeSystemError } from "./src/portal/auth.js";
 import { getLiveHtmlPage, getPortalHomePage, getPortalLoginPage, getPortalRegisterPage, getPublicLandingPage, handleGeminiLiveUpgrade, handlePortalApi } from "./src/portal/runtime.js";
 import { injectPortalLayoutClient } from "./src/portal/layout.js";
 import { injectPortalMembersClient } from "./src/portal/members.js";
@@ -327,6 +327,8 @@ const QQAIWorker = {
         return jsonResponse({ ok: false, code: usernameCheck.code || "USERNAME_INVALID", message: usernameCheck.message }, 400);
       }
 
+      let activationStage = "identity_verification";
+      let account = null;
       try {
         if (!developerDirect) {
           if (!/^\d{6}$/.test(code)) {
@@ -336,22 +338,59 @@ const QQAIWorker = {
           if (!verified.ok) return jsonResponse({ ok: false, code: "IDENTITY_VERIFICATION_FAILED", message: verified.message || "驗證碼錯誤或已過期。" }, 400);
         }
 
-        const account = developerDirect
+        activationStage = "account_binding";
+        account = developerDirect
           ? await createPortalAdminAccountBinding(env, { qq })
           : await createPortalAccountBinding(env, { qq, username: usernameCheck.value });
+
+        activationStage = "credential_persistence";
         const passwordRecord = await createPortalPasswordRecord(passwordCheck.value);
         await authDbPutStrict(env, `portal_auth_password:${qq}`, JSON.stringify(passwordRecord));
         if (!developerDirect) await authDbDelStrict(env, `portal_auth_code:${qq}`);
         await clearPasswordLoginGuard(env, qq);
+
         const remember = payload.remember !== false;
-        const session = await createPortalSession(env, {
-          qq,
-          username: account.username,
-          group: "",
-          groupId: "",
-          persistent: remember,
-          authMethod: developerDirect ? "developer_admin_password_setup" : "first_activation_identity_code"
-        });
+        activationStage = "session_creation";
+        let session = null;
+        try {
+          session = await createPortalSession(env, {
+            qq,
+            username: account.username,
+            group: "",
+            groupId: "",
+            persistent: remember,
+            authMethod: developerDirect ? "developer_admin_password_setup" : "first_activation_identity_code"
+          });
+        } catch (sessionError) {
+          const failureId = crypto.randomUUID();
+          const classified = classifyPortalAuthFailure(sessionError, activationStage);
+          console.error("portal activation session creation failed", {
+            failureId,
+            stage: classified.stage,
+            code: classified.code,
+            errorCode: String(sessionError?.code || ""),
+            diagnostic: classified.diagnostic,
+            developerDirect
+          });
+          await writeSystemError(env, sessionError, {
+            failureId,
+            source: "portal_register",
+            stage: classified.stage,
+            code: classified.code,
+            developerDirect
+          }).catch(() => {});
+          return jsonResponse({
+            ok: true,
+            code: "ACCOUNT_ACTIVATED_LOGIN_REQUIRED",
+            message: developerDirect
+              ? "admin 密碼已成功設定，但自動登入階段暫時失敗。請改到登入頁使用 admin 與剛設定的密碼登入。"
+              : "帳號與密碼已成功建立，但自動登入暫時失敗。請改到登入頁使用剛建立的帳密登入。",
+            username: account.username,
+            redirect: "/login?activated=1",
+            failureId
+          }, 200);
+        }
+
         await writeSystemAudit(env, {
           type: "portal_auth_security",
           actorId: qq,
@@ -369,7 +408,30 @@ const QQAIWorker = {
         if (error?.code === "ADMIN_ACCOUNT_ALREADY_BOUND") return jsonResponse({ ok: false, code: "ADMIN_ACCOUNT_ALREADY_BOUND", message: "系統帳號 admin 已綁定其他開發者身份，無法重複建立。" }, 409);
         if (error?.code === "USERNAME_TAKEN") return jsonResponse({ ok: false, code: "USERNAME_TAKEN", message: "這個帳號名稱已有人使用，請換一個。" }, 409);
         if (error?.code === "ACCOUNT_ALREADY_ACTIVATED") return jsonResponse({ ok: false, code: "ACCOUNT_ALREADY_ACTIVATED", message: "這個身份已完成首次啟用，請回登入頁使用既有帳號登入。" }, 409);
-        return jsonResponse({ ok: false, code: error?.code || "ACCOUNT_ACTIVATION_FAILED", message: "首次啟用暫時無法完成，請稍後再試。" }, 503);
+        const failureId = crypto.randomUUID();
+        const classified = classifyPortalAuthFailure(error, activationStage);
+        console.error("portal account activation failed", {
+          failureId,
+          stage: classified.stage,
+          code: classified.code,
+          errorCode: String(error?.code || ""),
+          diagnostic: classified.diagnostic,
+          developerDirect
+        });
+        await writeSystemError(env, error, {
+          failureId,
+          source: "portal_register",
+          stage: classified.stage,
+          code: classified.code,
+          developerDirect
+        }).catch(() => {});
+        return jsonResponse({
+          ok: false,
+          code: classified.code,
+          message: classified.message,
+          stage: classified.stage,
+          failureId
+        }, classified.status);
       }
     }
 
