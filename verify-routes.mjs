@@ -23,7 +23,10 @@ assert(result.body.includes('AI Control Center'), 'GET /: public homepage brand 
 assert(result.body.includes('href="/login"'), 'GET /: login CTA missing');
 assert(result.body.includes('href="/register"'), 'GET /: registration CTA missing');
 assert(!result.body.includes('qqai-deployment-toast'), 'GET /: Portal-only deployment client must not be injected into public homepage');
-assert(/<style>\s*:root\{color-scheme:light;/.test(result.body), 'GET /: shared public CSS must be materialized');
+assert(/<style>\s*:root\{\s*color-scheme:dark;/.test(result.body), 'GET /: futuristic public CSS must be materialized');
+assert(result.body.includes('class="console-preview"'), 'GET /: AI control-center preview missing');
+assert(result.body.includes('class="feature-grid"'), 'GET /: core capability grid missing');
+assert(!result.body.includes('QQAIbot'), 'GET /: legacy product branding must not leak');
 assert(!result.body.includes('${css}'), 'GET /: literal CSS template placeholder leaked');
 
 result = await get('/login');
@@ -31,14 +34,18 @@ assert(result.response.status === 200, 'GET /login: expected 200');
 assert(result.body.includes('登入你的帳號'), 'GET /login: account login form missing');
 assert(result.body.includes('id="username"'), 'GET /login: username input missing');
 assert(!result.body.includes('id="qqid"'), 'GET /login: QQID must not be a normal login input');
-assert(/<style>\s*:root\{color-scheme:light;/.test(result.body), 'GET /login: shared public CSS must be materialized');
+assert(/<style>\s*:root\{\s*color-scheme:dark;/.test(result.body), 'GET /login: futuristic public CSS must be materialized');
+assert(result.body.includes('class="auth-stage"'), 'GET /login: AI auth layout missing');
+assert(!result.body.includes('QQAIbot'), 'GET /login: legacy product branding must not leak');
 assert(!result.body.includes('${css}'), 'GET /login: literal CSS template placeholder leaked');
 
 result = await get('/register');
 assert(result.response.status === 200, 'GET /register: expected 200');
 assert(result.body.includes('第一次使用：建立帳號'), 'GET /register: activation page missing');
 assert(result.body.includes('id="qqid"'), 'GET /register: first-activation QQID input missing');
-assert(/<style>\s*:root\{color-scheme:light;/.test(result.body), 'GET /register: shared public CSS must be materialized');
+assert(/<style>\s*:root\{\s*color-scheme:dark;/.test(result.body), 'GET /register: futuristic public CSS must be materialized');
+assert(result.body.includes('class="auth-stage"'), 'GET /register: AI activation layout missing');
+assert(!result.body.includes('QQAIbot'), 'GET /register: legacy product branding must not leak');
 assert(!result.body.includes('${css}'), 'GET /register: literal CSS template placeholder leaked');
 
 result = await get('/portal');

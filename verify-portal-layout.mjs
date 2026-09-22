@@ -14,6 +14,12 @@ assert.match(injected, /max-height:min\(88dvh,900px\)/);
 assert.match(injected, /\.ww-layout\{grid-template-columns/);
 assert.match(injected, /\.member-action-row\{grid-template-columns/);
 assert.match(injected, /\.cleanup-summary\{grid-template-columns/);
+assert.match(injected, /--ai-cyan:#31ddff/);
+assert.match(injected, /\.overview-hero:after\{/);
+assert.match(injected, /\.qqai-nav-glyph\{/);
+assert.match(injected, /#qqai-deployment-toast\{/);
+assert.match(injected, /\.action-grid\{display:grid/);
+assert.match(injected, /@keyframes qqaiOrbFloat/);
 
 const worker = fs.readFileSync("worker.js", "utf8");
 assert.match(worker, /injectPortalLayoutClient\(injectWerewolfPortalClient\(injectPortalMembersClient/);
