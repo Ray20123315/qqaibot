@@ -171,4 +171,28 @@ assert.match(String(registerPayload.failureId || ""), /^[0-9a-f-]{20,}$/i);
 assert(sessionFailDb.map.has("portal_auth_password:123456789"), "password must remain persisted when session creation fails");
 assert.equal(JSON.parse(sessionFailDb.map.get("portal_account_username:admin")).username, "admin");
 
+const staleSessionDb = new FakeD1();
+const staleToken = "stale-developer-session";
+staleSessionDb.map.set("portal_session:" + staleToken, JSON.stringify({
+  qq: "123456789",
+  username: "admin",
+  group: "",
+  groupId: "",
+  token: staleToken,
+  role: "member",
+  permissions: { developer: false, aiAdmin: false, groupOps: false },
+  persistent: true,
+  idleTtlMs: 3600000,
+  absoluteTtlMs: 86400000,
+  createdAt: Date.now(),
+  lastActivityAt: Date.now(),
+  expiresAt: Date.now() + 3600000,
+  absoluteExpiresAt: Date.now() + 86400000
+}));
+const refreshedSession = await getPortalSession({ DB: staleSessionDb, DEVELOPER_IDS: "123456789" }, staleToken, { touch: false });
+assert.equal(refreshedSession.role, "developer", "developer authority must refresh from current deployment config");
+assert.equal(refreshedSession.permissions.developer, true, "stale session permission snapshots must not hide developer features");
+assert.equal(refreshedSession.permissions.aiAdmin, true);
+assert.equal(refreshedSession.permissions.groupOps, true);
+
 console.log("verify-portal-account-auth: ok");
