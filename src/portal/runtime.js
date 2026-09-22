@@ -3142,6 +3142,7 @@ if($('activeSpeakingTest'))$('activeSpeakingTest').onclick=async function(){if(!
 boot();
 })();
 </script>
-</body></html>`;\n}
+</body></html>`;
+}
 
 export { getAppealPage, getLiveHtmlPage, getPortalHomePage, getPortalLoginPage, getPortalRegisterPage, getPublicLandingPage, handleAppealApi, handleGeminiLiveUpgrade, handleOpsPortalApi, handlePortalApi };
