@@ -61,10 +61,6 @@ ROOT_QQ_IDS = ""
 # Legacy single-value fallback; normally leave empty.
 DEVELOPER_ID = ""
 
-# Optional developer first-activation username lock.
-# The developer must STILL pass QQID verification at /register.
-PORTAL_DEVELOPER_USERNAME = "replace-with-developer-login-name"
-
 # Public URL used in !help and generated links. No trailing slash.
 PUBLIC_BASE_URL = "https://bot.example.com"
 BOT_DISPLAY_NAME = "QQAI"
