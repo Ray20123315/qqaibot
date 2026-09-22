@@ -1,7 +1,7 @@
 import { aiReplyPromisesFutureSearch, aiReplySignalsUncertainty, appendSearchSources, buildDeepSeekContextSummary, callDeepSeekSummaryTask, callGeminiGenerate, callGoogleDecision, decideReplyMentionRouting, deepSeekApiKeys, effectiveRuntimeModels, enforceExecutedSearchForReply, generateHybridReply, googleApiKeysFor, imageInspectionEnabled, isLightweightAcknowledgement, isLowContextInterjectionFragment, mergeAbortSignal, notifyDeveloper, roundRobinKeys, stripBotMentionFromConversation } from "./src/ai/runtime.js";
 import { buildImmediateConversationContext, buildMeetingMinuteBatches, normalizeMeetingMinuteCount, splitOutboundText } from "./src/ai/conversation-quality.js";
 import { AI_MEDIA_LIMITS, DEFAULTS, VERSION, classifyOperationalFailure } from "./src/config/runtime.js";
-import { publicBaseUrl } from "./src/config/deployment.js";
+import { publicBaseUrl, publicLiveUrl } from "./src/config/deployment.js";
 import { consumeManualRuleCheckRate, developerIds, getAffinityProfile, isDeveloperId, latestConversationMessageForUser, recentConversationMessagesForUser, refreshAffinityAiAssessment, stripGroupAiOptOutPrefix, updateAffinityFixedFromMessage } from "./src/core/identity.js";
 import { appendIndex, buildLongGroupConversationContext, callOneBotAction, checkRuntimeRateLimit, getEffectivePermissions, isKnownOutboundMessage, markOutboundPending, modelPreferenceLabel, normalizeMemoryItems, normalizeModelPreference, normalizePermissionName, permissionLabel, removeFromIndex, setExplicitPermission, updateAiDecisionLog, writeAiDecisionLog, writeSystemAudit } from "./src/core/permissions.js";
 import { appendChatHistoryTurn, clearChatSessionHistory, dbDel, dbGet, dbPut, readChatHistory, withTimeout } from "./src/data/store.js";
@@ -152,6 +152,16 @@ const QQAIWorker = {
       return getOneBotHub(env).fetch(request);
     }
 
+    // Canonical public host migration. Keep WebSocket upgrades on the legacy host so
+    // existing NapCat/Live clients are not disconnected during the transition.
+    if (!upgradeHeader && url.hostname === "qqai.ray2025.com") {
+      const target = new URL(request.url);
+      target.protocol = "https:";
+      target.hostname = "aibot.ray2025.com";
+      target.port = "";
+      return Response.redirect(target.toString(), 308);
+    }
+
     // ==========================================
     // 🎙️ Gemini Live：網頁與 WebSocket
     // ==========================================
@@ -287,7 +297,7 @@ const QQAIWorker = {
           code: "VERIFICATION_DELIVERY_FAILED",
           message: httpConfigured
             ? "验证码发送失败。NapCat WebSocket 與 HTTP 備援皆無法送出，請檢查 NapCat 連線、Access Token 與私訊權限。"
-            : "验证码发送失败。請確認 NapCat WebSocket Client 已连接到 wss://qqai.ray2025.com/onebot；也可設定 ONEBOT_HTTP_URL 作為 HTTP 備援。"
+            : `验证码发送失败。請確認 NapCat WebSocket Client 已连接到 ${String(publicBaseUrl(env, url.origin) || url.origin).replace(/^http/i, "ws")}/onebot；也可設定 ONEBOT_HTTP_URL 作為 HTTP 備援。`
         }, 503);
       }
 
@@ -2446,7 +2456,7 @@ const QQAIWorker = {
       }
 
       if (/^[!！]live$/i.test(cleanMessage)) {
-        return jsonReply(`${atSender}🎙️ 即时语音通话：https://qqai.ray2025.com/live`);
+        return jsonReply(`${atSender}🎙️ 即时语音通话：${publicLiveUrl(env, url.origin) || `${url.origin}/live`}`);
       }
 
       if (/^[!！](?:群状态|群狀態|groupstatus)$/i.test(cleanMessage)) {
