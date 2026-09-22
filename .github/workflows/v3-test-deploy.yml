@@ -2,9 +2,6 @@ name: Deploy V3 test Worker
 
 on:
   workflow_dispatch:
-  push:
-    branches:
-      - codex/v3test-deploy-20260922
 
 permissions:
   contents: read
