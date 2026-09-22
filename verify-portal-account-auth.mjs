@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import fs from "node:fs";
+import worker from "./worker.js";
 import {
+  classifyPortalAuthFailure,
   createPortalAccountBinding,
   createPortalAdminAccountBinding,
   readPortalAccountByQq,
@@ -10,7 +12,7 @@ import {
 } from "./src/portal/auth.js";
 
 class FakeD1 {
-  constructor() { this.map = new Map(); }
+  constructor({ failWritePrefix = "" } = {}) { this.map = new Map(); this.failWritePrefix = failWritePrefix; }
   prepare(sql) {
     const db = this;
     return {
@@ -21,6 +23,9 @@ class FakeD1 {
             return db.map.has(args[0]) ? { value: db.map.get(args[0]) } : null;
           },
           async run() {
+            if (db.failWritePrefix && String(args[0] || "").startsWith(db.failWritePrefix)) {
+              throw new Error("D1_ERROR: simulated write failure for " + db.failWritePrefix);
+            }
             if (sql.includes("ON CONFLICT(key) DO NOTHING")) {
               if (db.map.has(args[0])) return { success: true, meta: { changes: 0 } };
               db.map.set(args[0], args[1]);
@@ -49,6 +54,27 @@ assert.equal(validatePortalUsername("admin").ok, false, "admin must stay reserve
 assert.equal(validatePortalLoginUsername("admin").ok, true, "reserved admin must be accepted for login");
 assert.equal(validatePortalLoginUsername("root").ok, false, "other reserved names must not become system logins");
 assert.equal(validatePortalUsername("a b").ok, false);
+
+assert.equal(classifyPortalAuthFailure(
+  Object.assign(new Error("auth write failed after 3 attempts"), {
+    code: "PORTAL_AUTH_STORAGE_UNAVAILABLE",
+    cause: new Error("Your account has exceeded D1's free tier daily row write limit.")
+  }),
+  "credential_persistence"
+).code, "AUTH_D1_DAILY_LIMIT");
+assert.equal(classifyPortalAuthFailure(
+  Object.assign(new Error("auth read failed after 3 attempts"), {
+    code: "PORTAL_AUTH_STORAGE_UNAVAILABLE",
+    cause: new Error("D1_ERROR: no such table: kv_store")
+  }),
+  "account_binding"
+).code, "AUTH_SCHEMA_MISSING");
+assert.equal(classifyPortalAuthFailure(
+  Object.assign(new Error("Missing D1 binding for Portal authentication"), {
+    code: "PORTAL_AUTH_STORAGE_UNAVAILABLE"
+  }),
+  "account_binding"
+).code, "AUTH_DB_BINDING_MISSING");
 
 const env = { DB: new FakeD1() };
 const first = await createPortalAccountBinding(env, { qq: "123456789", username: "RayAdmin" });
@@ -116,5 +142,29 @@ assert.match(loginBlock, /username: account\.username/);
 assert.doesNotMatch(worker, /PORTAL_DEVELOPER_USERNAME/);
 assert.doesNotMatch(worker, /PORTAL_DEVELOPER_INITIAL_PASSWORD/);
 assert.doesNotMatch(worker, /developerPortalBootstrapSecrets|developerPortalBootstrapPolicy|DEVELOPER_BOOTSTRAP_SECRET/);
+
+const sessionFailDb = new FakeD1({ failWritePrefix: "portal_session:" });
+const registerResponse = await worker.fetch(new Request("https://qqai.ray2025.com/api/auth/register", {
+  method: "POST",
+  headers: { "Content-Type": "application/json" },
+  body: JSON.stringify({
+    accountType: "developer",
+    qq: "123456789",
+    username: "admin",
+    password: "Str0ngAdmin!2026",
+    remember: true
+  })
+}), {
+  DB: sessionFailDb,
+  DEVELOPER_IDS: "123456789"
+}, { waitUntil() {}, passThroughOnException() {} });
+const registerPayload = await registerResponse.json();
+assert.equal(registerResponse.status, 200);
+assert.equal(registerPayload.ok, true);
+assert.equal(registerPayload.code, "ACCOUNT_ACTIVATED_LOGIN_REQUIRED");
+assert.equal(registerPayload.redirect, "/login?activated=1");
+assert.match(String(registerPayload.failureId || ""), /^[0-9a-f-]{20,}$/i);
+assert(sessionFailDb.map.has("portal_auth_password:123456789"), "password must remain persisted when session creation fails");
+assert.equal(JSON.parse(sessionFailDb.map.get("portal_account_username:admin")).username, "admin");
 
 console.log("verify-portal-account-auth: ok");
