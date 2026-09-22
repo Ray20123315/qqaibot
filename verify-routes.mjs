@@ -45,6 +45,7 @@ assert(/<style>\s*:root\{\s*color-scheme:dark;/.test(result.body), 'GET /login: 
 assert(result.body.includes('class="auth-stage"'), 'GET /login: AI auth layout missing');
 assert(!result.body.includes('QQAIbot'), 'GET /login: legacy product branding must not leak');
 assert(!result.body.includes('${css}'), 'GET /login: literal CSS template placeholder leaked');
+assert(result.body.includes("get('activated')==='1'"), 'GET /login: activation fallback notice missing');
 
 result = await get('/register');
 assert(result.response.status === 200, 'GET /register: expected 200');
