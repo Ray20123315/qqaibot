@@ -344,7 +344,7 @@ async function createPortalAdminAccountBinding(env, { qq } = {}) {
     error.account = existingAdmin;
     throw error;
   }
-  if (existingIdentity?.normalizedUsername === PORTAL_SYSTEM_ADMIN_USERNAME) return existingIdentity;
+  if (existingIdentity?.normalizedUsername === PORTAL_SYSTEM_ADMIN_USERNAME && existingAdmin?.qq === normalizedQq) return existingIdentity;
 
   const account = {
     qq: normalizedQq,
