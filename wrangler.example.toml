@@ -6,6 +6,8 @@ main = "worker.js"
 compatibility_date = "2026-07-21"
 compatibility_flags = ["nodejs_compat"]
 workers_dev = true
+# Preserve non-secret variables managed in the Cloudflare Dashboard instead of deleting them on deploy.
+keep_vars = true
 
 # Remove this block when no custom domain is used.
 [[routes]]
@@ -54,12 +56,11 @@ namespace_id = "REPLACE_WITH_RATE_LIMITER_NAMESPACE_ID"
   period = 10
 
 [vars]
-# Required operator identity. Comma-separate multiple QQ IDs.
-DEVELOPER_IDS = "123456789,987654321"
-# Optional additional root identities merged with DEVELOPER_IDS.
-ROOT_QQ_IDS = ""
-# Legacy single-value fallback; normally leave empty.
-DEVELOPER_ID = ""
+# Developer identity is intentionally configured in Cloudflare Dashboard Variables.
+# Required: DEVELOPER_IDS (comma/semicolon/newline-separated QQ IDs)
+# Optional: ROOT_QQ_IDS
+# Legacy fallback: DEVELOPER_ID
+# Do not add assignments here when Dashboard is the source of truth; keep_vars=true preserves them.
 
 # Public URL used in !help and generated links. No trailing slash.
 PUBLIC_BASE_URL = "https://bot.example.com"
