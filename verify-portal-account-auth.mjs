@@ -2,8 +2,10 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import {
   createPortalAccountBinding,
+  createPortalAdminAccountBinding,
   readPortalAccountByQq,
   readPortalAccountByUsername,
+  validatePortalLoginUsername,
   validatePortalUsername
 } from "./src/portal/auth.js";
 
@@ -43,7 +45,9 @@ class FakeD1 {
 assert.equal(validatePortalUsername("RayAdmin").ok, true);
 assert.equal(validatePortalUsername("Ray.Admin_2026").normalized, "ray.admin_2026");
 assert.equal(validatePortalUsername("12345678").ok, false, "username must not be a numeric QQID lookalike");
-assert.equal(validatePortalUsername("admin").ok, false, "reserved names must be blocked");
+assert.equal(validatePortalUsername("admin").ok, false, "admin must stay reserved from ordinary registration");
+assert.equal(validatePortalLoginUsername("admin").ok, true, "reserved admin must be accepted for login");
+assert.equal(validatePortalLoginUsername("root").ok, false, "other reserved names must not become system logins");
 assert.equal(validatePortalUsername("a b").ok, false);
 
 const env = { DB: new FakeD1() };
@@ -64,15 +68,28 @@ await assert.rejects(
   error => error?.code === "ACCOUNT_ALREADY_ACTIVATED"
 );
 
+
+const admin = await createPortalAdminAccountBinding(env, { qq: "123456789" });
+assert.equal(admin.username, "admin");
+assert.equal(admin.normalizedUsername, "admin");
+assert.equal((await readPortalAccountByUsername(env, "ADMIN")).qq, "123456789");
+assert.equal((await readPortalAccountByQq(env, "123456789")).normalizedUsername, "admin");
+assert.equal(await readPortalAccountByUsername(env, "RayAdmin"), null, "developer migration must remove the old custom username mapping");
+await assert.rejects(
+  () => createPortalAdminAccountBinding(env, { qq: "987654321" }),
+  error => error?.code === "ADMIN_ACCOUNT_ALREADY_BOUND"
+);
+
 const worker = fs.readFileSync("worker.js", "utf8");
 const registerStart = worker.indexOf("url.pathname === '/api/auth/register'");
 const registerEnd = worker.indexOf("url.pathname === '/api/auth/verify-code'", registerStart);
 const registerBlock = worker.slice(registerStart, registerEnd);
 assert(registerStart >= 0 && registerEnd > registerStart);
 assert.match(registerBlock, /const developerDirect = isDeveloperId\(env, qq\)/);
-assert.match(registerBlock, /developerPortalBootstrapPolicy/);
+assert.doesNotMatch(registerBlock, /developerPortalBootstrapPolicy|setupKey|PORTAL_AUTH_SECRET|ONEBOT_ACCESS_TOKEN/);
 assert.match(registerBlock, /verifyPortalVerificationCode/);
-assert.match(registerBlock, /developer_direct_password_bootstrap/);
+assert.match(registerBlock, /developer_admin_password_setup/);
+assert.match(registerBlock, /createPortalAdminAccountBinding/);
 assert.match(registerBlock, /createPortalAccountBinding/);
 assert.match(registerBlock, /createPortalPasswordRecord/);
 assert.match(registerBlock, /createPortalSession/);
@@ -87,10 +104,12 @@ const loginStart = worker.indexOf("url.pathname === '/api/auth/login-password'")
 const loginEnd = worker.indexOf("url.pathname === '/api/auth/logout'", loginStart);
 const loginBlock = worker.slice(loginStart, loginEnd);
 assert.match(loginBlock, /payload\.username/);
+assert.match(loginBlock, /validatePortalLoginUsername/);
 assert.match(loginBlock, /readPortalAccountByUsername/);
 assert.doesNotMatch(loginBlock, /payload\.qq/);
 assert.match(loginBlock, /username: account\.username/);
 assert.doesNotMatch(worker, /PORTAL_DEVELOPER_USERNAME/);
 assert.doesNotMatch(worker, /PORTAL_DEVELOPER_INITIAL_PASSWORD/);
+assert.doesNotMatch(worker, /developerPortalBootstrapSecrets|developerPortalBootstrapPolicy|DEVELOPER_BOOTSTRAP_SECRET/);
 
 console.log("verify-portal-account-auth: ok");
