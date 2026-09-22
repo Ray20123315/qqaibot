@@ -5,6 +5,7 @@ on:
     branches:
       - main
       - refactor/v2-modular-worker
+      - codex/account-password-auth-20260922
   pull_request:
     branches:
       - main
