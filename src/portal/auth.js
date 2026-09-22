@@ -666,6 +666,7 @@ async function createPortalSession(env, data) {
   const absoluteTtlMs = persistent ? DEFAULTS.portalSessionAbsoluteTtlMs : DEFAULTS.portalSessionTemporaryAbsoluteTtlMs;
   const session = {
     qq,
+    username: String(data.username || ""),
     group: data.group || "",
     groupId,
     token,

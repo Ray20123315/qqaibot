@@ -18,7 +18,7 @@ import { appendPortalConversationRecord, applyConversationOutputGuards, auditIgn
 import { classifyCollaborationNaturalIntent, classifyNaturalLanguageCommandIntent, normalizeNaturalLanguageCommandText, opsGetGroupMember, opsGetSettings, opsHandleActivityCommand, opsHandleMemberLeave, opsProcessAutomations } from "./src/operations/runtime.js";
 import { processPlatformJobs } from "./src/platform/runtime.js";
 import { pluginExecutionStatus } from "./src/plugins/runtime.js";
-import { authDbDelStrict, authDbGetStrict, authDbPutStrict, clearPasswordLoginGuard, commandChangesWebSettings, constantTimeEqual, createPortalPasswordRecord, createPortalSession, decryptPortalAuthSecret, deleteMemoryVector, generateSixDigitCode, getOneBotHub, getPortalSession, getPublicNebulaSeed, hashBackupCode, isMemoryBanned, isValidPortalPasswordRecord, jsonResponse, markGroupMemberLeft, notePasswordLoginFailure, portalSessionCookie, readCookie, readJson, readPasswordLoginGuard, readPortalAuthJson, sendOneBotAction, sendOneBotHttpAction, sendPortalVerificationMessage, upsertGroupMember, upsertMemoryVector, validatePortalPassword, verifyPortalPassword, verifyPortalVerificationCode, verifyTotpCode, writeMemoryAudit, writeSystemError } from "./src/portal/auth.js";
+import { authDbDelStrict, authDbGetStrict, authDbPutStrict, clearPasswordLoginGuard, commandChangesWebSettings, constantTimeEqual, createPortalAccountBinding, createPortalPasswordRecord, createPortalSession, decryptPortalAuthSecret, deleteMemoryVector, generateSixDigitCode, getOneBotHub, getPortalSession, getPublicNebulaSeed, hashBackupCode, isMemoryBanned, isValidPortalPasswordRecord, jsonResponse, markGroupMemberLeft, notePasswordLoginFailure, portalSessionCookie, readCookie, readJson, readPasswordLoginGuard, readPortalAccountByUsername, readPortalAuthJson, sendOneBotAction, sendOneBotHttpAction, sendPortalVerificationMessage, upsertGroupMember, upsertMemoryVector, validatePortalPassword, validatePortalUsername, verifyPortalPassword, verifyPortalVerificationCode, verifyTotpCode, writeMemoryAudit, writeSystemError } from "./src/portal/auth.js";
 import { getLiveHtmlPage, getPortalHomePage, handleGeminiLiveUpgrade, handlePortalApi } from "./src/portal/runtime.js";
 import { injectPortalLayoutClient } from "./src/portal/layout.js";
 import { injectPortalMembersClient } from "./src/portal/members.js";
@@ -213,7 +213,7 @@ const QQAIWorker = {
       return handlePortalApi(request, env, url);
     }
 
-    if (request.method === 'POST' && url.pathname === '/api/auth/request-code') {
+    if (request.method === 'POST' && ['/api/auth/request-code', '/api/auth/register/request-code'].includes(url.pathname)) {
       let payload = {};
       try { payload = await request.json(); } catch (e) {}
       const qq = String(payload.qq || "").replace(/\D/g, "");
@@ -236,7 +236,8 @@ const QQAIWorker = {
         return jsonResponse({ ok: false, code: "AUTH_STORAGE_UNAVAILABLE", message: "登录资料库暂时不可用，验证码尚未建立。请稍后重试。" }, 503);
       }
 
-      const verificationMessage = `【QQAIbot Portal 登入驗證碼】\n驗證碼：${code}\n有效期：5 分鐘。\n若非本人操作，請忽略。`;
+      const verificationPurpose = url.pathname.includes("/register/") ? "首次啟用" : "安全驗證";
+      const verificationMessage = `【AI Control Center ${verificationPurpose}】\n驗證碼：${code}\n有效期：5 分鐘。\n若非本人操作，請忽略。`;
       const delivery = await sendPortalVerificationMessage(env, qq, verificationMessage);
 
       await writeSystemAudit(env, {
@@ -261,43 +262,62 @@ const QQAIWorker = {
 
       return jsonResponse({
         ok: true,
-        message: "驗證碼已傳送至該 QQ 私訊，請在 5 分鐘內輸入。",
+        message: "驗證碼已透過已連接的訊息服務傳送，請在 5 分鐘內輸入。",
         transport: delivery.transport,
         ttl_seconds: 300
       });
     }
 
-    if (request.method === 'POST' && url.pathname === '/api/auth/verify-code') {
+    if (request.method === 'POST' && url.pathname === '/api/auth/register') {
       let payload = {};
       try { payload = await request.json(); } catch (e) {}
       const qq = String(payload.qq || "").replace(/\D/g, "");
       const code = String(payload.code || "").replace(/\D/g, "");
-      if (!/^\d{5,12}$/.test(qq) || !/^\d{6}$/.test(code)) return jsonResponse({ ok: false, message: "请输入正确的 QQ 号和六位验证码。" }, 400);
-      let verified;
-      try {
-        verified = await verifyPortalVerificationCode(env, qq, code, { consume: false });
-      } catch (error) {
-        return jsonResponse({ ok: false, code: "AUTH_STORAGE_UNAVAILABLE", message: "登录资料库暂时不可用，验证码没有被消耗。请稍后重试。" }, 503);
+      const usernameCheck = validatePortalUsername(payload.username);
+      const passwordCheck = validatePortalPassword(payload.password);
+      if (!/^\d{5,12}$/.test(qq) || !/^\d{6}$/.test(code)) {
+        return jsonResponse({ ok: false, code: "IDENTITY_VERIFICATION_INVALID", message: "請輸入有效的身份驗證 ID 與六位驗證碼。" }, 400);
       }
-      if (!verified.ok) return jsonResponse(verified, 400);
-      const remember = payload.remember !== false;
-      let session;
+      if (!usernameCheck.ok) return jsonResponse({ ok: false, code: usernameCheck.code || "USERNAME_INVALID", message: usernameCheck.message }, 400);
+      if (!passwordCheck.ok) return jsonResponse({ ok: false, code: "PASSWORD_POLICY", message: passwordCheck.message }, 400);
       try {
-        session = await createPortalSession(env, { qq, group: "", groupId: "", persistent: remember, authMethod: "qq_code" });
+        const verified = await verifyPortalVerificationCode(env, qq, code, { consume: false });
+        if (!verified.ok) return jsonResponse({ ok: false, code: "IDENTITY_VERIFICATION_FAILED", message: verified.message || "驗證碼錯誤或已過期。" }, 400);
+        const account = await createPortalAccountBinding(env, { qq, username: usernameCheck.value });
+        const passwordRecord = await createPortalPasswordRecord(passwordCheck.value);
+        await authDbPutStrict(env, `portal_auth_password:${qq}`, JSON.stringify(passwordRecord));
         await authDbDelStrict(env, `portal_auth_code:${qq}`);
+        await clearPasswordLoginGuard(env, qq);
+        const remember = payload.remember !== false;
+        const session = await createPortalSession(env, {
+          qq,
+          username: account.username,
+          group: "",
+          groupId: "",
+          persistent: remember,
+          authMethod: "first_activation_identity_code"
+        });
+        return jsonResponse({
+          ok: true,
+          code: "ACCOUNT_ACTIVATED",
+          message: "帳號已建立，正在進入控制中心。",
+          username: account.username,
+          role: session.role,
+          permissions: session.permissions || {}
+        }, 200, { "Set-Cookie": portalSessionCookie(session.token, session.persistent ? DEFAULTS.portalSessionCookieSeconds : null) });
       } catch (error) {
-        return jsonResponse({ ok: false, code: "SESSION_STORAGE_UNAVAILABLE", message: "验证码正确，但登录会话无法安全保存。验证码仍可再次使用，请稍后重试。" }, 503);
+        if (error?.code === "USERNAME_TAKEN") return jsonResponse({ ok: false, code: "USERNAME_TAKEN", message: "這個帳號名稱已有人使用，請換一個。" }, 409);
+        if (error?.code === "ACCOUNT_ALREADY_ACTIVATED") return jsonResponse({ ok: false, code: "ACCOUNT_ALREADY_ACTIVATED", message: "這個身份已完成首次啟用，請回登入頁使用既有帳號登入。" }, 409);
+        return jsonResponse({ ok: false, code: error?.code || "ACCOUNT_ACTIVATION_FAILED", message: "首次啟用暫時無法完成，請稍後再試。" }, 503);
       }
+    }
+
+    if (request.method === 'POST' && url.pathname === '/api/auth/verify-code') {
       return jsonResponse({
-        ok: true,
-        message: "登录成功，正在进入 Control Center。",
-        qq,
-        group: "",
-        groupId: "",
-        role: session.role,
-        permissions: session.permissions || {},
-        passwordSetupAvailable: !(await authDbGetStrict(env, `portal_auth_password:${qq}`).catch(() => null))
-      }, 200, { "Set-Cookie": portalSessionCookie(session.token, session.persistent ? DEFAULTS.portalSessionCookieSeconds : null) });
+        ok: false,
+        code: "DIRECT_ID_LOGIN_DISABLED",
+        message: "身份驗證碼只用於首次啟用、第二因素與帳號復原。一般登入請使用帳號與密碼。"
+      }, 410);
     }
 
     if (request.method === 'POST' && url.pathname === '/api/auth/reset-password') {
@@ -323,23 +343,52 @@ const QQAIWorker = {
       }
     }
 
+    if (request.method === 'POST' && url.pathname === '/api/auth/request-login-factor') {
+      let payload = {};
+      try { payload = await request.json(); } catch (e) {}
+      const usernameCheck = validatePortalUsername(payload.username);
+      const password = String(payload.password || "");
+      if (!usernameCheck.ok || !password) return jsonResponse({ ok: false, code: "INVALID_CREDENTIALS", message: "帳號或密碼錯誤。" }, 401);
+      try {
+        const account = await readPortalAccountByUsername(env, usernameCheck.normalized);
+        if (!account) return jsonResponse({ ok: false, code: "INVALID_CREDENTIALS", message: "帳號或密碼錯誤。" }, 401);
+        const passwordRecord = await readPortalAuthJson(env, `portal_auth_password:${account.qq}`, null);
+        if (!passwordRecord || !isValidPortalPasswordRecord(passwordRecord) || !(await verifyPortalPassword(password, passwordRecord))) {
+          return jsonResponse({ ok: false, code: "INVALID_CREDENTIALS", message: "帳號或密碼錯誤。" }, 401);
+        }
+        const twoFactor = await readPortalAuthJson(env, `portal_auth_2fa:${account.qq}`, null);
+        if (!twoFactor?.enabled) return jsonResponse({ ok: false, code: "TWO_FACTOR_NOT_ENABLED", message: "這個帳號目前沒有啟用第二因素。" }, 409);
+        const code = generateSixDigitCode();
+        await authDbPutStrict(env, `portal_auth_code:${account.qq}`, JSON.stringify({ code, group: "", qq: account.qq, expiresAt: Date.now() + 5 * 60 * 1000, attempts: 0 }));
+        const delivery = await sendPortalVerificationMessage(env, account.qq, `【AI Control Center 第二因素】\n驗證碼：${code}\n有效期：5 分鐘。\n若非本人操作，請忽略。`);
+        if (!delivery.ok) {
+          await authDbDelStrict(env, `portal_auth_code:${account.qq}`).catch(() => {});
+          return jsonResponse({ ok: false, code: "VERIFICATION_DELIVERY_FAILED", message: "第二因素驗證碼目前無法送達，請改用驗證器動態碼或備用碼。" }, 503);
+        }
+        return jsonResponse({ ok: true, message: "第二因素驗證碼已傳送。" });
+      } catch {
+        return jsonResponse({ ok: false, code: "AUTH_STORAGE_UNAVAILABLE", message: "登入服務暫時無法使用，請稍後再試。" }, 503);
+      }
+    }
+
     if (request.method === 'POST' && url.pathname === '/api/auth/login-password') {
       let payload = {};
       try { payload = await request.json(); } catch (e) {}
-      const qq = String(payload.qq || "").replace(/\D/g, "");
+      const usernameCheck = validatePortalUsername(payload.username);
       const password = String(payload.password || "");
-      if (!/^\d{5,12}$/.test(qq) || !password) return jsonResponse({ ok: false, message: "请输入正确的 QQ 号和密码。" }, 400);
+      if (!usernameCheck.ok || !password) return jsonResponse({ ok: false, code: "INVALID_CREDENTIALS", message: "帳號或密碼錯誤。" }, 401);
       try {
+        const account = await readPortalAccountByUsername(env, usernameCheck.normalized);
+        if (!account) return jsonResponse({ ok: false, code: "INVALID_CREDENTIALS", message: "帳號或密碼錯誤。" }, 401);
+        const qq = account.qq;
         const guard = await readPasswordLoginGuard(env, qq);
         if (Number(guard.lockUntil || 0) > Date.now()) {
-          return jsonResponse({ ok: false, code: "PASSWORD_LOGIN_LOCKED", message: `密码登录尝试过多，请在 ${Math.ceil((guard.lockUntil - Date.now()) / 60000)} 分钟后重试，或改用 QQ 验证码。` }, 429);
+          return jsonResponse({ ok: false, code: "PASSWORD_LOGIN_LOCKED", message: `登入嘗試過多，請在 ${Math.ceil((guard.lockUntil - Date.now()) / 60000)} 分鐘後重試。` }, 429);
         }
         const passwordRecord = await readPortalAuthJson(env, `portal_auth_password:${qq}`, null);
-        if (!passwordRecord) return jsonResponse({ ok: false, code: "PASSWORD_NOT_SET", message: "此 QQ 尚未设置密码，请先使用 QQ 验证码登录。" }, 404);
-        if (!isValidPortalPasswordRecord(passwordRecord)) return jsonResponse({ ok: false, code: "PASSWORD_RECORD_INVALID", message: "密码记录已损坏或格式过旧，请使用 QQ 验证码重设密码。" }, 409);
-        if (!(await verifyPortalPassword(password, passwordRecord))) {
+        if (!passwordRecord || !isValidPortalPasswordRecord(passwordRecord) || !(await verifyPortalPassword(password, passwordRecord))) {
           await notePasswordLoginFailure(env, qq);
-          return jsonResponse({ ok: false, code: "PASSWORD_INVALID", message: "QQ 号或密码错误。" }, 401);
+          return jsonResponse({ ok: false, code: "INVALID_CREDENTIALS", message: "帳號或密碼錯誤。" }, 401);
         }
         const twoFactor = await readPortalAuthJson(env, `portal_auth_2fa:${qq}`, null);
         let factorResult = { ok: true, method: "password" };
@@ -347,7 +396,7 @@ const QQAIWorker = {
           const factorType = String(payload.factorType || "").toLowerCase();
           const factorCode = String(payload.factorCode || "").trim();
           if (!factorType || !factorCode) {
-            return jsonResponse({ ok: false, code: "TWO_FACTOR_REQUIRED", requiresTwoFactor: true, methods: ["totp", "backup", "qq_code"], message: "密码正确，请输入验证器动态码、备用码，或发送 QQ 验证码。" }, 202);
+            return jsonResponse({ ok: false, code: "TWO_FACTOR_REQUIRED", requiresTwoFactor: true, methods: ["totp", "backup", "qq_code"], message: "密碼正確，請完成第二因素驗證。" }, 202);
           }
           if (factorType === "totp") {
             const secret = await decryptPortalAuthSecret(env, twoFactor.secret);
@@ -364,11 +413,11 @@ const QQAIWorker = {
           }
           if (!factorResult.ok) {
             await notePasswordLoginFailure(env, qq);
-            return jsonResponse({ ok: false, code: "TWO_FACTOR_INVALID", message: factorResult.message || "双因数验证码或备用码错误。" }, 401);
+            return jsonResponse({ ok: false, code: "TWO_FACTOR_INVALID", message: factorResult.message || "第二因素驗證失敗。" }, 401);
           }
         }
         const remember = payload.remember !== false;
-        const session = await createPortalSession(env, { qq, group: "", groupId: "", persistent: remember, authMethod: twoFactor?.enabled ? `password_${factorResult.method}` : "password" });
+        const session = await createPortalSession(env, { qq, username: account.username, group: "", groupId: "", persistent: remember, authMethod: twoFactor?.enabled ? `password_${factorResult.method}` : "password" });
         if (twoFactor?.enabled && factorResult.method === "backup") {
           twoFactor.backupCodeHashes.splice(factorResult.index, 1);
           twoFactor.updatedAt = Date.now();
@@ -377,10 +426,10 @@ const QQAIWorker = {
           await authDbDelStrict(env, `portal_auth_code:${qq}`);
         }
         await clearPasswordLoginGuard(env, qq);
-        return jsonResponse({ ok: true, message: "密码登录成功。", qq, role: session.role, permissions: session.permissions || {} }, 200, { "Set-Cookie": portalSessionCookie(session.token, session.persistent ? DEFAULTS.portalSessionCookieSeconds : null) });
+        return jsonResponse({ ok: true, message: "登入成功。", username: account.username, role: session.role, permissions: session.permissions || {} }, 200, { "Set-Cookie": portalSessionCookie(session.token, session.persistent ? DEFAULTS.portalSessionCookieSeconds : null) });
       } catch (error) {
         const secretMissing = error?.code === "PORTAL_AUTH_SECRET_MISSING";
-        return jsonResponse({ ok: false, code: secretMissing ? "TWO_FACTOR_CONFIGURATION_ERROR" : "AUTH_STORAGE_UNAVAILABLE", message: secretMissing ? "双因数验证密钥配置缺失，请管理员设置 PORTAL_AUTH_SECRET。" : "登录资料库暂时不可用，请稍后重试。" }, 503);
+        return jsonResponse({ ok: false, code: secretMissing ? "TWO_FACTOR_CONFIGURATION_ERROR" : "AUTH_STORAGE_UNAVAILABLE", message: secretMissing ? "第二因素驗證設定缺失，請聯絡管理員。" : "登入服務暫時無法使用，請稍後再試。" }, 503);
       }
     }
 
