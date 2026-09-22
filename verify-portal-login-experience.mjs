@@ -47,6 +47,8 @@ assert.match(worker, /\/portal#memory/);
 assert.match(worker, /\/portal#appeals/);
 assert.match(runtime, /function showLogin\(\)\{location\.replace\('\/login'\)\}/);
 assert.match(runtime, /session\.username\|\|'已登入帳號'/);
+assert.match(runtime, /p\.developer\|\|role==='developer'/);
+assert.match(runtime, /session\.role==='developer'/);
 
 const core = fs.readFileSync("src/core/permissions.js", "utf8");
 assert.match(core, /function outboundFingerprint/);
