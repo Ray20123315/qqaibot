@@ -33,6 +33,7 @@ assert.doesNotMatch(register, /id="bootstrapKey"/);
 assert.match(register, /id="qqid"/);
 assert.match(register, /\/api\/auth\/register\/request-code/);
 assert.match(register, /\/api\/auth\/register/);
+assert.match(register, /accountType:dev\?'developer':'member'/);
 assert.match(register, /建立登入帳號/);
 assert.match(register, /沒有預設密碼/);
 assert.match(register, /已有帳號但忘記密碼/);
