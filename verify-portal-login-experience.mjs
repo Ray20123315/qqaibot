@@ -1,34 +1,38 @@
 import assert from "node:assert/strict";
 import fs from "node:fs";
+import {
+  getPortalLoginPage,
+  getPortalRegisterPage,
+  getPublicLandingPage
+} from "./src/portal/runtime.js";
 
 const runtime = fs.readFileSync("src/portal/runtime.js", "utf8");
 const worker = fs.readFileSync("worker.js", "utf8");
+const landing = getPublicLandingPage();
+const login = getPortalLoginPage();
+const register = getPortalRegisterPage();
 
-assert.match(runtime, /function getPublicLandingPage\(/);
-assert.match(runtime, /function getPortalLoginPage\(/);
-assert.match(runtime, /function getPortalRegisterPage\(/);
-assert.match(runtime, /帳號密碼登入/);
-assert.match(runtime, /第一次使用：建立帳號/);
-assert.match(runtime, /QQID（僅首次身份驗證）/);
+assert.match(landing, /AI Control Center/);
+assert.match(landing, /class="console-preview"/);
+assert.match(landing, /class="feature-grid"/);
 
-const loginStart = runtime.indexOf("function getPortalLoginPage()");
-const registerStart = runtime.indexOf("function getPortalRegisterPage()", loginStart);
-assert(loginStart >= 0 && registerStart > loginStart);
-const publicLogin = runtime.slice(loginStart, registerStart);
-assert.match(publicLogin, /id="username"/);
-assert.match(publicLogin, /id="password"/);
-assert.match(publicLogin, /\/api\/auth\/login-password/);
-assert.match(publicLogin, /\/api\/auth\/request-login-factor/);
-assert.doesNotMatch(publicLogin, /id="qqid"/i);
-assert.doesNotMatch(publicLogin, /QQID/);
+assert.match(login, /登入你的帳號/);
+assert.match(login, /id="username"/);
+assert.match(login, /id="password"/);
+assert.match(login, /\/api\/auth\/login-password/);
+assert.match(login, /\/api\/auth\/request-login-factor/);
+assert.match(login, /class="auth-stage"/);
+assert.doesNotMatch(login, /id="qqid"/i);
+assert.doesNotMatch(login, /QQID/);
 
-const registerEnd = runtime.indexOf("function getPortalHomePage", registerStart);
-const registerPage = runtime.slice(registerStart, registerEnd);
-assert.match(registerPage, /id="qqid"/);
-assert.match(registerPage, /\/api\/auth\/register\/request-code/);
-assert.match(registerPage, /\/api\/auth\/register/);
-assert.match(registerPage, /建立登入帳號/);
-assert.match(registerPage, /已有帳號但忘記密碼/);
+assert.match(register, /第一次使用：建立帳號/);
+assert.match(register, /QQID（僅首次身份驗證）/);
+assert.match(register, /id="qqid"/);
+assert.match(register, /\/api\/auth\/register\/request-code/);
+assert.match(register, /\/api\/auth\/register/);
+assert.match(register, /建立登入帳號/);
+assert.match(register, /已有帳號但忘記密碼/);
+assert.match(register, /class="auth-stage"/);
 
 assert.match(worker, /url\.pathname === '\/'/);
 assert.match(worker, /\['\/login', '\/register'\]/);
