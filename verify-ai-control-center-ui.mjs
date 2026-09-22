@@ -48,7 +48,9 @@ assert.doesNotMatch(login, /QQAIbot/);
 
 const register = getPortalRegisterPage();
 assert.match(register, /class="auth-stage"/);
-assert.match(register, /DIRECT PASSWORD ACTIVATION/);\nassert.match(register, /id="activationMode"/);\nassert.match(register, /id="bootstrapKey"/);
+assert.match(register, /DIRECT PASSWORD ACTIVATION/);
+assert.match(register, /id="activationMode"/);
+assert.match(register, /id="bootstrapKey"/);
 assert.match(register, /id="qqid"/);
 assert.match(register, /id="username"/);
 assert.match(register, /\/api\/auth\/register/);
