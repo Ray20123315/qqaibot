@@ -19,6 +19,8 @@ const EXTERNAL_ACTION_TYPES = new Set(["reply", "log", "metric"]);
 const PLUGIN_ID_PATTERN = /^[a-z0-9][a-z0-9._-]{1,63}$/;
 const SEMVER_PATTERN = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/;
 const EVENT_PATTERN = /^[a-z][a-z0-9._:-]{0,63}$/;
+const PORTAL_VIEW_PATTERN = /^[a-z][a-z0-9-]{0,63}$/;
+const PORTAL_LOCALE_PATTERN = /^[a-z]{2,3}(?:-[A-Z0-9]{2,8})?$/;
 const textEncoder = new TextEncoder();
 
 function uniqueStrings(values, { maxItems = 64, pattern = null } = {}) {
@@ -34,6 +36,35 @@ function uniqueStrings(values, { maxItems = 64, pattern = null } = {}) {
   return output;
 }
 
+function normalizePortalMetadata(value) {
+  const source = value && typeof value === "object" ? value : {};
+  const views = uniqueStrings(source.views, { maxItems: 32, pattern: PORTAL_VIEW_PATTERN });
+  const defaultView = String(source.defaultView || "").trim().toLowerCase();
+  return Object.freeze({
+    category: String(source.category || "other").trim().toLowerCase().slice(0, 48),
+    icon: String(source.icon || "◇").trim().slice(0, 8),
+    defaultView: PORTAL_VIEW_PATTERN.test(defaultView) && views.includes(defaultView) ? defaultView : (views[0] || ""),
+    views,
+    order: Math.max(0, Math.min(9999, Number(source.order || 0) || 0)),
+    legacyBridge: source.legacyBridge === true,
+    developerOnly: source.developerOnly === true
+  });
+}
+
+function normalizePluginTranslations(value) {
+  const source = value && typeof value === "object" ? value : {};
+  const out = {};
+  for (const [locale, raw] of Object.entries(source)) {
+    if (!PORTAL_LOCALE_PATTERN.test(locale)) continue;
+    const row = raw && typeof raw === "object" ? raw : {};
+    const name = String(row.name || "").trim().slice(0, 120);
+    const description = String(row.description || "").trim().slice(0, 500);
+    if (!name && !description) continue;
+    out[locale] = Object.freeze({ name, description });
+  }
+  return Object.freeze(out);
+}
+
 function normalizePluginManifest(value) {
   const source = value && typeof value === "object" ? value : {};
   const mode = String(source.mode || "").trim().toLowerCase();
@@ -47,6 +78,8 @@ function normalizePluginManifest(value) {
     capabilities: uniqueStrings(source.capabilities, { maxItems: 32, pattern: /^[a-z][a-z0-9._:-]{0,63}$/ }),
     author: String(source.author || "").trim().slice(0, 120),
     description: String(source.description || "").trim().slice(0, 500),
+    portal: normalizePortalMetadata(source.portal),
+    i18n: normalizePluginTranslations(source.i18n),
   });
 }
 
@@ -268,6 +301,22 @@ async function applyExternalPluginActions(result, host = {}) {
   return applied;
 }
 
+function portalPluginCatalog() {
+  return listBundledPlugins()
+    .map(definition => validateTrustedBundledDefinition(definition))
+    .filter(result => result.ok && result.manifest.portal?.views?.length)
+    .map(result => Object.freeze({
+      id: result.manifest.id,
+      name: result.manifest.name,
+      version: result.manifest.version,
+      description: result.manifest.description,
+      author: result.manifest.author,
+      portal: result.manifest.portal,
+      i18n: result.manifest.i18n
+    }))
+    .sort((a, b) => Number(a.portal.order || 0) - Number(b.portal.order || 0) || a.id.localeCompare(b.id));
+}
+
 function pluginExecutionStatus(env) {
   return Object.freeze({
     trustedBundled: { available: true, requiresRebuild: true, registered: listBundledPlugins().length },
@@ -292,6 +341,7 @@ export {
   normalizePluginManifest,
   normalizePluginResult,
   pluginExecutionStatus,
+  portalPluginCatalog,
   validatePluginManifest,
   validateSandboxedExternalDefinition,
   validateTrustedBundledDefinition,
