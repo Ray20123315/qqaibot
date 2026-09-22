@@ -3,7 +3,7 @@
 本文件是 **目前 source 實際讀取** 的 Cloudflare bindings、公開 Worker 變數與 Secrets 對照表。  
 原則：公開設定放 `wrangler.toml [vars]`；憑證、密碼、Token、API Key 一律用 Cloudflare Secret；不要把真實值提交到 Git。
 
-> Developer Portal 開發者首次啟用現在直接在網頁輸入 QQID、帳號與密碼，不使用 QQ 六位驗證碼。為避免任何人搶先冒用已知開發者 QQID，首次建立開發者帳號時還要輸入一次既有 V2 的部署管理金鑰；後端只接受 `PORTAL_AUTH_SECRET` 或既有 OneBot 高權限 Secret，不新增開發者帳密 env。
+> Developer Portal 的開發者帳號固定為保留名稱 `admin`。第一次啟用只輸入 `DEVELOPER_IDS`／`ROOT_QQ_IDS` 中的 QQID並直接設定 admin 密碼；不使用 QQ 六位驗證碼，也不使用 `PORTAL_AUTH_SECRET`、OneBot Token 或其他新增 Secret 作登入前置條件。系統沒有預設 admin 密碼。
 
 ## 1. Cloudflare bindings
 
@@ -28,20 +28,19 @@
 | `DEVELOPER_IDS` | public var | 必要 | 逗號/分號/換行分隔的最高開發者 QQID 清單。 |
 | `ROOT_QQ_IDS` | public var | 可選 | 額外 Root QQID，與 `DEVELOPER_IDS` 合併。 |
 | `DEVELOPER_ID` | public var | legacy | 單一開發者 QQID 相容欄位。 |
-| 開發者 Portal username | Web / D1 | 首次啟用時設定 | 直接在 `/register` 填寫；不再使用 deploy-time username 變數。 |
-| 開發者 Portal password | Web / D1 PBKDF2 | 首次啟用時設定 | 直接在 `/register` 填寫；只保存 PBKDF2 salt/hash，不新增 deploy-time 初始密碼 Secret。 |
+| 開發者 Portal username | 固定系統帳號 | 必要 | 固定為保留名稱 `admin`；一般使用者不可註冊此名稱。 |
+| 開發者 Portal password | Web / D1 PBKDF2 | 首次啟用時設定 | 第一次在 `/register` 直接設定 admin 密碼；沒有預設密碼，只保存 PBKDF2 salt/hash。 |
 
-建議保留 V2 原本的部署設定：
+開發者身份仍由 V2 原本的 public var 判定：
 
 ```bash
 # wrangler.toml [vars]
 DEVELOPER_IDS = "你的QQID"
-
-# 既有 V2 Secret；同時可作第一次開發者 bootstrap 的部署管理金鑰
-npx wrangler secret put PORTAL_AUTH_SECRET
 ```
 
-開發者第一次走 `/register`：輸入 `DEVELOPER_IDS` 中的 QQID → 輸入一次部署管理金鑰 → 在網頁建立 username/password → 建立 D1 帳號。**不傳送 QQ 六位驗證碼**。之後走 `/login`，預設只需 username/password；只有使用者自行啟用 2FA 時才追加第二因素。
+開發者第一次走 `/register`：輸入 `DEVELOPER_IDS`／`ROOT_QQ_IDS` 中的 QQID → 直接設定密碼 → 系統建立或遷移保留帳號 `admin`。**不傳送 QQ 六位驗證碼，也不要求 `PORTAL_AUTH_SECRET`／OneBot Token。** 之後走 `/login`，帳號固定輸入 `admin`，密碼就是第一次設定的密碼；只有使用者自行啟用 2FA 時才追加第二因素。
+
+`PORTAL_AUTH_SECRET` / `TOTP_ENCRYPTION_KEY` 仍可供 Portal 敏感資料與 TOTP seed 加密使用，但它們不再是 admin 登入或首次啟用的密碼／鑰匙。
 
 ## 3. 公開 Worker vars（source 目前有讀取）
 
