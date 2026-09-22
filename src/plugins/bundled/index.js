@@ -1,7 +1,11 @@
 // Trusted bundled plugins are intentionally explicit imports.
 // Adding a plugin here is a trust decision: the plugin becomes part of the QQAI Worker build.
 
-const BUNDLED_PLUGINS = Object.freeze([]);
+import { PORTAL_FEATURE_PLUGINS } from "./portal-features.js";
+
+const BUNDLED_PLUGINS = Object.freeze([
+  ...PORTAL_FEATURE_PLUGINS
+]);
 
 function listBundledPlugins() {
   return [...BUNDLED_PLUGINS];
