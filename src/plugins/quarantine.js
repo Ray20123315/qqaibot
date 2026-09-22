@@ -1,4 +1,5 @@
 import { normalizeSignedPluginDistribution, verifyDistributionArtifact, verifyDistributionSignature } from "./distribution.js";
+import { deterministicScanPluginArtifact } from "./security-center.js";
 
 const PLUGIN_QUARANTINE_KEY = "plugin_quarantine:registry:v1";
 const PLUGIN_QUARANTINE_SCHEMA_VERSION = 1;
@@ -27,6 +28,8 @@ function safeDistributionMetadata(distribution) {
 function createPluginQuarantine(storageAdapter, {
   trustStore,
   fetchArtifact,
+  securityCenter = null,
+  scanArtifact = deterministicScanPluginArtifact,
   nowProvider = Date.now,
   idProvider = () => crypto.randomUUID()
 } = {}) {
@@ -80,13 +83,37 @@ function createPluginQuarantine(storageAdapter, {
       throw new Error("PLUGIN_ARTIFACT_MEDIA_TYPE_MISMATCH");
     }
     const integrity = await verifyDistributionArtifact(distribution, bytes);
+    const scan = typeof scanArtifact === "function"
+      ? await scanArtifact(bytes, { mediaType: distribution.artifact.mediaType, descriptor: distribution.descriptor })
+      : Object.freeze({ findings: Object.freeze([]), findingCount: 0, riskLevel: "none", overrideAllowed: false, blocked: false, scanner: "none" });
+    const securityRecord = securityCenter && typeof securityCenter.report === "function"
+      ? await securityCenter.report({
+          pluginId: distribution.descriptor.id,
+          version: distribution.descriptor.version,
+          hash: integrity.hash,
+          authorKeyId: author.keyId,
+          repositoryUrl: distribution.repositoryUrl,
+          trustStatus: distribution.descriptor.trustStatus || "uncertified",
+          releaseChannel: distribution.descriptor.releaseChannel || "stable",
+          findings: scan.findings || []
+        })
+      : null;
+    const security = Object.freeze({
+      recordId: String(securityRecord?.id || ""),
+      scanner: String(scan?.scanner || "qqai-deterministic-v1"),
+      findingCount: Number(scan?.findingCount || 0),
+      riskLevel: String(scan?.riskLevel || "none"),
+      overrideAllowed: scan?.overrideAllowed === true,
+      blocked: scan?.blocked === true,
+      findings: Object.freeze([...(scan?.findings || [])])
+    });
     const now = Number(nowProvider());
     const id = String(idProvider());
     const record = Object.freeze({
       id,
       pluginId: distribution.descriptor.id,
       version: distribution.descriptor.version,
-      state: "verified",
+      state: security.blocked ? "blocked" : security.findingCount ? "risky" : "verified",
       distribution: safeDistributionMetadata(distribution),
       author: Object.freeze({ keyId: author.keyId, label: author.label }),
       verification: Object.freeze({
@@ -96,6 +123,7 @@ function createPluginQuarantine(storageAdapter, {
         sizeBytes: integrity.sizeBytes,
         verifiedAt: now
       }),
+      security,
       createdAt: now,
       updatedAt: now,
       updatedBy: String(actorId || "")
@@ -110,9 +138,35 @@ function createPluginQuarantine(storageAdapter, {
     const key = String(id || "");
     const existing = state.entries?.[key];
     if (!existing) throw new Error("PLUGIN_QUARANTINE_NOT_FOUND:" + key);
-    if (!["verified", "approved"].includes(existing.state)) throw new Error("PLUGIN_QUARANTINE_STATE_INVALID");
+    if (!["verified", "approved"].includes(existing.state)) throw new Error(existing.state === "blocked" ? "PLUGIN_SECURITY_OVERRIDE_FORBIDDEN" : "PLUGIN_QUARANTINE_STATE_INVALID");
     const now = Number(nowProvider());
     const record = Object.freeze({ ...existing, state: "approved", approvedAt: now, updatedAt: now, updatedBy: String(actorId || "") });
+    await write({ ...state, updatedAt: now, entries: { ...(state.entries || {}), [key]: record } });
+    return record;
+  }
+
+  async function acceptRisk(id, actorId = "") {
+    const state = await read();
+    const key = String(id || "");
+    const existing = state.entries?.[key];
+    if (!existing) throw new Error("PLUGIN_QUARANTINE_NOT_FOUND:" + key);
+    if (existing.state !== "risky" && existing.state !== "approved_with_risk") {
+      if (existing.state === "blocked") throw new Error("PLUGIN_SECURITY_OVERRIDE_FORBIDDEN");
+      throw new Error("PLUGIN_QUARANTINE_STATE_INVALID");
+    }
+    if (existing.security?.overrideAllowed !== true || existing.security?.blocked === true) throw new Error("PLUGIN_SECURITY_OVERRIDE_FORBIDDEN");
+    if (securityCenter && existing.security?.recordId && typeof securityCenter.acceptRisk === "function") {
+      await securityCenter.acceptRisk(existing.security.recordId, actorId);
+    }
+    const now = Number(nowProvider());
+    const record = Object.freeze({
+      ...existing,
+      state: "approved_with_risk",
+      acceptedRiskAt: now,
+      acceptedRiskBy: String(actorId || ""),
+      updatedAt: now,
+      updatedBy: String(actorId || "")
+    });
     await write({ ...state, updatedAt: now, entries: { ...(state.entries || {}), [key]: record } });
     return record;
   }
@@ -145,7 +199,7 @@ function createPluginQuarantine(storageAdapter, {
     return true;
   }
 
-  return Object.freeze({ approve, get, list, read, reject, remove, verifyAndQuarantine });
+  return Object.freeze({ acceptRisk, approve, get, list, read, reject, remove, verifyAndQuarantine });
 }
 
 export {
