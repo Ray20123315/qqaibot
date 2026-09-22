@@ -1,112 +1,73 @@
 import assert from "node:assert/strict";
 import fs from "node:fs";
-import {
-  getPortalHomePage,
-  getPortalLoginPage,
-  getPortalRegisterPage,
-  getPublicLandingPage
-} from "./src/portal/runtime.js";
+import { getPortalHomePage, getPortalLoginPage, getPortalRegisterPage, getPublicLandingPage } from "./src/portal/runtime.js";
 import { injectPortalLayoutClient } from "./src/portal/layout.js";
 import { injectPortalMembersClient } from "./src/portal/members.js";
 import { injectWerewolfPortalClient } from "./src/games/werewolf.js";
 import { injectDeploymentPortalClient } from "./src/deployment/notifications.js";
 
 const landing = getPublicLandingPage();
-assert.match(landing, /<meta name="theme-color" content="#020714">/);
-assert.match(landing, /class="brand-mark"/);
-assert.match(landing, /class="console-preview"/);
-assert.match(landing, /class="cyber-skyline"/);
-assert.match(landing, /class="edge-motto"/);
-assert.match(landing, /class="preview-search"/);
-assert.match(landing, /class="preview-stat-grid"/);
-assert.match(landing, /class="preview-resource-rail"/);
-assert.match(landing, /class="flow-nodes"/);
+assert.match(landing, /AI Control Center/);
+assert.match(landing, /data-i18n="public\.hero\.title"/);
+assert.match(landing, /id="publicLocale"/);
+assert.match(landing, /© 2026 ray20123315\. All rights reserved\./);
 assert.match(landing, /class="feature-grid"/);
-assert.match(landing, /class="role-grid"/);
-assert.match(landing, /class="roles-layout"/);
-assert.match(landing, /class="role-quote"/);
-assert.match(landing, /BYOR/);
-assert.match(landing, /Cloudflare/);
-assert.match(landing, /YOUR AI · YOUR PLUGINS · YOUR RESOURCES/);
-assert.match(landing, /KV \/ R2 目前為未來 BYOR 預留/);
-assert.match(landing, /<b>Cloudflare D1<\/b><span class="resource-state core">核心<\/span>/);
-assert.match(landing, /<b>R2<\/b><span class="resource-state planned">預留<\/span>/);
-assert.doesNotMatch(landing, />28</);
 assert.doesNotMatch(landing, /2\.4K/);
-assert.doesNotMatch(landing, /<b>R2<\/b><span class="resource-state[^"]*">已連接<\/span>/);
-assert.doesNotMatch(landing, /QQAIbot/);
-assert.doesNotMatch(landing, /<style>\s*\$\{css\}/);
 
 const login = getPortalLoginPage();
 assert.match(login, /class="auth-stage"/);
-assert.match(login, /SECURE ACCOUNT ACCESS/);
 assert.match(login, /id="username"/);
 assert.match(login, /id="password"/);
-assert.match(login, /\/api\/auth\/login-password/);
-assert.doesNotMatch(login, /id="qqid"/i);
-assert.doesNotMatch(login, /QQAIbot/);
+assert.match(login, /id="publicLocale"/);
+assert.match(login, /data-i18n="login\.title"/);
+assert.match(login, /© 2026 ray20123315\. All rights reserved\./);
 
 const register = getPortalRegisterPage();
-assert.match(register, /class="auth-stage"/);
 assert.match(register, /ADMIN PASSWORD SETUP/);
 assert.match(register, /id="activationMode"/);
-assert.match(register, /id="developerUsername"/);
 assert.match(register, /value="admin"/);
-assert.doesNotMatch(register, /id="bootstrapKey"/);
-assert.match(register, /id="qqid"/);
-assert.match(register, /id="username"/);
-assert.match(register, /\/api\/auth\/register/);
-assert.doesNotMatch(register, /QQAIbot/);
+assert.match(register, /id="publicLocale"/);
+assert.match(register, /data-i18n="register\.title"/);
+assert.match(register, /© 2026 ray20123315\. All rights reserved\./);
 
-const portalBase = getPortalHomePage("qqai.ray2025.com");
-assert.match(portalBase, /<b>AI Control Center<\/b>/);
-assert.match(portalBase, /AI · Automation · BYOR/);
-assert.match(portalBase, /AI CONTROL CENTER/);
-assert.match(portalBase, /YOUR AI · YOUR PLUGINS · YOUR RESOURCES/);
-assert.match(portalBase, /t==='light'\?'light':'dark'/);
-assert.match(portalBase, /id="v-overview"/);
-assert.match(portalBase, /id="v-health"/);
-assert.match(portalBase, /id="v-models"/);
-assert.match(portalBase, /id="v-groups"/);
-assert.match(portalBase, /id="v-memory"/);
-assert.match(portalBase, /id="v-logs"/);
+const portalBase = getPortalHomePage("aibot.ray2025.com");
+for (const marker of [
+  'data-view="overview"',
+  'data-view="plugins"',
+  'data-view="account"',
+  'data-view="health"',
+  'id="pluginCompatNav"',
+  'id="pluginGrid"',
+  'id="overviewPluginGrid"',
+  'id="localeSelect"',
+  'window.__QQAI_PORTAL_PLUGINS__',
+  'window.__QQAI_PORTAL_I18N__',
+  '© 2026 ray20123315. All rights reserved.'
+]) assert.ok(portalBase.includes(marker), "missing rebuilt Portal marker: " + marker);
+assert.doesNotMatch(portalBase, /return toSimplifiedChinese\(String\.raw/);
 
 const withFeatures = injectWerewolfPortalClient(injectPortalMembersClient(injectDeploymentPortalClient(portalBase)));
 const full = injectPortalLayoutClient(withFeatures);
 assert.match(full, /id="qqai-member-console-style"/);
 assert.match(full, /id="qqai-werewolf-style"/);
 assert.match(full, /id="qqai-deployment-toast"/);
-assert.match(full, /id="qqai-portal-layout-v274"/);
-assert.ok(full.lastIndexOf("qqai-portal-layout-v274") > full.lastIndexOf("qqai-werewolf-style"), "AI design layer must be after werewolf feature styles");
-assert.ok(full.lastIndexOf("qqai-portal-layout-v274") > full.lastIndexOf("qqai-member-console-style"), "AI design layer must be after member feature styles");
-assert.match(full, /--ai-cyan:#31ddff/);
-assert.match(full, /\.member-console-toolbar\{grid-template-columns/);
-assert.match(full, /\.cleanup-summary\{grid-template-columns/);
-assert.match(full, /\.ww-layout\{grid-template-columns/);
-assert.match(full, /#qqai-deployment-toast\{/);
+assert.match(full, /id="qqai-portal-layout-v300"/);
+assert.ok(full.lastIndexOf("qqai-portal-layout-v300") > full.lastIndexOf("qqai-werewolf-style"));
+assert.ok(full.lastIndexOf("qqai-portal-layout-v300") > full.lastIndexOf("qqai-member-console-style"));
 
 const runtime = fs.readFileSync("src/portal/runtime.js", "utf8");
-assert.match(runtime, /v3 visual-fidelity layer: approved generated mockup/);
-assert.match(runtime, /\.public-home \.hero\{padding:51px 0 25px;grid-template-columns:minmax\(410px,\.77fr\) minmax\(700px,1\.23fr\)/);
-assert.match(runtime, /\.cyber-skyline:before\{/);
-assert.match(runtime, /\.preview-main-grid\{display:grid;grid-template-columns:minmax\(0,1fr\) 175px/);
-assert.match(runtime, /document\.documentElement\.dataset\.theme=t==='light'\?'light':'dark'/);
-assert.match(runtime, /class="side-brand"[\s\S]*AI Control Center/);
-assert.match(runtime, /class="top-kicker">AI CONTROL CENTER/);
-assert.doesNotMatch(runtime, /<div class="side-brand"[\s\S]{0,160}<b>QQAIbot<\/b>/);
+assert.match(runtime, /function renderPluginCatalog/);
+assert.match(runtime, /function setPortalLocale/);
+assert.match(runtime, /function organizeSidebarNavigation/);
+assert.match(runtime, /var core=\['overview','plugins','account','health'\]/);
+assert.match(runtime, /plugin-compat-nav/);
 
-const layoutSource = fs.readFileSync("src/portal/layout.js", "utf8");
-for (const selector of [
-  ".overview-hero:after",
-  ".status-strip",
-  ".action-card",
-  ".qqai-nav-glyph",
-  ".member-action-row",
-  ".suite-grid",
-  ".cleanup-summary",
-  ".ww-layout",
-  "#qqai-deployment-toast",
-  ".qqai-modal-card"
-]) assert.ok(layoutSource.includes(selector), "missing AI design selector: " + selector);
+const layout = fs.readFileSync("src/portal/layout.js", "utf8");
+assert.match(layout, /--sidebar-bg:#ffffff/);
+assert.match(layout, /:root\[data-theme="dark"\]/);
+assert.match(layout, /background:var\(--panel\)!important/);
+assert.match(layout, /\.plugin-grid\{/);
+assert.match(layout, /\.core-hero\{/);
+assert.doesNotMatch(layout, /--bg:#020713!important/);
 
 console.log("verify-ai-control-center-ui: ok");
