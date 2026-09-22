@@ -101,6 +101,19 @@ async function authDbPutStrict(env, key, value) {
 
 
 
+async function authDbPutIfAbsentStrict(env, key, value) {
+  if (!env?.DB) throw authStorageError("Missing D1 binding for Portal authentication");
+  return authDbRetry(`auth reserve ${key}`, async () => {
+    const result = await env.DB.prepare("INSERT INTO kv_store (key, value) VALUES (?, ?) ON CONFLICT(key) DO NOTHING").bind(key, value).run();
+    if (result && result.success === false) throw new Error("D1 reserve reported failure");
+    const changes = Number(result?.meta?.changes ?? result?.changes ?? 0);
+    if (changes > 0) return true;
+    return (await authDbGetStrict(env, key)) === null;
+  });
+}
+
+
+
 async function authDbDelStrict(env, key) {
   if (!env?.DB) throw authStorageError("Missing D1 binding for Portal authentication");
   await authDbRetry(`auth delete ${key}`, async () => {
@@ -160,6 +173,145 @@ function validatePortalPassword(password) {
   if (value.length > 128) return { ok: false, message: "密码不能超过 128 个字符。" };
   if (/^\s+$/.test(value)) return { ok: false, message: "密码不能全部为空白字符。" };
   return { ok: true, value };
+}
+
+
+
+const PORTAL_USERNAME_RESERVED = Object.freeze(new Set([
+  "admin", "administrator", "root", "developer", "system", "support", "security",
+  "api", "login", "logout", "register", "portal", "account", "accounts", "me"
+]));
+
+function normalizePortalUsername(value) {
+  return String(value ?? "").normalize("NFKC").trim().toLowerCase();
+}
+
+function validatePortalUsername(value) {
+  const display = String(value ?? "").normalize("NFKC").trim();
+  const normalized = normalizePortalUsername(display);
+  if (normalized.length < 4 || normalized.length > 32) {
+    return { ok: false, code: "USERNAME_LENGTH", message: "帳號名稱需為 4 到 32 個字元。" };
+  }
+  if (!/^[a-z0-9][a-z0-9._-]{3,31}$/i.test(normalized)) {
+    return { ok: false, code: "USERNAME_FORMAT", message: "帳號只能使用英文字母、數字、句點、底線與連字號，且必須以英文字母或數字開頭。" };
+  }
+  if (!/[a-z]/i.test(normalized)) {
+    return { ok: false, code: "USERNAME_LETTER_REQUIRED", message: "帳號至少需要一個英文字母，不能只使用數字。" };
+  }
+  if (PORTAL_USERNAME_RESERVED.has(normalized)) {
+    return { ok: false, code: "USERNAME_RESERVED", message: "這個帳號名稱保留給系統使用，請換一個名稱。" };
+  }
+  return { ok: true, value: display, normalized };
+}
+
+function portalAccountIdentityKey(qq) {
+  return `portal_account_identity:${String(qq || "").replace(/\D/g, "")}`;
+}
+
+function portalAccountUsernameKey(username) {
+  return `portal_account_username:${normalizePortalUsername(username)}`;
+}
+
+function normalizePortalAccountRecord(value) {
+  const source = value && typeof value === "object" ? value : {};
+  const qq = String(source.qq || "").replace(/\D/g, "");
+  const username = String(source.username || "").normalize("NFKC").trim();
+  const normalizedUsername = normalizePortalUsername(source.normalizedUsername || username);
+  if (!/^\d{5,12}$/.test(qq) || !validatePortalUsername(normalizedUsername).ok) return null;
+  return Object.freeze({
+    qq,
+    username: username || normalizedUsername,
+    normalizedUsername,
+    createdAt: Number(source.createdAt || 0) || null,
+    updatedAt: Number(source.updatedAt || source.createdAt || 0) || null
+  });
+}
+
+async function readPortalAccountByUsername(env, username) {
+  const validation = validatePortalUsername(username);
+  if (!validation.ok) return null;
+  const raw = await authDbGetStrict(env, portalAccountUsernameKey(validation.normalized));
+  if (!raw) return null;
+  try { return normalizePortalAccountRecord(JSON.parse(raw)); } catch { return null; }
+}
+
+async function readPortalAccountByQq(env, qq) {
+  const normalizedQq = String(qq || "").replace(/\D/g, "");
+  if (!/^\d{5,12}$/.test(normalizedQq)) return null;
+  const raw = await authDbGetStrict(env, portalAccountIdentityKey(normalizedQq));
+  if (!raw) return null;
+  try { return normalizePortalAccountRecord(JSON.parse(raw)); } catch { return null; }
+}
+
+async function createPortalAccountBinding(env, { qq, username } = {}) {
+  const normalizedQq = String(qq || "").replace(/\D/g, "");
+  if (!/^\d{5,12}$/.test(normalizedQq)) {
+    const error = new Error("QQID_INVALID");
+    error.code = "QQID_INVALID";
+    throw error;
+  }
+  const validation = validatePortalUsername(username);
+  if (!validation.ok) {
+    const error = new Error(validation.message);
+    error.code = validation.code || "USERNAME_INVALID";
+    throw error;
+  }
+  const now = Date.now();
+  const account = {
+    qq: normalizedQq,
+    username: validation.value,
+    normalizedUsername: validation.normalized,
+    createdAt: now,
+    updatedAt: now
+  };
+  const identityKey = portalAccountIdentityKey(normalizedQq);
+  const usernameKey = portalAccountUsernameKey(validation.normalized);
+  const existingIdentity = await readPortalAccountByQq(env, normalizedQq);
+  if (existingIdentity && existingIdentity.normalizedUsername !== validation.normalized) {
+    const error = new Error("ACCOUNT_ALREADY_ACTIVATED");
+    error.code = "ACCOUNT_ALREADY_ACTIVATED";
+    error.account = existingIdentity;
+    throw error;
+  }
+
+  let identityReserved = false;
+  if (!existingIdentity) {
+    identityReserved = await authDbPutIfAbsentStrict(env, identityKey, JSON.stringify(account));
+    if (!identityReserved) {
+      const racedIdentity = await readPortalAccountByQq(env, normalizedQq);
+      if (!racedIdentity || racedIdentity.normalizedUsername !== validation.normalized) {
+        const error = new Error("ACCOUNT_ALREADY_ACTIVATED");
+        error.code = "ACCOUNT_ALREADY_ACTIVATED";
+        error.account = racedIdentity;
+        throw error;
+      }
+    }
+  }
+
+  const existingUsername = await readPortalAccountByUsername(env, validation.normalized);
+  if (existingUsername && existingUsername.qq !== normalizedQq) {
+    if (identityReserved) await authDbDelStrict(env, identityKey).catch(() => {});
+    const error = new Error("USERNAME_TAKEN");
+    error.code = "USERNAME_TAKEN";
+    throw error;
+  }
+
+  if (!existingUsername) {
+    const usernameReserved = await authDbPutIfAbsentStrict(env, usernameKey, JSON.stringify(account));
+    if (!usernameReserved) {
+      const racedUsername = await readPortalAccountByUsername(env, validation.normalized);
+      if (!racedUsername || racedUsername.qq !== normalizedQq) {
+        if (identityReserved) await authDbDelStrict(env, identityKey).catch(() => {});
+        const error = new Error("USERNAME_TAKEN");
+        error.code = "USERNAME_TAKEN";
+        throw error;
+      }
+    }
+  }
+
+  const finalAccount = await readPortalAccountByQq(env, normalizedQq);
+  if (!finalAccount) throw authStorageError("Portal account identity write could not be verified");
+  return finalAccount;
 }
 
 
@@ -946,4 +1098,4 @@ async function writePortalSettingValue(env, definition, groupId, targetQq, value
   }
 }
 
-export { BASE32_ALPHABET, PORTAL_SETTING_DEFINITIONS, authDbDelStrict, authDbGetStrict, authDbPutStrict, authDbRetry, authStorageError, base32Decode, base32Encode, base64UrlToBytes, buildGroupReplyMessage, bytesToBase64Url, bytesToHex, clearPasswordLoginGuard, commandChangesWebSettings, constantTimeEqual, createPortalPasswordRecord, createPortalSession, decryptPortalAuthSecret, deleteMemoryVector, derivePortalPassword, encryptPortalAuthSecret, extractGroupId, generateBackupCodes, generateSixDigitCode, generateTotpCode, getOneBotHub, getPortalSession, getPublicNebulaSeed, getUserQuota, hasAdminRole, hashBackupCode, isMemoryBanned, isValidPortalPasswordRecord, jsonResponse, markGroupMemberLeft, migratePortalMemories, normalizeBackupCode, notePasswordLoginFailure, oneBotHttpActionUrl, portalAuthEncryptionKey, portalAuthEncryptionMaterial, portalRoleRank, portalSessionCookie, randomBytes, readCookie, readJson, readPasswordLoginGuard, readPortalAuthJson, readPortalSettingValue, resolvePortalRole, searchPortalVectors, sendOneBotAction, sendOneBotHttpAction, sendPortalVerificationMessage, sha256Hex, simplifyJsonValue, upsertGroupMember, upsertMemoryVector, validatePortalPassword, verifyPortalPassword, verifyPortalVerificationCode, verifyTotpCode, writeMemoryAudit, writePortalSettingValue, writeSystemError };
+export { BASE32_ALPHABET, PORTAL_SETTING_DEFINITIONS, PORTAL_USERNAME_RESERVED, authDbDelStrict, authDbGetStrict, authDbPutIfAbsentStrict, authDbPutStrict, authDbRetry, authStorageError, base32Decode, base32Encode, base64UrlToBytes, buildGroupReplyMessage, bytesToBase64Url, bytesToHex, clearPasswordLoginGuard, commandChangesWebSettings, constantTimeEqual, createPortalAccountBinding, createPortalPasswordRecord, createPortalSession, decryptPortalAuthSecret, deleteMemoryVector, derivePortalPassword, encryptPortalAuthSecret, extractGroupId, generateBackupCodes, generateSixDigitCode, generateTotpCode, getOneBotHub, getPortalSession, getPublicNebulaSeed, getUserQuota, hasAdminRole, hashBackupCode, isMemoryBanned, isValidPortalPasswordRecord, jsonResponse, markGroupMemberLeft, migratePortalMemories, normalizeBackupCode, normalizePortalUsername, notePasswordLoginFailure, oneBotHttpActionUrl, portalAuthEncryptionKey, portalAuthEncryptionMaterial, portalRoleRank, portalAccountIdentityKey, portalAccountUsernameKey, portalSessionCookie, randomBytes, readCookie, readJson, readPasswordLoginGuard, readPortalAccountByQq, readPortalAccountByUsername, readPortalAuthJson, readPortalSettingValue, resolvePortalRole, searchPortalVectors, sendOneBotAction, sendOneBotHttpAction, sendPortalVerificationMessage, sha256Hex, simplifyJsonValue, upsertGroupMember, upsertMemoryVector, validatePortalPassword, validatePortalUsername, verifyPortalPassword, verifyPortalVerificationCode, verifyTotpCode, writeMemoryAudit, writePortalSettingValue, writeSystemError };
