@@ -16,7 +16,7 @@ assert.match(landing, /AI Control Center/);
 assert.match(landing, /class="console-preview"/);
 assert.match(landing, /class="feature-grid"/);
 
-assert.match(login, /登入你的帳號/);
+assert.match(login, /data-i18n="login\.title"/);
 assert.match(login, /id="username"/);
 assert.match(login, /id="password"/);
 assert.match(login, /\/api\/auth\/login-password/);
