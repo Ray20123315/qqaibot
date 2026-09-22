@@ -25,14 +25,16 @@ assert.match(login, /class="auth-stage"/);
 assert.doesNotMatch(login, /id="qqid"/i);
 assert.doesNotMatch(login, /QQID/);
 
-assert.match(register, /第一次使用：建立帳號/);
-assert.match(register, /開發者直接啟用（不用驗證碼）/);
-assert.match(register, /id="bootstrapKey"/);
-assert.match(register, /部署管理金鑰/);
+assert.match(register, /第一次使用：設定登入/);
+assert.match(register, /開發者 \/ Root：設定 admin 密碼/);
+assert.match(register, /id="developerUsername"/);
+assert.match(register, /value="admin"/);
+assert.doesNotMatch(register, /id="bootstrapKey"/);
 assert.match(register, /id="qqid"/);
 assert.match(register, /\/api\/auth\/register\/request-code/);
 assert.match(register, /\/api\/auth\/register/);
 assert.match(register, /建立登入帳號/);
+assert.match(register, /沒有預設密碼/);
 assert.match(register, /已有帳號但忘記密碼/);
 assert.match(register, /class="auth-stage"/);
 
