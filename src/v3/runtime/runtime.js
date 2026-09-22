@@ -65,6 +65,7 @@ function createV3Runtime(env, options = {}) {
     publicStatusResponse: async statusOptions => v3PublicStatusResponse(await ensureStarted(), statusOptions || {}),
     runCommand: async (name, input = {}, eventContext = {}) => (await ensureStarted()).runCommand(name, input, eventContext),
     runDuePluginJobs: async runOptions => (await ensureStarted()).runDuePluginJobs(runOptions || {}),
+    setPluginChannelPreference: async (id, channel = "stable", eventContext = {}) => (await ensureStarted()).setPluginChannelPreference(id, channel, eventContext),
     setPluginEnabled: async (id, enabled, eventContext = {}) => (await ensureStarted()).setPluginEnabled(id, enabled, eventContext),
     setPluginPermissions: async (id, permissions = [], eventContext = {}) => (await ensureStarted()).setPluginPermissions(id, permissions, eventContext),
     start,

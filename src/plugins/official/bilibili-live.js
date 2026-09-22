@@ -420,8 +420,29 @@ function createBilibiliLivePlugin(options = {}) {
       description: "Webhook-free Bilibili live-status polling with AUTO/FORCE fallback state.",
       author: "QQAI",
       official: true,
+      officialBeta: true,
+      releaseChannel: "preview",
       publicStatus: true,
       capabilities: ["network", "storage", "scheduler"],
+      requiredCapabilities: ["network", "storage", "scheduler"],
+      permissionDetails: {
+        network: {
+          labelZh: "連線 Bilibili 直播 API",
+          descriptionZh: "查詢已設定 UP 主的公開直播狀態。",
+          accessTypes: ["external"],
+          externalDestinations: ["api.live.bilibili.com"]
+        },
+        storage: {
+          labelZh: "讀寫 Bilibili 插件資料",
+          descriptionZh: "保存此插件自己的設定、最後成功直播狀態與健康狀態。",
+          accessTypes: ["read", "write"]
+        },
+        scheduler: {
+          labelZh: "執行 Bilibili 定時檢查",
+          descriptionZh: "建立此插件自己的直播狀態輪詢工作。",
+          accessTypes: ["action"]
+        }
+      },
       settings: {
         creators: {
           type: "json",

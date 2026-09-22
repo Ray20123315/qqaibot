@@ -350,6 +350,14 @@ function createV3HostAdapter(env, {
     return applyLifecycleRecord(record, actorId);
   }
 
+  async function setPluginChannelPreference(pluginId, channel = "stable", eventContext = {}) {
+    if (!adapterStarted) await start();
+    const actorId = String(eventContext?.userId || eventContext?.actorId || "");
+    const record = await pluginLifecycle.setChannelPreference(pluginId, channel, actorId);
+    lifecycleRecords.set(record.id, record);
+    return record;
+  }
+
   async function dispatchOneBotEvent(body = {}) {
     const postType = String(body?.post_type || "");
     if (postType === "message" || postType === "message_sent") {
@@ -384,6 +392,7 @@ function createV3HostAdapter(env, {
     register: host.register,
     runCommand: host.runCommand,
     runDuePluginJobs,
+    setPluginChannelPreference,
     setPluginEnabled,
     setPluginPermissions,
     start,

@@ -59,7 +59,11 @@ function normalizePluginPackageDescriptor(input) {
     entry,
     integrity,
     official: manifest.official === true,
+    trustStatus: String(manifest.trustStatus || (manifest.official === true ? "official" : "uncertified")),
+    releaseChannel: String(manifest.releaseChannel || "stable"),
     requestedPermissions: Object.freeze([...(manifest.capabilities || [])]),
+    requiredPermissions: Object.freeze([...(manifest.requiredCapabilities || [])]),
+    permissionDetails: manifest.permissionDetails || Object.freeze({}),
     dependencies: normalizeDependencyMap(source.dependencies, "dependencies"),
     optionalDependencies: normalizeDependencyMap(source.optionalDependencies, "optionalDependencies")
   });

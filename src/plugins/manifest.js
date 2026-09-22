@@ -1,4 +1,5 @@
 import { PLUGIN_CAPABILITIES, QQAI_PLUGIN_API_VERSION } from "./constants.js";
+import { normalizePermissionDetails, normalizePluginTrustStatus, normalizeReleaseChannel, normalizeRequiredCapabilities } from "./governance.js";
 
 const PLUGIN_ID_PATTERN = /^[a-z0-9][a-z0-9._-]{1,79}$/;
 const PLUGIN_VERSION_PATTERN = /^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$/;
@@ -84,6 +85,17 @@ function normalizePluginManifest(input) {
     if (!known.has(capability)) throw new Error(`PLUGIN_MANIFEST_UNKNOWN_CAPABILITY:${capability}`);
   }
 
+  const requiredCapabilities = normalizeRequiredCapabilities(
+    capabilities,
+    source.requiredCapabilities || source.required_capabilities || []
+  );
+  const permissionDetails = normalizePermissionDetails(
+    source.permissionDetails || source.permission_details || {},
+    capabilities,
+    requiredCapabilities
+  );
+  const trustStatus = normalizePluginTrustStatus(source);
+  const releaseChannel = normalizeReleaseChannel(source.releaseChannel || source.release_channel, version);
   const settings = normalizePluginSettings(source.settings);
 
   return Object.freeze({
@@ -96,8 +108,12 @@ function normalizePluginManifest(input) {
     minQQAI,
     maxQQAI,
     official: source.official === true,
+    trustStatus,
+    releaseChannel,
     publicStatus: source.publicStatus === true,
     capabilities: Object.freeze(capabilities),
+    requiredCapabilities,
+    permissionDetails,
     settings
   });
 }

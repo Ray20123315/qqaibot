@@ -1,7 +1,7 @@
 import { QQAI_PLUGIN_API_VERSION } from "./constants.js";
 
 const PLUGIN_LIFECYCLE_REGISTRY_KEY = "plugin_lifecycle:registry:v1";
-const PLUGIN_LIFECYCLE_SCHEMA_VERSION = 1;
+const PLUGIN_LIFECYCLE_SCHEMA_VERSION = 2;
 const PLUGIN_LIFECYCLE_STATES = Object.freeze(["enabled", "disabled", "blocked"]);
 
 function parseSemver(value) {
@@ -76,28 +76,39 @@ function recordComparable(value) {
 
 function desiredRecord(existing, manifest, { qqaiVersion, defaultEnabled = true, now = Date.now(), available = true } = {}) {
   const requestedPermissions = normalizePermissions(manifest?.capabilities || []);
+  const requiredPermissions = normalizePermissions(manifest?.requiredCapabilities || [], requestedPermissions);
   const previous = existing && typeof existing === "object" ? existing : {};
   const desiredState = ["enabled", "disabled"].includes(previous.desiredState) ? previous.desiredState : (defaultEnabled ? "enabled" : "disabled");
-  const grantedPermissions = previous.id ? normalizePermissions(previous.grantedPermissions, requestedPermissions) : requestedPermissions;
+  const grantedPermissions = previous.id
+    ? normalizePermissions(previous.grantedPermissions, requestedPermissions)
+    : requiredPermissions;
   const compatibility = pluginCompatibility(manifest, qqaiVersion);
   const grantedSet = new Set(grantedPermissions);
   const missingPermissions = Object.freeze(requestedPermissions.filter(value => !grantedSet.has(value)));
+  const missingRequiredPermissions = Object.freeze(requiredPermissions.filter(value => !grantedSet.has(value)));
   let state = desiredState, blockReason = "";
   if (!available) { state = "blocked"; blockReason = "PLUGIN_BUNDLE_UNAVAILABLE"; }
   else if (!compatibility.ok) { state = "blocked"; blockReason = compatibility.reason || "PLUGIN_INCOMPATIBLE"; }
-  else if (desiredState === "enabled" && missingPermissions.length) { state = "blocked"; blockReason = "PLUGIN_PERMISSIONS_MISSING"; }
+  else if (desiredState === "enabled" && missingRequiredPermissions.length) { state = "blocked"; blockReason = "PLUGIN_REQUIRED_PERMISSIONS_MISSING"; }
+  const channelPreference = ["stable", "preview"].includes(previous.channelPreference) ? previous.channelPreference : "stable";
   const next = {
     id: String(manifest?.id || previous.id || ""),
     installed: true,
     available: Boolean(available),
     official: manifest?.official === true,
+    trustStatus: String(manifest?.trustStatus || previous.trustStatus || (manifest?.official === true ? "official" : "uncertified")),
+    releaseChannel: String(manifest?.releaseChannel || previous.releaseChannel || "stable"),
+    channelPreference,
     version: String(manifest?.version || previous.version || ""),
     apiVersion: String(manifest?.apiVersion || previous.apiVersion || ""),
     state,
     desiredState,
     requestedPermissions,
+    requiredPermissions,
     grantedPermissions,
     missingPermissions,
+    missingRequiredPermissions,
+    degraded: desiredState === "enabled" && state === "enabled" && missingPermissions.length > 0,
     compatibility,
     blockReason,
     discoveredAt: Number(previous.discoveredAt || now),
@@ -157,7 +168,11 @@ function createPluginLifecycleRegistry(storageAdapter, { qqaiVersion = "0.0.0", 
       const manifest = {
         id, version: previous.version, apiVersion: previous.apiVersion,
         minQQAI: previous.compatibility?.minQQAI || "", maxQQAI: previous.compatibility?.maxQQAI || "",
-        official: previous.official === true, capabilities: previous.requestedPermissions || []
+        official: previous.official === true,
+        trustStatus: previous.trustStatus || (previous.official === true ? "official" : "uncertified"),
+        releaseChannel: previous.releaseChannel || "stable",
+        capabilities: previous.requestedPermissions || [],
+        requiredCapabilities: previous.requiredPermissions || []
       };
       const record = desiredRecord(previous, manifest, { qqaiVersion, defaultEnabled: false, now, available: false });
       plugins[id] = record;
@@ -195,11 +210,12 @@ function createPluginLifecycleRegistry(storageAdapter, { qqaiVersion = "0.0.0", 
   async function setEnabled(pluginId, enabled, actorId = "") {
     return updateRecord(pluginId, record => {
       record.desiredState = enabled ? "enabled" : "disabled";
-      const missing = Array.isArray(record.missingPermissions) ? record.missingPermissions : [];
+      const missingRequired = Array.isArray(record.missingRequiredPermissions) ? record.missingRequiredPermissions : [];
       if (!record.available) { record.state = "blocked"; record.blockReason = "PLUGIN_BUNDLE_UNAVAILABLE"; }
       else if (record.compatibility?.ok !== true) { record.state = "blocked"; record.blockReason = record.compatibility?.reason || "PLUGIN_INCOMPATIBLE"; }
-      else if (enabled && missing.length) { record.state = "blocked"; record.blockReason = "PLUGIN_PERMISSIONS_MISSING"; }
+      else if (enabled && missingRequired.length) { record.state = "blocked"; record.blockReason = "PLUGIN_REQUIRED_PERMISSIONS_MISSING"; }
       else { record.state = enabled ? "enabled" : "disabled"; record.blockReason = ""; }
+      record.degraded = enabled && record.state === "enabled" && Array.isArray(record.missingPermissions) && record.missingPermissions.length > 0;
       return record;
     }, actorId);
   }
@@ -211,11 +227,23 @@ function createPluginLifecycleRegistry(storageAdapter, { qqaiVersion = "0.0.0", 
       if (unknown.length) throw new Error("PLUGIN_PERMISSION_NOT_REQUESTED:" + unknown[0]);
       record.grantedPermissions = normalizePermissions(permissions, requested);
       const granted = new Set(record.grantedPermissions);
+      const required = Array.isArray(record.requiredPermissions) ? record.requiredPermissions : [];
       record.missingPermissions = Object.freeze(requested.filter(value => !granted.has(value)));
+      record.missingRequiredPermissions = Object.freeze(required.filter(value => !granted.has(value)));
       if (!record.available) { record.state = "blocked"; record.blockReason = "PLUGIN_BUNDLE_UNAVAILABLE"; }
       else if (record.compatibility?.ok !== true) { record.state = "blocked"; record.blockReason = record.compatibility?.reason || "PLUGIN_INCOMPATIBLE"; }
-      else if (record.desiredState === "enabled" && record.missingPermissions.length) { record.state = "blocked"; record.blockReason = "PLUGIN_PERMISSIONS_MISSING"; }
+      else if (record.desiredState === "enabled" && record.missingRequiredPermissions.length) { record.state = "blocked"; record.blockReason = "PLUGIN_REQUIRED_PERMISSIONS_MISSING"; }
       else { record.state = record.desiredState === "enabled" ? "enabled" : "disabled"; record.blockReason = ""; }
+      record.degraded = record.desiredState === "enabled" && record.state === "enabled" && record.missingPermissions.length > 0;
+      return record;
+    }, actorId);
+  }
+
+  async function setChannelPreference(pluginId, channel = "stable", actorId = "") {
+    const normalized = String(channel || "").trim().toLowerCase();
+    if (!["stable", "preview"].includes(normalized)) throw new Error("PLUGIN_RELEASE_CHANNEL_INVALID");
+    return updateRecord(pluginId, record => {
+      record.channelPreference = normalized;
       return record;
     }, actorId);
   }
@@ -228,7 +256,7 @@ function createPluginLifecycleRegistry(storageAdapter, { qqaiVersion = "0.0.0", 
     }, actorId);
   }
 
-  return Object.freeze({ get, list, markRuntimeBlocked, read, reconcile, setEnabled, setGrantedPermissions });
+  return Object.freeze({ get, list, markRuntimeBlocked, read, reconcile, setChannelPreference, setEnabled, setGrantedPermissions });
 }
 
 export {
