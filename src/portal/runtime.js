@@ -2521,7 +2521,7 @@ function publicAuthPageStyles() {
 
 function getPublicLandingPage() {
   const css = publicAuthPageStyles();
-  return String.raw`<!doctype html><html lang="zh-Hant-TW"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>AI Control Center</title><style>\${css}</style></head><body>
+  return String.raw`<!doctype html><html lang="zh-Hant-TW"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>AI Control Center</title><style>${css}</style></head><body>
   <div class="shell"><header class="top"><a class="brand" href="/"><span class="logo">AI</span><span>AI Control Center</span></a><nav class="nav"><a class="btn ghost hide-mobile" href="/register">首次啟用</a><a class="btn primary" href="/login">登入</a></nav></header>
   <main><section class="hero"><div><div class="eyebrow">AI · Automation · BYOR</div><h1>把 AI、插件與自己的資源放在同一個控制中心。</h1><p>一般使用者以帳號密碼登入；第一次建立帳號時才需要完成身份驗證。實例管理員可以逐步接入自己的 Cloudflare 與其他資源。</p><div class="actions"><a class="btn primary" href="/login">登入控制中心</a><a class="btn ghost" href="/register">第一次使用？建立帳號</a></div></div><div class="panel"><div class="cards"><div class="mini"><b>帳號密碼登入</b><span>首次啟用完成後，不必再用身份 ID 當作日常登入帳號。</span></div><div class="mini"><b>權限由伺服器判定</b><span>開發者、管理員與一般使用者權限不靠前端選項決定。</span></div><div class="mini"><b>自備資源</b><span>D1、KV、R2、Vectorize、Workers AI 與外部 API 依使用者自己的資源設定接入。</span></div></div></div></section>
   <section class="features"><article class="feature"><h3>一般使用者</h3><p>使用自己的帳號與密碼進入 AI 功能、個人設定與被授權的社群功能。</p></article><article class="feature"><h3>實例管理員</h3><p>管理自己的部署、插件與之後接入的 Cloudflare 資源；共享額度與 BYOR 會清楚分開。</p></article><article class="feature"><h3>開發者</h3><p>平台維護與安全能力仍由後端身份與權限模型決定，不存在「點開發者入口就提權」。</p></article></section></main><footer class="footer">AI Control Center · 安全登入與資源管理</footer></div></body></html>`;
@@ -2529,7 +2529,7 @@ function getPublicLandingPage() {
 
 function getPortalLoginPage() {
   const css = publicAuthPageStyles();
-  return String.raw`<!doctype html><html lang="zh-Hant-TW"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>登入 · AI Control Center</title><style>\${css}</style></head><body>
+  return String.raw`<!doctype html><html lang="zh-Hant-TW"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>登入 · AI Control Center</title><style>${css}</style></head><body>
   <div class="shell"><header class="top"><a class="brand" href="/"><span class="logo">AI</span><span>AI Control Center</span></a><nav class="nav"><a class="btn ghost" href="/">首頁</a><a class="btn" href="/register">首次啟用</a></nav></header>
   <main class="auth-wrap"><section class="auth-card"><div class="eyebrow">Account Login</div><h1>登入你的帳號</h1><p>日常登入只使用帳號與密碼。若你的帳號已啟用第二因素，登入時會再要求驗證。</p>
   <div class="field"><label for="username">帳號</label><input id="username" autocomplete="username" maxlength="32" placeholder="例如 rayadmin"></div>
@@ -2550,7 +2550,7 @@ function getPortalLoginPage() {
 
 function getPortalRegisterPage() {
   const css = publicAuthPageStyles();
-  return String.raw`<!doctype html><html lang="zh-Hant-TW"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>首次啟用 · AI Control Center</title><style>\${css}</style></head><body>
+  return String.raw`<!doctype html><html lang="zh-Hant-TW"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>首次啟用 · AI Control Center</title><style>${css}</style></head><body>
   <div class="shell"><header class="top"><a class="brand" href="/"><span class="logo">AI</span><span>AI Control Center</span></a><nav class="nav"><a class="btn ghost" href="/">首頁</a><a class="btn primary" href="/login">登入</a></nav></header>
   <main class="auth-wrap"><section class="auth-card"><div class="eyebrow">First Activation</div><h1>第一次使用：建立帳號</h1><p>只有首次啟用需要使用 QQID 完成身份驗證。驗證成功後建立自訂帳號與密碼，之後日常登入不再輸入 QQID。</p>
   <div class="field"><label for="qqid">QQID（僅首次身份驗證）</label><input id="qqid" inputmode="numeric" autocomplete="off" maxlength="12" placeholder="輸入你的 QQID"></div>
