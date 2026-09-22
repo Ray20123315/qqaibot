@@ -1,0 +1,33 @@
+"$schema" = "./node_modules/wrangler/config-schema.json"
+
+# Isolated V3 smoke-test Worker. Never add production routes or production resource IDs here.
+name = "qqai-v3test"
+main = "worker.js"
+compatibility_date = "2026-07-21"
+compatibility_flags = ["nodejs_compat"]
+workers_dev = true
+preview_urls = true
+
+# Draft D1 binding: Wrangler auto-provisions an isolated test database on deploy.
+# Do not add the production database_id to this file.
+[[d1_databases]]
+binding = "DB"
+
+[vars]
+BOT_DISPLAY_NAME = "QQAI V3 Test"
+PUBLIC_BASE_URL = ""
+DEVELOPER_IDS = ""
+DEVELOPER_ID = ""
+ROOT_QQ_IDS = ""
+ENABLE_ONEBOT_HTTP_EVENTS = "false"
+AUTO_CHECKIN_ENABLED = "false"
+V3_RUNTIME_ENABLED = "true"
+V3_BILIBILI_ENABLED = "false"
+V3_BILIBILI_CREATORS_JSON = "[]"
+V3_PLUGIN_ADMIN_IDS = ""
+PLUGIN_SECURITY_GPT_ENABLED = "false"
+PLUGIN_SECURITY_GPT_MODEL = ""
+PLUGIN_SECURITY_GPT_WEB_SEARCH_ENABLED = "false"
+
+[observability]
+enabled = false
