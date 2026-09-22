@@ -45,7 +45,7 @@ assert(!result.body.includes('${css}'), 'GET /: literal CSS template placeholder
 
 result = await get('/login');
 assert(result.response.status === 200, 'GET /login: expected 200');
-assert(result.body.includes('登入你的帳號'), 'GET /login: account login form missing');
+assert(result.body.includes('data-i18n="login.title"'), 'GET /login: localized account login heading missing');
 assert(result.body.includes('id="username"'), 'GET /login: username input missing');
 assert(!result.body.includes('id="qqid"'), 'GET /login: QQID must not be a normal login input');
 assert(/<style>\s*:root\{\s*color-scheme:dark;/.test(result.body), 'GET /login: futuristic public CSS must be materialized');
