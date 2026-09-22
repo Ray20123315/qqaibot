@@ -66,7 +66,7 @@ assert.deepEqual(payload.plugins[0].requiredPermissions, ["network", "scheduler"
 assert.equal(payload.plugins[0].trustStatus, "official_beta");
 assert.equal(payload.plugins[0].trustLabelZh, "官方 Beta");
 assert.equal(payload.plugins[0].releaseChannel, "preview");
-assert.equal(payload.plugins[0].releaseChannelLabelZh, "搶先體驗版");
+assert.equal(payload.plugins[0].releaseChannelLabelZh, "抢先体验版");
 assert.equal(payload.plugins[0].channelPreference, "stable");
 assert.equal(payload.plugins[0].permissionDisclosures.find(row => row.capability === "network").externalDestinations[0], "api.live.bilibili.com");
 
