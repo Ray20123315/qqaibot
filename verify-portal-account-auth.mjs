@@ -56,6 +56,10 @@ assert.equal(validatePortalLoginUsername("root").ok, false, "other reserved name
 assert.equal(validatePortalUsername("a b").ok, false);
 
 assert.equal(classifyPortalAuthFailure(
+  Object.assign(new Error("Pbkdf2 failed: iteration counts above 100000 are not supported (requested 120000)."), { code: 9 }),
+  "credential_persistence"
+).code, "AUTH_PASSWORD_DERIVATION_UNSUPPORTED");
+assert.equal(classifyPortalAuthFailure(
   Object.assign(new Error("auth write failed after 3 attempts"), {
     code: "PORTAL_AUTH_STORAGE_UNAVAILABLE",
     cause: new Error("Your account has exceeded D1's free tier daily row write limit.")
