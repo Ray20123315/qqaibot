@@ -69,7 +69,10 @@ const registerStart = worker.indexOf("url.pathname === '/api/auth/register'");
 const registerEnd = worker.indexOf("url.pathname === '/api/auth/verify-code'", registerStart);
 const registerBlock = worker.slice(registerStart, registerEnd);
 assert(registerStart >= 0 && registerEnd > registerStart);
+assert.match(registerBlock, /const developerDirect = isDeveloperId\(env, qq\)/);
+assert.match(registerBlock, /developerPortalBootstrapPolicy/);
 assert.match(registerBlock, /verifyPortalVerificationCode/);
+assert.match(registerBlock, /developer_direct_password_bootstrap/);
 assert.match(registerBlock, /createPortalAccountBinding/);
 assert.match(registerBlock, /createPortalPasswordRecord/);
 assert.match(registerBlock, /createPortalSession/);
@@ -87,5 +90,7 @@ assert.match(loginBlock, /payload\.username/);
 assert.match(loginBlock, /readPortalAccountByUsername/);
 assert.doesNotMatch(loginBlock, /payload\.qq/);
 assert.match(loginBlock, /username: account\.username/);
+assert.doesNotMatch(worker, /PORTAL_DEVELOPER_USERNAME/);
+assert.doesNotMatch(worker, /PORTAL_DEVELOPER_INITIAL_PASSWORD/);
 
 console.log("verify-portal-account-auth: ok");
