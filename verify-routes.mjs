@@ -48,11 +48,13 @@ assert(!result.body.includes('${css}'), 'GET /login: literal CSS template placeh
 
 result = await get('/register');
 assert(result.response.status === 200, 'GET /register: expected 200');
-assert(result.body.includes('第一次使用：建立帳號'), 'GET /register: activation page missing');
+assert(result.body.includes('第一次使用：設定登入'), 'GET /register: activation page missing');
 assert(result.body.includes('id="qqid"'), 'GET /register: first-activation QQID input missing');
 assert(result.body.includes('id="activationMode"'), 'GET /register: activation mode selector missing');
-assert(result.body.includes('id="bootstrapKey"'), 'GET /register: developer bootstrap key input missing');
-assert(result.body.includes('開發者直接啟用（不用驗證碼）'), 'GET /register: direct developer activation copy missing');
+assert(result.body.includes('id="developerUsername"'), 'GET /register: fixed developer username display missing');
+assert(result.body.includes('value="admin"'), 'GET /register: reserved admin username missing');
+assert(result.body.includes('開發者 / Root：設定 admin 密碼'), 'GET /register: admin password setup option missing');
+assert(!result.body.includes('id="bootstrapKey"'), 'GET /register: obsolete developer bootstrap key must not exist');
 assert(/<style>\s*:root\{\s*color-scheme:dark;/.test(result.body), 'GET /register: futuristic public CSS must be materialized');
 assert(result.body.includes('class="auth-stage"'), 'GET /register: AI activation layout missing');
 assert(!result.body.includes('QQAIbot'), 'GET /register: legacy product branding must not leak');
