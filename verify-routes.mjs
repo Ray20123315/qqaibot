@@ -7,23 +7,45 @@ function assert(condition, message) {
 
 const exact = new Map([
   ['GET https://qqai.ray2025.com/live', [200, '442975303baab9496a23faa71f30d466eb3b8b00ab538a0bb6586eef598027c5']],
-  ['GET https://qqai.ray2025.com/appeal', [302, 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855']],
   ['GET https://qqai.ray2025.com/api/public/nebula', [200, '2c0c8c47f8c1bf6065a949b54eb3e92d67a6b3e02421a763c24c955332ae117a']],
   ['GET https://qqai.ray2025.com/api/appeal/legacy', [410, '742af5935f732e949d512573364e3672fcdc6a01ee0c266510b7582bcf46304e']],
 ]);
 const ctx = { waitUntil() {}, passThroughOnException() {} };
 
-let portalHash = '';
-for (const path of ['/', '/portal', '/matrix']) {
-  const key = `GET https://qqai.ray2025.com${path}`;
-  const response = await worker.fetch(new Request(`https://qqai.ray2025.com${path}`, { method: 'GET' }), {}, ctx);
-  const body = await response.text();
-  const hash = crypto.createHash('sha256').update(body).digest('hex');
-  assert(response.status === 200, `${key}: expected status 200, got ${response.status}`);
-  assert(body.includes('qqai-deployment-toast'), `${key}: deployment notification client missing`);
-  if (!portalHash) portalHash = hash;
-  else assert(hash === portalHash, `${key}: Portal route variants must remain identical`);
+async function get(path) {
+  const response = await worker.fetch(new Request('https://qqai.ray2025.com' + path, { method: 'GET' }), {}, ctx);
+  return { response, body: await response.text() };
 }
+
+let result = await get('/');
+assert(result.response.status === 200, 'GET /: expected 200');
+assert(result.body.includes('AI Control Center'), 'GET /: public homepage brand missing');
+assert(result.body.includes('href="/login"'), 'GET /: login CTA missing');
+assert(result.body.includes('href="/register"'), 'GET /: registration CTA missing');
+assert(!result.body.includes('qqai-deployment-toast'), 'GET /: Portal-only deployment client must not be injected into public homepage');
+
+result = await get('/login');
+assert(result.response.status === 200, 'GET /login: expected 200');
+assert(result.body.includes('登入你的帳號'), 'GET /login: account login form missing');
+assert(result.body.includes('id="username"'), 'GET /login: username input missing');
+assert(!result.body.includes('id="qqid"'), 'GET /login: QQID must not be a normal login input');
+
+result = await get('/register');
+assert(result.response.status === 200, 'GET /register: expected 200');
+assert(result.body.includes('第一次使用：建立帳號'), 'GET /register: activation page missing');
+assert(result.body.includes('id="qqid"'), 'GET /register: first-activation QQID input missing');
+
+result = await get('/portal');
+assert(result.response.status === 302, 'GET /portal without session: expected redirect');
+assert(String(result.response.headers.get('location') || '').includes('/login?next='), 'GET /portal: expected login redirect');
+
+result = await get('/matrix');
+assert(result.response.status === 302, 'GET /matrix: expected redirect');
+assert(String(result.response.headers.get('location') || '').endsWith('/portal#memory'), 'GET /matrix: expected /portal#memory redirect');
+
+result = await get('/appeal');
+assert(result.response.status === 302, 'GET /appeal: expected redirect');
+assert(String(result.response.headers.get('location') || '').endsWith('/portal#appeals'), 'GET /appeal: expected /portal#appeals redirect');
 
 for (const [key, [expectedStatus, expectedHash]] of exact) {
   const splitAt = key.indexOf(' ');
@@ -35,4 +57,5 @@ for (const [key, [expectedStatus, expectedHash]] of exact) {
   assert(response.status === expectedStatus, `${key}: expected status ${expectedStatus}, got ${response.status}`);
   assert(hash === expectedHash, `${key}: response body changed (${hash})`);
 }
-console.log(`verify-routes: ok (${exact.size + 3} public routes)`);
+
+console.log(`verify-routes: ok (${exact.size + 6} routes)`);
