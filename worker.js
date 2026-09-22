@@ -201,7 +201,7 @@ const QQAIWorker = {
       const token = readCookie(request, 'qqai_session');
       const session = await getPortalSession(env, token, { touch: false }).catch(() => null);
       if (!session) return Response.redirect(`${url.origin}/login?next=${encodeURIComponent('/portal')}`, 302);
-      const portalHtml = injectPortalLayoutClient(injectWerewolfPortalClient(injectPortalMembersClient(injectDeploymentPortalClient(toSimplifiedChinese(getPortalHomePage(url.host))))));
+      const portalHtml = injectPortalLayoutClient(injectWerewolfPortalClient(injectPortalMembersClient(injectDeploymentPortalClient(getPortalHomePage(url.host)))));
       return new Response(portalHtml, {
         headers: { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store" }
       });
