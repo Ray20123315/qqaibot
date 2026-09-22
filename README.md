@@ -233,7 +233,7 @@ Secrets 不可放在 `[vars]`、README 範例值、Portal 回應、Git log 或�
 | `ONEBOT_ACCESS_TOKEN` | NapCat WebSocket 驗證 Token。 |
 | `ONEBOT_HTTP_URL` | 可選 OneBot HTTP 備援網址。若含憑證資訊仍應視為 Secret。 |
 | `ONEBOT_HTTP_ACCESS_TOKEN` | HTTP 備援 Token。 |
-| `PORTAL_AUTH_SECRET` | Portal 敏感資料與登入相關加密。 |
+| `PORTAL_AUTH_SECRET` | Portal 敏感資料／2FA 加密 fallback；不是 `admin` 登入密碼，也不是首次啟用金鑰。 |
 | `TOTP_ENCRYPTION_KEY` | TOTP 種子優先加密 key；建議與 Portal/OneBot key 分開。 |
 | `CLOUDFLARE_BUILDS_API_TOKEN` | 可選，讀取 Cloudflare Build 詳細日誌。 |
 
