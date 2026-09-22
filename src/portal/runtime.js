@@ -2538,7 +2538,7 @@ function getPortalHomePage(host) {
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>AI Control Center</title>
-<script>(function(){try{var t=localStorage.getItem('qqai_theme');document.documentElement.dataset.theme=t==='dark'?'dark':'light'}catch(e){document.documentElement.dataset.theme='light'}})();</script>
+<script>(function(){try{var t=localStorage.getItem('qqai_theme');document.documentElement.dataset.theme=t==='light'?'light':'dark'}catch(e){document.documentElement.dataset.theme='light'}})();</script>
 <style>
 :root{color-scheme:light;--bg:#f5f7fb;--panel:#fff;--panel2:#f8fafc;--text:#172033;--muted:#68748a;--line:#e3e8f0;--primary:#5b5bd6;--primary2:#7777e8;--ok:#17845f;--warn:#b26a00;--bad:#c53d4d;--shadow:0 18px 48px rgba(31,42,68,.08);--login-panel:rgba(255,255,255,.92);--topbar-bg:rgba(245,247,251,.88);font-family:Inter,"Noto Sans TC","Microsoft JhengHei",system-ui,sans-serif}
 :root[data-theme="dark"]{color-scheme:dark;--bg:#070a11;--panel:#101521;--panel2:#151c2a;--text:#eef2f8;--muted:#9ca8bb;--line:#293247;--primary:#8585ff;--primary2:#a091ff;--ok:#48cfa0;--warn:#e5a94f;--bad:#ff7687;--shadow:0 18px 48px rgba(0,0,0,.38);--login-panel:rgba(16,21,34,.94);--topbar-bg:rgba(7,10,17,.9)}
@@ -2624,7 +2624,7 @@ function getPortalHomePage(host) {
 </section>
 <div id="app" class="app">
   <aside id="sidebar" class="sidebar">
-    <div class="side-brand"><div class="logo">AI</div><div><b>QQAIbot</b><small>群组控制台</small></div></div><div class="side-intro">先看首页，有需要再进入设置。</div>
+    <div class="side-brand"><div class="logo">AI</div><div><b>AI Control Center</b><small>AI · Automation · BYOR</small></div></div><div class="side-intro">YOUR AI · YOUR PLUGINS · YOUR RESOURCES</div>
     <nav class="nav" id="nav">
       <button data-view="overview" class="active">總覽</button>
       <button data-view="health">健康檢查</button>
@@ -2641,7 +2641,7 @@ function getPortalHomePage(host) {
   </aside>
   <div id="sidebarBackdrop" class="sidebar-backdrop"></div>
   <main class="main">
-    <header class="topbar"><div class="row"><button id="menu" class="btn ghost mobile-menu" aria-label="打开菜单">☰</button><div><div class="top-kicker">QQAIbot</div><h2 id="pageTitle">首页</h2></div></div><div class="top-actions"><select id="groupSelect" aria-label="选择群组"><option value="">选择群组</option></select><button id="themeToggle" type="button" class="btn ghost theme-toggle">黑色模式</button><button id="refresh" class="btn ghost">更新资料</button></div></header>
+    <header class="topbar"><div class="row"><button id="menu" class="btn ghost mobile-menu" aria-label="打开菜单">☰</button><div><div class="top-kicker">AI CONTROL CENTER</div><h2 id="pageTitle">首页</h2></div></div><div class="top-actions"><select id="groupSelect" aria-label="选择群组"><option value="">选择群组</option></select><button id="themeToggle" type="button" class="btn ghost theme-toggle">黑色模式</button><button id="refresh" class="btn ghost">更新资料</button></div></header>
     <div class="content">
       <section id="v-overview" class="view active">
         <div class="overview-hero">
@@ -2717,7 +2717,7 @@ function getPortalHomePage(host) {
 var token='';var currentGroup='';var session=null;var conversationCapabilities={recordViolation:true};var conversationPage=1,conversationPageSize=20,conversationTotalPages=1,conversationRequestSerial=0;var PORTAL_SIDEBAR_COLLAPSIBLE='v1';
 var $=function(id){return document.getElementById(id)};
 function activeTheme(){return document.documentElement.dataset.theme==='dark'?'dark':'light'}
-function updateThemeButtons(){var dark=activeTheme()==='dark';if($('loginThemeToggle'))$('loginThemeToggle').textContent=dark?'切换白色模式':'切换黑色模式';if($('themeToggle'))$('themeToggle').textContent=dark?'白色模式':'黑色模式'}
+function updateThemeButtons(){var dark=activeTheme()==='dark';if($('loginThemeToggle'))$('loginThemeToggle').textContent=dark?'切换白色模式':'切换黑色模式';if($('themeToggle'))$('themeToggle').textContent=dark?'光亮模式':'深色模式'}
 function setTheme(theme){var next=theme==='dark'?'dark':'light';document.documentElement.dataset.theme=next;try{localStorage.setItem('qqai_theme',next)}catch(e){}updateThemeButtons()}
 function toggleTheme(){setTheme(activeTheme()==='dark'?'light':'dark')}
 function migratePortalMaintenanceV140(){try{if(localStorage.getItem('qqai_portal_maintenance_v140')!=='1'){localStorage.setItem('qqai_portal_advanced_v1','1');localStorage.setItem('qqai_portal_maintenance_v140','1')}}catch(e){}}
