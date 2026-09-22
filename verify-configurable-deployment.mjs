@@ -40,16 +40,17 @@ assert.equal(envInteger("99", 12, 1, 30), 30);
 assert.equal(envInteger("bad", 12, 1, 30), 12);
 
 const activeWrangler = fs.readFileSync("wrangler.toml", "utf8");
-assert.match(activeWrangler, /DEVELOPER_IDS\s*=\s*""/);
-assert.match(activeWrangler, /DEVELOPER_ID\s*=\s*""/);
-assert.match(activeWrangler, /PUBLIC_BASE_URL\s*=/);
+assert.match(activeWrangler, /^keep_vars\s*=\s*true$/m, "Dashboard-managed vars must survive deploy");
+assert.match(activeWrangler, /pattern\s*=\s*"aibot\.ray2025\.com"/);
+assert.match(activeWrangler, /PUBLIC_BASE_URL\s*=\s*"https:\/\/aibot\.ray2025\.com"/);
 assert.match(activeWrangler, /AUTO_CHECKIN_ENABLED\s*=\s*"true"/);
-assert.doesNotMatch(activeWrangler, /DEVELOPER_ID(?:S)?\s*=\s*"\d{5,}"/);
+assert.doesNotMatch(activeWrangler, /^\s*(?:DEVELOPER_IDS|ROOT_QQ_IDS|DEVELOPER_ID)\s*=/m, "production identity vars must stay Dashboard-managed");
 
 const exampleWrangler = fs.readFileSync("wrangler.example.toml", "utf8");
+assert.match(exampleWrangler, /^keep_vars\s*=\s*true$/m);
 assert.match(exampleWrangler, /REPLACE_WITH_D1_DATABASE_ID/);
 assert.match(exampleWrangler, /REPLACE_WITH_RATE_LIMITER_NAMESPACE_ID/);
-assert.match(exampleWrangler, /DEVELOPER_IDS\s*=\s*"123456789,987654321"/);
+assert.doesNotMatch(exampleWrangler, /^\s*(?:DEVELOPER_IDS|ROOT_QQ_IDS|DEVELOPER_ID)\s*=/m);
 assert.match(exampleWrangler, /PUBLIC_BASE_URL\s*=\s*"https:\/\/bot\.example\.com"/);
 assert.match(exampleWrangler, /AUTO_CHECKIN_RETRY_INTERVAL_MS/);
 assert.match(exampleWrangler, /\[observability\]/);
@@ -73,6 +74,9 @@ assert.doesNotMatch(help, /qqai\.ray2025\.com/);
 
 const worker = fs.readFileSync("worker.js", "utf8");
 assert.match(worker, /publicBaseUrl/);
+assert.match(worker, /publicLiveUrl/);
+assert.match(worker, /url\.hostname === "qqai\.ray2025\.com"/);
+assert.match(worker, /target\.hostname = "aibot\.ray2025\.com"/);
 assert.doesNotMatch(worker, /portalUrl:\s*['"]https:\/\/qqai\.ray2025\.com/);
 
 const scheduler = fs.readFileSync("src/scheduler/runtime.js", "utf8");
@@ -97,5 +101,6 @@ assert.doesNotMatch(readme, /3569028262/);
 const packageJson = JSON.parse(fs.readFileSync("package.json", "utf8"));
 assert.equal(packageJson.version, "2.7.12");
 assert.match(packageJson.scripts.check, /verify-configurable-deployment\.mjs/);
+assert.match(packageJson.scripts.deploy, /--keep-vars/);
 
 console.log("Configurable deployment and README regression passed.");
