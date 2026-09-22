@@ -74,6 +74,15 @@ function classifyPortalAuthFailure(error, stage = "unknown") {
   const joined = messages.join("\n");
   const normalizedStage = String(stage || "unknown");
 
+  if (/Pbkdf2 failed: iteration counts above 100000 are not supported|PBKDF2.*iterations?.*(?:above|over).*100000/i.test(joined)) {
+    return {
+      code: "AUTH_PASSWORD_DERIVATION_UNSUPPORTED",
+      status: 503,
+      stage: normalizedStage,
+      message: "目前執行環境無法使用這組密碼派生參數。Portal 已阻止寫入不相容的密碼資料。",
+      diagnostic: joined.slice(0, 800)
+    };
+  }
   if (/free tier daily row (?:read|write) limit|exceeded.*D1.*daily/i.test(joined)) {
     return {
       code: "AUTH_D1_DAILY_LIMIT",
@@ -233,6 +242,7 @@ function validatePortalPassword(password) {
 
 
 const PORTAL_SYSTEM_ADMIN_USERNAME = "admin";
+const PORTAL_PASSWORD_PBKDF2_ITERATIONS = 100000;
 
 const PORTAL_USERNAME_RESERVED = Object.freeze(new Set([
   PORTAL_SYSTEM_ADMIN_USERNAME, "administrator", "root", "developer", "system", "support", "security",
@@ -453,7 +463,7 @@ async function createPortalAdminAccountBinding(env, { qq } = {}) {
 
 
 
-async function derivePortalPassword(password, salt, iterations = 120000) {
+async function derivePortalPassword(password, salt, iterations = PORTAL_PASSWORD_PBKDF2_ITERATIONS) {
   const material = await crypto.subtle.importKey("raw", new TextEncoder().encode(String(password || "")), "PBKDF2", false, ["deriveBits"]);
   const bits = await crypto.subtle.deriveBits({ name: "PBKDF2", hash: "SHA-256", salt, iterations }, material, 256);
   return new Uint8Array(bits);
@@ -465,7 +475,7 @@ async function createPortalPasswordRecord(password) {
   const validation = validatePortalPassword(password);
   if (!validation.ok) throw Object.assign(new Error(validation.message), { code: "PASSWORD_POLICY" });
   const salt = randomBytes(16);
-  const iterations = 120000;
+  const iterations = PORTAL_PASSWORD_PBKDF2_ITERATIONS;
   const hash = await derivePortalPassword(validation.value, salt, iterations);
   return { version: 1, algorithm: "PBKDF2-SHA-256", iterations, salt: bytesToBase64Url(salt), hash: bytesToBase64Url(hash), updatedAt: Date.now() };
 }
@@ -475,7 +485,7 @@ async function createPortalPasswordRecord(password) {
 function isValidPortalPasswordRecord(record) {
   if (!record || typeof record !== "object" || record.algorithm !== "PBKDF2-SHA-256") return false;
   const iterations = Number(record.iterations || 0);
-  if (!Number.isInteger(iterations) || iterations < 10000 || iterations > 2000000) return false;
+  if (!Number.isInteger(iterations) || iterations < 10000 || iterations > PORTAL_PASSWORD_PBKDF2_ITERATIONS) return false;
   if (typeof record.salt !== "string" || typeof record.hash !== "string") return false;
   try {
     const salt = base64UrlToBytes(record.salt);
@@ -1236,4 +1246,4 @@ async function writePortalSettingValue(env, definition, groupId, targetQq, value
   }
 }
 
-export { BASE32_ALPHABET, PORTAL_SETTING_DEFINITIONS, PORTAL_SYSTEM_ADMIN_USERNAME, PORTAL_USERNAME_RESERVED, authDbDelStrict, authDbGetStrict, authDbPutIfAbsentStrict, authDbPutStrict, authDbRetry, authStorageError, base32Decode, base32Encode, base64UrlToBytes, buildGroupReplyMessage, bytesToBase64Url, bytesToHex, clearPasswordLoginGuard, commandChangesWebSettings, classifyPortalAuthFailure, constantTimeEqual, createPortalAccountBinding, createPortalAdminAccountBinding, createPortalPasswordRecord, createPortalSession, decryptPortalAuthSecret, deleteMemoryVector, derivePortalPassword, encryptPortalAuthSecret, extractGroupId, generateBackupCodes, generateSixDigitCode, generateTotpCode, getOneBotHub, getPortalSession, getPublicNebulaSeed, getUserQuota, hasAdminRole, hashBackupCode, isMemoryBanned, isValidPortalPasswordRecord, jsonResponse, markGroupMemberLeft, migratePortalMemories, normalizeBackupCode, normalizePortalUsername, notePasswordLoginFailure, oneBotHttpActionUrl, portalAuthEncryptionKey, portalAuthEncryptionMaterial, portalRoleRank, portalAccountIdentityKey, portalAccountUsernameKey, portalSessionCookie, randomBytes, readCookie, readJson, readPasswordLoginGuard, readPortalAccountByQq, readPortalAccountByUsername, readPortalAuthJson, readPortalSettingValue, resolvePortalRole, searchPortalVectors, sendOneBotAction, sendOneBotHttpAction, sendPortalVerificationMessage, sha256Hex, simplifyJsonValue, upsertGroupMember, upsertMemoryVector, validatePortalLoginUsername, validatePortalPassword, validatePortalUsername, verifyPortalPassword, verifyPortalVerificationCode, verifyTotpCode, writeMemoryAudit, writePortalSettingValue, writeSystemError };
+export { BASE32_ALPHABET, PORTAL_PASSWORD_PBKDF2_ITERATIONS, PORTAL_SETTING_DEFINITIONS, PORTAL_SYSTEM_ADMIN_USERNAME, PORTAL_USERNAME_RESERVED, authDbDelStrict, authDbGetStrict, authDbPutIfAbsentStrict, authDbPutStrict, authDbRetry, authStorageError, base32Decode, base32Encode, base64UrlToBytes, buildGroupReplyMessage, bytesToBase64Url, bytesToHex, clearPasswordLoginGuard, commandChangesWebSettings, classifyPortalAuthFailure, constantTimeEqual, createPortalAccountBinding, createPortalAdminAccountBinding, createPortalPasswordRecord, createPortalSession, decryptPortalAuthSecret, deleteMemoryVector, derivePortalPassword, encryptPortalAuthSecret, extractGroupId, generateBackupCodes, generateSixDigitCode, generateTotpCode, getOneBotHub, getPortalSession, getPublicNebulaSeed, getUserQuota, hasAdminRole, hashBackupCode, isMemoryBanned, isValidPortalPasswordRecord, jsonResponse, markGroupMemberLeft, migratePortalMemories, normalizeBackupCode, normalizePortalUsername, notePasswordLoginFailure, oneBotHttpActionUrl, portalAuthEncryptionKey, portalAuthEncryptionMaterial, portalRoleRank, portalAccountIdentityKey, portalAccountUsernameKey, portalSessionCookie, randomBytes, readCookie, readJson, readPasswordLoginGuard, readPortalAccountByQq, readPortalAccountByUsername, readPortalAuthJson, readPortalSettingValue, resolvePortalRole, searchPortalVectors, sendOneBotAction, sendOneBotHttpAction, sendPortalVerificationMessage, sha256Hex, simplifyJsonValue, upsertGroupMember, upsertMemoryVector, validatePortalLoginUsername, validatePortalPassword, validatePortalUsername, verifyPortalPassword, verifyPortalVerificationCode, verifyTotpCode, writeMemoryAudit, writePortalSettingValue, writeSystemError };
