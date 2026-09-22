@@ -65,6 +65,61 @@ function authStorageError(message, cause) {
 
 
 
+function classifyPortalAuthFailure(error, stage = "unknown") {
+  const messages = [
+    error?.message,
+    error?.cause?.message,
+    error?.cause?.cause?.message
+  ].map(value => String(value || "")).filter(Boolean);
+  const joined = messages.join("\n");
+  const normalizedStage = String(stage || "unknown");
+
+  if (/free tier daily row (?:read|write) limit|exceeded.*D1.*daily/i.test(joined)) {
+    return {
+      code: "AUTH_D1_DAILY_LIMIT",
+      status: 503,
+      stage: normalizedStage,
+      message: "Cloudflare D1 今日讀寫額度已達上限，Portal 暫時無法寫入登入資料。請檢查 D1 用量或方案後再試。",
+      diagnostic: joined.slice(0, 800)
+    };
+  }
+  if (/no such table:\s*kv_store/i.test(joined)) {
+    return {
+      code: "AUTH_SCHEMA_MISSING",
+      status: 503,
+      stage: normalizedStage,
+      message: "Portal 登入資料表尚未建立或目前綁定到錯誤的 D1。請檢查 DB binding 與 kv_store schema。",
+      diagnostic: joined.slice(0, 800)
+    };
+  }
+  if (/Missing D1 binding/i.test(joined)) {
+    return {
+      code: "AUTH_DB_BINDING_MISSING",
+      status: 503,
+      stage: normalizedStage,
+      message: "Portal 找不到 Cloudflare D1 的 DB binding，無法儲存登入資料。",
+      diagnostic: joined.slice(0, 800)
+    };
+  }
+  if (error?.code === "PORTAL_AUTH_STORAGE_UNAVAILABLE" || /\bD1[_A-Z]*\b|database|kv_store|SQLITE_/i.test(joined)) {
+    return {
+      code: "AUTH_STORAGE_UNAVAILABLE",
+      status: 503,
+      stage: normalizedStage,
+      message: "Portal 登入資料庫目前無法完成讀寫。請檢查 Cloudflare D1 狀態、DB binding 與 kv_store schema。",
+      diagnostic: joined.slice(0, 800)
+    };
+  }
+  return {
+    code: String(error?.code || "ACCOUNT_ACTIVATION_FAILED"),
+    status: 503,
+    stage: normalizedStage,
+    message: "首次啟用失敗。請提供畫面上的錯誤代碼與 Failure ID 以便定位。",
+    diagnostic: joined.slice(0, 800)
+  };
+}
+
+
 async function authDbRetry(label, operation, attempts = 3) {
   let lastError = null;
   for (let index = 0; index < attempts; index += 1) {
@@ -1181,4 +1236,4 @@ async function writePortalSettingValue(env, definition, groupId, targetQq, value
   }
 }
 
-export { BASE32_ALPHABET, PORTAL_SETTING_DEFINITIONS, PORTAL_SYSTEM_ADMIN_USERNAME, PORTAL_USERNAME_RESERVED, authDbDelStrict, authDbGetStrict, authDbPutIfAbsentStrict, authDbPutStrict, authDbRetry, authStorageError, base32Decode, base32Encode, base64UrlToBytes, buildGroupReplyMessage, bytesToBase64Url, bytesToHex, clearPasswordLoginGuard, commandChangesWebSettings, constantTimeEqual, createPortalAccountBinding, createPortalAdminAccountBinding, createPortalPasswordRecord, createPortalSession, decryptPortalAuthSecret, deleteMemoryVector, derivePortalPassword, encryptPortalAuthSecret, extractGroupId, generateBackupCodes, generateSixDigitCode, generateTotpCode, getOneBotHub, getPortalSession, getPublicNebulaSeed, getUserQuota, hasAdminRole, hashBackupCode, isMemoryBanned, isValidPortalPasswordRecord, jsonResponse, markGroupMemberLeft, migratePortalMemories, normalizeBackupCode, normalizePortalUsername, notePasswordLoginFailure, oneBotHttpActionUrl, portalAuthEncryptionKey, portalAuthEncryptionMaterial, portalRoleRank, portalAccountIdentityKey, portalAccountUsernameKey, portalSessionCookie, randomBytes, readCookie, readJson, readPasswordLoginGuard, readPortalAccountByQq, readPortalAccountByUsername, readPortalAuthJson, readPortalSettingValue, resolvePortalRole, searchPortalVectors, sendOneBotAction, sendOneBotHttpAction, sendPortalVerificationMessage, sha256Hex, simplifyJsonValue, upsertGroupMember, upsertMemoryVector, validatePortalLoginUsername, validatePortalPassword, validatePortalUsername, verifyPortalPassword, verifyPortalVerificationCode, verifyTotpCode, writeMemoryAudit, writePortalSettingValue, writeSystemError };
+export { BASE32_ALPHABET, PORTAL_SETTING_DEFINITIONS, PORTAL_SYSTEM_ADMIN_USERNAME, PORTAL_USERNAME_RESERVED, authDbDelStrict, authDbGetStrict, authDbPutIfAbsentStrict, authDbPutStrict, authDbRetry, authStorageError, base32Decode, base32Encode, base64UrlToBytes, buildGroupReplyMessage, bytesToBase64Url, bytesToHex, clearPasswordLoginGuard, commandChangesWebSettings, classifyPortalAuthFailure, constantTimeEqual, createPortalAccountBinding, createPortalAdminAccountBinding, createPortalPasswordRecord, createPortalSession, decryptPortalAuthSecret, deleteMemoryVector, derivePortalPassword, encryptPortalAuthSecret, extractGroupId, generateBackupCodes, generateSixDigitCode, generateTotpCode, getOneBotHub, getPortalSession, getPublicNebulaSeed, getUserQuota, hasAdminRole, hashBackupCode, isMemoryBanned, isValidPortalPasswordRecord, jsonResponse, markGroupMemberLeft, migratePortalMemories, normalizeBackupCode, normalizePortalUsername, notePasswordLoginFailure, oneBotHttpActionUrl, portalAuthEncryptionKey, portalAuthEncryptionMaterial, portalRoleRank, portalAccountIdentityKey, portalAccountUsernameKey, portalSessionCookie, randomBytes, readCookie, readJson, readPasswordLoginGuard, readPortalAccountByQq, readPortalAccountByUsername, readPortalAuthJson, readPortalSettingValue, resolvePortalRole, searchPortalVectors, sendOneBotAction, sendOneBotHttpAction, sendPortalVerificationMessage, sha256Hex, simplifyJsonValue, upsertGroupMember, upsertMemoryVector, validatePortalLoginUsername, validatePortalPassword, validatePortalUsername, verifyPortalPassword, verifyPortalVerificationCode, verifyTotpCode, writeMemoryAudit, writePortalSettingValue, writeSystemError };
