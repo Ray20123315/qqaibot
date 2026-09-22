@@ -62,6 +62,8 @@ assert(result.body.includes('class="auth-stage"'), 'GET /register: AI activation
 assert(!result.body.includes('QQAIbot'), 'GET /register: legacy product branding must not leak');
 assert(!result.body.includes('${css}'), 'GET /register: literal CSS template placeholder leaked');
 assert(!result.body.includes('PORTAL_DEVELOPER_INITIAL_PASSWORD'), 'GET /register: removed developer password env must not leak');
+assert(result.body.includes("r.redirect||'/portal'"), 'GET /register: activation login fallback redirect missing');
+assert(result.body.includes('Failure ID'), 'GET /register: failure identifier UI missing');
 
 result = await get('/portal');
 assert(result.response.status === 302, 'GET /portal without session: expected redirect');
