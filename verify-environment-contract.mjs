@@ -35,7 +35,6 @@ for (const name of [...found].sort()) {
 }
 
 for (const name of [
-  "PORTAL_DEVELOPER_USERNAME",
   "ROOT_QQ_IDS",
   "GEMINI_DECISION_MODELS",
   "GEMINI_SEARCH_MODELS",
@@ -49,7 +48,6 @@ for (const name of [
 ]) assert.ok(wrangler.includes(name), `wrangler.example.toml missing public var ${name}`);
 
 for (const name of [
-  "PORTAL_DEVELOPER_INITIAL_PASSWORD",
   "TOTP_ENCRYPTION_KEY",
   "ONEBOT_HTTP_ACCESS_TOKEN",
   "GEMINI_DECISION_API_KEYS",
@@ -67,16 +65,18 @@ assert.match(operations, /env\.ONEBOT_HUB/);
 const registerStart = worker.indexOf("url.pathname === '/api/auth/register'");
 const registerEnd = worker.indexOf("url.pathname === '/api/auth/verify-code'", registerStart);
 const registerBlock = worker.slice(registerStart, registerEnd);
+assert.match(registerBlock, /const developerDirect = isDeveloperId\(env, qq\)/);
+assert.match(registerBlock, /developerPortalBootstrapPolicy\(env, \{ qq, setupKey \}\)/);
+assert.match(registerBlock, /if \(developerDirect\)/);
 assert.match(registerBlock, /verifyPortalVerificationCode/);
-assert.match(registerBlock, /developerPortalBootstrapPolicy/);
-assert.ok(registerBlock.indexOf("verifyPortalVerificationCode") < registerBlock.indexOf("developerPortalBootstrapPolicy"), "developer bootstrap credentials must only be checked after QQID verification");
-assert.match(worker, /PORTAL_DEVELOPER_USERNAME/);
-assert.match(worker, /PORTAL_DEVELOPER_INITIAL_PASSWORD/);
-assert.match(worker, /isDeveloperId\(env, qq\)/);
-assert.match(worker, /constantTimeEqual\(configuredPassword/);
-
-assert.match(devvars, /PORTAL_DEVELOPER_INITIAL_PASSWORD=replace_/);
-assert.doesNotMatch(wrangler, /PORTAL_DEVELOPER_INITIAL_PASSWORD\s*=/);
+assert.match(worker, /developerPortalBootstrapSecrets/);
+assert.match(worker, /env\.PORTAL_AUTH_SECRET/);
+assert.match(worker, /env\.ONEBOT_ACCESS_TOKEN/);
+assert.match(worker, /constantTimeEqual\(secret, supplied\)/);
+assert.doesNotMatch(worker, /PORTAL_DEVELOPER_USERNAME/);
+assert.doesNotMatch(worker, /PORTAL_DEVELOPER_INITIAL_PASSWORD/);
+assert.doesNotMatch(wrangler, /PORTAL_DEVELOPER_USERNAME\s*=/);
+assert.doesNotMatch(devvars, /PORTAL_DEVELOPER_INITIAL_PASSWORD\s*=/);
 assert.ok(docs.includes("KV") && docs.includes("R2") && docs.includes("目前不是 production source 直接讀取的 binding"));
 
 console.log(`verify-environment-contract: ok (${found.size} source env/binding names documented)`);
