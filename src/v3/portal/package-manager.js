@@ -6,6 +6,7 @@ import { createPluginPackageRegistry } from "../../plugins/package.js";
 import { PLUGIN_ALLOWED_ARTIFACT_TYPES, PLUGIN_AUTHOR_KEY_ID_PATTERN } from "../../plugins/distribution.js";
 import { createPluginAuthorTrustStore } from "../../plugins/trust.js";
 import { createPluginQuarantine } from "../../plugins/quarantine.js";
+import { createPluginSecurityCenter } from "../../plugins/security-center.js";
 import { fetchPublicUrl } from "../../security/network.js";
 import { authenticatePluginManager, decodePluginId } from "./plugin-manager.js";
 import { v3BilibiliEnabled } from "../runtime/bridge.js";
@@ -55,13 +56,18 @@ function externalStoresForPortal(env, overrides = {}) {
   const trustStore = overrides.authorTrustStore || createPluginAuthorTrustStore(storageAdapter, {
     nowProvider: overrides.nowProvider || Date.now
   });
+  const securityCenter = overrides.securityCenter || createPluginSecurityCenter(storageAdapter, {
+    nowProvider: overrides.nowProvider || Date.now
+  });
   const quarantine = overrides.quarantine || createPluginQuarantine(storageAdapter, {
     trustStore,
     fetchArtifact: overrides.fetchExternalArtifact || fetchExternalPluginArtifact,
+    securityCenter,
+    scanArtifact: overrides.scanExternalArtifact,
     nowProvider: overrides.nowProvider || Date.now,
     idProvider: overrides.quarantineIdProvider
   });
-  return Object.freeze({ storageAdapter, trustStore, quarantine });
+  return Object.freeze({ storageAdapter, trustStore, securityCenter, quarantine });
 }
 
 function safeAuthorRecord(record) {
@@ -105,6 +111,23 @@ function safeQuarantineRecord(record) {
       sizeBytes: Number(record.verification.sizeBytes || 0),
       verifiedAt: Number(record.verification.verifiedAt || 0) || null
     }) : null,
+    security: record.security ? Object.freeze({
+      recordId: String(record.security.recordId || ""),
+      scanner: String(record.security.scanner || ""),
+      findingCount: Number(record.security.findingCount || 0),
+      riskLevel: String(record.security.riskLevel || "none"),
+      overrideAllowed: record.security.overrideAllowed === true,
+      blocked: record.security.blocked === true,
+      findings: Object.freeze((record.security.findings || []).map(finding => Object.freeze({
+        code: String(finding.code || ""),
+        severity: String(finding.severity || ""),
+        summaryZh: String(finding.summaryZh || ""),
+        impacts: Object.freeze([...(finding.impacts || [])]),
+        overrideAllowed: finding.overrideAllowed === true
+      })))
+    }) : null,
+    acceptedRiskAt: Number(record.acceptedRiskAt || 0) || null,
+    acceptedRiskBy: String(record.acceptedRiskBy || ""),
     rejectionReason: String(record.rejectionReason || ""),
     approvedAt: Number(record.approvedAt || 0) || null,
     rejectedAt: Number(record.rejectedAt || 0) || null,
@@ -272,6 +295,10 @@ function packageManagerErrorResponse(error, fallbackStatus = 400) {
     PLUGIN_AUTHOR_KEY_REVOKED: "此作者 public key 已撤销。",
     PLUGIN_AUTHOR_KEY_SCOPE_DENIED: "此作者 key 未获授权签署该 plugin ID。",
     PLUGIN_SIGNATURE_INVALID: "Ed25519 签章验证失败。",
+    PLUGIN_SECURITY_OVERRIDE_FORBIDDEN: "此風險可能影響擁有者、其他使用者、共享資源、Core Secret 或平台完整性，禁止自行承擔並強制載入。",
+    PLUGIN_SECURITY_OVERRIDE_NOT_REQUIRED: "此項目目前不需要風險 override。",
+    PLUGIN_SECURITY_NOT_FOUND: "找不到對應的插件安全中心記錄。",
+    PLUGIN_QUARANTINE_STATE_INVALID: "目前 quarantine 狀態不允許這個操作。",
     PLUGIN_SIGNATURE_ALGORITHM_UNSUPPORTED: "只支持 Ed25519 签章。",
     PLUGIN_DISTRIBUTION_SCHEMA_UNSUPPORTED: "不支持的 distribution schemaVersion。",
     PLUGIN_DISTRIBUTION_HTTPS_REQUIRED: "外部插件 artifact/repository URL 必须使用 HTTPS。",
@@ -370,7 +397,12 @@ async function handleV3PackageManagerAuthed(request, env, url, body, session, ov
         keyId:record.author?.keyId || "",
         quarantineId:record.id
       }).catch(()=>{});
-      return jsonResponse({ok:true,entry:safeQuarantineRecord(record),state:await listExternalPluginState(env,overrides),message:"签章、artifact 大小与 SHA-256 已验证；已进入 quarantine。尚未执行任何第三方 JavaScript。"});
+      const message = record.state === "blocked"
+        ? "簽章與完整性已驗證，但安全掃描判定為不可由單一使用者承擔的系統性風險，因此已封鎖。"
+        : record.state === "risky"
+          ? "簽章與完整性已驗證；偵測到可由安裝者自行承擔的風險，請閱讀 findings 後再決定是否仍要載入。"
+          : "簽章、artifact 大小與 SHA-256 已驗證；安全掃描未發現目前規則可辨識的風險。尚未執行任何第三方 JavaScript。";
+      return jsonResponse({ok:true,entry:safeQuarantineRecord(record),state:await listExternalPluginState(env,overrides),message});
     } catch (error) { return packageManagerErrorResponse(error); }
   }
 
@@ -384,6 +416,24 @@ async function handleV3PackageManagerAuthed(request, env, url, body, session, ov
       const record = await quarantine.approve(id, session.qq);
       await writeSystemAudit(env, {type:"v3_plugin_external_quarantine",actorId:session.qq,action:"approve",pluginId:record.pluginId,quarantineId:id}).catch(()=>{});
       return jsonResponse({ok:true,entry:safeQuarantineRecord(record),state:await listExternalPluginState(env,overrides),message:"外部插件 metadata 已核准给未来 sandbox loader；目前仍未执行 JavaScript。"});
+    } catch (error) { return packageManagerErrorResponse(error); }
+  }
+
+  const quarantineAcceptRiskMatch = pathname.match(/^\/api\/portal\/v3\/packages\/external\/([^/]+)\/accept-risk$/);
+  if (quarantineAcceptRiskMatch) {
+    if (!packageManagerMethodAllowed(request, ["POST"])) return jsonResponse({ok:false,code:"METHOD_NOT_ALLOWED",message:"此接口只允許 POST。"},405,{Allow:"POST"});
+    const id = decodeTransactionId(quarantineAcceptRiskMatch[1]);
+    if (!id) return jsonResponse({ok:false,code:"PLUGIN_QUARANTINE_ID_INVALID",message:"quarantine ID 無效。"},400);
+    try {
+      const { quarantine } = externalStoresForPortal(env, overrides);
+      const record = await quarantine.acceptRisk(id, session.qq);
+      await writeSystemAudit(env, {type:"v3_plugin_external_quarantine",actorId:session.qq,action:"accept_risk",pluginId:record.pluginId,quarantineId:id}).catch(()=>{});
+      return jsonResponse({
+        ok:true,
+        entry:safeQuarantineRecord(record),
+        state:await listExternalPluginState(env,overrides),
+        message:"你已明確承擔此未認證插件對自己範圍內的已揭露風險；系統性／跨使用者風險仍不可被此操作解除。外部 JavaScript 仍須由隔離 runtime 載入。"
+      });
     } catch (error) { return packageManagerErrorResponse(error); }
   }
 
