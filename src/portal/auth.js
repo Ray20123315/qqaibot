@@ -362,7 +362,7 @@ async function verifyPortalPassword(password, record) {
 
 
 function portalAuthEncryptionMaterial(env) {
-  const secret = String(env.PORTAL_AUTH_SECRET || env.ONEBOT_ACCESS_TOKEN || env.ONEBOT_TOKEN || env.NAPCAT_ACCESS_TOKEN || "").trim();
+  const secret = String(env.TOTP_ENCRYPTION_KEY || env.PORTAL_AUTH_SECRET || env.ONEBOT_ACCESS_TOKEN || env.ONEBOT_TOKEN || env.NAPCAT_ACCESS_TOKEN || "").trim();
   if (secret.length < 16) {
     const error = new Error("PORTAL_AUTH_SECRET must be configured with at least 16 characters before enabling 2FA");
     error.code = "PORTAL_AUTH_SECRET_MISSING";
@@ -577,7 +577,7 @@ function oneBotHttpActionUrl(env, action) {
 async function sendOneBotHttpAction(env, action, params, timeoutMs = 12000) {
   const url = oneBotHttpActionUrl(env, action);
   if (!url) throw new Error("NAPCAT_HTTP_NOT_CONFIGURED");
-  const token = String(env.ONEBOT_ACCESS_TOKEN || env.NAPCAT_ACCESS_TOKEN || "").trim();
+  const token = String(env.ONEBOT_HTTP_ACCESS_TOKEN || env.ONEBOT_ACCESS_TOKEN || env.NAPCAT_ACCESS_TOKEN || "").trim();
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort("NAPCAT_HTTP_TIMEOUT"), Math.max(1000, timeoutMs));
   try {

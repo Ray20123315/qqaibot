@@ -67,6 +67,42 @@ async function shouldSuppressRepeatedShortReply(env, { isGroup, groupId, text, w
   return duplicate;
 }
 
+
+function developerPortalBootstrapPolicy(env, { qq = "", username = "", password = "" } = {}) {
+  if (!isDeveloperId(env, qq)) return { ok: true, enforced: false };
+  const configuredUsername = String(env.PORTAL_DEVELOPER_USERNAME || "").normalize("NFKC").trim();
+  const configuredPassword = String(env.PORTAL_DEVELOPER_INITIAL_PASSWORD || "");
+  if (!configuredUsername && !configuredPassword) return { ok: true, enforced: false };
+
+  if (configuredUsername) {
+    const expected = validatePortalUsername(configuredUsername);
+    if (!expected.ok) {
+      return { ok: false, status: 503, code: "DEVELOPER_BOOTSTRAP_CONFIG_INVALID", message: "開發者首次帳號變數格式無效，請修正 PORTAL_DEVELOPER_USERNAME。" };
+    }
+    const supplied = validatePortalUsername(username);
+    if (!supplied.ok || supplied.normalized !== expected.normalized) {
+      return { ok: false, status: 400, code: "DEVELOPER_BOOTSTRAP_CREDENTIAL_MISMATCH", message: "此開發者身份已設定固定的首次登入帳號，請使用部署者設定的帳號名稱。" };
+    }
+  }
+
+  if (configuredPassword) {
+    const expectedPassword = validatePortalPassword(configuredPassword);
+    if (!expectedPassword.ok) {
+      return { ok: false, status: 503, code: "DEVELOPER_BOOTSTRAP_CONFIG_INVALID", message: "開發者首次密碼 Secret 不符合密碼政策，請重新設定 PORTAL_DEVELOPER_INITIAL_PASSWORD。" };
+    }
+    if (!constantTimeEqual(configuredPassword, String(password || ""))) {
+      return { ok: false, status: 400, code: "DEVELOPER_BOOTSTRAP_CREDENTIAL_MISMATCH", message: "此開發者身份已設定固定的首次登入密碼，請使用部署者設定的密碼。" };
+    }
+  }
+
+  return {
+    ok: true,
+    enforced: true,
+    usernameConfigured: Boolean(configuredUsername),
+    passwordConfigured: Boolean(configuredPassword)
+  };
+}
+
 const QQAI_V1_R54_PROGRESSIVE_MULTI_ACTION_MARKER = "QQAI_V1_R54_PROGRESSIVE_MULTI_ACTION_MARKER";
 
 
@@ -306,6 +342,8 @@ const QQAIWorker = {
       try {
         const verified = await verifyPortalVerificationCode(env, qq, code, { consume: false });
         if (!verified.ok) return jsonResponse({ ok: false, code: "IDENTITY_VERIFICATION_FAILED", message: verified.message || "驗證碼錯誤或已過期。" }, 400);
+        const developerBootstrap = developerPortalBootstrapPolicy(env, { qq, username: usernameCheck.value, password: passwordCheck.value });
+        if (!developerBootstrap.ok) return jsonResponse({ ok: false, code: developerBootstrap.code, message: developerBootstrap.message }, developerBootstrap.status || 400);
         const account = await createPortalAccountBinding(env, { qq, username: usernameCheck.value });
         const passwordRecord = await createPortalPasswordRecord(passwordCheck.value);
         await authDbPutStrict(env, `portal_auth_password:${qq}`, JSON.stringify(passwordRecord));
