@@ -54,6 +54,7 @@ assert(result.body.includes('id="activationMode"'), 'GET /register: activation m
 assert(result.body.includes('id="developerUsername"'), 'GET /register: fixed developer username display missing');
 assert(result.body.includes('value="admin"'), 'GET /register: reserved admin username missing');
 assert(result.body.includes('開發者 / Root：設定 admin 密碼'), 'GET /register: admin password setup option missing');
+assert(result.body.includes("accountType:dev?'developer':'member'"), 'GET /register: explicit developer accountType payload missing');
 assert(!result.body.includes('id="bootstrapKey"'), 'GET /register: obsolete developer bootstrap key must not exist');
 assert(/<style>\s*:root\{\s*color-scheme:dark;/.test(result.body), 'GET /register: futuristic public CSS must be materialized');
 assert(result.body.includes('class="auth-stage"'), 'GET /register: AI activation layout missing');
