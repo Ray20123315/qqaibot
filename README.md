@@ -123,8 +123,6 @@ npx wrangler secret put GEMINI_API_KEYS
 npx wrangler secret put ONEBOT_ACCESS_TOKEN
 npx wrangler secret put PORTAL_AUTH_SECRET
 npx wrangler secret put TOTP_ENCRYPTION_KEY
-# 若要鎖定開發者第一次啟用的初始密碼：
-npx wrangler secret put PORTAL_DEVELOPER_INITIAL_PASSWORD
 ```
 
 ### 5. 驗證與部署
@@ -160,11 +158,10 @@ Cron 預設每分鐘執行，用於排程、自動化、暫存清理、主動發
 | `DEVELOPER_IDS` | 逗號、分號或換行分隔 QQ ID；預設空 | 開發者／Root QQ 清單。建議使用此欄位，可設定多人。 |
 | `DEVELOPER_ID` | 單一 QQ；預設空 | 舊版相容欄位，只有一位開發者時仍可用。 |
 | `ROOT_QQ_IDS` | QQ 清單；預設空 | 額外 Root 清單，相容部署使用；會與 `DEVELOPER_IDS` 合併去重。 |
-| `PORTAL_DEVELOPER_USERNAME` | 4–32 字元帳號 | 可選；鎖定開發者第一次 QQID 驗證啟用時建立的 username。 |
 | `PUBLIC_BASE_URL` | `https://bot.example.com`；預設使用請求來源 | `!help`、Portal 與 Live 對外連結的基底網址，不加結尾 `/`。 |
 | `BOT_DISPLAY_NAME` | `QQAI` | 對外顯示名稱，供可支援的 UI／訊息使用。 |
 
-`DEVELOPER_IDS` 不屬於密碼，但它授予最高權限。不要允許一般 Portal 管理員修改，否則會形成自行提權。應由部署者在 Cloudflare 設定。
+`DEVELOPER_IDS` 不屬於密碼，但它授予最高權限。不要允許一般 Portal 管理員修改，否則會形成自行提權。應由部署者在 Cloudflare 設定。開發者首次帳號名稱與密碼不再使用新增 env；直接在 `/register` 網頁建立，並以既有 V2 的部署管理 Secret 作一次性 bootstrap 證明。
 
 ### 部署通知
 
@@ -238,7 +235,6 @@ Secrets 不可放在 `[vars]`、README 範例值、Portal 回應、Git log 或�
 | `ONEBOT_HTTP_ACCESS_TOKEN` | HTTP 備援 Token。 |
 | `PORTAL_AUTH_SECRET` | Portal 敏感資料與登入相關加密。 |
 | `TOTP_ENCRYPTION_KEY` | TOTP 種子優先加密 key；建議與 Portal/OneBot key 分開。 |
-| `PORTAL_DEVELOPER_INITIAL_PASSWORD` | 可選；開發者第一次 QQID 驗證啟用時必須輸入的初始密碼，之後只使用 D1 PBKDF2 hash。 |
 | `CLOUDFLARE_BUILDS_API_TOKEN` | 可選，讀取 Cloudflare Build 詳細日誌。 |
 
 列出 Secrets：
@@ -308,7 +304,7 @@ npx wrangler secret put SECRET_NAME
 
 ### Portal
 
-Portal 入口由 `PUBLIC_BASE_URL` 或實際請求來源決定，不再固定指向維護者網站。包含登入、密碼重設、群組與群友、權限、群規、通知、模型、對話、違規、申訴、活動、投票、狼人殺與系統維護。
+Portal 入口由 `PUBLIC_BASE_URL` 或實際請求來源決定，不再固定指向維護者網站。開發者首次啟用可直接建立帳號密碼、不需 QQ 六位碼；日常登入預設只用帳號＋密碼。Portal 另包含密碼重設、群組與群友、權限、群規、通知、模型、對話、違規、申訴、活動、投票、狼人殺與系統維護。
 
 ## 指令
 
