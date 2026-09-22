@@ -38,7 +38,7 @@ Wrangler 會把所有模組打包成同一個 Worker，不需要建立第二個 
 
 ## 五層設定模型
 
-設定依用途分成五層，不應全部塞進同一頁或同一檔案。
+設定依用途分成五層，不應全部塞進同一頁或同一檔案。**Production 的 Developer identity 由 Cloudflare Dashboard Variables 管理；`wrangler.toml` 使用 `keep_vars = true`，部署腳本同時使用 `--keep-vars`，避免 Git 部署把網頁填入的 `DEVELOPER_IDS`／`ROOT_QQ_IDS`／`DEVELOPER_ID` 清空。**
 
 1. **Cloudflare 基礎資源**：Worker 名稱、網域、D1、Vectorize、Durable Object、Cron、Rate Limiter。設定於 `wrangler.toml`。
 2. **公開執行期變數**：開發者 QQ、公開網址、模型名稱、預算、功能開關與安全範圍內的限制值。設定於 `[vars]` 或 Cloudflare Dashboard Variables。
@@ -102,9 +102,10 @@ cp wrangler.example.toml wrangler.toml
 - D1 `database_name` 與 `database_id`
 - Vectorize `index_name`
 - Rate Limiter `namespace_id`
-- `DEVELOPER_IDS`
 - `PUBLIC_BASE_URL`
 - `DEPLOY_NOTIFY_WORKER_NAME`
+
+接著在 Cloudflare Dashboard Variables 建立 `DEVELOPER_IDS`（以及需要時的 `ROOT_QQ_IDS` / legacy `DEVELOPER_ID`）。不要把這些 identity 值提交到 production `wrangler.toml`。
 
 Durable Object migration 的 `v1_onebot_hub`、`v2_budget_guard`、`v3_remove_budget_guard` 順序屬於專案歷史，既有部署不可刪除、重新命名或重排。
 
@@ -365,3 +366,10 @@ npm run check:bundle
 ## 授權與責任
 
 本專案採用儲存庫現有的自訂限制性授權條款。使用、修改或散布前請先閱讀授權文件。軟體按現狀提供，使用者自行承擔部署、帳號、第三方平台與資料風險。
+
+
+## 權利保留
+
+Copyright (c) 2026 ray20123315. All rights reserved.
+
+本專案的使用、修改與散布條件以根目錄 `LICENSE` 為準。此說明不取代、擴張或縮減 LICENSE 內的授權條款。
