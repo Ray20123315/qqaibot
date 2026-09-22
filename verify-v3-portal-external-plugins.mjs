@@ -139,6 +139,8 @@ assert.match(injected,/v3ExternalDistribution/);
 assert.match(injected,/qqai-v3-external-plugin-client/);
 assert.match(injected,/加入 Trust Store/);
 assert.match(injected,/Quarantine/);
+assert.match(injected,/data-q-accept-risk/);
+assert.match(injected,/不可強制載入|不可自行承擔|系統性/);
 assert.equal(injectV3PackageManagerClient(injected),injected);
 
 console.log("verify-v3-portal-external-plugins: ok");

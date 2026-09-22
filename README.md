@@ -46,6 +46,20 @@ Wrangler 會把所有模組打包成同一個 Worker，不需要建立第二個 
 
 優先順序通常是：Portal／群組明確設定 → Worker 公開變數 → 程式安全預設。Secrets 只提供憑證，不應被 Portal 回傳或顯示。
 
+## V3 插件治理與安全中心
+
+V3 插件管理把「可信度」、「版本通道」與「執行權限」分開處理，不把「官方」或「穩定版」誤當成自動取得完整權限。
+
+- **權限可勾選也可後改**：每個 capability 都會揭露是唯讀、寫入／修改、操作／執行或外部傳輸，並標示必要或可選。可選權限不授權時，插件仍可啟用，但相依功能會由 Host capability gate 拒絕；必要權限缺少時才會 blocked。
+- **信任標籤**：顯示「官方」、「官方 Beta」、「官方認證」或「尚未取得認證」。認證只描述來源／審查狀態，不自動授權資料或 Core binding。
+- **版本通道**：`stable`（穩定版）預設優先，使用者可改成 `preview`（搶先體驗版）並隨時切回。版本通道與認證狀態彼此獨立。
+- **未認證插件可自行承擔有限風險**：若 finding 只影響安裝者自己，可在 Portal 閱讀警告後明確接受風險；若涉及擁有者、其他使用者／租戶、共享額度、Core Secret、跨插件資料或平台完整性，系統不提供 override。
+- **公開安全中心**：`/plugin-security` 提供人類可讀頁面，`/api/v3/plugin-security` 提供機器可讀 JSON。只公開插件 ID、版本、SHA-256、安全 finding 與時間，不公開惡意 artifact、Secret 或可直接執行的攻擊內容。
+- **整點重掃**：保留既有每分鐘 Cron，只有 UTC minute 0 執行插件安全重掃。系統會重新抓 signed immutable artifact、驗大小與 SHA-256、重跑 deterministic scan；finding 改變時，先前的「自行承擔」會失效並要求重新確認。Cloudflare Cron 本身仍為 `* * * * *`，避免破壞其他分鐘級排程。
+- **GPT 輔助審查是可選 defense-in-depth**：預設關閉。啟用時需設定 `PLUGIN_SECURITY_GPT_ENABLED=true`、`PLUGIN_SECURITY_GPT_MODEL`，並以 `wrangler secret put OPENAI_API_KEY` 保存 Key。GPT finding 只作安裝者自身的 advisory warning，不能解除或取代 deterministic hard block。
+
+外部插件即使通過 signature、SHA-256 與安全中心，也不會因此取得 D1、`env`、OneBot Token、AI Key 或其他插件 storage；真正執行仍必須走 V3 的隔離 runtime／capability boundary。
+
 ## 快速部署
 
 ### 1. 準備環境
@@ -223,6 +237,7 @@ Secrets 不可放在 `[vars]`、README 範例值、Portal 回應、Git log 或�
 | `PORTAL_AUTH_SECRET` | Portal 敏感資料與登入相關加密。 |
 | `TOTP_ENCRYPTION_KEY` | TOTP 種子加密。 |
 | `CLOUDFLARE_BUILDS_API_TOKEN` | 可選，讀取 Cloudflare Build 詳細日誌。 |
+| `OPENAI_API_KEY` | 可選，只供 V3 Plugin Security Center 的 GPT 輔助審查；必須以 Worker Secret 保存，預設功能關閉。 |
 
 列出 Secrets：
 

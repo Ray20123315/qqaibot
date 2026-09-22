@@ -6,6 +6,7 @@ on:
       - main
       - refactor/v2-modular-worker
       - v3-rewrite
+      - codex/v3-plugin-governance-20260922
   pull_request:
     branches:
       - main

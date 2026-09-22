@@ -12,34 +12,51 @@ const storage = {
 };
 
 const lifecyclePlugin = definePlugin({
-  manifest: { id: "test.lifecycle", name: "Lifecycle Test", version: "1.0.0", apiVersion: "1", minQQAI: "2.0.0", maxQQAI: "4.0.0", capabilities: ["storage"] }
+  manifest: { id: "test.lifecycle", name: "Lifecycle Test", version: "1.0.0", apiVersion: "1", minQQAI: "2.0.0", maxQQAI: "4.0.0", capabilities: ["storage"], requiredCapabilities: ["storage"] }
 });
 const futurePlugin = definePlugin({
   manifest: { id: "test.future", name: "Future", version: "1.0.0", apiVersion: "1", minQQAI: "99.0.0", capabilities: [] }
 });
+const optionalPlugin = definePlugin({
+  manifest: { id: "test.optional", name: "Optional Permission", version: "1.0.0", apiVersion: "1", capabilities: ["storage"] }
+});
 
 const registry = createPluginLifecycleRegistry(storage, { qqaiVersion: "3.0.0", nowProvider: () => 1000 });
-let snapshot = await registry.reconcile([lifecyclePlugin, futurePlugin]);
+let snapshot = await registry.reconcile([lifecyclePlugin, futurePlugin, optionalPlugin]);
 assert.equal(snapshot.plugins["test.lifecycle"].state, "enabled");
 assert.deepEqual(snapshot.plugins["test.lifecycle"].grantedPermissions, ["storage"]);
 assert.equal(snapshot.plugins["test.future"].state, "blocked");
 assert.equal(snapshot.plugins["test.future"].blockReason, "PLUGIN_REQUIRES_NEWER_QQAI");
+assert.equal(snapshot.plugins["test.optional"].state, "enabled");
+assert.deepEqual(snapshot.plugins["test.optional"].grantedPermissions, []);
+assert.deepEqual(snapshot.plugins["test.optional"].missingPermissions, ["storage"]);
+assert.deepEqual(snapshot.plugins["test.optional"].missingRequiredPermissions, []);
+assert.equal(snapshot.plugins["test.optional"].degraded, true);
 assert.equal(map.has(PLUGIN_LIFECYCLE_REGISTRY_KEY), true);
 assert(reads.every(key => key === PLUGIN_LIFECYCLE_REGISTRY_KEY), "lifecycle persistence must use one exact key");
 
 await registry.setEnabled("test.lifecycle", false, "42");
 assert.equal((await registry.get("test.lifecycle")).state, "disabled");
 const secondRegistry = createPluginLifecycleRegistry(storage, { qqaiVersion: "3.0.0", nowProvider: () => 2000 });
-snapshot = await secondRegistry.reconcile([lifecyclePlugin, futurePlugin]);
+snapshot = await secondRegistry.reconcile([lifecyclePlugin, futurePlugin, optionalPlugin]);
 assert.equal(snapshot.plugins["test.lifecycle"].state, "disabled");
 
 let record = await secondRegistry.setGrantedPermissions("test.lifecycle", [], "42");
 assert.equal(record.state, "disabled");
 record = await secondRegistry.setEnabled("test.lifecycle", true, "42");
 assert.equal(record.state, "blocked");
-assert.equal(record.blockReason, "PLUGIN_PERMISSIONS_MISSING");
+assert.equal(record.blockReason, "PLUGIN_REQUIRED_PERMISSIONS_MISSING");
 record = await secondRegistry.setGrantedPermissions("test.lifecycle", ["storage"], "42");
 assert.equal(record.state, "enabled");
+record = await secondRegistry.setChannelPreference("test.lifecycle", "preview", "42");
+assert.equal(record.channelPreference, "preview");
+await assert.rejects(() => secondRegistry.setChannelPreference("test.lifecycle", "beta", "42"), /PLUGIN_RELEASE_CHANNEL_INVALID/);
+let optionalRecord = await secondRegistry.setGrantedPermissions("test.optional", [], "42");
+assert.equal(optionalRecord.state, "enabled");
+assert.equal(optionalRecord.degraded, true);
+optionalRecord = await secondRegistry.setGrantedPermissions("test.optional", ["storage"], "42");
+assert.equal(optionalRecord.state, "enabled");
+assert.equal(optionalRecord.degraded, false);
 await assert.rejects(() => secondRegistry.setGrantedPermissions("test.lifecycle", ["network"], "42"), /PLUGIN_PERMISSION_NOT_REQUESTED/);
 assert.equal(pluginCompatibility(lifecyclePlugin.manifest, "3.0.0").ok, true);
 assert.equal(pluginCompatibility(futurePlugin.manifest, "3.0.0").ok, false);
@@ -56,7 +73,7 @@ assert.equal(volatileWrites, 0, "non-persistent lifecycle must not write side ef
 
 let loads = 0, unloads = 0, commands = 0;
 const runtimePlugin = definePlugin({
-  manifest: { id: "test.runtime-life", name: "Runtime Lifecycle", version: "1.0.0", apiVersion: "1", capabilities: ["storage"] },
+  manifest: { id: "test.runtime-life", name: "Runtime Lifecycle", version: "1.0.0", apiVersion: "1", capabilities: ["storage"], requiredCapabilities: ["storage"] },
   commands: [{
     name: "runtime-life",
     async run(ctx) { commands += 1; await ctx.storage.set("last", commands); return commands; }

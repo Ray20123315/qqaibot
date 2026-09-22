@@ -62,6 +62,13 @@ assert.equal(payload.plugins[0].active, true);
 assert.equal(payload.plugins[0].lifecycle.state, "enabled");
 assert.deepEqual(payload.plugins[0].requestedPermissions, ["network", "scheduler", "storage"]);
 assert.deepEqual(payload.plugins[0].grantedPermissions, ["network", "scheduler", "storage"]);
+assert.deepEqual(payload.plugins[0].requiredPermissions, ["network", "scheduler", "storage"]);
+assert.equal(payload.plugins[0].trustStatus, "official_beta");
+assert.equal(payload.plugins[0].trustLabelZh, "官方 Beta");
+assert.equal(payload.plugins[0].releaseChannel, "preview");
+assert.equal(payload.plugins[0].releaseChannelLabelZh, "搶先體驗版");
+assert.equal(payload.plugins[0].channelPreference, "stable");
+assert.equal(payload.plugins[0].permissionDisclosures.find(row => row.capability === "network").externalDestinations[0], "api.live.bilibili.com");
 
 response = await handleV3PluginManagerApi(
   new Request("https://example.com/api/portal/v3/plugins/official.bilibili-live/state", {
@@ -102,6 +109,25 @@ assert.equal(response.status, 200);
 payload = await response.json();
 assert.equal(payload.plugin.lifecycle.state, "enabled");
 assert.equal(payload.plugin.active, true);
+
+response = await handleV3PluginManagerApi(
+  new Request("https://example.com/api/portal/v3/plugins/official.bilibili-live/release-channel", {
+    method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ channel: "preview" })
+  }), env, null, options
+);
+assert.equal(response.status, 200);
+payload = await response.json();
+assert.equal(payload.plugin.channelPreference, "preview");
+assert.equal(payload.lifecycle.channelPreference, "preview");
+
+response = await handleV3PluginManagerApi(
+  new Request("https://example.com/api/portal/v3/plugins/official.bilibili-live/release-channel", {
+    method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ channel: "stable" })
+  }), env, null, options
+);
+assert.equal(response.status, 200);
+payload = await response.json();
+assert.equal(payload.plugin.channelPreference, "stable");
 
 response = await handleV3PluginManagerApi(
   new Request("https://example.com/api/portal/v3/plugins/official.bilibili-live/settings", {
@@ -154,6 +180,10 @@ assert.match(injected, /qqai-v3-plugin-manager-client/);
 assert.match(injected, /qqai-v3-plugin-lifecycle-style/);
 assert.match(injected, /data-v3-toggle/);
 assert.match(injected, /data-v3-permission/);
+assert.match(injected, /外部傳輸/);
+assert.match(injected, /必要/);
+assert.match(injected, /保存版本偏好/);
+assert.match(injected, /data-v3-save-channel/);
 assert.equal(injectV3PluginManagerClient(injected), injected, "Portal injection must be idempotent");
 
 const workerSource = fs.readFileSync("worker.js", "utf8");
