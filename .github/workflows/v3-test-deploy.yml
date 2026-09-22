@@ -26,12 +26,6 @@ jobs:
           cache: npm
           cache-dependency-path: package.json
 
-      - name: Verify Cloudflare CI credentials exist
-        shell: bash
-        run: |
-          set -euo pipefail
-          test -n "$CLOUDFLARE_API_TOKEN" || { echo "::error::Missing GitHub Actions secret CLOUDFLARE_API_TOKEN"; exit 1; }
-          test -n "$CLOUDFLARE_ACCOUNT_ID" || { echo "::error::Missing GitHub Actions secret CLOUDFLARE_ACCOUNT_ID"; exit 1; }
 
       - name: Install dependencies
         run: npm install --ignore-scripts
@@ -47,6 +41,12 @@ jobs:
           grep -q 'name = "qqai-v3test"' wrangler.v3test.toml
           grep -q 'binding = "DB"' wrangler.v3test.toml
           npx wrangler deploy --config wrangler.v3test.toml --dry-run --outdir dist-v3test --no-assets
+      - name: Verify Cloudflare CI credentials exist
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$CLOUDFLARE_API_TOKEN" || { echo "::error::Missing GitHub Actions secret CLOUDFLARE_API_TOKEN"; exit 1; }
+          test -n "$CLOUDFLARE_ACCOUNT_ID" || { echo "::error::Missing GitHub Actions secret CLOUDFLARE_ACCOUNT_ID"; exit 1; }
 
       - name: Deploy isolated V3 test Worker
         id: deploy
