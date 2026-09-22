@@ -310,7 +310,18 @@ const QQAIWorker = {
       }
       if (!passwordCheck.ok) return jsonResponse({ ok: false, code: "PASSWORD_POLICY", message: passwordCheck.message }, 400);
 
-      const developerDirect = isDeveloperId(env, qq);
+      const accountType = String(payload.accountType || "").trim().toLowerCase();
+      const requestedDeveloper = accountType === "developer"
+        || (!accountType && String(payload.username || "").trim().toLowerCase() === "admin");
+      const developerAuthorized = isDeveloperId(env, qq);
+      if (requestedDeveloper && !developerAuthorized) {
+        return jsonResponse({
+          ok: false,
+          code: "DEVELOPER_ID_NOT_AUTHORIZED",
+          message: "這個 QQID 未列在 DEVELOPER_IDS／ROOT_QQ_IDS／DEVELOPER_ID，無法設定系統帳號 admin。請先確認 Cloudflare Worker 的開發者身份設定。"
+        }, 403);
+      }
+      const developerDirect = requestedDeveloper && developerAuthorized;
       const usernameCheck = developerDirect ? null : validatePortalUsername(payload.username);
       if (!developerDirect && !usernameCheck.ok) {
         return jsonResponse({ ok: false, code: usernameCheck.code || "USERNAME_INVALID", message: usernameCheck.message }, 400);
