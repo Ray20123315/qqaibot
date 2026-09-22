@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import fs from "node:fs";
-import worker from "./worker.js";
+import portalWorker from "./worker.js";
 import {
   classifyPortalAuthFailure,
   createPortalAccountBinding,
@@ -144,7 +144,7 @@ assert.doesNotMatch(worker, /PORTAL_DEVELOPER_INITIAL_PASSWORD/);
 assert.doesNotMatch(worker, /developerPortalBootstrapSecrets|developerPortalBootstrapPolicy|DEVELOPER_BOOTSTRAP_SECRET/);
 
 const sessionFailDb = new FakeD1({ failWritePrefix: "portal_session:" });
-const registerResponse = await worker.fetch(new Request("https://qqai.ray2025.com/api/auth/register", {
+const registerResponse = await portalWorker.fetch(new Request("https://qqai.ray2025.com/api/auth/register", {
   method: "POST",
   headers: { "Content-Type": "application/json" },
   body: JSON.stringify({
