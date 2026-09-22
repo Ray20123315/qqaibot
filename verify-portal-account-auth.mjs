@@ -149,7 +149,7 @@ assert.doesNotMatch(worker, /PORTAL_DEVELOPER_INITIAL_PASSWORD/);
 assert.doesNotMatch(worker, /developerPortalBootstrapSecrets|developerPortalBootstrapPolicy|DEVELOPER_BOOTSTRAP_SECRET/);
 
 const sessionFailDb = new FakeD1({ failWritePrefix: "portal_session:" });
-const registerResponse = await portalWorker.fetch(new Request("https://qqai.ray2025.com/api/auth/register", {
+const registerResponse = await portalWorker.fetch(new Request("https://aibot.ray2025.com/api/auth/register", {
   method: "POST",
   headers: { "Content-Type": "application/json" },
   body: JSON.stringify({
