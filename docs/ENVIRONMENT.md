@@ -122,7 +122,7 @@ URL 如果內含 credential/query secret，也要當 Secret 管理。
 
 ### Portal / 2FA
 
-- `PORTAL_AUTH_SECRET`：Portal 一般敏感資料加密 fallback。
+- `PORTAL_AUTH_SECRET`：Portal 一般敏感資料／2FA 加密 fallback；不是 `admin` 密碼，也不參與 Developer 首次啟用。
 - `TOTP_ENCRYPTION_KEY`：**TOTP seed 的優先加密 key**；建議獨立設定，不與 OneBot token 共用。
 
 ### Cloudflare build detail
