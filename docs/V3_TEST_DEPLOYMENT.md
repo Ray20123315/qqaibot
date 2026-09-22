@@ -20,7 +20,7 @@
 第一次執行會建立新的 Worker 與 D1，因此 token 需要能建立這兩種資源。依 Cloudflare 目前 granular permission 模型，建議把 scope 限制在使用的 account，並給：
 
 - Workers：`Admin`（第一次建立 `qqai-v3test` 需要；既有 Worker 後可評估縮成 `Editor`）。
-- D1：`Admin`（第一次自動 provision 測試 D1 需要；既有 D1 後可評估縮成 `Editor`）。
+- D1：需要可建立／寫入 D1 的權限；目前 Cloudflare API 對建立 D1 接受 `D1 Write`，granular role 可使用 D1 product `Admin` 完成首次 provision。
 
 不要把 Account ID 或 API Token 寫進 `wrangler.v3test.toml`、README、commit、Issue、Actions log 或其他 repo 檔案。Account ID 雖不是密碼，仍應透過 CI 設定統一管理；API Token 必須視為 Secret。
 
