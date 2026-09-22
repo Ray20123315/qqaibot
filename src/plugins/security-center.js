@@ -180,24 +180,28 @@ function createPluginSecurityCenter(storageAdapter, { nowProvider = Date.now } =
     return record;
   }
 
-  async function markHourlyReview(id, { findings = null, reviewer = "gpt-crawler" } = {}) {
+  async function markHourlyReview(id, { findings = null, reviewer = "qqai-hourly" } = {}) {
     const state = await read();
     const key = String(id || "");
     const existing = state.entries?.[key];
     if (!existing) return null;
     const now = Number(nowProvider());
-    const merged = findings ? securitySummary([...(existing.findings || []), ...(findings || [])]) : securitySummary(existing.findings || []);
-    const blocked = merged.blocked;
+    const nextSummary = securitySummary(Array.isArray(findings) ? findings : existing.findings || []);
+    const previousSignature = JSON.stringify((existing.findings || []).map(f => [f.code, f.severity, f.summaryZh, f.impacts]));
+    const nextSignature = JSON.stringify((nextSummary.findings || []).map(f => [f.code, f.severity, f.summaryZh, f.impacts]));
+    const findingsUnchanged = previousSignature === nextSignature;
+    const preserveAcceptance = existing.status === "risk_accepted" && findingsUnchanged && nextSummary.overrideAllowed && !nextSummary.blocked;
     const record = Object.freeze({
       ...existing,
-      status: blocked ? "blocked" : (existing.status === "risk_accepted" && merged.overrideAllowed ? "risk_accepted" : merged.findingCount ? "warning" : "clear"),
-      riskLevel: merged.riskLevel,
-      overrideAllowed: merged.overrideAllowed,
-      findings: merged.findings,
+      status: nextSummary.blocked ? "blocked" : preserveAcceptance ? "risk_accepted" : nextSummary.findingCount ? "warning" : "clear",
+      riskLevel: nextSummary.riskLevel,
+      overrideAllowed: nextSummary.overrideAllowed,
+      findings: nextSummary.findings,
+      lastCheckedAt: now,
       lastHourlyReviewAt: now,
       lastReviewer: cleanText(reviewer, 80),
       updatedAt: now,
-      ...(blocked ? { riskAcceptedAt: null, riskAcceptedBy: "" } : {})
+      ...(!preserveAcceptance ? { riskAcceptedAt: null, riskAcceptedBy: "" } : {})
     });
     await write({ ...state, updatedAt: now, entries: { ...(state.entries || {}), [key]: record } });
     return record;

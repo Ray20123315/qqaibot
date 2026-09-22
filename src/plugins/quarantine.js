@@ -171,6 +171,46 @@ function createPluginQuarantine(storageAdapter, {
     return record;
   }
 
+  async function applySecurityReview(id, summary = {}, { actorId = "scheduled", reviewer = "qqai-hourly" } = {}) {
+    const state = await read();
+    const key = String(id || "");
+    const existing = state.entries?.[key];
+    if (!existing) throw new Error("PLUGIN_QUARANTINE_NOT_FOUND:" + key);
+    const findings = Object.freeze([...(summary?.findings || [])]);
+    const nextSignature = JSON.stringify(findings.map(f => [f.code, f.severity, f.summaryZh, f.impacts]));
+    const previousSignature = JSON.stringify((existing.security?.findings || []).map(f => [f.code, f.severity, f.summaryZh, f.impacts]));
+    const findingsUnchanged = nextSignature === previousSignature;
+    const blocked = summary?.blocked === true;
+    const warning = Number(summary?.findingCount || findings.length) > 0;
+    const preserveRiskAcceptance = existing.state === "approved_with_risk" && findingsUnchanged && summary?.overrideAllowed === true && !blocked;
+    let nextState = existing.state;
+    if (blocked) nextState = "blocked";
+    else if (warning) nextState = preserveRiskAcceptance ? "approved_with_risk" : "risky";
+    else if (["approved", "approved_with_risk"].includes(existing.state)) nextState = "approved";
+    else nextState = "verified";
+    const now = Number(nowProvider());
+    const security = Object.freeze({
+      ...(existing.security || {}),
+      findingCount: Number(summary?.findingCount || findings.length),
+      riskLevel: String(summary?.riskLevel || "none"),
+      overrideAllowed: summary?.overrideAllowed === true,
+      blocked,
+      findings,
+      reviewedAt: now,
+      reviewer: String(reviewer || "")
+    });
+    const record = Object.freeze({
+      ...existing,
+      state: nextState,
+      security,
+      updatedAt: now,
+      updatedBy: String(actorId || ""),
+      ...(!preserveRiskAcceptance ? { acceptedRiskAt: null, acceptedRiskBy: "" } : {})
+    });
+    await write({ ...state, updatedAt: now, entries: { ...(state.entries || {}), [key]: record } });
+    return record;
+  }
+
   async function reject(id, actorId = "", reason = "") {
     const state = await read();
     const key = String(id || "");
@@ -199,7 +239,7 @@ function createPluginQuarantine(storageAdapter, {
     return true;
   }
 
-  return Object.freeze({ acceptRisk, approve, get, list, read, reject, remove, verifyAndQuarantine });
+  return Object.freeze({ acceptRisk, applySecurityReview, approve, get, list, read, reject, remove, verifyAndQuarantine });
 }
 
 export {

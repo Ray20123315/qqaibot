@@ -1,5 +1,8 @@
 import { createPluginSecurityCenter } from "../../plugins/security-center.js";
 import { pluginTrustLabelZh, releaseChannelLabelZh } from "../../plugins/governance.js";
+import { createPluginAuthorTrustStore } from "../../plugins/trust.js";
+import { createPluginQuarantine } from "../../plugins/quarantine.js";
+import { runHourlyPluginSecurityReview } from "../../plugins/security-review.js";
 
 function createSecurityStorageAdapter(env) {
   if (!env?.DB || typeof env.DB.prepare !== "function") throw new Error("PLUGIN_SECURITY_STORAGE_UNAVAILABLE");
@@ -75,8 +78,26 @@ async function runV3PluginSecurityScheduled(env, scheduledTime = Date.now(), ove
   const date = new Date(at);
   if (date.getUTCMinutes() !== 0) return Object.freeze({ ok: true, skipped: true, reason: "NOT_HOURLY_BOUNDARY", at });
   if (!env?.DB && !overrides.storageAdapter && !overrides.securityCenter) return Object.freeze({ ok: false, skipped: true, reason: "PLUGIN_SECURITY_STORAGE_UNAVAILABLE", at });
-  const result = await securityCenterForEnv(env, overrides).touchHourlyReview(at);
-  return Object.freeze({ ok: true, skipped: false, ...result });
+
+  const storageAdapter = overrides.storageAdapter || createSecurityStorageAdapter(env);
+  const securityCenter = overrides.securityCenter || createPluginSecurityCenter(storageAdapter, { nowProvider: overrides.nowProvider || (() => at) });
+  const trustStore = overrides.trustStore || createPluginAuthorTrustStore(storageAdapter, { nowProvider: overrides.nowProvider || (() => at) });
+  const quarantine = overrides.quarantine || createPluginQuarantine(storageAdapter, {
+    trustStore,
+    securityCenter,
+    fetchArtifact: overrides.fetchArtifact || (async () => { throw new Error("PLUGIN_SECURITY_DIRECT_FETCH_ONLY"); }),
+    nowProvider: overrides.nowProvider || (() => at)
+  });
+
+  const result = await runHourlyPluginSecurityReview(env, {
+    quarantine,
+    trustStore,
+    securityCenter,
+    limit: overrides.limit,
+    fetchArtifact: overrides.fetchSecurityArtifact,
+    gptReview: overrides.gptReview
+  });
+  return Object.freeze({ ok: true, skipped: false, at, ...result });
 }
 
 export {

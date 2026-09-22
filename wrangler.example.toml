@@ -78,6 +78,13 @@ AUTO_CHECKIN_ENABLED = "true"
 AUTO_CHECKIN_RETRY_INTERVAL_MS = "1000"
 AUTO_CHECKIN_CONCURRENCY = "12"
 
+# V3 Plugin Security Center. Deterministic hourly rechecks are always primary.
+# Optional GPT-assisted review requires an OpenAI model name here and OPENAI_API_KEY
+# stored separately as a Worker secret: `wrangler secret put OPENAI_API_KEY`.
+PLUGIN_SECURITY_GPT_ENABLED = "false"
+PLUGIN_SECURITY_GPT_MODEL = ""
+PLUGIN_SECURITY_GPT_WEB_SEARCH_ENABLED = "true"
+
 # Model names and paid-model budget.
 DEEPSEEK_FLASH_MODEL = "deepseek-v4-flash"
 DEEPSEEK_PRO_MODEL = "deepseek-v4-pro"
