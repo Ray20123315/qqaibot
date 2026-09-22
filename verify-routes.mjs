@@ -6,16 +6,23 @@ function assert(condition, message) {
 }
 
 const exact = new Map([
-  ['GET https://qqai.ray2025.com/live', [200, '442975303baab9496a23faa71f30d466eb3b8b00ab538a0bb6586eef598027c5']],
-  ['GET https://qqai.ray2025.com/api/public/nebula', [200, '2c0c8c47f8c1bf6065a949b54eb3e92d67a6b3e02421a763c24c955332ae117a']],
-  ['GET https://qqai.ray2025.com/api/appeal/legacy', [410, '742af5935f732e949d512573364e3672fcdc6a01ee0c266510b7582bcf46304e']],
+  ['GET https://aibot.ray2025.com/api/public/nebula', [200, '2c0c8c47f8c1bf6065a949b54eb3e92d67a6b3e02421a763c24c955332ae117a']],
+  ['GET https://aibot.ray2025.com/api/appeal/legacy', [410, '742af5935f732e949d512573364e3672fcdc6a01ee0c266510b7582bcf46304e']],
 ]);
 const ctx = { waitUntil() {}, passThroughOnException() {} };
 
 async function get(path) {
-  const response = await worker.fetch(new Request('https://qqai.ray2025.com' + path, { method: 'GET' }), {}, ctx);
+  const response = await worker.fetch(new Request('https://aibot.ray2025.com' + path, { method: 'GET' }), {}, ctx);
   return { response, body: await response.text() };
 }
+
+let legacy = await worker.fetch(new Request('https://qqai.ray2025.com/login', { method: 'GET' }), {}, ctx);
+assert(legacy.status === 308, 'legacy HTTP host must redirect to canonical domain');
+assert(String(legacy.headers.get('location') || '').startsWith('https://aibot.ray2025.com/login'), 'legacy redirect target must use aibot.ray2025.com');
+
+let live = await get('/live');
+assert(live.response.status === 200, 'GET /live: expected 200 on canonical host');
+assert(live.body.length > 1000, 'GET /live: expected rendered live page');
 
 let result = await get('/');
 assert(result.response.status === 200, 'GET /: expected 200');
@@ -88,4 +95,4 @@ for (const [key, [expectedStatus, expectedHash]] of exact) {
   assert(hash === expectedHash, `${key}: response body changed (${hash})`);
 }
 
-console.log(`verify-routes: ok (${exact.size + 6} routes)`);
+console.log(`verify-routes: ok (${exact.size + 8} routes)`);
