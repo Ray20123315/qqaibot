@@ -799,14 +799,44 @@ async function readJson(env, key, fallback) {
 
 
 
+async function resolvePortalSessionAuthority(env, qq, groupId = "") {
+  const normalizedQq = String(qq || "");
+  const normalizedGroupId = String(groupId || "");
+  const developer = isDeveloperId(env, normalizedQq);
+  if (developer) {
+    return {
+      role: "developer",
+      permissions: {
+        developer: true,
+        nativeAdmin: false,
+        aiAdmin: true,
+        groupOps: true,
+        scheduleReviewer: true,
+        appealReviewer: true
+      }
+    };
+  }
+  const role = normalizedGroupId ? await resolvePortalRole(env, normalizedQq, normalizedGroupId) : "member";
+  const permissions = normalizedGroupId
+    ? await getEffectivePermissions(env, normalizedGroupId, normalizedQq, role, false)
+    : {
+        developer: false,
+        nativeAdmin: false,
+        aiAdmin: false,
+        groupOps: false,
+        scheduleReviewer: false,
+        appealReviewer: false
+      };
+  return { role, permissions };
+}
+
 async function createPortalSession(env, data) {
   const token = crypto.randomUUID() + crypto.randomUUID();
   const qq = String(data.qq || "");
   const groupId = String(data.groupId || "");
-  const role = groupId ? await resolvePortalRole(env, qq, groupId) : (isDeveloperId(env, qq) ? "developer" : "member");
-  const permissions = groupId ? await getEffectivePermissions(env, groupId, qq, role, role === "developer") : {
-    developer: isDeveloperId(env, qq), nativeAdmin: false, aiAdmin: isDeveloperId(env, qq), groupOps: isDeveloperId(env, qq), scheduleReviewer: isDeveloperId(env, qq), appealReviewer: isDeveloperId(env, qq)
-  };
+  const authority = await resolvePortalSessionAuthority(env, qq, groupId);
+  const role = authority.role;
+  const permissions = authority.permissions;
   const now = Date.now();
   const persistent = data.persistent !== false;
   const idleTtlMs = persistent ? DEFAULTS.portalSessionTtlMs : DEFAULTS.portalSessionTemporaryTtlMs;
@@ -858,6 +888,11 @@ async function getPortalSession(env, token, { touch = true } = {}) {
     session.idleTtlMs = idleTtlMs;
     session.absoluteTtlMs = absoluteTtlMs;
     session.absoluteExpiresAt = absoluteExpiresAt;
+
+    const authority = await resolvePortalSessionAuthority(env, session.qq, session.groupId);
+    session.role = authority.role;
+    session.permissions = authority.permissions;
+
     if (touch) {
       session.lastActivityAt = now;
       session.expiresAt = Math.min(now + idleTtlMs, absoluteExpiresAt);
@@ -1246,4 +1281,4 @@ async function writePortalSettingValue(env, definition, groupId, targetQq, value
   }
 }
 
-export { BASE32_ALPHABET, PORTAL_PASSWORD_PBKDF2_ITERATIONS, PORTAL_SETTING_DEFINITIONS, PORTAL_SYSTEM_ADMIN_USERNAME, PORTAL_USERNAME_RESERVED, authDbDelStrict, authDbGetStrict, authDbPutIfAbsentStrict, authDbPutStrict, authDbRetry, authStorageError, base32Decode, base32Encode, base64UrlToBytes, buildGroupReplyMessage, bytesToBase64Url, bytesToHex, clearPasswordLoginGuard, commandChangesWebSettings, classifyPortalAuthFailure, constantTimeEqual, createPortalAccountBinding, createPortalAdminAccountBinding, createPortalPasswordRecord, createPortalSession, decryptPortalAuthSecret, deleteMemoryVector, derivePortalPassword, encryptPortalAuthSecret, extractGroupId, generateBackupCodes, generateSixDigitCode, generateTotpCode, getOneBotHub, getPortalSession, getPublicNebulaSeed, getUserQuota, hasAdminRole, hashBackupCode, isMemoryBanned, isValidPortalPasswordRecord, jsonResponse, markGroupMemberLeft, migratePortalMemories, normalizeBackupCode, normalizePortalUsername, notePasswordLoginFailure, oneBotHttpActionUrl, portalAuthEncryptionKey, portalAuthEncryptionMaterial, portalRoleRank, portalAccountIdentityKey, portalAccountUsernameKey, portalSessionCookie, randomBytes, readCookie, readJson, readPasswordLoginGuard, readPortalAccountByQq, readPortalAccountByUsername, readPortalAuthJson, readPortalSettingValue, resolvePortalRole, searchPortalVectors, sendOneBotAction, sendOneBotHttpAction, sendPortalVerificationMessage, sha256Hex, simplifyJsonValue, upsertGroupMember, upsertMemoryVector, validatePortalLoginUsername, validatePortalPassword, validatePortalUsername, verifyPortalPassword, verifyPortalVerificationCode, verifyTotpCode, writeMemoryAudit, writePortalSettingValue, writeSystemError };
+export { BASE32_ALPHABET, PORTAL_PASSWORD_PBKDF2_ITERATIONS, PORTAL_SETTING_DEFINITIONS, PORTAL_SYSTEM_ADMIN_USERNAME, PORTAL_USERNAME_RESERVED, authDbDelStrict, authDbGetStrict, authDbPutIfAbsentStrict, authDbPutStrict, authDbRetry, authStorageError, base32Decode, base32Encode, base64UrlToBytes, buildGroupReplyMessage, bytesToBase64Url, bytesToHex, clearPasswordLoginGuard, commandChangesWebSettings, classifyPortalAuthFailure, constantTimeEqual, createPortalAccountBinding, createPortalAdminAccountBinding, createPortalPasswordRecord, createPortalSession, decryptPortalAuthSecret, deleteMemoryVector, derivePortalPassword, encryptPortalAuthSecret, extractGroupId, generateBackupCodes, generateSixDigitCode, generateTotpCode, getOneBotHub, getPortalSession, getPublicNebulaSeed, getUserQuota, hasAdminRole, hashBackupCode, isMemoryBanned, isValidPortalPasswordRecord, jsonResponse, markGroupMemberLeft, migratePortalMemories, normalizeBackupCode, normalizePortalUsername, notePasswordLoginFailure, oneBotHttpActionUrl, portalAuthEncryptionKey, portalAuthEncryptionMaterial, portalRoleRank, portalAccountIdentityKey, portalAccountUsernameKey, portalSessionCookie, randomBytes, readCookie, readJson, readPasswordLoginGuard, readPortalAccountByQq, readPortalAccountByUsername, readPortalAuthJson, readPortalSettingValue, resolvePortalRole, resolvePortalSessionAuthority, searchPortalVectors, sendOneBotAction, sendOneBotHttpAction, sendPortalVerificationMessage, sha256Hex, simplifyJsonValue, upsertGroupMember, upsertMemoryVector, validatePortalLoginUsername, validatePortalPassword, validatePortalUsername, verifyPortalPassword, verifyPortalVerificationCode, verifyTotpCode, writeMemoryAudit, writePortalSettingValue, writeSystemError };
