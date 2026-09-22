@@ -19,7 +19,7 @@ import { classifyCollaborationNaturalIntent, classifyNaturalLanguageCommandInten
 import { processPlatformJobs } from "./src/platform/runtime.js";
 import { pluginExecutionStatus } from "./src/plugins/runtime.js";
 import { authDbDelStrict, authDbGetStrict, authDbPutStrict, clearPasswordLoginGuard, commandChangesWebSettings, constantTimeEqual, createPortalAccountBinding, createPortalPasswordRecord, createPortalSession, decryptPortalAuthSecret, deleteMemoryVector, generateSixDigitCode, getOneBotHub, getPortalSession, getPublicNebulaSeed, hashBackupCode, isMemoryBanned, isValidPortalPasswordRecord, jsonResponse, markGroupMemberLeft, notePasswordLoginFailure, portalSessionCookie, readCookie, readJson, readPasswordLoginGuard, readPortalAccountByUsername, readPortalAuthJson, sendOneBotAction, sendOneBotHttpAction, sendPortalVerificationMessage, upsertGroupMember, upsertMemoryVector, validatePortalPassword, validatePortalUsername, verifyPortalPassword, verifyPortalVerificationCode, verifyTotpCode, writeMemoryAudit, writeSystemError } from "./src/portal/auth.js";
-import { getLiveHtmlPage, getPortalHomePage, handleGeminiLiveUpgrade, handlePortalApi } from "./src/portal/runtime.js";
+import { getLiveHtmlPage, getPortalHomePage, getPortalLoginPage, getPortalRegisterPage, getPublicLandingPage, handleGeminiLiveUpgrade, handlePortalApi } from "./src/portal/runtime.js";
 import { injectPortalLayoutClient } from "./src/portal/layout.js";
 import { injectPortalMembersClient } from "./src/portal/members.js";
 import { applySocialOutputPolicy, buildSocialDecision, buildSocialPromptBlock, capturePersonaContinuity, oneBotBotMentionCount, oneBotEventHasMedia, oneBotEventIsBareMention, oneBotEventIsPunctuationOnly, observeSocialStyle, shouldSendSocialBufferNotice, socialInputDelayMs, waitForSocialTyping } from "./src/social/runtime.js";
@@ -164,9 +164,32 @@ const QQAIWorker = {
     }
 
     // ==========================================
-    // 🌌 公共首頁與記憶矩陣中心
+    // 🌐 公開首頁、登入、首次啟用與受保護 Portal
     // ==========================================
-    if (request.method === 'GET' && ['/', '/portal', '/matrix'].includes(url.pathname)) {
+    if (request.method === 'GET' && url.pathname === '/') {
+      return new Response(getPublicLandingPage(), {
+        headers: { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store" }
+      });
+    }
+
+    if (request.method === 'GET' && ['/login', '/register'].includes(url.pathname)) {
+      const token = readCookie(request, 'qqai_session');
+      const session = await getPortalSession(env, token, { touch: false }).catch(() => null);
+      if (session) return Response.redirect(`${url.origin}/portal`, 302);
+      const html = url.pathname === '/login' ? getPortalLoginPage() : getPortalRegisterPage();
+      return new Response(html, {
+        headers: { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store" }
+      });
+    }
+
+    if (request.method === 'GET' && url.pathname === '/matrix') {
+      return Response.redirect(`${url.origin}/portal#memory`, 302);
+    }
+
+    if (request.method === 'GET' && url.pathname === '/portal') {
+      const token = readCookie(request, 'qqai_session');
+      const session = await getPortalSession(env, token, { touch: false }).catch(() => null);
+      if (!session) return Response.redirect(`${url.origin}/login?next=${encodeURIComponent('/portal')}`, 302);
       const portalHtml = injectPortalLayoutClient(injectWerewolfPortalClient(injectPortalMembersClient(injectDeploymentPortalClient(toSimplifiedChinese(getPortalHomePage(url.host))))));
       return new Response(portalHtml, {
         headers: { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store" }
@@ -174,7 +197,7 @@ const QQAIWorker = {
     }
 
     if (request.method === 'GET' && url.pathname === '/appeal') {
-      return Response.redirect(`${url.origin}/#appeals`, 302);
+      return Response.redirect(`${url.origin}/portal#appeals`, 302);
     }
 
     if (request.method === 'GET' && /^\/join\/\d{5,}$/.test(url.pathname)) {
