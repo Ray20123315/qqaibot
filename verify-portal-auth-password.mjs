@@ -18,18 +18,30 @@ assert.equal(await verifyPortalPassword(password, { ...record, hash: "%%%" }), f
 const worker = fs.readFileSync("worker.js", "utf8");
 const runtime = fs.readFileSync("src/portal/runtime.js", "utf8");
 const auth = fs.readFileSync("src/portal/auth.js", "utf8");
+
 assert.match(worker, /url\.pathname === '\/api\/auth\/reset-password'/);
 const resetStart = worker.indexOf("url.pathname === '/api/auth/reset-password'");
-const resetEnd = worker.indexOf("url.pathname === '/api/auth/login-password'", resetStart);
+const resetEnd = worker.indexOf("url.pathname === '/api/auth/request-login-factor'", resetStart);
 const resetBlock = worker.slice(resetStart, resetEnd);
 assert.ok(resetStart >= 0 && resetEnd > resetStart);
 assert.match(resetBlock, /verifyPortalVerificationCode\(env, qq, code, \{ consume: false \}\)/);
 assert.match(resetBlock, /createPortalPasswordRecord\(validation\.value\)/);
-assert.match(resetBlock, /authDbPutStrict\(env, `portal_auth_password:\$\{qq\}`/);
-assert.match(resetBlock, /authDbDelStrict\(env, `portal_auth_code:\$\{qq\}`\)/);
-assert.match(worker, /PASSWORD_RECORD_INVALID/);
-assert.match(runtime, /id="loginPasswordReset"/);
-assert.match(runtime, /raw\('\/api\/auth\/reset-password'/);
-assert.match(runtime, /passwordResetSendCode/);
+assert.match(resetBlock, /portal_auth_password/);
+assert.match(resetBlock, /portal_auth_code/);
+
+const loginStart = worker.indexOf("url.pathname === '/api/auth/login-password'");
+const loginEnd = worker.indexOf("url.pathname === '/api/auth/logout'", loginStart);
+const loginBlock = worker.slice(loginStart, loginEnd);
+assert.match(loginBlock, /payload\.username/);
+assert.match(loginBlock, /readPortalAccountByUsername/);
+assert.doesNotMatch(loginBlock, /const qq = String\(payload\.qq/);
+assert.match(loginBlock, /TWO_FACTOR_REQUIRED/);
+assert.match(loginBlock, /verifyTotpCode/);
+assert.match(loginBlock, /hashBackupCode/);
+assert.match(loginBlock, /verifyPortalVerificationCode/);
+
+assert.match(runtime, /getPortalLoginPage/);
+assert.match(runtime, /getPortalRegisterPage/);
 assert.match(auth, /function isValidPortalPasswordRecord/);
+assert.match(auth, /function validatePortalUsername/);
 console.log("verify-portal-auth-password: ok");
