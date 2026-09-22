@@ -34,6 +34,8 @@ worker.js
 
 Wrangler 會把所有模組打包成同一個 Worker，不需要建立第二個 Worker。
 
+完整逐項變數與 binding 對照見 **[Environment / Binding Reference](docs/ENVIRONMENT.md)**。該文件以目前 source 實際讀取為準，並另外標示相容/預留但尚未生效的名稱。
+
 ## 五層設定模型
 
 設定依用途分成五層，不應全部塞進同一頁或同一檔案。
@@ -121,6 +123,8 @@ npx wrangler secret put GEMINI_API_KEYS
 npx wrangler secret put ONEBOT_ACCESS_TOKEN
 npx wrangler secret put PORTAL_AUTH_SECRET
 npx wrangler secret put TOTP_ENCRYPTION_KEY
+# 若要鎖定開發者第一次啟用的初始密碼：
+npx wrangler secret put PORTAL_DEVELOPER_INITIAL_PASSWORD
 ```
 
 ### 5. 驗證與部署
@@ -156,6 +160,7 @@ Cron 預設每分鐘執行，用於排程、自動化、暫存清理、主動發
 | `DEVELOPER_IDS` | 逗號、分號或換行分隔 QQ ID；預設空 | 開發者／Root QQ 清單。建議使用此欄位，可設定多人。 |
 | `DEVELOPER_ID` | 單一 QQ；預設空 | 舊版相容欄位，只有一位開發者時仍可用。 |
 | `ROOT_QQ_IDS` | QQ 清單；預設空 | 額外 Root 清單，相容部署使用；會與 `DEVELOPER_IDS` 合併去重。 |
+| `PORTAL_DEVELOPER_USERNAME` | 4–32 字元帳號 | 可選；鎖定開發者第一次 QQID 驗證啟用時建立的 username。 |
 | `PUBLIC_BASE_URL` | `https://bot.example.com`；預設使用請求來源 | `!help`、Portal 與 Live 對外連結的基底網址，不加結尾 `/`。 |
 | `BOT_DISPLAY_NAME` | `QQAI` | 對外顯示名稱，供可支援的 UI／訊息使用。 |
 
@@ -232,7 +237,8 @@ Secrets 不可放在 `[vars]`、README 範例值、Portal 回應、Git log 或�
 | `ONEBOT_HTTP_URL` | 可選 OneBot HTTP 備援網址。若含憑證資訊仍應視為 Secret。 |
 | `ONEBOT_HTTP_ACCESS_TOKEN` | HTTP 備援 Token。 |
 | `PORTAL_AUTH_SECRET` | Portal 敏感資料與登入相關加密。 |
-| `TOTP_ENCRYPTION_KEY` | TOTP 種子加密。 |
+| `TOTP_ENCRYPTION_KEY` | TOTP 種子優先加密 key；建議與 Portal/OneBot key 分開。 |
+| `PORTAL_DEVELOPER_INITIAL_PASSWORD` | 可選；開發者第一次 QQID 驗證啟用時必須輸入的初始密碼，之後只使用 D1 PBKDF2 hash。 |
 | `CLOUDFLARE_BUILDS_API_TOKEN` | 可選，讀取 Cloudflare Build 詳細日誌。 |
 
 列出 Secrets：

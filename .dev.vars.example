@@ -1,25 +1,57 @@
 # Copy this file to .dev.vars for local development only.
 # Never commit .dev.vars or real credentials.
+# Production secrets should be set with: npx wrangler secret put NAME
 
-# At least one Google key is required for AI chat.
+# ── Developer first activation ───────────────────────────────────────────────
+# Public username is normally set in wrangler.toml [vars] as PORTAL_DEVELOPER_USERNAME.
+# This password is ONLY checked after the configured developer QQID passes its six-digit
+# first-activation verification. After activation, the PBKDF2 hash stored in D1 is authoritative.
+PORTAL_DEVELOPER_INITIAL_PASSWORD=replace_with_strong_initial_developer_password
+
+# ── Google / Gemini / Gemma key pools ───────────────────────────────────────
+# At least one general Google key is required for the normal Gemini path.
 GEMINI_API_KEYS=replace_with_google_api_key
+VECTORIZE_GEMINI_KEYS=
 
-# Optional dedicated key pools. Comma-separate multiple keys.
+# Optional dedicated pools. Comma-separate multiple keys.
 GEMINI_CHAT_API_KEYS=
+GEMINI_DECISION_API_KEYS=
 GEMMA_CHAT_API_KEYS=
 GEMMA_DECISION_API_KEYS=
 GEMINI_SEARCH_API_KEYS=
 GEMINI_VISION_API_KEYS=
-DEEPSEEK_API_KEYS=
 
-# OneBot / NapCat authentication.
+# Legacy/singular aliases still accepted by current source.
+GEMINI_SEARCH_API_KEY=
+GEMINI_VISION_API_KEY=
+IMAGE_CHECK_API_KEYS=
+IMAGE_CHECK_API_KEY=
+
+# ── DeepSeek ─────────────────────────────────────────────────────────────────
+DEEPSEEK_API_KEYS=
+# Legacy singular alias.
+DEEPSEEK_API_KEY=
+
+# ── OneBot / NapCat ─────────────────────────────────────────────────────────
+# WebSocket ingress/auth token.
 ONEBOT_ACCESS_TOKEN=replace_with_random_onebot_token
+# Legacy aliases accepted by Portal encryption/HTTP fallback.
+ONEBOT_TOKEN=
+NAPCAT_ACCESS_TOKEN=
+
+# Optional HTTP action fallback endpoint. Use ONEBOT_HTTP_ACTION_URL when the URL is
+# already the API action base; ONEBOT_HTTP_URL / NAPCAT_HTTP_URL are accepted aliases.
+ONEBOT_HTTP_ACTION_URL=
 ONEBOT_HTTP_URL=
+NAPCAT_HTTP_URL=
+# HTTP-specific token wins over the generic OneBot/NapCat token.
 ONEBOT_HTTP_ACCESS_TOKEN=
 
-# Portal authentication and encryption. Generate long random values.
+# ── Portal security ──────────────────────────────────────────────────────────
+# General Portal sensitive-data encryption fallback.
 PORTAL_AUTH_SECRET=replace_with_at_least_32_random_bytes
+# Preferred key for TOTP seed encryption.
 TOTP_ENCRYPTION_KEY=replace_with_at_least_32_random_bytes
 
-# Optional Cloudflare Builds detail lookup.
+# ── Optional Cloudflare deployment detail lookup ─────────────────────────────
 CLOUDFLARE_BUILDS_API_TOKEN=
