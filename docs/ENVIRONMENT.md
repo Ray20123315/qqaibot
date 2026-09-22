@@ -29,7 +29,7 @@
 | `ROOT_QQ_IDS` | public var | 可選 | 額外 Root QQID，與 `DEVELOPER_IDS` 合併。 |
 | `DEVELOPER_ID` | public var | legacy | 單一開發者 QQID 相容欄位。 |
 | 開發者 Portal username | 固定系統帳號 | 必要 | 固定為保留名稱 `admin`；一般使用者不可註冊此名稱。 |
-| 開發者 Portal password | Web / D1 PBKDF2 | 首次啟用時設定 | 第一次在 `/register` 直接設定 admin 密碼；沒有預設密碼，只保存 PBKDF2 salt/hash。 |
+| 開發者 Portal password | Web / D1 PBKDF2 | 首次啟用時設定 | 第一次在 `/register` 直接設定 admin 密碼；沒有預設密碼，只保存 PBKDF2 salt/hash。Workers Web Crypto 相容參數固定為 PBKDF2-SHA-256 / 100000 iterations。 |
 
 開發者身份仍由 V2 原本的 public var 判定：
 
