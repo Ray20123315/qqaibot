@@ -5,6 +5,7 @@ import {
   classifyPortalAuthFailure,
   createPortalAccountBinding,
   createPortalAdminAccountBinding,
+  getPortalSession,
   readPortalAccountByQq,
   readPortalAccountByUsername,
   validatePortalLoginUsername,
