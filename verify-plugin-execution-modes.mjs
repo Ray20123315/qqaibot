@@ -8,8 +8,15 @@ import {
   executeSandboxedExternalPlugin,
   executeTrustedBundledPlugin,
   pluginExecutionStatus,
+  portalPluginCatalog,
   validatePluginManifest,
 } from "./src/plugins/runtime.js";
+
+assert.ok(listBundledPlugins().length >= 8, "non-core feature families must be registered as bundled plugins");
+const catalog = portalPluginCatalog();
+assert.ok(catalog.length >= 8);
+assert.ok(catalog.every(item => item.portal?.views?.length), "Portal plugin catalog must expose owned views");
+assert.ok(catalog.every(item => item.i18n?.["zh-TW"] && item.i18n?.["zh-CN"] && item.i18n?.en), "every Portal plugin requires zh-TW/zh-CN/en metadata");
 
 for (const plugin of listBundledPlugins()) {
   const checked = validatePluginManifest(plugin?.manifest, { expectedMode: PLUGIN_EXECUTION_MODES.TRUSTED_BUNDLED });
