@@ -24,6 +24,8 @@ assert.match(source,/minFrame=mobile\?90:66/,"particle renderer must use a low-f
 assert.match(source,/IntersectionObserver/);
 assert.match(source,/visibilitychange/);
 assert.match(source,/RAY_REFERENCE_V7_START/,"reference-driven visual layer missing");
+assert.match(source,/RAY_MINIMAL_V9_START/,"minimal visual layer missing");
+assert.doesNotMatch(source,/enhanceSelects\(document\);mountParticlesAll\(\);/,"minimal UI must not mount decorative particles automatically");
 assert.match(source,/var host=q\(\'.ray-hero-core\'\)\|\|q\(\'.auth-visual\'\);/,"dashboard must not mount continuous particles");
 const broadBackdrop = (source.match(/backdrop-filter/g)||[]).length;
 assert.ok(broadBackdrop <= 0, "v6 must avoid expensive backdrop-filter surfaces");
