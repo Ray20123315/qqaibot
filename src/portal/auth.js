@@ -1254,6 +1254,28 @@ async function sha256Hex(value) {
 
 
 
+async function checkPortalAuthRateLimit(env, request, { scope, principal } = {}) {
+  const limiter = env?.MY_RATE_LIMITER;
+  if (!limiter || typeof limiter.limit !== "function") return { ok: false, reason: "unavailable" };
+  const normalizedScope = String(scope || "auth").replace(/[^a-z0-9_-]/gi, "").slice(0, 10) || "auth";
+  const identity = String(principal || "anonymous").normalize("NFKC").trim().toLowerCase() || "anonymous";
+  const ip = String(request?.headers?.get("CF-Connecting-IP") || "").trim();
+  const subjects = [["user", identity]];
+  if (ip) subjects.push(["ip", ip]);
+  try {
+    for (const [kind, value] of subjects) {
+      const digest = await sha256Hex(`${normalizedScope}:${kind}:${value}`);
+      const result = await limiter.limit({ key: `pa:${normalizedScope}:${kind}:${digest.slice(0, 40)}` });
+      if (result?.success !== true) return { ok: false, reason: "limited" };
+    }
+  } catch {
+    return { ok: false, reason: "unavailable" };
+  }
+  return { ok: true, reason: "allowed" };
+}
+
+
+
 async function migratePortalMemories(env, key, rawList, ownerFallback) {
   const input = Array.isArray(rawList) ? rawList : [];
   const normalized = [];
@@ -1437,4 +1459,4 @@ async function writePortalSettingValue(env, definition, groupId, targetQq, value
   }
 }
 
-export { BASE32_ALPHABET, PORTAL_PASSWORD_PBKDF2_ITERATIONS, PORTAL_SETTING_DEFINITIONS, PORTAL_SYSTEM_ADMIN_USERNAME, PORTAL_USERNAME_RESERVED, authDbDelStrict, authDbGetStrict, authDbPutIfAbsentStrict, authDbPutStrict, authDbRetry, authStorageError, base32Decode, base32Encode, base64UrlToBytes, buildGroupReplyMessage, bytesToBase64Url, bytesToHex, clearPasswordLoginGuard, commandChangesWebSettings, classifyPortalAuthFailure, constantTimeEqual, createPortalAccountBinding, createPortalAdminAccountBinding, createPortalPasswordRecord, createPortalSession, decryptPortalAuthSecret, deleteMemoryVector, derivePortalPassword, encryptPortalAuthSecret, extractGroupId, generateBackupCodes, generateSixDigitCode, generateTotpCode, getOneBotHub, getPortalSession, getPublicNebulaSeed, getUserQuota, hasAdminRole, hashBackupCode, isMemoryBanned, isPortalSystemAdminQq, isValidPortalPasswordRecord, jsonResponse, markGroupMemberLeft, migratePortalMemories, normalizeBackupCode, normalizePortalUsername, notePasswordLoginFailure, oneBotHttpActionUrl, portalAdminCredentialConfig, portalAuthEncryptionKey, portalAuthEncryptionMaterial, portalEnvironmentWithManagedDeveloperIds, portalRoleRank, portalAccountIdentityKey, portalAccountUsernameKey, portalSessionCookie, randomBytes, readCookie, readJson, readPasswordLoginGuard, readPortalAccountByQq, readPortalAccountByUsername, readPortalAuthJson, readPortalManagedDeveloperIds, readPortalSettingValue, resolvePortalPasswordLogin, resolvePortalRole, resolvePortalSessionAuthority, searchPortalVectors, sendOneBotAction, sendOneBotHttpAction, sendPortalVerificationMessage, sha256Hex, simplifyJsonValue, upsertGroupMember, upsertMemoryVector, validatePortalLoginUsername, validatePortalPassword, validatePortalUsername, verifyPortalPassword, verifyPortalVerificationCode, verifyTotpCode, writeMemoryAudit, writePortalManagedDeveloperIds, writePortalSettingValue, writeSystemError };
+export { BASE32_ALPHABET, PORTAL_PASSWORD_PBKDF2_ITERATIONS, PORTAL_SETTING_DEFINITIONS, PORTAL_SYSTEM_ADMIN_USERNAME, PORTAL_USERNAME_RESERVED, authDbDelStrict, authDbGetStrict, authDbPutIfAbsentStrict, authDbPutStrict, authDbRetry, authStorageError, base32Decode, base32Encode, base64UrlToBytes, buildGroupReplyMessage, bytesToBase64Url, bytesToHex, checkPortalAuthRateLimit, clearPasswordLoginGuard, commandChangesWebSettings, classifyPortalAuthFailure, constantTimeEqual, createPortalAccountBinding, createPortalAdminAccountBinding, createPortalPasswordRecord, createPortalSession, decryptPortalAuthSecret, deleteMemoryVector, derivePortalPassword, encryptPortalAuthSecret, extractGroupId, generateBackupCodes, generateSixDigitCode, generateTotpCode, getOneBotHub, getPortalSession, getPublicNebulaSeed, getUserQuota, hasAdminRole, hashBackupCode, isMemoryBanned, isPortalSystemAdminQq, isValidPortalPasswordRecord, jsonResponse, markGroupMemberLeft, migratePortalMemories, normalizeBackupCode, normalizePortalUsername, notePasswordLoginFailure, oneBotHttpActionUrl, portalAdminCredentialConfig, portalAuthEncryptionKey, portalAuthEncryptionMaterial, portalEnvironmentWithManagedDeveloperIds, portalRoleRank, portalAccountIdentityKey, portalAccountUsernameKey, portalSessionCookie, randomBytes, readCookie, readJson, readPasswordLoginGuard, readPortalAccountByQq, readPortalAccountByUsername, readPortalAuthJson, readPortalManagedDeveloperIds, readPortalSettingValue, resolvePortalPasswordLogin, resolvePortalRole, resolvePortalSessionAuthority, searchPortalVectors, sendOneBotAction, sendOneBotHttpAction, sendPortalVerificationMessage, sha256Hex, simplifyJsonValue, upsertGroupMember, upsertMemoryVector, validatePortalLoginUsername, validatePortalPassword, validatePortalUsername, verifyPortalPassword, verifyPortalVerificationCode, verifyTotpCode, writeMemoryAudit, writePortalManagedDeveloperIds, writePortalSettingValue, writeSystemError };

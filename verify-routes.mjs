@@ -21,8 +21,8 @@ assert(legacy.status === 308, 'legacy HTTP host must redirect to canonical domai
 assert(String(legacy.headers.get('location') || '').startsWith('https://aibot.ray2025.com/login'), 'legacy redirect target must use aibot.ray2025.com');
 
 let live = await get('/live');
-assert(live.response.status === 200, 'GET /live: expected 200 on canonical host');
-assert(live.body.length > 1000, 'GET /live: expected rendered live page');
+assert(live.response.status === 302, 'GET /live: unauthenticated visitors must be redirected to login');
+assert(String(live.response.headers.get('location') || '').includes('/login?next=%2Flive'), 'GET /live: login redirect must preserve the destination');
 
 let result = await get('/');
 assert(result.response.status === 200, 'GET /: expected 200');

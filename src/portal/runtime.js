@@ -17,7 +17,7 @@ import { appendRuleViolationRecord, createModerationProposal, defaultRuleCategor
 import { fetchConversationAttachmentResponse, getForwardMessageSnapshot, getTaipeiTimeContext, parseDurationSeconds, sendGroupRoleMentions, updatePortalConversationRecord } from "../onebot/messages.js";
 import { OPS_CAPABILITIES, OPS_RECORD_TYPES, opsActiveRuleRecords, opsActivityParticipants, opsActivitySummary, opsAnalytics, opsAnnounceActivity, opsCapabilityDef, opsCleanupThinking, opsConsumeQuota, opsCreateScheduleFromSpec, opsDeleteRecord, opsDependencyCheck, opsEffectiveCapability, opsExecuteHandoff, opsFuseState, opsGetRecord, opsGetSettings, opsImpactPreview, opsInviteActivityParticipant, opsJoinActivity, opsLeaveActivity, opsListRecords, opsMemberSummary, opsModelMetrics, opsParticipantsKey, opsPermissionKey, opsPollVotesKey, opsPreviewMessage, opsPublishAnnouncement, opsPurgeRemovedRecordTypes, opsRecordKey, opsRecordQualityFeedback, opsRemovedType, opsRequire, opsResetFuse, opsRestoreSnapshot, opsRetentionCleanup, opsRoleRank, opsRuleConflictCheck, opsRuleSandbox, opsSaveRecord, opsSaveSettings, opsSchedulePreview, opsSendDailyDigest, opsSendDraftNow, opsSnapshotConfig, opsTaipeiDateKey, opsTaskAction, opsTaskCenter, opsTypeDef, opsVersionKey, opsVotePoll, opsWelcomePreview } from "../operations/runtime.js";
 import { appendPlatformTrace, enqueuePlatformJob, listPlatformFeatures, listPlatformJobs, listPlatformTraces, platformFeatureById, setPlatformFeature } from "../platform/runtime.js";
-import { PORTAL_SETTING_DEFINITIONS, authDbDelStrict, authDbPutStrict, base32Encode, constantTimeEqual, createPortalPasswordRecord, decryptPortalAuthSecret, deleteMemoryVector, encryptPortalAuthSecret, extractGroupId, generateBackupCodes, generateSixDigitCode, getOneBotHub, getPortalSession, getUserQuota, hashBackupCode, isMemoryBanned, jsonResponse, migratePortalMemories, portalAdminCredentialConfig, portalAuthEncryptionMaterial, portalRoleRank, portalSessionCookie, randomBytes, readCookie, readJson, readPortalAuthJson, readPortalManagedDeveloperIds, readPortalSettingValue, resolvePortalRole, searchPortalVectors, sendOneBotAction, sendPortalVerificationMessage, sha256Hex, upsertMemoryVector, validatePortalPassword, verifyPortalPassword, verifyPortalVerificationCode, verifyTotpCode, writeMemoryAudit, writePortalManagedDeveloperIds, writePortalSettingValue } from "./auth.js";
+import { PORTAL_SETTING_DEFINITIONS, authDbDelStrict, authDbPutStrict, base32Encode, checkPortalAuthRateLimit, constantTimeEqual, createPortalPasswordRecord, decryptPortalAuthSecret, deleteMemoryVector, encryptPortalAuthSecret, extractGroupId, generateBackupCodes, generateSixDigitCode, getOneBotHub, getPortalSession, getUserQuota, hashBackupCode, isMemoryBanned, jsonResponse, migratePortalMemories, portalAdminCredentialConfig, portalAuthEncryptionMaterial, portalRoleRank, portalSessionCookie, randomBytes, readCookie, readJson, readPortalAuthJson, readPortalManagedDeveloperIds, readPortalSettingValue, resolvePortalRole, searchPortalVectors, sendOneBotAction, sendPortalVerificationMessage, sha256Hex, upsertMemoryVector, validatePortalPassword, verifyPortalPassword, verifyPortalVerificationCode, verifyTotpCode, writeMemoryAudit, writePortalManagedDeveloperIds, writePortalSettingValue } from "./auth.js";
 import { handlePortalMemberApi } from "./members.js";
 import { cancelSchedule, countActiveSchedulesForUser, createScheduleRecord, deleteScheduleRecord, extractScheduleMentionIds, listUserSchedules, parseManagementScheduleAction, parseScheduleRequest, reviewScheduleWithGemma, reviseScheduleRecord, sanitizeAppealForReviewer, scheduleSpecFromRecord, skipScheduleOnce, voteAppeal, voteSchedule } from "../scheduler/runtime.js";
 import { envFlag, getFeatureFlag, getPrivateAccessMode, isGroupWhitelisted, numericId, setFeatureFlag } from "../security/network.js";
@@ -721,6 +721,8 @@ async function handlePortalApi(request, env, url) {
     if (systemAdmin && portalAdminCredentialConfig(env).mode !== "legacy") {
       return jsonResponse({ ok: false, code: "ADMIN_PASSWORD_ENV_MANAGED", message: "管理員密碼由 PORTAL_ADMIN_PASSWORD Secret 管理，請在 Cloudflare 更新 Secret；此表單不會寫入或覆蓋管理員資料。" }, 409);
     }
+    const rateLimit = await checkPortalAuthRateLimit(env, request, { scope: "stepup", principal: session.qq });
+    if (!rateLimit.ok) return jsonResponse({ ok: false, code: rateLimit.reason === "limited" ? "AUTH_RATE_LIMITED" : "AUTH_RATE_LIMIT_UNAVAILABLE", message: rateLimit.reason === "limited" ? "安全驗證請求過於頻繁，請稍後再試。" : "安全驗證服務目前無法安全啟動，請稍後再試。" }, rateLimit.reason === "limited" ? 429 : 503);
     const newPassword = String(body.newPassword || "");
     const currentPassword = String(body.currentPassword || "");
     const verificationCode = String(body.verificationCode || "").replace(/\D/g, "");
@@ -744,6 +746,8 @@ async function handlePortalApi(request, env, url) {
   }
 
   if (request.method === "POST" && path === "/security/2fa/setup") {
+    const rateLimit = await checkPortalAuthRateLimit(env, request, { scope: "stepup", principal: session.qq });
+    if (!rateLimit.ok) return jsonResponse({ ok: false, code: rateLimit.reason === "limited" ? "AUTH_RATE_LIMITED" : "AUTH_RATE_LIMIT_UNAVAILABLE", message: rateLimit.reason === "limited" ? "安全驗證請求過於頻繁，請稍後再試。" : "安全驗證服務目前無法安全啟動，請稍後再試。" }, rateLimit.reason === "limited" ? 429 : 503);
     try {
       portalAuthEncryptionMaterial(env);
       const passwordRecord = await readPortalAuthJson(env, `portal_auth_password:${session.qq}`, null);
@@ -805,6 +809,8 @@ async function handlePortalApi(request, env, url) {
   }
 
   if (request.method === "POST" && path === "/security/2fa/disable") {
+    const rateLimit = await checkPortalAuthRateLimit(env, request, { scope: "stepup", principal: session.qq });
+    if (!rateLimit.ok) return jsonResponse({ ok: false, code: rateLimit.reason === "limited" ? "AUTH_RATE_LIMITED" : "AUTH_RATE_LIMIT_UNAVAILABLE", message: rateLimit.reason === "limited" ? "安全驗證請求過於頻繁，請稍後再試。" : "安全驗證服務目前無法安全啟動，請稍後再試。" }, rateLimit.reason === "limited" ? 429 : 503);
     try {
       const passwordRecord = await readPortalAuthJson(env, `portal_auth_password:${session.qq}`, null);
       const record = await readPortalAuthJson(env, `portal_auth_2fa:${session.qq}`, null);
@@ -2499,21 +2505,41 @@ async function handleGeminiLiveUpgrade(request, env) {
   const queue = [];
   let upstreamReady = false;
   let closed = false;
+  let transferredBytes = 0;
+  let maxDurationTimer = null;
+  const maxTransferredBytes = 20 * 1024 * 1024;
+  const maxDurationMs = 10 * 60 * 1000;
+  const messageBytes = data => {
+    if (typeof data === "string") return new TextEncoder().encode(data).byteLength;
+    if (data instanceof ArrayBuffer) return data.byteLength;
+    if (ArrayBuffer.isView(data)) return data.byteLength;
+    if (typeof Blob !== "undefined" && data instanceof Blob) return data.size;
+    return Infinity;
+  };
   const closeBoth = (code = 1000, reason = "closed") => {
     if (closed) return; closed = true;
+    if (maxDurationTimer !== null) clearTimeout(maxDurationTimer);
     try { if (server.readyState === WebSocket.OPEN) server.close(code, reason); } catch {}
     try { if (upstream.readyState === WebSocket.OPEN || upstream.readyState === WebSocket.CONNECTING) upstream.close(code, reason); } catch {}
   };
+  maxDurationTimer = setTimeout(() => closeBoth(1000, "session duration limit reached"), maxDurationMs);
   upstream.addEventListener("open", () => {
     upstreamReady = true;
     while (queue.length && upstream.readyState === WebSocket.OPEN) upstream.send(queue.shift());
   });
-  upstream.addEventListener("message", event => { if (server.readyState === WebSocket.OPEN) server.send(event.data); });
+  upstream.addEventListener("message", event => {
+    transferredBytes += messageBytes(event.data);
+    if (transferredBytes > maxTransferredBytes) return closeBoth(1009, "session data limit reached");
+    if (server.readyState === WebSocket.OPEN) server.send(event.data);
+  });
   upstream.addEventListener("error", () => { if (server.readyState === WebSocket.OPEN) server.send(JSON.stringify({ error: { message: "Gemini Live 上游连接错误" } })); });
   upstream.addEventListener("close", event => closeBoth(event.code || 1011, "Gemini Live closed"));
   server.addEventListener("message", event => {
     const data = event.data;
-    if (typeof data === "string" && data.length > 2_000_000) return closeBoth(1009, "message too large");
+    const size = messageBytes(data);
+    if (size > 2_000_000) return closeBoth(1009, "message too large");
+    transferredBytes += size;
+    if (transferredBytes > maxTransferredBytes) return closeBoth(1009, "session data limit reached");
     if (queue.length > 300) return closeBoth(1013, "queue overflow");
     if (upstreamReady && upstream.readyState === WebSocket.OPEN) upstream.send(data); else queue.push(data);
   });

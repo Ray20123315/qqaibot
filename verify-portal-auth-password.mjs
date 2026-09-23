@@ -32,6 +32,15 @@ assert.match(resetBlock, /verifyPortalVerificationCode\(env, qq, code, \{ consum
 assert.match(resetBlock, /createPortalPasswordRecord\(validation\.value\)/);
 assert.match(resetBlock, /portal_auth_password/);
 assert.match(resetBlock, /portal_auth_code/);
+assert.match(resetBlock, /checkPortalAuthRateLimit/);
+
+const factorStart = worker.indexOf("url.pathname === '/api/auth/request-login-factor'");
+const factorEnd = worker.indexOf("url.pathname === '/api/auth/login-password'", factorStart);
+const factorBlock = worker.slice(factorStart, factorEnd);
+assert.ok(factorStart >= 0 && factorEnd > factorStart);
+assert.match(factorBlock, /checkPortalAuthRateLimit/);
+assert.match(factorBlock, /readPasswordLoginGuard/);
+assert.match(factorBlock, /notePasswordLoginFailure/);
 
 const loginStart = worker.indexOf("url.pathname === '/api/auth/login-password'");
 const loginEnd = worker.indexOf("url.pathname === '/api/auth/logout'", loginStart);
@@ -44,6 +53,8 @@ assert.match(loginBlock, /TWO_FACTOR_REQUIRED/);
 assert.match(loginBlock, /verifyTotpCode/);
 assert.match(loginBlock, /hashBackupCode/);
 assert.match(loginBlock, /verifyPortalVerificationCode/);
+assert.match(loginBlock, /checkPortalAuthRateLimit/);
+assert.match(loginBlock, /readPasswordLoginGuard/);
 
 assert.match(runtime, /getPortalLoginPage/);
 assert.match(runtime, /getPortalRegisterPage/);

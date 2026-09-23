@@ -90,6 +90,7 @@ const failedResponse = await portalWorker.fetch(new Request("https://aibot.ray20
   body: JSON.stringify({ qq: "123456789" })
 }), {
   DB: failedDb,
+  MY_RATE_LIMITER: { async limit() { return { success: true }; } },
   ONEBOT_HUB: hubBinding({ rpc: () => Response.json({ ok: false, error: "NAPCAT_NOT_CONNECTED secret-token" }, { status: 503 }) }),
   DEVELOPER_IDS: "123456789"
 }, { waitUntil() {}, passThroughOnException() {} });

@@ -53,6 +53,8 @@ class FakeD1 {
   }
 }
 
+const testRateLimiter = { async limit() { return { success: true }; } };
+
 assert.equal(validatePortalUsername("RayAdmin").ok, true);
 assert.equal(validatePortalUsername("Ray.Admin_2026").normalized, "ray.admin_2026");
 assert.equal(validatePortalUsername("12345678").ok, false, "username must not be a numeric QQID lookalike");
@@ -204,6 +206,7 @@ const registerResponse = await portalWorker.fetch(new Request("https://aibot.ray
   })
 }), {
   DB: sessionFailDb,
+  MY_RATE_LIMITER: testRateLimiter,
   DEVELOPER_IDS: "123456789"
 }, { waitUntil() {}, passThroughOnException() {} });
 const registerPayload = await registerResponse.json();
@@ -227,6 +230,7 @@ const repeatRegistrationResponse = await portalWorker.fetch(new Request("https:/
   })
 }), {
   DB: sessionFailDb,
+  MY_RATE_LIMITER: testRateLimiter,
   DEVELOPER_IDS: "123456789"
 }, { waitUntil() {}, passThroughOnException() {} });
 assert.equal(repeatRegistrationResponse.status, 409, "admin re-registration must be rejected after bootstrap");
@@ -328,6 +332,7 @@ const configuredAdminResponse = await portalWorker.fetch(new Request("https://ai
   body: JSON.stringify({ username: "Ray-Worker-Admin", password: "WorkerAdminPassword-Only" })
 }), {
   DB: configuredAdminDb,
+  MY_RATE_LIMITER: testRateLimiter,
   PORTAL_ADMIN_USERNAME: "Ray-Worker-Admin",
   PORTAL_ADMIN_PASSWORD: "WorkerAdminPassword-Only"
 }, { waitUntil() {}, passThroughOnException() {} });
@@ -340,6 +345,7 @@ const firstEnvAdminDb = new FakeD1();
 const firstEnvAdminPassword = "FirstDeploymentAdminPassword2026";
 const firstEnvAdminConfig = {
   DB: firstEnvAdminDb,
+  MY_RATE_LIMITER: testRateLimiter,
   DEVELOPER_IDS: "444555666",
   PORTAL_ADMIN_USERNAME: "deployment-owner",
   PORTAL_ADMIN_PASSWORD: firstEnvAdminPassword

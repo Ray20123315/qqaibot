@@ -7,7 +7,6 @@ import { appendIndex, buildLongGroupConversationContext, callOneBotAction, check
 import { appendChatHistoryTurn, clearChatSessionHistory, dbDel, dbGet, dbPut, readChatHistory, withTimeout } from "./src/data/store.js";
 import { announceDeployedVersionFallback, getDeploymentStatusForViewer, handleDeploymentBuildQueue, injectDeploymentPortalClient } from "./src/deployment/notifications.js";
 import { botCanRunRuleMonitor, getBotGroupRole, getGroupFamilyForGroup, getGroupJoinPage, isVerifiedGroupOwner } from "./src/group/runtime.js";
-import { buildHealthState } from "./src/health/runtime.js";
 import { normalizeMultilingualCommand, toSimplifiedChinese } from "./src/i18n/commands.js";
 import { collectFullMemberDetails, formatFullMemberDetailsReport } from "./src/members/details.js";
 import { handleBilibiliWebhook, pollAutomaticBilibiliConnectors } from "./src/integrations/bilibili.js";
@@ -17,8 +16,7 @@ import { MASTER_RELATIONSHIP_DEFAULTS, MASTER_RELATIONSHIP_MAX_LEVEL, clearPartn
 import { appendPortalConversationRecord, applyConversationOutputGuards, auditIgnoredRobotMessage, botInteractionAllowKey, buildReplyPlan, cacheBotSenderClassification, clearRegisteredThinkingIndicators, detectLiteralPseudoElementLabels, eventHasBotMention, eventMentionedQqs, eventPlainText, eventSenderDisplayName, eventSenderRobotHint, extractFileDescriptors, extractForwardIds, extractMediaDescriptor, extractMessageText, extractOutboundMediaTypes, extractTextMentionIds, filterRobotMentionIds, formatForwardContext, getForwardMessageSnapshot, getQuotedMessage, getTaipeiTimeContext, isExplicitCurrentTimeQuestion, isExplicitRoleplayRequest, isGroupRobotInteractionAllowed, isIgnoredGroupRobotSender, isStandaloneCurrentTimeQuestion, looksLikeRobotDisplayName, normalizeFileDescriptor, parseDurationSeconds, prepareConversationHistory, purgeLegacyBotRepliesFromRecentLogs, qqaiTruthyRobotFlag, recordStructuredMessage, registerThinkingIndicator, removeTextMentionTokens, resolveOneBotMediaAsBase64, runOneBotGroupOperation, sanitizeAiReply, sendThinkingIndicator, thinkingIndicatorRegistryKey } from "./src/onebot/messages.js";
 import { classifyCollaborationNaturalIntent, classifyNaturalLanguageCommandIntent, normalizeNaturalLanguageCommandText, opsGetGroupMember, opsGetSettings, opsHandleActivityCommand, opsHandleMemberLeave, opsProcessAutomations } from "./src/operations/runtime.js";
 import { processPlatformJobs } from "./src/platform/runtime.js";
-import { pluginExecutionStatus } from "./src/plugins/runtime.js";
-import { authDbDelStrict, authDbGetStrict, authDbPutIfAbsentStrict, authDbPutStrict, clearPasswordLoginGuard, commandChangesWebSettings, classifyPortalAuthFailure, constantTimeEqual, createPortalAccountBinding, createPortalAdminAccountBinding, createPortalPasswordRecord, createPortalSession, decryptPortalAuthSecret, deleteMemoryVector, generateSixDigitCode, getOneBotHub, getPortalSession, getPublicNebulaSeed, hashBackupCode, isMemoryBanned, isPortalSystemAdminQq, isValidPortalPasswordRecord, jsonResponse, markGroupMemberLeft, notePasswordLoginFailure, portalAdminCredentialConfig, portalEnvironmentWithManagedDeveloperIds, portalSessionCookie, readCookie, readJson, readPasswordLoginGuard, readPortalAccountByUsername, readPortalAuthJson, resolvePortalPasswordLogin, sendOneBotAction, sendOneBotHttpAction, sendPortalVerificationMessage, upsertGroupMember, upsertMemoryVector, validatePortalLoginUsername, validatePortalPassword, validatePortalUsername, verifyPortalPassword, verifyPortalVerificationCode, verifyTotpCode, writeMemoryAudit, writeSystemError } from "./src/portal/auth.js";
+import { authDbDelStrict, authDbGetStrict, authDbPutIfAbsentStrict, authDbPutStrict, checkPortalAuthRateLimit, clearPasswordLoginGuard, commandChangesWebSettings, classifyPortalAuthFailure, constantTimeEqual, createPortalAccountBinding, createPortalAdminAccountBinding, createPortalPasswordRecord, createPortalSession, decryptPortalAuthSecret, deleteMemoryVector, generateSixDigitCode, getOneBotHub, getPortalSession, getPublicNebulaSeed, hashBackupCode, isMemoryBanned, isPortalSystemAdminQq, isValidPortalPasswordRecord, jsonResponse, markGroupMemberLeft, notePasswordLoginFailure, portalAdminCredentialConfig, portalEnvironmentWithManagedDeveloperIds, portalSessionCookie, readCookie, readJson, readPasswordLoginGuard, readPortalAccountByUsername, readPortalAuthJson, resolvePortalPasswordLogin, sendOneBotAction, sendOneBotHttpAction, sendPortalVerificationMessage, upsertGroupMember, upsertMemoryVector, validatePortalLoginUsername, validatePortalPassword, validatePortalUsername, verifyPortalPassword, verifyPortalVerificationCode, verifyTotpCode, writeMemoryAudit, writeSystemError } from "./src/portal/auth.js";
 import { getLiveHtmlPage, getPortalHomePage, getPortalLoginPage, getPortalRegisterPage, getPublicLandingPage, handleGeminiLiveUpgrade, handlePortalApi } from "./src/portal/runtime.js";
 import { injectPortalLayoutClient } from "./src/portal/layout.js";
 import { injectPortalMembersClient } from "./src/portal/members.js";
@@ -166,11 +164,26 @@ const QQAIWorker = {
     // 🎙️ Gemini Live：網頁與 WebSocket
     // ==========================================
     if (url.pathname === "/live") {
+      const isWebSocket = upgradeHeader?.toLowerCase() === "websocket";
+      if (isWebSocket) {
+        const origin = request.headers.get("Origin");
+        if (!origin || new URL(origin).origin !== url.origin) return new Response("Forbidden", { status: 403 });
+      }
+      const token = readCookie(request, "qqai_session");
+      let liveSession = null;
+      try { liveSession = token ? await getPortalSession(env, token, { touch: false }) : null; } catch {}
+      const developerAuthorized = Boolean(liveSession && (liveSession.permissions?.developer || isDeveloperId(env, liveSession.qq)));
+      if (!developerAuthorized) {
+        if (isWebSocket) return new Response("Unauthorized", { status: 401 });
+        return Response.redirect(`${url.origin}/login?next=${encodeURIComponent("/live")}`, 302);
+      }
       if (!upgradeHeader || upgradeHeader.toLowerCase() !== "websocket") {
         return new Response(toSimplifiedChinese(getLiveHtmlPage(url.host)), {
           headers: { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store" }
         });
       }
+      const rateLimit = await checkPortalAuthRateLimit(env, request, { scope: "live", principal: liveSession.qq });
+      if (!rateLimit.ok) return jsonResponse({ ok: false, code: rateLimit.reason === "limited" ? "LIVE_RATE_LIMITED" : "AUTH_RATE_LIMIT_UNAVAILABLE", message: rateLimit.reason === "limited" ? "即時通話啟動過於頻繁，請稍後再試。" : "即時通話目前無法安全啟動，請稍後再試。" }, rateLimit.reason === "limited" ? 429 : 503);
       return handleGeminiLiveUpgrade(request, env);
     }
 
@@ -220,8 +233,7 @@ const QQAIWorker = {
     }
 
     if (request.method === 'GET' && ['/health', '/healthz'].includes(url.pathname)) {
-      const health = await buildHealthState(env);
-      return jsonResponse({ ...health, plugins: pluginExecutionStatus(env) });
+      return jsonResponse({ ok: true, service: "qqai", version: VERSION });
     }
 
     if (request.method === 'GET' && url.pathname === '/api/public/nebula') {
@@ -255,6 +267,8 @@ const QQAIWorker = {
       if (!/^\d{5,12}$/.test(qq)) {
         return jsonResponse({ ok: false, message: "请先输入 QQ 号。" }, 400);
       }
+      const rateLimit = await checkPortalAuthRateLimit(env, request, { scope: "code", principal: qq });
+      if (!rateLimit.ok) return jsonResponse({ ok: false, code: rateLimit.reason === "limited" ? "AUTH_RATE_LIMITED" : "AUTH_RATE_LIMIT_UNAVAILABLE", message: rateLimit.reason === "limited" ? "驗證碼請求過於頻繁，請稍後再試。" : "驗證碼服務目前無法安全啟動，請稍後再試。" }, rateLimit.reason === "limited" ? 429 : 503);
       if (url.pathname.includes("/register/") && isDeveloperId(env, qq)) {
         return jsonResponse({
           ok: false,
@@ -326,6 +340,8 @@ const QQAIWorker = {
         return jsonResponse({ ok: false, code: "IDENTITY_INVALID", message: "請輸入有效的 QQID。" }, 400);
       }
       if (!passwordCheck.ok) return jsonResponse({ ok: false, code: "PASSWORD_POLICY", message: passwordCheck.message }, 400);
+      const rateLimit = await checkPortalAuthRateLimit(env, request, { scope: "register", principal: qq });
+      if (!rateLimit.ok) return jsonResponse({ ok: false, code: rateLimit.reason === "limited" ? "AUTH_RATE_LIMITED" : "AUTH_RATE_LIMIT_UNAVAILABLE", message: rateLimit.reason === "limited" ? "帳號啟用請求過於頻繁，請稍後再試。" : "帳號啟用服務目前無法安全啟動，請稍後再試。" }, rateLimit.reason === "limited" ? 429 : 503);
 
       const accountType = String(payload.accountType || "").trim().toLowerCase();
       const requestedDeveloper = accountType === "developer"
@@ -508,6 +524,8 @@ const QQAIWorker = {
       if (!/^\d{5,12}$/.test(qq) || !/^\d{6}$/.test(code)) return jsonResponse({ ok: false, message: "请输入正确的 QQ 号和六位验证码。" }, 400);
       const validation = validatePortalPassword(newPassword);
       if (!validation.ok) return jsonResponse({ ok: false, code: "PASSWORD_POLICY", message: validation.message }, 400);
+      const rateLimit = await checkPortalAuthRateLimit(env, request, { scope: "reset", principal: qq });
+      if (!rateLimit.ok) return jsonResponse({ ok: false, code: rateLimit.reason === "limited" ? "AUTH_RATE_LIMITED" : "AUTH_RATE_LIMIT_UNAVAILABLE", message: rateLimit.reason === "limited" ? "密碼復原請求過於頻繁，請稍後再試。" : "密碼復原服務目前無法安全啟動，請稍後再試。" }, rateLimit.reason === "limited" ? 429 : 503);
       if (portalAdminCredentialConfig(env).mode !== "legacy") {
         try {
           if (await isPortalSystemAdminQq(env, qq)) {
@@ -537,6 +555,8 @@ const QQAIWorker = {
       const usernameCheck = validatePortalLoginUsername(payload.username);
       const password = String(payload.password || "");
       if (!usernameCheck.ok || !password) return jsonResponse({ ok: false, code: "INVALID_CREDENTIALS", message: "帳號或密碼錯誤。" }, 401);
+      const rateLimit = await checkPortalAuthRateLimit(env, request, { scope: "login", principal: usernameCheck.normalized });
+      if (!rateLimit.ok) return jsonResponse({ ok: false, code: rateLimit.reason === "limited" ? "AUTH_RATE_LIMITED" : "AUTH_RATE_LIMIT_UNAVAILABLE", message: rateLimit.reason === "limited" ? "登入嘗試過於頻繁，請稍後再試。" : "登入服務目前無法安全啟動，請稍後再試。" }, rateLimit.reason === "limited" ? 429 : 503);
       try {
         const login = await resolvePortalPasswordLogin(env, usernameCheck.normalized, password);
         if (["ADMIN_CREDENTIALS_MISCONFIGURED", "ADMIN_ACCOUNT_NOT_BOUND", "ADMIN_USERNAME_COLLISION"].includes(login.errorCode)) {
@@ -544,11 +564,16 @@ const QQAIWorker = {
         }
         const account = login.account;
         if (!account) return jsonResponse({ ok: false, code: "INVALID_CREDENTIALS", message: "帳號或密碼錯誤。" }, 401);
+        const guard = await readPasswordLoginGuard(env, account.qq);
+        if (Number(guard.lockUntil || 0) > Date.now()) {
+          return jsonResponse({ ok: false, code: "PASSWORD_LOGIN_LOCKED", message: `登入嘗試過多，請在 ${Math.ceil((guard.lockUntil - Date.now()) / 60000)} 分鐘後重試。` }, 429);
+        }
         const passwordRecord = login.source === "database" ? await readPortalAuthJson(env, `portal_auth_password:${account.qq}`, null) : null;
         const passwordOk = login.source === "environment"
           ? Boolean(login.passwordMatches)
           : Boolean(passwordRecord && isValidPortalPasswordRecord(passwordRecord) && await verifyPortalPassword(password, passwordRecord));
         if (!passwordOk) {
+          await notePasswordLoginFailure(env, account.qq);
           return jsonResponse({ ok: false, code: "INVALID_CREDENTIALS", message: "帳號或密碼錯誤。" }, 401);
         }
         const twoFactor = await readPortalAuthJson(env, `portal_auth_2fa:${account.qq}`, null);
@@ -572,6 +597,8 @@ const QQAIWorker = {
       const usernameCheck = validatePortalLoginUsername(payload.username);
       const password = String(payload.password || "");
       if (!usernameCheck.ok || !password) return jsonResponse({ ok: false, code: "INVALID_CREDENTIALS", message: "帳號或密碼錯誤。" }, 401);
+      const rateLimit = await checkPortalAuthRateLimit(env, request, { scope: "login", principal: usernameCheck.normalized });
+      if (!rateLimit.ok) return jsonResponse({ ok: false, code: rateLimit.reason === "limited" ? "AUTH_RATE_LIMITED" : "AUTH_RATE_LIMIT_UNAVAILABLE", message: rateLimit.reason === "limited" ? "登入嘗試過於頻繁，請稍後再試。" : "登入服務目前無法安全啟動，請稍後再試。" }, rateLimit.reason === "limited" ? 429 : 503);
       try {
         const login = await resolvePortalPasswordLogin(env, usernameCheck.normalized, password);
         if (["ADMIN_CREDENTIALS_MISCONFIGURED", "ADMIN_ACCOUNT_NOT_BOUND", "ADMIN_USERNAME_COLLISION"].includes(login.errorCode)) {
