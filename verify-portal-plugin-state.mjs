@@ -42,6 +42,15 @@ assert.equal(portalPluginForApiPath("/integrations/bilibili")?.id, "qqai.integra
 assert.equal(portalPluginForView("health")?.id, "qqai.developer-tools");
 assert.equal(portalPluginForApiPath("/health")?.id, "qqai.developer-tools");
 assert.equal(portalPluginForApiPath("/health/model-check")?.id, "qqai.developer-tools");
+assert.equal(portalPluginForApiPath("/root/appeals")?.id, "qqai.moderation");
+assert.equal(portalPluginForApiPath("/root/schedules")?.id, "qqai.automation");
+assert.equal(portalPluginForApiPath("/root/members")?.id, "qqai.community");
+assert.equal(portalPluginForApiPath("/root/quotas")?.id, "qqai.models");
+assert.equal(portalPluginForApiPath("/root/state")?.id, "qqai.developer-tools");
+assert.equal(portalPluginForApiPath("/admin/state")?.id, "qqai.community");
+assert.equal(portalPluginForApiPath("/admin/logs")?.id, "qqai.developer-tools");
+assert.equal(portalPluginForApiPath("/group-work/decision")?.id, "qqai.moderation");
+assert.equal(portalPluginForApiPath("/settings")?.id, "qqai.community");
 assert.equal(portalPluginForApiPath("/security/auth-state"), null, "core security routes must not belong to a plugin");
 
 const db = new FakeD1();
