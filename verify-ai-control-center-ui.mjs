@@ -94,4 +94,4 @@ console.log("verify-ai-control-center-ui: ok");
 
 assert.doesNotMatch(fs.readFileSync("worker.js", "utf8"), /werewolf|狼人殺|狼人杀/i);
 
-assert.doesNotMatch(layoutSource, /<nav class="nav core-nav"/, "portal nav must stay isolated from public .nav");
+assert.doesNotMatch(runtime, /<nav class="nav core-nav"/, "portal nav must stay isolated from public .nav");
