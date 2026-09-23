@@ -209,6 +209,12 @@ html.ray-page-portal body{background:
   .ray-core-orbit{max-width:86vw!important}
 }
 
+
+/* RAY_REFERENCE_V7_DESKTOP_CONTAINMENT */
+@media(min-width:621px){
+  .ray-planet{right:0!important;left:auto!important;width:46%!important;max-width:430px!important}
+}
+
 /* RAY_REFERENCE_V7_END */
 `;
 function rayAiExperienceStyle(mode = "public") {
