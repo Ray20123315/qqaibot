@@ -50,6 +50,7 @@ function normalizePortalMetadata(value) {
     legacyBridge: source.legacyBridge === true,
     developerOnly: source.developerOnly === true,
     defaultEnabled: source.defaultEnabled !== false,
+    groupContext: source.groupContext === true,
     apiPrefixes: uniqueStrings(source.apiPrefixes, { maxItems: 32, pattern: PORTAL_API_PREFIX_PATTERN })
   });
 }
