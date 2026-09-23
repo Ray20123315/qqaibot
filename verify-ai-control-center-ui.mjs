@@ -3,7 +3,6 @@ import fs from "node:fs";
 import { getPortalHomePage, getPortalLoginPage, getPortalRegisterPage, getPublicLandingPage } from "./src/portal/runtime.js";
 import { injectPortalLayoutClient } from "./src/portal/layout.js";
 import { injectPortalMembersClient } from "./src/portal/members.js";
-import { injectWerewolfPortalClient } from "./src/games/werewolf.js";
 import { injectDeploymentPortalClient } from "./src/deployment/notifications.js";
 
 const landing = getPublicLandingPage();
@@ -46,13 +45,12 @@ for (const marker of [
 ]) assert.ok(portalBase.includes(marker), "missing rebuilt Portal marker: " + marker);
 assert.doesNotMatch(portalBase, /return toSimplifiedChinese\(String\.raw/);
 
-const withFeatures = injectWerewolfPortalClient(injectPortalMembersClient(injectDeploymentPortalClient(portalBase)));
+const withFeatures = injectPortalMembersClient(injectDeploymentPortalClient(portalBase));
 const full = injectPortalLayoutClient(withFeatures);
 assert.match(full, /id="qqai-member-console-style"/);
 assert.match(full, /id="qqai-werewolf-style"/);
 assert.match(full, /id="qqai-deployment-toast"/);
 assert.match(full, /id="qqai-portal-layout-v300"/);
-assert.ok(full.lastIndexOf("qqai-portal-layout-v300") > full.lastIndexOf("qqai-werewolf-style"));
 assert.ok(full.lastIndexOf("qqai-portal-layout-v300") > full.lastIndexOf("qqai-member-console-style"));
 
 const runtime = fs.readFileSync("src/portal/runtime.js", "utf8");
@@ -61,6 +59,8 @@ assert.match(runtime, /function setPortalLocale/);
 assert.match(runtime, /function organizeSidebarNavigation/);
 assert.match(runtime, /var core=\['overview','plugins','account','health'\]/);
 assert.match(runtime, /plugin-compat-nav/);
+assert.match(runtime, /data-plugin-toggle/);
+assert.match(runtime, /PLUGIN_DISABLED/);
 
 const layout = fs.readFileSync("src/portal/layout.js", "utf8");
 assert.match(layout, /--sidebar-bg:#ffffff/);
@@ -68,6 +68,9 @@ assert.match(layout, /:root\[data-theme="dark"\]/);
 assert.match(layout, /background:var\(--panel\)!important/);
 assert.match(layout, /\.plugin-grid\{/);
 assert.match(layout, /\.core-hero\{/);
+assert.match(layout, /\.nav>\.qqai-nav-entry\{display:none!important\}/);
 assert.doesNotMatch(layout, /--bg:#020713!important/);
 
 console.log("verify-ai-control-center-ui: ok");
+
+assert.doesNotMatch(fs.readFileSync("worker.js", "utf8"), /werewolf|狼人殺|狼人杀/i);
