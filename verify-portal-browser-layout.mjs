@@ -44,7 +44,7 @@ const pages = {
   },
   portal: {
     html: injectPortalLayoutClient(injectPortalMembersClient(injectDeploymentPortalClient(getPortalHomePage("aibot.ray2025.com")))),
-    selectors: [".workspace-shell", ".workspace-sidebar", ".core-nav", ".core-nav>button[data-view]", ".workspace-main", ".workspace-content", ".workspace-hero", ".workspace-status-grid", ".ray-dashboard-grid"]
+    selectors: [".workspace-shell", ".workspace-sidebar", ".core-nav", ".core-nav>button[data-view]", ".core-nav>button[data-view] .nav-glyph", ".core-nav>button[data-view]>span:last-child", ".workspace-main", ".workspace-content", ".workspace-hero", ".workspace-status-grid", ".ray-dashboard-grid"]
   }
 };
 
@@ -149,6 +149,10 @@ function assertLayout(name, width, metrics) {
     const sidebar=metrics.items[".workspace-sidebar"],nav=metrics.items[".core-nav"],first=metrics.items[".core-nav>button[data-view]"];
     assert.ok(nav.width>=sidebar.width*0.78,"portal sidebar navigation collapsed: "+JSON.stringify({sidebar,nav}));
     assert.ok(first.width>=nav.width*0.90,"portal sidebar button collapsed: "+JSON.stringify({nav,first}));
+    assert.ok(first.height<=52,"portal sidebar button unexpectedly stacked: "+JSON.stringify(first));
+    const icon=metrics.items[".core-nav>button[data-view] .nav-glyph"],label=metrics.items[".core-nav>button[data-view]>span:last-child"];
+    const iconCenter=(icon.top+icon.bottom)/2,labelCenter=(label.top+label.bottom)/2;
+    assert.ok(Math.abs(iconCenter-labelCenter)<=8,"portal sidebar icon/text must share one row: "+JSON.stringify({icon,label}));
   }
 }
 
