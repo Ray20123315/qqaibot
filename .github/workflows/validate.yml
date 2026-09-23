@@ -5,6 +5,7 @@ on:
     branches:
       - main
       - refactor/v2-modular-worker
+      - codex/plugin-toggle-cleanup-20260923
   pull_request:
     branches:
       - main
