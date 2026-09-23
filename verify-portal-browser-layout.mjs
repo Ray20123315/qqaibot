@@ -44,7 +44,7 @@ const pages = {
   },
   portal: {
     html: injectPortalLayoutClient(injectPortalMembersClient(injectDeploymentPortalClient(getPortalHomePage("aibot.ray2025.com")))),
-    selectors: [".workspace-shell", ".workspace-main", ".workspace-content", ".workspace-hero", ".workspace-status-grid", ".ray-dashboard-grid"]
+    selectors: [".workspace-shell", ".workspace-sidebar", ".core-nav", ".core-nav>button[data-view]", ".workspace-main", ".workspace-content", ".workspace-hero", ".workspace-status-grid", ".ray-dashboard-grid"]
   }
 };
 
@@ -145,6 +145,11 @@ function assertLayout(name, width, metrics) {
     name + " body creates horizontal overflow @ " + width + ": " + JSON.stringify(metrics));
   assert.equal(metrics.overflowers.length,0,
     name + " has out-of-viewport elements @ " + width + ": " + JSON.stringify(metrics.overflowers));
+  if(name==="portal"&&width>=1024){
+    const sidebar=metrics.items[".workspace-sidebar"],nav=metrics.items[".core-nav"],first=metrics.items[".core-nav>button[data-view]"];
+    assert.ok(nav.width>=sidebar.width*0.78,"portal sidebar navigation collapsed: "+JSON.stringify({sidebar,nav}));
+    assert.ok(first.width>=nav.width*0.90,"portal sidebar button collapsed: "+JSON.stringify({nav,first}));
+  }
 }
 
 try {
