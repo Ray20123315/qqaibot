@@ -10,7 +10,7 @@ assert.ok(injected.indexOf("qqai-portal-layout-v300") > injected.indexOf('id="fe
 assert.match(injected, /@media\(max-width:1024px\)/);
 assert.match(injected, /@media\(max-width:720px\)/);
 assert.match(injected, /@media\(max-width:440px\)/);
-for (const selector of [".plugin-grid{", ".core-hero{", ".ww-layout{", ".member-action-row{", ".cleanup-summary{", "#qqai-deployment-toast"]) {
+for (const selector of [".plugin-grid{", ".core-hero{", ".member-action-row{", ".cleanup-summary{", "#qqai-deployment-toast"]) {
   assert.ok(injected.includes(selector), "missing layout selector: " + selector);
 }
 assert.match(injected, /--sidebar-bg:#ffffff/);
@@ -18,8 +18,8 @@ assert.match(injected, /:root\[data-theme="dark"\]/);
 assert.doesNotMatch(injected, /--bg:#020713!important/);
 
 const worker = fs.readFileSync("worker.js", "utf8");
-assert.match(worker, /injectPortalLayoutClient\(injectWerewolfPortalClient\(injectPortalMembersClient/);
-for (const path of ["src/portal/community-suite.js", "src/portal/member-cleanup.js", "src/games/werewolf.js"]) {
+assert.match(worker, /injectPortalLayoutClient\(injectPortalMembersClient\(injectDeploymentPortalClient/);
+for (const path of ["src/portal/community-suite.js", "src/portal/member-cleanup.js"]) {
   const source = fs.readFileSync(path, "utf8");
   assert.ok(!source.includes("var(--border)"), path + " must use the Portal --line token");
 }
@@ -27,3 +27,5 @@ const pkg = JSON.parse(fs.readFileSync("package.json", "utf8"));
 assert.equal(pkg.version, "2.7.12");
 assert.match(pkg.scripts.check, /verify-portal-layout\.mjs/);
 console.log("verify-portal-layout: ok");
+
+assert.doesNotMatch(worker, /werewolf|狼人殺|狼人杀/i);
