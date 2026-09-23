@@ -19,6 +19,7 @@ import { classifyCollaborationNaturalIntent, classifyNaturalLanguageCommandInten
 import { processPlatformJobs } from "./src/platform/runtime.js";
 import { pluginExecutionStatus } from "./src/plugins/runtime.js";
 import { authDbDelStrict, authDbGetStrict, authDbPutStrict, clearPasswordLoginGuard, commandChangesWebSettings, classifyPortalAuthFailure, constantTimeEqual, createPortalAccountBinding, createPortalAdminAccountBinding, createPortalPasswordRecord, createPortalSession, decryptPortalAuthSecret, deleteMemoryVector, generateSixDigitCode, getOneBotHub, getPortalSession, getPublicNebulaSeed, hashBackupCode, isMemoryBanned, isValidPortalPasswordRecord, jsonResponse, markGroupMemberLeft, notePasswordLoginFailure, portalSessionCookie, readCookie, readJson, readPasswordLoginGuard, readPortalAccountByUsername, readPortalAuthJson, sendOneBotAction, sendOneBotHttpAction, sendPortalVerificationMessage, upsertGroupMember, upsertMemoryVector, validatePortalLoginUsername, validatePortalPassword, validatePortalUsername, verifyPortalPassword, verifyPortalVerificationCode, verifyTotpCode, writeMemoryAudit, writeSystemError } from "./src/portal/auth.js";
+import { readPortalBranding } from "./src/portal/brand.js";
 import { getLiveHtmlPage, getPortalHomePage, getPortalLoginPage, getPortalRegisterPage, getPublicLandingPage, handleGeminiLiveUpgrade, handlePortalApi } from "./src/portal/runtime.js";
 import { injectPortalLayoutClient } from "./src/portal/layout.js";
 import { injectPortalMembersClient } from "./src/portal/members.js";
@@ -221,6 +222,10 @@ const QQAIWorker = {
     if (request.method === 'GET' && ['/health', '/healthz'].includes(url.pathname)) {
       const health = await buildHealthState(env);
       return jsonResponse({ ...health, plugins: pluginExecutionStatus(env) });
+    }
+
+    if (request.method === 'GET' && url.pathname === '/api/public/branding') {
+      return jsonResponse({ ok: true, branding: await readPortalBranding(env) });
     }
 
     if (request.method === 'GET' && url.pathname === '/api/public/nebula') {
