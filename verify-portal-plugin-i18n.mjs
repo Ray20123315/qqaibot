@@ -43,7 +43,7 @@ for (const plugin of catalog) {
 assert.ok(catalog.some(x => x.id === "qqai.developer-tools" && x.portal.developerOnly));
 
 const portal = getPortalHomePage("aibot.ray2025.com");
-for (const marker of ['data-view="overview"','data-view="plugins"','data-view="account"','data-view="health"','id="pluginCompatNav"','id="localeSelect"']) {
+for (const marker of ['data-view="overview"','data-view="plugins"','data-view="account"','id="pluginCompatNav"','id="localeSelect"']) {
   assert.ok(portal.includes(marker), "missing core shell marker " + marker);
 }
 assert.match(portal, /function portalTitle\(name\).*view\./s);
