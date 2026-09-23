@@ -13,8 +13,11 @@ const login = getPortalLoginPage();
 const register = getPortalRegisterPage();
 
 assert.match(landing, /AI Control Center/);
-assert.match(landing, /class="console-preview"/);
-assert.match(landing, /class="feature-grid"/);
+assert.match(landing, /class="public-home-v4"/);
+assert.match(landing, /class="public-v4-hero"/);
+assert.match(landing, /class="qqai-brand-logo/);
+assert.match(landing, /SMALL CORE · PLUGIN FIRST · BYOR/);
+assert.doesNotMatch(landing, /class="console-preview"/);
 
 assert.match(login, /data-i18n="login\.title"/);
 assert.match(login, /id="username"/);
