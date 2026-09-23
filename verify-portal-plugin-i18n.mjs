@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import { PORTAL_LOCALES, PORTAL_MESSAGES, normalizePortalLocale, portalI18nPayload, portalMessage } from "./src/i18n/portal.js";
+import { PORTAL_LEGACY_PHRASES } from "./src/i18n/portal-legacy.js";
 import { portalPluginCatalog } from "./src/plugins/runtime.js";
 import { getPortalHomePage, getPortalLoginPage, getPortalRegisterPage, getPublicLandingPage } from "./src/portal/runtime.js";
 
@@ -22,6 +23,10 @@ for (const locale of ids) {
 }
 assert.equal(portalMessage("ja", "view.members"), "メンバー");
 assert.equal(portalMessage("xx-YY", "view.members"), "Members");
+assert.ok(Object.keys(PORTAL_LEGACY_PHRASES).length >= 80, "legacy compatibility surface should have broad translation coverage");
+for (const [source, row] of Object.entries(PORTAL_LEGACY_PHRASES)) {
+  for (const locale of ["zh-TW", "zh-CN", "en"]) assert.ok(row[locale], source + " missing required legacy translation " + locale);
+}
 for (const locale of ids) {
   assert.ok(payload.messages[locale], "missing locale message pack " + locale);
   for (const key of ["nav.home","nav.plugins","nav.account","footer.rights","public.hero.title","login.title","register.title"]) {
@@ -42,6 +47,9 @@ for (const marker of ['data-view="overview"','data-view="plugins"','data-view="a
   assert.ok(portal.includes(marker), "missing core shell marker " + marker);
 }
 assert.match(portal, /function portalTitle\(name\).*view\./s);
+assert.match(portal, /function localizeLegacyNode/);
+assert.match(portal, /MutationObserver/);
+assert.match(portal, /legacyPhrases/);
 assert.doesNotMatch(portal, /var titles=\{overview:/);
 for (const page of [getPublicLandingPage(), getPortalLoginPage(), getPortalRegisterPage()]) {
   assert.ok(page.includes('id="publicLocale"'), "public/auth surface missing locale selector");
