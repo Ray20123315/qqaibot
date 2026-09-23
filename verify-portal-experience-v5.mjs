@@ -2,7 +2,12 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import { brandLockupMarkup, brandLogoSvg, brandPublicStyle, brandThemeBootScript } from "./src/portal/brand.js";
 import { injectPortalLayoutClient } from "./src/portal/layout.js";
+import { rayAiExperienceScript } from "./src/portal/experience-v5.js";
 import { getPortalHomePage, getPortalLoginPage, getPortalRegisterPage, getPublicLandingPage } from "./src/portal/runtime.js";
+
+const experienceScript = rayAiExperienceScript("public");
+assert.equal(experienceScript.endsWith("</script>"), true, "v5 client script must emit a real HTML closing tag");
+assert.equal(experienceScript.includes("<\\\\/script>"), false, "v5 client script must not leak a literal backslash into the HTML closing tag");
 
 const logo = brandLogoSvg();
 assert.match(logo, /ray-logo-ring/);

@@ -7,6 +7,6 @@ function rayAiExperienceStyle(mode = "public") {
 }
 function rayAiExperienceScript(mode = "public") {
   const scope = mode === "portal" ? "portal" : "public";
-  return '<script id="qqai-ray-experience-client-v500" data-scope="' + scope + '">' + RAY_AI_EXPERIENCE_CLIENT + '<\\/script>';
+  return '<script id="qqai-ray-experience-client-v500" data-scope="' + scope + '">' + RAY_AI_EXPERIENCE_CLIENT + '<\/script>';
 }
 export { RAY_AI_EXPERIENCE_VERSION, rayAiExperienceScript, rayAiExperienceStyle };
