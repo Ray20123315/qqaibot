@@ -1,3 +1,5 @@
+import { PORTAL_LEGACY_PHRASES } from "./portal-legacy.js";
+
 const PORTAL_LOCALES = Object.freeze([
   { id: "zh-TW", label: "繁體中文" },
   { id: "zh-CN", label: "简体中文" },
@@ -791,7 +793,7 @@ function portalMessage(locale, key) {
 }
 
 function portalI18nPayload() {
-  return Object.freeze({ locales: PORTAL_LOCALES, messages: PORTAL_MESSAGES, defaultLocale: "zh-TW", fallbackLocale: "en" });
+  return Object.freeze({ locales: PORTAL_LOCALES, messages: PORTAL_MESSAGES, legacyPhrases: PORTAL_LEGACY_PHRASES, defaultLocale: "zh-TW", fallbackLocale: "en" });
 }
 
 export { PORTAL_LOCALES, PORTAL_MESSAGES, normalizePortalLocale, portalI18nPayload, portalMessage };
