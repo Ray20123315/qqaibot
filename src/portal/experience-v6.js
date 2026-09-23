@@ -215,6 +215,13 @@ html.ray-page-portal body{background:
   .ray-planet{right:0!important;left:auto!important;width:46%!important;max-width:430px!important}
 }
 
+
+/* RAY_REFERENCE_V7_MOBILE_SIDEBAR_CONTAINMENT */
+@media(max-width:1024px){
+  .workspace-sidebar:not(.open){display:none!important}
+  .workspace-sidebar.open{display:flex!important;transform:none!important}
+}
+
 /* RAY_REFERENCE_V7_END */
 `;
 function rayAiExperienceStyle(mode = "public") {
