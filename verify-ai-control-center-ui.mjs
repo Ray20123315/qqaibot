@@ -44,6 +44,8 @@ for (const marker of [
   'data-view="account"',
   'id="pluginCompatNav"',
   'id="pluginGrid"',
+  'id="pluginManagementHint"',
+  'id="accountIdentitySummary"',
   'id="overviewPluginGrid"',
   'id="localeSelect"',
   'id="pluginBack"',
@@ -68,6 +70,9 @@ assert.ok(full.lastIndexOf("qqai-portal-layout-v400") > full.lastIndexOf("qqai-m
 
 const runtime = fs.readFileSync("src/portal/runtime.js", "utf8");
 assert.match(runtime, /function renderPluginCatalog/);
+assert.match(runtime, /function renderAccountIdentity/);
+assert.match(runtime, /renderAccountIdentity\(\);await loadPlugins\(\);renderAccountIdentity\(\)/, "account identity must render before and after plugin authority loads");
+assert.match(runtime, /你有 Developer \/ Root 插件管理權限/, "plugin management guidance must be visible to managers");
 assert.match(runtime, /function setPortalLocale/);
 assert.match(runtime, /function organizeSidebarNavigation/);
 assert.match(runtime, /var core=\['overview','plugins','account'\]/);
@@ -85,6 +90,9 @@ assert.doesNotMatch(runtime, /openDisabled\?\'disabled\'/, "disabled plugins mus
 const layout = fs.readFileSync("src/portal/layout.js", "utf8");
 const experience = fs.readFileSync("src/portal/experience-v6.js", "utf8");
 assert.match(experience, /RAY_MINIMAL_V9_PLUGIN_CENTER_FIX/, "minimal plugin-center readability layer missing");
+assert.match(experience, /RAY_MINIMAL_V9_ACCOUNT_AND_SELECT_FIX/, "account/select refinement layer missing");
+assert.match(experience, /aria-activedescendant/, "custom select must expose active option to assistive technology");
+assert.match(experience, /ray-select-option-check/, "custom select must expose branded selected-state affordance");
 assert.match(layout, /--sidebar-bg:rgba\(255,255,255,\.94\)/);
 assert.match(layout, /:root\[data-theme="dark"\]/);
 assert.match(layout, /background:var\(--panel\)!important/);
