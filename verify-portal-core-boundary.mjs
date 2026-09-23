@@ -15,9 +15,9 @@ assert.match(runtime, /async function ensurePluginContext/, "plugin context must
 assert.doesNotMatch(runtime, /await loadPlugins\(\);var loaded=await loadGroups\(\)/, "core boot must not eagerly load group/community context");
 
 const rendered = getPortalHomePage("aibot.ray2025.com");
-const navStart = rendered.indexOf('<nav class="nav" id="nav"');
+const navStart = rendered.indexOf('id="nav"');
 const compatStart = rendered.indexOf('id="pluginCompatNav"', navStart);
-assert.ok(navStart >= 0 && compatStart > navStart, "portal nav/plugin bridge markers missing");
+assert.ok(navStart >= 0 && compatStart > navStart, "portal nav/plugin bridge markers missing");\nassert.match(rendered, /class="portal-appbar"/, "authenticated core must use the rebuilt app bar");\nassert.doesNotMatch(rendered, /<aside id="sidebar"/, "legacy sidebar shell must not return");
 const firstClassNav = rendered.slice(navStart, compatStart);
 for (const core of CORE_VIEWS) assert.ok(firstClassNav.includes(`data-view="${core}"`), "missing first-class core view " + core);
 for (const forbidden of ["health","tasks","moderation","simulator","models","quota","groups","memory","logs","members","platform","maintenance"]) {
