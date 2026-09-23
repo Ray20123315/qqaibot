@@ -2705,8 +2705,8 @@ function getPortalHomePage(host) {
       <button data-view="overview" class="active" data-i18n="nav.home">首頁</button>
       <button data-view="plugins" data-i18n="nav.plugins">插件</button>
       <button data-view="account" data-i18n="nav.account">帳號與設定</button>
-      <button data-view="health" data-i18n="nav.health">系統健康</button>
       <div id="pluginCompatNav" class="plugin-compat-nav" hidden>
+        <button data-view="health">系統健康</button>
         <button data-view="tasks">任務佇列</button>
         <button data-view="moderation">待確認操作</button>
         <button data-view="simulator">事件模擬器</button>
@@ -2920,7 +2920,7 @@ function ensureR3Views(){
   if(!$('v-platform')){var b=document.createElement('button');b.dataset.view='platform';b.textContent='功能权限中心';b.hidden=true;$('nav').appendChild(b);b.onclick=function(){showView('platform')};var v=document.createElement('section');v.id='v-platform';v.className='view';v.innerHTML='<div class="section-head"><div><h2>功能权限中心</h2><p>这是机器人功能总开关，仅开发者本人可见并可修改全部 300 项。</p></div><button id="pfReload" class="btn">重新加载</button></div><div class="card"><div class="row"><input id="pfSearch" class="grow" placeholder="搜索功能名称、ID、类别"><label id="pfAuditWrap" class="switch"><input id="pfAuditSilent" type="checkbox">不记录操作日志（仅开发者）</label><button id="pfGo" class="btn primary">搜索</button></div><div id="pfSummary" class="notice">尚未加载</div></div><div id="pfList" class="list" style="margin-top:16px"></div>';document.querySelector('.content').appendChild(v);$('pfReload').onclick=loadPlatformFeatures;$('pfGo').onclick=loadPlatformFeatures;$('pfSearch').onkeydown=function(e){if(e.key==='Enter')loadPlatformFeatures()}}
   ensureOperationsViews();
 }
-function organizeSidebarNavigation(){var nav=$('nav');if(!nav)return;var compat=$('pluginCompatNav');if(!compat){compat=document.createElement('div');compat.id='pluginCompatNav';compat.className='plugin-compat-nav';compat.hidden=true;nav.appendChild(compat)}var core=['overview','plugins','account','health'];Array.from(nav.querySelectorAll('button[data-view]')).forEach(function(b){if(core.includes(b.dataset.view))nav.insertBefore(b,compat);else compat.appendChild(b)});nav.dataset.grouped='3';applyPortalI18n();refreshSidebarGroupVisibility()}
+function organizeSidebarNavigation(){var nav=$('nav');if(!nav)return;var compat=$('pluginCompatNav');if(!compat){compat=document.createElement('div');compat.id='pluginCompatNav';compat.className='plugin-compat-nav';compat.hidden=true;nav.appendChild(compat)}var core=['overview','plugins','account'];Array.from(nav.querySelectorAll('button[data-view]')).forEach(function(b){if(core.includes(b.dataset.view))nav.insertBefore(b,compat);else compat.appendChild(b)});nav.dataset.grouped='3';applyPortalI18n();refreshSidebarGroupVisibility()}
 var SIDEBAR_COLLAPSE_KEY='qqai_sidebar_collapsed_v1';
 function readSidebarCollapseState(){try{var x=JSON.parse(localStorage.getItem(SIDEBAR_COLLAPSE_KEY)||'{}');return x&&typeof x==='object'?x:{}}catch(e){return{}}}
 function writeSidebarCollapseState(state){try{localStorage.setItem(SIDEBAR_COLLAPSE_KEY,JSON.stringify(state||{}))}catch(e){}}
