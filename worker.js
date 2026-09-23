@@ -26,7 +26,6 @@ import { applySocialOutputPolicy, buildSocialDecision, buildSocialPromptBlock, c
 import { pickSticker, pickStickerForText, stickerCqMessage } from "./src/social/sticker-library.js";
 import { cancelSchedule, cleanupExpiredModerationProposals, cleanupTransientState, countActiveSchedulesForUser, createAppealFromText, createScheduleRecord, extractScheduleMentionIds, formatScheduleLine, listUserSchedules, parseManagementScheduleAction, parseScheduleRequest, performManualGroupCheckins, processConflictSignal, processDueSchedules, reviewScheduleWithGemma, reviseScheduleRecord, runAutomaticGroupCheckins, skipScheduleOnce } from "./src/scheduler/runtime.js";
 import { handleEntertainmentCommand } from "./src/games/entertainment.js";
-import { handleWerewolfOneBotEvent, injectWerewolfPortalClient, processWerewolfTimers } from "./src/games/werewolf.js";
 import { buildHelpText } from "./src/help/commands.js";
 import { fetchPublicUrl, getFeatureFlag, getPrivateAccessMode, isGroupWhitelisted, numericId, verifyOneBotAccess } from "./src/security/network.js";
 
@@ -201,7 +200,7 @@ const QQAIWorker = {
       const token = readCookie(request, 'qqai_session');
       const session = await getPortalSession(env, token, { touch: false }).catch(() => null);
       if (!session) return Response.redirect(`${url.origin}/login?next=${encodeURIComponent('/portal')}`, 302);
-      const portalHtml = injectPortalLayoutClient(injectWerewolfPortalClient(injectPortalMembersClient(injectDeploymentPortalClient(getPortalHomePage(url.host)))));
+      const portalHtml = injectPortalLayoutClient(injectPortalMembersClient(injectDeploymentPortalClient(getPortalHomePage(url.host))));
       return new Response(portalHtml, {
         headers: { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store" }
       });
@@ -3936,7 +3935,6 @@ ${deepseekContextSummary}`;
     ctx.waitUntil(cleanupExpiredModerationProposals(env));
     ctx.waitUntil(runAutomaticGroupCheckins(env, Number(controller?.scheduledTime || Date.now())));
     ctx.waitUntil(processPlatformJobs(env, Number(controller?.scheduledTime || Date.now())));
-    ctx.waitUntil(processWerewolfTimers(env, Number(controller?.scheduledTime || Date.now())).catch(error => console.error("werewolf timer failed", error)));
     ctx.waitUntil(opsProcessAutomations(env, Number(controller?.scheduledTime || Date.now())));
     ctx.waitUntil(pollAutomaticBilibiliConnectors(env, Number(controller?.scheduledTime || Date.now())));
   },
@@ -4394,11 +4392,6 @@ export class OneBotHub {
       }
     }
 
-    const werewolfHandled = await handleWerewolfOneBotEvent(this.env, body).catch(async error => {
-      await writeSystemAudit(this.env, { type: "werewolf_event_failed", groupId: String(body?.group_id || ""), actorId: String(body?.user_id || ""), action: "handle_event", error: String(error?.message || error).slice(0, 500) }).catch(() => {});
-      return null;
-    });
-    if (werewolfHandled?.handled) return;
     if (this.isRuleMuteLiftNotice(body)) {
       await this.handleRuleMuteLiftNotice(body);
       return;
