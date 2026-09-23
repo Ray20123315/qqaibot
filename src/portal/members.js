@@ -381,14 +381,8 @@ function injectPortalMembersClient(html) {
     '<button data-view="member-cleanup" id="memberCleanupNav" class="qqai-nav-entry"><span class="qqai-nav-glyph" aria-hidden="true">清</span><span>清人分析</span></button>'
   ].join("");
   if (!source.includes('id="memberConsoleNav"')) {
-    const navFallbacks = [
-      { anchor: '<button data-view="logs">操作日志</button>', value: navButton + '<button data-view="logs">操作日志</button>' },
-      { anchor: '</nav>', value: navButton + '</nav>' },
-      { anchor: '</aside>', value: '<nav>' + navButton + '</nav></aside>' }
-    ];
-    const match = navFallbacks.find(item => source.includes(item.anchor));
-    if (match) source = source.replace(match.anchor, match.value);
-    else source = navButton + source;
+    const compat = '<div id="pluginCompatNav" class="plugin-compat-nav" hidden>';
+    if (source.includes(compat)) source = source.replace(compat, compat + navButton);
   }
   const section = `
 <section id="v-members" class="view">
@@ -414,7 +408,7 @@ function injectPortalMembersClient(html) {
   if (logsSectionIndex >= 0) source = source.slice(0, logsSectionIndex) + section + source.slice(logsSectionIndex);
   else source = source.replace("</main>", section + "</main>");
   const style = `<style id="qqai-member-console-style">
-#memberConsoleNav::before,#memberActionsNav::before,#relationshipNav::before,#memberDataNav::before,#memberCleanupNav::before{content:none!important;display:none!important}.qqai-nav-entry{display:flex!important;align-items:center!important;gap:10px!important}.qqai-nav-glyph{width:30px;height:30px;display:inline-grid;place-items:center;border-radius:9px;background:#151b35;color:#fff;font-size:13px;font-weight:800;flex:0 0 30px}
+#memberConsoleNav::before,#memberActionsNav::before,#relationshipNav::before,#memberDataNav::before,#memberCleanupNav::before{content:none!important;display:none!important}.plugin-compat-nav .qqai-nav-entry{display:flex!important;align-items:center!important;gap:10px!important}.qqai-nav-glyph{width:30px;height:30px;display:inline-grid;place-items:center;border-radius:9px;background:#151b35;color:#fff;font-size:13px;font-weight:800;flex:0 0 30px}
 .member-console-toolbar{display:grid;grid-template-columns:minmax(220px,1fr) minmax(260px,1.4fr);gap:14px;align-items:end;margin-bottom:12px}.member-console-filters{display:grid;grid-template-columns:repeat(4,minmax(135px,1fr)) auto auto;gap:10px;align-items:end;margin-bottom:16px}.member-console-filters .field{margin:0}.member-directory-row{display:grid;grid-template-columns:minmax(200px,1.3fr) minmax(160px,.7fr) auto;gap:12px;align-items:center}.member-action-row{display:grid;grid-template-columns:minmax(190px,1fr) minmax(150px,.7fr) minmax(320px,1.5fr);gap:12px;align-items:center}.member-main{min-width:0}.member-name{font-weight:800;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.member-meta{font-size:12px;color:var(--muted);margin-top:4px}.member-actions{display:flex;gap:8px;flex-wrap:wrap;align-items:center}.member-actions input[type="number"]{width:112px;min-height:40px}.member-toggle{display:inline-flex;align-items:center;gap:5px;font-size:12px;color:var(--muted);white-space:nowrap}.member-toggle input{width:auto;min-height:auto}.member-lock{font-size:12px;font-weight:800;color:#b45309}.member-history-message{white-space:pre-wrap;word-break:break-word}.member-history-time{font-size:12px;color:var(--muted);margin-bottom:6px}.member-role-owner{font-weight:800}.member-role-admin{font-weight:700}.member-muted{color:#b45309;font-weight:800}.relationship-console{margin-bottom:16px}.relationship-direct{display:grid;grid-template-columns:minmax(180px,1fr) minmax(180px,1fr) auto auto;gap:12px;align-items:end;margin:14px 0}.relationship-direct .field{margin:0}.relationship-replace{align-self:center}.relationship-row{display:grid;grid-template-columns:minmax(220px,1fr) auto;gap:12px;align-items:center}.relationship-actions{display:flex;gap:8px;justify-content:flex-end}.member-relationship{font-size:12px;font-weight:800;color:#6d28d9;margin-left:6px}@media(max-width:900px){.member-console-toolbar,.member-console-filters,.member-directory-row,.member-action-row,.relationship-direct,.relationship-row{grid-template-columns:1fr}.member-actions input{width:100%}.member-actions .btn{flex:1 1 120px}.relationship-actions{justify-content:stretch}.relationship-actions .btn{width:100%}}
 </style>`;
   source = source.includes("</head>") ? source.replace("</head>", style + "\n</head>") : style + source;
