@@ -799,10 +799,11 @@ async function readJson(env, key, fallback) {
 
 
 
-async function resolvePortalSessionAuthority(env, qq, groupId = "") {
+async function resolvePortalSessionAuthority(env, qq, groupId = "", username = "") {
   const normalizedQq = String(qq || "");
   const normalizedGroupId = String(groupId || "");
-  const developer = isDeveloperId(env, normalizedQq);
+  const systemAdmin = normalizePortalUsername(username) === PORTAL_SYSTEM_ADMIN_USERNAME;
+  const developer = systemAdmin || isDeveloperId(env, normalizedQq);
   if (developer) {
     return {
       role: "developer",
@@ -834,7 +835,7 @@ async function createPortalSession(env, data) {
   const token = crypto.randomUUID() + crypto.randomUUID();
   const qq = String(data.qq || "");
   const groupId = String(data.groupId || "");
-  const authority = await resolvePortalSessionAuthority(env, qq, groupId);
+  const authority = await resolvePortalSessionAuthority(env, qq, groupId, data.username);
   const role = authority.role;
   const permissions = authority.permissions;
   const now = Date.now();
@@ -889,7 +890,7 @@ async function getPortalSession(env, token, { touch = true } = {}) {
     session.absoluteTtlMs = absoluteTtlMs;
     session.absoluteExpiresAt = absoluteExpiresAt;
 
-    const authority = await resolvePortalSessionAuthority(env, session.qq, session.groupId);
+    const authority = await resolvePortalSessionAuthority(env, session.qq, session.groupId, session.username);
     session.role = authority.role;
     session.permissions = authority.permissions;
 
