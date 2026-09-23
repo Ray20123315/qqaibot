@@ -39,7 +39,10 @@ assert(worker.includes('partnerCommand: true'), 'Partner unmute must use the res
 assert(worker.includes('只能解除由对象关系产生的禁言'), 'Partner unmute must reject other mute sources');
 
 const portal = fs.readFileSync('src/portal/runtime.js', 'utf8');
-assert(portal.includes("members:'群友列表'"), 'Portal title map must include the member list');
+const i18n = fs.readFileSync('src/i18n/portal.js', 'utf8');
+assert(i18n.includes('"view.members": "群友列表"'), 'Traditional Chinese locale must include the member view label');
+assert(i18n.includes('"view.members": "Members"'), 'English locale must include the member view label');
+assert(portal.includes("function portalTitle(name)"), 'Portal must resolve view titles through the i18n contract');
 assert(portal.includes("'groups','moderation','members','ruleviolations'"), 'Portal management visibility must include the member list');
 const portalPlugins = fs.readFileSync('src/plugins/bundled/portal-features.js', 'utf8');
 assert(portal.includes('id="pluginGrid"'), 'Portal must expose the plugin center');
