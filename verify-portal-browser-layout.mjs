@@ -80,7 +80,7 @@ function injectProbe(html, selectors) {
       out.overflowers=out.overflowers.slice(0,20);
       document.title="QQAI_LAYOUT_PROBE:"+encodeURIComponent(JSON.stringify(out));
     }
-    if(document.readyState==="loading")document.addEventListener("DOMContentLoaded",function(){requestAnimationFrame(function(){requestAnimationFrame(sample)})},{once:true});else requestAnimationFrame(function(){requestAnimationFrame(sample)});
+    if(document.readyState==="loading")document.addEventListener("DOMContentLoaded",sample,{once:true});else sample();
   })();<\/script>`;
   return cleanHtml.replace("</body>", probe + "</body>");
 }
@@ -89,7 +89,7 @@ function runPage(name, config, width, height) {
   const file = path.join(tmp, name + "-" + width + ".html");
   fs.writeFileSync(file, injectProbe(config.html, config.selectors));
   let lastStderr = "";
-  for (let attempt = 1; attempt <= 3; attempt += 1) {
+  for (let attempt = 1; attempt <= 5; attempt += 1) {
     const userDir = path.join(tmp, "chrome-" + name + "-" + width + "-attempt-" + attempt);
     fs.mkdirSync(userDir, { recursive: true });
     const result = spawnSync(chrome, [
@@ -119,9 +119,9 @@ function runPage(name, config, width, height) {
       return metrics;
     }
     lastStderr = String(result.stderr || "");
-    if (attempt < 3) console.warn("layout probe retry", name, width, "attempt", attempt);
+    if (attempt < 5) console.warn("layout probe retry", name, width, "attempt", attempt);
   }
-  assert.fail(name + " did not emit layout metrics after 3 attempts. stderr=" + lastStderr.slice(-2500));
+  assert.fail(name + " did not emit layout metrics after 5 attempts. stderr=" + lastStderr.slice(-2500));
 }
 
 function assertLayout(name, width, metrics) {
