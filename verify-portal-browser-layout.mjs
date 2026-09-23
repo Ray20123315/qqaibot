@@ -50,12 +50,13 @@ const pages = {
 
 function injectProbe(html, selectors) {
   const payload = JSON.stringify(selectors);
+  const cleanHtml = String(html).replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, "");
   const probe = `<script id="__browser_layout_probe">(function(){
     var selectors=${payload};
     function sample(){
       var vw=document.documentElement.clientWidth||window.innerWidth;
       var vh=document.documentElement.clientHeight||window.innerHeight;
-      var out={vw:vw,vh:vh,docScrollWidth:document.documentElement.scrollWidth,bodyScrollWidth:document.body?document.body.scrollWidth:0,devicePixelRatio:window.devicePixelRatio||1,items:{}};
+      var out={vw:vw,vh:vh,docScrollWidth:document.documentElement.scrollWidth,bodyScrollWidth:document.body?document.body.scrollWidth:0,devicePixelRatio:window.devicePixelRatio||1,items:{},overflowers:[]};
       selectors.forEach(function(sel){
         var el=document.querySelector(sel);
         if(!el){out.items[sel]={missing:true};return}
@@ -72,11 +73,16 @@ function injectProbe(html, selectors) {
           overflowX:cs.overflowX,minWidth:cs.minWidth,maxWidth:cs.maxWidth
         };
       });
+      Array.prototype.forEach.call(document.querySelectorAll("body *"),function(el){
+        var r=el.getBoundingClientRect(),cs=getComputedStyle(el);
+        if(cs.display!=="none"&&r.width>1&&(r.left<-3||r.right>vw+3))out.overflowers.push({tag:el.tagName,cls:String(el.className||"").slice(0,90),id:el.id||"",left:Math.round(r.left),right:Math.round(r.right),width:Math.round(r.width)});
+      });
+      out.overflowers=out.overflowers.slice(0,20);
       document.title="QQAI_LAYOUT_PROBE:"+encodeURIComponent(JSON.stringify(out));
     }
     if(document.readyState==="loading")document.addEventListener("DOMContentLoaded",function(){requestAnimationFrame(function(){requestAnimationFrame(sample)})},{once:true});else requestAnimationFrame(function(){requestAnimationFrame(sample)});
   })();<\/script>`;
-  return String(html).replace("</body>", probe + "</body>");
+  return cleanHtml.replace("</body>", probe + "</body>");
 }
 
 function runPage(name, config, width, height) {
@@ -128,6 +134,10 @@ function assertLayout(name, width, metrics) {
   }
   assert.ok(metrics.docScrollWidth <= metrics.vw + tolerance,
     name + " document creates horizontal overflow @ " + width + ": " + JSON.stringify(metrics));
+  assert.ok(metrics.bodyScrollWidth <= metrics.vw + tolerance,
+    name + " body creates horizontal overflow @ " + width + ": " + JSON.stringify(metrics));
+  assert.equal(metrics.overflowers.length,0,
+    name + " has out-of-viewport elements @ " + width + ": " + JSON.stringify(metrics.overflowers));
 }
 
 try {
