@@ -88,33 +88,40 @@ function injectProbe(html, selectors) {
 function runPage(name, config, width, height) {
   const file = path.join(tmp, name + "-" + width + ".html");
   fs.writeFileSync(file, injectProbe(config.html, config.selectors));
-  const userDir = path.join(tmp, "chrome-" + name + "-" + width);
-  fs.mkdirSync(userDir, { recursive: true });
-  const result = spawnSync(chrome, [
-    "--headless=new",
-    "--no-sandbox",
-    "--disable-gpu",
-    "--disable-dev-shm-usage",
-    "--disable-background-networking",
-    "--disable-default-apps",
-    "--disable-extensions",
-    "--disable-sync",
-    "--no-first-run",
-    "--hide-scrollbars",
-    "--force-prefers-reduced-motion",
-    "--allow-file-access-from-files",
-    "--window-size=" + width + "," + height,
-    "--virtual-time-budget=1500",
-    "--user-data-dir=" + userDir,
-    "--dump-dom",
-    "file://" + file
-  ], { encoding: "utf8", timeout: 30000, maxBuffer: 12 * 1024 * 1024 });
-  assert.equal(result.status, 0, name + " Chrome failed: " + String(result.stderr || "").slice(-4000));
-  const match = String(result.stdout || "").match(/<title>QQAI_LAYOUT_PROBE:([^<]+)<\/title>/i);
-  assert.ok(match, name + " did not emit layout metrics. stderr=" + String(result.stderr || "").slice(-2500));
-  const metrics = JSON.parse(decodeURIComponent(match[1].replaceAll("&amp;", "&")));
-  console.log("layout", name, width, JSON.stringify(metrics));
-  return metrics;
+  let lastStderr = "";
+  for (let attempt = 1; attempt <= 3; attempt += 1) {
+    const userDir = path.join(tmp, "chrome-" + name + "-" + width + "-attempt-" + attempt);
+    fs.mkdirSync(userDir, { recursive: true });
+    const result = spawnSync(chrome, [
+      "--headless=new",
+      "--no-sandbox",
+      "--disable-gpu",
+      "--disable-dev-shm-usage",
+      "--disable-background-networking",
+      "--disable-default-apps",
+      "--disable-extensions",
+      "--disable-sync",
+      "--no-first-run",
+      "--hide-scrollbars",
+      "--force-prefers-reduced-motion",
+      "--allow-file-access-from-files",
+      "--window-size=" + width + "," + height,
+      "--virtual-time-budget=1500",
+      "--user-data-dir=" + userDir,
+      "--dump-dom",
+      "file://" + file
+    ], { encoding: "utf8", timeout: 30000, maxBuffer: 12 * 1024 * 1024 });
+    assert.equal(result.status, 0, name + " Chrome failed: " + String(result.stderr || "").slice(-4000));
+    const match = String(result.stdout || "").match(/<title>QQAI_LAYOUT_PROBE:([^<]+)<\/title>/i);
+    if (match) {
+      const metrics = JSON.parse(decodeURIComponent(match[1].replaceAll("&amp;", "&")));
+      console.log("layout", name, width, JSON.stringify(metrics));
+      return metrics;
+    }
+    lastStderr = String(result.stderr || "");
+    if (attempt < 3) console.warn("layout probe retry", name, width, "attempt", attempt);
+  }
+  assert.fail(name + " did not emit layout metrics after 3 attempts. stderr=" + lastStderr.slice(-2500));
 }
 
 function assertLayout(name, width, metrics) {
