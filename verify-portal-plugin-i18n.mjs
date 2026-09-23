@@ -31,11 +31,13 @@ assert.ok(catalog.some(x => x.id === "qqai.developer-tools" && x.portal.develope
 assert.equal(catalog.some(x => x.id === "qqai.werewolf"), false);
 
 const portal = getPortalHomePage("aibot.ray2025.com");
-for (const marker of ['data-view="overview"','data-view="plugins"','data-view="account"','id="pluginCompatNav"','id="localeSelect"']) {
+for (const marker of ['data-view="overview"','data-view="plugins"','data-view="account"','id="pluginCompatNav"','id="localeSelect"','id="pluginBack"','class="app workspace-shell"','class="qqai-brand-logo portal-brand-logo"']) {
   assert.ok(portal.includes(marker), "missing core shell marker " + marker);
 }
 for (const page of [getPublicLandingPage(), getPortalLoginPage(), getPortalRegisterPage()]) {
   assert.ok(page.includes('id="publicLocale"'), "public/auth surface missing locale selector");
+  assert.ok(page.includes('id="publicTheme"'), "public/auth surface missing theme toggle");
+  assert.ok(page.includes('class="qqai-brand-logo'), "public/auth surface missing canonical logo");
   assert.ok(page.includes("© 2026 ray20123315. All rights reserved."), "public/auth surface missing rights notice");
   assert.ok(page.includes("qqai-public-i18n"), "public/auth surface missing i18n runtime");
 }
