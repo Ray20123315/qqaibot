@@ -78,8 +78,13 @@ assert.match(runtime, /PLUGIN_DISABLED/);
 assert.match(runtime, /function pluginUsesGroupContext/);
 assert.match(runtime, /async function ensurePluginContext/);
 assert.match(runtime, /class="plugin-context-control hidden"/);
+assert.match(runtime, /pluginCanManage=r\.canManage===true/, "plugin center must honor backend Developer\/Root capability");
+assert.match(runtime, /pluginCanManage\|\|!!\(session/, "plugin rendering must use server canManage as the authoritative capability");
+assert.doesNotMatch(runtime, /openDisabled\?\'disabled\'/, "disabled plugins must not render a dead unavailable button for managers");
 
 const layout = fs.readFileSync("src/portal/layout.js", "utf8");
+const experience = fs.readFileSync("src/portal/experience-v6.js", "utf8");
+assert.match(experience, /RAY_MINIMAL_V9_PLUGIN_CENTER_FIX/, "minimal plugin-center readability layer missing");
 assert.match(layout, /--sidebar-bg:rgba\(255,255,255,\.94\)/);
 assert.match(layout, /:root\[data-theme="dark"\]/);
 assert.match(layout, /background:var\(--panel\)!important/);
