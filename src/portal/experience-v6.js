@@ -718,6 +718,47 @@ html.ray-page-portal body{background:var(--ray-min-bg)!important}
 @media(prefers-reduced-motion:reduce){
   *,*:before,*:after{scroll-behavior:auto!important;animation-duration:.001ms!important;animation-iteration-count:1!important;transition-duration:.001ms!important}
 }
+
+/* RAY_MINIMAL_V9_FUNCTIONAL_VISIBILITY */
+.workspace-topbar{
+  display:flex!important;align-items:center!important;justify-content:space-between!important;gap:12px!important;
+  grid-template-columns:none!important;
+}
+.workspace-heading{flex:0 0 auto!important}
+.ray-command-search{flex:1 1 320px!important}
+.top-actions{
+  display:flex!important;align-items:center!important;justify-content:flex-end!important;
+  gap:8px!important;width:auto!important;max-width:none!important;
+}
+.top-actions>.ray-select{display:block!important;min-width:118px!important}
+#themeToggle,#refresh{display:inline-flex!important;width:auto!important}
+.core-nav .plugin-compat-nav:not([hidden]){
+  display:grid!important;gap:3px!important;margin-top:3px!important;
+}
+.core-nav .plugin-compat-nav button,
+.core-nav>.qqai-nav-entry{
+  min-height:38px!important;border-radius:9px!important;padding:7px 9px!important;
+  border:1px solid transparent!important;background:transparent!important;color:var(--ray-min-muted)!important;
+  font-size:11px!important;font-weight:650!important;text-align:left!important;box-shadow:none!important;
+}
+.core-nav .plugin-compat-nav button:hover,
+.core-nav>.qqai-nav-entry:hover{
+  background:var(--ray-min-surface-2)!important;color:var(--ray-min-text)!important;
+}
+.core-nav>.qqai-nav-entry{display:grid!important}
+@media(max-width:1024px){
+  .workspace-topbar{flex-wrap:wrap!important}
+  .ray-command-search{order:3;flex:1 1 100%!important;max-width:none!important}
+  .top-actions{margin-left:auto!important}
+}
+@media(max-width:620px){
+  .top-actions>.ray-select{min-width:96px!important}
+  #refresh{display:none!important}
+  .ray-account-button{min-width:44px!important;width:44px!important;padding:4px!important}
+  .ray-account-button>span:not(.ray-account-avatar){display:none!important}
+}
+/* RAY_MINIMAL_V9_FUNCTIONAL_VISIBILITY_END */
+
 /* RAY_MINIMAL_V9_END */
 
 /* RAY_REFERENCE_V7_END */
