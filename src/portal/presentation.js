@@ -76,6 +76,10 @@ function publicLandingMainMarkup() {
 </main>`;
 }
 
+function publicPresentationClientScript() {
+  return `<script id="qqai-public-presentation-client">(function(){var root=document.documentElement;function theme(){try{return localStorage.getItem('qqai_theme')==='dark'?'dark':'light'}catch(e){return'light'}}function label(){var b=document.getElementById('publicThemeToggle');if(!b)return;b.textContent=root.dataset.theme==='dark'?'☀':'◐';b.setAttribute('aria-label',root.dataset.theme==='dark'?'Use light theme':'Use dark theme')}root.dataset.theme=theme();var b=document.getElementById('publicThemeToggle');if(b)b.onclick=function(){var next=root.dataset.theme==='dark'?'light':'dark';root.dataset.theme=next;try{localStorage.setItem('qqai_theme',next)}catch(e){}label()};label()})();<\/script>`;
+}
+
 function publicPresentationStyles() {
   return `
 <style id="qqai-public-redesign-v1">
@@ -92,4 +96,4 @@ body{background:var(--public-bg)!important;color:var(--public-text)!important}.c
 </style>`;
 }
 
-export { publicLandingMainMarkup, publicPresentationStyles, replaceLegacyBrandMarks };
+export { publicLandingMainMarkup, publicPresentationClientScript, publicPresentationStyles, replaceLegacyBrandMarks };
