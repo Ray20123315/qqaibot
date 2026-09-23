@@ -17,6 +17,7 @@ import { fetchConversationAttachmentResponse, getForwardMessageSnapshot, getTaip
 import { OPS_CAPABILITIES, OPS_RECORD_TYPES, opsActiveRuleRecords, opsActivityParticipants, opsActivitySummary, opsAnalytics, opsAnnounceActivity, opsCapabilityDef, opsCleanupThinking, opsConsumeQuota, opsCreateScheduleFromSpec, opsDeleteRecord, opsDependencyCheck, opsEffectiveCapability, opsExecuteHandoff, opsFuseState, opsGetRecord, opsGetSettings, opsImpactPreview, opsInviteActivityParticipant, opsJoinActivity, opsLeaveActivity, opsListRecords, opsMemberSummary, opsModelMetrics, opsParticipantsKey, opsPermissionKey, opsPollVotesKey, opsPreviewMessage, opsPublishAnnouncement, opsPurgeRemovedRecordTypes, opsRecordKey, opsRecordQualityFeedback, opsRemovedType, opsRequire, opsResetFuse, opsRestoreSnapshot, opsRetentionCleanup, opsRoleRank, opsRuleConflictCheck, opsRuleSandbox, opsSaveRecord, opsSaveSettings, opsSchedulePreview, opsSendDailyDigest, opsSendDraftNow, opsSnapshotConfig, opsTaipeiDateKey, opsTaskAction, opsTaskCenter, opsTypeDef, opsVersionKey, opsVotePoll, opsWelcomePreview } from "../operations/runtime.js";
 import { appendPlatformTrace, enqueuePlatformJob, listPlatformFeatures, listPlatformJobs, listPlatformTraces, platformFeatureById, setPlatformFeature } from "../platform/runtime.js";
 import { PORTAL_SETTING_DEFINITIONS, authDbDelStrict, authDbPutStrict, base32Encode, createPortalPasswordRecord, decryptPortalAuthSecret, deleteMemoryVector, encryptPortalAuthSecret, extractGroupId, generateBackupCodes, generateSixDigitCode, getOneBotHub, getPortalSession, getUserQuota, hashBackupCode, isMemoryBanned, jsonResponse, migratePortalMemories, portalAuthEncryptionMaterial, portalRoleRank, portalSessionCookie, randomBytes, readCookie, readJson, readPortalAuthJson, readPortalSettingValue, resolvePortalRole, searchPortalVectors, sendOneBotAction, sendPortalVerificationMessage, sha256Hex, upsertMemoryVector, validatePortalPassword, verifyPortalPassword, verifyPortalVerificationCode, verifyTotpCode, writeMemoryAudit, writePortalSettingValue } from "./auth.js";
+import { readPortalBranding, writePortalBranding } from "./brand.js";
 import { handlePortalMemberApi } from "./members.js";
 import { cancelSchedule, countActiveSchedulesForUser, createScheduleRecord, deleteScheduleRecord, extractScheduleMentionIds, listUserSchedules, parseManagementScheduleAction, parseScheduleRequest, reviewScheduleWithGemma, reviseScheduleRecord, sanitizeAppealForReviewer, scheduleSpecFromRecord, skipScheduleOnce, voteAppeal, voteSchedule } from "../scheduler/runtime.js";
 import { envFlag, getFeatureFlag, getPrivateAccessMode, isGroupWhitelisted, numericId, setFeatureFlag } from "../security/network.js";
@@ -815,6 +816,21 @@ async function handlePortalApi(request, env, url) {
   const permissions = groupId ? await getEffectivePermissions(env, groupId, session.qq, role, role === "developer") : session.permissions || {};
   const authed = { ...session, groupId, role, permissions };
   const portalIsDeveloper = permissions.developer || isDeveloperId(env, authed.qq);
+
+  if (request.method === "GET" && path === "/branding") {
+    return jsonResponse({ ok: true, branding: await readPortalBranding(env) });
+  }
+
+  if (request.method === "POST" && path === "/branding") {
+    if (!portalIsDeveloper) return jsonResponse({ ok: false, code: "BRANDING_MANAGE_FORBIDDEN", message: "只有 Developer / Root 可以修改品牌設定。" }, 403);
+    const result = await writePortalBranding(env, body || {});
+    if (!result.ok) {
+      const badRequest = ["BRANDING_INVALID", "LOGO_FORMAT_UNSUPPORTED", "LOGO_TOO_LARGE"].includes(result.code);
+      return jsonResponse(result, badRequest ? 400 : 503);
+    }
+    await writeSystemAudit(env, { type: "portal_branding", actorId: authed.qq, action: "updated" }).catch(() => {});
+    return jsonResponse({ ...result, message: "品牌設定已保存。" });
+  }
 
   if (request.method === "GET" && path === "/plugins") {
     return jsonResponse({
