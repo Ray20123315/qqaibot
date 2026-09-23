@@ -163,7 +163,11 @@ const registerResponse = await portalWorker.fetch(new Request("https://aibot.ray
   DB: sessionFailDb,
   DEVELOPER_IDS: "123456789"
 }, { waitUntil() {}, passThroughOnException() {} });
-const registerPayload = await registerResponse.json();
+const registerBody = await registerResponse.text();
+assert.ok(registerBody, `developer register response must contain JSON (status=${registerResponse.status}, location=${registerResponse.headers.get("location") || ""})`);
+let registerPayload;
+try { registerPayload = JSON.parse(registerBody); }
+catch (error) { throw new Error(`developer register response must be JSON (status=${registerResponse.status}): ${registerBody.slice(0, 500)}`); }
 assert.equal(registerResponse.status, 200);
 assert.equal(registerPayload.ok, true);
 assert.equal(registerPayload.code, "ACCOUNT_ACTIVATED_LOGIN_REQUIRED");
