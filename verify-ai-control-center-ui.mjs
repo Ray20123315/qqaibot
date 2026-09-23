@@ -76,7 +76,7 @@ assert.match(runtime, /async function ensurePluginContext/);
 assert.match(runtime, /class="plugin-context-control hidden"/);
 
 const layout = fs.readFileSync("src/portal/layout.js", "utf8");
-assert.match(layout, /--sidebar-bg:#ffffff/);
+assert.match(layout, /--sidebar-bg:rgba\(255,255,255,\.94\)/);
 assert.match(layout, /:root\[data-theme="dark"\]/);
 assert.match(layout, /background:var\(--panel\)!important/);
 assert.match(layout, /\.plugin-grid\{/);
