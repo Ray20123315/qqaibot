@@ -10,7 +10,7 @@ assert.ok(injected.indexOf("qqai-portal-layout-v400") > injected.indexOf('id="fe
 assert.match(injected, /@media\(max-width:1024px\)/);
 assert.match(injected, /@media\(max-width:720px\)/);
 assert.match(injected, /@media\(max-width:440px\)/);
-for (const selector of [".plugin-grid{", ".core-hero{", ".member-action-row{", ".cleanup-summary{", "#qqai-deployment-toast"]) {
+for (const selector of [".plugin-grid{", ".workspace-hero{", ".workspace-status-grid{", ".plugin-back{", ".member-action-row{", ".cleanup-summary{", "#qqai-deployment-toast"]) {
   assert.ok(injected.includes(selector), "missing layout selector: " + selector);
 }
 assert.match(injected, /--sidebar-bg:rgba\(255,255,255,\.94\)/);
