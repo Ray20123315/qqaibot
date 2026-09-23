@@ -9,7 +9,7 @@ import { clearChatSessionHistory, dbDel, dbGet, dbPut } from "../data/store.js";
 import { botCanRunRuleMonitor, enrichPortalGroupsWithBindings, filterAuthorizedReviewers, getAppealEligibleGroupsForUser, getBotGroupRole, getGroupFamilyForGroup, getGroupOwnerId, getLiveGroupMemberList, getWhitelistedGroupsForUser, isBotVerifiedGroupOwner, isVerifiedGroupOwner, normalizeJoinUrl, notifyModerationProposalGroup, saveGroupFamily, sendGroupSelectedMentions, sendMissingHeadGroupGuide, verifyGroupMembership } from "../group/runtime.js";
 import { apiModelHealthCandidates, buildHealthState, runHealthChecks, runSingleApiModelHealthCheck } from "../health/runtime.js";
 import { toSimplifiedChinese } from "../i18n/commands.js";
-import { portalI18nPayload } from "../i18n/portal.js";
+import { portalI18nPayload } from "../i18n/portal.js";\nimport { publicLandingMainMarkup, publicPresentationClientScript, publicPresentationStyles, replaceLegacyBrandMarks } from "./presentation.js";\nimport { brandLogoMarkup } from "./brand.js";
 import { portalPluginCatalog, portalPluginCatalogState, portalPluginForApiPath, readPortalPluginEnabled, setPortalPluginEnabled } from "../plugins/runtime.js";
 import { BILIBILI_POLL_DEFAULT_SECONDS, bilibiliPollIntervalSeconds, listBilibiliConnectors, normalizeBilibiliUid, pollOneAutomaticBilibiliConnector, sendBilibiliConnectorNotification } from "../integrations/bilibili.js";
 import { appendRuleViolationRecord, createModerationProposal, defaultRuleCategoryPolicies, getGroupMemberSafe, getRuleCategoryPolicies, getRuleProgressivePolicy, handleGroupWorkDecision, handleModerationConfirmation, listModerationProposals, localModerationIntent, moderationActionLabel, moderationActionNeedsTarget, normalizeRuleCategoryPolicies, normalizeRulePolicyActions, normalizeRuleProgressivePolicy, normalizeRuleProxyMode, normalizeRuleSeverity, normalizeRuleStrictness, parseUnlimitedNonNegativeInteger, performRuleProxyAction, recordRuleViolationFeedback, reverseRuleViolationAction, updateRuleViolationRecord } from "../moderation/runtime.js";
@@ -2622,7 +2622,7 @@ function publicI18nClientScript() {
 
 function decoratePublicPageI18n(html, page) {
   let source = String(html || "");
-  source = source.replace('<nav class="nav">', '<nav class="nav"><select id="publicLocale" class="public-locale" aria-label="Language"></select>');
+  source = source.replace('<nav class="nav">', '<nav class="nav"><select id="publicLocale" class="public-locale" aria-label="Language"></select><button id="publicThemeToggle" type="button" class="public-theme-toggle" aria-label="Theme">◐</button>');
   const replacements = [
     ['<a class="active hide-tablet" href="/">首頁</a>', '<a class="active hide-tablet" href="/" data-i18n="public.nav.home">首頁</a>'],
     ['<a class="hide-tablet" href="/">首頁</a>', '<a class="hide-tablet" href="/" data-i18n="public.nav.home">首頁</a>'],
@@ -2636,7 +2636,9 @@ function decoratePublicPageI18n(html, page) {
     ['<a class="nav-cta" href="/login">立即開始&nbsp; →</a>', '<a class="nav-cta" href="/login" data-i18n="public.hero.start">登入控制中心</a>']
   ];
   for (const [from, to] of replacements) source = source.replace(from, to);
+  source = source.replace("</head>", publicPresentationStyles() + "</head>");
   if (page === "landing") {
+    source = source.replace(/<main>[\s\S]*?<\/main>/, publicLandingMainMarkup());
     source = source
       .replace('<h1>把 AI、插件與自己的資源<br>放在<span class="gradient">同一個控制中心</span></h1>', '<h1 data-i18n="public.hero.title">把核心保持簡單，把需要的能力裝成插件。</h1>')
       .replace('<p>使用帳號密碼登入；開發者第一次使用時直接把保留帳號 admin 綁定到 Developer QQID 並設定密碼，不需要 QQ 驗證碼或部署管理金鑰。透過插件生態與 BYOR，把 Cloudflare 與外部 API 接入，打造屬於你的 AI 自動化平台。</p>', '<p data-i18n="public.hero.summary">安全帳密、權限與插件執行留在核心；其他能力按需啟用。</p>')
@@ -2654,7 +2656,8 @@ function decoratePublicPageI18n(html, page) {
       .replace('<button id="activate" type="button" class="btn primary" style="width:100%">設定密碼並登入&nbsp; →</button>', '<button id="activate" type="button" class="btn primary" style="width:100%" data-i18n="register.button">設定密碼並登入</button>');
   }
   source = source.replace(/<footer class="footer">[\s\S]*?<\/footer>/, '<footer class="footer"><span data-i18n="footer.rights">© 2026 ray20123315. All rights reserved.</span><span>AI Control Center</span></footer>');
-  return source.replace("</body>", publicI18nClientScript() + "</body>");
+  source = replaceLegacyBrandMarks(source, "public-" + page);
+  return source.replace("</body>", publicI18nClientScript() + publicPresentationClientScript() + "</body>");
 }
 
 function getPublicLandingPage() {
