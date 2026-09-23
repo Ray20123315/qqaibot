@@ -14,7 +14,9 @@ const PORTAL_FEATURE_PLUGINS = Object.freeze([
         defaultView: "groups",
         views: ["groups", "members", "member-actions", "relationships", "member-data", "member-cleanup", "notification-routing", "settingscenter"],
         order: 10,
-        legacyBridge: true
+        legacyBridge: true,
+        defaultEnabled: true,
+        apiPrefixes: ["/members", "/group-members", "/group-bindings", "/settings-center", "/admin/state", "/admin/blacklist"]
       },
       i18n: {
         "zh-TW": { name: "社群管理", description: "群組、群友、關係、通知與成員資料工具。" },
@@ -46,7 +48,9 @@ const PORTAL_FEATURE_PLUGINS = Object.freeze([
         defaultView: "ruleviolations",
         views: ["ruleviolations", "moderation", "appealreview", "violationhistory", "appeals"],
         order: 20,
-        legacyBridge: true
+        legacyBridge: true,
+        defaultEnabled: true,
+        apiPrefixes: ["/moderation", "/rule-violations", "/violations", "/appeals", "/review/appeal", "/review/appeals", "/ops/action"]
       },
       i18n: {
         "zh-TW": { name: "群規與審核", description: "群規、待確認操作、違規紀錄與申訴流程。" },
@@ -78,7 +82,9 @@ const PORTAL_FEATURE_PLUGINS = Object.freeze([
         defaultView: "collaboration",
         views: ["collaboration", "schedules", "tasks"],
         order: 30,
-        legacyBridge: true
+        legacyBridge: true,
+        defaultEnabled: false,
+        apiPrefixes: ["/schedules", "/tasks", "/review/schedule", "/review/schedules", "/ops/activity", "/ops/poll", "/ops/tasks", "/ops/schedule", "/ops/digest", "/ops/draft"]
       },
       i18n: {
         "zh-TW": { name: "自動化", description: "活動、投票、排程提醒與任務佇列。" },
@@ -110,7 +116,9 @@ const PORTAL_FEATURE_PLUGINS = Object.freeze([
         defaultView: "memory",
         views: ["memory", "conversations", "aidecisions"],
         order: 40,
-        legacyBridge: true
+        legacyBridge: true,
+        defaultEnabled: true,
+        apiPrefixes: ["/memories", "/matrix", "/vector-search", "/conversations", "/ai-decisions"]
       },
       i18n: {
         "zh-TW": { name: "AI 記憶與知識", description: "記憶、知識卡片、對話紀錄與 AI 回覆紀錄。" },
@@ -142,7 +150,9 @@ const PORTAL_FEATURE_PLUGINS = Object.freeze([
         defaultView: "models",
         views: ["models", "quota", "simulator"],
         order: 50,
-        legacyBridge: true
+        legacyBridge: true,
+        defaultEnabled: false,
+        apiPrefixes: ["/models", "/simulator", "/root/quotas", "/root/model-registry"]
       },
       i18n: {
         "zh-TW": { name: "模型與額度", description: "模型路由、成本額度與事件模擬器。" },
@@ -174,7 +184,9 @@ const PORTAL_FEATURE_PLUGINS = Object.freeze([
         defaultView: "bilibili",
         views: ["bilibili"],
         order: 60,
-        legacyBridge: true
+        legacyBridge: true,
+        defaultEnabled: false,
+        apiPrefixes: ["/integrations/bilibili"]
       },
       i18n: {
         "zh-TW": { name: "外部整合", description: "Bilibili 與其他選用型第三方連接能力。" },
@@ -187,38 +199,6 @@ const PORTAL_FEATURE_PLUGINS = Object.freeze([
         "de": { name: "Integrationen", description: "Bilibili und weitere optionale Integrationen." },
         "pt-BR": { name: "Integrações", description: "Bilibili e outras integrações opcionais." },
         "vi": { name: "Tích hợp", description: "Bilibili và các tích hợp bên thứ ba tùy chọn." }
-      }
-    },
-    async handler() { return { handled: false, actions: [] }; }
-  },
-  {
-    manifest: {
-      id: "qqai.werewolf",
-      name: "Werewolf",
-      version: "1.0.0",
-      mode: "trusted_bundled",
-      events: ["portal.open"],
-      author: "ray20123315",
-      description: "Werewolf game tools.",
-      portal: {
-        category: "entertainment",
-        icon: "狼",
-        defaultView: "werewolf",
-        views: ["werewolf"],
-        order: 70,
-        legacyBridge: true
-      },
-      i18n: {
-        "zh-TW": { name: "狼人殺", description: "狼人殺房間、角色與遊戲控制。" },
-        "zh-CN": { name: "狼人杀", description: "狼人杀房间、角色与游戏控制。" },
-        "en": { name: "Werewolf", description: "Werewolf rooms, roles and game controls." },
-        "ja": { name: "人狼", description: "人狼ゲームのルーム、役職、進行管理。" },
-        "ko": { name: "마피아 게임", description: "늑대인간 게임 방, 역할 및 게임 제어." },
-        "es": { name: "Hombre lobo", description: "Salas, roles y controles del juego." },
-        "fr": { name: "Loup-garou", description: "Salons, rôles et contrôles de partie." },
-        "de": { name: "Werwolf", description: "Räume, Rollen und Spielsteuerung." },
-        "pt-BR": { name: "Lobisomem", description: "Salas, papéis e controles do jogo." },
-        "vi": { name: "Ma sói", description: "Phòng chơi, vai trò và điều khiển trò Ma Sói." }
       }
     },
     async handler() { return { handled: false, actions: [] }; }
@@ -239,7 +219,9 @@ const PORTAL_FEATURE_PLUGINS = Object.freeze([
         views: ["health", "platform", "logs", "maintenance"],
         order: 90,
         legacyBridge: true,
-        developerOnly: true
+        developerOnly: true,
+        defaultEnabled: true,
+        apiPrefixes: ["/platform", "/admin/logs"]
       },
       i18n: {
         "zh-TW": { name: "開發者工具", description: "健康診斷、平台權限、日誌與系統維護。" },
