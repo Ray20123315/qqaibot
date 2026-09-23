@@ -10,7 +10,9 @@ assert.match(landing, /AI Control Center/);
 assert.match(landing, /data-i18n="public\.hero\.title"/);
 assert.match(landing, /id="publicLocale"/);
 assert.match(landing, /© 2026 ray20123315\. All rights reserved\./);
-assert.match(landing, /class="public-architecture"/);\nassert.match(landing, /class="public-core-grid"/);\nassert.match(landing, /data-brand-logo="qqai"/);
+assert.match(landing, /class="public-architecture"/);
+assert.match(landing, /class="public-core-grid"/);
+assert.match(landing, /data-brand-logo="qqai"/);
 assert.doesNotMatch(landing, /2\.4K/);
 
 const login = getPortalLoginPage();
@@ -19,7 +21,8 @@ assert.match(login, /id="username"/);
 assert.match(login, /id="password"/);
 assert.match(login, /id="publicLocale"/);
 assert.match(login, /data-i18n="login\.title"/);
-assert.match(login, /© 2026 ray20123315\. All rights reserved\./);\nassert.match(login, /data-brand-logo="qqai"/);
+assert.match(login, /© 2026 ray20123315\. All rights reserved\./);
+assert.match(login, /data-brand-logo="qqai"/);
 
 const register = getPortalRegisterPage();
 assert.match(register, /ADMIN PASSWORD SETUP/);
@@ -27,7 +30,8 @@ assert.match(register, /id="activationMode"/);
 assert.match(register, /value="admin"/);
 assert.match(register, /id="publicLocale"/);
 assert.match(register, /data-i18n="register\.title"/);
-assert.match(register, /© 2026 ray20123315\. All rights reserved\./);\nassert.match(register, /data-brand-logo="qqai"/);
+assert.match(register, /© 2026 ray20123315\. All rights reserved\./);
+assert.match(register, /data-brand-logo="qqai"/);
 
 const portalBase = getPortalHomePage("aibot.ray2025.com");
 for (const marker of [
@@ -74,7 +78,8 @@ assert.match(layout, /background:var\(--portal-panel\)!important/);
 assert.match(layout, /\.plugin-grid\{/);
 assert.match(layout, /\.portal-home-hero\{/);
 assert.match(layout, /\.portal-primary-nav>\.qqai-nav-entry/);
-assert.doesNotMatch(portalBase, /<aside id="sidebar"/);\nassert.doesNotMatch(layout, /--bg:#020713!important/);
+assert.doesNotMatch(portalBase, /<aside id="sidebar"/);
+assert.doesNotMatch(layout, /--bg:#020713!important/);
 
 console.log("verify-ai-control-center-ui: ok");
 
