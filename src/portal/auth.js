@@ -243,6 +243,8 @@ function validatePortalPassword(password) {
 
 const PORTAL_SYSTEM_ADMIN_USERNAME = "admin";
 const PORTAL_PASSWORD_PBKDF2_ITERATIONS = 100000;
+const PORTAL_MANAGED_DEVELOPER_IDS_KEY = "portal_system_developer_ids";
+const portalManagedDeveloperIdsCache = new WeakMap();
 
 const PORTAL_USERNAME_RESERVED = Object.freeze(new Set([
   PORTAL_SYSTEM_ADMIN_USERNAME, "administrator", "root", "developer", "system", "support", "security",
@@ -278,6 +280,128 @@ function validatePortalLoginUsername(value) {
     return { ok: true, value: PORTAL_SYSTEM_ADMIN_USERNAME, normalized: PORTAL_SYSTEM_ADMIN_USERNAME, system: true };
   }
   return validatePortalUsername(display);
+}
+
+function portalAdminCredentialConfig(env = {}) {
+  const username = String(env.PORTAL_ADMIN_USERNAME ?? "").normalize("NFKC").trim();
+  const password = String(env.PORTAL_ADMIN_PASSWORD ?? "");
+  const hasUsername = Boolean(username);
+  const hasPassword = Boolean(password);
+  const normalizedUsername = normalizePortalUsername(username);
+  if (!hasUsername && !hasPassword) return { mode: "legacy", username: "", normalizedUsername: "", password: "" };
+  if (!hasUsername || !hasPassword) return { mode: "invalid", username, normalizedUsername, password: "" };
+  const usernameCheck = normalizedUsername === PORTAL_SYSTEM_ADMIN_USERNAME
+    ? { ok: true }
+    : validatePortalUsername(username);
+  if (!usernameCheck.ok || !validatePortalPassword(password).ok) {
+    return { mode: "invalid", username, normalizedUsername, password: "" };
+  }
+  return { mode: "configured", username, normalizedUsername, password };
+}
+
+async function resolvePortalPasswordLogin(env, username, password) {
+  const usernameCheck = validatePortalLoginUsername(username);
+  if (!usernameCheck.ok) return { account: null, source: "database", errorCode: "INVALID_CREDENTIALS" };
+  const config = portalAdminCredentialConfig(env);
+  const normalizedUsername = usernameCheck.normalized;
+
+  if (config.mode === "invalid") {
+    if (normalizedUsername === PORTAL_SYSTEM_ADMIN_USERNAME || normalizedUsername === config.normalizedUsername) {
+      return { account: null, source: "environment", errorCode: "ADMIN_CREDENTIALS_MISCONFIGURED" };
+    }
+  } else if (config.mode === "configured") {
+    if (normalizedUsername === config.normalizedUsername) {
+      const account = await readPortalAccountByUsername(env, PORTAL_SYSTEM_ADMIN_USERNAME);
+      if (!account) return { account: null, source: "environment", errorCode: "ADMIN_ACCOUNT_NOT_BOUND" };
+      if (config.normalizedUsername !== PORTAL_SYSTEM_ADMIN_USERNAME) {
+        const collision = await readPortalAccountByUsername(env, config.normalizedUsername);
+        if (collision && (collision.qq !== account.qq || collision.normalizedUsername !== PORTAL_SYSTEM_ADMIN_USERNAME)) {
+          return { account: null, source: "environment", errorCode: "ADMIN_USERNAME_COLLISION" };
+        }
+      }
+      return {
+        account,
+        source: "environment",
+        passwordMatches: constantTimeEqual(String(password || ""), config.password)
+      };
+    }
+    if (normalizedUsername === PORTAL_SYSTEM_ADMIN_USERNAME) {
+      return { account: null, source: "environment", errorCode: "INVALID_CREDENTIALS" };
+    }
+  }
+
+  const account = await readPortalAccountByUsername(env, normalizedUsername);
+  return { account, source: "database", errorCode: account ? "" : "INVALID_CREDENTIALS" };
+}
+
+function normalizeManagedDeveloperIds(values) {
+  const source = Array.isArray(values) ? values : String(values ?? "").split(/[\n,;]+/g);
+  const ids = [...new Set(source.map(value => String(value ?? "").replace(/\D/g, "")).filter(value => /^\d{5,12}$/.test(value)))];
+  return ids.slice(0, 50);
+}
+
+async function readPortalManagedDeveloperIds(env) {
+  if (!env?.DB || (typeof env.DB !== "object" && typeof env.DB !== "function")) return [];
+  const cached = portalManagedDeveloperIdsCache.get(env.DB);
+  if (cached && cached.expiresAt > Date.now()) {
+    if (cached.error) throw authStorageError("Portal managed Developer QQ list is unavailable");
+    return [...cached.ids];
+  }
+  let raw;
+  try {
+    raw = await authDbGetStrict(env, PORTAL_MANAGED_DEVELOPER_IDS_KEY);
+  } catch (error) {
+    portalManagedDeveloperIdsCache.set(env.DB, { ids: [], error: true, expiresAt: Date.now() + 1000 });
+    throw error;
+  }
+  let parsed = [];
+  if (raw) {
+    try { parsed = JSON.parse(raw); } catch { parsed = []; }
+  }
+  const ids = normalizeManagedDeveloperIds(parsed);
+  portalManagedDeveloperIdsCache.set(env.DB, { ids, expiresAt: Date.now() + 3000 });
+  return [...ids];
+}
+
+async function writePortalManagedDeveloperIds(env, values) {
+  const source = Array.isArray(values) ? values : String(values ?? "").split(/[\n,;]+/g);
+  const invalid = source.map(value => String(value ?? "").trim()).filter(value => value && !/^\d{5,12}$/.test(value));
+  if (invalid.length) {
+    const error = new Error("DEVELOPER_QQ_INVALID");
+    error.code = "DEVELOPER_QQ_INVALID";
+    throw error;
+  }
+  const ids = normalizeManagedDeveloperIds(source);
+  if (source.filter(value => String(value ?? "").trim()).length > 50) {
+    const error = new Error("DEVELOPER_QQ_LIMIT");
+    error.code = "DEVELOPER_QQ_LIMIT";
+    throw error;
+  }
+  await authDbPutStrict(env, PORTAL_MANAGED_DEVELOPER_IDS_KEY, JSON.stringify(ids));
+  if (env?.DB && (typeof env.DB === "object" || typeof env.DB === "function")) {
+    portalManagedDeveloperIdsCache.delete(env.DB);
+  }
+  return ids;
+}
+
+async function portalEnvironmentWithManagedDeveloperIds(env) {
+  if (!env?.DB) return env;
+  try {
+    const managedIds = await readPortalManagedDeveloperIds(env);
+    const values = [env.DEVELOPER_IDS, env.ROOT_QQ_IDS, env.DEVELOPER_ID].flatMap(value => Array.isArray(value) ? value : String(value ?? "").split(/[\n,;]+/g));
+    const existing = values.map(value => String(value || "").trim()).filter(Boolean);
+    const overlay = Object.create(env);
+    overlay.qqaiStaticDeveloperIds = [...new Set(existing)].join(",");
+    overlay.DEVELOPER_IDS = [...new Set([...existing, ...managedIds])].join(",");
+    return overlay;
+  } catch {
+    return env;
+  }
+}
+
+async function isPortalSystemAdminQq(env, qq) {
+  const admin = await readPortalAccountByUsername(env, PORTAL_SYSTEM_ADMIN_USERNAME);
+  return Boolean(admin && admin.qq === String(qq || "").replace(/\D/g, ""));
 }
 
 function portalAccountIdentityKey(qq) {
@@ -407,6 +531,12 @@ async function createPortalAdminAccountBinding(env, { qq } = {}) {
     const error = new Error("ADMIN_ACCOUNT_ALREADY_BOUND");
     error.code = "ADMIN_ACCOUNT_ALREADY_BOUND";
     error.account = existingAdmin;
+    throw error;
+  }
+  if (existingIdentity && existingIdentity.normalizedUsername !== PORTAL_SYSTEM_ADMIN_USERNAME) {
+    const error = new Error("ADMIN_QQ_ALREADY_BOUND_TO_USER");
+    error.code = "ADMIN_QQ_ALREADY_BOUND_TO_USER";
+    error.account = existingIdentity;
     throw error;
   }
   if (existingIdentity?.normalizedUsername === PORTAL_SYSTEM_ADMIN_USERNAME && existingAdmin?.qq === normalizedQq) return existingIdentity;
@@ -763,7 +893,7 @@ async function sendPortalVerificationMessage(env, qq, message) {
       await callOneBotAction(env, attempt.payload, 12000);
       return { ok: true, transport: attempt.transport };
     } catch (error) {
-      errors.push(`${attempt.transport}:${String(error?.message || error)}`);
+      errors.push(`${attempt.transport}:${portalDeliveryErrorCode(error)}`);
     }
   }
   for (const action of ["send_private_msg", "send_msg"]) {
@@ -774,10 +904,35 @@ async function sendPortalVerificationMessage(env, qq, message) {
       await sendOneBotHttpAction(env, action, params, 12000);
       return { ok: true, transport: `http:${action}` };
     } catch (error) {
-      errors.push(`http:${action}:${String(error?.message || error)}`);
+      errors.push(`http:${action}:${portalDeliveryErrorCode(error)}`);
     }
   }
-  return { ok: false, transport: "none", errors };
+  let websocketConnected = null;
+  try {
+    const statusResponse = await getOneBotHub(env).fetch("https://onebot-hub/status");
+    const status = await statusResponse.json().catch(() => null);
+    websocketConnected = typeof status?.connected === "boolean" ? status.connected : null;
+  } catch {}
+  return {
+    ok: false,
+    transport: "none",
+    errors,
+    websocketConnected,
+    httpConfigured: Boolean(oneBotHttpActionUrl(env, "send_msg"))
+  };
+}
+
+function portalDeliveryErrorCode(error) {
+  const value = String(error?.message || error || "").toUpperCase();
+  const known = [
+    "ONEBOT_HUB_NOT_BOUND", "NAPCAT_NOT_CONNECTED", "ONEBOT_RPC_TIMEOUT",
+    "NAPCAT_HTTP_NOT_CONFIGURED", "NAPCAT_HTTP_TIMEOUT", "NAPCAT_HTTP_INVALID_URL"
+  ];
+  const code = known.find(item => value.includes(item));
+  if (code) return code;
+  const httpStatus = value.match(/NAPCAT_HTTP_(\d{3})/);
+  if (httpStatus) return `NAPCAT_HTTP_${httpStatus[1]}`;
+  return "DELIVERY_FAILED";
 }
 
 
@@ -1099,6 +1254,28 @@ async function sha256Hex(value) {
 
 
 
+async function checkPortalAuthRateLimit(env, request, { scope, principal } = {}) {
+  const limiter = env?.MY_RATE_LIMITER;
+  if (!limiter || typeof limiter.limit !== "function") return { ok: false, reason: "unavailable" };
+  const normalizedScope = String(scope || "auth").replace(/[^a-z0-9_-]/gi, "").slice(0, 10) || "auth";
+  const identity = String(principal || "anonymous").normalize("NFKC").trim().toLowerCase() || "anonymous";
+  const ip = String(request?.headers?.get("CF-Connecting-IP") || "").trim();
+  const subjects = [["user", identity]];
+  if (ip) subjects.push(["ip", ip]);
+  try {
+    for (const [kind, value] of subjects) {
+      const digest = await sha256Hex(`${normalizedScope}:${kind}:${value}`);
+      const result = await limiter.limit({ key: `pa:${normalizedScope}:${kind}:${digest.slice(0, 40)}` });
+      if (result?.success !== true) return { ok: false, reason: "limited" };
+    }
+  } catch {
+    return { ok: false, reason: "unavailable" };
+  }
+  return { ok: true, reason: "allowed" };
+}
+
+
+
 async function migratePortalMemories(env, key, rawList, ownerFallback) {
   const input = Array.isArray(rawList) ? rawList : [];
   const normalized = [];
@@ -1282,4 +1459,4 @@ async function writePortalSettingValue(env, definition, groupId, targetQq, value
   }
 }
 
-export { BASE32_ALPHABET, PORTAL_PASSWORD_PBKDF2_ITERATIONS, PORTAL_SETTING_DEFINITIONS, PORTAL_SYSTEM_ADMIN_USERNAME, PORTAL_USERNAME_RESERVED, authDbDelStrict, authDbGetStrict, authDbPutIfAbsentStrict, authDbPutStrict, authDbRetry, authStorageError, base32Decode, base32Encode, base64UrlToBytes, buildGroupReplyMessage, bytesToBase64Url, bytesToHex, clearPasswordLoginGuard, commandChangesWebSettings, classifyPortalAuthFailure, constantTimeEqual, createPortalAccountBinding, createPortalAdminAccountBinding, createPortalPasswordRecord, createPortalSession, decryptPortalAuthSecret, deleteMemoryVector, derivePortalPassword, encryptPortalAuthSecret, extractGroupId, generateBackupCodes, generateSixDigitCode, generateTotpCode, getOneBotHub, getPortalSession, getPublicNebulaSeed, getUserQuota, hasAdminRole, hashBackupCode, isMemoryBanned, isValidPortalPasswordRecord, jsonResponse, markGroupMemberLeft, migratePortalMemories, normalizeBackupCode, normalizePortalUsername, notePasswordLoginFailure, oneBotHttpActionUrl, portalAuthEncryptionKey, portalAuthEncryptionMaterial, portalRoleRank, portalAccountIdentityKey, portalAccountUsernameKey, portalSessionCookie, randomBytes, readCookie, readJson, readPasswordLoginGuard, readPortalAccountByQq, readPortalAccountByUsername, readPortalAuthJson, readPortalSettingValue, resolvePortalRole, resolvePortalSessionAuthority, searchPortalVectors, sendOneBotAction, sendOneBotHttpAction, sendPortalVerificationMessage, sha256Hex, simplifyJsonValue, upsertGroupMember, upsertMemoryVector, validatePortalLoginUsername, validatePortalPassword, validatePortalUsername, verifyPortalPassword, verifyPortalVerificationCode, verifyTotpCode, writeMemoryAudit, writePortalSettingValue, writeSystemError };
+export { BASE32_ALPHABET, PORTAL_PASSWORD_PBKDF2_ITERATIONS, PORTAL_SETTING_DEFINITIONS, PORTAL_SYSTEM_ADMIN_USERNAME, PORTAL_USERNAME_RESERVED, authDbDelStrict, authDbGetStrict, authDbPutIfAbsentStrict, authDbPutStrict, authDbRetry, authStorageError, base32Decode, base32Encode, base64UrlToBytes, buildGroupReplyMessage, bytesToBase64Url, bytesToHex, checkPortalAuthRateLimit, clearPasswordLoginGuard, commandChangesWebSettings, classifyPortalAuthFailure, constantTimeEqual, createPortalAccountBinding, createPortalAdminAccountBinding, createPortalPasswordRecord, createPortalSession, decryptPortalAuthSecret, deleteMemoryVector, derivePortalPassword, encryptPortalAuthSecret, extractGroupId, generateBackupCodes, generateSixDigitCode, generateTotpCode, getOneBotHub, getPortalSession, getPublicNebulaSeed, getUserQuota, hasAdminRole, hashBackupCode, isMemoryBanned, isPortalSystemAdminQq, isValidPortalPasswordRecord, jsonResponse, markGroupMemberLeft, migratePortalMemories, normalizeBackupCode, normalizePortalUsername, notePasswordLoginFailure, oneBotHttpActionUrl, portalAdminCredentialConfig, portalAuthEncryptionKey, portalAuthEncryptionMaterial, portalEnvironmentWithManagedDeveloperIds, portalRoleRank, portalAccountIdentityKey, portalAccountUsernameKey, portalSessionCookie, randomBytes, readCookie, readJson, readPasswordLoginGuard, readPortalAccountByQq, readPortalAccountByUsername, readPortalAuthJson, readPortalManagedDeveloperIds, readPortalSettingValue, resolvePortalPasswordLogin, resolvePortalRole, resolvePortalSessionAuthority, searchPortalVectors, sendOneBotAction, sendOneBotHttpAction, sendPortalVerificationMessage, sha256Hex, simplifyJsonValue, upsertGroupMember, upsertMemoryVector, validatePortalLoginUsername, validatePortalPassword, validatePortalUsername, verifyPortalPassword, verifyPortalVerificationCode, verifyTotpCode, writeMemoryAudit, writePortalManagedDeveloperIds, writePortalSettingValue, writeSystemError };

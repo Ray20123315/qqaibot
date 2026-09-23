@@ -38,7 +38,7 @@ Wrangler 會把所有模組打包成同一個 Worker，不需要建立第二個 
 
 ## 五層設定模型
 
-設定依用途分成五層，不應全部塞進同一頁或同一檔案。**Production 的 Developer identity 由 Cloudflare Dashboard Variables 管理；`wrangler.toml` 使用 `keep_vars = true`，部署腳本同時使用 `--keep-vars`，避免 Git 部署把網頁填入的 `DEVELOPER_IDS`／`ROOT_QQ_IDS`／`DEVELOPER_ID` 清空。**
+設定依用途分成五層，不應全部塞進同一頁或同一檔案。**Cloudflare Dashboard 的 `DEVELOPER_IDS`／`ROOT_QQ_IDS`／`DEVELOPER_ID` 是唯讀的部署層 Developer 身分；系統管理員可在登入後，另外管理 D1 中的 Developer QQ 清單。`wrangler.toml` 使用 `keep_vars = true`，部署腳本使用 `--keep-vars`，避免 Git 部署清除 Dashboard 變數。**
 
 1. **Cloudflare 基礎資源**：Worker 名稱、網域、D1、Vectorize、Durable Object、Cron、Rate Limiter。設定於 `wrangler.toml`。
 2. **公開執行期變數**：開發者 QQ、公開網址、模型名稱、預算、功能開關與安全範圍內的限制值。設定於 `[vars]` 或 Cloudflare Dashboard Variables。
@@ -72,7 +72,7 @@ Wrangler 會把所有模組打包成同一個 Worker，不需要建立第二個 
 - 至少一組可用的 Gemini API Key
 
 ```bash
-npm install --ignore-scripts
+npm ci --ignore-scripts
 npx wrangler login
 ```
 
@@ -107,6 +107,14 @@ cp wrangler.example.toml wrangler.toml
 
 接著在 Cloudflare Dashboard Variables 建立 `DEVELOPER_IDS`（以及需要時的 `ROOT_QQ_IDS` / legacy `DEVELOPER_ID`）。不要把這些 identity 值提交到 production `wrangler.toml`。
 
+同一個 Dashboard 中設定唯一的 `PORTAL_ADMIN_USERNAME`，並用 Cloudflare Secret 設定 `PORTAL_ADMIN_PASSWORD`。兩者必須一起設定，密碼至少 10 個字元。帳號名稱會對應至 D1 內既有的 `admin` 綁定；設定這兩個值不會重建或覆蓋帳號、QQ 綁定或 D1 密碼資料。若尚未設定這一組變數，系統保留現有 D1 管理員登入方式，避免更新後鎖住既有管理員。
+
+```bash
+npx wrangler secret put PORTAL_ADMIN_PASSWORD
+```
+
+NapCat 必須主動連接 `wss://你的網域/onebot`，並使用相同的 `ONEBOT_ACCESS_TOKEN`。如要加 HTTP 備援，設定 `ONEBOT_HTTP_URL` 和對應的 `ONEBOT_HTTP_ACCESS_TOKEN`。驗證碼傳送失敗時，Portal 會指出 WebSocket 是否連線及 HTTP 備援是否已設定；程式不會保留失敗的驗證碼。
+
 Durable Object migration 的 `v1_onebot_hub`、`v2_budget_guard`、`v3_remove_budget_guard` 順序屬於專案歷史，既有部署不可刪除、重新命名或重排。
 
 ### 4. 設定 Secrets
@@ -122,6 +130,7 @@ cp .dev.vars.example .dev.vars
 ```bash
 npx wrangler secret put GEMINI_API_KEYS
 npx wrangler secret put ONEBOT_ACCESS_TOKEN
+npx wrangler secret put PORTAL_ADMIN_PASSWORD
 npx wrangler secret put PORTAL_AUTH_SECRET
 npx wrangler secret put TOTP_ENCRYPTION_KEY
 ```
@@ -131,10 +140,10 @@ npx wrangler secret put TOTP_ENCRYPTION_KEY
 ```bash
 npm run check
 npm run check:bundle
-npm run deploy
+npm run deploy:prod
 ```
 
-`check:bundle` 是 Wrangler dry-run，不會部署；`deploy` 才會更新正式 Worker。
+`deploy` 與 `check:bundle` 都只做 Wrangler dry-run，不會部署。只有明確執行 `deploy:prod` 才會更新 Worker。
 
 ## Cloudflare Bindings
 
@@ -159,10 +168,11 @@ Cron 預設每分鐘執行，用於排程、自動化、暫存清理、主動發
 | `DEVELOPER_IDS` | 逗號、分號或換行分隔 QQ ID；預設空 | 開發者／Root QQ 清單。建議使用此欄位，可設定多人。 |
 | `DEVELOPER_ID` | 單一 QQ；預設空 | 舊版相容欄位，只有一位開發者時仍可用。 |
 | `ROOT_QQ_IDS` | QQ 清單；預設空 | 額外 Root 清單，相容部署使用；會與 `DEVELOPER_IDS` 合併去重。 |
+| `PORTAL_ADMIN_USERNAME` | 4–32 位帳號；預設未設定 | 此部署唯一的管理員登入名稱。必須和 `PORTAL_ADMIN_PASSWORD` 一起設定。若名稱與既有一般使用者重複，該管理員登入會 fail closed，請設定另一個名稱。 |
 | `PUBLIC_BASE_URL` | `https://bot.example.com`；預設使用請求來源 | `!help`、Portal 與 Live 對外連結的基底網址，不加結尾 `/`。 |
 | `BOT_DISPLAY_NAME` | `QQAI` | 對外顯示名稱，供可支援的 UI／訊息使用。 |
 
-`DEVELOPER_IDS` 不屬於密碼，但它授予最高 QQ 身份權限，並用來核准第一次建立保留帳號 `admin`。不要允許一般 Portal 管理員修改。`admin` 第一次到 `/register` 必須輸入已列入 Developer/Root 清單的 QQID 並直接設定密碼；建立成功後，`admin` 本身就是 Portal 的 Developer / Root 系統帳號，日常帳密登入不會因 Dashboard identity var 暫時空白而被降級。沒有預設 admin 密碼。
+`DEVELOPER_IDS` 不屬於密碼，但它授予最高 QQ 身份權限，也用來核准第一次建立保留帳號 `admin`。這組 Dashboard 清單不能透過 Portal 修改。系統管理員登入後，可在「帳號與設定 → Developer QQ 管理」新增或移除 D1 管理的額外 Developer QQ；一般帳號與群組管理員不能使用該 API。管理員的環境變數密碼只驗證登入，既有 D1 管理員資料不會被重設；若尚未設定環境變數，首次啟用僅能在管理員尚無密碼時寫入一次，不會覆蓋既有密碼。沒有預設 admin 密碼。
 
 ### 部署通知
 
@@ -356,10 +366,12 @@ Token: 與 ONEBOT_ACCESS_TOKEN 相同
 ## 驗證與 GitHub Actions
 
 ```bash
-npm install --ignore-scripts --no-package-lock
+npm ci --ignore-scripts
 npm run check
 npm run check:bundle
 ```
+
+在審查後有意修改 JavaScript 原始碼時，執行 `npm run manifest:refresh` 更新模組來源 checksum，再重新跑完整檢查。
 
 `.github/workflows/validate.yml` 在 `main` push 與 PR 執行完整 regression 和單一 Worker bundle，正式 workflow 僅使用 `contents: read`。
 

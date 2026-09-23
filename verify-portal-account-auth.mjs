@@ -6,10 +6,15 @@ import {
   createPortalAccountBinding,
   createPortalAdminAccountBinding,
   getPortalSession,
+  portalAdminCredentialConfig,
+  portalEnvironmentWithManagedDeveloperIds,
+  readPortalManagedDeveloperIds,
+  resolvePortalPasswordLogin,
   readPortalAccountByQq,
   readPortalAccountByUsername,
   validatePortalLoginUsername,
-  validatePortalUsername
+  validatePortalUsername,
+  writePortalManagedDeveloperIds
 } from "./src/portal/auth.js";
 
 class FakeD1 {
@@ -47,6 +52,8 @@ class FakeD1 {
     };
   }
 }
+
+const testRateLimiter = { async limit() { return { success: true }; } };
 
 assert.equal(validatePortalUsername("RayAdmin").ok, true);
 assert.equal(validatePortalUsername("Ray.Admin_2026").normalized, "ray.admin_2026");
@@ -100,16 +107,54 @@ await assert.rejects(
 );
 
 
-const admin = await createPortalAdminAccountBinding(env, { qq: "123456789" });
+await assert.rejects(
+  () => createPortalAdminAccountBinding(env, { qq: "123456789" }),
+  error => error?.code === "ADMIN_QQ_ALREADY_BOUND_TO_USER"
+);
+assert.equal((await readPortalAccountByUsername(env, "RayAdmin")).qq, "123456789", "admin bootstrap must preserve an existing ordinary account binding");
+assert.equal((await readPortalAccountByQq(env, "123456789")).normalizedUsername, "rayadmin", "admin bootstrap must not promote an existing ordinary account");
+
+const adminEnv = { DB: new FakeD1() };
+const admin = await createPortalAdminAccountBinding(adminEnv, { qq: "222333444" });
 assert.equal(admin.username, "admin");
 assert.equal(admin.normalizedUsername, "admin");
-assert.equal((await readPortalAccountByUsername(env, "ADMIN")).qq, "123456789");
-assert.equal((await readPortalAccountByQq(env, "123456789")).normalizedUsername, "admin");
-assert.equal(await readPortalAccountByUsername(env, "RayAdmin"), null, "developer migration must remove the old custom username mapping");
+assert.equal((await readPortalAccountByUsername(adminEnv, "ADMIN")).qq, "222333444");
+assert.equal((await readPortalAccountByQq(adminEnv, "222333444")).normalizedUsername, "admin");
 await assert.rejects(
-  () => createPortalAdminAccountBinding(env, { qq: "987654321" }),
+  () => createPortalAdminAccountBinding(adminEnv, { qq: "987654321" }),
   error => error?.code === "ADMIN_ACCOUNT_ALREADY_BOUND"
 );
+
+assert.equal(portalAdminCredentialConfig({}).mode, "legacy");
+assert.equal(portalAdminCredentialConfig({ PORTAL_ADMIN_USERNAME: "owner-r2", PORTAL_ADMIN_PASSWORD: "a-secure-admin-password" }).mode, "configured");
+assert.equal(portalAdminCredentialConfig({ PORTAL_ADMIN_USERNAME: "owner-r2" }).mode, "invalid", "setting only one admin credential must fail closed");
+assert.equal(portalAdminCredentialConfig({ PORTAL_ADMIN_USERNAME: "root", PORTAL_ADMIN_PASSWORD: "a-secure-admin-password" }).mode, "invalid", "reserved names must not be accepted as custom admin usernames");
+
+await writePortalManagedDeveloperIds(adminEnv, ["555555555", "666666666", "555555555"]);
+assert.deepEqual(await readPortalManagedDeveloperIds(adminEnv), ["555555555", "666666666"], "managed Developer QQ values must be normalized and deduplicated");
+const overlaidEnv = await portalEnvironmentWithManagedDeveloperIds({ DB: adminEnv.DB, DEVELOPER_IDS: "111111111", ROOT_QQ_IDS: "222222222" });
+assert.equal(overlaidEnv.qqaiStaticDeveloperIds, "111111111,222222222");
+assert.equal(overlaidEnv.DEVELOPER_IDS, "111111111,222222222,555555555,666666666", "runtime developer checks must include managed IDs without hiding static IDs");
+await assert.rejects(
+  () => writePortalManagedDeveloperIds(adminEnv, ["not-a-qq"]),
+  error => error?.code === "DEVELOPER_QQ_INVALID"
+);
+
+const envAdmin = {
+  ...adminEnv,
+  PORTAL_ADMIN_USERNAME: "Ray-Owner-42",
+  PORTAL_ADMIN_PASSWORD: "DeploymentAdminPassword2026"
+};
+const preservedAdminPassword = "legacy-password-hash-must-not-be-used";
+envAdmin.DB.map.set("portal_auth_password:222333444", preservedAdminPassword);
+const envAdminLogin = await resolvePortalPasswordLogin(envAdmin, "ray-owner-42", "DeploymentAdminPassword2026");
+assert.equal(envAdminLogin.source, "environment");
+assert.equal(envAdminLogin.account.qq, "222333444");
+assert.equal(envAdminLogin.passwordMatches, true);
+assert.equal((await resolvePortalPasswordLogin(envAdmin, "admin", "DeploymentAdminPassword2026")).account, null, "custom environment admin username must not also accept the default admin alias");
+assert.equal(envAdmin.DB.map.get("portal_auth_password:222333444"), preservedAdminPassword, "environment admin login must leave legacy hash untouched");
+await createPortalAccountBinding(envAdmin, { qq: "777777777", username: "Ray-Owner-42" });
+assert.equal((await resolvePortalPasswordLogin(envAdmin, "Ray-Owner-42", "DeploymentAdminPassword2026")).errorCode, "ADMIN_USERNAME_COLLISION", "environment admin auth must reject a collision with an existing ordinary account");
 
 const worker = fs.readFileSync("worker.js", "utf8");
 const registerStart = worker.indexOf("url.pathname === '/api/auth/register'");
@@ -141,7 +186,7 @@ const loginEnd = worker.indexOf("url.pathname === '/api/auth/logout'", loginStar
 const loginBlock = worker.slice(loginStart, loginEnd);
 assert.match(loginBlock, /payload\.username/);
 assert.match(loginBlock, /validatePortalLoginUsername/);
-assert.match(loginBlock, /readPortalAccountByUsername/);
+assert.match(loginBlock, /resolvePortalPasswordLogin/);
 assert.doesNotMatch(loginBlock, /payload\.qq/);
 assert.match(loginBlock, /username: account\.username/);
 assert.doesNotMatch(worker, /PORTAL_DEVELOPER_USERNAME/);
@@ -161,6 +206,7 @@ const registerResponse = await portalWorker.fetch(new Request("https://aibot.ray
   })
 }), {
   DB: sessionFailDb,
+  MY_RATE_LIMITER: testRateLimiter,
   DEVELOPER_IDS: "123456789"
 }, { waitUntil() {}, passThroughOnException() {} });
 const registerPayload = await registerResponse.json();
@@ -171,6 +217,24 @@ assert.equal(registerPayload.redirect, "/login?activated=1");
 assert.match(String(registerPayload.failureId || ""), /^[0-9a-f-]{20,}$/i);
 assert(sessionFailDb.map.has("portal_auth_password:123456789"), "password must remain persisted when session creation fails");
 assert.equal(JSON.parse(sessionFailDb.map.get("portal_account_username:admin")).username, "admin");
+const originalAdminHash = sessionFailDb.map.get("portal_auth_password:123456789");
+const repeatRegistrationResponse = await portalWorker.fetch(new Request("https://aibot.ray2025.com/api/auth/register", {
+  method: "POST",
+  headers: { "Content-Type": "application/json" },
+  body: JSON.stringify({
+    accountType: "developer",
+    qq: "123456789",
+    username: "admin",
+    password: "A-Different-Admin-Password-2026",
+    remember: true
+  })
+}), {
+  DB: sessionFailDb,
+  MY_RATE_LIMITER: testRateLimiter,
+  DEVELOPER_IDS: "123456789"
+}, { waitUntil() {}, passThroughOnException() {} });
+assert.equal(repeatRegistrationResponse.status, 409, "admin re-registration must be rejected after bootstrap");
+assert.equal(sessionFailDb.map.get("portal_auth_password:123456789"), originalAdminHash, "re-registration must not overwrite the stored admin password");
 
 const staleSessionDb = new FakeD1();
 const staleToken = "stale-developer-session";
@@ -241,5 +305,65 @@ ordinarySessionDb.map.set("portal_session:" + ordinarySessionToken, JSON.stringi
 const ordinarySessionWithoutVars = await getPortalSession({ DB: ordinarySessionDb }, ordinarySessionToken, { touch: false });
 assert.equal(ordinarySessionWithoutVars.role, "member", "ordinary accounts must not inherit stale developer authority");
 assert.equal(ordinarySessionWithoutVars.permissions.developer, false);
+
+const adminDeveloperApiResponse = await portalWorker.fetch(new Request("https://aibot.ray2025.com/api/portal/system/developers", {
+  method: "POST",
+  headers: { "Content-Type": "application/json", Authorization: `Bearer ${adminSessionToken}` },
+  body: JSON.stringify({ ids: ["888888888", "999999999"] })
+}), { DB: adminSessionDb }, { waitUntil() {}, passThroughOnException() {} });
+assert.equal(adminDeveloperApiResponse.status, 200, "system admin session must be allowed to manage Developer QQs");
+assert.deepEqual((await adminDeveloperApiResponse.json()).managedIds, ["888888888", "999999999"]);
+
+const ordinaryDeveloperApiResponse = await portalWorker.fetch(new Request("https://aibot.ray2025.com/api/portal/system/developers", {
+  method: "POST",
+  headers: { "Content-Type": "application/json", Authorization: `Bearer ${ordinarySessionToken}` },
+  body: JSON.stringify({ ids: ["777777777"] })
+}), { DB: ordinarySessionDb }, { waitUntil() {}, passThroughOnException() {} });
+assert.equal(ordinaryDeveloperApiResponse.status, 403, "ordinary account session must not be allowed to add Developer QQs");
+assert.equal(ordinarySessionDb.map.has("portal_system_developer_ids"), false);
+
+const configuredAdminDb = new FakeD1();
+await createPortalAdminAccountBinding({ DB: configuredAdminDb }, { qq: "333444555" });
+const configuredAdminLegacyHash = "stored-hash-that-must-remain-unchanged";
+configuredAdminDb.map.set("portal_auth_password:333444555", configuredAdminLegacyHash);
+const configuredAdminResponse = await portalWorker.fetch(new Request("https://aibot.ray2025.com/api/auth/login-password", {
+  method: "POST",
+  headers: { "Content-Type": "application/json" },
+  body: JSON.stringify({ username: "Ray-Worker-Admin", password: "WorkerAdminPassword-Only" })
+}), {
+  DB: configuredAdminDb,
+  MY_RATE_LIMITER: testRateLimiter,
+  PORTAL_ADMIN_USERNAME: "Ray-Worker-Admin",
+  PORTAL_ADMIN_PASSWORD: "WorkerAdminPassword-Only"
+}, { waitUntil() {}, passThroughOnException() {} });
+assert.equal(configuredAdminResponse.status, 200, "deployment credentials must authenticate as the existing D1 admin account");
+assert.equal((await configuredAdminResponse.json()).username, "Ray-Worker-Admin");
+assert.match(configuredAdminResponse.headers.get("Set-Cookie") || "", /qqai_session=/);
+assert.equal(configuredAdminDb.map.get("portal_auth_password:333444555"), configuredAdminLegacyHash, "environment login must preserve the existing D1 password hash");
+
+const firstEnvAdminDb = new FakeD1();
+const firstEnvAdminPassword = "FirstDeploymentAdminPassword2026";
+const firstEnvAdminConfig = {
+  DB: firstEnvAdminDb,
+  MY_RATE_LIMITER: testRateLimiter,
+  DEVELOPER_IDS: "444555666",
+  PORTAL_ADMIN_USERNAME: "deployment-owner",
+  PORTAL_ADMIN_PASSWORD: firstEnvAdminPassword
+};
+const firstEnvAdminResponse = await portalWorker.fetch(new Request("https://aibot.ray2025.com/api/auth/register", {
+  method: "POST",
+  headers: { "Content-Type": "application/json" },
+  body: JSON.stringify({ accountType: "developer", qq: "444555666", username: "admin", password: firstEnvAdminPassword })
+}), firstEnvAdminConfig, { waitUntil() {}, passThroughOnException() {} });
+assert.equal(firstEnvAdminResponse.status, 200);
+assert.equal(firstEnvAdminDb.map.has("portal_auth_password:444555666"), false, "environment-managed admin bootstrap must never persist its secret in D1");
+assert.equal(JSON.parse(firstEnvAdminDb.map.get("portal_account_username:admin")).qq, "444555666");
+const repeatEnvAdminResponse = await portalWorker.fetch(new Request("https://aibot.ray2025.com/api/auth/register", {
+  method: "POST",
+  headers: { "Content-Type": "application/json" },
+  body: JSON.stringify({ accountType: "developer", qq: "444555666", username: "admin", password: firstEnvAdminPassword })
+}), firstEnvAdminConfig, { waitUntil() {}, passThroughOnException() {} });
+assert.equal(repeatEnvAdminResponse.status, 409, "environment-managed admin bootstrap must be one-time");
+assert.equal(firstEnvAdminDb.map.has("portal_auth_password:444555666"), false, "repeat bootstrap must leave D1 credentials unchanged");
 
 console.log("verify-portal-account-auth: ok");

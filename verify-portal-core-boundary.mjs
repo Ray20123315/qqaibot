@@ -88,7 +88,7 @@ const routeLiterals = new Set([
   ...[...handleSource.matchAll(/path\s*===\s*"([^"]+)"/g)].map(match => match[1]),
   ...[...handleSource.matchAll(/path\.startsWith\("([^"]+)"\)/g)].map(match => match[1])
 ]);
-const coreApiExact = new Set(["/heartbeat", "/me", "/groups", "/select-group", "/capabilities", "/plugins", "/plugins/"]);
+const coreApiExact = new Set(["/heartbeat", "/me", "/groups", "/select-group", "/capabilities", "/plugins", "/plugins/", "/system/developers"]);
 function isCoreApiPath(path) {
   return coreApiExact.has(path) || path === "/security" || path.startsWith("/security/");
 }
@@ -97,7 +97,7 @@ const unownedFeatureApis = [...routeLiterals]
   .filter(path => !portalPluginForApiPath(path))
   .sort();
 assert.deepEqual(unownedFeatureApis, [], "every non-core Portal API literal must have a plugin owner");
-for (const path of ["/heartbeat","/me","/groups","/select-group","/capabilities","/plugins","/security/auth-state","/security/password"]) {
+for (const path of ["/heartbeat","/me","/groups","/select-group","/capabilities","/plugins","/system/developers","/security/auth-state","/security/password"]) {
   assert.equal(portalPluginForApiPath(path), null, "shared core API must remain plugin-independent: " + path);
 }
 

@@ -22,9 +22,9 @@ jobs:
         with:
           node-version: 22
           cache: npm
-          cache-dependency-path: package.json
+          cache-dependency-path: package-lock.json
       - name: Install dependencies
-        run: npm install --ignore-scripts
+        run: npm ci --ignore-scripts
       - name: Run regression checks
         run: npm run check
       - name: Build the single Worker bundle

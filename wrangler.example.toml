@@ -61,6 +61,8 @@ namespace_id = "REPLACE_WITH_RATE_LIMITER_NAMESPACE_ID"
 # Optional: ROOT_QQ_IDS
 # Legacy fallback: DEVELOPER_ID
 # Do not add assignments here when Dashboard is the source of truth; keep_vars=true preserves them.
+# Set PORTAL_ADMIN_USERNAME in Dashboard Variables and PORTAL_ADMIN_PASSWORD with `wrangler secret put`.
+# Keep both out of this file so the deployment-specific admin credentials are not committed.
 
 # Public URL used in !help and generated links. No trailing slash.
 PUBLIC_BASE_URL = "https://bot.example.com"

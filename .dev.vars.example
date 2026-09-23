@@ -42,6 +42,9 @@ NAPCAT_HTTP_URL=
 ONEBOT_HTTP_ACCESS_TOKEN=
 
 # ── Portal security ──────────────────────────────────────────────────────────
+# Set both together for environment-managed admin login; never commit real values.
+PORTAL_ADMIN_USERNAME=replace_with_unique_name
+PORTAL_ADMIN_PASSWORD=replace_with_at_least_10_characters
 # General Portal sensitive-data encryption fallback.
 PORTAL_AUTH_SECRET=replace_with_at_least_32_random_bytes
 # Preferred key for TOTP seed encryption.
