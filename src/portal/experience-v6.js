@@ -269,7 +269,7 @@ html.ray-page-portal body{background:
 }
 .ray-landing-hero{position:relative!important}
 .ray-landing-hero:after{
-  content:"";position:absolute;z-index:2;left:-2%;right:-2%;bottom:-1px;height:120px;pointer-events:none;
+  content:"";position:absolute;z-index:2;left:0;right:0;bottom:-1px;height:120px;pointer-events:none;
   background:
     linear-gradient(180deg,transparent 0%,rgba(3,15,42,.22) 25%,rgba(2,11,31,.94) 100%),
     repeating-linear-gradient(90deg,transparent 0 28px,rgba(53,188,255,.18) 29px 30px),
