@@ -16,6 +16,7 @@ const PORTAL_FEATURE_PLUGINS = Object.freeze([
         order: 10,
         legacyBridge: true,
         defaultEnabled: true,
+        groupContext: true,
         apiPrefixes: ["/members", "/group-members", "/group-bindings", "/settings-center", "/admin/state", "/admin/blacklist"]
       },
       i18n: {
@@ -50,6 +51,7 @@ const PORTAL_FEATURE_PLUGINS = Object.freeze([
         order: 20,
         legacyBridge: true,
         defaultEnabled: true,
+        groupContext: true,
         apiPrefixes: ["/moderation", "/rule-violations", "/violations", "/appeals", "/review/appeal", "/review/appeals", "/ops/action"]
       },
       i18n: {
@@ -84,6 +86,7 @@ const PORTAL_FEATURE_PLUGINS = Object.freeze([
         order: 30,
         legacyBridge: true,
         defaultEnabled: false,
+        groupContext: true,
         apiPrefixes: ["/schedules", "/tasks", "/review/schedule", "/review/schedules", "/ops/activity", "/ops/poll", "/ops/tasks", "/ops/schedule", "/ops/digest", "/ops/draft"]
       },
       i18n: {
@@ -118,6 +121,7 @@ const PORTAL_FEATURE_PLUGINS = Object.freeze([
         order: 40,
         legacyBridge: true,
         defaultEnabled: true,
+        groupContext: true,
         apiPrefixes: ["/memories", "/matrix", "/vector-search", "/conversations", "/ai-decisions"]
       },
       i18n: {
@@ -152,6 +156,7 @@ const PORTAL_FEATURE_PLUGINS = Object.freeze([
         order: 50,
         legacyBridge: true,
         defaultEnabled: false,
+        groupContext: true,
         apiPrefixes: ["/models", "/simulator", "/root/quotas", "/root/model-registry"]
       },
       i18n: {
@@ -186,6 +191,7 @@ const PORTAL_FEATURE_PLUGINS = Object.freeze([
         order: 60,
         legacyBridge: true,
         defaultEnabled: false,
+        groupContext: true,
         apiPrefixes: ["/integrations/bilibili"]
       },
       i18n: {
@@ -215,13 +221,13 @@ const PORTAL_FEATURE_PLUGINS = Object.freeze([
       portal: {
         category: "developer",
         icon: "</>",
-        defaultView: "platform",
-        views: ["platform", "logs", "maintenance"],
+        defaultView: "health",
+        views: ["health", "platform", "logs", "maintenance"],
         order: 90,
         legacyBridge: true,
         developerOnly: true,
         defaultEnabled: true,
-        apiPrefixes: ["/platform", "/admin/logs"]
+        apiPrefixes: ["/health", "/platform", "/admin/logs"]
       },
       i18n: {
         "zh-TW": { name: "開發者工具", description: "健康診斷、平台權限、日誌與系統維護。" },
