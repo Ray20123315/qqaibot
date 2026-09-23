@@ -215,8 +215,8 @@ const PORTAL_FEATURE_PLUGINS = Object.freeze([
       portal: {
         category: "developer",
         icon: "</>",
-        defaultView: "health",
-        views: ["health", "platform", "logs", "maintenance"],
+        defaultView: "platform",
+        views: ["platform", "logs", "maintenance"],
         order: 90,
         legacyBridge: true,
         developerOnly: true,
