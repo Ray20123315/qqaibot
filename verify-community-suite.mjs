@@ -6,9 +6,10 @@ import { MASTER_RELATIONSHIP_DEFAULT_LEVEL, MASTER_RELATIONSHIP_LEVELS, masterPe
 
 function assert(condition, message) { if (!condition) throw new Error(message); }
 
-const baseHtml = '<!doctype html><html><head></head><body><aside><nav><button data-view="home">首页</button><button data-view="logs">操作日志</button></nav></aside><main><section id="v-home" class="view active"></section><section id="v-logs" class="view"></section></main></body></html>';
+const baseHtml = '<!doctype html><html><head></head><body><aside><nav><button data-view="home">首页</button><div id="pluginCompatNav" class="plugin-compat-nav" hidden></div></nav></aside><main><section id="v-home" class="view active"></section><section id="v-logs" class="view"></section></main></body></html>';
 const html = injectPortalMembersClient(baseHtml);
-assert(html.includes('id="memberConsoleNav"'), 'The member console navigation entry must always be injected');
+assert(html.includes('id="memberConsoleNav"'), 'The member console navigation entry must be injected into the plugin bridge');
+assert(/id="pluginCompatNav"[\s\S]*id="memberConsoleNav"/.test(html), 'Community navigation must stay inside pluginCompatNav');
 assert(!html.includes("function syncNav()"), 'The injected client must not hide the member entry by guessing a private session variable');
 assert(html.includes('qqai-community-suite-client'), 'The Portal community suite client must be injected');
 assert(html.includes('Portal 自我诊断'), 'Diagnostics UI must be present');
@@ -32,7 +33,7 @@ for (const [index, script] of scripts.entries()) {
 const members = fs.readFileSync('src/portal/members.js', 'utf8');
 assert(members.includes('handleCommunitySuiteApi'), 'Member API must delegate to the community suite');
 assert(members.includes('injectCommunitySuiteClient'), 'Member HTML must include the community suite');
-assert(members.includes('const navFallbacks'), 'Member navigation injection must have multiple fallback anchors');
+assert(members.includes('const compat ='), 'Member navigation injection must target the plugin compatibility bridge');
 
 const suite = fs.readFileSync('src/portal/community-suite.js', 'utf8');
 for (const marker of ['/members/diagnostics', '/members/profiles', '/members/profile', '/members/batch', '/members/stickers', '/members/decisions', '/members/relationships/policy']) {
