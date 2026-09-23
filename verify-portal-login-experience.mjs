@@ -13,8 +13,9 @@ const login = getPortalLoginPage();
 const register = getPortalRegisterPage();
 
 assert.match(landing, /AI Control Center/);
-assert.match(landing, /class="console-preview"/);
-assert.match(landing, /class="feature-grid"/);
+assert.match(landing, /class="public-architecture"/);
+assert.match(landing, /class="public-core-grid"/);
+assert.match(landing, /data-brand-logo="qqai"/);
 
 assert.match(login, /data-i18n="login\.title"/);
 assert.match(login, /id="username"/);
