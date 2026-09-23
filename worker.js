@@ -192,7 +192,7 @@ const QQAIWorker = {
     }
 
     if (request.method === 'GET' && url.pathname === '/matrix') {
-      return Response.redirect(`${url.origin}/portal#memory`, 302);
+      return Response.redirect(`${url.origin}/portal#plugins`, 302);
     }
 
     if (request.method === 'GET' && url.pathname === '/portal') {
@@ -206,7 +206,7 @@ const QQAIWorker = {
     }
 
     if (request.method === 'GET' && url.pathname === '/appeal') {
-      return Response.redirect(`${url.origin}/portal#appeals`, 302);
+      return Response.redirect(`${url.origin}/portal#plugins`, 302);
     }
 
     if (request.method === 'GET' && /^\/join\/\d{5,}$/.test(url.pathname)) {
