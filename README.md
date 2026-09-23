@@ -162,7 +162,7 @@ Cron 預設每分鐘執行，用於排程、自動化、暫存清理、主動發
 | `PUBLIC_BASE_URL` | `https://bot.example.com`；預設使用請求來源 | `!help`、Portal 與 Live 對外連結的基底網址，不加結尾 `/`。 |
 | `BOT_DISPLAY_NAME` | `QQAI` | 對外顯示名稱，供可支援的 UI／訊息使用。 |
 
-`DEVELOPER_IDS` 不屬於密碼，但它授予最高權限。不要允許一般 Portal 管理員修改，否則會形成自行提權。應由部署者在 Cloudflare 設定。開發者 Portal 帳號固定為保留名稱 `admin`；第一次到 `/register` 輸入 Developer/Root QQID 並直接設定 admin 密碼，不使用 QQ 驗證碼、`PORTAL_AUTH_SECRET` 或 OneBot Token 作登入前置條件。沒有預設 admin 密碼。
+`DEVELOPER_IDS` 不屬於密碼，但它授予最高 QQ 身份權限，並用來核准第一次建立保留帳號 `admin`。不要允許一般 Portal 管理員修改。`admin` 第一次到 `/register` 必須輸入已列入 Developer/Root 清單的 QQID 並直接設定密碼；建立成功後，`admin` 本身就是 Portal 的 Developer / Root 系統帳號，日常帳密登入不會因 Dashboard identity var 暫時空白而被降級。沒有預設 admin 密碼。
 
 ### 部署通知
 
