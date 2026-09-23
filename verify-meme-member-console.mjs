@@ -37,9 +37,10 @@ const cachedMember = normalizeMember(member);
 assert.equal(cachedMember.muteUntil, member.muteUntil, "Cached normalized member timestamps must not be multiplied again");
 assert(cachedMember.muteRemainingSeconds >= 115 && cachedMember.muteRemainingSeconds <= 120);
 
-const sampleHtml = '<!doctype html><html><head></head><body><nav><button data-view="logs">操作日志</button></nav><main><section id="v-logs" class="view"></section></main></body></html>';
+const sampleHtml = '<!doctype html><html><head></head><body><nav><button data-view="overview">首页</button><div id="pluginCompatNav" class="plugin-compat-nav" hidden></div></nav><main><section id="v-logs" class="view"></section></main></body></html>';
 const injected = injectPortalMembersClient(sampleHtml);
 assert(injected.includes('id="memberConsoleNav"'), "Member navigation must be injected");
+assert(/id="pluginCompatNav"[\s\S]*id="memberConsoleNav"/.test(injected), "Member navigation must stay inside the hidden plugin compatibility bridge");
 assert(injected.includes('id="v-members"'), "Member console page must be injected");
 assert(injected.includes('id="qqai-member-console-client"'), "Member console client must be injected");
 assert(injected.includes('禁言（秒）'), "Member console must expose second-based mute controls");
