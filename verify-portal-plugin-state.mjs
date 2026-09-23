@@ -39,6 +39,9 @@ assert.equal(portalPluginForApiPath("/members/history")?.id, "qqai.community");
 assert.equal(portalPluginForApiPath("/tasks")?.id, "qqai.automation");
 assert.equal(portalPluginForApiPath("/models")?.id, "qqai.models");
 assert.equal(portalPluginForApiPath("/integrations/bilibili")?.id, "qqai.integrations");
+assert.equal(portalPluginForView("health")?.id, "qqai.developer-tools");
+assert.equal(portalPluginForApiPath("/health")?.id, "qqai.developer-tools");
+assert.equal(portalPluginForApiPath("/health/model-check")?.id, "qqai.developer-tools");
 assert.equal(portalPluginForApiPath("/security/auth-state"), null, "core security routes must not belong to a plugin");
 
 const db = new FakeD1();
