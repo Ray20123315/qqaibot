@@ -23,12 +23,20 @@ const BRAND_LOGO_SVG = `<svg viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/s
   </g>
 </svg>`;
 
-function brandLogoMarkup({ className = "qqai-brand-logo", title = "AI Control Center" } = {}) {
+function safeToken(value, fallback) {
+  const token = String(value || "").replace(/[^a-zA-Z0-9_-]/g, "");
+  return token || fallback;
+}
+
+function brandLogoMarkup({ className = "qqai-brand-logo", title = "AI Control Center", idPrefix = "qqai-brand" } = {}) {
   const safeClass = String(className || "qqai-brand-logo").replace(/[^a-zA-Z0-9_ -]/g, "");
   const safeTitle = String(title || "AI Control Center").replace(/[<>&"]/g, "");
+  const prefix = safeToken(idPrefix, "qqai-brand");
   return BRAND_LOGO_SVG
-    .replace('class="', 'class="')
-    .replace('<svg ', `<svg class="${safeClass}" data-brand-logo="qqai" title="${safeTitle}" `);
+    .replaceAll("qqai-g1", prefix + "-g1")
+    .replaceAll("qqai-g2", prefix + "-g2")
+    .replaceAll("qqai-glow", prefix + "-glow")
+    .replace("<svg ", `<svg class="${safeClass}" data-brand-logo="qqai" title="${safeTitle}" `);
 }
 
 export { BRAND_LOGO_SVG, brandLogoMarkup };
