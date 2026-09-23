@@ -20,6 +20,7 @@ const PLUGIN_ID_PATTERN = /^[a-z0-9][a-z0-9._-]{1,63}$/;
 const SEMVER_PATTERN = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/;
 const EVENT_PATTERN = /^[a-z][a-z0-9._:-]{0,63}$/;
 const PORTAL_VIEW_PATTERN = /^[a-z][a-z0-9-]{0,63}$/;
+const PORTAL_API_PREFIX_PATTERN = /^\/[a-z0-9][a-z0-9/_-]{0,95}$/;
 const PORTAL_LOCALE_PATTERN = /^[a-z]{2,3}(?:-[A-Z0-9]{2,8})?$/;
 const textEncoder = new TextEncoder();
 
@@ -47,7 +48,9 @@ function normalizePortalMetadata(value) {
     views,
     order: Math.max(0, Math.min(9999, Number(source.order || 0) || 0)),
     legacyBridge: source.legacyBridge === true,
-    developerOnly: source.developerOnly === true
+    developerOnly: source.developerOnly === true,
+    defaultEnabled: source.defaultEnabled !== false,
+    apiPrefixes: uniqueStrings(source.apiPrefixes, { maxItems: 32, pattern: PORTAL_API_PREFIX_PATTERN })
   });
 }
 
@@ -317,6 +320,75 @@ function portalPluginCatalog() {
     .sort((a, b) => Number(a.portal.order || 0) - Number(b.portal.order || 0) || a.id.localeCompare(b.id));
 }
 
+function portalPluginStateKey(pluginId) {
+  return `portal_plugin_enabled:${String(pluginId || "").trim().toLowerCase()}`;
+}
+
+function portalPluginById(pluginId) {
+  const id = String(pluginId || "").trim().toLowerCase();
+  return portalPluginCatalog().find(plugin => plugin.id === id) || null;
+}
+
+function portalPluginForView(viewName) {
+  const view = String(viewName || "").trim().toLowerCase();
+  return portalPluginCatalog().find(plugin => plugin.portal.views.includes(view)) || null;
+}
+
+function portalPluginForApiPath(pathname) {
+  const path = String(pathname || "").trim().toLowerCase();
+  const matches = portalPluginCatalog().flatMap(plugin =>
+    (plugin.portal.apiPrefixes || [])
+      .filter(prefix => path === prefix || path.startsWith(prefix.endsWith("/") ? prefix : prefix + "/"))
+      .map(prefix => ({ plugin, prefix }))
+  );
+  matches.sort((a, b) => b.prefix.length - a.prefix.length);
+  return matches[0]?.plugin || null;
+}
+
+async function readPortalPluginEnabled(env, pluginId) {
+  const plugin = portalPluginById(pluginId);
+  if (!plugin) return null;
+  const fallback = plugin.portal.defaultEnabled !== false;
+  if (!env?.DB) return fallback;
+  try {
+    const row = await env.DB.prepare("SELECT value FROM kv_store WHERE key = ?")
+      .bind(portalPluginStateKey(plugin.id))
+      .first();
+    if (!row) return fallback;
+    return String(row.value || "").toLowerCase() === "true";
+  } catch (error) {
+    console.error("plugin state read failed", { pluginId: plugin.id, error: String(error?.message || error).slice(0, 300) });
+    return fallback;
+  }
+}
+
+async function setPortalPluginEnabled(env, pluginId, enabled) {
+  const plugin = portalPluginById(pluginId);
+  if (!plugin) return { ok: false, code: "PLUGIN_NOT_FOUND", message: "找不到這個插件。" };
+  if (!env?.DB) return { ok: false, code: "PLUGIN_STATE_STORAGE_UNAVAILABLE", message: "D1 尚未綁定，無法保存插件狀態。" };
+  try {
+    await env.DB.prepare("INSERT INTO kv_store (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value")
+      .bind(portalPluginStateKey(plugin.id), enabled ? "true" : "false")
+      .run();
+    return { ok: true, pluginId: plugin.id, enabled: Boolean(enabled) };
+  } catch (error) {
+    console.error("plugin state write failed", { pluginId: plugin.id, error: String(error?.message || error).slice(0, 300) });
+    return { ok: false, code: "PLUGIN_STATE_STORAGE_UNAVAILABLE", message: "插件狀態無法寫入 D1，設定沒有變更。" };
+  }
+}
+
+async function portalPluginCatalogState(env, { developer = false } = {}) {
+  const catalog = portalPluginCatalog();
+  const rows = [];
+  for (const plugin of catalog) {
+    if (plugin.portal.developerOnly && !developer) continue;
+    const enabled = await readPortalPluginEnabled(env, plugin.id);
+    if (!developer && !enabled) continue;
+    rows.push(Object.freeze({ ...plugin, enabled: Boolean(enabled) }));
+  }
+  return rows;
+}
+
 function pluginExecutionStatus(env) {
   return Object.freeze({
     trustedBundled: { available: true, requiresRebuild: true, registered: listBundledPlugins().length },
@@ -341,7 +413,14 @@ export {
   normalizePluginManifest,
   normalizePluginResult,
   pluginExecutionStatus,
+  portalPluginById,
   portalPluginCatalog,
+  portalPluginCatalogState,
+  portalPluginForApiPath,
+  portalPluginForView,
+  portalPluginStateKey,
+  readPortalPluginEnabled,
+  setPortalPluginEnabled,
   validatePluginManifest,
   validateSandboxedExternalDefinition,
   validateTrustedBundledDefinition,
