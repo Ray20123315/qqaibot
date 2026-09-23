@@ -16,18 +16,19 @@ assert.equal(normalizePortalLocale("pt-PT"), "pt-BR");
 const payload = portalI18nPayload();
 for (const locale of ids) {
   assert.ok(payload.messages[locale], "missing locale message pack " + locale);
-  for (const key of ["nav.home","nav.plugins","nav.account","footer.rights","public.hero.title","login.title","register.title"]) {
+  for (const key of ["nav.home","nav.plugins","nav.account","footer.rights","public.hero.title","login.title","register.title","plugins.enabled","plugins.disabled","plugins.enable","plugins.disable"]) {
     assert.ok(payload.messages[locale][key], locale + " missing " + key);
   }
 }
 
 const catalog = portalPluginCatalog();
-assert.ok(catalog.length >= 8);
+assert.ok(catalog.length >= 7);
 for (const plugin of catalog) {
   assert.ok(plugin.portal.views.length, plugin.id + " missing views");
   for (const locale of required) assert.ok(plugin.i18n[locale]?.name, plugin.id + " missing " + locale + " plugin name");
 }
 assert.ok(catalog.some(x => x.id === "qqai.developer-tools" && x.portal.developerOnly));
+assert.equal(catalog.some(x => x.id === "qqai.werewolf"), false);
 
 const portal = getPortalHomePage("aibot.ray2025.com");
 for (const marker of ['data-view="overview"','data-view="plugins"','data-view="account"','data-view="health"','id="pluginCompatNav"','id="localeSelect"']) {
