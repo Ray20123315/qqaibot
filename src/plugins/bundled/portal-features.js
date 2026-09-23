@@ -17,7 +17,7 @@ const PORTAL_FEATURE_PLUGINS = Object.freeze([
         legacyBridge: true,
         defaultEnabled: true,
         groupContext: true,
-        apiPrefixes: ["/members", "/group-members", "/group-bindings", "/settings-center", "/admin/state", "/admin/blacklist"]
+        apiPrefixes: ["/members", "/group-members", "/group-bindings", "/settings", "/settings-center", "/admin/state", "/admin/blacklist", "/admin/active-speaking-test", "/root/member", "/root/members", "/root/program-permissions"]
       },
       i18n: {
         "zh-TW": { name: "社群管理", description: "群組、群友、關係、通知與成員資料工具。" },
@@ -52,7 +52,7 @@ const PORTAL_FEATURE_PLUGINS = Object.freeze([
         legacyBridge: true,
         defaultEnabled: true,
         groupContext: true,
-        apiPrefixes: ["/moderation", "/rule-violations", "/violations", "/appeals", "/review/appeal", "/review/appeals", "/ops/action"]
+        apiPrefixes: ["/moderation", "/rule-violations", "/violations", "/appeals", "/review/appeal", "/review/appeals", "/group-work", "/root/appeals", "/root/appeal-assign", "/ops/action"]
       },
       i18n: {
         "zh-TW": { name: "群規與審核", description: "群規、待確認操作、違規紀錄與申訴流程。" },
@@ -87,7 +87,7 @@ const PORTAL_FEATURE_PLUGINS = Object.freeze([
         legacyBridge: true,
         defaultEnabled: false,
         groupContext: true,
-        apiPrefixes: ["/schedules", "/tasks", "/review/schedule", "/review/schedules", "/ops/activity", "/ops/poll", "/ops/tasks", "/ops/schedule", "/ops/digest", "/ops/draft"]
+        apiPrefixes: ["/schedules", "/tasks", "/review/schedule", "/review/schedules", "/root/schedules", "/root/schedule-action", "/root/schedule-assign", "/ops/activity", "/ops/poll", "/ops/tasks", "/ops/schedule", "/ops/digest", "/ops/draft"]
       },
       i18n: {
         "zh-TW": { name: "自動化", description: "活動、投票、排程提醒與任務佇列。" },
@@ -227,7 +227,7 @@ const PORTAL_FEATURE_PLUGINS = Object.freeze([
         legacyBridge: true,
         developerOnly: true,
         defaultEnabled: true,
-        apiPrefixes: ["/health", "/platform", "/admin/logs"]
+        apiPrefixes: ["/health", "/platform", "/admin", "/root"]
       },
       i18n: {
         "zh-TW": { name: "開發者工具", description: "健康診斷、平台權限、日誌與系統維護。" },
