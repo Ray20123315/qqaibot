@@ -1,78 +1,59 @@
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import { getPortalHomePage, getPortalLoginPage, getPortalRegisterPage, getPublicLandingPage } from "./src/portal/runtime.js";
-import { injectPortalLayoutClient } from "./src/portal/layout.js";
-import { injectPortalMembersClient } from "./src/portal/members.js";
-import { injectDeploymentPortalClient } from "./src/deployment/notifications.js";
 
 const landing = getPublicLandingPage();
-assert.match(landing, /AI Control Center/);
-assert.match(landing, /data-i18n="public\.hero\.title"/);
-assert.match(landing, /id="publicLocale"/);
-assert.match(landing, /© 2026 ray20123315\. All rights reserved\./);
-assert.match(landing, /class="feature-grid"/);
-assert.doesNotMatch(landing, /2\.4K/);
+for (const marker of [
+  "AI Control Center",
+  "PLUGIN-FIRST · MINIMAL CORE",
+  'id="publicLogo"',
+  'id="publicPlugins"',
+  'id="locale"',
+  'data-i18n="public.hero.title"',
+  "© 2026 ray20123315. All rights reserved.",
+  "aibot.ray2025.com"
+]) assert.ok(landing.includes(marker), "public V4 marker missing: " + marker);
+assert.doesNotMatch(landing, /2\.4K|fake metric/i);
+assert.doesNotMatch(landing, /cyber-skyline|console-preview|preview-resource-rail/);
 
 const login = getPortalLoginPage();
 assert.match(login, /class="auth-stage"/);
 assert.match(login, /id="username"/);
 assert.match(login, /id="password"/);
-assert.match(login, /id="publicLocale"/);
 assert.match(login, /data-i18n="login\.title"/);
-assert.match(login, /© 2026 ray20123315\. All rights reserved\./);
 
 const register = getPortalRegisterPage();
 assert.match(register, /ADMIN PASSWORD SETUP/);
 assert.match(register, /id="activationMode"/);
 assert.match(register, /value="admin"/);
-assert.match(register, /id="publicLocale"/);
-assert.match(register, /data-i18n="register\.title"/);
-assert.match(register, /© 2026 ray20123315\. All rights reserved\./);
 
-const portalBase = getPortalHomePage("aibot.ray2025.com");
+const portal = getPortalHomePage("aibot.ray2025.com");
 for (const marker of [
-  'data-view="overview"',
-  'data-view="plugins"',
-  'data-view="account"',
-  'id="pluginCompatNav"',
+  'id="view-overview"',
+  'id="view-plugins"',
+  'id="view-account"',
   'id="pluginGrid"',
-  'id="overviewPluginGrid"',
+  'id="overviewPlugins"',
   'id="localeSelect"',
-  'window.__QQAI_PORTAL_PLUGINS__',
-  'window.__QQAI_PORTAL_I18N__',
-  '© 2026 ray20123315. All rights reserved.'
-]) assert.ok(portalBase.includes(marker), "missing rebuilt Portal marker: " + marker);
-assert.doesNotMatch(portalBase, /return toSimplifiedChinese\(String\.raw/);
+  'id="brandingCard"',
+  'id="brandLogoInput"',
+  "© 2026 ray20123315. All rights reserved.",
+  "Product features in core",
+  "Disabled"
+]) assert.ok(portal.includes(marker), "Portal V4 marker missing: " + marker);
+for (const forbidden of [
+  'id="v-groups"','id="v-members"','id="v-models"','id="v-health"','id="v-memory"',
+  'id="v-moderation"','id="v-logs"','id="pluginCompatNav"','qqai-member-console-style',
+  'qqai-deployment-toast','qqai-portal-layout-v300'
+]) assert.equal(portal.includes(forbidden), false, "legacy Portal UI leaked: " + forbidden);
+assert.equal((portal.match(/class="view(?: active)?"/g)||[]).length, 3, "Portal V4 must render exactly three first-class views");
+assert.match(portal, /:root\[data-theme="dark"\]/);
+assert.match(portal, /--surface:#fff/);
+assert.match(portal, /--surface:#111722/);
 
-const withFeatures = injectPortalMembersClient(injectDeploymentPortalClient(portalBase));
-const full = injectPortalLayoutClient(withFeatures);
-assert.match(full, /id="qqai-member-console-style"/);
-assert.match(full, /id="qqai-deployment-toast"/);
-assert.match(full, /id="qqai-portal-layout-v300"/);
-assert.ok(full.lastIndexOf("qqai-portal-layout-v300") > full.lastIndexOf("qqai-member-console-style"));
-
-const runtime = fs.readFileSync("src/portal/runtime.js", "utf8");
-assert.match(runtime, /function renderPluginCatalog/);
-assert.match(runtime, /function setPortalLocale/);
-assert.match(runtime, /function organizeSidebarNavigation/);
-assert.match(runtime, /var core=\['overview','plugins','account'\]/);
-assert.doesNotMatch(runtime, /var core=\[[^\]]*health/);
-assert.match(runtime, /plugin-compat-nav/);
-assert.match(runtime, /data-plugin-toggle/);
-assert.match(runtime, /PLUGIN_DISABLED/);
-assert.match(runtime, /function pluginUsesGroupContext/);
-assert.match(runtime, /async function ensurePluginContext/);
-assert.match(runtime, /class="plugin-context-control hidden"/);
-
-const layout = fs.readFileSync("src/portal/layout.js", "utf8");
-assert.match(layout, /--sidebar-bg:#ffffff/);
-assert.match(layout, /:root\[data-theme="dark"\]/);
-assert.match(layout, /background:var\(--panel\)!important/);
-assert.match(layout, /\.plugin-grid\{/);
-assert.match(layout, /\.core-hero\{/);
-assert.match(layout, /\.nav>\.qqai-nav-entry\{display:none!important\}/);
-assert.doesNotMatch(layout, /--bg:#020713!important/);
+const worker = fs.readFileSync("worker.js", "utf8");
+assert.match(worker, /const portalHtml = getPortalHomePage\(url\.host\)/);
+assert.doesNotMatch(worker, /injectPortalLayoutClient|injectPortalMembersClient|injectDeploymentPortalClient/);
+assert.match(worker, /\/api\/public\/branding/);
 
 console.log("verify-ai-control-center-ui: ok");
-
-assert.doesNotMatch(fs.readFileSync("worker.js", "utf8"), /werewolf|狼人殺|狼人杀/i);
