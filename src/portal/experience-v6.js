@@ -576,7 +576,7 @@ html.ray-page-portal body{background:var(--ray-min-bg)!important}
 .workspace-topbar{
   min-height:64px!important;height:64px!important;padding:8px 18px!important;
   background:var(--ray-min-bg)!important;border-bottom:1px solid var(--ray-min-line)!important;
-  box-shadow:none!important;backdrop-filter:none!important;
+  box-shadow:none!important;
 }
 .workspace-heading h2{font-size:15px!important;color:var(--ray-min-text)!important}
 .top-kicker{display:none!important}
