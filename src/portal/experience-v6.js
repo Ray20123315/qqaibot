@@ -201,6 +201,14 @@ html.ray-page-portal body{background:
 .workspace-hero-logo:before,.workspace-hero-logo:after,.auth-brand-hero:before,.auth-brand-hero:after{position:absolute;display:grid;place-items:center;width:52px;height:52px;border:1px solid rgba(78,205,255,.55);border-radius:11px;background:linear-gradient(145deg,rgba(9,49,108,.92),rgba(30,18,86,.90));color:#eafcff;box-shadow:0 0 22px rgba(62,169,255,.25);font-size:17px;pointer-events:none}
 .workspace-hero-logo:before{content:"✦";left:-120px;top:-65px}.workspace-hero-logo:after{content:"</>";right:-128px;top:-18px;font-size:13px}.auth-brand-hero:before{content:"◇";left:-138px;top:-74px}.auth-brand-hero:after{content:"⚙";right:-128px;bottom:-42px}
 @media(max-width:820px){.workspace-hero-logo:before,.workspace-hero-logo:after,.auth-brand-hero:before,.auth-brand-hero:after{display:none!important}}
+
+/* RAY_REFERENCE_V7_MOBILE_CONTAINMENT */
+@media(max-width:620px){
+  .ray-landing-hero,.ray-landing-copy,.ray-hero-core{width:100%!important;max-width:100%!important;min-width:0!important}
+  .ray-planet{right:1%!important;left:auto!important;width:38%!important;max-width:190px!important}
+  .ray-core-orbit{max-width:86vw!important}
+}
+
 /* RAY_REFERENCE_V7_END */
 `;
 function rayAiExperienceStyle(mode = "public") {
