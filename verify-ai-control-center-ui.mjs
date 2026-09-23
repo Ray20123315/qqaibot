@@ -34,7 +34,6 @@ for (const marker of [
   'data-view="overview"',
   'data-view="plugins"',
   'data-view="account"',
-  'data-view="health"',
   'id="pluginCompatNav"',
   'id="pluginGrid"',
   'id="overviewPluginGrid"',
@@ -56,10 +55,14 @@ const runtime = fs.readFileSync("src/portal/runtime.js", "utf8");
 assert.match(runtime, /function renderPluginCatalog/);
 assert.match(runtime, /function setPortalLocale/);
 assert.match(runtime, /function organizeSidebarNavigation/);
-assert.match(runtime, /var core=\['overview','plugins','account','health'\]/);
+assert.match(runtime, /var core=\['overview','plugins','account'\]/);
+assert.doesNotMatch(runtime, /var core=\[[^\]]*health/);
 assert.match(runtime, /plugin-compat-nav/);
 assert.match(runtime, /data-plugin-toggle/);
 assert.match(runtime, /PLUGIN_DISABLED/);
+assert.match(runtime, /function pluginUsesGroupContext/);
+assert.match(runtime, /async function ensurePluginContext/);
+assert.match(runtime, /class="plugin-context-control hidden"/);
 
 const layout = fs.readFileSync("src/portal/layout.js", "utf8");
 assert.match(layout, /--sidebar-bg:#ffffff/);
