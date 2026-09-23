@@ -2809,7 +2809,7 @@ ${brandFaviconLink()}
 <div id="app" class="app workspace-shell">
   <aside id="sidebar" class="sidebar workspace-sidebar">
     <div class="side-brand">${brandLogoSvg("qqai-brand-logo portal-brand-logo")}<div class="side-brand-copy"><b>RAY AI</b><small>QQ AI BOT</small><span class="sr-only" data-i18n="app.subtitle">核心精簡 · 插件擴充 · 自備資源</span></div></div>
-    <nav class="nav core-nav" id="nav" aria-label="Primary">
+    <nav class="core-nav" id="nav" aria-label="Primary">
       <button data-view="overview" class="active"><span class="nav-glyph">⌂</span><span data-i18n="nav.home">首頁</span></button>
       <button data-view="plugins"><span class="nav-glyph">＋</span><span data-i18n="nav.plugins">插件</span></button>
       <button data-view="account"><span class="nav-glyph">◎</span><span data-i18n="nav.account">帳號與設定</span></button>
