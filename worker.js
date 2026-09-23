@@ -167,7 +167,11 @@ const QQAIWorker = {
       const isWebSocket = upgradeHeader?.toLowerCase() === "websocket";
       if (isWebSocket) {
         const origin = request.headers.get("Origin");
-        if (!origin || new URL(origin).origin !== url.origin) return new Response("Forbidden", { status: 403 });
+        try {
+          if (!origin || new URL(origin).origin !== url.origin) return new Response("Forbidden", { status: 403 });
+        } catch {
+          return new Response("Forbidden", { status: 403 });
+        }
       }
       const token = readCookie(request, "qqai_session");
       let liveSession = null;

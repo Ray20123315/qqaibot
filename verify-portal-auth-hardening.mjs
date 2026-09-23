@@ -135,6 +135,10 @@ const crossOriginLiveUpgrade = await portalWorker.fetch(new Request("https://aib
   headers: { Upgrade: "websocket", Origin: "https://attacker.example" }
 }), { DB: liveDb }, ctx);
 assert.equal(crossOriginLiveUpgrade.status, 403, "Live WebSocket upgrades must reject cross-origin requests");
+const malformedOriginLiveUpgrade = await portalWorker.fetch(new Request("https://aibot.ray2025.com/live", {
+  headers: { Upgrade: "websocket", Origin: "not a valid origin" }
+}), { DB: liveDb }, ctx);
+assert.equal(malformedOriginLiveUpgrade.status, 403, "malformed Origin headers must fail closed rather than throw");
 
 for (const path of ["/health", "/healthz"]) {
   const response = await portalWorker.fetch(new Request(`https://aibot.ray2025.com${path}`), {}, ctx);
