@@ -27,11 +27,11 @@ for (const plugin of catalog) {
   assert.ok(plugin.portal.views.length, plugin.id + " missing views");
   for (const locale of required) assert.ok(plugin.i18n[locale]?.name, plugin.id + " missing " + locale + " plugin name");
 }
-assert.ok(catalog.some(x => x.id === "qqai.developer-tools" && x.portal.developerOnly));
+assert.ok(catalog.some(x => x.id === "qqai.developer-tools" && x.portal.developerOnly && x.portal.views.includes("health")));
 assert.equal(catalog.some(x => x.id === "qqai.werewolf"), false);
 
 const portal = getPortalHomePage("aibot.ray2025.com");
-for (const marker of ['data-view="overview"','data-view="plugins"','data-view="account"','data-view="health"','id="pluginCompatNav"','id="localeSelect"']) {
+for (const marker of ['data-view="overview"','data-view="plugins"','data-view="account"','id="pluginCompatNav"','id="localeSelect"']) {
   assert.ok(portal.includes(marker), "missing core shell marker " + marker);
 }
 for (const page of [getPublicLandingPage(), getPortalLoginPage(), getPortalRegisterPage()]) {
