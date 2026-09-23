@@ -1,4 +1,4 @@
-import { rayAiExperienceScript, rayAiExperienceStyle } from "./experience-v5.js";
+import { rayAiExperienceScript, rayAiExperienceStyle } from "./experience-v6.js";
 
 function brandLogoSvg(className = "qqai-brand-logo", title = "RAY AI") {
   const safeClass = String(className || "qqai-brand-logo").replace(/[^a-zA-Z0-9 _-]/g, "");

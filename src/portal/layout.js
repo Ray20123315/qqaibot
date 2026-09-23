@@ -1,4 +1,4 @@
-import { rayAiExperienceScript, rayAiExperienceStyle } from "./experience-v5.js";
+import { rayAiExperienceScript, rayAiExperienceStyle } from "./experience-v6.js";
 
 // Final Portal layout layer.
 // Keep this layer theme-token driven: feature clients may add markup, but must not force a dark-only palette.

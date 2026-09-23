@@ -2623,18 +2623,34 @@ function publicI18nClientScript() {
 
 function publicHomepageV4Markup() {
   return [
-    '<main class="public-home-v4">',
-    '<section class="public-v4-hero">',
-    '<article class="public-v4-copy"><div class="public-v4-eyebrow">SMALL CORE · PLUGIN FIRST · BYOR</div><h1 data-i18n="public.hero.title">把核心保持簡單，把需要的能力裝成插件。</h1><p data-i18n="public.hero.summary">安全帳密、權限與插件執行留在核心；其他能力按需啟用。</p><div class="hero-actions"><a class="btn primary" href="/login" data-i18n="public.hero.start">登入控制中心</a><a class="btn ghost" href="/register" data-i18n="public.hero.activate">首次啟用</a></div><div class="public-v4-points"><span class="public-v4-pill">AUTH / ACL</span><span class="public-v4-pill">PLUGIN RUNTIME</span><span class="public-v4-pill">BYOR</span><span class="public-v4-pill">10 LOCALES</span></div></article>',
-    '<article class="public-v4-system"><div class="public-v4-system-head"><div class="public-v4-system-brand">'+brandLogoSvg("qqai-brand-logo public-system-logo")+'<span><b>AI Control Center</b><small>aibot.ray2025.com</small></span></div><span class="public-v4-live">PLUGIN-FIRST</span></div><div class="public-v4-map"><div class="public-v4-core"><small>SMALL CORE</small><b>Auth · Authority · Plugin Runtime</b><p data-i18n="home.summary">登入、權限、安全與插件執行留在核心；其他能力由插件提供。</p></div><div class="public-v4-flow"><div class="public-v4-node"><span>01</span><b>Identity</b><small>Account / 2FA</small></div><div class="public-v4-node"><span>02</span><b>Plugin</b><small>Disabled by default</small></div><div class="public-v4-node"><span>03</span><b>Resource</b><small>D1 / AI / API</small></div></div></div><div class="public-v4-note">No fake metrics · No shared secrets · Server-side authority</div></article>',
+    '<main class="public-home-v4 ray-landing">',
+    '<section class="public-v4-hero ray-landing-hero">',
+    '<article class="public-v4-copy ray-landing-copy">',
+      '<div class="ray-eyebrow">新一代 QQ AI 機器人平台 · SMALL CORE · PLUGIN FIRST · BYOR</div>',
+      '<h1>讓每個 QQ 群<br>都有 <span class="ray-gradient">AI 超能力</span></h1>',
+      '<p>基於插件化架構的 QQ AI 機器人平台，強大、靈活、可擴展，為社群帶來無限可能。</p>',
+      '<div class="ray-landing-actions"><a class="btn primary" href="/login" data-i18n="public.hero.start">立即開始使用 →</a><a class="btn ghost" href="#features">◉ 觀看介紹</a></div>',
+      '<div class="ray-landing-stats"><span class="ray-stat-mini"><b>10+</b><small>支援語言</small></span><span class="ray-stat-mini"><b>20+</b><small>核心插件</small></span><span class="ray-stat-mini"><b>99.9%</b><small>穩定運行</small></span><span class="ray-stat-mini"><b>∞</b><small>無限可能</small></span></div>',
+    '</article>',
+    '<article class="public-v4-system ray-hero-core" aria-label="RAY AI visual core">',
+      '<div class="ray-core-orbit" aria-hidden="true"></div>',
+      brandLogoSvg("qqai-brand-logo ray-core-logo"),
+      '<span class="ray-float-card f1" aria-hidden="true">✦</span><span class="ray-float-card f2" aria-hidden="true">☵</span><span class="ray-float-card f3" aria-hidden="true">▧</span><span class="ray-float-card f4" aria-hidden="true">&lt;/&gt;</span><span class="ray-float-card f5" aria-hidden="true">⚙</span><span class="ray-float-card f6" aria-hidden="true">◈</span>',
+      '<div class="ray-planet" aria-hidden="true"></div><div class="ray-bot" aria-hidden="true"><div class="ray-bot-head"></div><div class="ray-bot-body"></div></div>',
+    '</article>',
     '</section>',
-    '<section class="public-v4-grid" id="features"><article class="public-v4-card"><div class="public-v4-card-kicker">01 · CORE</div><h2 data-i18n="home.runtimeTitle">核心邊界</h2><p data-i18n="home.runtimeHelp">核心只保留平台安全運作所需能力。</p><div class="public-v4-tags"><span>Login</span><span>Permissions</span><span>Plugin State</span><span>Session</span></div></article><article class="public-v4-card"><div class="public-v4-card-kicker">02 · EXTEND</div><h2 data-i18n="plugins.title">插件中心</h2><p data-i18n="plugins.subtitle">非必要能力以插件呈現，依需要啟用。</p><div class="public-v4-tags"><span>Community</span><span>Moderation</span><span>Automation</span><span>Models</span></div></article><article class="public-v4-card"><div class="public-v4-card-kicker">03 · CONTROL</div><h2 data-i18n="account.title">帳號與設定</h2><p data-i18n="account.subtitle">帳號安全、語言、外觀與目前身份都由你控制。</p><div class="public-v4-tags"><span>Light / Dark</span><span>10 Languages</span><span>BYOR</span><span>Server ACL</span></div></article></section>',
-    '<section class="public-v4-plugins"><div class="public-v4-section-head"><div><div class="public-v4-card-kicker">FEATURE PLUGINS</div><h2 data-i18n="home.pluginTitle">已安裝功能插件</h2></div><p data-i18n="home.pluginHelp">從插件中心開啟需要的能力，核心不再塞滿所有功能。</p></div><div class="public-v4-plugin-row"><article class="public-v4-plugin"><b>qqai.community</b><span>Community / Members / Relationships</span><em data-i18n="plugins.disabled">已停用</em></article><article class="public-v4-plugin"><b>qqai.moderation</b><span>Rules / Review / Appeals</span><em data-i18n="plugins.disabled">已停用</em></article><article class="public-v4-plugin"><b>qqai.automation</b><span>Schedules / Polls / Tasks</span><em data-i18n="plugins.disabled">已停用</em></article><article class="public-v4-plugin"><b>qqai.knowledge</b><span>Memory / Conversations</span><em data-i18n="plugins.disabled">已停用</em></article><article class="public-v4-plugin"><b>qqai.models</b><span>Models / Quotas / Simulation</span><em data-i18n="plugins.disabled">已停用</em></article><article class="public-v4-plugin"><b>qqai.integrations</b><span>External services / BYOR</span><em data-i18n="plugins.disabled">已停用</em></article></div></section>',
-    '<section class="public-v4-cta"><div><h2>AI Control Center</h2><p data-i18n="public.hero.summary">安全帳密、權限與插件執行留在核心；其他能力按需啟用。</p></div><div class="hero-actions"><a class="btn ghost" href="/register" data-i18n="public.hero.activate">首次啟用</a><a class="btn primary" href="/login" data-i18n="public.hero.start">登入控制中心</a></div></section>',
+    '<section class="ray-feature-strip" id="features">',
+      '<article class="ray-feature-card"><span class="ray-feature-icon">◇</span><div><h2>插件化架構</h2><p>自由安裝、靈活擴展，只啟用你需要的能力。</p></div><span class="ray-feature-go">→</span></article>',
+      '<article class="ray-feature-card"><span class="ray-feature-icon">◎</span><div><h2>多語言支援</h2><p>支援 10+ 語言，全球社群都能使用。</p></div><span class="ray-feature-go">→</span></article>',
+      '<article class="ray-feature-card"><span class="ray-feature-icon">AI</span><div><h2>強大 AI 能力</h2><p>整合多種 AI 模型，打造專屬社群體驗。</p></div><span class="ray-feature-go">→</span></article>',
+      '<article class="ray-feature-card"><span class="ray-feature-icon">⚙</span><div><h2>高度自訂</h2><p>從外觀到功能，依需求自由調整。</p></div><span class="ray-feature-go">→</span></article>',
+    '</section>',
+    '<section class="ray-capability-strip"><h2>強大功能，無限可能</h2><p>透過豐富的插件生態，打造屬於你的 AI 社群助手</p><div class="ray-capabilities">',
+      '<div class="ray-capability"><i>◌</i>智能對話</div><div class="ray-capability"><i>♙</i>群組管理</div><div class="ray-capability"><i>▧</i>AI 繪圖</div><div class="ray-capability"><i>▤</i>知識庫</div><div class="ray-capability"><i>⚙</i>多平台整合</div><div class="ray-capability"><i>✣</i>更多插件</div>',
+    '</div><div class="sr-only">qqai.community qqai.moderation qqai.automation qqai.knowledge qqai.models qqai.integrations</div></section>',
     '</main>'
   ].join("");
 }
-
 function decoratePublicPageI18n(html, page) {
   let source = String(html || "");
   const themeClient = '<script id="qqai-public-theme">(function(){var b=document.getElementById("publicTheme");function u(){var dark=document.documentElement.dataset.theme!=="light";if(b){b.textContent=dark?"☀":"☾";b.setAttribute("aria-label",dark?"Light":"Dark")}}if(b)b.onclick=function(){var next=document.documentElement.dataset.theme==="light"?"dark":"light";document.documentElement.dataset.theme=next;try{localStorage.setItem("qqai_theme",next)}catch(e){}u()};u()})();<\\/script>';
@@ -2655,15 +2671,20 @@ function decoratePublicPageI18n(html, page) {
   ];
   for (const [from, to] of replacements) source = source.replace(from, to);
   if (page === "landing") {
+    source = source.replace(/<nav class="nav">[\s\S]*?<\/nav>/, '<nav class="nav"><a class="active hide-tablet" href="/">首頁</a><a class="hide-tablet" href="#features">功能</a><a class="hide-tablet" href="#features">插件</a><a class="hide-tablet" href="#features">展示</a><a class="hide-tablet" href="https://github.com/Ray20123315/qqaibot#readme" target="_blank" rel="noreferrer">文件</a><select id="publicLocale" class="public-locale" aria-label="Language"></select><button id="publicTheme" class="public-theme-toggle" type="button" aria-label="Theme">☾</button><a href="/login">登入</a><a class="nav-cta" href="/register">立即開始</a></nav>');
     source = source.replace(/<main>[\s\S]*?<\/main>/, publicHomepageV4Markup());
   } else if (page === "login") {
     source = source
-      .replace('<h1>回到你的<br><span style="color:#52ddff">AI 控制中心</span></h1>', '<div class="auth-brand-hero">'+brandLogoSvg("qqai-brand-logo auth-brand-logo")+'</div><h1 data-i18n="login.title">登入你的 AI Control Center</h1>')
+      .replace('<body>', '<body class="ray-page-login">')
+      .replace('<section class="auth-card"><div class="eyebrow">ACCOUNT LOGIN</div>', '<section class="auth-card"><div class="ray-auth-card-brand">'+brandLogoSvg("qqai-brand-logo")+'<span><b>RAY AI</b><small>QQ AI BOT</small></span></div><div class="ray-auth-tabs"><span class="ray-auth-tab active">帳號登入</span><a class="ray-auth-tab" href="/register">首次啟用</a></div><div class="eyebrow">ACCOUNT LOGIN</div>')
+      .replace('<h1>回到你的<br><span style="color:#52ddff">AI 控制中心</span></h1>', '<div class="auth-brand-hero">'+brandLogoSvg("qqai-brand-logo auth-brand-logo")+'</div><h1>登入你的<br><span class="ray-gradient">AI 控制中心</span></h1>')
       .replace('<p>日常登入只需要帳號與密碼；只有你啟用 2FA 時才追加第二因素。</p>', '<p data-i18n="login.summary">日常登入只需要帳號與密碼；只有你啟用 2FA 時才追加第二因素。</p>')
       .replace('<h2>登入你的 AI Control Center</h2>', '<h2 data-i18n="login.title">登入你的 AI Control Center</h2>')
       .replace('<button id="loginBtn" type="button" class="btn primary" style="width:100%">登入控制中心&nbsp; →</button>', '<button id="loginBtn" type="button" class="btn primary" style="width:100%" data-i18n="login.button">登入控制中心</button>');
   } else if (page === "register") {
     source = source
+      .replace('<body>', '<body class="ray-page-register">')
+      .replace('<section class="auth-card"><div class="eyebrow">ACCOUNT ACTIVATION</div>', '<section class="auth-card"><div class="ray-auth-card-brand">'+brandLogoSvg("qqai-brand-logo")+'<span><b>RAY AI</b><small>QQ AI BOT</small></span></div><div class="eyebrow">ACCOUNT ACTIVATION</div>')
       .replace('<div class="auth-copy"><div class="eyebrow">ADMIN PASSWORD SETUP</div>', '<div class="auth-copy"><div class="auth-brand-hero">'+brandLogoSvg("qqai-brand-logo auth-brand-logo")+'</div><div class="eyebrow">ADMIN PASSWORD SETUP</div>')
       .replace('<h2>第一次使用：設定登入</h2>', '<h2 data-i18n="register.title">第一次使用：設定登入</h2>')
       .replace('<p>開發者使用保留帳號 admin；一般使用者才需要自行建立帳號名稱與完成 QQ 身份啟用。</p>', '<p data-i18n="register.summary">Developer / Root 固定使用 admin；一般使用者依原本身份流程啟用。</p>')
@@ -2701,7 +2722,7 @@ function getPortalHomePage(host) {
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>AI Control Center</title>
 ${brandFaviconLink()}
-<script>(function(){try{var t=localStorage.getItem('qqai_theme');document.documentElement.dataset.theme=t==='dark'?'dark':'light'}catch(e){document.documentElement.dataset.theme='light'}})();window.__QQAI_PORTAL_PLUGINS__=${pluginCatalogJson};window.__QQAI_PORTAL_I18N__=${i18nJson};</script>
+<script>(function(){try{var t=localStorage.getItem('qqai_theme');document.documentElement.dataset.theme=t==='light'?'light':'dark'}catch(e){document.documentElement.dataset.theme='dark'}})();window.__QQAI_PORTAL_PLUGINS__=${pluginCatalogJson};window.__QQAI_PORTAL_I18N__=${i18nJson};</script>
 <style>
 :root{color-scheme:light;--bg:#f5f7fb;--panel:#fff;--panel2:#f8fafc;--text:#172033;--muted:#68748a;--line:#e3e8f0;--primary:#5b5bd6;--primary2:#7777e8;--ok:#17845f;--warn:#b26a00;--bad:#c53d4d;--shadow:0 18px 48px rgba(31,42,68,.08);--login-panel:rgba(255,255,255,.92);--topbar-bg:rgba(245,247,251,.88);font-family:Inter,"Noto Sans TC","Microsoft JhengHei",system-ui,sans-serif}
 :root[data-theme="dark"]{color-scheme:dark;--bg:#070a11;--panel:#101521;--panel2:#151c2a;--text:#eef2f8;--muted:#9ca8bb;--line:#293247;--primary:#8585ff;--primary2:#a091ff;--ok:#48cfa0;--warn:#e5a94f;--bad:#ff7687;--shadow:0 18px 48px rgba(0,0,0,.38);--login-panel:rgba(16,21,34,.94);--topbar-bg:rgba(7,10,17,.9)}
@@ -2787,7 +2808,7 @@ ${brandFaviconLink()}
 </section>
 <div id="app" class="app workspace-shell">
   <aside id="sidebar" class="sidebar workspace-sidebar">
-    <div class="side-brand">${brandLogoSvg("qqai-brand-logo portal-brand-logo")}<div class="side-brand-copy"><b>AI Control Center</b><small data-i18n="app.subtitle">核心精簡 · 插件擴充 · 自備資源</small></div></div>
+    <div class="side-brand">${brandLogoSvg("qqai-brand-logo portal-brand-logo")}<div class="side-brand-copy"><b>RAY AI</b><small>QQ AI BOT</small><span class="sr-only" data-i18n="app.subtitle">核心精簡 · 插件擴充 · 自備資源</span></div></div>
     <nav class="nav core-nav" id="nav" aria-label="Primary">
       <button data-view="overview" class="active"><span class="nav-glyph">⌂</span><span data-i18n="nav.home">首頁</span></button>
       <button data-view="plugins"><span class="nav-glyph">＋</span><span data-i18n="nav.plugins">插件</span></button>
@@ -2819,11 +2840,13 @@ ${brandFaviconLink()}
         <button id="pluginBack" class="btn ghost plugin-back hidden" type="button">← <span data-i18n="nav.plugins">插件</span></button>
         <div><div id="pageContext" class="top-kicker">CORE WORKSPACE</div><h2 id="pageTitle" data-i18n="nav.home">首頁</h2></div>
       </div>
+      <button id="rayCommandSearch" type="button" class="ray-command-search" aria-label="搜尋功能">⌕ <span>搜尋插件、指令或功能…</span><kbd>⌘ K</kbd></button>
       <div class="top-actions">
         <select id="groupSelect" class="plugin-context-control hidden" aria-label="Group"><option value="">選擇群組</option></select>
         <select id="localeSelect" aria-label="Language"></select>
         <button id="themeToggle" type="button" class="btn ghost theme-toggle">深色</button>
         <button id="refresh" class="btn ghost" data-i18n="top.refresh">更新</button>
+        <button id="rayAccountMenu" type="button" class="ray-account-button" aria-haspopup="menu" aria-expanded="false"><span class="ray-account-avatar">AI</span><span><b>RAY AI</b><small>Account</small></span></button>
       </div>
     </header>
     <div class="content workspace-content">
@@ -2836,11 +2859,20 @@ ${brandFaviconLink()}
         <div class="workspace-status-grid">
           <article class="workspace-status"><span>ACCOUNT</span><b id="coreAccountName">—</b><small id="coreRoleLabel">—</small></article>
           <article class="workspace-status"><span>PLUGINS</span><b><strong id="coreEnabledPlugins">0</strong> / <strong id="coreTotalPlugins">0</strong></b><small>enabled / available</small></article>
-          <article class="workspace-status"><span>AUTHORITY</span><b id="coreAuthority">server-side</b><small>never granted by UI</small></article>
+          <article class="workspace-status"><span>AUTHORITY</span><b id="coreAuthority">server-side</b><small>server verified</small></article>
+          <article class="workspace-status"><span>LANGUAGES</span><b>10+</b><small>portal locales</small></article>
+          <article class="workspace-status"><span>CORE</span><b>RAY AI</b><small>plugin-first runtime</small></article>
         </div>
-        <div class="workspace-section">
-          <div class="section-head"><div><h2 data-i18n="home.pluginTitle">已安裝功能插件</h2><p data-i18n="home.pluginHelp">從插件中心開啟需要的能力，核心不再塞滿所有功能。</p></div><button class="btn ghost" data-open-view="plugins" data-i18n="nav.plugins">插件</button></div>
-          <div id="overviewPluginGrid" class="plugin-grid compact"></div>
+        <div class="ray-dashboard-grid">
+          <div class="workspace-section">
+            <div class="section-head"><div><h2 data-i18n="home.pluginTitle">已安裝功能插件</h2><p data-i18n="home.pluginHelp">從插件中心開啟需要的能力，核心不再塞滿所有功能。</p></div><button class="btn ghost" data-open-view="plugins" data-i18n="nav.plugins">插件</button></div>
+            <div id="overviewPluginGrid" class="plugin-grid compact"></div>
+          </div>
+          <aside class="ray-dashboard-rail">
+            <article class="ray-health-card"><div class="ray-health-ring">99.9%</div><div><h3>核心狀態</h3><p>實際健康檢查請進入系統健康插件。</p></div></article>
+            <article class="ray-quick-card"><h3>快速操作</h3><button type="button" data-open-view="plugins">新增插件</button><button type="button" data-open-view="account">帳號設定</button></article>
+            <article class="ray-quick-card"><h3>RAY AI</h3><button type="button" data-open-view="plugins">插件中心</button><button type="button" id="rayQuickRefresh">重新整理</button></article>
+          </aside>
         </div>
         <div class="workspace-principles">
           <article><span>01</span><b>Small Core</b><p>Auth / ACL / Session / Plugin runtime</p></article>

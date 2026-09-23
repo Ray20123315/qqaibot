@@ -32,11 +32,11 @@ const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "qqai-layout-"));
 const pages = {
   landing: {
     html: getPublicLandingPage(),
-    selectors: [".shell", ".public-home-v4", ".public-v4-hero", ".public-v4-copy", ".public-v4-system"]
+    selectors: [".shell", ".ray-landing", ".ray-landing-hero", ".ray-landing-copy", ".ray-hero-core", ".ray-feature-strip"]
   },
   login: {
     html: getPortalLoginPage(),
-    selectors: [".shell", ".auth-wrap", ".auth-stage", ".auth-card", ".auth-visual"]
+    selectors: [".shell", ".auth-wrap", ".auth-stage", ".auth-visual", ".auth-card"]
   },
   register: {
     html: getPortalRegisterPage(),
@@ -44,7 +44,7 @@ const pages = {
   },
   portal: {
     html: injectPortalLayoutClient(injectPortalMembersClient(injectDeploymentPortalClient(getPortalHomePage("aibot.ray2025.com")))),
-    selectors: [".workspace-shell", ".workspace-main", ".workspace-content", ".workspace-hero"]
+    selectors: [".workspace-shell", ".workspace-main", ".workspace-content", ".workspace-hero", ".workspace-status-grid", ".ray-dashboard-grid"]
   }
 };
 
