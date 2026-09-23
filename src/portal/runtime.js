@@ -2734,7 +2734,7 @@ function getPortalHomePage(host) {
 <section id="login" class="login hidden">
   <div class="login-card">
     <div class="login-aside">
-      <div class="brand"><div class="logo">AI</div><div><div class="login-kicker">AI Control Center</div><h1>安全登入</h1><p>同一個入口，依你的實際帳號權限顯示可使用的功能。</p></div></div>
+      <div class="brand">${brandLogoMarkup({ className: "portal-login-logo", idPrefix: "portal-internal-login" })}<div><div class="login-kicker">AI Control Center</div><h1>安全登入</h1><p>同一個入口，依你的實際帳號權限顯示可使用的功能。</p></div></div>
       <div class="login-aside-copy"><h2>你今天要使用哪一種身份？</h2><p>先選最接近你的使用情境。這只會調整登入說明，不會自行提升帳號權限。</p></div>
       <div class="login-role-grid" id="loginRoleGrid">
         <button type="button" class="login-role active" data-login-profile="developer"><b>開發者</b><small>平台核心維護、部署與安全管理。</small></button>
@@ -2815,18 +2815,52 @@ function getPortalHomePage(host) {
     </header>
     <div class="content portal-content">
       <section id="v-overview" class="view active">
-        <div class="core-hero">
-          <div><div class="eyebrow" data-i18n="home.kicker">AI CONTROL CENTER</div><h1 data-i18n="home.title">保持核心簡單，把能力交給插件。</h1><p data-i18n="home.summary">登入、權限、安全與插件執行留在核心；其他能力由插件提供。</p></div>
-          <button class="btn primary" data-open-view="plugins" data-i18n="nav.plugins">插件</button>
+        <div class="portal-home-hero">
+          <div class="portal-home-copy">
+            <div class="portal-home-mark">${brandLogoMarkup({ className: "portal-home-logo", idPrefix: "portal-home" })}<span data-i18n="home.kicker">AI CONTROL CENTER</span></div>
+            <h1 data-i18n="home.title">保持核心簡單，把能力交給插件。</h1>
+            <p data-i18n="home.summary">登入、權限、安全與插件執行留在核心；其他能力由插件提供。</p>
+            <div class="portal-home-actions">
+              <button class="btn primary" data-open-view="plugins" data-i18n="nav.plugins">插件</button>
+              <button class="btn ghost" data-open-view="account" data-i18n="nav.account">帳號與設定</button>
+            </div>
+          </div>
+          <div class="portal-home-orbit" aria-hidden="true">
+            <div class="orbit-core">CORE</div>
+            <span class="orbit-chip chip-a">AUTH</span>
+            <span class="orbit-chip chip-b">ACL</span>
+            <span class="orbit-chip chip-c">PLUGIN</span>
+          </div>
         </div>
-        <div class="core-metrics">
-          <article class="core-metric"><span>ID</span><div><small>Account</small><b id="coreAccountName">—</b><em id="coreRoleLabel">—</em></div></article>
-          <article class="core-metric"><span>＋</span><div><small>Plugins</small><b><strong id="coreEnabledPlugins">0</strong> enabled</b><em><strong id="coreTotalPlugins">0</strong> available</em></div></article>
-          <article class="core-metric"><span>ACL</span><div><small>Authority</small><b id="coreAuthority">server-side</b><em>role & permission guarded</em></div></article>
+
+        <div class="portal-core-status">
+          <article class="portal-status-card">
+            <span class="portal-status-icon">ID</span>
+            <div><small>Account</small><b id="coreAccountName">—</b><em id="coreRoleLabel">—</em></div>
+          </article>
+          <article class="portal-status-card">
+            <span class="portal-status-icon">＋</span>
+            <div><small>Plugins</small><b><strong id="coreEnabledPlugins">0</strong> enabled</b><em><strong id="coreTotalPlugins">0</strong> available</em></div>
+          </article>
+          <article class="portal-status-card">
+            <span class="portal-status-icon">ACL</span>
+            <div><small>Authority</small><b id="coreAuthority">server-side</b><em>role & permission guarded</em></div>
+          </article>
         </div>
-        <div class="core-grid">
-          <div class="card"><div class="section-head compact"><div><h3 data-i18n="home.pluginTitle">已安裝功能插件</h3><p data-i18n="home.pluginHelp">從插件中心開啟需要的能力。</p></div></div><div id="overviewPluginGrid" class="plugin-grid compact"></div></div>
-          <div class="card"><div class="section-head compact"><div><h3 data-i18n="home.runtimeTitle">核心邊界</h3><p data-i18n="home.runtimeHelp">核心只處理登入、權限、帳號安全、介面偏好與插件執行；群組、模型、審核、記憶、自動化與診斷由插件提供。</p></div></div><div class="list"><div class="item"><div class="item-title">Authentication / Authorization</div><div class="item-meta">核心</div></div><div class="item"><div class="item-title">Plugin Registry / State / Execution</div><div class="item-meta">核心</div></div><div class="item"><div class="item-title">Product Features</div><div class="item-meta">插件</div></div></div></div>
+
+        <div class="portal-home-grid">
+          <article class="card portal-plugin-quick">
+            <div class="section-head compact"><div><h3 data-i18n="home.pluginTitle">已安裝功能插件</h3><p data-i18n="home.pluginHelp">從插件中心開啟需要的能力。</p></div><button class="btn ghost" data-open-view="plugins" data-i18n="common.open">開啟</button></div>
+            <div id="overviewPluginGrid" class="plugin-grid compact"></div>
+          </article>
+          <article class="card portal-core-boundary">
+            <div class="section-head compact"><div><h3 data-i18n="home.runtimeTitle">核心邊界</h3><p data-i18n="home.runtimeHelp">核心只處理必要能力，其餘由插件提供。</p></div></div>
+            <div class="boundary-list">
+              <div><span>01</span><b>Authentication</b><small>Password · 2FA · Session</small></div>
+              <div><span>02</span><b>Authorization</b><small>Server-side role & permissions</small></div>
+              <div><span>03</span><b>Plugin Runtime</b><small>Registry · State · Execution</small></div>
+            </div>
+          </article>
         </div>
       </section>
       <section id="v-plugins" class="view">
