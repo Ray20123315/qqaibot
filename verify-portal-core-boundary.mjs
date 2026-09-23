@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import fs from "node:fs";
-import { portalPluginCatalog, portalPluginForView } from "./src/plugins/runtime.js";
+import { portalPluginCatalog, portalPluginForApiPath, portalPluginForView } from "./src/plugins/runtime.js";
 import { getPortalHomePage } from "./src/portal/runtime.js";
 
 const CORE_VIEWS = new Set(["overview", "plugins", "account"]);
@@ -76,5 +76,25 @@ assert.doesNotMatch(overviewFunction, /health|tasks|moderation\/proposals/, "cor
 
 assert.match(featureSource, /id: "qqai\.developer-tools"[\s\S]*views: \["health", "platform", "logs", "maintenance"\]/);
 assert.doesNotMatch(featureSource, /qqai\.werewolf|狼人殺|狼人杀/i);
+
+const handleStart = runtime.indexOf("async function handlePortalApi");
+assert.ok(handleStart >= 0, "handlePortalApi missing");
+const handleSource = runtime.slice(handleStart);
+const routeLiterals = new Set([
+  ...[...handleSource.matchAll(/path\s*===\s*"([^"]+)"/g)].map(match => match[1]),
+  ...[...handleSource.matchAll(/path\.startsWith\("([^"]+)"\)/g)].map(match => match[1])
+]);
+const coreApiExact = new Set(["/heartbeat", "/me", "/groups", "/select-group", "/capabilities", "/plugins", "/plugins/"]);
+function isCoreApiPath(path) {
+  return coreApiExact.has(path) || path === "/security" || path.startsWith("/security/");
+}
+const unownedFeatureApis = [...routeLiterals]
+  .filter(path => !isCoreApiPath(path))
+  .filter(path => !portalPluginForApiPath(path))
+  .sort();
+assert.deepEqual(unownedFeatureApis, [], "every non-core Portal API literal must have a plugin owner");
+for (const path of ["/heartbeat","/me","/groups","/select-group","/capabilities","/plugins","/security/auth-state","/security/password"]) {
+  assert.equal(portalPluginForApiPath(path), null, "shared core API must remain plugin-independent: " + path);
+}
 
 console.log("verify-portal-core-boundary: ok");
