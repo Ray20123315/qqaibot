@@ -42,7 +42,7 @@ function brandPublicStyle() {
   return `<style id="qqai-brand-public-v4">
 .qqai-brand-logo{width:44px;height:44px;display:block;flex:0 0 auto;filter:drop-shadow(0 0 20px rgba(47,174,255,.20))}
 .brand-lockup{display:flex!important;align-items:center!important;gap:12px!important;text-decoration:none!important}
-.brand-lockup .brand-copy{display:grid!important;gap:2px!important}.brand-lockup .brand-copy b{font-size:17px!important;letter-spacing:-.02em!important}.brand-lockup .brand-copy small{font-size:9px!important;letter-spacing:.17em!important;font-weight:850!important}
+.brand-lockup .brand-copy{display:grid!important;gap:2px!important}.brand-lockup .brand-copy b{font-size:17px!important;letter-spacing:-.02em!important}.brand-lockup .brand-copy small{font-size:9px!important;letter-spacing:.17em!important;font-weight:850!important}.auth-brand-hero{margin:0 0 18px}.auth-brand-logo{width:72px;height:72px}
 .public-theme-toggle{width:40px;height:40px;border-radius:11px;border:1px solid var(--line)!important;background:var(--surface-soft)!important;color:var(--text)!important;cursor:pointer;font-weight:900}
 .public-home-v4{display:grid;gap:18px;padding:58px 0 68px}
 .public-v4-hero{display:grid;grid-template-columns:minmax(0,.92fr) minmax(440px,1.08fr);gap:34px;align-items:stretch}
