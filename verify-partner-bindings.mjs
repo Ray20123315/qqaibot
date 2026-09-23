@@ -41,9 +41,7 @@ assert(worker.includes('只能解除由对象关系产生的禁言'), 'Partner u
 const portal = fs.readFileSync('src/portal/runtime.js', 'utf8');
 assert(portal.includes("members:'群友列表'"), 'Portal title map must include the member list');
 assert(portal.includes("'groups','moderation','members','ruleviolations'"), 'Portal management visibility must include the member list');
-const portalPlugins = fs.readFileSync('src/plugins/bundled/portal-features.js', 'utf8');
-assert(portal.includes('id="pluginGrid"'), 'Portal must expose the plugin center');
-assert(portalPlugins.includes('id: "qqai.community"') && portalPlugins.includes('"members"'), 'Community plugin must own the member-list view');
+assert(portal.includes('data-open-view="members"'), 'Portal dashboard must expose a member-list shortcut when the navigation permission is available');
 assert(portal.includes('id="opProtect"'), 'Pending moderation form must expose prevent-unmute');
 assert(portal.includes('id="opOwnerUnlock"'), 'Pending moderation form must expose owner-can-unmute');
 assert(portal.includes('id="opSkipConfirm"'), 'Pending moderation form must expose skip-confirmation');

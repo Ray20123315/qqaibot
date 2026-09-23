@@ -2,7 +2,7 @@
 
 目前版本：**2.7.12**
 
-QQ AI Bot 是部署在 Cloudflare Workers 的單一 Worker QQ 群聊機器人。它透過 NapCat／OneBot WebSocket 接收 QQ 事件，整合 Gemini、Gemma、DeepSeek、D1、Vectorize、Durable Objects 與內建 Portal，提供聊天、記憶、群規、活動、排程、通知與管理工具。
+QQ AI Bot 是部署在 Cloudflare Workers 的單一 Worker QQ 群聊機器人。它透過 NapCat／OneBot WebSocket 接收 QQ 事件，整合 Gemini、Gemma、DeepSeek、D1、Vectorize、Durable Objects 與內建 Portal，提供聊天、記憶、群規、活動、排程、通知、狼人殺與管理工具。
 
 本儲存庫不再把維護者 QQ 號當成程式預設。部署者必須設定自己的開發者 QQ、公開網址、Cloudflare 資源與 API 憑證。
 
@@ -28,36 +28,23 @@ worker.js
       ├─ src/operations/     活動、投票、協作與自動化
       ├─ src/scheduler/      排程、衝突守衛、群打卡
       ├─ src/social/         人格、關係、輸出風格與表情庫
-      ├─ src/games/          本地娛樂指令
+      ├─ src/games/          狼人殺與本地娛樂指令
       └─ src/data/           D1／KV 相容資料存取
 ```
 
 Wrangler 會把所有模組打包成同一個 Worker，不需要建立第二個 Worker。
 
-完整逐項變數與 binding 對照見 **[Environment / Binding Reference](docs/ENVIRONMENT.md)**。該文件以目前 source 實際讀取為準，並另外標示相容/預留但尚未生效的名稱。
-
 ## 五層設定模型
 
-設定依用途分成五層，不應全部塞進同一頁或同一檔案。**Cloudflare Dashboard 的 `DEVELOPER_IDS`／`ROOT_QQ_IDS`／`DEVELOPER_ID` 是唯讀的部署層 Developer 身分；系統管理員可在登入後，另外管理 D1 中的 Developer QQ 清單。`wrangler.toml` 使用 `keep_vars = true`，部署腳本使用 `--keep-vars`，避免 Git 部署清除 Dashboard 變數。**
+設定依用途分成五層，不應全部塞進同一頁或同一檔案。
 
 1. **Cloudflare 基礎資源**：Worker 名稱、網域、D1、Vectorize、Durable Object、Cron、Rate Limiter。設定於 `wrangler.toml`。
 2. **公開執行期變數**：開發者 QQ、公開網址、模型名稱、預算、功能開關與安全範圍內的限制值。設定於 `[vars]` 或 Cloudflare Dashboard Variables。
 3. **Secrets**：API Key、OneBot Token、Portal 加密金鑰。使用 `wrangler secret put`，不得提交至 GitHub。
-4. **Portal／群組動態設定**：人格、群規、通知路由、模型偏好、活動、排程、權限、插件啟用狀態與各群開關。保存於 D1，不必重新部署。
+4. **Portal／群組動態設定**：人格、群規、通知路由、模型偏好、活動、排程、權限與各群開關。保存於 D1，不必重新部署。
 5. **不可任意關閉的系統不變量**：權限驗證、資料隔離、政治靜默、安全規則、危險操作二次確認、Durable Object migration 歷史與資料結構完整性。
 
 優先順序通常是：Portal／群組明確設定 → Worker 公開變數 → 程式安全預設。Secrets 只提供憑證，不應被 Portal 回傳或顯示。
-
-## Self-made Plugin Execution Modes
-
-自製插件固定分成兩種執行模式，信任邊界不可自動降級：
-
-- `trusted_bundled`：只給自己或已信任作者的插件。插件先進 repo、完成 manifest／安全檢查與 regression，再納入 Worker bundle 並重新部署。這類插件視為 QQAI Core 的一部分，因此 code review 與來源信任是必要條件。
-- `sandboxed_external`：給未來 Marketplace／其他使用者提供的陌生插件。QQAI Core 不以 `eval`、`new Function` 或同程序 VM 執行，而是透過 Cloudflare Dynamic Workers 的 `PLUGIN_LOADER` 建立獨立 isolate。預設 `globalOutbound: null`，且不傳入 D1、AI、OneBot Hub、Vectorize、Rate Limiter、Secrets 或完整 `env`。
-- External sandbox 的回傳值一律當成不可信資料；目前 host 只接受受限的 `reply`、`log`、`metric` action，其他 action 會被丟棄。未來若要開放 DB、HTTP、OneBot 等能力，必須新增明確、可稽核、可限權的 host capability adapter。
-- 若 production 沒有設定 `PLUGIN_LOADER`，external 模式會 fail closed 為 `PLUGIN_SANDBOX_UNAVAILABLE`，不會退回 QQAI Core 同程序執行。Cloudflare Dynamic Workers 目前需要 Workers Paid plan。
-
-實作、manifest 與部署說明見 `src/plugins/README.md`。
 
 ## 快速部署
 
@@ -72,7 +59,7 @@ Wrangler 會把所有模組打包成同一個 Worker，不需要建立第二個 
 - 至少一組可用的 Gemini API Key
 
 ```bash
-npm ci --ignore-scripts
+npm install --ignore-scripts
 npx wrangler login
 ```
 
@@ -102,18 +89,9 @@ cp wrangler.example.toml wrangler.toml
 - D1 `database_name` 與 `database_id`
 - Vectorize `index_name`
 - Rate Limiter `namespace_id`
+- `DEVELOPER_IDS`
 - `PUBLIC_BASE_URL`
 - `DEPLOY_NOTIFY_WORKER_NAME`
-
-接著在 Cloudflare Dashboard Variables 建立 `DEVELOPER_IDS`（以及需要時的 `ROOT_QQ_IDS` / legacy `DEVELOPER_ID`）。不要把這些 identity 值提交到 production `wrangler.toml`。
-
-同一個 Dashboard 中設定唯一的 `PORTAL_ADMIN_USERNAME`，並用 Cloudflare Secret 設定 `PORTAL_ADMIN_PASSWORD`。兩者必須一起設定，密碼至少 10 個字元。帳號名稱會對應至 D1 內既有的 `admin` 綁定；設定這兩個值不會重建或覆蓋帳號、QQ 綁定或 D1 密碼資料。若尚未設定這一組變數，系統保留現有 D1 管理員登入方式，避免更新後鎖住既有管理員。
-
-```bash
-npx wrangler secret put PORTAL_ADMIN_PASSWORD
-```
-
-NapCat 必須主動連接 `wss://你的網域/onebot`，並使用相同的 `ONEBOT_ACCESS_TOKEN`。如要加 HTTP 備援，設定 `ONEBOT_HTTP_URL` 和對應的 `ONEBOT_HTTP_ACCESS_TOKEN`。驗證碼傳送失敗時，Portal 會指出 WebSocket 是否連線及 HTTP 備援是否已設定；程式不會保留失敗的驗證碼。
 
 Durable Object migration 的 `v1_onebot_hub`、`v2_budget_guard`、`v3_remove_budget_guard` 順序屬於專案歷史，既有部署不可刪除、重新命名或重排。
 
@@ -130,7 +108,6 @@ cp .dev.vars.example .dev.vars
 ```bash
 npx wrangler secret put GEMINI_API_KEYS
 npx wrangler secret put ONEBOT_ACCESS_TOKEN
-npx wrangler secret put PORTAL_ADMIN_PASSWORD
 npx wrangler secret put PORTAL_AUTH_SECRET
 npx wrangler secret put TOTP_ENCRYPTION_KEY
 ```
@@ -140,10 +117,10 @@ npx wrangler secret put TOTP_ENCRYPTION_KEY
 ```bash
 npm run check
 npm run check:bundle
-npm run deploy:prod
+npm run deploy
 ```
 
-`deploy` 與 `check:bundle` 都只做 Wrangler dry-run，不會部署。只有明確執行 `deploy:prod` 才會更新 Worker。
+`check:bundle` 是 Wrangler dry-run，不會部署；`deploy` 才會更新正式 Worker。
 
 ## Cloudflare Bindings
 
@@ -168,11 +145,10 @@ Cron 預設每分鐘執行，用於排程、自動化、暫存清理、主動發
 | `DEVELOPER_IDS` | 逗號、分號或換行分隔 QQ ID；預設空 | 開發者／Root QQ 清單。建議使用此欄位，可設定多人。 |
 | `DEVELOPER_ID` | 單一 QQ；預設空 | 舊版相容欄位，只有一位開發者時仍可用。 |
 | `ROOT_QQ_IDS` | QQ 清單；預設空 | 額外 Root 清單，相容部署使用；會與 `DEVELOPER_IDS` 合併去重。 |
-| `PORTAL_ADMIN_USERNAME` | 4–32 位帳號；預設未設定 | 此部署唯一的管理員登入名稱。必須和 `PORTAL_ADMIN_PASSWORD` 一起設定。若名稱與既有一般使用者重複，該管理員登入會 fail closed，請設定另一個名稱。 |
 | `PUBLIC_BASE_URL` | `https://bot.example.com`；預設使用請求來源 | `!help`、Portal 與 Live 對外連結的基底網址，不加結尾 `/`。 |
 | `BOT_DISPLAY_NAME` | `QQAI` | 對外顯示名稱，供可支援的 UI／訊息使用。 |
 
-`DEVELOPER_IDS` 不屬於密碼，但它授予最高 QQ 身份權限，也用來核准第一次建立保留帳號 `admin`。這組 Dashboard 清單不能透過 Portal 修改。系統管理員登入後，可在「帳號與設定 → Developer QQ 管理」新增或移除 D1 管理的額外 Developer QQ；一般帳號與群組管理員不能使用該 API。管理員的環境變數密碼只驗證登入，既有 D1 管理員資料不會被重設；若尚未設定環境變數，首次啟用僅能在管理員尚無密碼時寫入一次，不會覆蓋既有密碼。沒有預設 admin 密碼。
+`DEVELOPER_IDS` 不屬於密碼，但它授予最高權限。不要允許一般 Portal 管理員修改，否則會形成自行提權。應由部署者在 Cloudflare 設定。
 
 ### 部署通知
 
@@ -244,8 +220,8 @@ Secrets 不可放在 `[vars]`、README 範例值、Portal 回應、Git log 或�
 | `ONEBOT_ACCESS_TOKEN` | NapCat WebSocket 驗證 Token。 |
 | `ONEBOT_HTTP_URL` | 可選 OneBot HTTP 備援網址。若含憑證資訊仍應視為 Secret。 |
 | `ONEBOT_HTTP_ACCESS_TOKEN` | HTTP 備援 Token。 |
-| `PORTAL_AUTH_SECRET` | Portal 敏感資料／2FA 加密 fallback；不是 `admin` 登入密碼，也不是首次啟用金鑰。 |
-| `TOTP_ENCRYPTION_KEY` | TOTP 種子優先加密 key；建議與 Portal/OneBot key 分開。 |
+| `PORTAL_AUTH_SECRET` | Portal 敏感資料與登入相關加密。 |
+| `TOTP_ENCRYPTION_KEY` | TOTP 種子加密。 |
 | `CLOUDFLARE_BUILDS_API_TOKEN` | 可選，讀取 Cloudflare Build 詳細日誌。 |
 
 列出 Secrets：
@@ -271,7 +247,7 @@ npx wrangler secret put SECRET_NAME
 - 自動歡迎、歡迎詞、入群輔助與新人觀察期
 - 人工通知路由；預設只找開發者，群主通知總開關預設關閉
 - AI 管理、群操作、排程審核與申訴審核權限
-- 活動、報名、候補、投票與排程
+- 活動、報名、候補、投票、排程與狼人殺
 - Bilibili 監控設定
 - 使用者記憶、免打擾、黑名單、好感度與申訴資料
 
@@ -315,7 +291,7 @@ npx wrangler secret put SECRET_NAME
 
 ### Portal
 
-Portal 入口由 `PUBLIC_BASE_URL` 或實際請求來源決定，不再固定指向維護者網站。開發者首次啟用固定建立／綁定保留帳號 `admin` 並直接設定密碼，不需 QQ 六位碼；日常登入使用 `admin + 密碼`。Portal 另包含密碼重設、群組與群友、權限、群規、通知、模型、對話、違規、申訴、活動、投票與系統維護。
+Portal 入口由 `PUBLIC_BASE_URL` 或實際請求來源決定，不再固定指向維護者網站。包含登入、密碼重設、群組與群友、權限、群規、通知、模型、對話、違規、申訴、活動、投票、狼人殺與系統維護。
 
 ## 指令
 
@@ -366,22 +342,13 @@ Token: 與 ONEBOT_ACCESS_TOKEN 相同
 ## 驗證與 GitHub Actions
 
 ```bash
-npm ci --ignore-scripts
+npm install --ignore-scripts --no-package-lock
 npm run check
 npm run check:bundle
 ```
-
-在審查後有意修改 JavaScript 原始碼時，執行 `npm run manifest:refresh` 更新模組來源 checksum，再重新跑完整檢查。
 
 `.github/workflows/validate.yml` 在 `main` push 與 PR 執行完整 regression 和單一 Worker bundle，正式 workflow 僅使用 `contents: read`。
 
 ## 授權與責任
 
 本專案採用儲存庫現有的自訂限制性授權條款。使用、修改或散布前請先閱讀授權文件。軟體按現狀提供，使用者自行承擔部署、帳號、第三方平台與資料風險。
-
-
-## 權利保留
-
-Copyright (c) 2026 ray20123315. All rights reserved.
-
-本專案的使用、修改與散布條件以根目錄 `LICENSE` 為準。此說明不取代、擴張或縮減 LICENSE 內的授權條款。

@@ -796,7 +796,7 @@ async function opsDependencyCheck(env, groupId) {
     { id: "bot_moderation", name: "群规自动处理", ok: ["admin", "owner"].includes(String(bot?.role || "")), detail: "需要 Bot 为管理员或群主" },
     { id: "join_approval", name: "AI 同意入群申请", ok: ["admin", "owner"].includes(String(bot?.role || "")), detail: "需要 Bot 可处理群申请" },
     { id: "d1", name: "D1 储存", ok: Boolean(env.DB), detail: env.DB ? "configured" : "missing" },
-    { id: "durable_object", name: "Durable Object", ok: Boolean(env.ONEBOT_HUB), detail: env.ONEBOT_HUB ? "configured" : "missing" },
+    { id: "durable_object", name: "Durable Object", ok: Boolean(env.ONEBOT_WS), detail: env.ONEBOT_WS ? "configured" : "missing" },
     { id: "maintenance", name: "维护模式", ok: !settings.maintenanceMode, detail: settings.maintenanceMode ? "enabled" : "disabled" },
     { id: "emergency_lock", name: "紧急锁定", ok: !settings.emergencyLock, detail: settings.emergencyLock ? "enabled" : "disabled" }
   ];

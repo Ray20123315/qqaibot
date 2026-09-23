@@ -6,8 +6,6 @@ main = "worker.js"
 compatibility_date = "2026-07-21"
 compatibility_flags = ["nodejs_compat"]
 workers_dev = true
-# Preserve non-secret variables managed in the Cloudflare Dashboard instead of deleting them on deploy.
-keep_vars = true
 
 # Remove this block when no custom domain is used.
 [[routes]]
@@ -56,13 +54,10 @@ namespace_id = "REPLACE_WITH_RATE_LIMITER_NAMESPACE_ID"
   period = 10
 
 [vars]
-# Developer identity is intentionally configured in Cloudflare Dashboard Variables.
-# Required: DEVELOPER_IDS (comma/semicolon/newline-separated QQ IDs)
-# Optional: ROOT_QQ_IDS
-# Legacy fallback: DEVELOPER_ID
-# Do not add assignments here when Dashboard is the source of truth; keep_vars=true preserves them.
-# Set PORTAL_ADMIN_USERNAME in Dashboard Variables and PORTAL_ADMIN_PASSWORD with `wrangler secret put`.
-# Keep both out of this file so the deployment-specific admin credentials are not committed.
+# Required operator identity. Comma-separate multiple QQ IDs.
+DEVELOPER_IDS = "123456789,987654321"
+# Legacy single-value fallback; normally leave empty.
+DEVELOPER_ID = ""
 
 # Public URL used in !help and generated links. No trailing slash.
 PUBLIC_BASE_URL = "https://bot.example.com"
@@ -72,47 +67,27 @@ BOT_DISPLAY_NAME = "QQAI"
 DEPLOY_NOTIFY_WORKER_NAME = "replace-with-worker-name"
 DEPLOY_NOTIFY_BRANCH = "main"
 DEPLOY_NOTIFY_DEVELOPER_IDS = ""
-DEPLOY_NOTIFY_DEVELOPER_ID = ""
-# Reserved compatibility variable; current source does not read this value.
 DEPLOY_NOTIFY_START_COOLDOWN_SECONDS = "600"
 DEPLOY_NOTIFY_SELF_GRACE_SECONDS = "90"
 
-# OneBot HTTP event fallback. Keep disabled unless the HTTP ingress is intentionally exposed.
+# OneBot HTTP event fallback.
 ENABLE_ONEBOT_HTTP_EVENTS = "false"
-# Emergency public loopback for internal event processing. Keep false in normal deployments.
-QQAI_PUBLIC_INTERNAL_FALLBACK = "false"
 
 # Automatic group check-in. The execution window remains Asia/Taipei 23:59–00:01:59.
 AUTO_CHECKIN_ENABLED = "true"
 AUTO_CHECKIN_RETRY_INTERVAL_MS = "1000"
 AUTO_CHECKIN_CONCURRENCY = "12"
 
-# Model names, routing and paid-model budget.
+# Model names and paid-model budget.
 DEEPSEEK_FLASH_MODEL = "deepseek-v4-flash"
-DEEPSEEK_DAILY_BUDGET_CNY = "0.35"
-DEEPSEEK_EMERGENCY_FALLBACK = "true"
-MODEL_COST_POLICY = "balanced"
-
-GEMINI_CHAT_MODELS = "gemini-3.5-flash,gemini-3.1-flash-lite,gemini-2.5-flash"
-GEMINI_DECISION_MODELS = "gemini-3.1-flash-lite,gemini-3.5-flash"
-GEMINI_SEARCH_MODELS = "gemini-3.5-flash,gemini-3.1-flash-lite"
-GEMINI_VISION_MODELS = "gemini-3.1-flash-lite,gemini-2.5-flash"
-GEMMA_CHAT_MODELS = "gemma-4-31b-it"
-GEMMA_DECISION_MODELS = "gemma-4-26b-a4b-it,gemma-4-31b-it"
-GEMMA_LAST_RESORT_MODELS = "gemma-4-31b-it"
-GEMINI_TTS_MODELS = "gemini-3.1-flash-tts-preview,gemini-2.5-flash-preview-tts"
-GEMINI_LIVE_MODEL = "models/gemini-3.1-flash-live-preview"
-IMAGE_INSPECTION_ENABLED = "auto"
-
-# Reserved/compatibility names kept for deployment continuity; current source does not read them directly.
 DEEPSEEK_PRO_MODEL = "deepseek-v4-pro"
+DEEPSEEK_DAILY_BUDGET_CNY = "0.35"
+GEMINI_CHAT_MODELS = "gemini-3.5-flash,gemini-3.1-flash-lite,gemini-2.5-flash"
+GEMMA_DECISION_MODELS = "gemma-4-26b-a4b-it,gemma-4-31b-it"
 GEMINI_IMAGE_MODELS = ""
 IMAGEN_MODELS = ""
-
-# Optional: sandboxed external plugins require Cloudflare Dynamic Workers (Workers Paid).
-# Uncomment only after confirming the production account supports Dynamic Workers.
-# [[worker_loaders]]
-# binding = "PLUGIN_LOADER"
+GEMINI_TTS_MODELS = "gemini-3.1-flash-tts-preview,gemini-2.5-flash-preview-tts"
+GEMINI_LIVE_MODEL = "models/gemini-3.1-flash-live-preview"
 
 [observability]
 enabled = false

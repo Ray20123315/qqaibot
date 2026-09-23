@@ -1,12 +1,13 @@
 import { aiReplyPromisesFutureSearch, aiReplySignalsUncertainty, appendSearchSources, buildDeepSeekContextSummary, callDeepSeekSummaryTask, callGeminiGenerate, callGoogleDecision, decideReplyMentionRouting, deepSeekApiKeys, effectiveRuntimeModels, enforceExecutedSearchForReply, generateHybridReply, googleApiKeysFor, imageInspectionEnabled, isLightweightAcknowledgement, isLowContextInterjectionFragment, mergeAbortSignal, notifyDeveloper, roundRobinKeys, stripBotMentionFromConversation } from "./src/ai/runtime.js";
 import { buildImmediateConversationContext, buildMeetingMinuteBatches, normalizeMeetingMinuteCount, splitOutboundText } from "./src/ai/conversation-quality.js";
 import { AI_MEDIA_LIMITS, DEFAULTS, VERSION, classifyOperationalFailure } from "./src/config/runtime.js";
-import { publicBaseUrl, publicLiveUrl } from "./src/config/deployment.js";
+import { publicBaseUrl } from "./src/config/deployment.js";
 import { consumeManualRuleCheckRate, developerIds, getAffinityProfile, isDeveloperId, latestConversationMessageForUser, recentConversationMessagesForUser, refreshAffinityAiAssessment, stripGroupAiOptOutPrefix, updateAffinityFixedFromMessage } from "./src/core/identity.js";
 import { appendIndex, buildLongGroupConversationContext, callOneBotAction, checkRuntimeRateLimit, getEffectivePermissions, isKnownOutboundMessage, markOutboundPending, modelPreferenceLabel, normalizeMemoryItems, normalizeModelPreference, normalizePermissionName, permissionLabel, removeFromIndex, setExplicitPermission, updateAiDecisionLog, writeAiDecisionLog, writeSystemAudit } from "./src/core/permissions.js";
 import { appendChatHistoryTurn, clearChatSessionHistory, dbDel, dbGet, dbPut, readChatHistory, withTimeout } from "./src/data/store.js";
 import { announceDeployedVersionFallback, getDeploymentStatusForViewer, handleDeploymentBuildQueue, injectDeploymentPortalClient } from "./src/deployment/notifications.js";
 import { botCanRunRuleMonitor, getBotGroupRole, getGroupFamilyForGroup, getGroupJoinPage, isVerifiedGroupOwner } from "./src/group/runtime.js";
+import { buildHealthState } from "./src/health/runtime.js";
 import { normalizeMultilingualCommand, toSimplifiedChinese } from "./src/i18n/commands.js";
 import { collectFullMemberDetails, formatFullMemberDetailsReport } from "./src/members/details.js";
 import { handleBilibiliWebhook, pollAutomaticBilibiliConnectors } from "./src/integrations/bilibili.js";
@@ -16,14 +17,15 @@ import { MASTER_RELATIONSHIP_DEFAULTS, MASTER_RELATIONSHIP_MAX_LEVEL, clearPartn
 import { appendPortalConversationRecord, applyConversationOutputGuards, auditIgnoredRobotMessage, botInteractionAllowKey, buildReplyPlan, cacheBotSenderClassification, clearRegisteredThinkingIndicators, detectLiteralPseudoElementLabels, eventHasBotMention, eventMentionedQqs, eventPlainText, eventSenderDisplayName, eventSenderRobotHint, extractFileDescriptors, extractForwardIds, extractMediaDescriptor, extractMessageText, extractOutboundMediaTypes, extractTextMentionIds, filterRobotMentionIds, formatForwardContext, getForwardMessageSnapshot, getQuotedMessage, getTaipeiTimeContext, isExplicitCurrentTimeQuestion, isExplicitRoleplayRequest, isGroupRobotInteractionAllowed, isIgnoredGroupRobotSender, isStandaloneCurrentTimeQuestion, looksLikeRobotDisplayName, normalizeFileDescriptor, parseDurationSeconds, prepareConversationHistory, purgeLegacyBotRepliesFromRecentLogs, qqaiTruthyRobotFlag, recordStructuredMessage, registerThinkingIndicator, removeTextMentionTokens, resolveOneBotMediaAsBase64, runOneBotGroupOperation, sanitizeAiReply, sendThinkingIndicator, thinkingIndicatorRegistryKey } from "./src/onebot/messages.js";
 import { classifyCollaborationNaturalIntent, classifyNaturalLanguageCommandIntent, normalizeNaturalLanguageCommandText, opsGetGroupMember, opsGetSettings, opsHandleActivityCommand, opsHandleMemberLeave, opsProcessAutomations } from "./src/operations/runtime.js";
 import { processPlatformJobs } from "./src/platform/runtime.js";
-import { authDbDelStrict, authDbGetStrict, authDbPutIfAbsentStrict, authDbPutStrict, checkPortalAuthRateLimit, clearPasswordLoginGuard, commandChangesWebSettings, classifyPortalAuthFailure, constantTimeEqual, createPortalAccountBinding, createPortalAdminAccountBinding, createPortalPasswordRecord, createPortalSession, decryptPortalAuthSecret, deleteMemoryVector, generateSixDigitCode, getOneBotHub, getPortalSession, getPublicNebulaSeed, hashBackupCode, isMemoryBanned, isPortalSystemAdminQq, isValidPortalPasswordRecord, jsonResponse, markGroupMemberLeft, notePasswordLoginFailure, portalAdminCredentialConfig, portalEnvironmentWithManagedDeveloperIds, portalSessionCookie, readCookie, readJson, readPasswordLoginGuard, readPortalAccountByUsername, readPortalAuthJson, resolvePortalPasswordLogin, sendOneBotAction, sendOneBotHttpAction, sendPortalVerificationMessage, upsertGroupMember, upsertMemoryVector, validatePortalLoginUsername, validatePortalPassword, validatePortalUsername, verifyPortalPassword, verifyPortalVerificationCode, verifyTotpCode, writeMemoryAudit, writeSystemError } from "./src/portal/auth.js";
-import { getLiveHtmlPage, getPortalHomePage, getPortalLoginPage, getPortalRegisterPage, getPublicLandingPage, handleGeminiLiveUpgrade, handlePortalApi } from "./src/portal/runtime.js";
+import { authDbDelStrict, authDbGetStrict, authDbPutStrict, clearPasswordLoginGuard, commandChangesWebSettings, constantTimeEqual, createPortalPasswordRecord, createPortalSession, decryptPortalAuthSecret, deleteMemoryVector, generateSixDigitCode, getOneBotHub, getPortalSession, getPublicNebulaSeed, hashBackupCode, isMemoryBanned, isValidPortalPasswordRecord, jsonResponse, markGroupMemberLeft, notePasswordLoginFailure, portalSessionCookie, readCookie, readJson, readPasswordLoginGuard, readPortalAuthJson, sendOneBotAction, sendOneBotHttpAction, sendPortalVerificationMessage, upsertGroupMember, upsertMemoryVector, validatePortalPassword, verifyPortalPassword, verifyPortalVerificationCode, verifyTotpCode, writeMemoryAudit, writeSystemError } from "./src/portal/auth.js";
+import { getLiveHtmlPage, getPortalHomePage, handleGeminiLiveUpgrade, handlePortalApi } from "./src/portal/runtime.js";
 import { injectPortalLayoutClient } from "./src/portal/layout.js";
 import { injectPortalMembersClient } from "./src/portal/members.js";
 import { applySocialOutputPolicy, buildSocialDecision, buildSocialPromptBlock, capturePersonaContinuity, oneBotBotMentionCount, oneBotEventHasMedia, oneBotEventIsBareMention, oneBotEventIsPunctuationOnly, observeSocialStyle, shouldSendSocialBufferNotice, socialInputDelayMs, waitForSocialTyping } from "./src/social/runtime.js";
 import { pickSticker, pickStickerForText, stickerCqMessage } from "./src/social/sticker-library.js";
 import { cancelSchedule, cleanupExpiredModerationProposals, cleanupTransientState, countActiveSchedulesForUser, createAppealFromText, createScheduleRecord, extractScheduleMentionIds, formatScheduleLine, listUserSchedules, parseManagementScheduleAction, parseScheduleRequest, performManualGroupCheckins, processConflictSignal, processDueSchedules, reviewScheduleWithGemma, reviseScheduleRecord, runAutomaticGroupCheckins, skipScheduleOnce } from "./src/scheduler/runtime.js";
 import { handleEntertainmentCommand } from "./src/games/entertainment.js";
+import { handleWerewolfOneBotEvent, injectWerewolfPortalClient, processWerewolfTimers } from "./src/games/werewolf.js";
 import { buildHelpText } from "./src/help/commands.js";
 import { fetchPublicUrl, getFeatureFlag, getPrivateAccessMode, isGroupWhitelisted, numericId, verifyOneBotAccess } from "./src/security/network.js";
 
@@ -63,7 +65,6 @@ async function shouldSuppressRepeatedShortReply(env, { isGroup, groupId, text, w
   if (!duplicate) await dbPut(env, key, JSON.stringify({ fingerprint, at: Date.now() }));
   return duplicate;
 }
-
 
 const QQAI_V1_R54_PROGRESSIVE_MULTI_ACTION_MARKER = "QQAI_V1_R54_PROGRESSIVE_MULTI_ACTION_MARKER";
 
@@ -138,7 +139,6 @@ const QQAI_V1_R3_MARKER = "QQAI_V1_R3_MARKER";
 
 const QQAIWorker = {
   async fetch(request, env, ctx) {
-    env = await portalEnvironmentWithManagedDeveloperIds(env);
     const url = new URL(request.url); // 👈 保留此行，避免後續代碼崩潰！
 
     // ==========================================
@@ -150,82 +150,30 @@ const QQAIWorker = {
       return getOneBotHub(env).fetch(request);
     }
 
-    // Canonical public host migration. Keep WebSocket upgrades on the legacy host so
-    // existing NapCat/Live clients are not disconnected during the transition.
-    if (!upgradeHeader && url.hostname === "qqai.ray2025.com") {
-      const target = new URL(request.url);
-      target.protocol = "https:";
-      target.hostname = "aibot.ray2025.com";
-      target.port = "";
-      return Response.redirect(target.toString(), 308);
-    }
-
     // ==========================================
     // 🎙️ Gemini Live：網頁與 WebSocket
     // ==========================================
     if (url.pathname === "/live") {
-      const isWebSocket = upgradeHeader?.toLowerCase() === "websocket";
-      if (isWebSocket) {
-        const origin = request.headers.get("Origin");
-        try {
-          if (!origin || new URL(origin).origin !== url.origin) return new Response("Forbidden", { status: 403 });
-        } catch {
-          return new Response("Forbidden", { status: 403 });
-        }
-      }
-      const token = readCookie(request, "qqai_session");
-      let liveSession = null;
-      try { liveSession = token ? await getPortalSession(env, token, { touch: false }) : null; } catch {}
-      const developerAuthorized = Boolean(liveSession && (liveSession.permissions?.developer || isDeveloperId(env, liveSession.qq)));
-      if (!developerAuthorized) {
-        if (isWebSocket) return new Response("Unauthorized", { status: 401 });
-        return Response.redirect(`${url.origin}/login?next=${encodeURIComponent("/live")}`, 302);
-      }
       if (!upgradeHeader || upgradeHeader.toLowerCase() !== "websocket") {
         return new Response(toSimplifiedChinese(getLiveHtmlPage(url.host)), {
           headers: { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store" }
         });
       }
-      const rateLimit = await checkPortalAuthRateLimit(env, request, { scope: "live", principal: liveSession.qq });
-      if (!rateLimit.ok) return jsonResponse({ ok: false, code: rateLimit.reason === "limited" ? "LIVE_RATE_LIMITED" : "AUTH_RATE_LIMIT_UNAVAILABLE", message: rateLimit.reason === "limited" ? "即時通話啟動過於頻繁，請稍後再試。" : "即時通話目前無法安全啟動，請稍後再試。" }, rateLimit.reason === "limited" ? 429 : 503);
       return handleGeminiLiveUpgrade(request, env);
     }
 
     // ==========================================
-    // 🌐 公開首頁、登入、首次啟用與受保護 Portal
+    // 🌌 公共首頁與記憶矩陣中心
     // ==========================================
-    if (request.method === 'GET' && url.pathname === '/') {
-      return new Response(getPublicLandingPage(), {
-        headers: { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store" }
-      });
-    }
-
-    if (request.method === 'GET' && ['/login', '/register'].includes(url.pathname)) {
-      const token = readCookie(request, 'qqai_session');
-      const session = await getPortalSession(env, token, { touch: false }).catch(() => null);
-      if (session) return Response.redirect(`${url.origin}/portal`, 302);
-      const html = url.pathname === '/login' ? getPortalLoginPage() : getPortalRegisterPage();
-      return new Response(html, {
-        headers: { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store" }
-      });
-    }
-
-    if (request.method === 'GET' && url.pathname === '/matrix') {
-      return Response.redirect(`${url.origin}/portal#memory`, 302);
-    }
-
-    if (request.method === 'GET' && url.pathname === '/portal') {
-      const token = readCookie(request, 'qqai_session');
-      const session = await getPortalSession(env, token, { touch: false }).catch(() => null);
-      if (!session) return Response.redirect(`${url.origin}/login?next=${encodeURIComponent('/portal')}`, 302);
-      const portalHtml = injectPortalLayoutClient(injectPortalMembersClient(injectDeploymentPortalClient(getPortalHomePage(url.host))));
+    if (request.method === 'GET' && ['/', '/portal', '/matrix'].includes(url.pathname)) {
+      const portalHtml = injectPortalLayoutClient(injectWerewolfPortalClient(injectPortalMembersClient(injectDeploymentPortalClient(toSimplifiedChinese(getPortalHomePage(url.host))))));
       return new Response(portalHtml, {
         headers: { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store" }
       });
     }
 
     if (request.method === 'GET' && url.pathname === '/appeal') {
-      return Response.redirect(`${url.origin}/portal#appeals`, 302);
+      return Response.redirect(`${url.origin}/#appeals`, 302);
     }
 
     if (request.method === 'GET' && /^\/join\/\d{5,}$/.test(url.pathname)) {
@@ -237,7 +185,7 @@ const QQAIWorker = {
     }
 
     if (request.method === 'GET' && ['/health', '/healthz'].includes(url.pathname)) {
-      return jsonResponse({ ok: true, service: "qqai", version: VERSION });
+      return jsonResponse(await buildHealthState(env));
     }
 
     if (request.method === 'GET' && url.pathname === '/api/public/nebula') {
@@ -263,22 +211,13 @@ const QQAIWorker = {
       return handlePortalApi(request, env, url);
     }
 
-    if (request.method === 'POST' && ['/api/auth/request-code', '/api/auth/register/request-code'].includes(url.pathname)) {
+    if (request.method === 'POST' && url.pathname === '/api/auth/request-code') {
       let payload = {};
       try { payload = await request.json(); } catch (e) {}
       const qq = String(payload.qq || "").replace(/\D/g, "");
       const group = "";
-      if (!/^\d{5,12}$/.test(qq)) {
+      if (!qq) {
         return jsonResponse({ ok: false, message: "请先输入 QQ 号。" }, 400);
-      }
-      const rateLimit = await checkPortalAuthRateLimit(env, request, { scope: "code", principal: qq });
-      if (!rateLimit.ok) return jsonResponse({ ok: false, code: rateLimit.reason === "limited" ? "AUTH_RATE_LIMITED" : "AUTH_RATE_LIMIT_UNAVAILABLE", message: rateLimit.reason === "limited" ? "驗證碼請求過於頻繁，請稍後再試。" : "驗證碼服務目前無法安全啟動，請稍後再試。" }, rateLimit.reason === "limited" ? 429 : 503);
-      if (url.pathname.includes("/register/") && isDeveloperId(env, qq)) {
-        return jsonResponse({
-          ok: false,
-          code: "DEVELOPER_DIRECT_BOOTSTRAP",
-          message: "開發者首次啟用不使用 QQ 驗證碼，請直接在首次啟用頁為保留帳號 admin 設定密碼。"
-        }, 409);
       }
 
       const code = generateSixDigitCode();
@@ -295,8 +234,7 @@ const QQAIWorker = {
         return jsonResponse({ ok: false, code: "AUTH_STORAGE_UNAVAILABLE", message: "登录资料库暂时不可用，验证码尚未建立。请稍后重试。" }, 503);
       }
 
-      const verificationPurpose = url.pathname.includes("/register/") ? "首次啟用" : "安全驗證";
-      const verificationMessage = `【AI Control Center ${verificationPurpose}】\n驗證碼：${code}\n有效期：5 分鐘。\n若非本人操作，請忽略。`;
+      const verificationMessage = `【QQAIbot Portal 登入驗證碼】\n驗證碼：${code}\n有效期：5 分鐘。\n若非本人操作，請忽略。`;
       const delivery = await sendPortalVerificationMessage(env, qq, verificationMessage);
 
       await writeSystemAudit(env, {
@@ -309,214 +247,55 @@ const QQAIWorker = {
 
       if (!delivery.ok) {
         await authDbDelStrict(env, authKey).catch(() => {});
-        const httpConfigured = Boolean(delivery.httpConfigured);
-        const websocketConnected = delivery.websocketConnected;
-        const message = !httpConfigured && websocketConnected === false
-          ? `驗證碼發送失敗：NapCat WebSocket 尚未連線。請讓 NapCat 主動連接 ${String(publicBaseUrl(env, url.origin) || url.origin).replace(/^http/i, "ws")}/onebot，並確認 ONEBOT_ACCESS_TOKEN 相同後再試。`
-          : websocketConnected === true
-            ? "驗證碼發送失敗：NapCat 已連線，但私訊傳送遭拒或失敗。請確認此 QQ 可接收機器人私訊、NapCat 帳號狀態正常，以及 Access Token／HTTP 備援設定正確。"
-            : httpConfigured
-              ? "驗證碼發送失敗。NapCat WebSocket 與 HTTP 備援都未能傳送；請確認 NapCat 可連線、HTTP 備援 URL／Token 正確，且此 QQ 可接收私訊。"
-              : `驗證碼發送失敗。請確認 NapCat WebSocket Client 已連接到 ${String(publicBaseUrl(env, url.origin) || url.origin).replace(/^http/i, "ws")}/onebot；也可設定 ONEBOT_HTTP_URL 作為 HTTP 備援。`;
+        const httpConfigured = Boolean(String(env.ONEBOT_HTTP_ACTION_URL || env.ONEBOT_HTTP_URL || env.NAPCAT_HTTP_URL || "").trim());
         return jsonResponse({
           ok: false,
           code: "VERIFICATION_DELIVERY_FAILED",
-          message,
-          diagnostics: { websocketConnected, httpConfigured }
+          message: httpConfigured
+            ? "验证码发送失败。NapCat WebSocket 與 HTTP 備援皆無法送出，請檢查 NapCat 連線、Access Token 與私訊權限。"
+            : "验证码发送失败。請確認 NapCat WebSocket Client 已连接到 wss://qqai.ray2025.com/onebot；也可設定 ONEBOT_HTTP_URL 作為 HTTP 備援。"
         }, 503);
       }
 
       return jsonResponse({
         ok: true,
-        message: "驗證碼已透過已連接的訊息服務傳送，請在 5 分鐘內輸入。",
+        message: "驗證碼已傳送至該 QQ 私訊，請在 5 分鐘內輸入。",
         transport: delivery.transport,
         ttl_seconds: 300
       });
     }
 
-    if (request.method === 'POST' && url.pathname === '/api/auth/register') {
+    if (request.method === 'POST' && url.pathname === '/api/auth/verify-code') {
       let payload = {};
       try { payload = await request.json(); } catch (e) {}
       const qq = String(payload.qq || "").replace(/\D/g, "");
       const code = String(payload.code || "").replace(/\D/g, "");
-      const passwordCheck = validatePortalPassword(payload.password);
-      if (!/^\d{5,12}$/.test(qq)) {
-        return jsonResponse({ ok: false, code: "IDENTITY_INVALID", message: "請輸入有效的 QQID。" }, 400);
-      }
-      if (!passwordCheck.ok) return jsonResponse({ ok: false, code: "PASSWORD_POLICY", message: passwordCheck.message }, 400);
-      const rateLimit = await checkPortalAuthRateLimit(env, request, { scope: "register", principal: qq });
-      if (!rateLimit.ok) return jsonResponse({ ok: false, code: rateLimit.reason === "limited" ? "AUTH_RATE_LIMITED" : "AUTH_RATE_LIMIT_UNAVAILABLE", message: rateLimit.reason === "limited" ? "帳號啟用請求過於頻繁，請稍後再試。" : "帳號啟用服務目前無法安全啟動，請稍後再試。" }, rateLimit.reason === "limited" ? 429 : 503);
-
-      const accountType = String(payload.accountType || "").trim().toLowerCase();
-      const requestedDeveloper = accountType === "developer"
-        || (!accountType && String(payload.username || "").trim().toLowerCase() === "admin");
-      const developerAuthorized = isDeveloperId(env, qq);
-      const adminConfig = portalAdminCredentialConfig(env);
-      if (requestedDeveloper && !developerAuthorized) {
-        return jsonResponse({
-          ok: false,
-          code: "DEVELOPER_ID_NOT_AUTHORIZED",
-          message: "這個 QQID 未列在 DEVELOPER_IDS／ROOT_QQ_IDS／DEVELOPER_ID，無法設定系統帳號 admin。請先確認 Cloudflare Worker 的開發者身份設定。"
-        }, 403);
-      }
-      const developerDirect = requestedDeveloper && developerAuthorized;
-      if (developerDirect && adminConfig.mode === "invalid") {
-        return jsonResponse({ ok: false, code: "ADMIN_CREDENTIALS_MISCONFIGURED", message: "管理員帳號與密碼變數必須同時設定，且帳號格式與密碼長度有效。" }, 503);
-      }
-      if (developerDirect && adminConfig.mode === "configured" && !constantTimeEqual(passwordCheck.value, adminConfig.password)) {
-        return jsonResponse({ ok: false, code: "ADMIN_ENV_PASSWORD_MISMATCH", message: "首次建立管理員帳號時，密碼必須與 PORTAL_ADMIN_PASSWORD Secret 相同。" }, 403);
-      }
-      const usernameCheck = developerDirect ? null : validatePortalUsername(payload.username);
-      if (!developerDirect && !usernameCheck.ok) {
-        return jsonResponse({ ok: false, code: usernameCheck.code || "USERNAME_INVALID", message: usernameCheck.message }, 400);
-      }
-      if (!developerDirect && adminConfig.normalizedUsername && usernameCheck.normalized === adminConfig.normalizedUsername) {
-        return jsonResponse({ ok: false, code: "USERNAME_RESERVED_FOR_ADMIN", message: "這個帳號名稱已保留給此部署的管理員，請換一個名稱。" }, 409);
-      }
-
-      let activationStage = "identity_verification";
-      let account = null;
+      if (!/^\d{5,12}$/.test(qq) || !/^\d{6}$/.test(code)) return jsonResponse({ ok: false, message: "请输入正确的 QQ 号和六位验证码。" }, 400);
+      let verified;
       try {
-        if (!developerDirect) {
-          if (!/^\d{6}$/.test(code)) {
-            return jsonResponse({ ok: false, code: "IDENTITY_VERIFICATION_INVALID", message: "一般使用者首次啟用仍需輸入六位 QQ 驗證碼。" }, 400);
-          }
-          const verified = await verifyPortalVerificationCode(env, qq, code, { consume: false });
-          if (!verified.ok) return jsonResponse({ ok: false, code: "IDENTITY_VERIFICATION_FAILED", message: verified.message || "驗證碼錯誤或已過期。" }, 400);
-        }
-
-        activationStage = "account_binding";
-        if (developerDirect) {
-          const existingAdmin = await readPortalAccountByUsername(env, "admin");
-          if (existingAdmin && existingAdmin.qq !== qq) {
-            return jsonResponse({ ok: false, code: "ADMIN_ACCOUNT_ALREADY_BOUND", message: "系統管理員帳號已綁定其他 QQ，現有管理員資料已保留。" }, 409);
-          }
-          if (adminConfig.mode === "legacy" && await readPortalAuthJson(env, `portal_auth_password:${qq}`, null)) {
-            return jsonResponse({ ok: false, code: "ADMIN_ALREADY_CONFIGURED", message: "管理員密碼已存在，首次啟用不會覆蓋它。請使用既有管理員密碼登入。" }, 409);
-          }
-          if (adminConfig.mode === "configured" && existingAdmin) {
-            return jsonResponse({ ok: false, code: "ADMIN_ALREADY_CONFIGURED", message: "管理員帳號已建立。請直接使用設定的管理員帳號與環境變數密碼登入。" }, 409);
-          }
-        }
-        account = developerDirect
-          ? await createPortalAdminAccountBinding(env, { qq })
-          : await createPortalAccountBinding(env, { qq, username: usernameCheck.value });
-
-        activationStage = "credential_persistence";
-        if (!developerDirect || adminConfig.mode === "legacy") {
-          const passwordRecord = await createPortalPasswordRecord(passwordCheck.value);
-          if (developerDirect) {
-            const created = await authDbPutIfAbsentStrict(env, `portal_auth_password:${qq}`, JSON.stringify(passwordRecord));
-            if (!created) {
-              const error = new Error("ADMIN_ALREADY_CONFIGURED");
-              error.code = "ADMIN_ALREADY_CONFIGURED";
-              throw error;
-            }
-          } else {
-            await authDbPutStrict(env, `portal_auth_password:${qq}`, JSON.stringify(passwordRecord));
-          }
-        }
-        if (!developerDirect) await authDbDelStrict(env, `portal_auth_code:${qq}`);
-        await clearPasswordLoginGuard(env, qq);
-
-        const remember = payload.remember !== false;
-        activationStage = "session_creation";
-        let session = null;
-        try {
-          session = await createPortalSession(env, {
-            qq,
-            username: account.username,
-            group: "",
-            groupId: "",
-            persistent: remember,
-            authMethod: developerDirect ? "developer_admin_password_setup" : "first_activation_identity_code"
-          });
-        } catch (sessionError) {
-          const failureId = crypto.randomUUID();
-          const classified = classifyPortalAuthFailure(sessionError, activationStage);
-          console.error("portal activation session creation failed", {
-            failureId,
-            stage: classified.stage,
-            code: classified.code,
-            errorCode: String(sessionError?.code || ""),
-            diagnostic: classified.diagnostic,
-            developerDirect
-          });
-          await writeSystemError(env, sessionError, {
-            failureId,
-            source: "portal_register",
-            stage: classified.stage,
-            code: classified.code,
-            developerDirect
-          }).catch(() => {});
-          return jsonResponse({
-            ok: true,
-            code: "ACCOUNT_ACTIVATED_LOGIN_REQUIRED",
-            message: developerDirect
-              ? "admin 密碼已成功設定，但自動登入階段暫時失敗。請改到登入頁使用 admin 與剛設定的密碼登入。"
-              : "帳號與密碼已成功建立，但自動登入暫時失敗。請改到登入頁使用剛建立的帳密登入。",
-            username: account.username,
-            redirect: "/login?activated=1",
-            failureId
-          }, 200);
-        }
-
-        await writeSystemAudit(env, {
-          type: "portal_auth_security",
-          actorId: qq,
-          action: developerDirect ? "developer_admin_password_setup" : "account_activated_by_identity_code"
-        }).catch(() => {});
-        return jsonResponse({
-          ok: true,
-          code: "ACCOUNT_ACTIVATED",
-          message: developerDirect
-            ? adminConfig.mode === "configured"
-              ? `管理員帳號 admin 已建立。之後請使用 ${adminConfig.username} 和 PORTAL_ADMIN_PASSWORD 環境變數密碼登入。`
-              : "管理員帳號 admin 已建立。之後請使用 admin 與首次設定的密碼登入。"
-            : "帳號已建立，正在進入控制中心。",
-          username: account.username,
-          role: session.role,
-          permissions: session.permissions || {}
-        }, 200, { "Set-Cookie": portalSessionCookie(session.token, session.persistent ? DEFAULTS.portalSessionCookieSeconds : null) });
+        verified = await verifyPortalVerificationCode(env, qq, code, { consume: false });
       } catch (error) {
-        if (error?.code === "ADMIN_ACCOUNT_ALREADY_BOUND") return jsonResponse({ ok: false, code: "ADMIN_ACCOUNT_ALREADY_BOUND", message: "系統帳號 admin 已綁定其他開發者身份，無法重複建立。" }, 409);
-        if (error?.code === "ADMIN_QQ_ALREADY_BOUND_TO_USER") return jsonResponse({ ok: false, code: "ADMIN_QQ_ALREADY_BOUND_TO_USER", message: "此 QQ 已綁定一般帳號，系統已保留該帳號及登入資料；請使用另一個 Developer QQ 建立管理員。" }, 409);
-        if (error?.code === "ADMIN_ALREADY_CONFIGURED") return jsonResponse({ ok: false, code: "ADMIN_ALREADY_CONFIGURED", message: "管理員密碼已存在，首次啟用不會覆蓋它。請使用既有管理員密碼登入。" }, 409);
-        if (error?.code === "USERNAME_TAKEN") return jsonResponse({ ok: false, code: "USERNAME_TAKEN", message: "這個帳號名稱已有人使用，請換一個。" }, 409);
-        if (error?.code === "ACCOUNT_ALREADY_ACTIVATED") return jsonResponse({ ok: false, code: "ACCOUNT_ALREADY_ACTIVATED", message: "這個身份已完成首次啟用，請回登入頁使用既有帳號登入。" }, 409);
-        const failureId = crypto.randomUUID();
-        const classified = classifyPortalAuthFailure(error, activationStage);
-        console.error("portal account activation failed", {
-          failureId,
-          stage: classified.stage,
-          code: classified.code,
-          errorCode: String(error?.code || ""),
-          diagnostic: classified.diagnostic,
-          developerDirect
-        });
-        await writeSystemError(env, error, {
-          failureId,
-          source: "portal_register",
-          stage: classified.stage,
-          code: classified.code,
-          developerDirect
-        }).catch(() => {});
-        return jsonResponse({
-          ok: false,
-          code: classified.code,
-          message: classified.message,
-          stage: classified.stage,
-          failureId
-        }, classified.status);
+        return jsonResponse({ ok: false, code: "AUTH_STORAGE_UNAVAILABLE", message: "登录资料库暂时不可用，验证码没有被消耗。请稍后重试。" }, 503);
       }
-    }
-
-    if (request.method === 'POST' && url.pathname === '/api/auth/verify-code') {
+      if (!verified.ok) return jsonResponse(verified, 400);
+      const remember = payload.remember !== false;
+      let session;
+      try {
+        session = await createPortalSession(env, { qq, group: "", groupId: "", persistent: remember, authMethod: "qq_code" });
+        await authDbDelStrict(env, `portal_auth_code:${qq}`);
+      } catch (error) {
+        return jsonResponse({ ok: false, code: "SESSION_STORAGE_UNAVAILABLE", message: "验证码正确，但登录会话无法安全保存。验证码仍可再次使用，请稍后重试。" }, 503);
+      }
       return jsonResponse({
-        ok: false,
-        code: "DIRECT_ID_LOGIN_DISABLED",
-        message: "身份驗證碼只用於首次啟用、第二因素與帳號復原。一般登入請使用帳號與密碼。"
-      }, 410);
+        ok: true,
+        message: "登录成功，正在进入 Control Center。",
+        qq,
+        group: "",
+        groupId: "",
+        role: session.role,
+        permissions: session.permissions || {},
+        passwordSetupAvailable: !(await authDbGetStrict(env, `portal_auth_password:${qq}`).catch(() => null))
+      }, 200, { "Set-Cookie": portalSessionCookie(session.token, session.persistent ? DEFAULTS.portalSessionCookieSeconds : null) });
     }
 
     if (request.method === 'POST' && url.pathname === '/api/auth/reset-password') {
@@ -528,17 +307,6 @@ const QQAIWorker = {
       if (!/^\d{5,12}$/.test(qq) || !/^\d{6}$/.test(code)) return jsonResponse({ ok: false, message: "请输入正确的 QQ 号和六位验证码。" }, 400);
       const validation = validatePortalPassword(newPassword);
       if (!validation.ok) return jsonResponse({ ok: false, code: "PASSWORD_POLICY", message: validation.message }, 400);
-      const rateLimit = await checkPortalAuthRateLimit(env, request, { scope: "reset", principal: qq });
-      if (!rateLimit.ok) return jsonResponse({ ok: false, code: rateLimit.reason === "limited" ? "AUTH_RATE_LIMITED" : "AUTH_RATE_LIMIT_UNAVAILABLE", message: rateLimit.reason === "limited" ? "密碼復原請求過於頻繁，請稍後再試。" : "密碼復原服務目前無法安全啟動，請稍後再試。" }, rateLimit.reason === "limited" ? 429 : 503);
-      if (portalAdminCredentialConfig(env).mode !== "legacy") {
-        try {
-          if (await isPortalSystemAdminQq(env, qq)) {
-            return jsonResponse({ ok: false, code: "ADMIN_PASSWORD_ENV_MANAGED", message: "管理員密碼由 PORTAL_ADMIN_PASSWORD Secret 管理，請在 Cloudflare 更新 Secret；此復原表單不會修改管理員資料。" }, 409);
-          }
-        } catch {
-          return jsonResponse({ ok: false, code: "AUTH_STORAGE_UNAVAILABLE", message: "登入資料庫暫時無法確認管理員身份，密碼尚未變更。" }, 503);
-        }
-      }
       try {
         const verified = await verifyPortalVerificationCode(env, qq, code, { consume: false });
         if (!verified.ok) return jsonResponse(verified, 400);
@@ -553,75 +321,23 @@ const QQAIWorker = {
       }
     }
 
-    if (request.method === 'POST' && url.pathname === '/api/auth/request-login-factor') {
-      let payload = {};
-      try { payload = await request.json(); } catch (e) {}
-      const usernameCheck = validatePortalLoginUsername(payload.username);
-      const password = String(payload.password || "");
-      if (!usernameCheck.ok || !password) return jsonResponse({ ok: false, code: "INVALID_CREDENTIALS", message: "帳號或密碼錯誤。" }, 401);
-      const rateLimit = await checkPortalAuthRateLimit(env, request, { scope: "factor", principal: usernameCheck.normalized });
-      if (!rateLimit.ok) return jsonResponse({ ok: false, code: rateLimit.reason === "limited" ? "AUTH_RATE_LIMITED" : "AUTH_RATE_LIMIT_UNAVAILABLE", message: rateLimit.reason === "limited" ? "登入嘗試過於頻繁，請稍後再試。" : "登入服務目前無法安全啟動，請稍後再試。" }, rateLimit.reason === "limited" ? 429 : 503);
-      try {
-        const login = await resolvePortalPasswordLogin(env, usernameCheck.normalized, password);
-        if (["ADMIN_CREDENTIALS_MISCONFIGURED", "ADMIN_ACCOUNT_NOT_BOUND", "ADMIN_USERNAME_COLLISION"].includes(login.errorCode)) {
-          return jsonResponse({ ok: false, code: login.errorCode, message: login.errorCode === "ADMIN_USERNAME_COLLISION" ? "管理員帳號設定與既有一般帳號名稱重疊，請更換 PORTAL_ADMIN_USERNAME。" : login.errorCode === "ADMIN_ACCOUNT_NOT_BOUND" ? "系統管理員帳號尚未綁定 Developer QQ，請先完成核准的首次啟用。" : "管理員帳號變數設定不完整，請一併設定 PORTAL_ADMIN_USERNAME 與 PORTAL_ADMIN_PASSWORD。" }, 503);
-        }
-        const account = login.account;
-        if (!account) return jsonResponse({ ok: false, code: "INVALID_CREDENTIALS", message: "帳號或密碼錯誤。" }, 401);
-        const guard = await readPasswordLoginGuard(env, account.qq);
-        if (Number(guard.lockUntil || 0) > Date.now()) {
-          return jsonResponse({ ok: false, code: "PASSWORD_LOGIN_LOCKED", message: `登入嘗試過多，請在 ${Math.ceil((guard.lockUntil - Date.now()) / 60000)} 分鐘後重試。` }, 429);
-        }
-        const passwordRecord = login.source === "database" ? await readPortalAuthJson(env, `portal_auth_password:${account.qq}`, null) : null;
-        const passwordOk = login.source === "environment"
-          ? Boolean(login.passwordMatches)
-          : Boolean(passwordRecord && isValidPortalPasswordRecord(passwordRecord) && await verifyPortalPassword(password, passwordRecord));
-        if (!passwordOk) {
-          await notePasswordLoginFailure(env, account.qq);
-          return jsonResponse({ ok: false, code: "INVALID_CREDENTIALS", message: "帳號或密碼錯誤。" }, 401);
-        }
-        const twoFactor = await readPortalAuthJson(env, `portal_auth_2fa:${account.qq}`, null);
-        if (!twoFactor?.enabled) return jsonResponse({ ok: false, code: "TWO_FACTOR_NOT_ENABLED", message: "這個帳號目前沒有啟用第二因素。" }, 409);
-        const code = generateSixDigitCode();
-        await authDbPutStrict(env, `portal_auth_code:${account.qq}`, JSON.stringify({ code, group: "", qq: account.qq, expiresAt: Date.now() + 5 * 60 * 1000, attempts: 0 }));
-        const delivery = await sendPortalVerificationMessage(env, account.qq, `【AI Control Center 第二因素】\n驗證碼：${code}\n有效期：5 分鐘。\n若非本人操作，請忽略。`);
-        if (!delivery.ok) {
-          await authDbDelStrict(env, `portal_auth_code:${account.qq}`).catch(() => {});
-          return jsonResponse({ ok: false, code: "VERIFICATION_DELIVERY_FAILED", message: "第二因素驗證碼目前無法送達，請改用驗證器動態碼或備用碼。" }, 503);
-        }
-        return jsonResponse({ ok: true, message: "第二因素驗證碼已傳送。" });
-      } catch {
-        return jsonResponse({ ok: false, code: "AUTH_STORAGE_UNAVAILABLE", message: "登入服務暫時無法使用，請稍後再試。" }, 503);
-      }
-    }
-
     if (request.method === 'POST' && url.pathname === '/api/auth/login-password') {
       let payload = {};
       try { payload = await request.json(); } catch (e) {}
-      const usernameCheck = validatePortalLoginUsername(payload.username);
+      const qq = String(payload.qq || "").replace(/\D/g, "");
       const password = String(payload.password || "");
-      if (!usernameCheck.ok || !password) return jsonResponse({ ok: false, code: "INVALID_CREDENTIALS", message: "帳號或密碼錯誤。" }, 401);
-      const rateLimit = await checkPortalAuthRateLimit(env, request, { scope: "login", principal: usernameCheck.normalized });
-      if (!rateLimit.ok) return jsonResponse({ ok: false, code: rateLimit.reason === "limited" ? "AUTH_RATE_LIMITED" : "AUTH_RATE_LIMIT_UNAVAILABLE", message: rateLimit.reason === "limited" ? "登入嘗試過於頻繁，請稍後再試。" : "登入服務目前無法安全啟動，請稍後再試。" }, rateLimit.reason === "limited" ? 429 : 503);
+      if (!/^\d{5,12}$/.test(qq) || !password) return jsonResponse({ ok: false, message: "请输入正确的 QQ 号和密码。" }, 400);
       try {
-        const login = await resolvePortalPasswordLogin(env, usernameCheck.normalized, password);
-        if (["ADMIN_CREDENTIALS_MISCONFIGURED", "ADMIN_ACCOUNT_NOT_BOUND", "ADMIN_USERNAME_COLLISION"].includes(login.errorCode)) {
-          return jsonResponse({ ok: false, code: login.errorCode, message: login.errorCode === "ADMIN_USERNAME_COLLISION" ? "管理員帳號設定與既有一般帳號名稱重疊，請更換 PORTAL_ADMIN_USERNAME。" : login.errorCode === "ADMIN_ACCOUNT_NOT_BOUND" ? "系統管理員帳號尚未綁定 Developer QQ，請先完成核准的首次啟用。" : "管理員帳號變數設定不完整，請一併設定 PORTAL_ADMIN_USERNAME 與 PORTAL_ADMIN_PASSWORD。" }, 503);
-        }
-        const account = login.account;
-        if (!account) return jsonResponse({ ok: false, code: "INVALID_CREDENTIALS", message: "帳號或密碼錯誤。" }, 401);
-        const qq = account.qq;
         const guard = await readPasswordLoginGuard(env, qq);
         if (Number(guard.lockUntil || 0) > Date.now()) {
-          return jsonResponse({ ok: false, code: "PASSWORD_LOGIN_LOCKED", message: `登入嘗試過多，請在 ${Math.ceil((guard.lockUntil - Date.now()) / 60000)} 分鐘後重試。` }, 429);
+          return jsonResponse({ ok: false, code: "PASSWORD_LOGIN_LOCKED", message: `密码登录尝试过多，请在 ${Math.ceil((guard.lockUntil - Date.now()) / 60000)} 分钟后重试，或改用 QQ 验证码。` }, 429);
         }
-        const passwordRecord = login.source === "database" ? await readPortalAuthJson(env, `portal_auth_password:${qq}`, null) : null;
-        const passwordOk = login.source === "environment"
-          ? Boolean(login.passwordMatches)
-          : Boolean(passwordRecord && isValidPortalPasswordRecord(passwordRecord) && await verifyPortalPassword(password, passwordRecord));
-        if (!passwordOk) {
+        const passwordRecord = await readPortalAuthJson(env, `portal_auth_password:${qq}`, null);
+        if (!passwordRecord) return jsonResponse({ ok: false, code: "PASSWORD_NOT_SET", message: "此 QQ 尚未设置密码，请先使用 QQ 验证码登录。" }, 404);
+        if (!isValidPortalPasswordRecord(passwordRecord)) return jsonResponse({ ok: false, code: "PASSWORD_RECORD_INVALID", message: "密码记录已损坏或格式过旧，请使用 QQ 验证码重设密码。" }, 409);
+        if (!(await verifyPortalPassword(password, passwordRecord))) {
           await notePasswordLoginFailure(env, qq);
-          return jsonResponse({ ok: false, code: "INVALID_CREDENTIALS", message: "帳號或密碼錯誤。" }, 401);
+          return jsonResponse({ ok: false, code: "PASSWORD_INVALID", message: "QQ 号或密码错误。" }, 401);
         }
         const twoFactor = await readPortalAuthJson(env, `portal_auth_2fa:${qq}`, null);
         let factorResult = { ok: true, method: "password" };
@@ -629,7 +345,7 @@ const QQAIWorker = {
           const factorType = String(payload.factorType || "").toLowerCase();
           const factorCode = String(payload.factorCode || "").trim();
           if (!factorType || !factorCode) {
-            return jsonResponse({ ok: false, code: "TWO_FACTOR_REQUIRED", requiresTwoFactor: true, methods: ["totp", "backup", "qq_code"], message: "密碼正確，請完成第二因素驗證。" }, 202);
+            return jsonResponse({ ok: false, code: "TWO_FACTOR_REQUIRED", requiresTwoFactor: true, methods: ["totp", "backup", "qq_code"], message: "密码正确，请输入验证器动态码、备用码，或发送 QQ 验证码。" }, 202);
           }
           if (factorType === "totp") {
             const secret = await decryptPortalAuthSecret(env, twoFactor.secret);
@@ -646,11 +362,11 @@ const QQAIWorker = {
           }
           if (!factorResult.ok) {
             await notePasswordLoginFailure(env, qq);
-            return jsonResponse({ ok: false, code: "TWO_FACTOR_INVALID", message: factorResult.message || "第二因素驗證失敗。" }, 401);
+            return jsonResponse({ ok: false, code: "TWO_FACTOR_INVALID", message: factorResult.message || "双因数验证码或备用码错误。" }, 401);
           }
         }
         const remember = payload.remember !== false;
-        const session = await createPortalSession(env, { qq, username: account.username, group: "", groupId: "", persistent: remember, authMethod: twoFactor?.enabled ? `password_${factorResult.method}` : "password" });
+        const session = await createPortalSession(env, { qq, group: "", groupId: "", persistent: remember, authMethod: twoFactor?.enabled ? `password_${factorResult.method}` : "password" });
         if (twoFactor?.enabled && factorResult.method === "backup") {
           twoFactor.backupCodeHashes.splice(factorResult.index, 1);
           twoFactor.updatedAt = Date.now();
@@ -659,11 +375,10 @@ const QQAIWorker = {
           await authDbDelStrict(env, `portal_auth_code:${qq}`);
         }
         await clearPasswordLoginGuard(env, qq);
-        const returnedUsername = login.source === "environment" ? portalAdminCredentialConfig(env).username : account.username;
-        return jsonResponse({ ok: true, message: "登入成功。", username: returnedUsername, role: session.role, permissions: session.permissions || {} }, 200, { "Set-Cookie": portalSessionCookie(session.token, session.persistent ? DEFAULTS.portalSessionCookieSeconds : null) });
+        return jsonResponse({ ok: true, message: "密码登录成功。", qq, role: session.role, permissions: session.permissions || {} }, 200, { "Set-Cookie": portalSessionCookie(session.token, session.persistent ? DEFAULTS.portalSessionCookieSeconds : null) });
       } catch (error) {
         const secretMissing = error?.code === "PORTAL_AUTH_SECRET_MISSING";
-        return jsonResponse({ ok: false, code: secretMissing ? "TWO_FACTOR_CONFIGURATION_ERROR" : "AUTH_STORAGE_UNAVAILABLE", message: secretMissing ? "第二因素驗證設定缺失，請聯絡管理員。" : "登入服務暫時無法使用，請稍後再試。" }, 503);
+        return jsonResponse({ ok: false, code: secretMissing ? "TWO_FACTOR_CONFIGURATION_ERROR" : "AUTH_STORAGE_UNAVAILABLE", message: secretMissing ? "双因数验证密钥配置缺失，请管理员设置 PORTAL_AUTH_SECRET。" : "登录资料库暂时不可用，请稍后重试。" }, 503);
       }
     }
 
@@ -2557,7 +2272,7 @@ const QQAIWorker = {
       }
 
       if (/^[!！]live$/i.test(cleanMessage)) {
-        return jsonReply(`${atSender}🎙️ 即时语音通话：${publicLiveUrl(env, url.origin) || `${url.origin}/live`}`);
+        return jsonReply(`${atSender}🎙️ 即时语音通话：https://qqai.ray2025.com/live`);
       }
 
       if (/^[!！](?:群状态|群狀態|groupstatus)$/i.test(cleanMessage)) {
@@ -4030,7 +3745,6 @@ ${deepseekContextSummary}`;
   }, // 结束 fetch 函式
 
   async scheduled(controller, env, ctx) {
-    env = await portalEnvironmentWithManagedDeveloperIds(env);
     ctx.waitUntil(dbPut(env, "system:last_cron", String(Number(controller?.scheduledTime || Date.now()))));
     ctx.waitUntil(announceDeployedVersionFallback(env).catch(error => console.error("deployment self-fallback failed", error)));
     ctx.waitUntil(processDueSchedules(env, Number(controller?.scheduledTime || Date.now())));
@@ -4038,6 +3752,7 @@ ${deepseekContextSummary}`;
     ctx.waitUntil(cleanupExpiredModerationProposals(env));
     ctx.waitUntil(runAutomaticGroupCheckins(env, Number(controller?.scheduledTime || Date.now())));
     ctx.waitUntil(processPlatformJobs(env, Number(controller?.scheduledTime || Date.now())));
+    ctx.waitUntil(processWerewolfTimers(env, Number(controller?.scheduledTime || Date.now())).catch(error => console.error("werewolf timer failed", error)));
     ctx.waitUntil(opsProcessAutomations(env, Number(controller?.scheduledTime || Date.now())));
     ctx.waitUntil(pollAutomaticBilibiliConnectors(env, Number(controller?.scheduledTime || Date.now())));
   },
@@ -4495,6 +4210,11 @@ export class OneBotHub {
       }
     }
 
+    const werewolfHandled = await handleWerewolfOneBotEvent(this.env, body).catch(async error => {
+      await writeSystemAudit(this.env, { type: "werewolf_event_failed", groupId: String(body?.group_id || ""), actorId: String(body?.user_id || ""), action: "handle_event", error: String(error?.message || error).slice(0, 500) }).catch(() => {});
+      return null;
+    });
+    if (werewolfHandled?.handled) return;
     if (this.isRuleMuteLiftNotice(body)) {
       await this.handleRuleMuteLiftNotice(body);
       return;
