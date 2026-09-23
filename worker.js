@@ -555,7 +555,7 @@ const QQAIWorker = {
       const usernameCheck = validatePortalLoginUsername(payload.username);
       const password = String(payload.password || "");
       if (!usernameCheck.ok || !password) return jsonResponse({ ok: false, code: "INVALID_CREDENTIALS", message: "帳號或密碼錯誤。" }, 401);
-      const rateLimit = await checkPortalAuthRateLimit(env, request, { scope: "login", principal: usernameCheck.normalized });
+      const rateLimit = await checkPortalAuthRateLimit(env, request, { scope: "factor", principal: usernameCheck.normalized });
       if (!rateLimit.ok) return jsonResponse({ ok: false, code: rateLimit.reason === "limited" ? "AUTH_RATE_LIMITED" : "AUTH_RATE_LIMIT_UNAVAILABLE", message: rateLimit.reason === "limited" ? "登入嘗試過於頻繁，請稍後再試。" : "登入服務目前無法安全啟動，請稍後再試。" }, rateLimit.reason === "limited" ? 429 : 503);
       try {
         const login = await resolvePortalPasswordLogin(env, usernameCheck.normalized, password);

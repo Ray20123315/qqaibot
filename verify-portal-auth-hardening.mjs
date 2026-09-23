@@ -74,7 +74,31 @@ assert.equal((await factorWhileLocked.json()).code, "PASSWORD_LOGIN_LOCKED");
 const passwordWhileLocked = await post("/api/auth/login-password", { username: "member", password }, env);
 assert.equal(passwordWhileLocked.status, 429, "password login must share that same lockout");
 assert.equal((await passwordWhileLocked.json()).code, "PASSWORD_LOGIN_LOCKED");
-assert(new Set(loginKeys).size === 1, "login and factor endpoints must consume the same per-account Cloudflare rate-limit key");
+const loginPrincipalKeys = [...new Set(loginKeys.filter(key => key.includes(":user:")))];
+assert.equal(loginPrincipalKeys.length, 2, "login and factor endpoints need separate request buckets so a legitimate second-factor request is not blocked");
+assert(loginPrincipalKeys.some(key => key.startsWith("pa:login:")) && loginPrincipalKeys.some(key => key.startsWith("pa:factor:")));
+
+const factorDb = new FakeD1();
+await createPortalAccountBinding({ DB: factorDb }, { qq: "333444555", username: "factor-user" });
+factorDb.map.set("portal_auth_password:333444555", JSON.stringify(await createPortalPasswordRecord(password)));
+factorDb.map.set("portal_auth_2fa:333444555", JSON.stringify({ enabled: true, secret: "unused-by-qq-factor-test" }));
+const consumedKeys = new Set();
+const sentActions = [];
+const factorEnv = {
+  DB: factorDb,
+  MY_RATE_LIMITER: { async limit({ key }) { if (consumedKeys.has(key)) return { success: false }; consumedKeys.add(key); return { success: true }; } },
+  ONEBOT_HUB: {
+    idFromName(name) { return name; },
+    get() { return { async fetch(_url, init) { sentActions.push(JSON.parse(init.body).action); return Response.json({ ok: true, data: { message_id: 1 } }); } }; }
+  }
+};
+const passwordAccepted = await post("/api/auth/login-password", { username: "factor-user", password }, factorEnv);
+assert.equal(passwordAccepted.status, 202, "correct password should request the configured second factor");
+const factorCodeSent = await post("/api/auth/request-login-factor", { username: "factor-user", password }, factorEnv);
+assert.equal(factorCodeSent.status, 200, "the separate factor-code bucket must allow the next step in a valid login");
+assert.deepEqual(sentActions, ["send_private_msg"], "a valid factor request should send exactly one QQ private message");
+const repeatedFactorRequest = await post("/api/auth/request-login-factor", { username: "factor-user", password }, factorEnv);
+assert.equal(repeatedFactorRequest.status, 429, "repeated factor-code requests must still be rate-limited");
 
 const rejectedDb = new FakeD1();
 let deniedTransportCalls = 0;
