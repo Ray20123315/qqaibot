@@ -1,3 +1,5 @@
+import { rayAiExperienceScript, rayAiExperienceStyle } from "./experience-v5.js";
+
 // Final Portal layout layer.
 // Keep this layer theme-token driven: feature clients may add markup, but must not force a dark-only palette.
 
@@ -54,9 +56,11 @@ details,.settings-fold{border:1px solid var(--line)!important;background:var(--p
 @media(max-width:720px){.top-actions{grid-template-columns:1fr 1fr!important}.top-actions select:first-child{grid-column:1/-1!important}.workspace-hero{grid-template-columns:1fr;padding:24px}.portal-hero-logo{width:74px;height:74px}.plugin-grid{grid-template-columns:1fr}.plugin-card{grid-template-columns:42px minmax(0,1fr)}.plugin-card>.plugin-actions{grid-column:1/-1}.section-head{display:grid!important}.member-actions,.relationship-actions{display:grid!important;grid-template-columns:1fr!important}.suite-batch-controls,.suite-sticker-form,.suite-decision-filters,.suite-profile-flags,.cleanup-filters,.member-data-toolbar,.cleanup-head-actions{grid-template-columns:1fr!important}}
 @media(max-width:440px){.top-actions{grid-template-columns:1fr!important}.top-actions>*{grid-column:1!important}.workspace-content{padding-left:10px!important;padding-right:10px!important}.workspace-hero{padding:20px}.card,.workspace-section{padding:14px!important}.side-brand small{display:none!important}}
 </style>`;
+  const v5Style = rayAiExperienceStyle("portal");
   const script = `<script id="qqai-portal-layout-client-v400">(function(){document.documentElement.dataset.portalLayout="4.0.0";})();</script>`;
-  source = source.includes("</head>") ? source.replace("</head>", style + "\n</head>") : style + source;
-  source = source.includes("</body>") ? source.replace("</body>", script + "\n</body>") : source + script;
+  const v5Script = rayAiExperienceScript("portal");
+  source = source.includes("</head>") ? source.replace("</head>", style + "\n" + v5Style + "\n</head>") : style + v5Style + source;
+  source = source.includes("</body>") ? source.replace("</body>", script + "\n" + v5Script + "\n</body>") : source + script + v5Script;
   return source;
 }
 

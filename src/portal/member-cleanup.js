@@ -793,7 +793,7 @@ function injectMemberCleanupClient(html) {
   function ce(id){return document.getElementById(id)}
   function cs(value){return typeof esc==='function'?esc(value):String(value==null?'':value).replace(/[&<>"']/g,function(c){return({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'})[c]})}
   async function cc(path,method,body){try{if(typeof api==='function')return await api(path,method||'GET',body);var r=await fetch('/api/portal'+path,{method:method||'GET',headers:{'Content-Type':'application/json'},credentials:'same-origin',body:body?JSON.stringify(body):undefined});var t=await r.text(),d={};try{d=t?JSON.parse(t):{}}catch(e){d={ok:false,message:'接口返回格式错误'}}if(!r.ok)d.ok=false;return d}catch(e){return{ok:false,message:String(e&&e.message||e)}}}
-  function cn(message){if(typeof toast==='function')toast(message);else window.alert(message)}
+  function cn(message){if(typeof toast==='function')toast(message);else if(typeof window.rayToast==='function')window.rayToast(message)}
   function cd(value){var n=Number(value||0);return n?new Date(n).toLocaleString():'未提供'}
   function cdays(value){return value==null?'未提供':String(value)+' 天'}
   function sexText(value){return value==='male'?'男':value==='female'?'女':'平台未提供'}

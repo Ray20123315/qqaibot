@@ -1,25 +1,19 @@
-function brandLogoSvg(className = "qqai-brand-logo", title = "AI Control Center") {
+import { rayAiExperienceScript, rayAiExperienceStyle } from "./experience-v5.js";
+
+function brandLogoSvg(className = "qqai-brand-logo", title = "RAY AI") {
   const safeClass = String(className || "qqai-brand-logo").replace(/[^a-zA-Z0-9 _-]/g, "");
-  const safeTitle = String(title || "AI Control Center").replace(/[<>&]/g, "");
-  return `<svg class="${safeClass}" viewBox="0 0 64 64" role="img" aria-label="${safeTitle}">
+  const safeTitle = String(title || "RAY AI").replace(/[<>&]/g, "");
+  return `<svg class="${safeClass}" viewBox="0 0 72 72" role="img" aria-label="${safeTitle}">
     <defs>
-      <linearGradient id="qqai-brand-cyan" x1="0" y1="0" x2="1" y2="1">
-        <stop offset="0" stop-color="#27e6ff"/>
-        <stop offset=".52" stop-color="#4b7dff"/>
-        <stop offset="1" stop-color="#8e5cff"/>
-      </linearGradient>
-      <linearGradient id="qqai-brand-violet" x1="0" y1="0" x2="1" y2="1">
-        <stop offset="0" stop-color="#6a8bff"/>
-        <stop offset=".56" stop-color="#9b5cff"/>
-        <stop offset="1" stop-color="#d05cff"/>
-      </linearGradient>
+      <linearGradient id="qqai-brand-cyan" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#38efff"/><stop offset=".52" stop-color="#3f7cff"/><stop offset="1" stop-color="#8f5cff"/></linearGradient>
+      <linearGradient id="qqai-brand-violet" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#6d8dff"/><stop offset=".55" stop-color="#a15cff"/><stop offset="1" stop-color="#e05cff"/></linearGradient>
+      <filter id="ray-logo-glow"><feGaussianBlur stdDeviation="1.8" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
     </defs>
-    <rect x="1" y="1" width="62" height="62" rx="18" fill="rgba(6,14,32,.92)" stroke="rgba(100,190,255,.30)"/>
-    <path d="M17 10h12L20.5 48H8.5z" fill="url(#qqai-brand-cyan)"/>
-    <path d="M36 18h11l8.5 30H43.5z" fill="url(#qqai-brand-violet)"/>
-    <path d="M15 41h31l-2.8 10H12.2z" fill="url(#qqai-brand-cyan)" opacity=".96"/>
-    <circle cx="51" cy="12" r="4" fill="#37e7ff"/>
-    <circle cx="51" cy="12" r="8" fill="none" stroke="rgba(55,231,255,.25)"/>
+    <circle class="ray-logo-ring" cx="36" cy="36" r="31" fill="rgba(4,13,32,.92)" stroke="url(#qqai-brand-cyan)" stroke-width="2.2"/>
+    <circle cx="36" cy="36" r="27" fill="none" stroke="rgba(90,213,255,.20)" stroke-width="1"/>
+    <path class="ray-logo-r" d="M20 51l9.2-31h15.1c8.5 0 12.9 3.8 11.1 10.2-1.2 4.3-4.8 7.2-10.2 8.3L52 51H40.9l-6.2-11.4h-3L28.3 51H20zm14.3-20h7.3c2.7 0 4.4-1.1 4.9-3 .5-1.9-.8-2.8-3.7-2.8h-6.9L34.3 31z" fill="url(#qqai-brand-cyan)" filter="url(#ray-logo-glow)"/>
+    <path d="M30.2 40.1h10.2L49.7 51H38.8z" fill="url(#qqai-brand-violet)" opacity=".95"/>
+    <circle cx="57" cy="16" r="2.6" fill="#45efff"/><circle cx="57" cy="16" r="5.8" fill="none" stroke="rgba(69,239,255,.24)"/>
   </svg>`;
 }
 
@@ -33,12 +27,12 @@ function brandLockupMarkup({
   const hrefAttr = href ? ` href="${href}"` : "";
   return `<${tag} class="${className}${compact ? " compact" : ""}"${hrefAttr}>
     ${brandLogoSvg("qqai-brand-logo")}
-    <span class="brand-copy"><b>AI Control Center</b><small>${subtitle}</small></span>
+    <span class="brand-copy" data-product="AI Control Center" data-architecture="${subtitle}"><b>RAY AI</b><small>QQ AI BOT</small><span class="sr-only">AI Control Center · ${subtitle}</span></span>
   </${tag}>`;
 }
 
 
-function brandPublicStyle() {
+function brandPublicStyleBase() {
   return `<style id="qqai-brand-public-v4">
 .qqai-brand-logo{width:44px;height:44px;display:block;flex:0 0 auto;filter:drop-shadow(0 0 20px rgba(47,174,255,.20))}
 .brand-lockup{display:flex!important;align-items:center!important;gap:12px!important;text-decoration:none!important}
@@ -72,12 +66,20 @@ function brandPublicStyle() {
 </style>`;
 }
 
-function brandThemeBootScript() {
+function brandPublicStyle() {
+  return brandPublicStyleBase() + rayAiExperienceStyle("public");
+}
+
+function brandThemeBootScriptBase() {
   return `<script id="qqai-brand-theme-boot">(function(){try{var t=localStorage.getItem("qqai_theme");document.documentElement.dataset.theme=t==="light"?"light":"dark"}catch(e){document.documentElement.dataset.theme="dark"}})();<\/script>`;
 }
 
+function brandThemeBootScript() {
+  return brandThemeBootScriptBase() + rayAiExperienceScript("public");
+}
+
 function brandFaviconLink() {
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><rect width="64" height="64" rx="18" fill="#081225"/><path d="M17 10h12L20.5 48H8.5z" fill="#27e6ff"/><path d="M36 18h11l8.5 30H43.5z" fill="#9b5cff"/><path d="M15 41h31l-2.8 10H12.2z" fill="#4b7dff"/><circle cx="51" cy="12" r="4" fill="#37e7ff"/></svg>`;
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 72 72"><circle cx="36" cy="36" r="31" fill="#061126" stroke="#39e7ff" stroke-width="2"/><path d="M20 51l9.2-31h15.1c8.5 0 12.9 3.8 11.1 10.2-1.2 4.3-4.8 7.2-10.2 8.3L52 51H40.9l-6.2-11.4h-3L28.3 51H20zm14.3-20h7.3c2.7 0 4.4-1.1 4.9-3 .5-1.9-.8-2.8-3.7-2.8h-6.9L34.3 31z" fill="#39e7ff"/><path d="M30.2 40.1h10.2L49.7 51H38.8z" fill="#9b5cff"/></svg>`;
   return `<link rel="icon" href="data:image/svg+xml,${encodeURIComponent(svg)}">`;
 }
 
