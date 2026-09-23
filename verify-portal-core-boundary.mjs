@@ -40,6 +40,8 @@ for (const path of sourceFiles) {
 for (const core of CORE_VIEWS) discovered.delete(core);
 
 const catalog = portalPluginCatalog();
+assert.ok(catalog.length >= 7, "feature plugin catalog unexpectedly small");
+assert.equal(catalog.every(plugin => plugin.portal.defaultEnabled === false), true, "minimal deployment must not auto-enable product plugins");
 const owners = new Map();
 for (const plugin of catalog) {
   for (const view of plugin.portal.views || []) {
