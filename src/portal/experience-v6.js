@@ -812,6 +812,41 @@ html.ray-page-portal body{background:var(--ray-min-bg)!important}
 }
 /* RAY_MINIMAL_V9_SIDEBAR_TRACK_FIX_END */
 
+
+/* RAY_MINIMAL_V9_SIDEBAR_ROW_FIX */
+.core-nav>button[data-view],
+.core-nav .plugin-compat-nav button,
+.core-nav>.qqai-nav-entry{
+  display:flex!important;
+  flex-direction:row!important;
+  align-items:center!important;
+  justify-content:flex-start!important;
+  gap:10px!important;
+  width:100%!important;
+  min-width:0!important;
+  min-height:40px!important;
+  height:auto!important;
+  padding:7px 9px!important;
+  text-align:left!important;
+}
+.core-nav>button[data-view] .nav-glyph,
+.core-nav>.qqai-nav-entry .qqai-nav-glyph{
+  flex:0 0 26px!important;
+  width:26px!important;
+  height:26px!important;
+  display:inline-grid!important;
+  place-items:center!important;
+}
+.core-nav>button[data-view]>span:last-child,
+.core-nav>.qqai-nav-entry>span:last-child{
+  flex:1 1 auto!important;
+  min-width:0!important;
+  white-space:nowrap!important;
+  overflow:hidden!important;
+  text-overflow:ellipsis!important;
+}
+/* RAY_MINIMAL_V9_SIDEBAR_ROW_FIX_END */
+
 /* RAY_MINIMAL_V9_END */
 
 /* RAY_REFERENCE_V7_END */
