@@ -4,7 +4,7 @@
 import { callDeepSeekSummaryTask } from "../ai/runtime.js";
 import { DEFAULTS } from "../config/runtime.js";
 import { developerId, isDeveloperId } from "./identity.js";
-import { dbDel, dbGet, dbPut } from "../data/store.js";
+import { dbCompareAndSwap, dbDel, dbGet, dbGetStrict, dbPut, dbPutBestEffort, dbPutExpiring } from "../data/store.js";
 import { parseUnlimitedNonNegativeInteger } from "../moderation/runtime.js";
 import { getOneBotHub, readJson, sha256Hex } from "../portal/auth.js";
 import { numericId } from "../security/network.js";
@@ -57,15 +57,15 @@ function explicitProgramPermissionIndexKey(groupId) {
 
 
 async function updateExplicitProgramPermissionIndex(env, groupId, userId) {
-  const indexKey = explicitProgramPermissionIndexKey(groupId);
-  const list = await readJson(env, indexKey, []);
-  const normalized = [...new Set((Array.isArray(list) ? list : []).map(value => String(value || "").replace(/\D/g, "")).filter(Boolean))];
   const hasAiAdmin = await dbGet(env, `permission:${groupId}:${userId}:${PERMISSIONS.AI_ADMIN}`) === "true";
   const hasGroupOps = await dbGet(env, `permission:${groupId}:${userId}:${PERMISSIONS.GROUP_OPS}`) === "true";
-  const next = hasAiAdmin || hasGroupOps
-    ? [...new Set([...normalized, String(userId)])]
-    : normalized.filter(value => value !== String(userId));
-  await dbPut(env, indexKey, JSON.stringify(next.slice(-1000)));
+  const target = String(userId);
+  const next = await mutateJsonArray(env, explicitProgramPermissionIndexKey(groupId), list => {
+    const normalized = [...new Set(list.map(value => String(value || "").replace(/\D/g, "")).filter(Boolean))];
+    return hasAiAdmin || hasGroupOps
+      ? [...new Set([...normalized, target])]
+      : normalized.filter(value => value !== target);
+  }, 1000);
   return next;
 }
 
@@ -185,11 +185,7 @@ async function writeSystemAudit(env, entry) {
   const item = { id: crypto.randomUUID(), at: new Date().toISOString(), ...entry };
   const keys = ["audit:system:global"];
   if (entry.groupId) keys.push(`audit:system:group:${entry.groupId}`);
-  for (const key of keys) {
-    const list = await readJson(env, key, []);
-    list.push(item);
-    await dbPut(env, key, JSON.stringify(list.slice(-1000)));
-  }
+  for (const key of keys) await mutateJsonArray(env, key, list => [...list, item], 1000);
   return item;
 }
 
@@ -314,9 +310,13 @@ async function writeAiDecisionLog(env, data) {
     ...data,
     id
   };
-  await dbPut(env, `ai_decision_log:${id}`, JSON.stringify(item));
-  await appendIndex(env, "ai_decision_log:index", id, DEFAULTS.aiDecisionLogLimit);
-  if (item.groupId) await appendIndex(env, `ai_decision_log:index:${item.groupId}`, id, DEFAULTS.aiDecisionLogLimit);
+  await dbPutBestEffort(env, `ai_decision_log:${id}`, JSON.stringify(item));
+  try {
+    await appendIndex(env, "ai_decision_log:index", id, DEFAULTS.aiDecisionLogLimit);
+    if (item.groupId) await appendIndex(env, `ai_decision_log:index:${item.groupId}`, id, DEFAULTS.aiDecisionLogLimit);
+  } catch {
+    // Decision logs are optional telemetry; a failed index update must not block a reply.
+  }
   return item;
 }
 
@@ -394,17 +394,34 @@ async function buildLongGroupConversationContext(env, { groupId, userId, logs, c
 
 
 
+async function mutateJsonArray(env, key, update, max = 1000) {
+  const cap = Math.max(1, Number(max) || 1000);
+  for (let attempt = 0; attempt < 10; attempt += 1) {
+    const raw = await dbGetStrict(env, key);
+    let list = [];
+    try { list = JSON.parse(raw || "[]"); } catch {}
+    if (!Array.isArray(list)) list = [];
+    const nextList = update(list);
+    const next = JSON.stringify(nextList.slice(-cap));
+    if (next === raw) return nextList;
+    if (await dbCompareAndSwap(env, key, raw, next)) return nextList;
+  }
+  const error = new Error("Persistent storage changed too often; retry the operation");
+  error.code = "D1_STORAGE_UNAVAILABLE";
+  error.retryable = true;
+  throw error;
+}
+
+
+
 async function appendIndex(env, key, id, max = 2000) {
-  const list = await readJson(env, key, []);
-  if (!list.includes(id)) list.push(id);
-  await dbPut(env, key, JSON.stringify(list.slice(-max)));
+  await mutateJsonArray(env, key, list => list.includes(id) ? list : [...list, id], max);
 }
 
 
 
 async function removeFromIndex(env, key, id) {
-  const list = await readJson(env, key, []);
-  await dbPut(env, key, JSON.stringify(list.filter(x => x !== id)));
+  await mutateJsonArray(env, key, list => list.filter(x => x !== id));
 }
 
 
@@ -490,7 +507,8 @@ function outboundFingerprint(info) {
 async function markOutboundPending(env, info) {
   const key = `outbound_pending:${outboundFingerprint(info)}`;
   // 僅保存短期去重時間戳；不保存任何指令或回覆正文。
-  await dbPut(env, key, JSON.stringify({ at: Date.now() }));
+  const at = Date.now();
+  await dbPutExpiring(env, key, JSON.stringify({ at }), at + 24 * 60 * 60 * 1000);
   return key;
 }
 

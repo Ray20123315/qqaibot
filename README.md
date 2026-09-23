@@ -157,6 +157,21 @@ npm run deploy:prod
 
 Cron 預設每分鐘執行，用於排程、自動化、暫存清理、主動發話與自動群打卡。更改 Cron 會影響所有上述工作，不應只為調整打卡時間而降低觸發頻率。
 
+### Vectorize metadata indexes
+
+群聊檢索與語意記憶會依 metadata 篩選。建立或確認 `qqai` index 的 metadata indexes：
+
+```bash
+npx wrangler vectorize list-metadata-index qqai --config wrangler.toml
+npx wrangler vectorize create-metadata-index qqai --propertyName kind --type string --config wrangler.toml
+npx wrangler vectorize create-metadata-index qqai --propertyName groupId --type string --config wrangler.toml
+npx wrangler vectorize create-metadata-index qqai --propertyName subjectQq --type string --config wrangler.toml
+npx wrangler vectorize create-metadata-index qqai --propertyName userId --type string --config wrangler.toml
+npx wrangler vectorize create-metadata-index qqai --propertyName qq --type string --config wrangler.toml
+```
+
+此專案使用 5 個 metadata 欄位，低於 Vectorize 每個 index 10 個欄位的上限。若命令回報欄位已存在，先用 `list-metadata-index` 核對即可。建立索引前已寫入的 vectors 不會自動被索引；需要依原始向量資料重新 upsert 才能納入 metadata filter。舊群聊向量若尚未補上 `kind: "chat_log"`，Portal 會用舊 ID 格式作相容判斷，但仍只會回傳 metadata 中群號與使用者符合權限的資料。
+
 ## 公開 Worker 變數
 
 這些值可放在 `wrangler.toml [vars]` 或 Cloudflare Dashboard。變更後通常需要重新部署，除非使用 Dashboard 直接更新 Worker 變數。

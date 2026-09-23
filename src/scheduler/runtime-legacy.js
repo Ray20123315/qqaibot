@@ -5,7 +5,7 @@ import { callGeminiGenerate, callGoogleDecision, notifyDeveloper, parseList, tai
 import { DEFAULTS } from "../config/runtime.js";
 import { envBoolean } from "../config/deployment.js";
 import { appendIndex, callOneBotAction, removeFromIndex, writeSystemAudit } from "../core/permissions.js";
-import { dbDel, dbGet, dbPut } from "../data/store.js";
+import { dbCompareAndSwap, dbDel, dbGet, dbGetStrict, dbPut } from "../data/store.js";
 import { getAppealEligibleGroupsForUser } from "../group/runtime.js";
 import { retractModerationProposalMessage } from "../moderation/runtime.js";
 import { parseDurationSeconds, runOneBotGroupOperation } from "../onebot/messages.js";
@@ -315,10 +315,35 @@ function computeNextScheduleRun(record, after = Date.now()) {
 
 
 async function processDueSchedules(env, now = Date.now()) {
-  const ids = await readJson(env, "schedule:index", []);
+  let ids = [];
+  try { ids = JSON.parse(await dbGetStrict(env, "schedule:index") || "[]"); } catch (error) { throw error; }
+  if (!Array.isArray(ids)) ids = [];
   for (const id of ids.slice(-5000)) {
-    const item = await readJson(env, `schedule:${id}`, null);
+    const recordKey = `schedule:${id}`;
+    const recordRaw = await dbGetStrict(env, recordKey);
+    let item = null;
+    try { item = recordRaw ? JSON.parse(recordRaw) : null; } catch {}
     if (!item || !item.enabled || item.status !== "active" || Number(item.nextRunAt || Infinity) > now) continue;
+    const claimKey = `schedule:run_claim:${id}`;
+    const runSlot = Number(item.originalNextRunAt || item.nextRunAt || now);
+    let priorClaimRaw = await dbGetStrict(env, claimKey);
+    let priorClaim = null;
+    try { priorClaim = priorClaimRaw ? JSON.parse(priorClaimRaw) : null; } catch {}
+    if (priorClaim?.status === "running") {
+      if (Number(priorClaim.expiresAt || 0) > now) continue;
+      const manualReview = JSON.stringify({ ...priorClaim, status: "manual_review", expiredAt: now });
+      if (await dbCompareAndSwap(env, claimKey, priorClaimRaw, manualReview)) {
+        const paused = { ...item, status: "paused", enabled: false, lastResult: "execution_claim_expired_manual_review", lastExecutionReviewAt: now };
+        await dbCompareAndSwap(env, recordKey, recordRaw, JSON.stringify(paused));
+        await notifyDeveloper(env, `【排程需要人工確認】\n编号：${id}\n执行认领逾时，系统为避免重复发送已暂停排程。请检查 QQ 端实际结果后再恢复。`).catch(() => {});
+      }
+      continue;
+    }
+    if (priorClaim?.scheduledAt === runSlot) {
+      if (["done", "manual_review"].includes(priorClaim.status)) continue;
+      if (priorClaim.status === "retry" && Number(priorClaim.retryAt || 0) > now) continue;
+    }
+    if (Number(priorClaim?.scheduledAt || 0) > runSlot) continue;
     const scheduleFuse = await opsFuseAllows(env, item.groupId, "schedule");
     if (!scheduleFuse.allowed) {
       item.status = "paused";
@@ -376,6 +401,16 @@ async function processDueSchedules(env, now = Date.now()) {
     if (Number(item.failureCount || 0) === 0 || !Number(item.originalNextRunAt || 0)) {
       item.originalNextRunAt = Number(item.nextRunAt || now);
     }
+    const runClaim = {
+      scheduledAt: runSlot,
+      status: "running",
+      owner: crypto.randomUUID(),
+      attempts: priorClaim?.scheduledAt === runSlot ? Number(priorClaim.attempts || 0) + 1 : 1,
+      claimedAt: now,
+      expiresAt: now + 15 * 60 * 1000
+    };
+    const runClaimRaw = JSON.stringify(runClaim);
+    if (!(await dbCompareAndSwap(env, claimKey, priorClaimRaw, runClaimRaw))) continue;
     try {
       let result;
       if (item.managementAction) result = await executeManagementSchedule(env, item);
@@ -420,7 +455,21 @@ async function processDueSchedules(env, now = Date.now()) {
         item.lastResult = `retry_${item.failureCount}:${item.lastResult}`;
       }
     }
-    await dbPut(env, `schedule:${id}`, JSON.stringify(item));
+    if (!(await dbCompareAndSwap(env, recordKey, recordRaw, JSON.stringify(item)))) {
+      const error = new Error("Schedule result could not be committed; manual review required");
+      error.code = "D1_STORAGE_UNAVAILABLE";
+      error.retryable = true;
+      throw error;
+    }
+    const finalClaim = item.status === "active"
+      ? JSON.stringify({ ...runClaim, status: "retry", retryAt: Number(item.nextRunAt || now), expiresAt: 0 })
+      : JSON.stringify({ ...runClaim, status: item.status === "completed" ? "done" : "manual_review", completedAt: Date.now(), expiresAt: 0 });
+    if (!(await dbCompareAndSwap(env, claimKey, runClaimRaw, finalClaim))) {
+      const error = new Error("Schedule execution claim could not be finalized; manual review required");
+      error.code = "D1_STORAGE_UNAVAILABLE";
+      error.retryable = true;
+      throw error;
+    }
     if (item.status === "completed") {
       await writeSystemAudit(env, { type: "schedule_completed", groupId: item.groupId, actorId: item.creatorId, action: "completed_and_kept", scheduleId: id, content: String(item.content || "").slice(0, 500) }).catch(() => {});
     }

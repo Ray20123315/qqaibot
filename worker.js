@@ -4,7 +4,7 @@ import { AI_MEDIA_LIMITS, DEFAULTS, VERSION, classifyOperationalFailure } from "
 import { publicBaseUrl, publicLiveUrl } from "./src/config/deployment.js";
 import { consumeManualRuleCheckRate, developerIds, getAffinityProfile, isDeveloperId, latestConversationMessageForUser, recentConversationMessagesForUser, refreshAffinityAiAssessment, stripGroupAiOptOutPrefix, updateAffinityFixedFromMessage } from "./src/core/identity.js";
 import { appendIndex, buildLongGroupConversationContext, callOneBotAction, checkRuntimeRateLimit, getEffectivePermissions, isKnownOutboundMessage, markOutboundPending, modelPreferenceLabel, normalizeMemoryItems, normalizeModelPreference, normalizePermissionName, permissionLabel, removeFromIndex, setExplicitPermission, updateAiDecisionLog, writeAiDecisionLog, writeSystemAudit } from "./src/core/permissions.js";
-import { appendChatHistoryTurn, clearChatSessionHistory, dbDel, dbGet, dbPut, readChatHistory, withTimeout } from "./src/data/store.js";
+import { appendChatHistoryTurn, clearChatSessionHistory, dbDel, dbGet, dbPut, dbPutExpiringBestEffort, readChatHistory, withTimeout } from "./src/data/store.js";
 import { announceDeployedVersionFallback, getDeploymentStatusForViewer, handleDeploymentBuildQueue, injectDeploymentPortalClient } from "./src/deployment/notifications.js";
 import { botCanRunRuleMonitor, getBotGroupRole, getGroupFamilyForGroup, getGroupJoinPage, isVerifiedGroupOwner } from "./src/group/runtime.js";
 import { normalizeMultilingualCommand, toSimplifiedChinese } from "./src/i18n/commands.js";
@@ -260,7 +260,14 @@ const QQAIWorker = {
     }
 
     if (url.pathname.startsWith('/api/portal/')) {
-      return handlePortalApi(request, env, url);
+      try {
+        return await handlePortalApi(request, env, url);
+      } catch (error) {
+        if (error?.code === "D1_STORAGE_UNAVAILABLE" || error?.code === "PORTAL_AUTH_STORAGE_UNAVAILABLE") {
+          return jsonResponse({ ok: false, code: "STORAGE_UNAVAILABLE", retryable: true, message: "資料庫暫時無法完成儲存，資料未確認寫入；請稍後重試。" }, 503, { "Retry-After": "30" });
+        }
+        throw error;
+      }
     }
 
     if (request.method === 'POST' && ['/api/auth/request-code', '/api/auth/register/request-code'].includes(url.pathname)) {
@@ -3206,7 +3213,7 @@ const QQAIWorker = {
                 const vectorMatches = await env.VECTORIZE.query(userVector, {
                     topK: 12,                    // 撈出最相關的 12 條語風範本
                     filter: { qq: targetQq.toString() }, // 確保與寫入時的字串型態一致
-                    returnValues: true
+                    returnMetadata: "all"
                 });
 
                 if (vectorMatches && vectorMatches.matches) {
@@ -3314,6 +3321,8 @@ const QQAIWorker = {
                            id: `msg_${currentGroupId}_${userId}_${Date.now()}`,
                            values: msgVector,
                            metadata: {
+                              kind: "chat_log",
+                              schemaVersion: 2,
                               text: logEntry,
                               qq: userId.toString(),
                               userId: userId.toString(),
@@ -3396,7 +3405,7 @@ ${String(groupPersona).slice(0, 12000)}
           const vectorMatches = await env.VECTORIZE.query(embeddingResponse.data[0], {
             topK: 10,
             filter: { qq: mimicTargetQq },
-            returnValues: true
+            returnMetadata: "all"
           });
           dynamicLogs = (vectorMatches.matches || []).map(match => match.metadata?.text || "").filter(Boolean);
         } catch (vErr) {
@@ -4463,7 +4472,8 @@ export class OneBotHub {
       const pending = this.pending.get(String(body.echo)); this.pending.delete(String(body.echo)); clearTimeout(pending.timer);
       const messageId = body?.data?.message_id ?? body?.data?.messageId;
       if (messageId && ["send_group_msg", "send_private_msg", "send_msg"].includes(pending.action.action)) {
-        await dbPut(this.env, `outbound:${messageId}`, JSON.stringify({ at: Date.now(), action: pending.action.action }));
+        const at = Date.now();
+        await dbPutExpiringBestEffort(this.env, `outbound:${messageId}`, JSON.stringify({ at, action: pending.action.action }), at + 24 * 60 * 60 * 1000);
       }
       pending.resolve(body); return;
     }

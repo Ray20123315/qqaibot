@@ -10,7 +10,7 @@
 // conflict_manager_intervention conflict_warning_after_manager_stop
 
 import * as legacy from "./runtime-legacy.js";
-import { dbGet, dbPut } from "../data/store.js";
+import { dbCleanupExpiredRows, dbGet, dbPut } from "../data/store.js";
 import { getOneBotHub } from "../portal/auth.js";
 
 export * from "./runtime-legacy.js";
@@ -44,16 +44,9 @@ async function runAutomaticGroupCheckins(env, now = Date.now()) {
   return legacy.runAutomaticGroupCheckins(env, now);
 }
 
-async function cleanupTransientState(_env) {
-  // IMPORTANT: Do not call legacy.cleanupTransientState().
-  //
-  // The legacy implementation SELECTs every row matching outbound_pending:*,
-  // outbound:* and notice:not_whitelisted:* on every one-minute cron tick, then
-  // filters expiry in JavaScript. Outbound echo protection already enforces its
-  // own fixed TTL at lookup time, so these rows do not need a minute-by-minute
-  // database sweep for correctness. We intentionally leave old transient rows
-  // in place until a bounded expiry-index cleanup is introduced.
-  return { ok: true, skipped: "prefix_scan_disabled" };
+async function cleanupTransientState(env, now = Date.now()) {
+  const deleted = await dbCleanupExpiredRows(env, now, 25);
+  return { ok: true, deleted, bounded: true };
 }
 
 async function cleanupExpiredModerationProposals(env) {

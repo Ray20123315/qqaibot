@@ -27,14 +27,15 @@ for (const query of [
   assert.ok(legacy.includes(query), `legacy rollback copy should preserve original implementation: ${query}`);
 }
 
-assert.match(active, /prefix_scan_disabled/);
+assert.match(active, /dbCleanupExpiredRows\(env,\s*now,\s*25\)/);
 assert.match(active, /onebot_disconnected/);
 assert.match(active, /MODERATION_FALLBACK_INTERVAL_MS\s*=\s*24\s*\*\s*60\s*\*\s*60\s*\*\s*1000/);
 assert.ok(!/return\s+legacy\.cleanupTransientState\s*\(/.test(active), "transient cleanup must never call the legacy prefix scan");
 assert.match(active, /return\s+legacy\.cleanupExpiredModerationProposals\s*\(env\)/);
 
 const transient = await cleanupTransientState({});
-assert.equal(transient?.skipped, "prefix_scan_disabled");
+assert.equal(transient?.bounded, true);
+assert.equal(transient?.deleted, 0);
 
 for (const [name, fn] of [
   ["processDueSchedules", processDueSchedules],

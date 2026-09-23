@@ -4,7 +4,7 @@
 import { DEFAULTS } from "../config/runtime.js";
 import { isDeveloperId } from "../core/identity.js";
 import { callOneBotAction, getEffectivePermissions, getRuntimeRateLimitSeconds, normalizeModelPreference, writeSystemAudit } from "../core/permissions.js";
-import { dbDel, dbGet, dbPut } from "../data/store.js";
+import { dbDel, dbExpiryIndexKey, dbGet, dbPut, dbPutExpiring } from "../data/store.js";
 import { toSimplifiedChinese } from "../i18n/commands.js";
 import { normalizeRuleProxyMode, normalizeRuleStrictness, parseUnlimitedNonNegativeInteger } from "../moderation/runtime.js";
 import { getFeatureFlag, numericId, setFeatureFlag } from "../security/network.js";
@@ -1016,10 +1016,20 @@ async function createPortalSession(env, data) {
     authMethod: String(data.authMethod || "qq_code")
   };
   const key = `portal_session:${token}`;
-  await authDbPutStrict(env, key, JSON.stringify(session));
+  await writePortalSession(env, token, session);
   const confirmed = await authDbGetStrict(env, key);
   if (!confirmed) throw authStorageError("Portal session write could not be verified");
   return session;
+}
+
+
+
+async function writePortalSession(env, token, session, previousExpiresAt = 0) {
+  const key = "portal_session:" + token;
+  const previousExpiryKey = previousExpiresAt
+    ? dbExpiryIndexKey(key, previousExpiresAt)
+    : "";
+  await dbPutExpiring(env, key, JSON.stringify(session), session.expiresAt, previousExpiryKey);
 }
 
 
@@ -1052,7 +1062,7 @@ async function getPortalSession(env, token, { touch = true } = {}) {
     if (touch) {
       session.lastActivityAt = now;
       session.expiresAt = Math.min(now + idleTtlMs, absoluteExpiresAt);
-      await authDbPutStrict(env, `portal_session:${token}`, JSON.stringify(session));
+      await writePortalSession(env, token, session, idleExpiresAt);
     }
     return session;
   } catch (e) {
@@ -1328,17 +1338,37 @@ async function deleteMemoryVector(env, item) {
 
 
 async function searchPortalVectors(env, { groupId, userId, permissions, query, limit = 20 }) {
-  if (!env.VECTORIZE || !env.AI || !query) return [];
+  if (!env.VECTORIZE || !env.AI || !groupId || !query) return [];
   const embedded = await env.AI.run("@cf/baai/bge-m3", { text: [String(query)] });
   const vector = embedded?.data?.[0];
   if (!Array.isArray(vector)) return [];
-  const result = await env.VECTORIZE.query(vector, { topK: Math.max(1, Math.min(50, limit)), returnMetadata: "all", filter: { kind: "chat_log", groupId: String(groupId) } });
-  return (result?.matches || []).filter(match => {
+  const resultLimit = Math.max(1, Math.min(50, Number(limit) || 20));
+  const allowedMatches = matches => (matches || []).filter(match => {
     const meta = match.metadata || {};
-    if (meta.kind !== "chat_log" || String(meta.groupId || meta.group_id || "") !== String(groupId)) return false;
+    if (String(meta.groupId || meta.group_id || "") !== String(groupId)) return false;
+    const isCurrentChatLog = meta.kind === "chat_log";
+    const isLegacyChatLog = !meta.kind && String(match.id || "").startsWith(`msg_${groupId}_`) && typeof meta.text === "string";
+    if (!isCurrentChatLog && !isLegacyChatLog) return false;
     if (permissions?.nativeAdmin || permissions?.aiAdmin || permissions?.developer) return true;
     return String(meta.qq || meta.userId || meta.author || "") === String(userId);
-  }).map(match => ({ id: match.id, score: match.score, text: match.metadata?.text || "", qq: match.metadata?.qq || "", createdAt: match.metadata?.createdAt || null }));
+  });
+  let matches = [];
+  try {
+    const result = await env.VECTORIZE.query(vector, {
+      topK: Math.max(1, Math.min(50, resultLimit * 3)),
+      returnMetadata: "all",
+      filter: { groupId: String(groupId) }
+    });
+    matches = allowedMatches(result?.matches);
+  } catch {
+    // An index may not have its metadata filter configured yet. The fallback
+    // still validates group and user metadata before returning any result.
+  }
+  if (!matches.length) {
+    const fallback = await env.VECTORIZE.query(vector, { topK: 50, returnMetadata: "all" });
+    matches = allowedMatches(fallback?.matches);
+  }
+  return matches.slice(0, resultLimit).map(match => ({ id: match.id, score: match.score, text: match.metadata?.text || "", qq: match.metadata?.qq || "", createdAt: match.metadata?.createdAt || null }));
 }
 
 
@@ -1460,3 +1490,4 @@ async function writePortalSettingValue(env, definition, groupId, targetQq, value
 }
 
 export { BASE32_ALPHABET, PORTAL_PASSWORD_PBKDF2_ITERATIONS, PORTAL_SETTING_DEFINITIONS, PORTAL_SYSTEM_ADMIN_USERNAME, PORTAL_USERNAME_RESERVED, authDbDelStrict, authDbGetStrict, authDbPutIfAbsentStrict, authDbPutStrict, authDbRetry, authStorageError, base32Decode, base32Encode, base64UrlToBytes, buildGroupReplyMessage, bytesToBase64Url, bytesToHex, checkPortalAuthRateLimit, clearPasswordLoginGuard, commandChangesWebSettings, classifyPortalAuthFailure, constantTimeEqual, createPortalAccountBinding, createPortalAdminAccountBinding, createPortalPasswordRecord, createPortalSession, decryptPortalAuthSecret, deleteMemoryVector, derivePortalPassword, encryptPortalAuthSecret, extractGroupId, generateBackupCodes, generateSixDigitCode, generateTotpCode, getOneBotHub, getPortalSession, getPublicNebulaSeed, getUserQuota, hasAdminRole, hashBackupCode, isMemoryBanned, isPortalSystemAdminQq, isValidPortalPasswordRecord, jsonResponse, markGroupMemberLeft, migratePortalMemories, normalizeBackupCode, normalizePortalUsername, notePasswordLoginFailure, oneBotHttpActionUrl, portalAdminCredentialConfig, portalAuthEncryptionKey, portalAuthEncryptionMaterial, portalEnvironmentWithManagedDeveloperIds, portalRoleRank, portalAccountIdentityKey, portalAccountUsernameKey, portalSessionCookie, randomBytes, readCookie, readJson, readPasswordLoginGuard, readPortalAccountByQq, readPortalAccountByUsername, readPortalAuthJson, readPortalManagedDeveloperIds, readPortalSettingValue, resolvePortalPasswordLogin, resolvePortalRole, resolvePortalSessionAuthority, searchPortalVectors, sendOneBotAction, sendOneBotHttpAction, sendPortalVerificationMessage, sha256Hex, simplifyJsonValue, upsertGroupMember, upsertMemoryVector, validatePortalLoginUsername, validatePortalPassword, validatePortalUsername, verifyPortalPassword, verifyPortalVerificationCode, verifyTotpCode, writeMemoryAudit, writePortalManagedDeveloperIds, writePortalSettingValue, writeSystemError };
+export { writePortalSession };

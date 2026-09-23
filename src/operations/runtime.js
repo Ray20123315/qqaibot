@@ -5,7 +5,7 @@ import { callGemmaDecision, callGoogleDecision } from "../ai/runtime.js";
 import { DEFAULTS, VERSION } from "../config/runtime.js";
 import { isDeveloperId } from "../core/identity.js";
 import { appendIndex, callOneBotAction, listAiDecisionLogs, writeSystemAudit } from "../core/permissions.js";
-import { dbDel, dbGet, dbPut } from "../data/store.js";
+import { dbCompareAndSwap, dbDel, dbGet, dbGetStrict, dbPut } from "../data/store.js";
 import { dispatchHumanAttentionNotification } from "../notifications/routing.js";
 import { canUseBotGroupOperations, getBotGroupRole, getBotIdentity } from "../group/runtime.js";
 import { createGroupWorkRequest, extractOneBotMessageId, normalizeRuleStrictness } from "../moderation/runtime.js";
@@ -1337,7 +1337,23 @@ async function opsSendDailyDigest(env, groupId, now = Date.now()) {
   if (current < settings.dailyDigestTime) return { ok: true, skipped: true, reason: "not_due" };
   const dateKey = opsTaipeiDateKey(now);
   const sentKey = `ops:digest:sent:${groupId}:${dateKey}`;
-  if (await dbGet(env, sentKey)) return { ok: true, skipped: true, reason: "already_sent" };
+  const claimRaw = await dbGetStrict(env, sentKey);
+  let previous = null;
+  if (claimRaw) {
+    try { previous = JSON.parse(claimRaw); } catch {}
+    if (!previous || previous.state === "sent") return { ok: true, skipped: true, reason: "already_sent" };
+    if (previous.state === "manual_review") return { ok: true, skipped: true, reason: "manual_review_required" };
+    if (previous.state === "running" && Number(previous.expiresAt || 0) > now) return { ok: true, skipped: true, reason: "already_claimed" };
+    if (previous.state === "running" && Number(previous.expiresAt || 0) <= now) {
+      const review = JSON.stringify({ ...previous, state: "manual_review", expiredAt: now });
+      await dbCompareAndSwap(env, sentKey, claimRaw, review);
+      return { ok: true, skipped: true, reason: "manual_review_required" };
+    }
+    if (previous.state === "retry" && Number(previous.retryAt || 0) > now) return { ok: true, skipped: true, reason: "retry_not_due" };
+  }
+  const claim = { state: "running", owner: crypto.randomUUID(), startedAt: now, expiresAt: now + 30 * 60 * 1000 };
+  const runningRaw = JSON.stringify(claim);
+  if (!(await dbCompareAndSwap(env, sentKey, claimRaw, runningRaw))) return { ok: true, skipped: true, reason: "already_claimed" };
   const center = await opsTaskCenter(env, groupId, 1000);
   const counts = center.tasks.reduce((acc, item) => { acc[item.status] = (acc[item.status] || 0) + 1; return acc; }, {});
   const residuals = center.tasks.filter(item => item.kind === "thinking" || String(item.detail?.type || "").includes("thinking_indicator_residual")).length;
@@ -1345,9 +1361,20 @@ async function opsSendDailyDigest(env, groupId, now = Date.now()) {
   const recipients = await opsResolveDigestRecipients(env, groupId, settings);
   let sent = 0;
   for (const qq of recipients) {
-    try { await sendPortalVerificationMessage(env, qq, text); sent += 1; } catch {}
+    try {
+      const result = await sendPortalVerificationMessage(env, qq, text);
+      if (result?.ok) sent += 1;
+    } catch {}
   }
-  if (sent > 0) await dbPut(env, sentKey, String(now));
+  const finalState = sent > 0
+    ? JSON.stringify({ state: "sent", sentAt: now, sent, recipients: recipients.length })
+    : JSON.stringify({ state: "retry", retryAt: now, sent: 0, recipients: recipients.length });
+  if (!(await dbCompareAndSwap(env, sentKey, runningRaw, finalState))) {
+    const error = new Error("Daily digest result could not be committed; manual review required");
+    error.code = "D1_STORAGE_UNAVAILABLE";
+    error.retryable = true;
+    throw error;
+  }
   return { ok: sent > 0, sent, recipients };
 }
 
