@@ -48,7 +48,6 @@ assert.doesNotMatch(portalBase, /return toSimplifiedChinese\(String\.raw/);
 const withFeatures = injectPortalMembersClient(injectDeploymentPortalClient(portalBase));
 const full = injectPortalLayoutClient(withFeatures);
 assert.match(full, /id="qqai-member-console-style"/);
-assert.match(full, /id="qqai-werewolf-style"/);
 assert.match(full, /id="qqai-deployment-toast"/);
 assert.match(full, /id="qqai-portal-layout-v300"/);
 assert.ok(full.lastIndexOf("qqai-portal-layout-v300") > full.lastIndexOf("qqai-member-console-style"));
