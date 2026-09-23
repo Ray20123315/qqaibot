@@ -3,7 +3,7 @@
 本文件是 **目前 source 實際讀取** 的 Cloudflare bindings、公開 Worker 變數與 Secrets 對照表。  
 原則：敏感憑證、密碼、Token、API Key 一律用 Cloudflare Secret；需要由 Cloudflare Dashboard 網頁維護且不可被 Git 部署覆蓋的非敏感變數，使用 Dashboard Variables。正式 `wrangler.toml` 固定 `keep_vars = true`，部署腳本也使用 `--keep-vars`。只有明確由 Git 管理的公開預設值才放 `[vars]`。
 
-> Developer Portal 的開發者帳號固定為保留名稱 `admin`。第一次啟用只輸入 `DEVELOPER_IDS`／`ROOT_QQ_IDS` 中的 QQID並直接設定 admin 密碼；不使用 QQ 六位驗證碼，也不使用 `PORTAL_AUTH_SECRET`、OneBot Token 或其他新增 Secret 作登入前置條件。系統沒有預設 admin 密碼。
+> Developer Portal 的開發者帳號固定為保留名稱 `admin`。第一次啟用仍必須使用 `DEVELOPER_IDS`／`ROOT_QQ_IDS` 中已授權的 QQID 建立 admin 綁定並設定密碼；建立成功後，保留帳號 `admin` 本身就是 Portal 的 Developer / Root 系統帳號，日常帳密登入不會因部署變數暫時缺失而降級成一般成員。系統沒有預設 admin 密碼。
 
 ## 1. Cloudflare bindings
 
@@ -31,7 +31,7 @@
 | 開發者 Portal username | 固定系統帳號 | 必要 | 固定為保留名稱 `admin`；一般使用者不可註冊此名稱。 |
 | 開發者 Portal password | Web / D1 PBKDF2 | 首次啟用時設定 | 第一次在 `/register` 直接設定 admin 密碼；沒有預設密碼，只保存 PBKDF2 salt/hash。Workers Web Crypto 相容參數固定為 PBKDF2-SHA-256 / 100000 iterations。 |
 
-開發者身份仍由 V2 原本的 public var 判定，但 production 由 **Cloudflare Dashboard → Workers → qqai → Settings → Variables** 管理：
+開發者 QQ 身份與 **admin 首次啟用資格** 仍由 V2 原本的 public var 判定，production 由 **Cloudflare Dashboard → Workers → qqai → Settings → Variables** 管理：
 
 ```text
 DEVELOPER_IDS = 你的QQID[,第二個QQID...]
@@ -41,7 +41,7 @@ DEVELOPER_ID = legacy，可選
 
 這三個 identity var **不要再寫入 production `wrangler.toml [vars]`**。Wrangler 預設會讓設定檔中的 Vars 成為部署值；若設定檔寫了空字串，下一次部署就可能把 Dashboard 值覆蓋成空值。本專案因此同時使用 `keep_vars = true` 與 `wrangler deploy --keep-vars`，並從 production `[vars]` 移除 identity assignments。
 
-開發者第一次走 `/register`：輸入 `DEVELOPER_IDS`／`ROOT_QQ_IDS` 中的 QQID → 直接設定密碼 → 系統建立或遷移保留帳號 `admin`。**不傳送 QQ 六位驗證碼，也不要求 `PORTAL_AUTH_SECRET`／OneBot Token。** 之後走 `/login`，帳號固定輸入 `admin`，密碼就是第一次設定的密碼；只有使用者自行啟用 2FA 時才追加第二因素。
+開發者第一次走 `/register`：輸入 `DEVELOPER_IDS`／`ROOT_QQ_IDS` 中的 QQID → 直接設定密碼 → 系統建立或遷移保留帳號 `admin`。**不傳送 QQ 六位驗證碼，也不要求 `PORTAL_AUTH_SECRET`／OneBot Token。** 建立完成後，`admin` 會固定以 Developer / Root 權限建立與刷新 Portal Session；之後走 `/login` 只需要 `admin` + 密碼（以及自行啟用的 2FA）。`DEVELOPER_IDS`／`ROOT_QQ_IDS` 仍用於 QQ 端 Developer 身份與首次 admin 綁定授權，但不再讓已建立的 `admin` 因部署變數暫時空白而失去 Portal 系統權限。
 
 `PORTAL_AUTH_SECRET` / `TOTP_ENCRYPTION_KEY` 仍可供 Portal 敏感資料與 TOTP seed 加密使用，但它們不再是 admin 登入或首次啟用的密碼／鑰匙。
 
