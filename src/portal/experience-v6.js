@@ -759,6 +759,59 @@ html.ray-page-portal body{background:var(--ray-min-bg)!important}
 }
 /* RAY_MINIMAL_V9_FUNCTIONAL_VISIBILITY_END */
 
+
+/* RAY_MINIMAL_V9_SIDEBAR_TRACK_FIX */
+.core-nav{
+  width:100%!important;
+  min-width:0!important;
+  grid-template-columns:minmax(0,1fr)!important;
+  justify-content:stretch!important;
+  justify-items:stretch!important;
+  align-items:stretch!important;
+}
+.core-nav>button[data-view]{
+  width:100%!important;
+  min-width:0!important;
+  max-width:none!important;
+  justify-self:stretch!important;
+  align-items:center!important;
+  white-space:nowrap!important;
+  word-break:keep-all!important;
+  overflow-wrap:normal!important;
+}
+.core-nav>button[data-view]>span:last-child{
+  min-width:0!important;
+  white-space:nowrap!important;
+  overflow:hidden!important;
+  text-overflow:ellipsis!important;
+}
+.core-nav .plugin-compat-nav:not([hidden]){
+  width:100%!important;
+  min-width:0!important;
+  grid-template-columns:minmax(0,1fr)!important;
+  justify-content:stretch!important;
+  justify-items:stretch!important;
+}
+.core-nav .plugin-compat-nav button,
+.core-nav>.qqai-nav-entry{
+  width:100%!important;
+  min-width:0!important;
+  max-width:none!important;
+  justify-self:stretch!important;
+  white-space:nowrap!important;
+  word-break:keep-all!important;
+  overflow:hidden!important;
+  text-overflow:ellipsis!important;
+}
+.core-nav>.qqai-nav-entry{
+  grid-template-columns:26px minmax(0,1fr)!important;
+  align-items:center!important;
+}
+.core-nav>.qqai-nav-entry>*{
+  min-width:0!important;
+}
+/* RAY_MINIMAL_V9_SIDEBAR_TRACK_FIX_END */
+
 /* RAY_MINIMAL_V9_END */
 
 /* RAY_REFERENCE_V7_END */
