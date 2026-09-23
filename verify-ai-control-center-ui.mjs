@@ -71,6 +71,9 @@ assert.ok(full.lastIndexOf("qqai-portal-layout-v400") > full.lastIndexOf("qqai-m
 const runtime = fs.readFileSync("src/portal/runtime.js", "utf8");
 assert.match(runtime, /function renderPluginCatalog/);
 assert.match(runtime, /function renderAccountIdentity/);
+assert.match(runtime, /const systemAdmin = String\(session\.username \|\| ""\)\.trim\(\)\.toLowerCase\(\) === "admin"/, "reserved admin account must be recognized as Developer / Root");
+assert.match(runtime, /canManagePlugins: Boolean\(portalIsDeveloper\)/, "\/me must expose authoritative plugin management capability");
+assert.match(runtime, /function refreshAccountIdentity\(\)/, "account view must re-read server identity instead of leaving a stale placeholder");
 assert.match(runtime, /renderAccountIdentity\(\);await loadPlugins\(\);renderAccountIdentity\(\)/, "account identity must render before and after plugin authority loads");
 assert.match(runtime, /你有 Developer \/ Root 插件管理權限/, "plugin management guidance must be visible to managers");
 assert.match(runtime, /function setPortalLocale/);
