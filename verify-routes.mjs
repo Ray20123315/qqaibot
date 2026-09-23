@@ -78,11 +78,11 @@ assert(String(result.response.headers.get('location') || '').includes('/login?ne
 
 result = await get('/matrix');
 assert(result.response.status === 302, 'GET /matrix: expected redirect');
-assert(String(result.response.headers.get('location') || '').endsWith('/portal#memory'), 'GET /matrix: expected /portal#memory redirect');
+assert(String(result.response.headers.get('location') || '').endsWith('/portal#plugins'), 'GET /matrix: expected plugin-center redirect');
 
 result = await get('/appeal');
 assert(result.response.status === 302, 'GET /appeal: expected redirect');
-assert(String(result.response.headers.get('location') || '').endsWith('/portal#appeals'), 'GET /appeal: expected /portal#appeals redirect');
+assert(String(result.response.headers.get('location') || '').endsWith('/portal#plugins'), 'GET /appeal: expected plugin-center redirect');
 
 for (const [key, [expectedStatus, expectedHash]] of exact) {
   const splitAt = key.indexOf(' ');
