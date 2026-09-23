@@ -315,7 +315,8 @@ function portalPluginCatalog() {
       description: result.manifest.description,
       author: result.manifest.author,
       portal: result.manifest.portal,
-      i18n: result.manifest.i18n
+      i18n: result.manifest.i18n,
+      enabled: result.manifest.portal.defaultEnabled !== false
     }))
     .sort((a, b) => Number(a.portal.order || 0) - Number(b.portal.order || 0) || a.id.localeCompare(b.id));
 }
