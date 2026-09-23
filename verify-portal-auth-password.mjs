@@ -37,7 +37,8 @@ const loginStart = worker.indexOf("url.pathname === '/api/auth/login-password'")
 const loginEnd = worker.indexOf("url.pathname === '/api/auth/logout'", loginStart);
 const loginBlock = worker.slice(loginStart, loginEnd);
 assert.match(loginBlock, /payload\.username/);
-assert.match(loginBlock, /readPortalAccountByUsername/);
+assert.match(loginBlock, /resolvePortalPasswordLogin/);
+assert.match(loginBlock, /login\.source === "environment"/);
 assert.doesNotMatch(loginBlock, /const qq = String\(payload\.qq/);
 assert.match(loginBlock, /TWO_FACTOR_REQUIRED/);
 assert.match(loginBlock, /verifyTotpCode/);
@@ -50,4 +51,6 @@ assert.match(auth, /PORTAL_PASSWORD_PBKDF2_ITERATIONS = 100000/);
 assert.doesNotMatch(auth, /iterations = 120000/);
 assert.match(auth, /function isValidPortalPasswordRecord/);
 assert.match(auth, /function validatePortalUsername/);
+assert.match(auth, /PORTAL_ADMIN_USERNAME/);
+assert.match(auth, /constantTimeEqual\(String\(password \|\| ""\), config\.password\)/);
 console.log("verify-portal-auth-password: ok");

@@ -99,8 +99,12 @@ for (const marker of [
 assert.doesNotMatch(readme, /3569028262/);
 
 const packageJson = JSON.parse(fs.readFileSync("package.json", "utf8"));
+const packageLock = JSON.parse(fs.readFileSync("package-lock.json", "utf8"));
 assert.equal(packageJson.version, "2.7.12");
+assert.equal(packageLock.version, packageJson.version, "npm lockfile must match package.json");
+assert.equal(packageLock.packages[""].devDependencies.wrangler, packageJson.devDependencies.wrangler, "locked Wrangler must match package.json");
 assert.match(packageJson.scripts.check, /verify-configurable-deployment\.mjs/);
-assert.match(packageJson.scripts.deploy, /--keep-vars/);
+assert.match(packageJson.scripts.deploy, /check:bundle/);
+assert.match(packageJson.scripts["deploy:prod"], /--keep-vars/);
 
 console.log("Configurable deployment and README regression passed.");

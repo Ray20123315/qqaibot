@@ -3,7 +3,7 @@
 本文件是 **目前 source 實際讀取** 的 Cloudflare bindings、公開 Worker 變數與 Secrets 對照表。  
 原則：敏感憑證、密碼、Token、API Key 一律用 Cloudflare Secret；需要由 Cloudflare Dashboard 網頁維護且不可被 Git 部署覆蓋的非敏感變數，使用 Dashboard Variables。正式 `wrangler.toml` 固定 `keep_vars = true`，部署腳本也使用 `--keep-vars`。只有明確由 Git 管理的公開預設值才放 `[vars]`。
 
-> Developer Portal 的開發者帳號固定為保留名稱 `admin`。第一次啟用仍必須使用 `DEVELOPER_IDS`／`ROOT_QQ_IDS` 中已授權的 QQID 建立 admin 綁定並設定密碼；建立成功後，保留帳號 `admin` 本身就是 Portal 的 Developer / Root 系統帳號，日常帳密登入不會因部署變數暫時缺失而降級成一般成員。系統沒有預設 admin 密碼。
+> Portal 內部的系統管理員綁定仍固定使用保留名稱 `admin`，但登入名稱與密碼可分別由 `PORTAL_ADMIN_USERNAME` Worker Variable 和 `PORTAL_ADMIN_PASSWORD` Secret 設定。這組變數只驗證登入，不會改寫 D1 管理員身份或舊密碼 hash；兩者都未設定時，維持既有 D1 管理員登入方式。
 
 ## 1. Cloudflare bindings
 
@@ -28,8 +28,10 @@
 | `DEVELOPER_IDS` | public var | 必要 | 逗號/分號/換行分隔的最高開發者 QQID 清單。 |
 | `ROOT_QQ_IDS` | public var | 可選 | 額外 Root QQID，與 `DEVELOPER_IDS` 合併。 |
 | `DEVELOPER_ID` | public var | legacy | 單一開發者 QQID 相容欄位。 |
-| 開發者 Portal username | 固定系統帳號 | 必要 | 固定為保留名稱 `admin`；一般使用者不可註冊此名稱。 |
-| 開發者 Portal password | Web / D1 PBKDF2 | 首次啟用時設定 | 第一次在 `/register` 直接設定 admin 密碼；沒有預設密碼，只保存 PBKDF2 salt/hash。Workers Web Crypto 相容參數固定為 PBKDF2-SHA-256 / 100000 iterations。 |
+| `PORTAL_ADMIN_USERNAME` | public var | 選用 | 此部署的管理員登入名稱，需符合一般 username 格式；`admin` 仍可用。不得與既有一般帳號名稱重疊。 |
+| `PORTAL_ADMIN_PASSWORD` | Secret | 與 username 同設 | 此部署的管理員登入密碼，至少 10 字元；以常數時間比較，只用於管理員認證，不會寫入 D1。 |
+| Portal 內部系統帳號 | 固定系統帳號 | 必要 | D1 中固定為保留名稱 `admin`；一般使用者不可註冊或升級成此帳號。 |
+| 傳統 D1 管理員密碼 | Web / D1 PBKDF2 | 相容 | 只在兩個 `PORTAL_ADMIN_*` 變數都未設定時使用。首次建立只能寫入空值，不會覆蓋既有 hash。Workers Web Crypto 相容參數固定為 PBKDF2-SHA-256 / 100000 iterations。 |
 
 開發者 QQ 身份與 **admin 首次啟用資格** 仍由 V2 原本的 public var 判定，production 由 **Cloudflare Dashboard → Workers → qqai → Settings → Variables** 管理：
 
@@ -41,7 +43,7 @@ DEVELOPER_ID = legacy，可選
 
 這三個 identity var **不要再寫入 production `wrangler.toml [vars]`**。Wrangler 預設會讓設定檔中的 Vars 成為部署值；若設定檔寫了空字串，下一次部署就可能把 Dashboard 值覆蓋成空值。本專案因此同時使用 `keep_vars = true` 與 `wrangler deploy --keep-vars`，並從 production `[vars]` 移除 identity assignments。
 
-開發者第一次走 `/register`：輸入 `DEVELOPER_IDS`／`ROOT_QQ_IDS` 中的 QQID → 直接設定密碼 → 系統建立或遷移保留帳號 `admin`。**不傳送 QQ 六位驗證碼，也不要求 `PORTAL_AUTH_SECRET`／OneBot Token。** 建立完成後，`admin` 會固定以 Developer / Root 權限建立與刷新 Portal Session；之後走 `/login` 只需要 `admin` + 密碼（以及自行啟用的 2FA）。`DEVELOPER_IDS`／`ROOT_QQ_IDS` 仍用於 QQ 端 Developer 身份與首次 admin 綁定授權，但不再讓已建立的 `admin` 因部署變數暫時空白而失去 Portal 系統權限。
+開發者第一次走 `/register`：輸入 `DEVELOPER_IDS`／`ROOT_QQ_IDS` 中的 QQID → 建立保留帳號 `admin`。若已設定 `PORTAL_ADMIN_*`，表單密碼必須符合 `PORTAL_ADMIN_PASSWORD`，且密碼只留在 Secret；若兩者未設定，D1 密碼只在尚未存在時建立。一般 QQ 帳號不得轉成 admin，重複啟用不會重設既有密碼。**此開發者首次啟用路徑不傳送 QQ 六位驗證碼，也不要求 `PORTAL_AUTH_SECRET`／OneBot Token。** 管理員登入後可在 Portal「帳號與設定 → Developer QQ 管理」管理額外的 D1 Developer 清單；Cloudflare Dashboard 的靜態清單保持唯讀。
 
 `PORTAL_AUTH_SECRET` / `TOTP_ENCRYPTION_KEY` 仍可供 Portal 敏感資料與 TOTP seed 加密使用，但它們不再是 admin 登入或首次啟用的密碼／鑰匙。
 
@@ -126,6 +128,7 @@ URL 如果內含 credential/query secret，也要當 Secret 管理。
 ### Portal / 2FA
 
 - `PORTAL_AUTH_SECRET`：Portal 一般敏感資料／2FA 加密 fallback；不是 `admin` 密碼，也不參與 Developer 首次啟用。
+- `PORTAL_ADMIN_PASSWORD`：此部署的管理員登入 Secret；需同時設定 `PORTAL_ADMIN_USERNAME` Variable。旋轉方式是更新 Secret，不用 Portal 密碼重設表單。
 - `TOTP_ENCRYPTION_KEY`：**TOTP seed 的優先加密 key**；建議獨立設定，不與 OneBot token 共用。
 
 ### Cloudflare build detail
@@ -139,6 +142,7 @@ URL 如果內含 credential/query secret，也要當 Secret 管理。
 ```bash
 npx wrangler secret put GEMINI_API_KEYS
 npx wrangler secret put ONEBOT_ACCESS_TOKEN
+npx wrangler secret put PORTAL_ADMIN_PASSWORD
 npx wrangler secret put PORTAL_AUTH_SECRET
 npx wrangler secret put TOTP_ENCRYPTION_KEY
 ```
@@ -159,7 +163,9 @@ npx wrangler secret put CLOUDFLARE_BUILDS_API_TOKEN
 - 不要把 `DEVELOPER_IDS`／`ROOT_QQ_IDS`／`DEVELOPER_ID` 重新加回 production `wrangler.toml [vars]`；它們由 Dashboard 管理，否則部署可能覆寫網頁設定。
 - 不要移除 `keep_vars = true` 或 deploy script 的 `--keep-vars`，除非已明確改成「Wrangler 設定檔為唯一變數來源」並完成遷移。
 - 不要把 API Key、Token、初始密碼放入 `wrangler.toml [vars]`。
+- 不要只設定 `PORTAL_ADMIN_USERNAME` 或 `PORTAL_ADMIN_PASSWORD` 其中一個；完整設定前管理員登入會 fail closed。
+- 不要將 `PORTAL_ADMIN_USERNAME` 設成既有一般使用者帳號；此時該變數登入會拒絕，以免接管該一般帳號。
 - 不要在 GitHub Issue、commit message、Portal log 或 Ray_Chen memory 寫真實 Secret。
 - 不要把 `DEVELOPER_IDS` 開放給一般 Portal 使用者修改。
-- 開發者首次啟用的 username/password 直接由 `/register` 網頁建立；不要再新增 deploy-time 的開發者帳號／初始密碼變數。
+- 不要透過重複 `/register` 覆蓋管理員資料；環境變數模式的登入密碼只由 Cloudflare Secret 管理。
 - 不要為了讓首頁「顯示已連接」而建立其實程式沒用到的 KV/R2；UI 預覽必須標示真實/預留狀態。
