@@ -3,7 +3,7 @@
 
 import { VERSION } from "../config/runtime.js";
 import { callOneBotAction, writeSystemAudit } from "../core/permissions.js";
-import { dbDel, dbGet, dbPut } from "../data/store.js";
+import { dbClaimLeaseStrict, dbDel, dbDeleteKeyIfJsonFieldEquals, dbGet, dbPut, dbPutStrict } from "../data/store.js";
 import { getBotGroupRole } from "../group/runtime.js";
 import { jsonResponse, readJson } from "../portal/auth.js";
 import { numericId } from "../security/network.js";
@@ -22,7 +22,7 @@ function normalizeBilibiliEvent(payload) {
   const roomId = String(data?.room_id || data?.roomid || payload?.room_id || "");
   const bvid = String(data?.bvid || data?.bv_id || payload?.bvid || "");
   const url = String(data?.url || data?.link || payload?.url || (type === "live_start" && roomId ? `https://live.bilibili.com/${roomId}` : type === "video_publish" && bvid ? `https://www.bilibili.com/video/${bvid}` : ""));
-  const eventId = String(payload?.event_id || payload?.id || data?.event_id || `${type}:${creatorId}:${roomId || bvid}:${title}`);
+  const eventId = String(payload?.event_id || payload?.id || data?.event_id || `${type}:${creatorId}:${roomId || bvid}:${title}`).slice(0, 256);
   return { type, creatorId, creatorName, title, roomId, bvid, url, eventId, rawType };
 }
 
@@ -34,7 +34,7 @@ async function sendBilibiliConnectorNotification(env, connector, event) {
   const log = { at: Date.now(), connectorId: connector.id, groupId: connector.groupId, event };
   if (!notify) {
     log.status = "record_only";
-    await dbPut(env, `bili:event:${connector.id}:${event.eventId}`, JSON.stringify(log));
+    await dbPutStrict(env, `bili:event:${connector.id}:${event.eventId}`, JSON.stringify(log));
     return { ok: true, sent: false };
   }
   const botRole = (await getBotGroupRole(env, connector.groupId)).role;
@@ -48,11 +48,11 @@ async function sendBilibiliConnectorNotification(env, connector, event) {
     log.status = "sent";
     log.atAllRequested = atAllRequested;
     log.atAllSent = atAllRequested && canAtAll;
-    await dbPut(env, `bili:event:${connector.id}:${event.eventId}`, JSON.stringify(log));
+    await dbPutStrict(env, `bili:event:${connector.id}:${event.eventId}`, JSON.stringify(log)).catch(error => console.warn("Bilibili delivery log save failed", String(error?.code || error?.message || error)));
     return { ok: true, sent: true };
   } catch (error) {
     log.status = "failed"; log.error = String(error?.message || error);
-    await dbPut(env, `bili:event:${connector.id}:${event.eventId}`, JSON.stringify(log));
+    await dbPut(env, `bili:event:${connector.id}:${event.eventId}`, JSON.stringify(log)).catch(() => {});
     return { ok: false, error: log.error };
   }
 }
@@ -60,23 +60,38 @@ async function sendBilibiliConnectorNotification(env, connector, event) {
 
 
 async function handleBilibiliWebhook(request, env, url) {
+  const declaredLength = Number(request.headers.get("Content-Length") || 0);
+  if (declaredLength > 65536) return jsonResponse({ ok: false, message: "Webhook payload 過大。" }, 413);
+  if (!String(request.headers.get("Content-Type") || "").toLowerCase().includes("application/json")) return jsonResponse({ ok: false, message: "Webhook 僅接受 JSON。" }, 415);
   const secret = url.pathname.split("/").pop() || "";
   const connectorId = await dbGet(env, `bili:webhook_secret:${secret}`);
   if (!connectorId) return jsonResponse({ ok: false, message: "未知串接密钥。" }, 404);
   const connector = await readJson(env, `bili:connector:${connectorId}`, null);
   if (!connector || connector.enabled === false) return jsonResponse({ ok: false, message: "串接已停用。" }, 403);
-  const payload = await request.json().catch(() => ({}));
+  const rawPayload = await request.text();
+  if (new TextEncoder().encode(rawPayload).byteLength > 65536) return jsonResponse({ ok: false, message: "Webhook payload 過大。" }, 413);
+  let payload;
+  try { payload = JSON.parse(rawPayload); } catch { return jsonResponse({ ok: false, message: "Webhook JSON 格式無效。" }, 400); }
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) return jsonResponse({ ok: false, message: "Webhook JSON 必須是物件。" }, 400);
   if (payload?.challenge) return jsonResponse({ challenge: payload.challenge });
   const event = normalizeBilibiliEvent(payload);
   if (event.type === "unknown") return jsonResponse({ ok: true, ignored: true, message: "未识别事件类型。" });
   if (connector.creatorId && event.creatorId && String(connector.creatorId) !== String(event.creatorId)) return jsonResponse({ ok: true, ignored: true, message: "创作者不匹配。" });
   const dedupKey = `bili:dedup:${connector.id}:${event.eventId}`;
-  if (await dbGet(env, dedupKey)) return jsonResponse({ ok: true, duplicate: true });
-  await dbPut(env, dedupKey, String(Date.now()));
-  const result = await sendBilibiliConnectorNotification(env, connector, event);
+  const owner = `bili-webhook:${crypto.randomUUID()}`;
+  const now = Date.now();
+  if (!(await dbClaimLeaseStrict(env, dedupKey, owner, now, 10 * 60 * 1000))) return jsonResponse({ ok: true, duplicate: true });
+  let result;
+  try { result = await sendBilibiliConnectorNotification(env, connector, event); }
+  catch (error) { result = { ok: false, error: String(error?.message || error).slice(0, 300) }; }
+  if (!result.ok) {
+    await dbDeleteKeyIfJsonFieldEquals(env, dedupKey, "$.owner", owner).catch(() => {});
+    return jsonResponse({ ok: false, event, ...result }, 502);
+  }
+  await dbPutStrict(env, dedupKey, JSON.stringify({ owner, status: "completed", createdAt: now, expiresAt: now + 30 * 24 * 60 * 60 * 1000 }));
   connector.lastEventAt = Date.now(); connector.lastEvent = event;
-  await dbPut(env, `bili:connector:${connector.id}`, JSON.stringify(connector));
-  return jsonResponse({ ok: result.ok, event, ...result }, result.ok ? 200 : 502);
+  await dbPutStrict(env, `bili:connector:${connector.id}`, JSON.stringify(connector)).catch(error => console.warn("Bilibili webhook state save failed", String(error?.code || error?.message || error)));
+  return jsonResponse({ ok: true, event, ...result }, 200);
 }
 
 
@@ -253,7 +268,7 @@ async function listAllBilibiliConnectorIds(env) {
     for (const id of await readJson(env, `bili:connector:index:${groupId}`, [])) ids.add(id);
   }
   const result = [...ids].slice(0, 5000);
-  await dbPut(env, "bili:connector:index:all", JSON.stringify(result));
+  await Promise.all(result.map(id => appendIndex(env, "bili:connector:index:all", id, 5000)));
   return result;
 }
 

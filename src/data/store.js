@@ -11,160 +11,222 @@ import { DEFAULTS } from "../config/runtime.js";
 async function dbGet(env, key) {
   if (!env || !env.DB) return null; // 防呆安全鎖
   try {
-    const stmt = env.DB.prepare("SELECT value FROM kv_store WHERE key = ?").bind(key);
-    const result = await stmt.first();
-    return result ? result.value : null;
+    return await dbGetStrict(env, key);
   } catch (e) {
     console.error(`讀取 DB 失敗 [${key}]:`, e);
-    return null;
-  }
-}
-
-
-
-function dbStorageError(cause) {
-  const error = new Error("Persistent storage is temporarily unavailable");
-  error.code = "D1_STORAGE_UNAVAILABLE";
-  error.retryable = true;
-  if (cause) error.cause = cause;
-  return error;
-}
-
-
-
-async function dbGetStrict(env, key) {
-  if (!env?.DB) throw dbStorageError();
-  try {
-    const result = await env.DB.prepare("SELECT value FROM kv_store WHERE key = ?").bind(key).first();
-    return result ? result.value : null;
-  } catch (error) {
-    throw dbStorageError(error);
-  }
-}
-
-
-
-async function runStrict(env, sql, values) {
-  if (!env?.DB) throw dbStorageError();
-  try {
-    const result = await env.DB.prepare(sql).bind(...values).run();
-    if (result?.success === false || result?.error) throw new Error("D1 statement reported failure");
-    return result;
-  } catch (error) {
-    throw dbStorageError(error);
-  }
-}
-
-
-
-async function dbCompareAndSwap(env, key, expectedValue, nextValue) {
-  const result = expectedValue === null
-    ? await runStrict(env, "INSERT INTO kv_store (key, value) VALUES (?, ?) ON CONFLICT(key) DO NOTHING", [key, nextValue])
-    : await runStrict(env, "UPDATE kv_store SET value = ? WHERE key = ? AND value = ?", [nextValue, key, expectedValue]);
-  const changes = Number(result?.meta?.changes ?? result?.changes ?? 0);
-  return changes === 1;
-}
-
-
-
-function dbExpiryIndexKey(key, expiresAt) {
-  const timestamp = Math.max(0, Math.trunc(Number(expiresAt) || 0));
-  return `expiry:${String(timestamp).padStart(13, "0")}:${encodeURIComponent(String(key || ""))}`;
-}
-
-
-
-async function dbPutExpiring(env, key, value, expiresAt, previousExpiryKey = "") {
-  if (!env?.DB) throw dbStorageError();
-  const expiryKey = dbExpiryIndexKey(key, expiresAt);
-  const statements = [
-    env.DB.prepare("INSERT INTO kv_store (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value").bind(key, value)
-  ];
-  if (previousExpiryKey && previousExpiryKey !== expiryKey) {
-    statements.push(env.DB.prepare("DELETE FROM kv_store WHERE key = ?").bind(previousExpiryKey));
-  }
-  statements.push(env.DB.prepare("INSERT INTO kv_store (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value").bind(expiryKey, key));
-  try {
-    const results = await env.DB.batch(statements);
-    if (results?.some(result => result?.success === false || result?.error)) throw new Error("D1 batch reported failure");
-    return expiryKey;
-  } catch (error) {
-    throw dbStorageError(error);
-  }
-}
-
-
-
-async function dbPutExpiringBestEffort(env, key, value, expiresAt) {
-  try {
-    return await dbPutExpiring(env, key, value, expiresAt);
-  } catch {
-    console.warn("Optional expiring persistent write was skipped");
-    return "";
-  }
-}
-
-
-
-async function dbCleanupExpiredRows(env, now = Date.now(), limit = 25) {
-  if (!env?.DB) return 0;
-  const batchLimit = Math.max(1, Math.min(25, Math.trunc(Number(limit) || 25)));
-  const before = `expiry:${String(Math.max(0, Math.trunc(Number(now) || 0) + 1)).padStart(13, "0")}:`;
-  let rows;
-  try {
-    const result = await env.DB.prepare("SELECT key, value FROM kv_store WHERE key LIKE 'expiry:%' AND key < ? ORDER BY key LIMIT ?")
-      .bind(before, batchLimit).all();
-    rows = result?.results || [];
-  } catch (error) {
-    throw dbStorageError(error);
-  }
-  if (!rows.length) return 0;
-  const indexKeys = rows.map(row => String(row.key || "")).filter(Boolean);
-  const targetKeys = rows.map(row => String(row.value || "")).filter(Boolean);
-  const placeholders = values => values.map(() => "?").join(",");
-  const statements = [];
-  if (targetKeys.length) statements.push(env.DB.prepare(`DELETE FROM kv_store WHERE key IN (${placeholders(targetKeys)})`).bind(...targetKeys));
-  if (indexKeys.length) statements.push(env.DB.prepare(`DELETE FROM kv_store WHERE key IN (${placeholders(indexKeys)})`).bind(...indexKeys));
-  try {
-    const results = await env.DB.batch(statements);
-    if (results?.some(result => result?.success === false || result?.error)) throw new Error("D1 cleanup batch reported failure");
-    return rows.length;
-  } catch (error) {
-    throw dbStorageError(error);
+    throw e;
   }
 }
 
 
 
 async function dbPut(env, key, value) {
-  await runStrict(env,
-    "INSERT INTO kv_store (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
-    [key, value]);
-}
-
-
-
-async function dbPutBestEffort(env, key, value) {
+  if (!env || !env.DB) return; // 防呆安全鎖
   try {
-    await dbPut(env, key, value);
-    return true;
-  } catch {
-    console.warn("Optional persistent write was skipped");
-    return false;
+    return await dbPutStrict(env, key, value);
+  } catch (e) {
+    console.error(`寫入 DB 失敗 [${key}]:`, e);
+    throw e;
   }
 }
 
 
 
+function d1StorageError(operation, key, cause) {
+  const error = new Error(`D1 ${operation} failed${key ? ` for ${key}` : ""}`);
+  error.code = "D1_STORAGE_UNAVAILABLE";
+  if (cause) error.cause = cause;
+  return error;
+}
+
+
+
+async function dbRetryStrict(operation, key, fn, attempts = 3) {
+  let lastError = null;
+  for (let index = 0; index < attempts; index += 1) {
+    try {
+      return await fn();
+    } catch (error) {
+      lastError = error;
+      if (index + 1 < attempts) await new Promise(resolve => setTimeout(resolve, 40 * (index + 1)));
+    }
+  }
+  throw d1StorageError(operation, key, lastError);
+}
+
+
+
+async function dbGetStrict(env, key) {
+  if (!env?.DB) throw d1StorageError("read", key);
+  return dbRetryStrict("read", key, async () => {
+    const result = await env.DB.prepare("SELECT value FROM kv_store WHERE key = ?").bind(key).first();
+    return result ? result.value : null;
+  });
+}
+
+
+
+async function dbPutStrict(env, key, value) {
+  if (!env?.DB) throw d1StorageError("write", key);
+  return dbRetryStrict("write", key, async () => {
+    const result = await env.DB.prepare("INSERT INTO kv_store (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value").bind(key, value).run();
+    if (result?.success === false) throw new Error("D1 reported write failure");
+    return result;
+  });
+}
+
+
+
+async function dbDelStrict(env, key) {
+  if (!env?.DB) throw d1StorageError("delete", key);
+  return dbRetryStrict("delete", key, async () => {
+    const result = await env.DB.prepare("DELETE FROM kv_store WHERE key = ?").bind(key).run();
+    if (result?.success === false) throw new Error("D1 reported delete failure");
+    return result;
+  });
+}
+
+
+
+async function dbCompareAndSwapStrict(env, key, expectedValue, value) {
+  if (!env?.DB) throw d1StorageError("compare-and-swap", key);
+  const expected = expectedValue === null || expectedValue === undefined ? null : String(expectedValue);
+  const result = await dbRetryStrict("compare-and-swap", key, async () => expected === null
+    ? env.DB.prepare("INSERT INTO kv_store (key, value) VALUES (?, ?) ON CONFLICT(key) DO NOTHING").bind(key, value).run()
+    : env.DB.prepare("UPDATE kv_store SET value = ? WHERE key = ? AND value = ?").bind(value, key, expected).run());
+  if (result?.success === false) throw d1StorageError("compare-and-swap", key);
+  return Number(result?.meta?.changes || 0) === 1;
+}
+
+
+
+async function dbAppendJsonArrayCapped(env, key, item, limit = 1000) {
+  if (!env?.DB) throw d1StorageError("append", key);
+  const cap = Math.max(1, Math.min(10000, Number(limit) || 1000));
+  const encoded = JSON.stringify(item);
+  return dbRetryStrict("append", key, async () => {
+    const result = await env.DB.prepare(`INSERT INTO kv_store (key, value) VALUES (?, json_array(json(?)))
+      ON CONFLICT(key) DO UPDATE SET value = CASE
+        WHEN json_valid(kv_store.value) AND json_type(kv_store.value) = 'array' THEN json_insert(
+          CASE WHEN json_array_length(kv_store.value) >= ? THEN json_remove(kv_store.value, '$[0]') ELSE kv_store.value END,
+          '$[#]', json(?)
+        )
+        ELSE json_array(json(?))
+      END`).bind(key, encoded, cap, encoded, encoded).run();
+    if (result?.success === false) throw new Error("D1 reported JSON append failure");
+    return result;
+  });
+}
+
+
+
+async function dbAddJsonArrayItemUnique(env, key, item, limit = 2000) {
+  if (!env?.DB) throw d1StorageError("index update", key);
+  const cap = Math.max(1, Math.min(10000, Number(limit) || 2000));
+  const value = String(item);
+  return dbRetryStrict("index update", key, async () => {
+    const result = await env.DB.prepare(`INSERT INTO kv_store (key, value) VALUES (?, json_array(?))
+      ON CONFLICT(key) DO UPDATE SET value = CASE
+        WHEN NOT json_valid(kv_store.value) OR json_type(kv_store.value) != 'array' THEN json_array(?)
+        WHEN EXISTS (SELECT 1 FROM json_each(kv_store.value) WHERE CAST(value AS TEXT) = ?) THEN kv_store.value
+        ELSE json_insert(
+          CASE WHEN json_array_length(kv_store.value) >= ? THEN json_remove(kv_store.value, '$[0]') ELSE kv_store.value END,
+          '$[#]', ?
+        )
+      END`).bind(key, value, value, value, cap, value).run();
+    if (result?.success === false) throw new Error("D1 reported JSON index append failure");
+    return result;
+  });
+}
+
+
+
+async function dbRemoveJsonArrayItem(env, key, item) {
+  if (!env?.DB) throw d1StorageError("index delete", key);
+  const value = String(item);
+  return dbRetryStrict("index delete", key, async () => {
+    const result = await env.DB.prepare(`UPDATE kv_store SET value = CASE
+      WHEN json_valid(value) AND json_type(value) = 'array' AND EXISTS (SELECT 1 FROM json_each(kv_store.value) WHERE CAST(value AS TEXT) = ?)
+      THEN json_remove(value, '$[' || (SELECT key FROM json_each(kv_store.value) WHERE CAST(value AS TEXT) = ? ORDER BY CAST(key AS INTEGER) LIMIT 1) || ']')
+      ELSE value
+    END WHERE key = ?`).bind(value, value, key).run();
+    if (result?.success === false) throw new Error("D1 reported JSON index delete failure");
+    return result;
+  });
+}
+
+
+
+async function dbClaimLeaseStrict(env, key, owner, now = Date.now(), leaseMs = 180000) {
+  if (!env?.DB) throw d1StorageError("lease claim", key);
+  const value = JSON.stringify({ owner: String(owner), startedAt: now, heartbeatAt: now, expiresAt: now + Math.max(1000, Number(leaseMs) || 180000) });
+  const result = await dbRetryStrict("lease claim", key, async () => env.DB.prepare(`INSERT INTO kv_store (key, value) VALUES (?, ?)
+    ON CONFLICT(key) DO UPDATE SET value = excluded.value
+    WHERE CAST(coalesce(json_extract(kv_store.value, '$.expiresAt'), 0) AS INTEGER) <= ?
+       OR json_extract(kv_store.value, '$.owner') = ?`).bind(key, value, now, String(owner)).run());
+  if (result?.success === false) throw d1StorageError("lease claim", key);
+  if (Number(result?.meta?.changes || 0) <= 0) return false;
+  const confirmed = await dbGetStrict(env, key);
+  try { return JSON.parse(confirmed || "null")?.owner === String(owner); } catch { return false; }
+}
+
+
+
+async function dbRenewLeaseStrict(env, key, owner, now = Date.now(), leaseMs = 180000) {
+  if (!env?.DB) throw d1StorageError("lease renew", key);
+  const result = await dbRetryStrict("lease renew", key, async () => env.DB.prepare(`UPDATE kv_store SET value = json_set(value, '$.heartbeatAt', ?, '$.expiresAt', ?)
+    WHERE key = ? AND json_extract(value, '$.owner') = ?`).bind(now, now + Math.max(1000, Number(leaseMs) || 180000), key, String(owner)).run());
+  if (result?.success === false) throw d1StorageError("lease renew", key);
+  return Number(result?.meta?.changes || 0) > 0;
+}
+
+
+
+async function dbDeleteKeyIfJsonFieldEquals(env, key, field, expected) {
+  if (!env?.DB) throw d1StorageError("conditional delete", key);
+  if (!/^\$\.[A-Za-z0-9_]+$/.test(String(field || ""))) throw d1StorageError("invalid JSON field", key);
+  const result = await dbRetryStrict("conditional delete", key, async () => env.DB.prepare("DELETE FROM kv_store WHERE key = ? AND json_extract(value, ?) = ?").bind(key, field, String(expected)).run());
+  if (result?.success === false) throw d1StorageError("conditional delete", key);
+  return Number(result?.meta?.changes || 0) > 0;
+}
+
+
+
+function prefixRangeEnd(prefix) {
+  // Current KV namespaces use ASCII; U+FFFF is a strict upper bound for their suffixes.
+  return `${String(prefix)}\uFFFF`;
+}
+
+
+
 async function dbDel(env, key) {
-  await runStrict(env, "DELETE FROM kv_store WHERE key = ?", [key]);
+  if (!env || !env.DB) return; // 防呆安全鎖
+  try {
+    return await dbDelStrict(env, key);
+  } catch (e) {
+    console.error(`删除 DB 失敗 [${key}]:`, e);
+    throw e;
+  }
 }
 
 
 
 async function dbDeletePrefix(env, prefix) {
-  if (!prefix) return;
-  await runStrict(env, "DELETE FROM kv_store WHERE substr(key, 1, ?) = ?", [prefix.length, prefix]);
+  if (!env?.DB || !prefix) return;
+  return dbDeletePrefixStrict(env, prefix);
+}
+
+
+
+async function dbDeletePrefixStrict(env, prefix) {
+  if (!env?.DB) throw d1StorageError("delete prefix", prefix);
+  const normalized = String(prefix || "");
+  if (!normalized) throw d1StorageError("delete empty prefix");
+  return dbRetryStrict("delete prefix", normalized, async () => {
+    const result = await env.DB.prepare("DELETE FROM kv_store WHERE key >= ? AND key < ?").bind(normalized, prefixRangeEnd(normalized)).run();
+    if (result?.success === false) throw new Error("D1 reported prefix delete failure");
+    return result;
+  });
 }
 
 
@@ -188,8 +250,8 @@ async function readChatHistory(env, sessionKey, limit = DEFAULTS.conversationHis
   try {
     const turnLimit = Math.max(1, Math.ceil(boundedLimit / 2) + 4);
     const turnPrefix = `chat_turn:${sessionKey}:`;
-    const rows = await env.DB.prepare("SELECT value FROM kv_store WHERE substr(key, 1, ?) = ? ORDER BY key DESC LIMIT ?")
-      .bind(turnPrefix.length, turnPrefix, turnLimit)
+    const rows = await env.DB.prepare("SELECT value FROM kv_store WHERE key >= ? AND key < ? ORDER BY key DESC LIMIT ?")
+      .bind(turnPrefix, prefixRangeEnd(turnPrefix), turnLimit)
       .all();
     const recent = (rows.results || []).reverse().flatMap(row => {
       try {
@@ -213,21 +275,21 @@ async function appendChatHistoryTurn(env, sessionKey, items, metadata = {}) {
   if (!cleanItems.length) return;
   if (!String(sessionKey).startsWith("chat:group:") || !env?.DB) {
     const current = await readChatHistory(env, sessionKey, DEFAULTS.conversationHistoryItems);
-    await dbPut(env, sessionKey, JSON.stringify([...current, ...cleanItems].slice(-DEFAULTS.conversationHistoryItems)));
+    await dbPutStrict(env, sessionKey, JSON.stringify([...current, ...cleanItems].slice(-DEFAULTS.conversationHistoryItems)));
     return;
   }
   const createdAt = Math.max(0, Number(metadata.createdAt || Date.now()));
   const sourceMessageId = String(metadata.messageId || "").replace(/\D/g, "").padStart(20, "0");
   const key = `chat_turn:${sessionKey}:${String(createdAt).padStart(13, "0")}:${sourceMessageId}:${crypto.randomUUID()}`;
-  await dbPutExpiring(env, key, JSON.stringify({ items: cleanItems, createdAt, messageId: String(metadata.messageId || ""), userId: String(metadata.userId || "") }), createdAt + 7 * 24 * 60 * 60 * 1000);
+  const retentionMs = Math.max(24 * 60 * 60 * 1000, Number(metadata.retentionMs || 30 * 24 * 60 * 60 * 1000));
+  await dbPutStrict(env, key, JSON.stringify({ items: cleanItems, createdAt, expiresAt: createdAt + retentionMs, messageId: String(metadata.messageId || ""), userId: String(metadata.userId || "") }));
 }
 
 
 
 async function clearChatSessionHistory(env, sessionKey) {
-  await dbDel(env, sessionKey);
-  await dbDel(env, `context_summary:${sessionKey}`);
-  if (String(sessionKey).startsWith("chat:group:")) await dbDeletePrefix(env, `chat_turn:${sessionKey}:`);
+  await Promise.all([dbDelStrict(env, sessionKey), dbDelStrict(env, `context_summary:${sessionKey}`)]);
+  if (String(sessionKey).startsWith("chat:group:")) await dbDeletePrefixStrict(env, `chat_turn:${sessionKey}:`);
 }
 
 
@@ -257,4 +319,4 @@ function withTimeout(promise, timeoutMs, label = "TASK_TIMEOUT") {
   ]).finally(() => clearTimeout(timer));
 }
 
-export { appendChatHistoryTurn, clearChatSessionHistory, dbCleanupExpiredRows, dbCompareAndSwap, dbDel, dbDeletePrefix, dbExpiryIndexKey, dbGet, dbGetStrict, dbPut, dbPutBestEffort, dbPutExpiring, dbPutExpiringBestEffort, isDeadlineExceeded, parseStoredHistory, readChatHistory, remainingTimeout, withTimeout };
+export { appendChatHistoryTurn, clearChatSessionHistory, dbAddJsonArrayItemUnique, dbAppendJsonArrayCapped, dbClaimLeaseStrict, dbCompareAndSwapStrict, dbDel, dbDelStrict, dbDeleteKeyIfJsonFieldEquals, dbDeletePrefix, dbDeletePrefixStrict, dbGet, dbGetStrict, dbPut, dbPutStrict, dbRemoveJsonArrayItem, dbRenewLeaseStrict, isDeadlineExceeded, parseStoredHistory, prefixRangeEnd, readChatHistory, remainingTimeout, withTimeout };

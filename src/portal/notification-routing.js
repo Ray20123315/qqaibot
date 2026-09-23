@@ -48,9 +48,8 @@ function injectNotificationRoutingClient(html) {
   if (!source || source.includes("qqai-notification-routing-client")) return source;
   const nav = '<button data-view="notification-routing" id="notificationRoutingNav" class="qqai-nav-entry"><span class="qqai-nav-glyph" aria-hidden="true">讯</span><span>通知路由</span></button>';
   const memberNav = '<button data-view="members" id="memberConsoleNav"';
-  const compat = '<div id="pluginCompatNav" class="plugin-compat-nav" hidden>';
   if (source.includes(memberNav)) source = source.replace(memberNav, nav + memberNav);
-  else if (source.includes(compat)) source = source.replace(compat, compat + nav);
+  else if (source.includes('</nav>')) source = source.replace('</nav>', nav + '</nav>');
 
   const page = `<section id="v-notification-routing" class="view">
   <div class="section-head"><div><h2>人工通知路由</h2><p>默认只通知开发者；只有手动改为指定管理员或群主时，才会通知其他人。群主通知总开关默认关闭。</p></div><button id="notificationRoutingReload" class="ghost">重新读取</button></div>

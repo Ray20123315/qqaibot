@@ -4,7 +4,7 @@
 import { DEFAULTS } from "../config/runtime.js";
 import { isDeveloperId } from "../core/identity.js";
 import { callOneBotAction, getEffectivePermissions, getRuntimeRateLimitSeconds, normalizeModelPreference, writeSystemAudit } from "../core/permissions.js";
-import { dbDel, dbExpiryIndexKey, dbGet, dbPut, dbPutExpiring } from "../data/store.js";
+import { dbCompareAndSwapStrict, dbDel, dbGet, dbPut } from "../data/store.js";
 import { toSimplifiedChinese } from "../i18n/commands.js";
 import { normalizeRuleProxyMode, normalizeRuleStrictness, parseUnlimitedNonNegativeInteger } from "../moderation/runtime.js";
 import { getFeatureFlag, numericId, setFeatureFlag } from "../security/network.js";
@@ -28,6 +28,11 @@ function jsonResponse(data, status = 200, extraHeaders = {}) {
     headers: {
       "Content-Type": "application/json; charset=utf-8",
       "Cache-Control": "no-store",
+      "Strict-Transport-Security": "max-age=31536000",
+      "X-Content-Type-Options": "nosniff",
+      "X-Frame-Options": "DENY",
+      "Referrer-Policy": "strict-origin-when-cross-origin",
+      "Permissions-Policy": "camera=(), geolocation=()",
       ...extraHeaders
     }
   });
@@ -65,70 +70,6 @@ function authStorageError(message, cause) {
 
 
 
-function classifyPortalAuthFailure(error, stage = "unknown") {
-  const messages = [
-    error?.message,
-    error?.cause?.message,
-    error?.cause?.cause?.message
-  ].map(value => String(value || "")).filter(Boolean);
-  const joined = messages.join("\n");
-  const normalizedStage = String(stage || "unknown");
-
-  if (/Pbkdf2 failed: iteration counts above 100000 are not supported|PBKDF2.*iterations?.*(?:above|over).*100000/i.test(joined)) {
-    return {
-      code: "AUTH_PASSWORD_DERIVATION_UNSUPPORTED",
-      status: 503,
-      stage: normalizedStage,
-      message: "目前執行環境無法使用這組密碼派生參數。Portal 已阻止寫入不相容的密碼資料。",
-      diagnostic: joined.slice(0, 800)
-    };
-  }
-  if (/free tier daily row (?:read|write) limit|exceeded.*D1.*daily/i.test(joined)) {
-    return {
-      code: "AUTH_D1_DAILY_LIMIT",
-      status: 503,
-      stage: normalizedStage,
-      message: "Cloudflare D1 今日讀寫額度已達上限，Portal 暫時無法寫入登入資料。請檢查 D1 用量或方案後再試。",
-      diagnostic: joined.slice(0, 800)
-    };
-  }
-  if (/no such table:\s*kv_store/i.test(joined)) {
-    return {
-      code: "AUTH_SCHEMA_MISSING",
-      status: 503,
-      stage: normalizedStage,
-      message: "Portal 登入資料表尚未建立或目前綁定到錯誤的 D1。請檢查 DB binding 與 kv_store schema。",
-      diagnostic: joined.slice(0, 800)
-    };
-  }
-  if (/Missing D1 binding/i.test(joined)) {
-    return {
-      code: "AUTH_DB_BINDING_MISSING",
-      status: 503,
-      stage: normalizedStage,
-      message: "Portal 找不到 Cloudflare D1 的 DB binding，無法儲存登入資料。",
-      diagnostic: joined.slice(0, 800)
-    };
-  }
-  if (error?.code === "PORTAL_AUTH_STORAGE_UNAVAILABLE" || /\bD1[_A-Z]*\b|database|kv_store|SQLITE_/i.test(joined)) {
-    return {
-      code: "AUTH_STORAGE_UNAVAILABLE",
-      status: 503,
-      stage: normalizedStage,
-      message: "Portal 登入資料庫目前無法完成讀寫。請檢查 Cloudflare D1 狀態、DB binding 與 kv_store schema。",
-      diagnostic: joined.slice(0, 800)
-    };
-  }
-  return {
-    code: String(error?.code || "ACCOUNT_ACTIVATION_FAILED"),
-    status: 503,
-    stage: normalizedStage,
-    message: "首次啟用失敗。請提供畫面上的錯誤代碼與 Failure ID 以便定位。",
-    diagnostic: joined.slice(0, 800)
-  };
-}
-
-
 async function authDbRetry(label, operation, attempts = 3) {
   let lastError = null;
   for (let index = 0; index < attempts; index += 1) {
@@ -160,19 +101,6 @@ async function authDbPutStrict(env, key, value) {
     const result = await env.DB.prepare("INSERT INTO kv_store (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value").bind(key, value).run();
     if (result && result.success === false) throw new Error("D1 write reported failure");
     return result;
-  });
-}
-
-
-
-async function authDbPutIfAbsentStrict(env, key, value) {
-  if (!env?.DB) throw authStorageError("Missing D1 binding for Portal authentication");
-  return authDbRetry(`auth reserve ${key}`, async () => {
-    const result = await env.DB.prepare("INSERT INTO kv_store (key, value) VALUES (?, ?) ON CONFLICT(key) DO NOTHING").bind(key, value).run();
-    if (result && result.success === false) throw new Error("D1 reserve reported failure");
-    const changes = Number(result?.meta?.changes ?? result?.changes ?? 0);
-    if (changes > 0) return true;
-    return (await authDbGetStrict(env, key)) === null;
   });
 }
 
@@ -241,146 +169,92 @@ function validatePortalPassword(password) {
 
 
 
-const PORTAL_SYSTEM_ADMIN_USERNAME = "admin";
-const PORTAL_PASSWORD_PBKDF2_ITERATIONS = 100000;
 const PORTAL_MANAGED_DEVELOPER_IDS_KEY = "portal_system_developer_ids";
 const portalManagedDeveloperIdsCache = new WeakMap();
+const PORTAL_SYSTEM_ADMIN_IDLE_TTL_MS = 30 * 60 * 1000;
+const PORTAL_SYSTEM_ADMIN_ABSOLUTE_TTL_MS = 8 * 60 * 60 * 1000;
 
-const PORTAL_USERNAME_RESERVED = Object.freeze(new Set([
-  PORTAL_SYSTEM_ADMIN_USERNAME, "administrator", "root", "developer", "system", "support", "security",
-  "api", "login", "logout", "register", "portal", "account", "accounts", "me"
-]));
-
-function normalizePortalUsername(value) {
+function normalizePortalAdminUsername(value) {
   return String(value ?? "").normalize("NFKC").trim().toLowerCase();
-}
-
-function validatePortalUsername(value) {
-  const display = String(value ?? "").normalize("NFKC").trim();
-  const normalized = normalizePortalUsername(display);
-  if (normalized.length < 4 || normalized.length > 32) {
-    return { ok: false, code: "USERNAME_LENGTH", message: "帳號名稱需為 4 到 32 個字元。" };
-  }
-  if (!/^[a-z0-9][a-z0-9._-]{3,31}$/i.test(normalized)) {
-    return { ok: false, code: "USERNAME_FORMAT", message: "帳號只能使用英文字母、數字、句點、底線與連字號，且必須以英文字母或數字開頭。" };
-  }
-  if (!/[a-z]/i.test(normalized)) {
-    return { ok: false, code: "USERNAME_LETTER_REQUIRED", message: "帳號至少需要一個英文字母，不能只使用數字。" };
-  }
-  if (PORTAL_USERNAME_RESERVED.has(normalized)) {
-    return { ok: false, code: "USERNAME_RESERVED", message: "這個帳號名稱保留給系統使用，請換一個名稱。" };
-  }
-  return { ok: true, value: display, normalized };
-}
-
-function validatePortalLoginUsername(value) {
-  const display = String(value ?? "").normalize("NFKC").trim();
-  const normalized = normalizePortalUsername(display);
-  if (normalized === PORTAL_SYSTEM_ADMIN_USERNAME) {
-    return { ok: true, value: PORTAL_SYSTEM_ADMIN_USERNAME, normalized: PORTAL_SYSTEM_ADMIN_USERNAME, system: true };
-  }
-  return validatePortalUsername(display);
 }
 
 function portalAdminCredentialConfig(env = {}) {
   const username = String(env.PORTAL_ADMIN_USERNAME ?? "").normalize("NFKC").trim();
   const password = String(env.PORTAL_ADMIN_PASSWORD ?? "");
-  const hasUsername = Boolean(username);
-  const hasPassword = Boolean(password);
-  const normalizedUsername = normalizePortalUsername(username);
-  if (!hasUsername && !hasPassword) return { mode: "legacy", username: "", normalizedUsername: "", password: "" };
-  if (!hasUsername || !hasPassword) return { mode: "invalid", username, normalizedUsername, password: "" };
-  const usernameCheck = normalizedUsername === PORTAL_SYSTEM_ADMIN_USERNAME
-    ? { ok: true }
-    : validatePortalUsername(username);
-  if (!usernameCheck.ok || !validatePortalPassword(password).ok) {
+  const normalizedUsername = normalizePortalAdminUsername(username);
+  if (!username && !password) return { mode: "unconfigured", username: "", normalizedUsername: "", password: "" };
+  if (!username || !password) return { mode: "invalid", username, normalizedUsername, password: "" };
+  const usernameValid = username.length >= 4 && username.length <= 32
+    && /^[a-z0-9][a-z0-9._-]*$/i.test(username)
+    && /[a-z]/i.test(username)
+    && !/^\d+$/.test(username);
+  if (!usernameValid || !validatePortalPassword(password).ok) {
     return { mode: "invalid", username, normalizedUsername, password: "" };
   }
   return { mode: "configured", username, normalizedUsername, password };
 }
 
-async function resolvePortalPasswordLogin(env, username, password) {
-  const usernameCheck = validatePortalLoginUsername(username);
-  if (!usernameCheck.ok) return { account: null, source: "database", errorCode: "INVALID_CREDENTIALS" };
+function verifyPortalAdminCredentials(env, username, password) {
   const config = portalAdminCredentialConfig(env);
-  const normalizedUsername = usernameCheck.normalized;
-
-  if (config.mode === "invalid") {
-    if (normalizedUsername === PORTAL_SYSTEM_ADMIN_USERNAME || normalizedUsername === config.normalizedUsername) {
-      return { account: null, source: "environment", errorCode: "ADMIN_CREDENTIALS_MISCONFIGURED" };
-    }
-  } else if (config.mode === "configured") {
-    if (normalizedUsername === config.normalizedUsername) {
-      const account = await readPortalAccountByUsername(env, PORTAL_SYSTEM_ADMIN_USERNAME);
-      if (!account) return { account: null, source: "environment", errorCode: "ADMIN_ACCOUNT_NOT_BOUND" };
-      if (config.normalizedUsername !== PORTAL_SYSTEM_ADMIN_USERNAME) {
-        const collision = await readPortalAccountByUsername(env, config.normalizedUsername);
-        if (collision && (collision.qq !== account.qq || collision.normalizedUsername !== PORTAL_SYSTEM_ADMIN_USERNAME)) {
-          return { account: null, source: "environment", errorCode: "ADMIN_USERNAME_COLLISION" };
-        }
-      }
-      return {
-        account,
-        source: "environment",
-        passwordMatches: constantTimeEqual(String(password || ""), config.password)
-      };
-    }
-    if (normalizedUsername === PORTAL_SYSTEM_ADMIN_USERNAME) {
-      return { account: null, source: "environment", errorCode: "INVALID_CREDENTIALS" };
-    }
+  if (config.mode === "invalid") return { ok: false, code: "ADMIN_CREDENTIALS_MISCONFIGURED" };
+  if (config.mode !== "configured") return { ok: false, code: "INVALID_CREDENTIALS" };
+  if (normalizePortalAdminUsername(username) !== config.normalizedUsername
+    || !constantTimeEqual(String(password ?? ""), config.password)) {
+    return { ok: false, code: "INVALID_CREDENTIALS" };
   }
-
-  const account = await readPortalAccountByUsername(env, normalizedUsername);
-  return { account, source: "database", errorCode: account ? "" : "INVALID_CREDENTIALS" };
+  return { ok: true, username: config.username };
 }
 
-function normalizeManagedDeveloperIds(values) {
+
+
+async function portalAdminUsernameIsClaimed(env, username) {
+  const normalized = normalizePortalAdminUsername(username);
+  if (!normalized) return false;
+  return Boolean(await authDbGetStrict(env, `portal_account_username:${normalized}`));
+}
+
+function normalizePortalManagedDeveloperIds(values) {
   const source = Array.isArray(values) ? values : String(values ?? "").split(/[\n,;]+/g);
-  const ids = [...new Set(source.map(value => String(value ?? "").replace(/\D/g, "")).filter(value => /^\d{5,12}$/.test(value)))];
-  return ids.slice(0, 50);
+  const ids = [...new Set(source.map(value => String(value ?? "").trim()).filter(Boolean))];
+  if (ids.some(id => !/^\d{5,12}$/.test(id))) {
+    const error = new Error("DEVELOPER_QQ_INVALID");
+    error.code = "DEVELOPER_QQ_INVALID";
+    throw error;
+  }
+  if (ids.length > 50) {
+    const error = new Error("DEVELOPER_QQ_LIMIT");
+    error.code = "DEVELOPER_QQ_LIMIT";
+    throw error;
+  }
+  return ids;
 }
 
 async function readPortalManagedDeveloperIds(env) {
   if (!env?.DB || (typeof env.DB !== "object" && typeof env.DB !== "function")) return [];
   const cached = portalManagedDeveloperIdsCache.get(env.DB);
   if (cached && cached.expiresAt > Date.now()) {
-    if (cached.error) throw authStorageError("Portal managed Developer QQ list is unavailable");
+    if (cached.error) throw authStorageError("Managed Developer QQ list is unavailable");
     return [...cached.ids];
   }
-  let raw;
   try {
-    raw = await authDbGetStrict(env, PORTAL_MANAGED_DEVELOPER_IDS_KEY);
+    const raw = await authDbGetStrict(env, PORTAL_MANAGED_DEVELOPER_IDS_KEY);
+    let parsed = [];
+    if (raw) {
+      try { parsed = JSON.parse(raw); } catch { throw authStorageError("Managed Developer QQ list is corrupt"); }
+    }
+    const ids = normalizePortalManagedDeveloperIds(parsed);
+    portalManagedDeveloperIdsCache.set(env.DB, { ids, expiresAt: Date.now() + 3000 });
+    return [...ids];
   } catch (error) {
     portalManagedDeveloperIdsCache.set(env.DB, { ids: [], error: true, expiresAt: Date.now() + 1000 });
     throw error;
   }
-  let parsed = [];
-  if (raw) {
-    try { parsed = JSON.parse(raw); } catch { parsed = []; }
-  }
-  const ids = normalizeManagedDeveloperIds(parsed);
-  portalManagedDeveloperIdsCache.set(env.DB, { ids, expiresAt: Date.now() + 3000 });
-  return [...ids];
 }
 
 async function writePortalManagedDeveloperIds(env, values) {
-  const source = Array.isArray(values) ? values : String(values ?? "").split(/[\n,;]+/g);
-  const invalid = source.map(value => String(value ?? "").trim()).filter(value => value && !/^\d{5,12}$/.test(value));
-  if (invalid.length) {
-    const error = new Error("DEVELOPER_QQ_INVALID");
-    error.code = "DEVELOPER_QQ_INVALID";
-    throw error;
-  }
-  const ids = normalizeManagedDeveloperIds(source);
-  if (source.filter(value => String(value ?? "").trim()).length > 50) {
-    const error = new Error("DEVELOPER_QQ_LIMIT");
-    error.code = "DEVELOPER_QQ_LIMIT";
-    throw error;
-  }
+  const ids = normalizePortalManagedDeveloperIds(values);
   await authDbPutStrict(env, PORTAL_MANAGED_DEVELOPER_IDS_KEY, JSON.stringify(ids));
-  if (env?.DB && (typeof env.DB === "object" || typeof env.DB === "function")) {
-    portalManagedDeveloperIdsCache.delete(env.DB);
-  }
+  if (env?.DB && (typeof env.DB === "object" || typeof env.DB === "function")) portalManagedDeveloperIdsCache.delete(env.DB);
   return ids;
 }
 
@@ -388,8 +262,10 @@ async function portalEnvironmentWithManagedDeveloperIds(env) {
   if (!env?.DB) return env;
   try {
     const managedIds = await readPortalManagedDeveloperIds(env);
-    const values = [env.DEVELOPER_IDS, env.ROOT_QQ_IDS, env.DEVELOPER_ID].flatMap(value => Array.isArray(value) ? value : String(value ?? "").split(/[\n,;]+/g));
-    const existing = values.map(value => String(value || "").trim()).filter(Boolean);
+    const existing = [env.DEVELOPER_IDS, env.ROOT_QQ_IDS, env.DEVELOPER_ID]
+      .flatMap(value => Array.isArray(value) ? value : String(value ?? "").split(/[\n,;]+/g))
+      .map(value => String(value ?? "").trim())
+      .filter(Boolean);
     const overlay = Object.create(env);
     overlay.qqaiStaticDeveloperIds = [...new Set(existing)].join(",");
     overlay.DEVELOPER_IDS = [...new Set([...existing, ...managedIds])].join(",");
@@ -399,201 +275,11 @@ async function portalEnvironmentWithManagedDeveloperIds(env) {
   }
 }
 
-async function isPortalSystemAdminQq(env, qq) {
-  const admin = await readPortalAccountByUsername(env, PORTAL_SYSTEM_ADMIN_USERNAME);
-  return Boolean(admin && admin.qq === String(qq || "").replace(/\D/g, ""));
-}
-
-function portalAccountIdentityKey(qq) {
-  return `portal_account_identity:${String(qq || "").replace(/\D/g, "")}`;
-}
-
-function portalAccountUsernameKey(username) {
-  return `portal_account_username:${normalizePortalUsername(username)}`;
-}
-
-function normalizePortalAccountRecord(value) {
-  const source = value && typeof value === "object" ? value : {};
-  const qq = String(source.qq || "").replace(/\D/g, "");
-  const username = String(source.username || "").normalize("NFKC").trim();
-  const normalizedUsername = normalizePortalUsername(source.normalizedUsername || username);
-  if (!/^\d{5,12}$/.test(qq) || !validatePortalLoginUsername(normalizedUsername).ok) return null;
-  return Object.freeze({
-    qq,
-    username: username || normalizedUsername,
-    normalizedUsername,
-    createdAt: Number(source.createdAt || 0) || null,
-    updatedAt: Number(source.updatedAt || source.createdAt || 0) || null
-  });
-}
-
-async function readPortalAccountByUsername(env, username) {
-  const validation = validatePortalLoginUsername(username);
-  if (!validation.ok) return null;
-  const raw = await authDbGetStrict(env, portalAccountUsernameKey(validation.normalized));
-  if (!raw) return null;
-  try { return normalizePortalAccountRecord(JSON.parse(raw)); } catch { return null; }
-}
-
-async function readPortalAccountByQq(env, qq) {
-  const normalizedQq = String(qq || "").replace(/\D/g, "");
-  if (!/^\d{5,12}$/.test(normalizedQq)) return null;
-  const raw = await authDbGetStrict(env, portalAccountIdentityKey(normalizedQq));
-  if (!raw) return null;
-  try { return normalizePortalAccountRecord(JSON.parse(raw)); } catch { return null; }
-}
-
-async function createPortalAccountBinding(env, { qq, username } = {}) {
-  const normalizedQq = String(qq || "").replace(/\D/g, "");
-  if (!/^\d{5,12}$/.test(normalizedQq)) {
-    const error = new Error("QQID_INVALID");
-    error.code = "QQID_INVALID";
-    throw error;
-  }
-  const validation = validatePortalUsername(username);
-  if (!validation.ok) {
-    const error = new Error(validation.message);
-    error.code = validation.code || "USERNAME_INVALID";
-    throw error;
-  }
-  const now = Date.now();
-  const account = {
-    qq: normalizedQq,
-    username: validation.value,
-    normalizedUsername: validation.normalized,
-    createdAt: now,
-    updatedAt: now
-  };
-  const identityKey = portalAccountIdentityKey(normalizedQq);
-  const usernameKey = portalAccountUsernameKey(validation.normalized);
-  const existingIdentity = await readPortalAccountByQq(env, normalizedQq);
-  if (existingIdentity && existingIdentity.normalizedUsername !== validation.normalized) {
-    const error = new Error("ACCOUNT_ALREADY_ACTIVATED");
-    error.code = "ACCOUNT_ALREADY_ACTIVATED";
-    error.account = existingIdentity;
-    throw error;
-  }
-
-  let identityReserved = false;
-  if (!existingIdentity) {
-    identityReserved = await authDbPutIfAbsentStrict(env, identityKey, JSON.stringify(account));
-    if (!identityReserved) {
-      const racedIdentity = await readPortalAccountByQq(env, normalizedQq);
-      if (!racedIdentity || racedIdentity.normalizedUsername !== validation.normalized) {
-        const error = new Error("ACCOUNT_ALREADY_ACTIVATED");
-        error.code = "ACCOUNT_ALREADY_ACTIVATED";
-        error.account = racedIdentity;
-        throw error;
-      }
-    }
-  }
-
-  const existingUsername = await readPortalAccountByUsername(env, validation.normalized);
-  if (existingUsername && existingUsername.qq !== normalizedQq) {
-    if (identityReserved) await authDbDelStrict(env, identityKey).catch(() => {});
-    const error = new Error("USERNAME_TAKEN");
-    error.code = "USERNAME_TAKEN";
-    throw error;
-  }
-
-  if (!existingUsername) {
-    const usernameReserved = await authDbPutIfAbsentStrict(env, usernameKey, JSON.stringify(account));
-    if (!usernameReserved) {
-      const racedUsername = await readPortalAccountByUsername(env, validation.normalized);
-      if (!racedUsername || racedUsername.qq !== normalizedQq) {
-        if (identityReserved) await authDbDelStrict(env, identityKey).catch(() => {});
-        const error = new Error("USERNAME_TAKEN");
-        error.code = "USERNAME_TAKEN";
-        throw error;
-      }
-    }
-  }
-
-  const finalAccount = await readPortalAccountByQq(env, normalizedQq);
-  if (!finalAccount) throw authStorageError("Portal account identity write could not be verified");
-  return finalAccount;
-}
 
 
+const PORTAL_PASSWORD_ITERATIONS = 600000;
 
-async function createPortalAdminAccountBinding(env, { qq } = {}) {
-  const normalizedQq = String(qq || "").replace(/\D/g, "");
-  if (!/^\d{5,12}$/.test(normalizedQq)) {
-    const error = new Error("QQID_INVALID");
-    error.code = "QQID_INVALID";
-    throw error;
-  }
-
-  const now = Date.now();
-  const existingIdentity = await readPortalAccountByQq(env, normalizedQq);
-  const existingAdmin = await readPortalAccountByUsername(env, PORTAL_SYSTEM_ADMIN_USERNAME);
-  if (existingAdmin && existingAdmin.qq !== normalizedQq) {
-    const error = new Error("ADMIN_ACCOUNT_ALREADY_BOUND");
-    error.code = "ADMIN_ACCOUNT_ALREADY_BOUND";
-    error.account = existingAdmin;
-    throw error;
-  }
-  if (existingIdentity && existingIdentity.normalizedUsername !== PORTAL_SYSTEM_ADMIN_USERNAME) {
-    const error = new Error("ADMIN_QQ_ALREADY_BOUND_TO_USER");
-    error.code = "ADMIN_QQ_ALREADY_BOUND_TO_USER";
-    error.account = existingIdentity;
-    throw error;
-  }
-  if (existingIdentity?.normalizedUsername === PORTAL_SYSTEM_ADMIN_USERNAME && existingAdmin?.qq === normalizedQq) return existingIdentity;
-
-  const account = {
-    qq: normalizedQq,
-    username: PORTAL_SYSTEM_ADMIN_USERNAME,
-    normalizedUsername: PORTAL_SYSTEM_ADMIN_USERNAME,
-    createdAt: Number(existingIdentity?.createdAt || 0) || now,
-    updatedAt: now
-  };
-  const identityKey = portalAccountIdentityKey(normalizedQq);
-  const adminKey = portalAccountUsernameKey(PORTAL_SYSTEM_ADMIN_USERNAME);
-  let adminReserved = false;
-
-  try {
-    if (!existingAdmin) {
-      adminReserved = await authDbPutIfAbsentStrict(env, adminKey, JSON.stringify(account));
-      if (!adminReserved) {
-        const racedAdmin = await readPortalAccountByUsername(env, PORTAL_SYSTEM_ADMIN_USERNAME);
-        if (!racedAdmin || racedAdmin.qq !== normalizedQq) {
-          const error = new Error("ADMIN_ACCOUNT_ALREADY_BOUND");
-          error.code = "ADMIN_ACCOUNT_ALREADY_BOUND";
-          error.account = racedAdmin;
-          throw error;
-        }
-      }
-    }
-
-    await authDbPutStrict(env, identityKey, JSON.stringify(account));
-    await authDbPutStrict(env, adminKey, JSON.stringify(account));
-
-    if (existingIdentity && existingIdentity.normalizedUsername !== PORTAL_SYSTEM_ADMIN_USERNAME) {
-      const oldUsernameKey = portalAccountUsernameKey(existingIdentity.normalizedUsername);
-      const oldRaw = await authDbGetStrict(env, oldUsernameKey);
-      if (oldRaw) {
-        try {
-          const oldRecord = normalizePortalAccountRecord(JSON.parse(oldRaw));
-          if (oldRecord?.qq === normalizedQq) await authDbDelStrict(env, oldUsernameKey);
-        } catch {}
-      }
-    }
-
-    const finalAccount = await readPortalAccountByQq(env, normalizedQq);
-    if (!finalAccount || finalAccount.normalizedUsername !== PORTAL_SYSTEM_ADMIN_USERNAME) {
-      throw authStorageError("Portal admin account write could not be verified");
-    }
-    return finalAccount;
-  } catch (error) {
-    if (adminReserved) await authDbDelStrict(env, adminKey).catch(() => {});
-    throw error;
-  }
-}
-
-
-
-async function derivePortalPassword(password, salt, iterations = PORTAL_PASSWORD_PBKDF2_ITERATIONS) {
+async function derivePortalPassword(password, salt, iterations = PORTAL_PASSWORD_ITERATIONS) {
   const material = await crypto.subtle.importKey("raw", new TextEncoder().encode(String(password || "")), "PBKDF2", false, ["deriveBits"]);
   const bits = await crypto.subtle.deriveBits({ name: "PBKDF2", hash: "SHA-256", salt, iterations }, material, 256);
   return new Uint8Array(bits);
@@ -605,7 +291,7 @@ async function createPortalPasswordRecord(password) {
   const validation = validatePortalPassword(password);
   if (!validation.ok) throw Object.assign(new Error(validation.message), { code: "PASSWORD_POLICY" });
   const salt = randomBytes(16);
-  const iterations = PORTAL_PASSWORD_PBKDF2_ITERATIONS;
+  const iterations = PORTAL_PASSWORD_ITERATIONS;
   const hash = await derivePortalPassword(validation.value, salt, iterations);
   return { version: 1, algorithm: "PBKDF2-SHA-256", iterations, salt: bytesToBase64Url(salt), hash: bytesToBase64Url(hash), updatedAt: Date.now() };
 }
@@ -615,7 +301,7 @@ async function createPortalPasswordRecord(password) {
 function isValidPortalPasswordRecord(record) {
   if (!record || typeof record !== "object" || record.algorithm !== "PBKDF2-SHA-256") return false;
   const iterations = Number(record.iterations || 0);
-  if (!Number.isInteger(iterations) || iterations < 10000 || iterations > PORTAL_PASSWORD_PBKDF2_ITERATIONS) return false;
+  if (!Number.isInteger(iterations) || iterations < 10000 || iterations > 2000000) return false;
   if (typeof record.salt !== "string" || typeof record.hash !== "string") return false;
   try {
     const salt = base64UrlToBytes(record.salt);
@@ -624,6 +310,29 @@ function isValidPortalPasswordRecord(record) {
   } catch {
     return false;
   }
+}
+
+
+function needsPortalPasswordRehash(record) {
+  return isValidPortalPasswordRecord(record) && Number(record.iterations) < PORTAL_PASSWORD_ITERATIONS;
+}
+
+
+async function rehashPortalPasswordIfNeeded(env, qq, password, verifiedRecord) {
+  if (!needsPortalPasswordRehash(verifiedRecord)) return false;
+  const key = `portal_auth_password:${String(qq || "")}`;
+  const currentRaw = await authDbGetStrict(env, key);
+  if (!currentRaw) return false;
+  let current;
+  try { current = JSON.parse(currentRaw); }
+  catch (error) { throw authStorageError(`Invalid authentication record ${key}`, error); }
+  if (!isValidPortalPasswordRecord(current)
+    || current.algorithm !== verifiedRecord.algorithm
+    || current.salt !== verifiedRecord.salt
+    || current.hash !== verifiedRecord.hash
+    || Number(current.iterations) !== Number(verifiedRecord.iterations)) return false;
+  const upgraded = await createPortalPasswordRecord(password);
+  return dbCompareAndSwapStrict(env, key, currentRaw, JSON.stringify(upgraded));
 }
 
 async function verifyPortalPassword(password, record) {
@@ -639,9 +348,9 @@ async function verifyPortalPassword(password, record) {
 
 
 function portalAuthEncryptionMaterial(env) {
-  const secret = String(env.TOTP_ENCRYPTION_KEY || env.PORTAL_AUTH_SECRET || env.ONEBOT_ACCESS_TOKEN || env.ONEBOT_TOKEN || env.NAPCAT_ACCESS_TOKEN || "").trim();
+  const secret = String(env.TOTP_ENCRYPTION_KEY || env.PORTAL_AUTH_SECRET || "").trim();
   if (secret.length < 16) {
-    const error = new Error("PORTAL_AUTH_SECRET must be configured with at least 16 characters before enabling 2FA");
+    const error = new Error("TOTP_ENCRYPTION_KEY or PORTAL_AUTH_SECRET must be configured with at least 16 characters before enabling 2FA");
     error.code = "PORTAL_AUTH_SECRET_MISSING";
     throw error;
   }
@@ -650,9 +359,22 @@ function portalAuthEncryptionMaterial(env) {
 
 
 
-async function portalAuthEncryptionKey(env) {
-  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(portalAuthEncryptionMaterial(env)));
+function portalAuthLegacyEncryptionMaterials(env) {
+  return [...new Set([env.PORTAL_AUTH_SECRET, env.ONEBOT_ACCESS_TOKEN, env.ONEBOT_TOKEN, env.NAPCAT_ACCESS_TOKEN]
+    .map(value => String(value || "").trim()).filter(value => value.length >= 16))];
+}
+
+
+
+async function portalAuthEncryptionKeyFromMaterial(material) {
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(material));
   return crypto.subtle.importKey("raw", digest, { name: "AES-GCM" }, false, ["encrypt", "decrypt"]);
+}
+
+
+
+async function portalAuthEncryptionKey(env) {
+  return portalAuthEncryptionKeyFromMaterial(portalAuthEncryptionMaterial(env));
 }
 
 
@@ -660,14 +382,25 @@ async function portalAuthEncryptionKey(env) {
 async function encryptPortalAuthSecret(env, value) {
   const iv = randomBytes(12);
   const encrypted = await crypto.subtle.encrypt({ name: "AES-GCM", iv }, await portalAuthEncryptionKey(env), new TextEncoder().encode(String(value || "")));
-  return { version: 1, iv: bytesToBase64Url(iv), data: bytesToBase64Url(new Uint8Array(encrypted)) };
+  return { version: 2, iv: bytesToBase64Url(iv), data: bytesToBase64Url(new Uint8Array(encrypted)) };
 }
 
 
 
 async function decryptPortalAuthSecret(env, payload) {
-  const decrypted = await crypto.subtle.decrypt({ name: "AES-GCM", iv: base64UrlToBytes(payload.iv) }, await portalAuthEncryptionKey(env), base64UrlToBytes(payload.data));
-  return new TextDecoder().decode(decrypted);
+  if (!payload?.iv || !payload?.data) throw new Error("加密資料格式不正確");
+  const materials = Number(payload.version || 1) >= 2
+    ? [portalAuthEncryptionMaterial(env)]
+    : portalAuthLegacyEncryptionMaterials(env);
+  let lastError;
+  for (const material of materials) {
+    try {
+      const decrypted = await crypto.subtle.decrypt({ name: "AES-GCM", iv: base64UrlToBytes(payload.iv) }, await portalAuthEncryptionKeyFromMaterial(material), base64UrlToBytes(payload.data));
+      return new TextDecoder().decode(decrypted);
+    } catch (error) { lastError = error; }
+  }
+  if (!materials.length) throw Object.assign(new Error("A dedicated TOTP encryption key is required"), { code: "PORTAL_AUTH_SECRET_MISSING" });
+  throw Object.assign(new Error("TOTP secret could not be decrypted with configured keys"), { code: "PORTAL_AUTH_SECRET_DECRYPT_FAILED", cause: lastError });
 }
 
 
@@ -854,7 +587,7 @@ function oneBotHttpActionUrl(env, action) {
 async function sendOneBotHttpAction(env, action, params, timeoutMs = 12000) {
   const url = oneBotHttpActionUrl(env, action);
   if (!url) throw new Error("NAPCAT_HTTP_NOT_CONFIGURED");
-  const token = String(env.ONEBOT_HTTP_ACCESS_TOKEN || env.ONEBOT_ACCESS_TOKEN || env.NAPCAT_ACCESS_TOKEN || "").trim();
+  const token = String(env.ONEBOT_ACCESS_TOKEN || env.NAPCAT_ACCESS_TOKEN || "").trim();
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort("NAPCAT_HTTP_TIMEOUT"), Math.max(1000, timeoutMs));
   try {
@@ -884,6 +617,7 @@ async function sendPortalVerificationMessage(env, qq, message) {
   const userId = numericId(qq);
   message = toSimplifiedChinese(String(message || ""));
   const errors = [];
+  const httpConfigured = Boolean(String(env.ONEBOT_HTTP_ACTION_URL || env.ONEBOT_HTTP_URL || env.NAPCAT_HTTP_URL || "").trim());
   const attempts = [
     { transport: "websocket:send_private_msg", payload: { action: "send_private_msg", params: { user_id: userId, message, auto_escape: false } } },
     { transport: "websocket:send_msg", payload: { action: "send_msg", params: { message_type: "private", user_id: userId, message, auto_escape: false } } }
@@ -891,9 +625,9 @@ async function sendPortalVerificationMessage(env, qq, message) {
   for (const attempt of attempts) {
     try {
       await callOneBotAction(env, attempt.payload, 12000);
-      return { ok: true, transport: attempt.transport };
+      return { ok: true, transport: attempt.transport, diagnostics: { websocketConnected: true, httpConfigured } };
     } catch (error) {
-      errors.push(`${attempt.transport}:${portalDeliveryErrorCode(error)}`);
+      errors.push(`${attempt.transport}:${String(error?.message || error)}`);
     }
   }
   for (const action of ["send_private_msg", "send_msg"]) {
@@ -902,37 +636,20 @@ async function sendPortalVerificationMessage(env, qq, message) {
         ? { message_type: "private", user_id: userId, message, auto_escape: false }
         : { user_id: userId, message, auto_escape: false };
       await sendOneBotHttpAction(env, action, params, 12000);
-      return { ok: true, transport: `http:${action}` };
+      return { ok: true, transport: `http:${action}`, diagnostics: { websocketConnected: null, httpConfigured } };
     } catch (error) {
-      errors.push(`http:${action}:${portalDeliveryErrorCode(error)}`);
+      errors.push(`http:${action}:${String(error?.message || error)}`);
     }
   }
-  let websocketConnected = null;
+  let websocketConnected = false;
   try {
-    const statusResponse = await getOneBotHub(env).fetch("https://onebot-hub/status");
-    const status = await statusResponse.json().catch(() => null);
-    websocketConnected = typeof status?.connected === "boolean" ? status.connected : null;
+    if (env.ONEBOT_HUB) {
+      const response = await getOneBotHub(env).fetch("https://onebot-hub/status");
+      const status = await response.json().catch(() => ({}));
+      websocketConnected = Boolean(status.connected);
+    }
   } catch {}
-  return {
-    ok: false,
-    transport: "none",
-    errors,
-    websocketConnected,
-    httpConfigured: Boolean(oneBotHttpActionUrl(env, "send_msg"))
-  };
-}
-
-function portalDeliveryErrorCode(error) {
-  const value = String(error?.message || error || "").toUpperCase();
-  const known = [
-    "ONEBOT_HUB_NOT_BOUND", "NAPCAT_NOT_CONNECTED", "ONEBOT_RPC_TIMEOUT",
-    "NAPCAT_HTTP_NOT_CONFIGURED", "NAPCAT_HTTP_TIMEOUT", "NAPCAT_HTTP_INVALID_URL"
-  ];
-  const code = known.find(item => value.includes(item));
-  if (code) return code;
-  const httpStatus = value.match(/NAPCAT_HTTP_(\d{3})/);
-  if (httpStatus) return `NAPCAT_HTTP_${httpStatus[1]}`;
-  return "DELIVERY_FAILED";
+  return { ok: false, transport: "none", errors, diagnostics: { websocketConnected, httpConfigured } };
 }
 
 
@@ -954,52 +671,47 @@ async function readJson(env, key, fallback) {
 
 
 
-async function resolvePortalSessionAuthority(env, qq, groupId = "", username = "") {
-  const normalizedQq = String(qq || "");
-  const normalizedGroupId = String(groupId || "");
-  const systemAdmin = normalizePortalUsername(username) === PORTAL_SYSTEM_ADMIN_USERNAME;
-  const developer = systemAdmin || isDeveloperId(env, normalizedQq);
-  if (developer) {
-    return {
-      role: "developer",
-      permissions: {
-        developer: true,
-        nativeAdmin: false,
-        aiAdmin: true,
-        groupOps: true,
-        scheduleReviewer: true,
-        appealReviewer: true
-      }
-    };
-  }
-  const role = normalizedGroupId ? await resolvePortalRole(env, normalizedQq, normalizedGroupId) : "member";
-  const permissions = normalizedGroupId
-    ? await getEffectivePermissions(env, normalizedGroupId, normalizedQq, role, false)
-    : {
-        developer: false,
-        nativeAdmin: false,
-        aiAdmin: false,
-        groupOps: false,
-        scheduleReviewer: false,
-        appealReviewer: false
-      };
-  return { role, permissions };
-}
-
 async function createPortalSession(env, data) {
   const token = crypto.randomUUID() + crypto.randomUUID();
+  if (data.systemAdmin === true) {
+    const now = Date.now();
+    const session = {
+      qq: "system-admin",
+      username: String(data.username || "admin"),
+      systemAdmin: true,
+      group: "",
+      groupId: "",
+      token,
+      role: "developer",
+      permissions: { developer: true, nativeAdmin: false, aiAdmin: true, groupOps: true, scheduleReviewer: true, appealReviewer: true },
+      persistent: false,
+      idleTtlMs: PORTAL_SYSTEM_ADMIN_IDLE_TTL_MS,
+      absoluteTtlMs: PORTAL_SYSTEM_ADMIN_ABSOLUTE_TTL_MS,
+      createdAt: now,
+      lastActivityAt: now,
+      expiresAt: now + PORTAL_SYSTEM_ADMIN_IDLE_TTL_MS,
+      absoluteExpiresAt: now + PORTAL_SYSTEM_ADMIN_ABSOLUTE_TTL_MS,
+      authenticatedAt: now,
+      authMethod: "environment_admin_password"
+    };
+    const key = `portal_session:${token}`;
+    await authDbPutStrict(env, key, JSON.stringify(session));
+    if (!(await authDbGetStrict(env, key))) throw authStorageError("Portal system admin session write could not be verified");
+    return session;
+  }
   const qq = String(data.qq || "");
   const groupId = String(data.groupId || "");
-  const authority = await resolvePortalSessionAuthority(env, qq, groupId, data.username);
-  const role = authority.role;
-  const permissions = authority.permissions;
+  const role = groupId ? await resolvePortalRole(env, qq, groupId) : (isDeveloperId(env, qq) ? "developer" : "member");
+  const permissions = groupId ? await getEffectivePermissions(env, groupId, qq, role, role === "developer") : {
+    developer: isDeveloperId(env, qq), nativeAdmin: false, aiAdmin: isDeveloperId(env, qq), groupOps: isDeveloperId(env, qq), scheduleReviewer: isDeveloperId(env, qq), appealReviewer: isDeveloperId(env, qq)
+  };
   const now = Date.now();
-  const persistent = data.persistent !== false;
-  const idleTtlMs = persistent ? DEFAULTS.portalSessionTtlMs : DEFAULTS.portalSessionTemporaryTtlMs;
-  const absoluteTtlMs = persistent ? DEFAULTS.portalSessionAbsoluteTtlMs : DEFAULTS.portalSessionTemporaryAbsoluteTtlMs;
+  const privileged = ["developer", "owner", "admin"].includes(role);
+  const persistent = privileged ? false : data.persistent !== false;
+  const idleTtlMs = privileged ? PORTAL_SYSTEM_ADMIN_IDLE_TTL_MS : (persistent ? DEFAULTS.portalSessionTtlMs : DEFAULTS.portalSessionTemporaryTtlMs);
+  const absoluteTtlMs = privileged ? PORTAL_SYSTEM_ADMIN_ABSOLUTE_TTL_MS : (persistent ? DEFAULTS.portalSessionAbsoluteTtlMs : DEFAULTS.portalSessionTemporaryAbsoluteTtlMs);
   const session = {
     qq,
-    username: String(data.username || ""),
     group: data.group || "",
     groupId,
     token,
@@ -1016,20 +728,10 @@ async function createPortalSession(env, data) {
     authMethod: String(data.authMethod || "qq_code")
   };
   const key = `portal_session:${token}`;
-  await writePortalSession(env, token, session);
+  await authDbPutStrict(env, key, JSON.stringify(session));
   const confirmed = await authDbGetStrict(env, key);
   if (!confirmed) throw authStorageError("Portal session write could not be verified");
   return session;
-}
-
-
-
-async function writePortalSession(env, token, session, previousExpiresAt = 0) {
-  const key = "portal_session:" + token;
-  const previousExpiryKey = previousExpiresAt
-    ? dbExpiryIndexKey(key, previousExpiresAt)
-    : "";
-  await dbPutExpiring(env, key, JSON.stringify(session), session.expiresAt, previousExpiryKey);
 }
 
 
@@ -1054,15 +756,10 @@ async function getPortalSession(env, token, { touch = true } = {}) {
     session.idleTtlMs = idleTtlMs;
     session.absoluteTtlMs = absoluteTtlMs;
     session.absoluteExpiresAt = absoluteExpiresAt;
-
-    const authority = await resolvePortalSessionAuthority(env, session.qq, session.groupId, session.username);
-    session.role = authority.role;
-    session.permissions = authority.permissions;
-
     if (touch) {
       session.lastActivityAt = now;
       session.expiresAt = Math.min(now + idleTtlMs, absoluteExpiresAt);
-      await writePortalSession(env, token, session, idleExpiresAt);
+      await authDbPutStrict(env, `portal_session:${token}`, JSON.stringify(session));
     }
     return session;
   } catch (e) {
@@ -1264,28 +961,6 @@ async function sha256Hex(value) {
 
 
 
-async function checkPortalAuthRateLimit(env, request, { scope, principal } = {}) {
-  const limiter = env?.MY_RATE_LIMITER;
-  if (!limiter || typeof limiter.limit !== "function") return { ok: false, reason: "unavailable" };
-  const normalizedScope = String(scope || "auth").replace(/[^a-z0-9_-]/gi, "").slice(0, 10) || "auth";
-  const identity = String(principal || "anonymous").normalize("NFKC").trim().toLowerCase() || "anonymous";
-  const ip = String(request?.headers?.get("CF-Connecting-IP") || "").trim();
-  const subjects = [["user", identity]];
-  if (ip) subjects.push(["ip", ip]);
-  try {
-    for (const [kind, value] of subjects) {
-      const digest = await sha256Hex(`${normalizedScope}:${kind}:${value}`);
-      const result = await limiter.limit({ key: `pa:${normalizedScope}:${kind}:${digest.slice(0, 40)}` });
-      if (result?.success !== true) return { ok: false, reason: "limited" };
-    }
-  } catch {
-    return { ok: false, reason: "unavailable" };
-  }
-  return { ok: true, reason: "allowed" };
-}
-
-
-
 async function migratePortalMemories(env, key, rawList, ownerFallback) {
   const input = Array.isArray(rawList) ? rawList : [];
   const normalized = [];
@@ -1338,37 +1013,19 @@ async function deleteMemoryVector(env, item) {
 
 
 async function searchPortalVectors(env, { groupId, userId, permissions, query, limit = 20 }) {
-  if (!env.VECTORIZE || !env.AI || !groupId || !query) return [];
+  if (!env.VECTORIZE || !env.AI || !query) return [];
   const embedded = await env.AI.run("@cf/baai/bge-m3", { text: [String(query)] });
   const vector = embedded?.data?.[0];
   if (!Array.isArray(vector)) return [];
-  const resultLimit = Math.max(1, Math.min(50, Number(limit) || 20));
-  const allowedMatches = matches => (matches || []).filter(match => {
+  const result = await env.VECTORIZE.query(vector, { topK: Math.max(1, Math.min(50, limit)), returnMetadata: "all", filter: { kind: "chat_log", groupId: String(groupId) } });
+  return (result?.matches || []).filter(match => {
     const meta = match.metadata || {};
-    if (String(meta.groupId || meta.group_id || "") !== String(groupId)) return false;
-    const isCurrentChatLog = meta.kind === "chat_log";
-    const isLegacyChatLog = !meta.kind && String(match.id || "").startsWith(`msg_${groupId}_`) && typeof meta.text === "string";
-    if (!isCurrentChatLog && !isLegacyChatLog) return false;
+    if (meta.kind !== "chat_log" || String(meta.groupId || meta.group_id || "") !== String(groupId)) return false;
+    const expiresAt = Number(meta.expiresAt || Number(meta.createdAt || 0) + 90 * 24 * 60 * 60 * 1000);
+    if (!expiresAt || expiresAt <= Date.now()) return false;
     if (permissions?.nativeAdmin || permissions?.aiAdmin || permissions?.developer) return true;
     return String(meta.qq || meta.userId || meta.author || "") === String(userId);
-  });
-  let matches = [];
-  try {
-    const result = await env.VECTORIZE.query(vector, {
-      topK: Math.max(1, Math.min(50, resultLimit * 3)),
-      returnMetadata: "all",
-      filter: { groupId: String(groupId) }
-    });
-    matches = allowedMatches(result?.matches);
-  } catch {
-    // An index may not have its metadata filter configured yet. The fallback
-    // still validates group and user metadata before returning any result.
-  }
-  if (!matches.length) {
-    const fallback = await env.VECTORIZE.query(vector, { topK: 50, returnMetadata: "all" });
-    matches = allowedMatches(fallback?.matches);
-  }
-  return matches.slice(0, resultLimit).map(match => ({ id: match.id, score: match.score, text: match.metadata?.text || "", qq: match.metadata?.qq || "", createdAt: match.metadata?.createdAt || null }));
+  }).map(match => ({ id: match.id, score: match.score, text: match.metadata?.text || "", qq: match.metadata?.qq || "", createdAt: match.metadata?.createdAt || null }));
 }
 
 
@@ -1489,5 +1146,4 @@ async function writePortalSettingValue(env, definition, groupId, targetQq, value
   }
 }
 
-export { BASE32_ALPHABET, PORTAL_PASSWORD_PBKDF2_ITERATIONS, PORTAL_SETTING_DEFINITIONS, PORTAL_SYSTEM_ADMIN_USERNAME, PORTAL_USERNAME_RESERVED, authDbDelStrict, authDbGetStrict, authDbPutIfAbsentStrict, authDbPutStrict, authDbRetry, authStorageError, base32Decode, base32Encode, base64UrlToBytes, buildGroupReplyMessage, bytesToBase64Url, bytesToHex, checkPortalAuthRateLimit, clearPasswordLoginGuard, commandChangesWebSettings, classifyPortalAuthFailure, constantTimeEqual, createPortalAccountBinding, createPortalAdminAccountBinding, createPortalPasswordRecord, createPortalSession, decryptPortalAuthSecret, deleteMemoryVector, derivePortalPassword, encryptPortalAuthSecret, extractGroupId, generateBackupCodes, generateSixDigitCode, generateTotpCode, getOneBotHub, getPortalSession, getPublicNebulaSeed, getUserQuota, hasAdminRole, hashBackupCode, isMemoryBanned, isPortalSystemAdminQq, isValidPortalPasswordRecord, jsonResponse, markGroupMemberLeft, migratePortalMemories, normalizeBackupCode, normalizePortalUsername, notePasswordLoginFailure, oneBotHttpActionUrl, portalAdminCredentialConfig, portalAuthEncryptionKey, portalAuthEncryptionMaterial, portalEnvironmentWithManagedDeveloperIds, portalRoleRank, portalAccountIdentityKey, portalAccountUsernameKey, portalSessionCookie, randomBytes, readCookie, readJson, readPasswordLoginGuard, readPortalAccountByQq, readPortalAccountByUsername, readPortalAuthJson, readPortalManagedDeveloperIds, readPortalSettingValue, resolvePortalPasswordLogin, resolvePortalRole, resolvePortalSessionAuthority, searchPortalVectors, sendOneBotAction, sendOneBotHttpAction, sendPortalVerificationMessage, sha256Hex, simplifyJsonValue, upsertGroupMember, upsertMemoryVector, validatePortalLoginUsername, validatePortalPassword, validatePortalUsername, verifyPortalPassword, verifyPortalVerificationCode, verifyTotpCode, writeMemoryAudit, writePortalManagedDeveloperIds, writePortalSettingValue, writeSystemError };
-export { writePortalSession };
+export { BASE32_ALPHABET, PORTAL_SETTING_DEFINITIONS, authDbDelStrict, authDbGetStrict, authDbPutStrict, authDbRetry, authStorageError, base32Decode, base32Encode, base64UrlToBytes, buildGroupReplyMessage, bytesToBase64Url, bytesToHex, clearPasswordLoginGuard, commandChangesWebSettings, constantTimeEqual, createPortalPasswordRecord, createPortalSession, decryptPortalAuthSecret, deleteMemoryVector, derivePortalPassword, encryptPortalAuthSecret, extractGroupId, generateBackupCodes, generateSixDigitCode, generateTotpCode, getOneBotHub, getPortalSession, getPublicNebulaSeed, getUserQuota, hasAdminRole, hashBackupCode, isMemoryBanned, isValidPortalPasswordRecord, jsonResponse, markGroupMemberLeft, migratePortalMemories, needsPortalPasswordRehash, normalizeBackupCode, normalizePortalAdminUsername, normalizePortalManagedDeveloperIds, notePasswordLoginFailure, oneBotHttpActionUrl, portalAdminCredentialConfig, portalAdminUsernameIsClaimed, portalAuthEncryptionKey, portalAuthEncryptionMaterial, portalEnvironmentWithManagedDeveloperIds, portalRoleRank, portalSessionCookie, randomBytes, readCookie, readJson, readPasswordLoginGuard, readPortalAuthJson, readPortalManagedDeveloperIds, readPortalSettingValue, rehashPortalPasswordIfNeeded, resolvePortalRole, searchPortalVectors, sendOneBotAction, sendOneBotHttpAction, sendPortalVerificationMessage, sha256Hex, simplifyJsonValue, upsertGroupMember, upsertMemoryVector, validatePortalPassword, verifyPortalAdminCredentials, verifyPortalPassword, verifyPortalVerificationCode, verifyTotpCode, writeMemoryAudit, writePortalManagedDeveloperIds, writePortalSettingValue, writeSystemError };

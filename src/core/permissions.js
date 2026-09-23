@@ -3,8 +3,8 @@
 
 import { callDeepSeekSummaryTask } from "../ai/runtime.js";
 import { DEFAULTS } from "../config/runtime.js";
-import { developerId, isDeveloperId } from "./identity.js";
-import { dbCompareAndSwap, dbDel, dbGet, dbGetStrict, dbPut, dbPutBestEffort, dbPutExpiring } from "../data/store.js";
+import { isDeveloperId } from "./identity.js";
+import { dbAddJsonArrayItemUnique, dbAppendJsonArrayCapped, dbDel, dbDelStrict, dbGet, dbGetStrict, dbPut, dbPutStrict, dbRemoveJsonArrayItem } from "../data/store.js";
 import { parseUnlimitedNonNegativeInteger } from "../moderation/runtime.js";
 import { getOneBotHub, readJson, sha256Hex } from "../portal/auth.js";
 import { numericId } from "../security/network.js";
@@ -19,6 +19,13 @@ const PERMISSIONS = Object.freeze({
   PRIVATE_FULL: "private_full",
   PRIVATE_COMMANDS: "private_commands",
 });
+
+const GROUP_PROGRAM_PERMISSIONS = Object.freeze([
+  PERMISSIONS.AI_ADMIN,
+  PERMISSIONS.GROUP_OPS,
+  PERMISSIONS.SCHEDULE_REVIEWER,
+  PERMISSIONS.APPEAL_REVIEWER
+]);
 
 
 
@@ -57,16 +64,66 @@ function explicitProgramPermissionIndexKey(groupId) {
 
 
 async function updateExplicitProgramPermissionIndex(env, groupId, userId) {
-  const hasAiAdmin = await dbGet(env, `permission:${groupId}:${userId}:${PERMISSIONS.AI_ADMIN}`) === "true";
-  const hasGroupOps = await dbGet(env, `permission:${groupId}:${userId}:${PERMISSIONS.GROUP_OPS}`) === "true";
-  const target = String(userId);
-  const next = await mutateJsonArray(env, explicitProgramPermissionIndexKey(groupId), list => {
-    const normalized = [...new Set(list.map(value => String(value || "").replace(/\D/g, "")).filter(Boolean))];
-    return hasAiAdmin || hasGroupOps
-      ? [...new Set([...normalized, target])]
-      : normalized.filter(value => value !== target);
-  }, 1000);
-  return next;
+  const indexKey = explicitProgramPermissionIndexKey(groupId);
+  let hasGroupPermission = false;
+  for (const permission of GROUP_PROGRAM_PERMISSIONS) {
+    if (await dbGetStrict(env, `permission:${groupId}:${userId}:${permission}`) === "true") hasGroupPermission = true;
+  }
+  if (hasGroupPermission) await dbAddJsonArrayItemUnique(env, indexKey, String(userId), 1000);
+  else await dbRemoveJsonArrayItem(env, indexKey, String(userId));
+  return await readJson(env, indexKey, []);
+}
+
+
+async function setPrivateAccessMode(env, userId, mode, actorId = "unknown", groupId = "") {
+  const target = String(userId || "");
+  const normalized = ["none", "commands", "full"].includes(String(mode)) ? String(mode) : null;
+  if (!/^\d{5,12}$/.test(target) || !normalized) throw new Error("Invalid private access assignment");
+  const key = `private_access:${target}`;
+  if (normalized === "none") {
+    await dbPutStrict(env, key, "none");
+    await dbRemoveJsonArrayItem(env, "private_access:index", target);
+  } else {
+    await dbPutStrict(env, key, normalized);
+    await dbAddJsonArrayItemUnique(env, "private_access:index", target, 5000);
+  }
+  await writeSystemAudit(env, {
+    type: "permission",
+    scope: "global",
+    ...(groupId ? { groupId: String(groupId) } : {}),
+    actorId: String(actorId || "unknown"),
+    targetId: target,
+    action: `set:private_access:${normalized}`
+  });
+  return normalized;
+}
+
+
+async function listExplicitPrivateAccess(env) {
+  const indexed = await readJson(env, "private_access:index", []);
+  const candidateSet = new Set((Array.isArray(indexed) ? indexed : [])
+    .map(value => String(value || ""))
+    .filter(value => /^\d{5,12}$/.test(value)));
+  const accessByQq = new Map();
+  if (env?.DB) {
+    const prefix = "private_access:";
+    const rows = await env.DB.prepare("SELECT key, value FROM kv_store WHERE key >= ? AND key < ? ORDER BY key LIMIT ?")
+      .bind(prefix, `${prefix}\uFFFF`, 5000)
+      .all();
+    for (const row of rows?.results || []) {
+      const key = String(row.key || "");
+      if (!key.startsWith(prefix)) continue;
+      const qq = key.slice(prefix.length);
+      if (/^\d{5,12}$/.test(qq)) { candidateSet.add(qq); accessByQq.set(qq, row.value); }
+    }
+  }
+  const records = [];
+  for (const qq of candidateSet) {
+    const access = accessByQq.has(qq) ? accessByQq.get(qq) : await dbGetStrict(env, `private_access:${qq}`);
+    if (["commands", "full"].includes(access)) records.push({ qq, privateAccess: access });
+  }
+  records.sort((a, b) => a.qq.localeCompare(b.qq));
+  return records;
 }
 
 
@@ -74,11 +131,21 @@ async function updateExplicitProgramPermissionIndex(env, groupId, userId) {
 async function listExplicitProgramPermissions(env, groupId) {
   const indexed = await readJson(env, explicitProgramPermissionIndexKey(groupId), []);
   const audits = await readJson(env, `audit:system:group:${groupId}`, []);
-  const candidates = new Set((Array.isArray(indexed) ? indexed : []).map(value => String(value || "").replace(/\D/g, "")).filter(Boolean));
+  const candidates = new Set((Array.isArray(indexed) ? indexed : []).map(value => String(value || "")).filter(value => /^\d{5,12}$/.test(value)));
+  if (env?.DB) {
+    const prefix = `permission:${groupId}:`;
+    const rows = await env.DB.prepare("SELECT key FROM kv_store WHERE key >= ? AND key < ? AND value = 'true' ORDER BY key LIMIT ?")
+      .bind(prefix, `${prefix}\uFFFF`, 10000).all();
+    for (const row of rows?.results || []) {
+      const parts = String(row.key || "").slice(prefix.length).split(":");
+      const qq = String(parts[0] || "");
+      if (qq && GROUP_PROGRAM_PERMISSIONS.includes(parts[1])) candidates.add(qq);
+    }
+  }
   for (const entry of Array.isArray(audits) ? audits : []) {
     if (entry?.type !== "permission") continue;
     const action = String(entry.action || "");
-    if (!/^(?:grant|revoke):(?:ai_admin|group_ops)$/.test(action)) continue;
+    if (!/^(?:grant|revoke):(?:ai_admin|group_ops|schedule_reviewer|appeal_reviewer)$/.test(action)) continue;
     const qq = String(entry.targetId || "").replace(/\D/g, "");
     if (qq) candidates.add(qq);
   }
@@ -101,9 +168,11 @@ async function listExplicitProgramPermissions(env, groupId) {
   const directory = new Map((Array.isArray(members) ? members : []).map(member => [String(member.qq || member.user_id || ""), member]));
   const records = [];
   for (const qq of candidates) {
-    const aiAdmin = await dbGet(env, `permission:${groupId}:${qq}:${PERMISSIONS.AI_ADMIN}`) === "true";
-    const groupOps = await dbGet(env, `permission:${groupId}:${qq}:${PERMISSIONS.GROUP_OPS}`) === "true";
-    if (!aiAdmin && !groupOps) continue;
+    const permissions = [];
+    for (const permission of GROUP_PROGRAM_PERMISSIONS) {
+      if (await dbGetStrict(env, `permission:${groupId}:${qq}:${permission}`) === "true") permissions.push(permission);
+    }
+    if (!permissions.length) continue;
     let member = directory.get(qq) || null;
     if (!member) {
       try {
@@ -118,28 +187,26 @@ async function listExplicitProgramPermissions(env, groupId) {
       card: String(member?.card || ""),
       nickname: String(member?.nickname || ""),
       role: String(member?.role || "member"),
-      permissions: [aiAdmin ? PERMISSIONS.AI_ADMIN : "", groupOps ? PERMISSIONS.GROUP_OPS : ""].filter(Boolean)
+      permissions
     });
   }
   records.sort((a, b) => a.displayName.localeCompare(b.displayName, "zh-CN") || a.qq.localeCompare(b.qq));
-  await dbPut(env, explicitProgramPermissionIndexKey(groupId), JSON.stringify(records.map(record => record.qq).slice(-1000)));
   return records;
 }
 
 
 
-async function setExplicitPermission(env, groupId, userId, permission, enabled) {
+async function setExplicitPermission(env, groupId, userId, permission, enabled, actorId = "unknown") {
   if (permission === PERMISSIONS.PRIVATE_FULL || permission === PERMISSIONS.PRIVATE_COMMANDS) {
-    if (enabled) await dbPut(env, `private_access:${userId}`, permission === PERMISSIONS.PRIVATE_FULL ? "full" : "commands");
-    else await dbPut(env, `private_access:${userId}`, "none");
+    await setPrivateAccessMode(env, userId, enabled ? (permission === PERMISSIONS.PRIVATE_FULL ? "full" : "commands") : "none", actorId, groupId);
     return;
   }
   const key = `permission:${groupId}:${userId}:${permission}`;
-  if (enabled) await dbPut(env, key, "true"); else await dbDel(env, key);
-  if (permission === PERMISSIONS.AI_ADMIN || permission === PERMISSIONS.GROUP_OPS) {
+  if (enabled) await dbPutStrict(env, key, "true"); else await dbDelStrict(env, key);
+  if (GROUP_PROGRAM_PERMISSIONS.includes(permission)) {
     await updateExplicitProgramPermissionIndex(env, groupId, userId);
   }
-  await writeSystemAudit(env, { type: "permission", groupId, actorId: developerId(env), targetId: userId, action: enabled ? `grant:${permission}` : `revoke:${permission}` });
+  await writeSystemAudit(env, { type: "permission", groupId, actorId: String(actorId || "unknown"), targetId: userId, action: enabled ? `grant:${permission}` : `revoke:${permission}` });
 }
 
 
@@ -147,7 +214,8 @@ async function setExplicitPermission(env, groupId, userId, permission, enabled) 
 async function getEffectivePermissions(env, groupId, userId, senderRole = "member", isDeveloper = false) {
   const developer = isDeveloper || isDeveloperId(env, userId);
   const nativeAdmin = senderRole === "owner" || senderRole === "admin";
-  const legacyAdmin = await dbGet(env, `admin_auth:${userId}`) === "true";
+  const legacyAdmin = env.ALLOW_LEGACY_ADMIN_AUTH === "true"
+    && await dbGet(env, `admin_auth:${userId}`) === "true";
   const explicit = async p => await dbGet(env, `permission:${groupId}:${userId}:${p}`) === "true";
   const aiAdmin = developer || nativeAdmin || legacyAdmin || await explicit(PERMISSIONS.AI_ADMIN);
   const groupOps = developer || nativeAdmin || await explicit(PERMISSIONS.GROUP_OPS);
@@ -185,7 +253,7 @@ async function writeSystemAudit(env, entry) {
   const item = { id: crypto.randomUUID(), at: new Date().toISOString(), ...entry };
   const keys = ["audit:system:global"];
   if (entry.groupId) keys.push(`audit:system:group:${entry.groupId}`);
-  for (const key of keys) await mutateJsonArray(env, key, list => [...list, item], 1000);
+  for (const key of keys) await dbAppendJsonArrayCapped(env, key, item, 1000);
   return item;
 }
 
@@ -310,13 +378,9 @@ async function writeAiDecisionLog(env, data) {
     ...data,
     id
   };
-  await dbPutBestEffort(env, `ai_decision_log:${id}`, JSON.stringify(item));
-  try {
-    await appendIndex(env, "ai_decision_log:index", id, DEFAULTS.aiDecisionLogLimit);
-    if (item.groupId) await appendIndex(env, `ai_decision_log:index:${item.groupId}`, id, DEFAULTS.aiDecisionLogLimit);
-  } catch {
-    // Decision logs are optional telemetry; a failed index update must not block a reply.
-  }
+  await dbPut(env, `ai_decision_log:${id}`, JSON.stringify(item));
+  await appendIndex(env, "ai_decision_log:index", id, DEFAULTS.aiDecisionLogLimit);
+  if (item.groupId) await appendIndex(env, `ai_decision_log:index:${item.groupId}`, id, DEFAULTS.aiDecisionLogLimit);
   return item;
 }
 
@@ -394,34 +458,14 @@ async function buildLongGroupConversationContext(env, { groupId, userId, logs, c
 
 
 
-async function mutateJsonArray(env, key, update, max = 1000) {
-  const cap = Math.max(1, Number(max) || 1000);
-  for (let attempt = 0; attempt < 10; attempt += 1) {
-    const raw = await dbGetStrict(env, key);
-    let list = [];
-    try { list = JSON.parse(raw || "[]"); } catch {}
-    if (!Array.isArray(list)) list = [];
-    const nextList = update(list);
-    const next = JSON.stringify(nextList.slice(-cap));
-    if (next === raw) return nextList;
-    if (await dbCompareAndSwap(env, key, raw, next)) return nextList;
-  }
-  const error = new Error("Persistent storage changed too often; retry the operation");
-  error.code = "D1_STORAGE_UNAVAILABLE";
-  error.retryable = true;
-  throw error;
-}
-
-
-
 async function appendIndex(env, key, id, max = 2000) {
-  await mutateJsonArray(env, key, list => list.includes(id) ? list : [...list, id], max);
+  await dbAddJsonArrayItemUnique(env, key, String(id), max);
 }
 
 
 
 async function removeFromIndex(env, key, id) {
-  await mutateJsonArray(env, key, list => list.filter(x => x !== id));
+  await dbRemoveJsonArrayItem(env, key, String(id));
 }
 
 
@@ -507,8 +551,7 @@ function outboundFingerprint(info) {
 async function markOutboundPending(env, info) {
   const key = `outbound_pending:${outboundFingerprint(info)}`;
   // 僅保存短期去重時間戳；不保存任何指令或回覆正文。
-  const at = Date.now();
-  await dbPutExpiring(env, key, JSON.stringify({ at }), at + 24 * 60 * 60 * 1000);
+  await dbPut(env, key, JSON.stringify({ at: Date.now() }));
   return key;
 }
 
@@ -548,4 +591,4 @@ async function callOneBotAction(env, actionPayload, timeoutMs = 15000) {
   return data.data;
 }
 
-export { PERMISSIONS, appendIndex, buildLongGroupConversationContext, callOneBotAction, checkRuntimeRateLimit, enrichAuditLogsForPortal, explicitProgramPermissionIndexKey, getEffectivePermissions, getRuntimeRateLimitSeconds, isKnownOutboundMessage, listAiDecisionLogs, listExplicitProgramPermissions, markOutboundPending, modelCapabilityLabel, modelHealthStatusLabel, modelHealthStatusRank, modelPreferenceLabel, normalizeFingerprintText, normalizeMemoryItems, normalizeModelPreference, normalizePermissionName, outboundFingerprint, permissionLabel, removeFromIndex, setExplicitPermission, updateAiDecisionLog, updateExplicitProgramPermissionIndex, writeAiDecisionLog, writeSystemAudit };
+export { PERMISSIONS, appendIndex, buildLongGroupConversationContext, callOneBotAction, checkRuntimeRateLimit, enrichAuditLogsForPortal, explicitProgramPermissionIndexKey, getEffectivePermissions, getRuntimeRateLimitSeconds, isKnownOutboundMessage, listAiDecisionLogs, listExplicitPrivateAccess, listExplicitProgramPermissions, markOutboundPending, modelCapabilityLabel, modelHealthStatusLabel, modelHealthStatusRank, modelPreferenceLabel, normalizeFingerprintText, normalizeMemoryItems, normalizeModelPreference, normalizePermissionName, outboundFingerprint, permissionLabel, removeFromIndex, setExplicitPermission, setPrivateAccessMode, updateAiDecisionLog, updateExplicitProgramPermissionIndex, writeAiDecisionLog, writeSystemAudit };
