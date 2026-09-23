@@ -15,7 +15,8 @@ for (const selector of [".portal-appbar{", ".portal-home-hero{", ".plugin-grid{"
 }
 assert.match(injected, /--portal-bg:#f5f7fb/);
 assert.match(injected, /:root\[data-theme="dark"\]/);
-assert.match(injected, /\.portal-main,.main\{margin:0!important/);\nassert.doesNotMatch(injected, /--bg:#020713!important/);
+assert.match(injected, /\.portal-main,.main\{margin:0!important/);
+assert.doesNotMatch(injected, /--bg:#020713!important/);
 
 const worker = fs.readFileSync("worker.js", "utf8");
 assert.match(worker, /injectPortalLayoutClient\(injectPortalMembersClient\(injectDeploymentPortalClient/);
