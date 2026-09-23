@@ -13,13 +13,13 @@ const lockup = brandLockupMarkup();
 assert.match(lockup, /AI Control Center/);
 assert.match(lockup, /AI · PLUGINS · BYOR/);
 assert.match(brandFaviconLink(), /data:image\/svg\+xml/);
-assert.match(brandPublicStyle(), /public-home-v4/);
+assert.match(brandPublicStyle(), /ray-landing-hero/);
 assert.match(brandPublicStyle(), /:root\[data-theme="light"\]/);
 assert.match(brandThemeBootScript(), /qqai_theme/);
 
 const landing = getPublicLandingPage();
 assert.match(landing, /public-home-v4/);
-assert.match(landing, /qqai-brand-logo public-system-logo/);
+assert.match(landing, /qqai-brand-logo ray-core-logo/);
 assert.match(landing, /SMALL CORE · PLUGIN FIRST · BYOR/);
 assert.doesNotMatch(landing, /2\.4K|28 個|28 plugins/i);
 
@@ -27,6 +27,7 @@ for (const page of [landing, getPortalLoginPage(), getPortalRegisterPage()]) {
   assert.match(page, /qqai-brand-logo/);
   assert.match(page, /qqai-brand-theme-boot/);
   assert.match(page, /qqai-brand-public-v4/);
+  assert.match(page, /qqai-ray-experience-v600/);
 }
 const portal = getPortalHomePage("aibot.ray2025.com");
 assert.match(portal, /qqai-brand-logo portal-brand-logo/);

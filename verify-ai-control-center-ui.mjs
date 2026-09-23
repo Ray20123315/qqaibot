@@ -7,13 +7,14 @@ import { injectDeploymentPortalClient } from "./src/deployment/notifications.js"
 
 const landing = getPublicLandingPage();
 assert.match(landing, /AI Control Center/);
-assert.match(landing, /data-i18n="public\.hero\.title"/);
 assert.match(landing, /id="publicLocale"/);
 assert.match(landing, /© 2026 ray20123315\. All rights reserved\./);
-assert.match(landing, /class="public-home-v4"/);
-assert.match(landing, /class="public-v4-hero"/);
+assert.match(landing, /class="public-home-v4 ray-landing"/);
+assert.match(landing, /class="public-v4-hero ray-landing-hero"/);
 assert.match(landing, /class="qqai-brand-logo/);
 assert.match(landing, /id="publicTheme"/);
+assert.match(landing, /ray-feature-strip/);
+assert.match(landing, /qqai-ray-experience-v600/);
 assert.doesNotMatch(landing, /2\.4K/);
 
 const login = getPortalLoginPage();
@@ -46,6 +47,9 @@ for (const marker of [
   'id="overviewPluginGrid"',
   'id="localeSelect"',
   'id="pluginBack"',
+  'id="rayCommandSearch"',
+  'id="rayAccountMenu"',
+  'class="ray-dashboard-grid"',
   'class="app workspace-shell"',
   'class="qqai-brand-logo portal-brand-logo"',
   'class="qqai-brand-logo portal-hero-logo"',

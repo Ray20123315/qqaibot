@@ -13,10 +13,12 @@ const login = getPortalLoginPage();
 const register = getPortalRegisterPage();
 
 assert.match(landing, /AI Control Center/);
-assert.match(landing, /class="public-home-v4"/);
-assert.match(landing, /class="public-v4-hero"/);
+assert.match(landing, /class="public-home-v4 ray-landing"/);
+assert.match(landing, /class="public-v4-hero ray-landing-hero"/);
 assert.match(landing, /class="qqai-brand-logo/);
 assert.match(landing, /SMALL CORE · PLUGIN FIRST · BYOR/);
+assert.match(landing, /class="ray-feature-strip"/);
+assert.match(landing, /qqai-ray-experience-v600/);
 assert.doesNotMatch(landing, /class="console-preview"/);
 
 assert.match(login, /data-i18n="login\.title"/);
@@ -25,6 +27,8 @@ assert.match(login, /id="password"/);
 assert.match(login, /\/api\/auth\/login-password/);
 assert.match(login, /\/api\/auth\/request-login-factor/);
 assert.match(login, /class="auth-stage"/);
+assert.match(login, /class="ray-page-login"/);
+assert.match(login, /ray-auth-card-brand/);
 assert.doesNotMatch(login, /id="qqid"/i);
 assert.doesNotMatch(login, /QQID/);
 
@@ -41,6 +45,8 @@ assert.match(register, /建立登入帳號/);
 assert.match(register, /沒有預設密碼/);
 assert.match(register, /已有帳號但忘記密碼/);
 assert.match(register, /class="auth-stage"/);
+assert.match(register, /class="ray-page-register"/);
+assert.match(register, /ray-auth-card-brand/);
 
 assert.match(worker, /url\.pathname === '\/'/);
 assert.match(worker, /\['\/login', '\/register'\]/);
