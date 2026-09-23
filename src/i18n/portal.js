@@ -13,6 +13,10 @@ const PORTAL_LOCALES = Object.freeze([
 
 const PORTAL_MESSAGES = Object.freeze({
   "zh-TW": Object.freeze({
+    "plugins.enabled": "已啟用",
+    "plugins.disabled": "已停用",
+    "plugins.enable": "啟用",
+    "plugins.disable": "停用",
     "public.nav.home": "首頁",
     "public.nav.login": "登入",
     "public.nav.activate": "首次啟用",
@@ -42,6 +46,10 @@ const PORTAL_MESSAGES = Object.freeze({
     "common.loading": "讀取中…", "common.unavailable": "目前無法使用", "common.open": "開啟", "common.core": "核心"
   }),
   "zh-CN": Object.freeze({
+    "plugins.enabled": "已启用",
+    "plugins.disabled": "已停用",
+    "plugins.enable": "启用",
+    "plugins.disable": "停用",
     "public.nav.home": "首页",
     "public.nav.login": "登录",
     "public.nav.activate": "首次启用",
@@ -71,6 +79,10 @@ const PORTAL_MESSAGES = Object.freeze({
     "common.loading": "读取中…", "common.unavailable": "当前无法使用", "common.open": "打开", "common.core": "核心"
   }),
   "en": Object.freeze({
+    "plugins.enabled": "Enabled",
+    "plugins.disabled": "Disabled",
+    "plugins.enable": "Enable",
+    "plugins.disable": "Disable",
     "public.nav.home": "Home",
     "public.nav.login": "Sign in",
     "public.nav.activate": "First-time setup",
@@ -100,6 +112,10 @@ const PORTAL_MESSAGES = Object.freeze({
     "common.loading": "Loading…", "common.unavailable": "Unavailable", "common.open": "Open", "common.core": "Core"
   }),
   "ja": Object.freeze({
+    "plugins.enabled": "有効",
+    "plugins.disabled": "無効",
+    "plugins.enable": "有効化",
+    "plugins.disable": "無効化",
     "public.nav.home": "ホーム",
     "public.nav.login": "ログイン",
     "public.nav.activate": "初回設定",
@@ -117,6 +133,10 @@ const PORTAL_MESSAGES = Object.freeze({
     "app.subtitle":"小さなコア · プラグイン拡張 · BYOR","nav.home":"ホーム","nav.plugins":"プラグイン","nav.account":"アカウントと設定","nav.health":"システム状態","top.language":"言語","top.refresh":"更新","top.light":"ライト","top.dark":"ダーク","top.logout":"ログアウト","home.kicker":"AI CONTROL CENTER","home.title":"コアはシンプルに。機能はプラグインへ。","home.summary":"認証、権限、安全性、プラグイン実行はコアに残し、コミュニティ、モデレーション、自動化、モデル、連携はプラグインで提供します。","home.pluginTitle":"インストール済みプラグイン","home.pluginHelp":"必要な機能はプラグインセンターから開きます。","home.runtimeTitle":"コア状態","home.runtimeHelp":"安全な運用に必要な情報だけを表示します。","plugins.title":"プラグインセンター","plugins.subtitle":"非必須機能はプラグインとして整理します。既存機能は互換ブリッジで維持しながら段階的に分離します。","plugins.open":"開く","plugins.bridge":"互換ブリッジ","plugins.developer":"開発者のみ","account.title":"アカウントと設定","account.subtitle":"セキュリティ、言語、外観、現在の権限を管理します。","account.security":"アカウント安全","account.preferences":"表示設定","account.identity":"現在の権限","health.title":"システム状態","health.subtitle":"コア接続、ストレージ、必須ランタイムを診断します。","footer.rights":"© 2026 ray20123315. All rights reserved.","common.loading":"読み込み中…","common.unavailable":"利用不可","common.open":"開く","common.core":"コア"
   }),
   "ko": Object.freeze({
+    "plugins.enabled": "활성화됨",
+    "plugins.disabled": "비활성화됨",
+    "plugins.enable": "활성화",
+    "plugins.disable": "비활성화",
     "public.nav.home": "홈",
     "public.nav.login": "로그인",
     "public.nav.activate": "초기 설정",
@@ -134,6 +154,10 @@ const PORTAL_MESSAGES = Object.freeze({
     "app.subtitle":"작은 코어 · 플러그인 확장 · BYOR","nav.home":"홈","nav.plugins":"플러그인","nav.account":"계정 및 설정","nav.health":"시스템 상태","top.language":"언어","top.refresh":"새로고침","top.light":"라이트","top.dark":"다크","top.logout":"로그아웃","home.kicker":"AI CONTROL CENTER","home.title":"코어는 단순하게, 기능은 플러그인으로.","home.summary":"인증, 권한, 보안, 플러그인 실행은 코어에 두고 커뮤니티, 관리, 자동화, 모델, 연동은 플러그인으로 제공합니다.","home.pluginTitle":"설치된 기능 플러그인","home.pluginHelp":"모든 기능을 사이드바에 넣지 않고 플러그인 센터에서 엽니다.","home.runtimeTitle":"코어 상태","home.runtimeHelp":"안전한 운영에 필요한 정보만 표시합니다.","plugins.title":"플러그인 센터","plugins.subtitle":"비필수 기능은 플러그인으로 제공합니다. 기존 기능은 호환 브리지를 거쳐 점진적으로 코어에서 분리합니다.","plugins.open":"열기","plugins.bridge":"호환 브리지","plugins.developer":"개발자 전용","account.title":"계정 및 설정","account.subtitle":"계정 보안, 언어, 외관 및 현재 권한을 관리합니다.","account.security":"계정 보안","account.preferences":"인터페이스 설정","account.identity":"현재 권한","health.title":"시스템 상태","health.subtitle":"코어 연결, 저장소 및 필수 런타임 진단.","footer.rights":"© 2026 ray20123315. All rights reserved.","common.loading":"불러오는 중…","common.unavailable":"사용할 수 없음","common.open":"열기","common.core":"코어"
   }),
   "es": Object.freeze({
+    "plugins.enabled": "Activado",
+    "plugins.disabled": "Desactivado",
+    "plugins.enable": "Activar",
+    "plugins.disable": "Desactivar",
     "public.nav.home": "Inicio",
     "public.nav.login": "Entrar",
     "public.nav.activate": "Configuración inicial",
@@ -151,6 +175,10 @@ const PORTAL_MESSAGES = Object.freeze({
     "app.subtitle":"Núcleo mínimo · Plugins · Tus recursos","nav.home":"Inicio","nav.plugins":"Plugins","nav.account":"Cuenta y ajustes","nav.health":"Estado del sistema","top.language":"Idioma","top.refresh":"Actualizar","top.light":"Claro","top.dark":"Oscuro","top.logout":"Salir","home.kicker":"AI CONTROL CENTER","home.title":"Un núcleo simple. Las capacidades viven en plugins.","home.summary":"Autenticación, permisos, seguridad y ejecución de plugins permanecen en el núcleo; comunidad, moderación, automatización, modelos e integraciones se ofrecen como plugins.","home.pluginTitle":"Plugins instalados","home.pluginHelp":"Abre las capacidades desde el centro de plugins.","home.runtimeTitle":"Estado del núcleo","home.runtimeHelp":"Solo se muestra lo necesario para operar con seguridad.","plugins.title":"Centro de plugins","plugins.subtitle":"Las capacidades no esenciales se presentan como plugins y las funciones existentes usan puentes de compatibilidad durante la migración.","plugins.open":"Abrir","plugins.bridge":"Puente compatible","plugins.developer":"Solo desarrolladores","account.title":"Cuenta y ajustes","account.subtitle":"Seguridad, idioma, apariencia e identidad actual.","account.security":"Seguridad de la cuenta","account.preferences":"Preferencias","account.identity":"Identidad actual","health.title":"Estado del sistema","health.subtitle":"Diagnóstico de conectividad, almacenamiento y servicios esenciales.","footer.rights":"© 2026 ray20123315. All rights reserved.","common.loading":"Cargando…","common.unavailable":"No disponible","common.open":"Abrir","common.core":"Núcleo"
   }),
   "fr": Object.freeze({
+    "plugins.enabled": "Activé",
+    "plugins.disabled": "Désactivé",
+    "plugins.enable": "Activer",
+    "plugins.disable": "Désactiver",
     "public.nav.home": "Accueil",
     "public.nav.login": "Connexion",
     "public.nav.activate": "Première configuration",
@@ -168,6 +196,10 @@ const PORTAL_MESSAGES = Object.freeze({
     "app.subtitle":"Noyau minimal · Plugins · Vos ressources","nav.home":"Accueil","nav.plugins":"Plugins","nav.account":"Compte et réglages","nav.health":"État système","top.language":"Langue","top.refresh":"Actualiser","top.light":"Clair","top.dark":"Sombre","top.logout":"Déconnexion","home.kicker":"AI CONTROL CENTER","home.title":"Un noyau simple. Les capacités passent par les plugins.","home.summary":"Authentification, autorisations, sécurité et exécution des plugins restent dans le noyau ; communauté, modération, automatisation, modèles et intégrations sont fournis par des plugins.","home.pluginTitle":"Plugins installés","home.pluginHelp":"Ouvrez les capacités depuis le centre de plugins.","home.runtimeTitle":"État du noyau","home.runtimeHelp":"Seules les informations nécessaires au fonctionnement sûr sont affichées.","plugins.title":"Centre de plugins","plugins.subtitle":"Les capacités non essentielles sont présentées comme plugins ; les fonctions existantes restent disponibles via des ponts de compatibilité pendant la migration.","plugins.open":"Ouvrir","plugins.bridge":"Pont de compatibilité","plugins.developer":"Développeur uniquement","account.title":"Compte et réglages","account.subtitle":"Sécurité, langue, apparence et identité actuelle.","account.security":"Sécurité du compte","account.preferences":"Préférences","account.identity":"Identité actuelle","health.title":"État système","health.subtitle":"Diagnostic de la connectivité, du stockage et des services essentiels.","footer.rights":"© 2026 ray20123315. All rights reserved.","common.loading":"Chargement…","common.unavailable":"Indisponible","common.open":"Ouvrir","common.core":"Noyau"
   }),
   "de": Object.freeze({
+    "plugins.enabled": "Aktiviert",
+    "plugins.disabled": "Deaktiviert",
+    "plugins.enable": "Aktivieren",
+    "plugins.disable": "Deaktivieren",
     "public.nav.home": "Start",
     "public.nav.login": "Anmelden",
     "public.nav.activate": "Ersteinrichtung",
@@ -185,6 +217,10 @@ const PORTAL_MESSAGES = Object.freeze({
     "app.subtitle":"Kleiner Kern · Plugins · Eigene Ressourcen","nav.home":"Start","nav.plugins":"Plugins","nav.account":"Konto & Einstellungen","nav.health":"Systemstatus","top.language":"Sprache","top.refresh":"Aktualisieren","top.light":"Hell","top.dark":"Dunkel","top.logout":"Abmelden","home.kicker":"AI CONTROL CENTER","home.title":"Der Kern bleibt einfach. Funktionen gehören in Plugins.","home.summary":"Authentifizierung, Berechtigungen, Sicherheit und Plugin-Ausführung bleiben im Kern; Community, Moderation, Automatisierung, Modelle und Integrationen kommen als Plugins.","home.pluginTitle":"Installierte Plugins","home.pluginHelp":"Funktionen werden im Plugin-Center geöffnet.","home.runtimeTitle":"Kernstatus","home.runtimeHelp":"Es werden nur betriebsnotwendige Informationen angezeigt.","plugins.title":"Plugin-Center","plugins.subtitle":"Nicht notwendige Funktionen werden als Plugins dargestellt; bestehende Funktionen bleiben während der Migration über Kompatibilitätsbrücken verfügbar.","plugins.open":"Öffnen","plugins.bridge":"Kompatibilitätsbrücke","plugins.developer":"Nur Entwickler","account.title":"Konto & Einstellungen","account.subtitle":"Kontosicherheit, Sprache, Darstellung und aktuelle Identität.","account.security":"Kontosicherheit","account.preferences":"Oberfläche","account.identity":"Aktuelle Identität","health.title":"Systemstatus","health.subtitle":"Diagnose für Kernverbindungen, Speicher und notwendige Laufzeitdienste.","footer.rights":"© 2026 ray20123315. All rights reserved.","common.loading":"Lädt…","common.unavailable":"Nicht verfügbar","common.open":"Öffnen","common.core":"Kern"
   }),
   "pt-BR": Object.freeze({
+    "plugins.enabled": "Ativado",
+    "plugins.disabled": "Desativado",
+    "plugins.enable": "Ativar",
+    "plugins.disable": "Desativar",
     "public.nav.home": "Início",
     "public.nav.login": "Entrar",
     "public.nav.activate": "Configuração inicial",
@@ -202,6 +238,10 @@ const PORTAL_MESSAGES = Object.freeze({
     "app.subtitle":"Núcleo enxuto · Plugins · Seus recursos","nav.home":"Início","nav.plugins":"Plugins","nav.account":"Conta e configurações","nav.health":"Saúde do sistema","top.language":"Idioma","top.refresh":"Atualizar","top.light":"Claro","top.dark":"Escuro","top.logout":"Sair","home.kicker":"AI CONTROL CENTER","home.title":"Mantenha o núcleo simples. Coloque recursos em plugins.","home.summary":"Autenticação, autorização, segurança e execução de plugins ficam no núcleo; comunidade, moderação, automação, modelos e integrações são plugins.","home.pluginTitle":"Plugins instalados","home.pluginHelp":"Abra recursos pelo centro de plugins.","home.runtimeTitle":"Estado do núcleo","home.runtimeHelp":"Mostramos apenas o necessário para operação segura.","plugins.title":"Centro de plugins","plugins.subtitle":"Recursos não essenciais são plugins; funções existentes usam pontes de compatibilidade durante a migração.","plugins.open":"Abrir","plugins.bridge":"Ponte de compatibilidade","plugins.developer":"Somente desenvolvedor","account.title":"Conta e configurações","account.subtitle":"Segurança, idioma, aparência e identidade atual.","account.security":"Segurança da conta","account.preferences":"Preferências","account.identity":"Identidade atual","health.title":"Saúde do sistema","health.subtitle":"Diagnósticos de conectividade, armazenamento e serviços essenciais.","footer.rights":"© 2026 ray20123315. All rights reserved.","common.loading":"Carregando…","common.unavailable":"Indisponível","common.open":"Abrir","common.core":"Núcleo"
   }),
   "vi": Object.freeze({
+    "plugins.enabled": "Đã bật",
+    "plugins.disabled": "Đã tắt",
+    "plugins.enable": "Bật",
+    "plugins.disable": "Tắt",
     "public.nav.home": "Trang chủ",
     "public.nav.login": "Đăng nhập",
     "public.nav.activate": "Thiết lập lần đầu",
