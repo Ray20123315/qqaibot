@@ -222,6 +222,101 @@ html.ray-page-portal body{background:
   .workspace-sidebar.open{display:flex!important;transform:none!important}
 }
 
+
+/* RAY_REFERENCE_V8_HARD_RESET */
+@media(min-width:1025px){
+  .ray-landing-hero,.auth-stage,.workspace-hero{isolation:isolate!important}
+  .ray-landing-hero:before,.auth-stage:before,.workspace-hero:before{
+    content:"";position:absolute;pointer-events:none;z-index:0;
+    background:
+      radial-gradient(circle at 50% 48%,rgba(52,238,255,.22) 0 1px,transparent 2px),
+      radial-gradient(circle at 18% 28%,rgba(255,255,255,.72) 0 1px,transparent 1.8px),
+      radial-gradient(circle at 72% 18%,rgba(130,102,255,.78) 0 1px,transparent 2px),
+      radial-gradient(circle at 83% 63%,rgba(58,220,255,.68) 0 1px,transparent 2px);
+    background-size:47px 47px,79px 79px,111px 111px,149px 149px;
+    opacity:.95
+  }
+  .ray-landing-hero:before{inset:0}
+  .auth-stage:before{inset:0}
+}
+.ray-hero-core{overflow:hidden!important}
+.ray-hero-core .ray-particle-canvas{opacity:.72!important}
+.ray-hero-core .ray-core-orbit{box-shadow:
+  0 0 0 14px rgba(49,218,255,.025),
+  0 0 0 28px rgba(76,92,255,.025),
+  0 0 60px rgba(46,195,255,.30),
+  0 0 120px rgba(99,66,255,.28),
+  inset 0 0 64px rgba(42,220,255,.18)!important}
+.ray-hero-core .ray-core-orbit:before{box-shadow:0 0 28px rgba(71,225,255,.20),inset 0 0 30px rgba(120,75,255,.12)!important}
+.ray-hero-core .ray-core-orbit:after{box-shadow:0 0 36px rgba(99,93,255,.18)!important}
+.ray-core-logo{width:min(29vw,390px)!important}
+.ray-bot{right:6%!important;bottom:13%!important;transform:scale(1.22)!important;filter:drop-shadow(0 0 22px rgba(63,225,255,.28))}
+.ray-bot:before,.ray-bot:after{content:"";position:absolute;background:#d9e8ff;border:2px solid #62e9ff;border-radius:999px;width:38px;height:12px;top:48px;box-shadow:0 0 12px rgba(60,225,255,.28)}
+.ray-bot:before{left:-24px;transform:rotate(-28deg)}.ray-bot:after{right:-24px;transform:rotate(28deg)}
+.ray-planet{filter:saturate(1.25) contrast(1.12);box-shadow:-55px 0 100px rgba(53,143,255,.42),inset 48px -44px 82px rgba(1,5,20,.94)!important}
+.ray-planet:before{content:"";position:absolute;inset:9%;border-radius:50%;background:
+  radial-gradient(circle at 30% 30%,rgba(255,255,255,.32) 0 1px,transparent 2px),
+  radial-gradient(circle at 52% 20%,rgba(65,210,255,.26) 0 2px,transparent 3px),
+  repeating-linear-gradient(18deg,transparent 0 16px,rgba(64,177,255,.09) 17px 18px)}
+.ray-float-card{transform:perspective(500px) rotateX(6deg) rotateY(-8deg);box-shadow:0 0 24px rgba(65,180,255,.30),0 14px 32px rgba(0,0,0,.28),inset 0 1px 0 rgba(255,255,255,.08)!important}
+.ray-float-card.f3,.ray-float-card.f4{transform:perspective(500px) rotateX(6deg) rotateY(9deg)}
+.ray-feature-card{box-shadow:0 18px 38px rgba(0,0,0,.28),0 0 28px rgba(53,147,255,.08),inset 0 1px 0 rgba(255,255,255,.035)!important}
+.ray-feature-card:hover{transform:translateY(-2px);border-color:rgba(91,221,255,.58)!important}
+
+/* stronger skyline/city */
+.ray-hero-core:after,.workspace-hero:after,.auth-visual:after{
+  filter:drop-shadow(0 -8px 18px rgba(32,135,255,.12))
+}
+.ray-landing-hero{position:relative!important}
+.ray-landing-hero:after{
+  content:"";position:absolute;z-index:2;left:-2%;right:-2%;bottom:-1px;height:120px;pointer-events:none;
+  background:
+    linear-gradient(180deg,transparent 0%,rgba(3,15,42,.22) 25%,rgba(2,11,31,.94) 100%),
+    repeating-linear-gradient(90deg,transparent 0 28px,rgba(53,188,255,.18) 29px 30px),
+    repeating-linear-gradient(0deg,transparent 0 19px,rgba(90,96,255,.12) 20px 21px);
+  clip-path:polygon(0 70%,3% 64%,3% 35%,5% 35%,5% 61%,8% 57%,8% 22%,10% 22%,10% 63%,13% 56%,13% 42%,15% 42%,15% 68%,18% 55%,18% 15%,20% 15%,20% 66%,23% 50%,23% 30%,25% 30%,25% 62%,29% 52%,29% 17%,32% 17%,32% 64%,36% 49%,36% 33%,39% 33%,39% 63%,43% 48%,43% 11%,46% 11%,46% 61%,50% 44%,50% 29%,53% 29%,53% 64%,57% 48%,57% 15%,60% 15%,60% 63%,64% 44%,64% 30%,67% 30%,67% 66%,71% 49%,71% 17%,74% 17%,74% 63%,78% 44%,78% 28%,81% 28%,81% 66%,85% 49%,85% 20%,88% 20%,88% 62%,92% 46%,92% 31%,95% 31%,95% 65%,100% 58%,100% 100%,0 100%);
+  opacity:.95
+}
+
+/* auth pages visually fill scene */
+.auth-visual{background:
+  radial-gradient(circle at 58% 49%,rgba(42,222,255,.16),transparent 18rem),
+  radial-gradient(circle at 72% 46%,rgba(122,66,255,.18),transparent 28rem)!important}
+.auth-card{background:linear-gradient(160deg,rgba(5,28,70,.975),rgba(2,12,34,.99))!important}
+.auth-card:before{content:"";position:absolute;inset:1px;border-radius:24px;pointer-events:none;background:linear-gradient(120deg,rgba(255,255,255,.04),transparent 34%,rgba(75,220,255,.025));mix-blend-mode:screen}
+.auth-card .field input{background:rgba(1,12,33,.90)!important;border-color:rgba(77,153,242,.42)!important}
+.auth-card .ray-select-control{min-height:44px!important}
+.auth-card .btn.primary{box-shadow:0 0 28px rgba(73,138,255,.32),0 0 42px rgba(221,89,255,.10)!important}
+
+/* dashboard: match dense reference instead of sparse SaaS */
+.workspace-content{padding-top:8px!important}
+.workspace-hero{min-height:372px!important;border-radius:0!important}
+.workspace-hero-copy{align-self:center!important}
+.workspace-hero h1{font-size:clamp(42px,4vw,58px)!important}
+.workspace-hero-logo{width:336px!important;height:336px!important}
+.portal-hero-logo{width:336px!important;height:336px!important}
+.workspace-status-grid{margin-top:8px!important}
+.workspace-status{border-radius:12px!important}
+.workspace-section,.ray-dashboard-rail>article{border-radius:12px!important}
+.workspace-sidebar{box-shadow:20px 0 60px rgba(0,0,0,.26)!important}
+.workspace-topbar{box-shadow:0 8px 30px rgba(0,0,0,.16)!important}
+.workspace-topbar:after{content:"";position:absolute;left:0;right:0;bottom:-1px;height:1px;background:linear-gradient(90deg,transparent,rgba(51,220,255,.55),rgba(112,83,255,.45),transparent)}
+.core-nav>button[data-view]{font-size:12px!important}
+
+/* mobile sidebar: hidden when closed, real overlay only when open */
+@media(max-width:1024px){
+  .workspace-sidebar{display:none!important;transform:none!important}
+  .workspace-sidebar.open{display:flex!important;left:0!important;right:auto!important}
+  .sidebar-backdrop{display:none!important}
+  .sidebar-backdrop.open{display:block!important}
+}
+@media(max-width:620px){
+  .ray-bot{transform:scale(.86)!important}
+  .ray-core-logo{width:230px!important}
+  .auth-card:before{border-radius:18px}
+}
+/* RAY_REFERENCE_V8_HARD_RESET_END */
+
 /* RAY_REFERENCE_V7_END */
 `;
 function rayAiExperienceStyle(mode = "public") {
