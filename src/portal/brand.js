@@ -1,4 +1,4 @@
-import { dbGet, dbPut } from "../data/store.js";
+import { dbGet } from "../data/store.js";
 
 const PORTAL_BRAND_KEY = "portal_branding:v1";
 const PORTAL_BRAND_LOGO_MAX_BYTES = 256 * 1024;
@@ -80,7 +80,13 @@ async function writePortalBranding(env, input) {
     return { ok: false, code: "BRANDING_INVALID", message: "品牌設定格式不正確。" };
   }
   try {
-    await dbPut(env, PORTAL_BRAND_KEY, JSON.stringify(record));
+    const serialized = JSON.stringify(record);
+    const result = await env.DB.prepare("INSERT INTO kv_store (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value")
+      .bind(PORTAL_BRAND_KEY, serialized)
+      .run();
+    if (result?.success === false) throw new Error("D1 branding write returned success=false");
+    const readBack = await env.DB.prepare("SELECT value FROM kv_store WHERE key = ?").bind(PORTAL_BRAND_KEY).first();
+    if (!readBack || String(readBack.value || "") !== serialized) throw new Error("D1 branding write read-back mismatch");
     return { ok: true, branding: record };
   } catch (error) {
     console.error("portal branding write failed", { error: String(error?.message || error).slice(0, 300) });
