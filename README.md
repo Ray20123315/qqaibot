@@ -2,7 +2,7 @@
 
 目前版本：**2.7.12**
 
-QQ AI Bot 是部署在 Cloudflare Workers 的單一 Worker QQ 群聊機器人。它透過 NapCat／OneBot WebSocket 接收 QQ 事件，整合 Gemini、Gemma、DeepSeek、D1、Vectorize、Durable Objects 與內建 Portal，提供聊天、記憶、群規、活動、排程、通知、狼人殺與管理工具。
+QQ AI Bot 是部署在 Cloudflare Workers 的單一 Worker QQ 群聊機器人。它透過 NapCat／OneBot WebSocket 接收 QQ 事件，整合 Gemini、Gemma、DeepSeek、D1、Vectorize、Durable Objects 與內建 Portal，提供聊天、記憶、群規、活動、排程、通知與管理工具。
 
 本儲存庫不再把維護者 QQ 號當成程式預設。部署者必須設定自己的開發者 QQ、公開網址、Cloudflare 資源與 API 憑證。
 
@@ -28,7 +28,7 @@ worker.js
       ├─ src/operations/     活動、投票、協作與自動化
       ├─ src/scheduler/      排程、衝突守衛、群打卡
       ├─ src/social/         人格、關係、輸出風格與表情庫
-      ├─ src/games/          狼人殺與本地娛樂指令
+      ├─ src/games/          本地娛樂指令
       └─ src/data/           D1／KV 相容資料存取
 ```
 
@@ -43,7 +43,7 @@ Wrangler 會把所有模組打包成同一個 Worker，不需要建立第二個 
 1. **Cloudflare 基礎資源**：Worker 名稱、網域、D1、Vectorize、Durable Object、Cron、Rate Limiter。設定於 `wrangler.toml`。
 2. **公開執行期變數**：開發者 QQ、公開網址、模型名稱、預算、功能開關與安全範圍內的限制值。設定於 `[vars]` 或 Cloudflare Dashboard Variables。
 3. **Secrets**：API Key、OneBot Token、Portal 加密金鑰。使用 `wrangler secret put`，不得提交至 GitHub。
-4. **Portal／群組動態設定**：人格、群規、通知路由、模型偏好、活動、排程、權限與各群開關。保存於 D1，不必重新部署。
+4. **Portal／群組動態設定**：人格、群規、通知路由、模型偏好、活動、排程、權限、插件啟用狀態與各群開關。保存於 D1，不必重新部署。
 5. **不可任意關閉的系統不變量**：權限驗證、資料隔離、政治靜默、安全規則、危險操作二次確認、Durable Object migration 歷史與資料結構完整性。
 
 優先順序通常是：Portal／群組明確設定 → Worker 公開變數 → 程式安全預設。Secrets 只提供憑證，不應被 Portal 回傳或顯示。
@@ -261,7 +261,7 @@ npx wrangler secret put SECRET_NAME
 - 自動歡迎、歡迎詞、入群輔助與新人觀察期
 - 人工通知路由；預設只找開發者，群主通知總開關預設關閉
 - AI 管理、群操作、排程審核與申訴審核權限
-- 活動、報名、候補、投票、排程與狼人殺
+- 活動、報名、候補、投票與排程
 - Bilibili 監控設定
 - 使用者記憶、免打擾、黑名單、好感度與申訴資料
 
@@ -305,7 +305,7 @@ npx wrangler secret put SECRET_NAME
 
 ### Portal
 
-Portal 入口由 `PUBLIC_BASE_URL` 或實際請求來源決定，不再固定指向維護者網站。開發者首次啟用固定建立／綁定保留帳號 `admin` 並直接設定密碼，不需 QQ 六位碼；日常登入使用 `admin + 密碼`。Portal 另包含密碼重設、群組與群友、權限、群規、通知、模型、對話、違規、申訴、活動、投票、狼人殺與系統維護。
+Portal 入口由 `PUBLIC_BASE_URL` 或實際請求來源決定，不再固定指向維護者網站。開發者首次啟用固定建立／綁定保留帳號 `admin` 並直接設定密碼，不需 QQ 六位碼；日常登入使用 `admin + 密碼`。Portal 另包含密碼重設、群組與群友、權限、群規、通知、模型、對話、違規、申訴、活動、投票與系統維護。
 
 ## 指令
 
