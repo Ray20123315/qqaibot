@@ -19,10 +19,13 @@ assert.equal(script.includes("<\\/script>"), false, "v6 runtime HTML must not co
 
 const source = fs.readFileSync("src/portal/experience-v6.js","utf8");
 assert.doesNotMatch(source,/shadowBlur\s*=/,"particle renderer must not use per-frame shadowBlur");
-assert.match(source,/mobile\?84:220/,"particle budget must stay capped");
-assert.match(source,/minFrame=mobile\?34:22/,"particle renderer must frame-cap mobile");
+assert.match(source,/mobile\?24:64/,"particle budget must stay aggressively capped");
+assert.match(source,/minFrame=mobile\?90:66/,"particle renderer must use a low-frequency decorative frame cap");
 assert.match(source,/IntersectionObserver/);
 assert.match(source,/visibilitychange/);
+assert.match(source,/RAY_REFERENCE_V7_START/,"reference-driven visual layer missing");
+assert.match(source,/mountReferenceChrome/,"reference dashboard chrome missing");
+assert.match(source,/mountReferenceScenes/,"reference scene decoration missing");
 const broadBackdrop = (source.match(/backdrop-filter/g)||[]).length;
 assert.ok(broadBackdrop <= 0, "v6 must avoid expensive backdrop-filter surfaces");
 
