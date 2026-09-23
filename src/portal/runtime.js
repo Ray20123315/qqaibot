@@ -2771,43 +2771,49 @@ function getPortalHomePage(host) {
     </div>
   </div>
 </section>
-<div id="app" class="app">
-  <aside id="sidebar" class="sidebar">
-    <div class="side-brand"><div class="logo">AI</div><div><b>AI Control Center</b><small data-i18n="app.subtitle">核心精簡 · 插件擴充 · 自備資源</small></div></div>
-    <nav class="nav" id="nav" aria-label="Primary">
-      <button data-view="overview" class="active" data-i18n="nav.home">首頁</button>
-      <button data-view="plugins" data-i18n="nav.plugins">插件</button>
-      <button data-view="account" data-i18n="nav.account">帳號與設定</button>
-      <div id="pluginCompatNav" class="plugin-compat-nav" hidden>
-        <button data-view="health">系統健康</button>
-        <button data-view="tasks">任務佇列</button>
-        <button data-view="moderation">待確認操作</button>
-        <button data-view="simulator">事件模擬器</button>
-        <button data-view="models">模型中心</button>
-        <button data-view="quota">額度與限制</button>
-        <button data-view="groups">群組設定</button>
-        <button data-view="memory">AI 記憶</button>
-        <button data-view="logs">操作日誌</button>
-      </div>
-    </nav>
-    <div class="side-bottom">
-      <div id="identity" class="identity-card"></div>
-      <div class="portal-rights" data-i18n="footer.rights">© 2026 ray20123315. All rights reserved.</div>
-      <button id="logout" class="btn ghost side-logout" data-i18n="top.logout">登出</button>
-    </div>
-  </aside>
-  <div id="sidebarBackdrop" class="sidebar-backdrop"></div>
-  <main class="main">
-    <header class="topbar">
-      <div class="row"><button id="menu" class="btn ghost mobile-menu" aria-label="Menu">☰</button><div><div class="top-kicker">AI CONTROL CENTER</div><h2 id="pageTitle" data-i18n="nav.home">首頁</h2></div></div>
-      <div class="top-actions">
-        <select id="groupSelect" class="plugin-context-control hidden" aria-label="Group"><option value="">選擇群組</option></select>
+<div id="app" class="app portal-app">
+  <header id="sidebar" class="portal-appbar">
+    <div class="portal-appbar-inner">
+      <a class="portal-brand" href="/" aria-label="AI Control Center home">
+        ${brandLogoMarkup({ className: "portal-brand-logo", idPrefix: "portal-appbar" })}
+        <span><b>AI Control Center</b><small data-i18n="app.subtitle">核心精簡 · 插件擴充 · 自備資源</small></span>
+      </a>
+      <button id="menu" class="btn ghost mobile-menu portal-menu" type="button" aria-label="Menu" aria-expanded="false">☰</button>
+      <nav class="nav portal-primary-nav" id="nav" aria-label="Primary">
+        <button data-view="overview" class="active" data-i18n="nav.home">首頁</button>
+        <button data-view="plugins" data-i18n="nav.plugins">插件</button>
+        <button data-view="account" data-i18n="nav.account">帳號與設定</button>
+        <div id="pluginCompatNav" class="plugin-compat-nav" hidden>
+          <button data-view="health">系統健康</button>
+          <button data-view="tasks">任務佇列</button>
+          <button data-view="moderation">待確認操作</button>
+          <button data-view="simulator">事件模擬器</button>
+          <button data-view="models">模型中心</button>
+          <button data-view="quota">額度與限制</button>
+          <button data-view="groups">群組設定</button>
+          <button data-view="memory">AI 記憶</button>
+          <button data-view="logs">操作日誌</button>
+        </div>
+      </nav>
+      <div class="portal-header-actions">
         <select id="localeSelect" aria-label="Language"></select>
         <button id="themeToggle" type="button" class="btn ghost theme-toggle">深色</button>
+        <div id="identity" class="identity-card"></div>
+        <button id="logout" class="btn ghost portal-logout" data-i18n="top.logout">登出</button>
+      </div>
+    </div>
+    <div class="portal-rights" data-i18n="footer.rights">© 2026 ray20123315. All rights reserved.</div>
+  </header>
+  <div id="sidebarBackdrop" class="sidebar-backdrop"></div>
+  <main class="main portal-main">
+    <header class="topbar portal-subbar">
+      <div class="portal-page-heading"><div class="top-kicker">AI CONTROL CENTER</div><h2 id="pageTitle" data-i18n="nav.home">首頁</h2></div>
+      <div class="top-actions">
+        <select id="groupSelect" class="plugin-context-control hidden" aria-label="Group"><option value="">選擇群組</option></select>
         <button id="refresh" class="btn ghost" data-i18n="top.refresh">更新</button>
       </div>
     </header>
-    <div class="content">
+    <div class="content portal-content">
       <section id="v-overview" class="view active">
         <div class="core-hero">
           <div><div class="eyebrow" data-i18n="home.kicker">AI CONTROL CENTER</div><h1 data-i18n="home.title">保持核心簡單，把能力交給插件。</h1><p data-i18n="home.summary">登入、權限、安全與插件執行留在核心；其他能力由插件提供。</p></div>
