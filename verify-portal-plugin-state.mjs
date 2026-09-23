@@ -55,9 +55,13 @@ assert.equal(portalPluginForApiPath("/security/auth-state"), null, "core securit
 
 const db = new FakeD1();
 const env = { DB: db };
-assert.equal(await readPortalPluginEnabled(env, "qqai.community"), true);
+assert.equal(await readPortalPluginEnabled(env, "qqai.community"), false);
+assert.equal(await readPortalPluginEnabled(env, "qqai.moderation"), false);
 assert.equal(await readPortalPluginEnabled(env, "qqai.automation"), false);
+assert.equal(await readPortalPluginEnabled(env, "qqai.knowledge"), false);
 assert.equal(await readPortalPluginEnabled(env, "qqai.models"), false);
+assert.equal(await readPortalPluginEnabled(env, "qqai.integrations"), false);
+assert.equal(await readPortalPluginEnabled(env, "qqai.developer-tools"), false);
 
 let result = await setPortalPluginEnabled(env, "qqai.automation", true);
 assert.equal(result.ok, true);
