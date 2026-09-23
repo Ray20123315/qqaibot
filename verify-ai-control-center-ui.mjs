@@ -87,9 +87,11 @@ assert.match(layout, /\.plugin-grid\{/);
 assert.match(layout, /\.workspace-hero\{/);
 assert.match(layout, /\.workspace-status-grid\{/);
 assert.match(layout, /\.plugin-back\{/);
-assert.match(layout, /\.nav>\.qqai-nav-entry/);
+assert.match(layout, /\.core-nav>\.qqai-nav-entry/);
 assert.doesNotMatch(layout, /--bg:#020713!important/);
 
 console.log("verify-ai-control-center-ui: ok");
 
 assert.doesNotMatch(fs.readFileSync("worker.js", "utf8"), /werewolf|狼人殺|狼人杀/i);
+
+assert.doesNotMatch(layoutSource, /<nav class="nav core-nav"/, "portal nav must stay isolated from public .nav");
