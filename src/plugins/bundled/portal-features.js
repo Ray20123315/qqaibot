@@ -15,7 +15,7 @@ const PORTAL_FEATURE_PLUGINS = Object.freeze([
         views: ["groups", "members", "member-actions", "relationships", "member-data", "member-cleanup", "notification-routing", "settingscenter"],
         order: 10,
         legacyBridge: true,
-        defaultEnabled: true,
+        defaultEnabled: false,
         groupContext: true,
         apiPrefixes: ["/members", "/group-members", "/group-bindings", "/settings", "/settings-center", "/admin/state", "/admin/blacklist", "/admin/active-speaking-test", "/root/member", "/root/members", "/root/program-permissions"]
       },
@@ -50,7 +50,7 @@ const PORTAL_FEATURE_PLUGINS = Object.freeze([
         views: ["ruleviolations", "moderation", "appealreview", "violationhistory", "appeals"],
         order: 20,
         legacyBridge: true,
-        defaultEnabled: true,
+        defaultEnabled: false,
         groupContext: true,
         apiPrefixes: ["/moderation", "/rule-violations", "/violations", "/appeals", "/review/appeal", "/review/appeals", "/group-work", "/root/appeals", "/root/appeal-assign", "/ops/action"]
       },
@@ -120,7 +120,7 @@ const PORTAL_FEATURE_PLUGINS = Object.freeze([
         views: ["memory", "conversations", "aidecisions"],
         order: 40,
         legacyBridge: true,
-        defaultEnabled: true,
+        defaultEnabled: false,
         groupContext: true,
         apiPrefixes: ["/memories", "/matrix", "/vector-search", "/conversations", "/ai-decisions"]
       },
@@ -226,7 +226,7 @@ const PORTAL_FEATURE_PLUGINS = Object.freeze([
         order: 90,
         legacyBridge: true,
         developerOnly: true,
-        defaultEnabled: true,
+        defaultEnabled: false,
         apiPrefixes: ["/health", "/platform", "/admin", "/root"]
       },
       i18n: {
