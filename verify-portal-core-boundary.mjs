@@ -15,9 +15,10 @@ assert.match(runtime, /async function ensurePluginContext/, "plugin context must
 assert.doesNotMatch(runtime, /await loadPlugins\(\);var loaded=await loadGroups\(\)/, "core boot must not eagerly load group/community context");
 
 const rendered = getPortalHomePage("aibot.ray2025.com");
-const navStart = rendered.indexOf('<nav class="nav core-nav" id="nav"');
+const navStart = rendered.indexOf('<nav class="core-nav" id="nav"');
 const compatStart = rendered.indexOf('id="pluginCompatNav"', navStart);
 assert.ok(navStart >= 0 && compatStart > navStart, "workspace core nav/plugin bridge markers missing");
+assert.doesNotMatch(rendered, /<nav class="nav core-nav" id="nav"/, "portal navigation must not reuse the public nav class");
 const firstClassNav = rendered.slice(navStart, compatStart);
 for (const core of CORE_VIEWS) assert.ok(firstClassNav.includes(`data-view="${core}"`), "missing first-class core view " + core);
 for (const forbidden of ["health","tasks","moderation","simulator","models","quota","groups","memory","logs","members","platform","maintenance"]) {
