@@ -43,4 +43,11 @@ for (const path of ["src/portal/members.js","src/portal/member-cleanup.js","src/
   assert.doesNotMatch(source, /window\.confirm\s*\(/, path + " must not use native confirm");
 }
 assert.doesNotMatch(fs.readFileSync("src/portal/community-suite.js","utf8"), /!confirm\s*\(/);
+
+const runtimeSource = fs.readFileSync("src/portal/runtime.js", "utf8");
+assert.doesNotMatch(runtimeSource, /min\(100%\s*-\s*\d+px/, "legacy/public responsive CSS must use calc() for subtraction");
+assert.doesNotMatch(experience, /min\(100%\s*-\s*\d+px/, "v5 responsive CSS must use calc() for subtraction");
+for (const marker of ["ray-mobile-containment","body>.shell,.shell","grid-template-columns:minmax(0,1fr)!important","workspace-main{margin-left:0!important;width:100%!important","nav>.ray-select","document.documentElement.scrollLeft=0"]) {
+  assert.ok(experience.includes(marker), "missing mobile containment marker: " + marker);
+}
 console.log("verify-portal-experience-v5: ok");
