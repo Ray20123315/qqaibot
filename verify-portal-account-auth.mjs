@@ -196,4 +196,50 @@ assert.equal(refreshedSession.permissions.developer, true, "stale session permis
 assert.equal(refreshedSession.permissions.aiAdmin, true);
 assert.equal(refreshedSession.permissions.groupOps, true);
 
+const adminSessionDb = new FakeD1();
+const adminSessionToken = "reserved-admin-session";
+adminSessionDb.map.set("portal_session:" + adminSessionToken, JSON.stringify({
+  qq: "123456789",
+  username: "admin",
+  group: "",
+  groupId: "",
+  token: adminSessionToken,
+  role: "member",
+  permissions: { developer: false, aiAdmin: false, groupOps: false },
+  persistent: true,
+  idleTtlMs: 3600000,
+  absoluteTtlMs: 86400000,
+  createdAt: Date.now(),
+  lastActivityAt: Date.now(),
+  expiresAt: Date.now() + 3600000,
+  absoluteExpiresAt: Date.now() + 86400000
+}));
+const adminSessionWithoutVars = await getPortalSession({ DB: adminSessionDb }, adminSessionToken, { touch: false });
+assert.equal(adminSessionWithoutVars.role, "developer", "reserved admin account must retain Developer / Root authority after successful bootstrap");
+assert.equal(adminSessionWithoutVars.permissions.developer, true, "reserved admin must be able to manage global plugins even if Dashboard identity vars are later absent");
+assert.equal(adminSessionWithoutVars.permissions.aiAdmin, true);
+assert.equal(adminSessionWithoutVars.permissions.groupOps, true);
+
+const ordinarySessionDb = new FakeD1();
+const ordinarySessionToken = "ordinary-account-session";
+ordinarySessionDb.map.set("portal_session:" + ordinarySessionToken, JSON.stringify({
+  qq: "555555555",
+  username: "rayuser",
+  group: "",
+  groupId: "",
+  token: ordinarySessionToken,
+  role: "developer",
+  permissions: { developer: true, aiAdmin: true, groupOps: true },
+  persistent: true,
+  idleTtlMs: 3600000,
+  absoluteTtlMs: 86400000,
+  createdAt: Date.now(),
+  lastActivityAt: Date.now(),
+  expiresAt: Date.now() + 3600000,
+  absoluteExpiresAt: Date.now() + 86400000
+}));
+const ordinarySessionWithoutVars = await getPortalSession({ DB: ordinarySessionDb }, ordinarySessionToken, { touch: false });
+assert.equal(ordinarySessionWithoutVars.role, "member", "ordinary accounts must not inherit stale developer authority");
+assert.equal(ordinarySessionWithoutVars.permissions.developer, false);
+
 console.log("verify-portal-account-auth: ok");
