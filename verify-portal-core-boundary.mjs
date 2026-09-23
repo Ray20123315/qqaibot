@@ -78,8 +78,9 @@ assert.match(featureSource, /id: "qqai\.developer-tools"[\s\S]*views: \["health"
 assert.doesNotMatch(featureSource, /qqai\.werewolf|狼人殺|狼人杀/i);
 
 const handleStart = runtime.indexOf("async function handlePortalApi");
-assert.ok(handleStart >= 0, "handlePortalApi missing");
-const handleSource = runtime.slice(handleStart);
+const handleEnd = runtime.indexOf("async function handleGeminiLiveUpgrade", handleStart);
+assert.ok(handleStart >= 0 && handleEnd > handleStart, "handlePortalApi bounds missing");
+const handleSource = runtime.slice(handleStart, handleEnd);
 const routeLiterals = new Set([
   ...[...handleSource.matchAll(/path\s*===\s*"([^"]+)"/g)].map(match => match[1]),
   ...[...handleSource.matchAll(/path\.startsWith\("([^"]+)"\)/g)].map(match => match[1])
