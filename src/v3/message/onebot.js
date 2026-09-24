@@ -119,6 +119,8 @@ function fromOneBotEvent(body = {}) {
     groupId: body.group_id,
     userId: body.user_id,
     selfId: body.self_id,
+    senderRole: body?.sender?.role || "member",
+    senderName: body?.sender?.card || body?.sender?.nickname || "",
     time: body.time
   }, normalizeOneBotMessage(body.message ?? body.raw_message ?? ""));
 }
