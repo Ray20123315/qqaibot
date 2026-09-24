@@ -1,4 +1,4 @@
-import { getAffinityProfile, isDeveloperId, recentConversationMessagesForUser } from "../core/identity.js";
+import { isDeveloperId, recentConversationMessagesForUser } from "../core/identity.js";
 import { callOneBotAction, writeSystemAudit } from "../core/permissions.js";
 import { dbGet } from "../data/store.js";
 import { getMuteLock } from "../moderation/mute-locks.js";
@@ -100,7 +100,6 @@ async function readStoredMemberSources(env, groupId, targetId) {
   const keys = {
     snapshot: `member_snapshot:${groupId}:${targetId}`,
     profile: `member_profile:${groupId}:${targetId}`,
-    affinity: `affinity:${groupId}:${targetId}`,
     cachedMembers: `group_members:${groupId}`,
     enforcement: `rule_mute_enforcement:${groupId}:${targetId}`,
     selfMute: `self_mute:${groupId}:${targetId}`,
@@ -140,14 +139,13 @@ async function collectFullMemberDetails(env, { groupId, targetId, actorId, actor
     throw new Error("只能查询自己的完整资料；查询其他成员仅限本群管理员、群主、获授群操作权限者或开发者。");
   }
 
-  const [groupInfo, strangerInfo, honorResponse, stored, muteLock, relationship, affinity, records] = await Promise.all([
+  const [groupInfo, strangerInfo, honorResponse, stored, muteLock, relationship, records] = await Promise.all([
     getLiveDetailSource(env, "get_group_member_info", { group_id: numericId(group), user_id: numericId(target), no_cache: true }),
     getLiveDetailSource(env, "get_stranger_info", { user_id: numericId(target), no_cache: true }),
     getLiveDetailSource(env, "get_group_honor_info", { group_id: numericId(group), type: "all" }),
     readStoredMemberSources(env, group, target),
     getMuteLock(env, group, target).catch(error => ({ readError: String(error?.message || error).slice(0, 500) })),
     getPartnerBinding(env, group, target).catch(error => ({ readError: String(error?.message || error).slice(0, 500) })),
-    getAffinityProfile(env, { groupId: group, userId: target, refreshAi: false }).catch(error => ({ readError: String(error?.message || error).slice(0, 500) })),
     recentConversationMessagesForUser(env, group, target, 200).catch(() => [])
   ]);
 
@@ -186,11 +184,10 @@ async function collectFullMemberDetails(env, { groupId, targetId, actorId, actor
     operationalState: {
       muteLock: sanitizeMemberDetailValue(muteLock),
       relationship: sanitizeMemberDetailValue(relationship),
-      affinity: sanitizeMemberDetailValue(affinity),
       messageStats: buildMessageStats(records)
     },
     disclosure: {
-      includes: "OneBot 即时成员资料、陌生人补充资料、群荣誉、D1 成员快照、管理备注、关系、禁言锁、好感与留存消息统计。",
+      includes: "OneBot 即时成员资料、陌生人补充资料、群荣誉、D1 成员快照、管理备注、关系、禁言锁与留存消息统计。",
       excludes: "密码、Token、Cookie、API Key、授权标头、Session、私钥等秘密字段会被遮罩；平台未返回的资料不会推测。",
       rawMessageBodiesIncluded: false
     }
