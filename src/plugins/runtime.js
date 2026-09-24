@@ -234,6 +234,12 @@ function createPluginHost({ services = {}, storageAdapter = null, logger = conso
           return requireService("scheduler.cancel")({ plugin: plugin.manifest, id: String(id || ""), payload: visiblePayload, eventContext: { ...eventContext, message: readableMessage } });
         }
       }),
+      member: Object.freeze({
+        recentMessages: async input => {
+          assertCapability(plugin, "member.read");
+          return requireService("member.recent_messages")({ plugin: plugin.manifest, input: input || {}, payload: visiblePayload, eventContext: { ...eventContext, message: readableMessage } });
+        }
+      }),
       network: Object.freeze({
         fetch: async input => {
           assertCapability(plugin, "network");
