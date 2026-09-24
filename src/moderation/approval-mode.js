@@ -34,7 +34,7 @@ function moderationApprovalModeLabel(value) {
 
 function moderationApprovalModeDescription(value) {
   return ({
-    require_approval: "所有會改變群組狀態的自動管理動作都先建立提案，必須由管理員核准。",
+    require_approval: "所有對 QQ 群產生外部效果的自動管理動作（包含提醒、警告、撤回、禁言與踢出）都先建立提案，必須由管理員核准。",
     smart_approval: "提醒與警告可自動處理；撤回、禁言、踢出與權限變更仍要求核准。",
     full_access: "在機器人原本已擁有的 QQ 群權限內自動執行；仍保留角色、保護名單、黑名單與不可提權等安全限制。"
   })[normalizeModerationApprovalMode(value)];
@@ -45,10 +45,8 @@ function moderationActionNeedsApproval(mode, action) {
   const name = String(action || "").trim().toLowerCase();
   if (!name || ["record", "manual", "none"].includes(name)) return true;
   if (normalized === "full_access") return false;
-  if (normalized === "smart_approval") {
-    return !["remind", "warn"].includes(name);
-  }
-  return !["remind", "warn"].includes(name);
+  if (normalized === "smart_approval") return !["remind", "warn"].includes(name);
+  return true;
 }
 
 function moderationApprovalDecision(mode, action) {
