@@ -36,6 +36,7 @@ PLUGIN_SECURITY_GPT_ENABLED = "false"
 PLUGIN_SECURITY_GPT_MODEL = ""
 PLUGIN_SECURITY_GPT_WEB_SEARCH_ENABLED = "false"
 V3_TEST_DB_TABLE = "kv_store_v3test_20260924"
+ONEBOT_READ_ONLY = "true"
 
 [observability]
 enabled = false
