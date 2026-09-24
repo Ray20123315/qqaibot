@@ -120,7 +120,7 @@ async function recordStructuredMessage(env, item) {
     const key = `recent_logs:${record.groupId}`;
     const logs = await readJson(env, key, []);
     logs.push(`[${record.senderName}(QQ:${record.senderId})]: ${record.text}`);
-    await dbPut(env, key, JSON.stringify(logs.slice(-200)));
+    await dbPut(env, key, JSON.stringify(logs.slice(-80)));
   }
   return record;
 }
