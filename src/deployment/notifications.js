@@ -26,7 +26,7 @@ async function kvGet(env, key) {
 
 async function kvPut(env, key, value) {
   if (!env?.DB) throw new Error("Missing D1 binding: DB");
-  const result = await env.DB.prepare("INSERT INTO kv_store (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value").bind(key, String(value)).run();
+  const result = await env.DB.prepare("INSERT INTO kv_store (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value WHERE kv_store.value IS NOT excluded.value").bind(key, String(value)).run();
   if (result && result.success === false) throw new Error(`D1 write failed: ${key}`);
 }
 
