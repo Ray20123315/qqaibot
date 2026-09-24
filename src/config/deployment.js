@@ -88,8 +88,6 @@ function deploymentPublicConfig(env = {}, requestOrigin = "") {
     developerIds: developerIds(env),
     publicBaseUrl: publicBaseUrl(env, requestOrigin),
     botDisplayName: envString(env?.BOT_DISPLAY_NAME, "QQAI"),
-    autoCheckinEnabled: envBoolean(env?.AUTO_CHECKIN_ENABLED, true),
-    autoCheckinRetryIntervalMs: envInteger(env?.AUTO_CHECKIN_RETRY_INTERVAL_MS, 1000, 500, 5000),
     autoCheckinConcurrency: envInteger(env?.AUTO_CHECKIN_CONCURRENCY, 12, 1, 30),
     deployNotifyWorkerName: envString(env?.DEPLOY_NOTIFY_WORKER_NAME, "qqai"),
     deployNotifyBranch: envString(env?.DEPLOY_NOTIFY_BRANCH, "main")
