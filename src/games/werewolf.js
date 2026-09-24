@@ -1,3 +1,5 @@
+import { runV3ShadowEvent, shadowEnabled } from "../v3/shadow/runtime.js";
+import { runV3MultimodalCanary } from "../v3/canary/multimodal.js";
 import { callGoogleDecision } from "../ai/runtime.js";
 import { isDeveloperId } from "../core/identity.js";
 import { callOneBotAction, writeSystemAudit } from "../core/permissions.js";
@@ -1250,7 +1252,7 @@ async function handleWerewolfPortalApi(request, env, url, path, body, authed) {
   return jsonResponse({ ok: false, message: "未知狼人杀操作。" }, 404);
 }
 
-async function handleWerewolfOneBotEvent(env, body) {
+async function handleLegacyWerewolfOneBotEvent(env, body) {
   if (!body || body.post_type !== "message") return null;
   const text = eventText(body);
   const isGroup = body.message_type === "group";
@@ -1419,6 +1421,23 @@ function injectWerewolfPortalClient(html) {
   })();</script>`;
   source = source.includes('</body>') ? source.replace('</body>', script + '</body>') : source + script;
   return source;
+}
+
+async function handleWerewolfOneBotEvent(env, body) {
+  if (shadowEnabled(env)) {
+    try {
+      await runV3ShadowEvent(env, body);
+    } catch (error) {
+      console.warn("[v3-shadow] observer failed", String(error?.message || error).slice(0, 300));
+    }
+  }
+  try {
+    const canary = await runV3MultimodalCanary(env, body);
+    if (canary?.handled) return canary;
+  } catch (error) {
+    console.warn("[v3-canary] multimodal canary failed", String(error?.message || error).slice(0, 300));
+  }
+  return handleLegacyWerewolfOneBotEvent(env, body);
 }
 
 export {
