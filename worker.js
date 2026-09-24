@@ -23,7 +23,7 @@ import { injectPortalLayoutClient } from "./src/portal/layout.js";
 import { injectPortalMembersClient } from "./src/portal/members.js";
 import { applySocialOutputPolicy, buildSocialDecision, buildSocialPromptBlock, capturePersonaContinuity, oneBotBotMentionCount, oneBotEventHasMedia, oneBotEventIsBareMention, oneBotEventIsPunctuationOnly, observeSocialStyle, shouldSendSocialBufferNotice, socialInputDelayMs, waitForSocialTyping } from "./src/social/runtime.js";
 import { pickSticker, pickStickerForText, stickerCqMessage } from "./src/social/sticker-library.js";
-import { cancelSchedule, cleanupExpiredModerationProposals, cleanupTransientState, countActiveSchedulesForUser, createAppealFromText, createScheduleRecord, extractScheduleMentionIds, formatScheduleLine, listUserSchedules, parseManagementScheduleAction, parseScheduleRequest, performManualGroupCheckins, processConflictSignal, processDueSchedules, reviewScheduleWithGemma, reviseScheduleRecord, runAutomaticGroupCheckins, skipScheduleOnce } from "./src/scheduler/runtime.js";
+import { cancelSchedule, cleanupExpiredModerationProposals, cleanupTransientState, countActiveSchedulesForUser, createAppealFromText, createScheduleRecord, extractScheduleMentionIds, formatScheduleLine, listUserSchedules, parseManagementScheduleAction, parseScheduleRequest, performManualGroupCheckins, processConflictSignal, processDueSchedules, reviewScheduleWithGemma, reviseScheduleRecord, runAutomaticGroupCheckins, scheduledCronMode, skipScheduleOnce } from "./src/scheduler/runtime.js";
 import { handleEntertainmentCommand } from "./src/games/entertainment.js";
 import { handleWerewolfOneBotEvent, injectWerewolfPortalClient, processWerewolfTimers } from "./src/games/werewolf.js";
 import { buildHelpText } from "./src/help/commands.js";
@@ -3880,12 +3880,19 @@ ${deepseekContextSummary}`;
   }, // 结束 fetch 函式
 
   async scheduled(controller, env, ctx) {
+    const cronMode = scheduledCronMode(controller?.cron);
+    if (cronMode === "cleanup") {
+      const now = Number(controller?.scheduledTime || Date.now());
+      ctx.waitUntil(cleanupTransientState(env, now));
+      ctx.waitUntil(cleanupExpiredModerationProposals(env, now));
+      return;
+    }
+    if (cronMode !== "routine") return;
+
     env = await portalEnvironmentWithManagedDeveloperIds(env);
     ctx.waitUntil(dbPut(env, "system:last_cron", String(Number(controller?.scheduledTime || Date.now()))));
     ctx.waitUntil(announceDeployedVersionFallback(env).catch(error => console.error("deployment self-fallback failed", error)));
     ctx.waitUntil(processDueSchedules(env, Number(controller?.scheduledTime || Date.now())));
-    ctx.waitUntil(cleanupTransientState(env));
-    ctx.waitUntil(cleanupExpiredModerationProposals(env));
     ctx.waitUntil(runAutomaticGroupCheckins(env, Number(controller?.scheduledTime || Date.now())));
     ctx.waitUntil(processPlatformJobs(env, Number(controller?.scheduledTime || Date.now())));
     ctx.waitUntil(processWerewolfTimers(env, Number(controller?.scheduledTime || Date.now())).catch(error => console.error("werewolf timer failed", error)));
