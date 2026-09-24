@@ -14,14 +14,16 @@ assert.match(wrangler, /^V3_RUNTIME_ENABLED = "true"$/m);
 assert.match(wrangler, /^V3_BILIBILI_ENABLED = "false"$/m);
 assert.match(wrangler, /^AUTO_CHECKIN_ENABLED = "false"$/m);
 assert.match(wrangler, /^PLUGIN_SECURITY_GPT_ENABLED = "false"$/m);
+assert.match(wrangler, /^V3_TEST_DB_TABLE = "kv_store_v3test_20260924"$/m);
+assert.match(wrangler, /^database_name = "qqaibot"$/m);
+assert.match(wrangler, /^database_id = "[a-f0-9-]{36}"$/m);
 
 for (const forbidden of [
   "qqai.ray2025.com",
-  "569a01fe-3297-40e1-832f-09c3793056ed",
+  "aibot.ray2025.com",
   "REPLACE_WITH_D1_DATABASE_ID",
   "[[routes]]",
   "[triggers]",
-  "database_id =",
   "index_name =",
   "namespace_id =",
   "[[durable_objects.bindings]]",
@@ -33,7 +35,8 @@ for (const forbidden of [
 }
 
 assert.match(workflow, /^\s*workflow_dispatch:\s*$/m);
-assert.doesNotMatch(workflow, /^\s*push:\s*$/m);
+assert.match(workflow, /^\s*push:\s*$/m);
+assert.match(workflow, /codex\/v3-forward-staging-20260924/);
 assert.match(workflow, /secrets\.CLOUDFLARE_API_TOKEN/);
 assert.match(workflow, /secrets\.CLOUDFLARE_ACCOUNT_ID/);
 assert.match(workflow, /npm run check/);
@@ -55,11 +58,12 @@ const deployPos = workflow.indexOf("Deploy isolated V3 test Worker");
 assert(regressionPos >= 0 && dryRunPos > regressionPos && credentialPos > dryRunPos && deployPos > credentialPos,
   "regression and dry-run must complete before the credential gate and live deploy");
 
-assert.match(bootstrap, /CREATE TABLE IF NOT EXISTS kv_store/);
-assert.match(bootstrap, /CREATE INDEX IF NOT EXISTS idx_kv_store_key_nocase/);
+assert.match(bootstrap, /CREATE TABLE IF NOT EXISTS kv_store_v3test_20260924/);
+assert.match(bootstrap, /INSERT INTO kv_store_v3test_20260924/);
+assert.doesNotMatch(bootstrap, /CREATE TABLE IF NOT EXISTS kv_store\s*\(/, "staging bootstrap must not create or alter the production table");
 assert.doesNotMatch(bootstrap, /\bDROP\s+(?:TABLE|DATABASE)\b/i);
-assert.doesNotMatch(bootstrap, /\bDELETE\s+FROM\b/i);
+assert.doesNotMatch(bootstrap, /\bDELETE\s+FROM\s+kv_store\b/i);
 assert.doesNotMatch(bootstrap, /\bUPDATE\s+kv_store\b/i);
-assert.doesNotMatch(bootstrap, /\bINSERT\s+INTO\b/i);
+assert.doesNotMatch(bootstrap, /\bINSERT\s+INTO\s+kv_store\b/i);
 
 console.log("verify-v3-test-deployment: ok");

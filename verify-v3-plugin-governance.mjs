@@ -194,10 +194,10 @@ assert.equal(minuteZero.checked, 1);
 const worker = fs.readFileSync("worker.js", "utf8");
 assert.match(worker, /runV3PluginSecurityScheduled\(env, scheduledTime\)/);
 assert.match(worker, /handleV3PluginSecurityPublic/);
-const wrangler = fs.readFileSync("wrangler.toml", "utf8");
-assert.match(wrangler, /crons = \["\* \* \* \* \*"\]/);
-assert.match(wrangler, /PLUGIN_SECURITY_GPT_ENABLED = "false"/);
-assert.match(wrangler, /PLUGIN_SECURITY_GPT_MODEL = ""/);
+const wrangler = fs.readFileSync("wrangler.v3test.toml", "utf8");
+assert.match(wrangler, /^PLUGIN_SECURITY_GPT_ENABLED = "false"$/m);
+assert.match(wrangler, /^PLUGIN_SECURITY_GPT_MODEL = ""$/m);
 assert.doesNotMatch(wrangler, /^OPENAI_API_KEY\s*=/m);
+assert.doesNotMatch(wrangler, /^\[triggers\]$/m, "staging plugin-security checks must not attach a Cron trigger");
 
 console.log("verify-v3-plugin-governance: ok");
