@@ -646,16 +646,23 @@ async function runAutomaticGroupCheckins(env, now = Date.now()) {
 async function cleanupExpiredModerationProposals(env, now = Date.now()) {
   if (!env.DB) return;
   try {
-    const rows = await env.DB.prepare("SELECT key, value FROM kv_store WHERE key LIKE 'moderation:proposal:op_%'").all();
-    for (const row of rows.results || []) {
+    const prefix = "moderation:proposal:op_";
+    const cursorKey = "cleanup:cursor:moderation_proposal_expiry";
+    const rows = await env.DB.prepare("SELECT key, value FROM kv_store WHERE key >= ? AND key < ? AND key > coalesce((SELECT value FROM kv_store WHERE key = ?), '') ORDER BY key LIMIT ?")
+      .bind(prefix, prefix + "\uFFFF", cursorKey, 50)
+      .all();
+    const batch = rows.results || [];
+    for (const row of batch) {
       let proposal = null;
       try { proposal = JSON.parse(row.value); } catch {}
       if (!proposal || proposal.status !== "pending" || now <= Number(proposal.expiresAt || 0)) continue;
       proposal.status = "expired";
       proposal.expiredAt = now;
       await retractModerationProposalMessage(env, proposal, "expired");
-      await dbPut(env, row.key, JSON.stringify(proposal));
+      await dbPutStrict(env, row.key, JSON.stringify(proposal));
     }
+    if (batch.length) await dbPutStrict(env, cursorKey, batch[batch.length - 1].key);
+    else await dbDelStrict(env, cursorKey);
   } catch (error) {
     console.warn("moderation expiry cleanup failed", error);
   }
