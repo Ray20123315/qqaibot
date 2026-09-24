@@ -105,7 +105,7 @@ async function readAtomicPersonaFacts(env) {
   if (!env?.DB) return output;
   const prefix = "social_persona_fact:";
   try {
-    const rows = await env.DB.prepare("SELECT key, value FROM kv_store WHERE substr(key, 1, ?) = ?").bind(prefix.length, prefix).all();
+    const rows = await env.DB.prepare("SELECT key, value FROM kv_store WHERE key >= ? AND key < ?").bind(prefix, `${prefix}\uFFFF`).all();
     for (const row of rows.results || []) {
       const key = String(row?.key || "").slice(prefix.length);
       if (!["birthday", "age", "gender", "heightCm", "weight"].includes(key)) continue;
