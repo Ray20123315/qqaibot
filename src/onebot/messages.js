@@ -114,7 +114,6 @@ async function recordStructuredMessage(env, item) {
     text: String(item.text || ""), mentions: item.mentions || [], replyId: item.replyId || "",
     source: item.source || "human", createdAt: Date.now()
   };
-  if (record.messageId) await dbPut(env, `message:${record.groupId}:${record.messageId}`, JSON.stringify(record));
   // 指令回覆、白名單提示、權限提示與其他系統訊息只保留引用辨識所需的 message metadata，
   // 不加入 recent_logs，也不成為模仿、摘要、衝突判斷或後續 AI 聊天的語料。
   if (record.groupId && item.includeInRecentLogs !== false) {
@@ -842,20 +841,6 @@ async function normalizeQuotedMessageSource(env, obj, botId, messageId) {
 
 
 async function getQuotedMessage(env, groupId, messageId, botId = "") {
-  const cacheKey = `message:${groupId}:${messageId}`;
-  const cached = await dbGet(env, cacheKey);
-  if (cached) {
-    try {
-      const obj = JSON.parse(cached);
-      if (obj && typeof obj === "object") {
-        const normalized = await normalizeQuotedMessageSource(env, obj, botId, messageId);
-        if (JSON.stringify(normalized) !== JSON.stringify(obj)) await dbPut(env, cacheKey, JSON.stringify(normalized));
-        return normalized;
-      }
-    } catch {
-      return { messageId, groupId, senderId: "", senderName: "", text: cached, source: "unknown" };
-    }
-  }
   try {
     const data = await callOneBotAction(env, { action: "get_msg", params: { message_id: numericId(messageId) } }, 12000);
     const senderId = String(data?.sender?.user_id || data?.user_id || "");
@@ -880,7 +865,6 @@ async function getQuotedMessage(env, groupId, messageId, botId = "") {
       selfId,
       createdAt: Number(data?.time || 0) * 1000 || Date.now()
     };
-    await dbPut(env, `message:${obj.groupId}:${messageId}`, JSON.stringify(obj));
     return obj;
   } catch (error) {
     return null;
