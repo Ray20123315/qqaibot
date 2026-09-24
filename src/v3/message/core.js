@@ -64,6 +64,8 @@ function createCanonicalMessage(meta = {}, parts = []) {
     groupId: idValue(meta.groupId),
     userId: idValue(meta.userId),
     selfId: idValue(meta.selfId),
+    senderRole: textValue(meta.senderRole || "member"),
+    senderName: textValue(meta.senderName),
     time: numberOrNull(meta.time),
     parts: normalizedParts
   };
