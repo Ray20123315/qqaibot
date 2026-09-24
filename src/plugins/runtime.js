@@ -63,6 +63,8 @@ function sanitizeMessageForPlugin(message, { allowMedia = false } = {}) {
     groupId: String(message.groupId || ""),
     userId: String(message.userId || ""),
     selfId: String(message.selfId || ""),
+    senderRole: String(message.senderRole || "member"),
+    senderName: String(message.senderName || ""),
     time: Number.isFinite(Number(message.time)) ? Number(message.time) : null,
     parts: Object.freeze(message.parts.map(part => sanitizePartForPlugin(part, allowMedia)))
   });
