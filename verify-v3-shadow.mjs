@@ -61,8 +61,9 @@ assert.match(log, /mface/);
 
 const wrapper = fs.readFileSync("src/games/werewolf.js", "utf8");
 assert.match(wrapper, /runV3ShadowEvent/);
-assert.match(wrapper, /V3_SHADOW_ENABLED/);
-assert.match(wrapper, /werewolf-legacy\.js/);
+assert.match(wrapper, /shadowEnabled\(env\)/);
+assert.match(wrapper, /async function handleLegacyWerewolfOneBotEvent/);
+assert.match(wrapper, /return handleLegacyWerewolfOneBotEvent\(env, body\)/);
 assert.match(wrapper, /catch/);
 
 console.log("verify-v3-shadow: ok");
