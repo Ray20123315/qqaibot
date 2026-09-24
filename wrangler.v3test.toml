@@ -10,7 +10,10 @@ preview_urls = true
 [[durable_objects.bindings]]
 name = "ONEBOT_HUB"
 class_name = "OneBotHub"
-script_name = "qqai"
+
+[[migrations]]
+tag = "v3test_onebot_hub_v1"
+new_sqlite_classes = ["OneBotHub"]
 
 [[d1_databases]]
 binding = "DB"
@@ -24,7 +27,6 @@ DEVELOPER_IDS = ""
 DEVELOPER_ID = ""
 ROOT_QQ_IDS = ""
 ENABLE_ONEBOT_HTTP_EVENTS = "false"
-ONEBOT_READ_ONLY = "true"
 AUTO_CHECKIN_ENABLED = "false"
 V3_RUNTIME_ENABLED = "true"
 V3_BILIBILI_ENABLED = "false"
