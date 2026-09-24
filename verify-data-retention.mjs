@@ -1,13 +1,15 @@
 import assert from "node:assert/strict";
 import { DatabaseSync } from "node:sqlite";
-import { cleanupTransientState } from "./src/scheduler/runtime.js";
+import { cleanupExpiredModerationProposals, cleanupTransientState } from "./src/scheduler/runtime.js";
 
 class SqliteD1 {
   constructor() {
     this.sqlite = new DatabaseSync(":memory:");
     this.sqlite.exec("CREATE TABLE kv_store (key TEXT PRIMARY KEY COLLATE NOCASE, value TEXT NOT NULL)");
+    this.preparedSql = [];
   }
   prepare(sql) {
+    this.preparedSql.push(sql);
     const database = this.sqlite;
     return {
       parameters: [],
@@ -87,6 +89,39 @@ assert.equal(afterOneBatch, 11, "each prefix sweep is bounded to 50 records");
 await cleanupTransientState(env, now);
 const afterTwoBatches = Array.from({ length: 60 }, (_, index) => db.get("portal_auth_code:batch-" + String(index).padStart(2, "0"))).filter(Boolean).length;
 assert.equal(afterTwoBatches, 0, "resumed keyset sweeps converge on the next cron pass");
+
+const moderationPrefix = "moderation:proposal:op_";
+const moderationCursor = "cleanup:cursor:moderation_proposal_expiry";
+for (let index = 0; index < 60; index += 1) {
+  const expired = index < 55;
+  db.set(moderationPrefix + String(index).padStart(2, "0"), JSON.stringify({
+    id: String(index),
+    status: "pending",
+    expiresAt: expired ? now - 1 : now + 60_000
+  }));
+}
+
+await cleanupExpiredModerationProposals(env, now);
+const moderationSelect = [...db.preparedSql].reverse().find(sql => sql.startsWith("SELECT key, value FROM kv_store WHERE key >= ? AND key < ?"));
+assert.ok(moderationSelect, "moderation expiry cleanup uses an indexed key range");
+assert.match(moderationSelect, /ORDER BY key LIMIT \?/);
+assert.doesNotMatch(moderationSelect, /LIKE|substr\s*\(/i, "moderation expiry cleanup must not scan kv_store by pattern");
+const plan = db.sqlite.prepare(`EXPLAIN QUERY PLAN ${moderationSelect}`).all(moderationPrefix, moderationPrefix + "\uFFFF", moderationCursor, 50);
+const planText = plan.map(row => row.detail).join("\n");
+assert.match(planText, /SEARCH kv_store USING (?:COVERING )?(?:INDEX|PRIMARY KEY)/i, "moderation range query is served by the key index");
+assert.doesNotMatch(planText, /SCAN kv_store/i, "moderation range query must avoid a full-table scan");
+assert.equal(JSON.parse(db.get(moderationPrefix + "00")).status, "expired");
+assert.equal(JSON.parse(db.get(moderationPrefix + "49")).status, "expired");
+assert.equal(JSON.parse(db.get(moderationPrefix + "50")).status, "pending", "each moderation cleanup pass is capped at 50 rows");
+assert.equal(db.get(moderationCursor), moderationPrefix + "49");
+
+await cleanupExpiredModerationProposals(env, now);
+assert.equal(JSON.parse(db.get(moderationPrefix + "54")).status, "expired");
+assert.equal(JSON.parse(db.get(moderationPrefix + "55")).status, "pending");
+assert.equal(db.get(moderationCursor), moderationPrefix + "59");
+
+await cleanupExpiredModerationProposals(env, now);
+assert.equal(db.get(moderationCursor), null, "the cleanup cursor resets after reaching the end of the prefix");
 db.sqlite.close();
 
 console.log("verify-data-retention: ok");
