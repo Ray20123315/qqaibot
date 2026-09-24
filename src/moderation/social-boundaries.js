@@ -37,34 +37,39 @@ function looksLikeFlirtCandidate(text, recentRecords = []) {
 async function readRecentConversationRecords(env, groupId, limit = 24) {
   const group = cleanId(groupId);
   if (!group) return [];
-  let ids = [];
-  try {
-    const raw = await dbGet(env, `conversation:index:${group}`);
-    ids = raw ? JSON.parse(raw) : [];
-  } catch {
-    ids = [];
-  }
-  const selected = (Array.isArray(ids) ? ids : []).slice(-Math.max(1, Math.min(80, Number(limit || 24))));
-  const records = [];
-  for (const id of selected) {
-    try {
-      const raw = await dbGet(env, `conversation:${group}:${String(id)}`);
-      if (!raw) continue;
-      const item = JSON.parse(raw);
-      records.push({
-        messageId: String(item?.messageId || item?.id || id),
-        groupId: group,
-        userId: cleanId(item?.userId),
-        senderName: String(item?.senderName || item?.userId || ""),
-        senderRole: String(item?.senderRole || "member").toLowerCase(),
-        text: String(item?.text || "").slice(0, 4000),
-        mentions: (Array.isArray(item?.mentions) ? item.mentions : []).map(cleanId).filter(Boolean),
-        replyId: String(item?.replyId || ""),
-        createdAt: Number(item?.createdAt || item?.updatedAt || 0)
-      });
-    } catch {}
-  }
-  return records.sort((left, right) => Number(left.createdAt || 0) - Number(right.createdAt || 0));
+  const boundedLimit = Math.max(1, Math.min(80, Number(limit || 24)));
+  const [logsRaw, membersRaw] = await Promise.all([
+    dbGet(env, `recent_logs:${group}`),
+    dbGet(env, `group_members:${group}`)
+  ]);
+  let logs = [];
+  let members = [];
+  try { logs = logsRaw ? JSON.parse(logsRaw) : []; } catch {}
+  try { members = membersRaw ? JSON.parse(membersRaw) : []; } catch {}
+  const roles = new Map((Array.isArray(members) ? members : []).map(item => [
+    cleanId(item?.user_id || item?.qq),
+    String(item?.role || "member").toLowerCase()
+  ]));
+  const selected = (Array.isArray(logs) ? logs : []).slice(-boundedLimit);
+  const now = Date.now();
+  return selected.map((line, index) => {
+    const text = String(line || "");
+    const match = text.match(/^\[(.*)\(QQ:(\d+)\)\]:\s*([\s\S]*)$/);
+    const userId = cleanId(match?.[2]);
+    const body = String(match?.[3] ?? text).slice(0, 4000);
+    return {
+      messageId: "",
+      groupId: group,
+      userId,
+      senderName: String(match?.[1] || userId),
+      senderRole: roles.get(userId) || "member",
+      text: body,
+      mentions: [...body.matchAll(/@(\d{5,20})/g)].map(item => cleanId(item[1])).filter(Boolean),
+      replyId: "",
+      createdAt: now - Math.max(0, selected.length - 1 - index) * 15000,
+      source: "recent_logs"
+    };
+  }).filter(item => item.userId);
 }
 
 function managerExchangeContext(records, { userId = "", senderRole = "member", text = "", mentionedQqs = [], quotedSenderId = "", now = Date.now() } = {}) {
