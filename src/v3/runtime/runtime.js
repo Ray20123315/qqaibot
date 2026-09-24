@@ -1,4 +1,4 @@
-import { createBilibiliLivePlugin, entertainmentPlugin } from "../../plugins/official/index.js";
+import { createActivityPlugin, createBilibiliLivePlugin, createPollPlugin, entertainmentPlugin } from "../../plugins/official/index.js";
 import { createV3HostAdapter } from "../host/adapter.js";
 import { buildV3PublicStatus, v3PublicStatusResponse } from "../public/status.js";
 
@@ -11,7 +11,10 @@ function normalizeExtraPlugins(value) {
 function createOfficialV3Plugins(options = {}) {
   const source = options && typeof options === "object" ? options : {};
   const plugins = [];
+  const adminUserIds = Array.isArray(source.adminUserIds) ? source.adminUserIds : [];
   if (source.entertainment !== false) plugins.push(entertainmentPlugin);
+  if (source.activity !== false) plugins.push(createActivityPlugin({ adminUserIds }));
+  if (source.poll !== false) plugins.push(createPollPlugin({ adminUserIds }));
   if (source.bilibili && source.bilibili !== false) {
     if (typeof source.bilibili !== "object") throw new Error("V3_BILIBILI_OPTIONS_INVALID");
     plugins.push(createBilibiliLivePlugin(source.bilibili));
