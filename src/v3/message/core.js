@@ -67,7 +67,8 @@ function createCanonicalMessage(meta = {}, parts = []) {
     senderRole: textValue(meta.senderRole || "member"),
     senderName: textValue(meta.senderName),
     time: numberOrNull(meta.time),
-    parts: normalizedParts
+    parts: normalizedParts,
+    text: canonicalPlainText(normalizedParts)
   };
   return Object.freeze(message);
 }
