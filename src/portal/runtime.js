@@ -17,7 +17,6 @@ import { appendPlatformTrace, enqueuePlatformJob, listPlatformFeatures, listPlat
 import { PORTAL_SETTING_DEFINITIONS, authDbDelStrict, authDbPutStrict, base32Encode, createPortalPasswordRecord, decryptPortalAuthSecret, deleteMemoryVector, encryptPortalAuthSecret, extractGroupId, generateBackupCodes, generateSixDigitCode, getOneBotHub, getPortalSession, getUserQuota, hashBackupCode, isMemoryBanned, jsonResponse, migratePortalMemories, portalAuthEncryptionMaterial, portalRoleRank, portalSessionCookie, randomBytes, readCookie, readJson, readPortalAuthJson, readPortalSettingValue, resolvePortalRole, searchPortalVectors, sendOneBotAction, sendPortalVerificationMessage, sha256Hex, upsertMemoryVector, validatePortalPassword, verifyPortalPassword, verifyPortalVerificationCode, verifyTotpCode, writeMemoryAudit, writePortalSettingValue } from "./auth.js";
 import { resolvePortalAccountIdentity } from "./account-identity.js";
 import { handlePortalMemberApi } from "./members.js";
-import { handleWerewolfPortalApi } from "../games/werewolf.js";
 import { cancelSchedule, countActiveSchedulesForUser, createScheduleRecord, deleteScheduleRecord, extractScheduleMentionIds, listUserSchedules, parseManagementScheduleAction, parseScheduleRequest, reviewScheduleWithGemma, reviseScheduleRecord, sanitizeAppealForReviewer, scheduleSpecFromRecord, skipScheduleOnce, voteAppeal, voteSchedule } from "../scheduler/runtime.js";
 import { envFlag, getFeatureFlag, getPrivateAccessMode, isGroupWhitelisted, numericId, setFeatureFlag } from "../security/network.js";
 
@@ -837,8 +836,6 @@ async function handlePortalApi(request, env, url) {
   const operationsResponse = await handleOpsPortalApi(request, env, url, path, body, authed);
   if (operationsResponse) return operationsResponse;
 
-  const werewolfPortalResponse = await handleWerewolfPortalApi(request, env, url, path, body, authed);
-  if (werewolfPortalResponse) return werewolfPortalResponse;
   const memberResponse = await handlePortalMemberApi(request, env, url, path, body, authed);
   if (memberResponse) return memberResponse;
 
@@ -1418,7 +1415,7 @@ ${summary}`.slice(0, 4000),
         chat: `Gemini 聊天优先（${pools.geminiChat.length} 把 Key），Gemma 聊天备用（${pools.gemmaChat.length} 把 Key）`,
         vision: visionConfigured ? `Gemini 独立图片 Key 池（${geminiVisionApiKeys(env).length} 把）` : "未配置，自动关闭",
         search: geminiSearchApiKeys(env).length ? `Gemini 独立搜索 Key 池（${geminiSearchApiKeys(env).length} 把）` : "未配置独立搜索 Key",
-        contextSummary: "DeepSeek 优先整理聊天上下文、会议纪要与吃瓜总结；失败时回退 Google 免费模型",
+        contextSummary: "上下文摘要依模型路由与配额策略执行；失败时自动选择可用的低成本备用模型",
         deepseekChat: portalIsDeveloper ? "开发者可手动使用；普通成员仅在 Google 免费模型连续失败后临时开放" : "普通成员不可手动选择；仅连续失败后临时开放"
       },
       keyPools: portalIsDeveloper ? {
@@ -1477,13 +1474,12 @@ ${summary}`.slice(0, 4000),
     const localManagement = ["owner", "admin"].includes(senderRole) ? localModerationIntent(text) : { action: "none", confidence: 0 };
     const managementCandidate = localManagement.action !== "none" && !isCommand;
     const explicitQuestion = mentionsBot && Boolean(text || hasImage) && !isCommand && !managementCandidate;
-    const interjectRate = groupId ? Math.max(0, Math.min(100, Number(await dbGet(env, `interject_rate:${groupId}`) || DEFAULTS.interjectRate))) : DEFAULTS.interjectRate;
+    const interjectRate = 0; // 主動插話目前全域暫停，不讀取舊 D1 設定。
     let final = "静默";
     if (isCommand) final = "执行指令；指令回复不写入聊天记忆";
     else if (managementCandidate) final = `建立「${moderationActionLabel(localManagement.action)}」提案，等待二次确认；不直接执行`;
     else if (explicitQuestion && currentlyBusy) final = "加入该群友的个人等待列";
     else if (explicitQuestion) final = "立即进入 AI 回答流程";
-    else if (interjectRate > 0) final = "可进入随机插话候选；仍需 Gemma 判断与概率检查";
     return jsonResponse({ ok: true, parsed: { text, senderRole, mentionsBot, hasImage, isCommand, managementCandidate, managementAction: localManagement.action, explicitQuestion, currentlyBusy, interjectRate }, decisions: { queue: explicitQuestion && currentlyBusy, thinking: explicitQuestion && !currentlyBusy, recordReply: explicitQuestion && !isCommand, commandOrSystemRecordedAsChat: false, final }, steps: ["解析 OneBot 事件", `发送者角色：${senderRole}`, mentionsBot ? "检测到 @机器人" : "未检测到 @机器人", managementCandidate ? `检测到待确认操作：${moderationActionLabel(localManagement.action)}` : "未检测到明确待确认操作", final] });
   }
 
@@ -2745,7 +2741,7 @@ function getPortalHomePage(host) {
         <div class="split"><div class="card"><div class="field"><label>模擬訊息</label><textarea id="simText" placeholder="例如：把 @某人 殺了"></textarea></div><div class="field"><label>發送者角色</label><select id="simRole"><option value="member">群友</option><option value="admin">管理員</option><option value="owner">群主</option></select></div><label class="switch"><input id="simMention" type="checkbox" checked>有 @ 機器人</label><label class="switch"><input id="simImage" type="checkbox">含圖片</label><label class="switch"><input id="simBusy" type="checkbox">此群友已有問題執行中</label></div><div class="card"><h3>模擬結果</h3><div id="simDecision" class="notice">尚未執行</div><div id="simSteps" class="timeline" style="margin-top:14px"></div></div></div>
       </section>
       <section id="v-models" class="view">
-        <div class="section-head"><div><h2>模型中心</h2><p>聊天默认使用 Gemini，Gemma 作为免费备用；DeepSeek 主要负责上下文、会议纪要与聊天总结。普通成员不可手动选择 DeepSeek，连续失败时才临时开放。</p></div><button id="reloadModels" class="btn">重新加载</button></div><div id="modelRoutingSummary" class="card" style="margin-bottom:16px"><div class="empty">尚未加载模型路由</div></div><div id="modelList" class="grid"><div class="empty span-12">尚未加载</div></div>
+        <div class="section-head"><div><h2>模型中心</h2><p>模型依用途、帐号与配额分类管理；聊天、判断、图片、语音与摘要可分别指定模型与备用顺序。</p></div><button id="reloadModels" class="btn">重新加载</button></div><div id="modelRoutingSummary" class="card" style="margin-bottom:16px"><div class="empty">尚未加载模型路由</div></div><div id="modelList" class="grid"><div class="empty span-12">尚未加载</div></div>
       </section>
       <section id="v-quota" class="view">
         <div class="section-head"><div><h2>DeepSeek 额度与限制</h2><p>留空代表不限制；填 0 代表完全禁止；正數代表每日人民幣上限。</p></div><button id="saveQuota" class="btn primary">儲存額度</button></div>
