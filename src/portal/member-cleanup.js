@@ -403,7 +403,7 @@ async function writeSnapshots(env, groupId, snapshots) {
   if (typeof env.DB.batch === "function") {
     for (let index = 0; index < list.length; index += 50) {
       const chunk = list.slice(index, index + 50);
-      await env.DB.batch(chunk.map(item => env.DB.prepare("INSERT INTO kv_store (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value").bind(snapshotKey(groupId, item.qq), JSON.stringify(item))));
+      await env.DB.batch(chunk.map(item => env.DB.prepare("INSERT INTO kv_store (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value WHERE kv_store.value IS NOT excluded.value").bind(snapshotKey(groupId, item.qq), JSON.stringify(item))));
     }
   } else {
     for (const item of list) await dbPut(env, snapshotKey(groupId, item.qq), JSON.stringify(item));
