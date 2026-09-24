@@ -7,6 +7,14 @@ compatibility_flags = ["nodejs_compat"]
 workers_dev = true
 preview_urls = true
 
+[[durable_objects.bindings]]
+name = "ONEBOT_HUB"
+class_name = "OneBotHub"
+
+[[migrations]]
+tag = "v3test_onebot_hub_v1"
+new_sqlite_classes = ["OneBotHub"]
+
 [[d1_databases]]
 binding = "DB"
 database_name = "qqaibot"

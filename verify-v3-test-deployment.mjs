@@ -8,7 +8,7 @@ const bootstrap = fs.readFileSync("tools/v3test-bootstrap.sql", "utf8");
 assert.match(wrangler, /^name = "qqai-v3test"$/m);
 assert.match(wrangler, /^workers_dev = true$/m);
 assert.match(wrangler, /^preview_urls = true$/m);
-assert.match(wrangler, /^\[\[d1_databases\]\]$/m);
+assert.match(wrangler, /^\\[\\[durable_objects\\.bindings\\]\\]$/m);\nassert.match(wrangler, /^name = "ONEBOT_HUB"$/m);\nassert.match(wrangler, /^class_name = "OneBotHub"$/m);\nassert.match(wrangler, /^\\[\\[migrations\\]\\]$/m);\nassert.match(wrangler, /^new_sqlite_classes = \\["OneBotHub"\\]$/m);\nassert.match(wrangler, /^\\[\\[d1_databases\\]\\]$/m);
 assert.match(wrangler, /^binding = "DB"$/m);
 assert.match(wrangler, /^V3_RUNTIME_ENABLED = "true"$/m);
 assert.match(wrangler, /^V3_BILIBILI_ENABLED = "false"$/m);
@@ -26,7 +26,6 @@ for (const forbidden of [
   "[triggers]",
   "index_name =",
   "namespace_id =",
-  "[[durable_objects.bindings]]",
   "ONEBOT_ACCESS_TOKEN",
   "GEMINI_API",
   "OPENAI_API_KEY"
