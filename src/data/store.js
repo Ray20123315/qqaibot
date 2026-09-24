@@ -245,8 +245,10 @@ function parseStoredHistory(raw) {
 
 async function readChatHistory(env, sessionKey, limit = DEFAULTS.conversationHistoryItems) {
   const boundedLimit = Math.max(2, Math.min(200, Number(limit || DEFAULTS.conversationHistoryItems)));
-  const legacy = parseStoredHistory(await dbGet(env, sessionKey));
-  if (!String(sessionKey).startsWith("chat:group:") || !env?.DB) return legacy.slice(-boundedLimit);
+  const isGroupSession = String(sessionKey).startsWith("chat:group:");
+  if (!isGroupSession || !env?.DB) {
+    return parseStoredHistory(await dbGet(env, sessionKey)).slice(-boundedLimit);
+  }
   try {
     const turnLimit = Math.max(1, Math.ceil(boundedLimit / 2) + 4);
     const turnPrefix = `chat_turn:${sessionKey}:`;
@@ -261,13 +263,14 @@ async function readChatHistory(env, sessionKey, limit = DEFAULTS.conversationHis
         return [];
       }
     });
+    if (recent.length >= boundedLimit) return recent.slice(-boundedLimit);
+    const legacy = parseStoredHistory(await dbGet(env, sessionKey));
     return [...legacy, ...recent].slice(-boundedLimit);
   } catch (error) {
     console.error(`读取并发群聊历史失败 [${sessionKey}]:`, error);
-    return legacy.slice(-boundedLimit);
+    return parseStoredHistory(await dbGet(env, sessionKey)).slice(-boundedLimit);
   }
 }
-
 
 
 async function appendChatHistoryTurn(env, sessionKey, items, metadata = {}) {
