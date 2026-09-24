@@ -62,12 +62,17 @@ assert(worker.includes('from "./src/social/runtime.js"'), 'Worker must import th
 assert(worker.includes('oneBotEventIsBareMention(body)'), 'Bare mentions must enter the existing Durable Object input buffer');
 assert(worker.includes('shouldSendSocialBufferNotice'), 'Multi-message waiting notices must be controlled and silent by default');
 assert(worker.includes('buildSocialDecision(env'), 'Worker must run the social decision layer before public wording');
+assert(!worker.includes('observeSocialStyle(env'), 'Lean v2 must not persist learned social style on every group message');
+assert(!worker.includes('updateAffinityFixedFromMessage(env'), 'Lean v2 must not update affinity on the message hot path');
+assert(!worker.includes('refreshAffinityAiAssessment(env'), 'Lean v2 must not run background affinity AI refreshes');
 assert(worker.includes('applySocialOutputPolicy({'), 'Worker must enforce output shape after model generation');
 assert(worker.includes('capturePersonaContinuity(env'), 'Generated persona facts must be persisted for continuity');
 assert(worker.includes('const personaContinuity = await capturePersonaContinuity'), 'Persona facts must be locked before the reply is sent');
 const socialSource = fs.readFileSync('src/social/runtime.js', 'utf8');
 assert(socialSource.includes('social_persona:global'), 'Persona facts must be global across groups and private chat');
 assert(socialSource.includes('INSERT OR IGNORE INTO kv_store'), 'First-generated persona facts must use an atomic claim');
+assert(socialSource.includes('PERSIST_SOCIAL_RELATIONSHIPS'), 'Relationship persistence must be explicit opt-in');
+assert(!socialSource.includes('async function observeSocialStyle'), 'Learned social-style persistence is removed from lean v2');
 const onebotSource = fs.readFileSync('src/onebot/messages.js', 'utf8');
 assert(onebotSource.includes('[表情:'), 'Native QQ face IDs must survive text extraction');
 assert(worker.includes('waitForSocialTyping({'), 'Group replies must use bounded natural typing delay');
