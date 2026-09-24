@@ -14,6 +14,15 @@ import { readJson, sendPortalVerificationMessage } from "../portal/auth.js";
 import { getFeatureFlag, isGroupWhitelisted, numericId } from "../security/network.js";
 import { isManagementRole, looksLikeRoughBanter, managerExchangeContext, readRecentConversationRecords } from "../moderation/social-boundaries.js";
 
+export const SCHEDULED_ROUTINE_CRON = "* * * * *";
+export const SCHEDULED_D1_CLEANUP_CRON = "17 * * * *";
+
+export function scheduledCronMode(cron) {
+  if (cron === SCHEDULED_D1_CLEANUP_CRON) return "cleanup";
+  if (cron === SCHEDULED_ROUTINE_CRON) return "routine";
+  return "ignore";
+}
+
 
 
 function parseScheduleRequest(text, now = Date.now()) {
