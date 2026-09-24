@@ -21,7 +21,6 @@ assert.match(wrangler, /^V3_BILIBILI_ENABLED = "false"$/m);
 assert.match(wrangler, /^AUTO_CHECKIN_ENABLED = "false"$/m);
 assert.match(wrangler, /^PLUGIN_SECURITY_GPT_ENABLED = "false"$/m);
 assert.match(wrangler, /^V3_TEST_DB_TABLE = "kv_store_v3test_20260924"$/m);
-assert.match(wrangler, /^ONEBOT_READ_ONLY = "true"$/m);
 assert.match(wrangler, /^database_name = "qqaibot"$/m);
 assert.match(wrangler, /^database_id = "[a-f0-9-]{36}"$/m);
 
@@ -34,6 +33,7 @@ for (const forbidden of [
   "index_name =",
   "namespace_id =",
   'script_name = "qqai"',
+  "ONEBOT_READ_ONLY",
   "ONEBOT_ACCESS_TOKEN",
   "GEMINI_API",
   "OPENAI_API_KEY"

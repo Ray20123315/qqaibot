@@ -1,0 +1,367 @@
+import { dbDel, dbGet, dbPut } from "../data/store.js";
+
+const PARTNER_REQUEST_TTL_MS = 10 * 60 * 1000;
+const MASTER_RELATIONSHIP_DEFAULT_LEVEL = 1;
+const MASTER_RELATIONSHIP_MAX_LEVEL = 4;
+const MASTER_RELATIONSHIP_LEVELS = Object.freeze({
+  1: Object.freeze({ level: 1, label: "Lv.1", mute: true, unmute: false, recall: false, rename: false, kick: false, maxMuteSeconds: 60, unlock: "禁言" }),
+  2: Object.freeze({ level: 2, label: "Lv.2", mute: true, unmute: true, recall: false, rename: false, kick: false, maxMuteSeconds: 10 * 60, unlock: "禁言、解除主人禁言" }),
+  3: Object.freeze({ level: 3, label: "Lv.3", mute: true, unmute: true, recall: true, rename: false, kick: false, maxMuteSeconds: 30 * 60, unlock: "禁言、解除主人禁言、撤回" }),
+  4: Object.freeze({ level: 4, label: "Lv.4", mute: true, unmute: true, recall: true, rename: true, kick: false, maxMuteSeconds: 2 * 60 * 60, unlock: "禁言、解除主人禁言、撤回、修改群名片" })
+});
+const MASTER_RELATIONSHIP_DEFAULTS = MASTER_RELATIONSHIP_LEVELS[MASTER_RELATIONSHIP_DEFAULT_LEVEL];
+
+function normalizeMasterLevel(value, fallback = MASTER_RELATIONSHIP_DEFAULT_LEVEL) {
+  const parsed = Math.trunc(Number(value));
+  if (Number.isFinite(parsed) && parsed >= 1 && parsed <= MASTER_RELATIONSHIP_MAX_LEVEL) return parsed;
+  const safeFallback = Math.trunc(Number(fallback));
+  return Number.isFinite(safeFallback) && safeFallback >= 1 && safeFallback <= MASTER_RELATIONSHIP_MAX_LEVEL ? safeFallback : MASTER_RELATIONSHIP_DEFAULT_LEVEL;
+}
+
+function inferMasterLevelFromLegacyPermissions(value) {
+  const source = value && typeof value === "object" ? value : null;
+  if (!source) return MASTER_RELATIONSHIP_MAX_LEVEL;
+  if (source.rename === true) return 4;
+  if (source.recall === true) return 3;
+  if (source.unmute === true) return 2;
+  return 1;
+}
+
+function masterPermissionsForLevel(value) {
+  const level = normalizeMasterLevel(value);
+  return { ...MASTER_RELATIONSHIP_LEVELS[level], kick: false };
+}
+
+function normalizeMasterPermissions(value, levelValue) {
+  const fallback = levelValue === undefined || levelValue === null
+    ? inferMasterLevelFromLegacyPermissions(value)
+    : MASTER_RELATIONSHIP_DEFAULT_LEVEL;
+  return masterPermissionsForLevel(normalizeMasterLevel(levelValue, fallback));
+}
+
+function cleanId(value) {
+  return String(value || "").replace(/\D/g, "");
+}
+
+function partnerBindingKey(groupId, userId) {
+  return `partner_binding:${cleanId(groupId)}:${cleanId(userId)}`;
+}
+
+function partnerRequestKey(id) {
+  return `partner_binding_request:${String(id || "")}`;
+}
+
+function partnerPendingKey(groupId, userId) {
+  return `partner_binding_pending:${cleanId(groupId)}:${cleanId(userId)}`;
+}
+
+async function readJsonKey(env, key, fallback = null) {
+  const raw = await dbGet(env, key);
+  if (!raw) return fallback;
+  try { return JSON.parse(raw); } catch { return fallback; }
+}
+
+function normalizeBinding(value) {
+  const source = value && typeof value === "object" ? value : {};
+  const groupId = cleanId(source.groupId);
+  const userId = cleanId(source.userId);
+  const partnerId = cleanId(source.partnerId);
+  const mode = source.mode === "master" ? "master" : "partner";
+  const masterId = mode === "master" ? cleanId(source.masterId) : "";
+  const memberId = mode === "master" ? cleanId(source.memberId) : "";
+  const relationshipRole = mode === "master"
+    ? userId === masterId ? "master" : userId === memberId ? "member" : ""
+    : "partner";
+  const validMasterPair = mode !== "master" || Boolean(masterId && memberId && masterId !== memberId && relationshipRole);
+  const level = mode === "master" ? normalizeMasterLevel(source.level, inferMasterLevelFromLegacyPermissions(source.permissions)) : 0;
+  return {
+    active: Boolean(source.active && groupId && userId && partnerId && userId !== partnerId && validMasterPair),
+    groupId,
+    userId,
+    partnerId,
+    mode,
+    relationshipRole,
+    masterId,
+    memberId,
+    level,
+    permissions: mode === "master" ? masterPermissionsForLevel(level) : null,
+    createdAt: Number(source.createdAt || 0),
+    requestId: String(source.requestId || "")
+  };
+}
+
+async function getPartnerBinding(env, groupId, userId) {
+  const binding = normalizeBinding(await readJsonKey(env, partnerBindingKey(groupId, userId), null));
+  if (!binding.active) return null;
+  const reverse = normalizeBinding(await readJsonKey(env, partnerBindingKey(groupId, binding.partnerId), null));
+  if (!reverse.active || reverse.partnerId !== binding.userId || reverse.mode !== binding.mode) return null;
+  if (binding.mode === "master" && (reverse.masterId !== binding.masterId || reverse.memberId !== binding.memberId || reverse.relationshipRole === binding.relationshipRole)) return null;
+  return binding;
+}
+
+async function getBindingRequest(env, requestId) {
+  const request = await readJsonKey(env, partnerRequestKey(requestId), null);
+  return request && typeof request === "object" ? request : null;
+}
+
+async function clearPendingRequestPointers(env, request) {
+  await Promise.all([
+    dbDel(env, partnerPendingKey(request.groupId, request.requesterId)).catch(() => {}),
+    dbDel(env, partnerPendingKey(request.groupId, request.targetId)).catch(() => {})
+  ]);
+}
+
+async function activePendingRequest(env, groupId, userId) {
+  const pointer = String(await dbGet(env, partnerPendingKey(groupId, userId)) || "");
+  if (!pointer) return null;
+  const request = await readJsonKey(env, partnerRequestKey(pointer), null);
+  if (!request || request.status !== "pending" || Number(request.expiresAt || 0) <= Date.now()) {
+    if (request) {
+      request.status = request.status === "pending" ? "expired" : request.status;
+      request.decidedAt = Number(request.decidedAt || Date.now());
+      await dbPut(env, partnerRequestKey(pointer), JSON.stringify(request)).catch(() => {});
+      await clearPendingRequestPointers(env, request);
+    } else {
+      await dbDel(env, partnerPendingKey(groupId, userId)).catch(() => {});
+    }
+    return null;
+  }
+  return request;
+}
+
+async function createBindingRequest(env, { groupId, requesterId, targetId, mode = "partner", masterId = "", memberId = "" }) {
+  const group = cleanId(groupId);
+  const requester = cleanId(requesterId);
+  const target = cleanId(targetId);
+  const normalizedMode = mode === "master" ? "master" : "partner";
+  const master = normalizedMode === "master" ? cleanId(masterId) : "";
+  const member = normalizedMode === "master" ? cleanId(memberId) : "";
+  if (!group || !requester || !target || requester === target) return { ok: false, message: normalizedMode === "master" ? "主人关系必须绑定本群另一位成员。" : "绑定对象必须是本群另一位成员。" };
+  if (normalizedMode === "master" && (!master || !member || master === member || ![requester, target].includes(master) || ![requester, target].includes(member))) return { ok: false, message: "主人与所属成员资料不完整。" };
+  if (await getPartnerBinding(env, group, requester)) return { ok: false, message: normalizedMode === "partner" ? "你已经绑定了一个对象；每个人只能绑定一个。" : "你已经有一段绑定关系；每个人每群只能有一段关系。" };
+  if (await getPartnerBinding(env, group, target)) return { ok: false, message: normalizedMode === "partner" ? "对方已经绑定了对象；每个人只能绑定一个。" : "对方已经有一段绑定关系；每个人每群只能有一段关系。" };
+  if (await activePendingRequest(env, group, requester)) return { ok: false, message: "你已有尚未处理的关系绑定申请。" };
+  if (await activePendingRequest(env, group, target)) return { ok: false, message: "对方已有尚未处理的关系绑定申请。" };
+  const now = Date.now();
+  const id = `${normalizedMode === "master" ? "mb" : "pb"}_${now.toString(36)}_${crypto.randomUUID().slice(0, 6)}`;
+  const request = {
+    id,
+    mode: normalizedMode,
+    status: "pending",
+    groupId: group,
+    requesterId: requester,
+    targetId: target,
+    masterId: master,
+    memberId: member,
+    createdAt: now,
+    expiresAt: now + PARTNER_REQUEST_TTL_MS
+  };
+  await dbPut(env, partnerRequestKey(id), JSON.stringify(request));
+  await dbPut(env, partnerPendingKey(group, requester), id);
+  await dbPut(env, partnerPendingKey(group, target), id);
+  return { ok: true, request };
+}
+
+async function createPartnerBindingRequest(env, { groupId, requesterId, targetId }) {
+  return createBindingRequest(env, { groupId, requesterId, targetId, mode: "partner" });
+}
+
+async function createMasterBindingRequest(env, { groupId, requesterId, targetId, masterId, memberId }) {
+  return createBindingRequest(env, { groupId, requesterId, targetId, mode: "master", masterId, memberId });
+}
+
+async function decidePartnerBindingRequest(env, { groupId, requestId, actorId, approve }) {
+  const request = await readJsonKey(env, partnerRequestKey(requestId), null);
+  const group = cleanId(groupId);
+  const actor = cleanId(actorId);
+  const relationName = request?.mode === "master" ? "主人关系" : "对象";
+  if (!request || request.groupId !== group) return { ok: false, message: `找不到该${relationName}绑定申请。` };
+  if (request.status !== "pending") return { ok: false, message: `该${relationName}绑定申请当前状态为 ${request.status}。` };
+  if (Number(request.expiresAt || 0) <= Date.now()) {
+    request.status = "expired";
+    request.decidedAt = Date.now();
+    await dbPut(env, partnerRequestKey(request.id), JSON.stringify(request));
+    await clearPendingRequestPointers(env, request);
+    return { ok: false, message: `该${relationName}绑定申请已过期。` };
+  }
+  if (actor !== request.targetId) return { ok: false, message: "只有被邀请的群友可以处理该申请。" };
+  if (!approve) {
+    request.status = "rejected";
+    request.decidedAt = Date.now();
+    request.decidedBy = actor;
+    await dbPut(env, partnerRequestKey(request.id), JSON.stringify(request));
+    await clearPendingRequestPointers(env, request);
+    return { ok: true, approved: false, request };
+  }
+  if (await getPartnerBinding(env, group, request.requesterId) || await getPartnerBinding(env, group, request.targetId)) {
+    request.status = "conflict";
+    request.decidedAt = Date.now();
+    await dbPut(env, partnerRequestKey(request.id), JSON.stringify(request));
+    await clearPendingRequestPointers(env, request);
+    return { ok: false, message: "其中一方已经绑定了其他关系，本次申请无法通过。" };
+  }
+  const now = Date.now();
+  const common = { active: true, groupId: group, mode: request.mode === "master" ? "master" : "partner", level: request.mode === "master" ? MASTER_RELATIONSHIP_DEFAULT_LEVEL : 0, permissions: request.mode === "master" ? masterPermissionsForLevel(MASTER_RELATIONSHIP_DEFAULT_LEVEL) : null, createdAt: now, requestId: request.id };
+  const left = {
+    ...common,
+    userId: request.requesterId,
+    partnerId: request.targetId,
+    masterId: request.mode === "master" ? cleanId(request.masterId) : "",
+    memberId: request.mode === "master" ? cleanId(request.memberId) : ""
+  };
+  const right = {
+    ...common,
+    userId: request.targetId,
+    partnerId: request.requesterId,
+    masterId: left.masterId,
+    memberId: left.memberId
+  };
+  left.relationshipRole = left.mode === "master" ? left.userId === left.masterId ? "master" : "member" : "partner";
+  right.relationshipRole = right.mode === "master" ? right.userId === right.masterId ? "master" : "member" : "partner";
+  if (left.mode === "master" && (!left.masterId || !left.memberId || left.relationshipRole === right.relationshipRole)) return { ok: false, message: "主人关系资料验证失败。" };
+  await dbPut(env, partnerBindingKey(group, left.userId), JSON.stringify(left));
+  await dbPut(env, partnerBindingKey(group, right.userId), JSON.stringify(right));
+  request.status = "approved";
+  request.decidedAt = now;
+  request.decidedBy = actor;
+  await dbPut(env, partnerRequestKey(request.id), JSON.stringify(request));
+  await clearPendingRequestPointers(env, request);
+  return { ok: true, approved: true, request, bindings: [left, right] };
+}
+
+async function listGroupBindings(env, groupId) {
+  const group = cleanId(groupId);
+  if (!env?.DB || !group) return [];
+  const prefix = `partner_binding:${group}:`;
+  const rows = await env.DB.prepare("SELECT key, value FROM kv_store WHERE key >= ? AND key < ? ORDER BY key ASC").bind(prefix, `${prefix}\uFFFF`).all();
+  const byUser = new Map();
+  for (const row of rows.results || []) {
+    let parsed = null;
+    try { parsed = JSON.parse(String(row?.value || "{}")); } catch {}
+    const binding = normalizeBinding(parsed);
+    if (binding.active) byUser.set(binding.userId, binding);
+  }
+  const output = [];
+  const seen = new Set();
+  for (const binding of byUser.values()) {
+    const reverse = byUser.get(binding.partnerId);
+    if (!reverse || reverse.partnerId !== binding.userId || reverse.mode !== binding.mode) continue;
+    if (binding.mode === "master" && (reverse.masterId !== binding.masterId || reverse.memberId !== binding.memberId || reverse.relationshipRole === binding.relationshipRole)) continue;
+    const pair = [binding.userId, binding.partnerId].sort();
+    const key = `${binding.mode}:${pair[0]}:${pair[1]}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    output.push(binding.mode === "master" ? {
+      mode: "master",
+      masterId: binding.masterId,
+      memberId: binding.memberId,
+      userIds: [binding.masterId, binding.memberId],
+      level: binding.level,
+      permissions: binding.permissions,
+      createdAt: binding.createdAt,
+      requestId: binding.requestId
+    } : {
+      mode: "partner",
+      leftId: pair[0],
+      rightId: pair[1],
+      userIds: pair,
+      createdAt: binding.createdAt,
+      requestId: binding.requestId
+    });
+  }
+  return output.sort((left, right) => Number(right.createdAt || 0) - Number(left.createdAt || 0));
+}
+
+async function createDirectMasterBinding(env, { groupId, masterId, memberId, createdBy = "", replaceExisting = false }) {
+  const group = cleanId(groupId);
+  const master = cleanId(masterId);
+  const member = cleanId(memberId);
+  const actor = cleanId(createdBy);
+  if (!group || !master || !member || master === member) return { ok: false, message: "主人与所属成员资料不完整。" };
+  const [masterBinding, memberBinding] = await Promise.all([
+    getPartnerBinding(env, group, master),
+    getPartnerBinding(env, group, member)
+  ]);
+  if ((masterBinding || memberBinding) && !replaceExisting) {
+    return { ok: false, conflict: true, message: "主人或所属成员已有关系；请明确勾选替换既有关系。" };
+  }
+  if (replaceExisting) {
+    const users = [...new Set([masterBinding?.userId, masterBinding?.partnerId, memberBinding?.userId, memberBinding?.partnerId].filter(Boolean))];
+    for (const userId of users) await clearPartnerBinding(env, group, userId).catch(() => {});
+  }
+  for (const userId of [master, member]) {
+    const pending = await activePendingRequest(env, group, userId);
+    if (!pending) continue;
+    pending.status = "superseded";
+    pending.decidedAt = Date.now();
+    pending.decidedBy = actor;
+    await dbPut(env, partnerRequestKey(pending.id), JSON.stringify(pending)).catch(() => {});
+    await clearPendingRequestPointers(env, pending);
+  }
+  const now = Date.now();
+  const requestId = `direct_${now.toString(36)}_${crypto.randomUUID().slice(0, 6)}`;
+  const common = { active: true, groupId: group, mode: "master", masterId: master, memberId: member, level: MASTER_RELATIONSHIP_DEFAULT_LEVEL, permissions: masterPermissionsForLevel(MASTER_RELATIONSHIP_DEFAULT_LEVEL), createdAt: now, requestId, direct: true, createdBy: actor };
+  const masterBindingRecord = { ...common, userId: master, partnerId: member, relationshipRole: "master" };
+  const memberBindingRecord = { ...common, userId: member, partnerId: master, relationshipRole: "member" };
+  await Promise.all([
+    dbPut(env, partnerBindingKey(group, master), JSON.stringify(masterBindingRecord)),
+    dbPut(env, partnerBindingKey(group, member), JSON.stringify(memberBindingRecord))
+  ]);
+  return { ok: true, requestId, bindings: [normalizeBinding(masterBindingRecord), normalizeBinding(memberBindingRecord)] };
+}
+async function updateMasterBindingLevel(env, groupId, userId, requestedLevel, updatedBy = "") {
+  const binding = await getPartnerBinding(env, groupId, userId);
+  if (!binding || binding.mode !== "master") return { ok: false, message: "找不到有效的主人关系。" };
+  const level = normalizeMasterLevel(requestedLevel, binding.level || MASTER_RELATIONSHIP_DEFAULT_LEVEL);
+  const permissions = masterPermissionsForLevel(level);
+  const [leftRaw, rightRaw] = await Promise.all([
+    readJsonKey(env, partnerBindingKey(binding.groupId, binding.userId), null),
+    readJsonKey(env, partnerBindingKey(binding.groupId, binding.partnerId), null)
+  ]);
+  if (!leftRaw || !rightRaw) return { ok: false, message: "主人关系资料不完整。" };
+  const updatedAt = Date.now();
+  await Promise.all([
+    dbPut(env, partnerBindingKey(binding.groupId, binding.userId), JSON.stringify({ ...leftRaw, level, permissions, permissionsUpdatedAt: updatedAt, permissionsUpdatedBy: cleanId(updatedBy) })),
+    dbPut(env, partnerBindingKey(binding.groupId, binding.partnerId), JSON.stringify({ ...rightRaw, level, permissions, permissionsUpdatedAt: updatedAt, permissionsUpdatedBy: cleanId(updatedBy) }))
+  ]);
+  const next = await getPartnerBinding(env, binding.groupId, binding.userId);
+  return { ok: true, binding: next };
+}
+
+async function updateMasterBindingPermissions(env, groupId, userId, patch, updatedBy = "") {
+  const requestedLevel = patch && typeof patch === "object" && patch.level !== undefined
+    ? patch.level
+    : inferMasterLevelFromLegacyPermissions(patch);
+  return updateMasterBindingLevel(env, groupId, userId, requestedLevel, updatedBy);
+}
+async function clearPartnerBinding(env, groupId, userId) {
+  const binding = await getPartnerBinding(env, groupId, userId);
+  if (!binding) return null;
+  await Promise.all([
+    dbDel(env, partnerBindingKey(binding.groupId, binding.userId)),
+    dbDel(env, partnerBindingKey(binding.groupId, binding.partnerId))
+  ]);
+  return binding;
+}
+
+export {
+  MASTER_RELATIONSHIP_DEFAULT_LEVEL,
+  MASTER_RELATIONSHIP_DEFAULTS,
+  MASTER_RELATIONSHIP_LEVELS,
+  MASTER_RELATIONSHIP_MAX_LEVEL,
+  PARTNER_REQUEST_TTL_MS,
+  clearPartnerBinding,
+  createDirectMasterBinding,
+  createMasterBindingRequest,
+  createPartnerBindingRequest,
+  decidePartnerBindingRequest,
+  getBindingRequest,
+  getPartnerBinding,
+  listGroupBindings,
+  masterPermissionsForLevel,
+  normalizeMasterLevel,
+  normalizeMasterPermissions,
+  partnerBindingKey,
+  updateMasterBindingLevel,
+  updateMasterBindingPermissions
+};
