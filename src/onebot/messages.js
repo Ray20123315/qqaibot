@@ -4,8 +4,8 @@
 import { AI_MEDIA_LIMITS, DEFAULTS, VERSION } from "../config/runtime.js";
 import { completeTextAtBoundary } from "../ai/conversation-quality.js";
 import { neutralizeAiCommandPrefix } from "../core/identity.js";
-import { appendIndex, callOneBotAction, writeSystemAudit } from "../core/permissions.js";
-import { dbDel, dbGet, dbPut } from "../data/store.js";
+import { callOneBotAction, writeSystemAudit } from "../core/permissions.js";
+import { dbAppendJsonArrayCapped, dbDel, dbGet, dbPut } from "../data/store.js";
 import { getLiveGroupMemberList, sendGroupSelectedMentions } from "../group/runtime.js";
 import { readJson, upsertGroupMember } from "../portal/auth.js";
 import { fetchMediaAsBase64, numericId } from "../security/network.js";
@@ -44,48 +44,6 @@ async function purgeLegacyBotRepliesFromRecentLogs(env, groupId, botId) {
 
 
 
-async function appendPortalConversationRecord(env, data) {
-  const groupId = String(data.groupId || "");
-  const messageId = String(data.messageId || `conv_${Date.now().toString(36)}_${crypto.randomUUID().slice(0, 8)}`);
-  if (!groupId || !messageId) return null;
-  const key = `conversation:${groupId}:${messageId}`;
-  const existing = await readJson(env, key, null);
-  const files = (Array.isArray(data.files) ? data.files : []).slice(0, 20).map(normalizeFileDescriptor);
-  const media = (Array.isArray(data.media) ? data.media : []).slice(0, 20).map(item => ({ type: String(item?.type || ""), url: String(item?.url || "").slice(0, 2000), file: String(item?.file || "").slice(0, 1000) }));
-  const forwardSnapshots = (Array.isArray(data.forwardSnapshots) ? data.forwardSnapshots : []).slice(0, AI_MEDIA_LIMITS.forwardBundles).map(item => ({
-    id: String(item?.id || ""),
-    text: String(item?.text || "").slice(0, AI_MEDIA_LIMITS.forwardTextChars),
-    nodes: (Array.isArray(item?.nodes) ? item.nodes : []).slice(0, AI_MEDIA_LIMITS.forwardNodes).map(node => ({ senderName: String(node?.senderName || ""), senderId: String(node?.senderId || ""), text: String(node?.text || "").slice(0, 4000), time: Number(node?.time || 0) || 0 })),
-    media: (Array.isArray(item?.media) ? item.media : []).slice(0, 20),
-    error: String(item?.error || "").slice(0, 500),
-    truncated: Boolean(item?.truncated)
-  }));
-  const item = {
-    ...(existing || {}),
-    id: messageId,
-    messageId,
-    groupId,
-    userId: String(data.userId || existing?.userId || ""),
-    senderName: String(data.senderName || existing?.senderName || data.userId || "").slice(0, 160),
-    senderRole: String(data.senderRole || existing?.senderRole || "member"),
-    text: String(data.text || existing?.text || "").slice(0, 8000),
-    mentions: [...new Set((Array.isArray(data.mentions) ? data.mentions : existing?.mentions || []).map(String))].slice(0, 100),
-    replyId: String(data.replyId || existing?.replyId || ""),
-    files,
-    media,
-    forwardIds: [...new Set((Array.isArray(data.forwardIds) ? data.forwardIds : existing?.forwardIds || []).map(String))].slice(0, AI_MEDIA_LIMITS.forwardBundles),
-    forwardSnapshots,
-    createdAt: Number(existing?.createdAt || data.createdAt || Date.now()),
-    updatedAt: Date.now(),
-    source: "group_member"
-  };
-  await dbPut(env, key, JSON.stringify(item));
-  await appendIndex(env, `conversation:index:${groupId}`, messageId, AI_MEDIA_LIMITS.conversationRecords);
-  return item;
-}
-
-
-
 async function updatePortalConversationRecord(env, groupId, messageId, patch) {
   const key = `conversation:${String(groupId || "")}:${String(messageId || "")}`;
   const item = await readJson(env, key, null);
@@ -117,10 +75,12 @@ async function recordStructuredMessage(env, item) {
   // 指令回覆、白名單提示、權限提示與其他系統訊息只保留引用辨識所需的 message metadata，
   // 不加入 recent_logs，也不成為模仿、摘要、衝突判斷或後續 AI 聊天的語料。
   if (record.groupId && item.includeInRecentLogs !== false) {
-    const key = `recent_logs:${record.groupId}`;
-    const logs = await readJson(env, key, []);
-    logs.push(`[${record.senderName}(QQ:${record.senderId})]: ${record.text}`);
-    await dbPut(env, key, JSON.stringify(logs.slice(-80)));
+    await dbAppendJsonArrayCapped(
+      env,
+      `recent_logs:${record.groupId}`,
+      `[${record.senderName}(QQ:${record.senderId})]: ${record.text}`,
+      80
+    );
   }
   return record;
 }
@@ -1109,4 +1069,4 @@ function flattenGeminiContents(contents) {
   return result;
 }
 
-export { allMediaDescriptors, appendPortalConversationRecord, applyConversationOutputGuards, auditIgnoredRobotMessage, botInteractionAllowKey, botSenderCacheKey, buildReplyPlan, cacheBotSenderClassification, clearRegisteredThinkingIndicators, collectOneBotMedia, decodeCqValue, decodeInlineMedia, detectLiteralPseudoElementLabels, eventHasBotMention, eventMentionedQqs, eventPlainText, eventSenderDisplayName, eventSenderRobotHint, extractFileDescriptors, extractForwardIds, extractMediaDescriptor, extractMessageText, extractOutboundMediaTypes, extractTextMentionIds, fetchConversationAttachmentResponse, filterRobotMentionIds, flattenGeminiContents, formatDuration, formatForwardContext, getForwardMessageSnapshot, getQuotedMessage, getTaipeiTimeContext, guessAttachmentMime, hasOutboundMessageMarker, isExplicitCurrentTimeQuestion, isExplicitRoleplayRequest, isGroupRobotInteractionAllowed, isIgnoredGroupRobotSender, isStandaloneCurrentTimeQuestion, looksLikeRobotDisplayName, neutralizeUnconfiguredPersonaText, normalizeFileDescriptor, normalizeForwardNodeList, normalizeQuotedMessageSource, oneBotContentText, parseCqAttributes, parseDurationSeconds, prepareConversationHistory, purgeLegacyBotRepliesFromRecentLogs, qqaiTruthyRobotFlag, recordStructuredMessage, refreshConversationAttachmentDescriptor, registerThinkingIndicator, removeTextMentionTokens, removeUnsupportedCurrentTimeClaims, resolveOneBotMediaAsBase64, runOneBotGroupOperation, safeAttachmentFilename, sanitizeAiReply, sendGroupRoleMentions, sendThinkingIndicator, thinkingIndicatorRegistryKey, updatePortalConversationRecord };
+export { allMediaDescriptors, applyConversationOutputGuards, auditIgnoredRobotMessage, botInteractionAllowKey, botSenderCacheKey, buildReplyPlan, cacheBotSenderClassification, clearRegisteredThinkingIndicators, collectOneBotMedia, decodeCqValue, decodeInlineMedia, detectLiteralPseudoElementLabels, eventHasBotMention, eventMentionedQqs, eventPlainText, eventSenderDisplayName, eventSenderRobotHint, extractFileDescriptors, extractForwardIds, extractMediaDescriptor, extractMessageText, extractOutboundMediaTypes, extractTextMentionIds, fetchConversationAttachmentResponse, filterRobotMentionIds, flattenGeminiContents, formatDuration, formatForwardContext, getForwardMessageSnapshot, getQuotedMessage, getTaipeiTimeContext, guessAttachmentMime, hasOutboundMessageMarker, isExplicitCurrentTimeQuestion, isExplicitRoleplayRequest, isGroupRobotInteractionAllowed, isIgnoredGroupRobotSender, isStandaloneCurrentTimeQuestion, looksLikeRobotDisplayName, neutralizeUnconfiguredPersonaText, normalizeFileDescriptor, normalizeForwardNodeList, normalizeQuotedMessageSource, oneBotContentText, parseCqAttributes, parseDurationSeconds, prepareConversationHistory, purgeLegacyBotRepliesFromRecentLogs, qqaiTruthyRobotFlag, recordStructuredMessage, refreshConversationAttachmentDescriptor, registerThinkingIndicator, removeTextMentionTokens, removeUnsupportedCurrentTimeClaims, resolveOneBotMediaAsBase64, runOneBotGroupOperation, safeAttachmentFilename, sanitizeAiReply, sendGroupRoleMentions, sendThinkingIndicator, thinkingIndicatorRegistryKey, updatePortalConversationRecord };
