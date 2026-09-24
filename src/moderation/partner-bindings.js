@@ -233,7 +233,7 @@ async function listGroupBindings(env, groupId) {
   const group = cleanId(groupId);
   if (!env?.DB || !group) return [];
   const prefix = `partner_binding:${group}:`;
-  const rows = await env.DB.prepare("SELECT key, value FROM kv_store WHERE substr(key, 1, ?) = ? ORDER BY key ASC").bind(prefix.length, prefix).all();
+  const rows = await env.DB.prepare("SELECT key, value FROM kv_store WHERE key >= ? AND key < ? ORDER BY key ASC").bind(prefix, `${prefix}\uFFFF`).all();
   const byUser = new Map();
   for (const row of rows.results || []) {
     let parsed = null;
