@@ -1,6 +1,21 @@
 import assert from "node:assert/strict";
 import { DatabaseSync } from "node:sqlite";
-import { cleanupExpiredModerationProposals, cleanupTransientState } from "./src/scheduler/runtime.js";
+import { readFileSync } from "node:fs";
+import { cleanupExpiredModerationProposals, cleanupTransientState, scheduledCronMode, SCHEDULED_D1_CLEANUP_CRON, SCHEDULED_ROUTINE_CRON } from "./src/scheduler/runtime.js";
+
+const wranglerConfig = readFileSync(new URL("./wrangler.toml", import.meta.url), "utf8");
+const configuredCronLine = wranglerConfig.match(/^crons\s*=\s*(\[[^\]]+\])\s*$/m);
+assert.ok(configuredCronLine, "Wrangler config includes explicit cron triggers");
+assert.deepEqual(JSON.parse(configuredCronLine[1]), [SCHEDULED_ROUTINE_CRON, SCHEDULED_D1_CLEANUP_CRON]);
+assert.equal(scheduledCronMode(SCHEDULED_ROUTINE_CRON), "routine", "the minute trigger runs normal scheduled work only");
+assert.equal(scheduledCronMode(SCHEDULED_D1_CLEANUP_CRON), "cleanup", "cleanup has its own hourly trigger");
+assert.equal(scheduledCronMode("0 3 * * *"), "ignore", "unknown triggers cannot accidentally start D1 cleanup");
+const workerSource = readFileSync(new URL("./worker.js", import.meta.url), "utf8");
+const scheduledBody = workerSource.split("async scheduled(controller, env, ctx) {")[1]?.split("\n  async queue(batch, env, ctx)")[0] || "";
+assert.ok(scheduledBody, "Worker scheduled handler exists");
+const routineBody = scheduledBody.split('if (cronMode !== "routine") return;')[1] || "";
+assert.match(scheduledBody, /const cronMode = scheduledCronMode\(controller\?\.cron\)/);
+assert.doesNotMatch(routineBody, /cleanupTransientState|cleanupExpiredModerationProposals/, "the per-minute handler must not run D1 cleanup");
 
 class SqliteD1 {
   constructor() {
