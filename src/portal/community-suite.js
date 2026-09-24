@@ -59,7 +59,7 @@ async function listMemberProfileSummaries(env, groupId) {
   const group = cleanId(groupId);
   if (!env?.DB || !group) return {};
   const prefix = `member_profile:${group}:`;
-  const rows = await env.DB.prepare("SELECT value FROM kv_store WHERE substr(key, 1, ?) = ? ORDER BY key ASC").bind(prefix.length, prefix).all();
+  const rows = await env.DB.prepare("SELECT value FROM kv_store WHERE key >= ? AND key < ? ORDER BY key ASC").bind(prefix, `${prefix}\uFFFF`).all();
   const out = {};
   for (const row of rows.results || []) {
     let parsed = null;
@@ -84,7 +84,7 @@ function classificationLabel(value) {
 
 async function countPrefix(env, prefix) {
   if (!env?.DB) return 0;
-  const result = await env.DB.prepare("SELECT COUNT(*) AS count FROM kv_store WHERE substr(key, 1, ?) = ?").bind(prefix.length, prefix).first();
+  const result = await env.DB.prepare("SELECT COUNT(*) AS count FROM kv_store WHERE key >= ? AND key < ?").bind(prefix, `${prefix}\uFFFF`).first();
   return Number(result?.count || 0);
 }
 
