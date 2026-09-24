@@ -23,7 +23,6 @@ import { injectPortalMembersClient } from "./src/portal/members.js";
 import { applySocialOutputPolicy, buildSocialDecision, buildSocialPromptBlock, capturePersonaContinuity, oneBotBotMentionCount, oneBotEventHasMedia, oneBotEventIsBareMention, oneBotEventIsPunctuationOnly, shouldSendSocialBufferNotice, socialInputDelayMs, waitForSocialTyping } from "./src/social/runtime.js";
 import { pickSticker, pickStickerForText, stickerCqMessage } from "./src/social/sticker-library.js";
 import { cancelSchedule, cleanupExpiredModerationProposals, cleanupTransientState, countActiveSchedulesForUser, createAppealFromText, createScheduleRecord, extractScheduleMentionIds, formatScheduleLine, listUserSchedules, parseManagementScheduleAction, parseScheduleRequest, processConflictSignal, processDueSchedules, reviewScheduleWithGemma, reviseScheduleRecord, scheduledCronMode, skipScheduleOnce } from "./src/scheduler/runtime.js";
-import { handleEntertainmentCommand } from "./src/games/entertainment.js";
 import { buildHelpText } from "./src/help/commands.js";
 import { fetchPublicUrl, getFeatureFlag, getPrivateAccessMode, isGroupWhitelisted, numericId, verifyOneBotAccess } from "./src/security/network.js";
 import { dispatchV3RuntimeEvent, handleV3RuntimeFetch, runV3RuntimeScheduled } from "./src/v3/runtime/bridge.js";
@@ -2379,19 +2378,6 @@ const QQAIWorker = {
       // ==========================================
       // 📜 基础系统帮助与状态模组 (权限阶梯动态版)
       // ==========================================
-      const entertainmentResult = handleEntertainmentCommand({
-        text: cleanMessage,
-        userId,
-        groupId: currentGroupId || "private",
-        now: new Date()
-      });
-      if (entertainmentResult.handled) {
-        return jsonReply(`${atSender}${entertainmentResult.text}`, {
-          reply_kind: "entertainment",
-          entertainment_kind: entertainmentResult.kind || "unknown"
-        });
-      }
-
       if (['!help', '!帮助', '!幫助', '！help', '！帮助', '！幫助'].includes(msgLower)) {
         const roleTxt = isOnlyMe ? '开发者' :
           senderRole === 'owner' ? '群主' :
