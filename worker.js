@@ -1209,8 +1209,11 @@ const QQAIWorker = {
         return new Response(null, { status: 204 });
       }
 
-      // 權限拆分：AI 管理與真正群操作互不混用。
-      const permissionSet = await getEffectivePermissions(env, currentGroupId, userId, senderRole, isDeveloper);
+      // 普通聊天不需要查询显式管理权限；自然语言命令在此前已正规化为命令。
+      const needsExplicitPermissions = isCommandMessage || isDeveloper || senderRole === "owner" || senderRole === "admin";
+      const permissionSet = needsExplicitPermissions
+        ? await getEffectivePermissions(env, currentGroupId, userId, senderRole, isDeveloper)
+        : { developer: false, nativeAdmin: false, aiAdmin: false, groupOps: false, scheduleReviewer: false, appealReviewer: false };
       const hasAdminAuth = permissionSet.aiAdmin;
       const hasGroupOpsAuth = permissionSet.groupOps;
       const isOnlyMe = isDeveloper;
