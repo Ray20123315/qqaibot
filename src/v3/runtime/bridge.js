@@ -53,6 +53,24 @@ function disabledResponse() {
   });
 }
 
+function v3RuntimeStorageUnavailable(error) {
+  return String(error?.code || "") === "D1_STORAGE_UNAVAILABLE";
+}
+
+function degradedPublicStatusResponse(code = "D1_STORAGE_UNAVAILABLE") {
+  const payload = {
+    schemaVersion: 1,
+    generatedAt: new Date().toISOString(),
+    plugins: [],
+    live: { active: false, activeCount: 0, stale: true, entries: [], rows: [] },
+    degraded: { unavailable: true, storageUnavailable: code === "D1_STORAGE_UNAVAILABLE", code }
+  };
+  return new Response(JSON.stringify(payload), {
+    status: 200,
+    headers: { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store, max-age=0" }
+  });
+}
+
 async function handleV3RuntimeFetch(request, env, url = null, runtimeOverrides = {}) {
   const target = url instanceof URL ? url : new URL(request.url);
   if (target.pathname !== V3_PUBLIC_STATUS_PATH) return null;
@@ -63,8 +81,13 @@ async function handleV3RuntimeFetch(request, env, url = null, runtimeOverrides =
     });
   }
   if (!v3RuntimeEnabled(env)) return disabledResponse();
-  const runtime = await getV3Runtime(env, v3RuntimeOptionsFromEnv(env, runtimeOverrides));
-  return runtime.publicStatusResponse();
+  try {
+    const runtime = await getV3Runtime(env, v3RuntimeOptionsFromEnv(env, runtimeOverrides));
+    return await runtime.publicStatusResponse();
+  } catch (error) {
+    if (v3RuntimeStorageUnavailable(error)) return degradedPublicStatusResponse();
+    throw error;
+  }
 }
 
 async function runV3RuntimeScheduled(env, scheduledTime = Date.now(), runtimeOverrides = {}) {
@@ -78,11 +101,13 @@ export {
   V3_BILIBILI_MAX_POLL_MS,
   V3_BILIBILI_MIN_POLL_MS,
   V3_PUBLIC_STATUS_PATH,
+  degradedPublicStatusResponse,
   handleV3RuntimeFetch,
   parseCreatorJson,
   runV3RuntimeScheduled,
   v3BilibiliCreators,
   v3BilibiliEnabled,
   v3RuntimeEnabled,
-  v3RuntimeOptionsFromEnv
+  v3RuntimeOptionsFromEnv,
+  v3RuntimeStorageUnavailable
 };

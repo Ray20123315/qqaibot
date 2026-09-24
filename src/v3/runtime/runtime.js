@@ -82,8 +82,14 @@ async function getV3Runtime(env, options = {}) {
     runtime = createV3Runtime(env, options);
     V3_RUNTIME_CACHE.set(env, runtime);
   }
-  await runtime.start();
-  return runtime;
+  try {
+    await runtime.start();
+    return runtime;
+  } catch (error) {
+    if (V3_RUNTIME_CACHE.get(env) === runtime) V3_RUNTIME_CACHE.delete(env);
+    try { await runtime.stop(); } catch {}
+    throw error;
+  }
 }
 
 async function releaseV3Runtime(env) {

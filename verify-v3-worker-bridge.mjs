@@ -50,6 +50,47 @@ await runV3RuntimeScheduled(enabledEnv, 1700000060000, { dependencies: deps });
 assert.deepEqual(reads, ["plugin_scheduler:due"], "steady-state empty V3 cron must read only due index");
 await releaseV3Runtime(enabledEnv);
 
+const degradedEnv = { V3_RUNTIME_ENABLED: "true" };
+const d1Failure = () => Object.assign(new Error("D1 quota exhausted"), { code: "D1_STORAGE_UNAVAILABLE" });
+const degradedDeps = {
+  ...deps,
+  dbGet: async () => { throw d1Failure(); },
+  dbPut: async () => { throw d1Failure(); },
+  dbDel: async () => { throw d1Failure(); }
+};
+response = await handleV3RuntimeFetch(
+  new Request("https://example.com/api/v3/status"),
+  degradedEnv,
+  null,
+  { dependencies: degradedDeps, logger: { info(){}, warn(){}, error(){}, debug(){} } }
+);
+assert.equal(response.status, 200, "public V3 status must stay observable when D1 storage is unavailable");
+const degradedPayload = await response.json();
+assert.equal(degradedPayload.schemaVersion, 1);
+assert.equal(degradedPayload.degraded?.storageUnavailable, true);
+assert.equal(degradedPayload.degraded?.code, "D1_STORAGE_UNAVAILABLE");
+assert.equal(degradedPayload.live?.stale, true);
+assert.equal(JSON.stringify(degradedPayload).includes("D1 quota exhausted"), false, "public degraded payload must not expose storage error text");
+
+const recoveredDb = new Map();
+const recoveredDeps = {
+  ...deps,
+  dbGet: async key => recoveredDb.has(key) ? recoveredDb.get(key) : null,
+  dbPut: async (key, value) => { recoveredDb.set(key, value); },
+  dbDel: async key => { recoveredDb.delete(key); }
+};
+response = await handleV3RuntimeFetch(
+  new Request("https://example.com/api/v3/status"),
+  degradedEnv,
+  null,
+  { dependencies: recoveredDeps, logger: { info(){}, warn(){}, error(){}, debug(){} } }
+);
+assert.equal(response.status, 200, "failed runtime initialization must be evicted so the next request can recover");
+const recoveredPayload = await response.json();
+assert.equal(recoveredPayload.schemaVersion, 1);
+assert.equal("degraded" in recoveredPayload, false);
+await releaseV3Runtime(degradedEnv);
+
 const worker = fs.readFileSync("worker.js", "utf8");
 assert.match(worker, /handleV3RuntimeFetch/);
 assert.match(worker, /runV3RuntimeScheduled/);
