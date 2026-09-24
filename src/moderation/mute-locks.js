@@ -210,7 +210,7 @@ async function listGroupMuteLocks(env, groupId) {
   const output = {};
   if (!env?.DB || !cleanId(groupId)) return output;
   try {
-    const rows = await env.DB.prepare("SELECT key, value FROM kv_store WHERE substr(key, 1, ?) = ?").bind(prefix.length, prefix).all();
+    const rows = await env.DB.prepare("SELECT key, value FROM kv_store WHERE key >= ? AND key < ?").bind(prefix, `${prefix}\uFFFF`).all();
     for (const row of rows.results || []) {
       let parsed = null;
       try { parsed = JSON.parse(String(row?.value || "{}")); } catch {}
