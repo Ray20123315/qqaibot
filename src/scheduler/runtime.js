@@ -3,7 +3,6 @@
 
 import { callGeminiGenerate, callGoogleDecision, notifyDeveloper, parseList, taipeiDateKey } from "../ai/runtime.js";
 import { DEFAULTS } from "../config/runtime.js";
-import { envBoolean } from "../config/deployment.js";
 import { appendIndex, callOneBotAction, removeFromIndex, writeSystemAudit } from "../core/permissions.js";
 import { dbClaimLeaseStrict, dbDel, dbDelStrict, dbDeleteKeyIfJsonFieldEquals, dbGet, dbGetStrict, dbPut, dbPutStrict, dbRenewLeaseStrict } from "../data/store.js";
 import { getAppealEligibleGroupsForUser } from "../group/runtime.js";
