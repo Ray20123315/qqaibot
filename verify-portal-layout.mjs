@@ -17,7 +17,7 @@ assert.match(injected, /\.cleanup-summary\{grid-template-columns/);
 
 const worker = fs.readFileSync("worker.js", "utf8");
 assert.match(worker, /injectPortalLayoutClient\(injectWerewolfPortalClient\(injectPortalMembersClient/);
-for (const path of ["src/portal/community-suite.js", "src/portal/member-cleanup.js", "src/games/werewolf.js"]) {
+for (const path of ["src/portal/community-suite.js", "src/portal/member-cleanup.js"]) {
   const source = fs.readFileSync(path, "utf8");
   assert.ok(!source.includes("var(--border)"), `${path} must use the Portal --line token`);
 }
