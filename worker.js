@@ -26,7 +26,7 @@ import { cancelSchedule, cleanupExpiredModerationProposals, cleanupTransientStat
 import { handleEntertainmentCommand } from "./src/games/entertainment.js";
 import { buildHelpText } from "./src/help/commands.js";
 import { fetchPublicUrl, getFeatureFlag, getPrivateAccessMode, isGroupWhitelisted, numericId, verifyOneBotAccess } from "./src/security/network.js";
-import { handleV3RuntimeFetch, runV3RuntimeScheduled } from "./src/v3/runtime/bridge.js";
+import { dispatchV3RuntimeEvent, handleV3RuntimeFetch, runV3RuntimeScheduled } from "./src/v3/runtime/bridge.js";
 import { handleV3PluginManagerApi, injectV3PluginManagerClient } from "./src/v3/portal/plugin-manager.js";
 import { handleV3PackageManagerApi, injectV3PackageManagerClient } from "./src/v3/portal/package-manager.js";
 import { handleV3PluginSecurityPublic, runV3PluginSecurityScheduled } from "./src/v3/public/plugin-security.js";
@@ -4197,6 +4197,25 @@ export class OneBotHub {
         }).catch(() => {});
         return;
       }
+    }
+
+    const v3PluginEvent = await dispatchV3RuntimeEvent(this.env, body).catch(async error => {
+      await writeSystemAudit(this.env, {
+        type: "v3_plugin_event_failed",
+        groupId: String(body?.group_id || ""),
+        actorId: String(body?.user_id || ""),
+        action: String(body?.post_type || "event"),
+        error: String(error?.message || error).slice(0, 500)
+      }).catch(() => {});
+      return null;
+    });
+    if (v3PluginEvent?.consumed) {
+      await this.recordIngress(body, "v3_plugin_consumed", {
+        explicit: eventHasBotMention(body),
+        force: true,
+        postType: inboundPostType
+      }).catch(() => {});
+      return;
     }
 
     if (this.isRuleMuteLiftNotice(body)) {
