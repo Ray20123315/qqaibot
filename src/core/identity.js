@@ -138,18 +138,41 @@ async function readAffinityAiAssessment(env, groupId, userId) {
 
 
 async function recentConversationMessagesForUser(env, groupId, userId, limit = 12) {
-  const ids = await readJson(env, `conversation:index:${groupId}`, []);
+  const group = String(groupId || "");
+  const user = String(userId || "");
+  const boundedLimit = Math.max(1, Math.min(200, Number(limit) || 12));
+  if (!group || !user) return [];
+  const logs = await readJson(env, `recent_logs:${group}`, []);
+  const marker = `(QQ:${user})]: `;
   const output = [];
-  for (const id of ids.slice().reverse()) {
-    const item = await readJson(env, `conversation:${groupId}:${id}`, null);
-    if (!item || String(item.userId || "") !== String(userId || "")) continue;
-    if (!String(item.text || "").trim()) continue;
-    output.push(item);
-    if (output.length >= limit) break;
+  for (const line of (Array.isArray(logs) ? logs : []).slice().reverse()) {
+    const text = String(line || "");
+    const markerIndex = text.indexOf(marker);
+    if (markerIndex < 0) continue;
+    const prefix = text.slice(0, markerIndex);
+    const senderName = prefix.startsWith("[") ? prefix.slice(1) : prefix;
+    output.push({
+      id: "",
+      messageId: "",
+      groupId: group,
+      userId: user,
+      senderName,
+      senderRole: "member",
+      text: text.slice(markerIndex + marker.length),
+      mentions: [],
+      replyId: "",
+      files: [],
+      media: [],
+      forwardIds: [],
+      forwardSnapshots: [],
+      createdAt: 0,
+      updatedAt: 0,
+      source: "recent_logs"
+    });
+    if (output.length >= boundedLimit) break;
   }
   return output.reverse();
 }
-
 
 
 async function refreshAffinityAiAssessment(env, { groupId, userId, senderName = "", force = false }) {
