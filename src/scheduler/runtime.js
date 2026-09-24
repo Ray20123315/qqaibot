@@ -702,6 +702,9 @@ async function voteAppeal(env, id, reviewerId, vote, note = "") {
 
 
 async function processConflictSignal(env, { groupId, userId, senderName, senderRole = "member", text, botId, mentionedQqs = [], quotedSenderId = "", messageId = "" }) {
+  const rough = looksLikeRoughBanter(text);
+  const currentManagerStop = isManagementRole(senderRole) && isManagerStopSignal(text);
+  if (!rough && !currentManagerStop) return null;
   const now = Date.now();
   const records = await readRecentConversationRecords(env, groupId, 20);
   const managerContext = managerExchangeContext(records, { userId, senderRole, text, mentionedQqs, quotedSenderId, now });
@@ -740,7 +743,6 @@ async function processConflictSignal(env, { groupId, userId, senderName, senderR
     return null;
   }
 
-  const rough = looksLikeRoughBanter(text);
   const activeManagerStopAt = Math.max(Number(state.managerStoppedAt || 0), Number(managerContext.managerStopRecord?.createdAt || 0));
   const managerStopActive = activeManagerStopAt > 0 && now - activeManagerStopAt <= 8 * 60 * 1000;
   if (!rough && !managerStopActive && now - Number(state.updatedAt || 0) > 10 * 60 * 1000) {
