@@ -51,9 +51,9 @@ database_id = "569a01fe-3297-40e1-832f-09c3793056ed"
 binding = "VECTORIZE"
 index_name = "qqai"
 
-# Schedules, automation, cleanup and automatic group check-in.
+# Minute scheduler plus hourly D1 cleanup.
 [triggers]
-crons = ["* * * * *"]
+crons = ["* * * * *", "17 * * * *"]
 
 [[ratelimits]]
 name = "MY_RATE_LIMITER"
