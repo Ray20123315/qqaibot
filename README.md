@@ -145,10 +145,19 @@ Cron 預設每分鐘執行，用於排程、自動化、暫存清理、主動發
 | `DEVELOPER_IDS` | 逗號、分號或換行分隔 QQ ID；預設空 | 開發者／Root QQ 清單。建議使用此欄位，可設定多人。 |
 | `DEVELOPER_ID` | 單一 QQ；預設空 | 舊版相容欄位，只有一位開發者時仍可用。 |
 | `ROOT_QQ_IDS` | QQ 清單；預設空 | 額外 Root 清單，相容部署使用；會與 `DEVELOPER_IDS` 合併去重。 |
+| `PORTAL_ADMIN_USERNAME` | 4～32 字元的獨立帳號 | 系統管理員登入帳號；必須含英文字母，可用數字、`.`、`_`、`-`。若已被一般 QQ 帳號占用，管理員登入會拒絕且保留該帳號資料。 |
 | `PUBLIC_BASE_URL` | `https://bot.example.com`；預設使用請求來源 | `!help`、Portal 與 Live 對外連結的基底網址，不加結尾 `/`。 |
 | `BOT_DISPLAY_NAME` | `QQAI` | 對外顯示名稱，供可支援的 UI／訊息使用。 |
 
 `DEVELOPER_IDS` 不屬於密碼，但它授予最高權限。不要允許一般 Portal 管理員修改，否則會形成自行提權。應由部署者在 Cloudflare 設定。
+
+系統管理員登入使用獨立的 `PORTAL_ADMIN_USERNAME` 與 `PORTAL_ADMIN_PASSWORD`，不會覆寫 QQ 帳號的密碼資料。帳號變數放在 Cloudflare Variables；密碼只放在 Worker Secret，長度需為 10～128 字元。設定方式：
+
+```bash
+npx wrangler secret put PORTAL_ADMIN_PASSWORD
+```
+
+再於 Cloudflare Worker Variables 設定 `PORTAL_ADMIN_USERNAME`。帳號名稱如果與現有 QQ 使用者登入名稱衝突，系統會拒絕管理員登入，既有使用者密碼不會被更改。舊的全站 `admin_auth:<qq>` 權限預設不再生效；只有在遷移期間明確設定 `ALLOW_LEGACY_ADMIN_AUTH=true` 才會暫時保留，遷移完成後應移除此變數。
 
 ### 部署通知
 
@@ -222,6 +231,7 @@ Secrets 不可放在 `[vars]`、README 範例值、Portal 回應、Git log 或�
 | `ONEBOT_HTTP_ACCESS_TOKEN` | HTTP 備援 Token。 |
 | `PORTAL_AUTH_SECRET` | Portal 敏感資料與登入相關加密。 |
 | `TOTP_ENCRYPTION_KEY` | TOTP 種子加密。 |
+| `PORTAL_ADMIN_PASSWORD` | 獨立系統管理員密碼，只存 Cloudflare Worker Secret。 |
 | `CLOUDFLARE_BUILDS_API_TOKEN` | 可選，讀取 Cloudflare Build 詳細日誌。 |
 
 列出 Secrets：
@@ -325,6 +335,8 @@ Heartbeat: 1000 ms
 Reconnect: 1000 ms
 Token: 與 ONEBOT_ACCESS_TOKEN 相同
 ```
+
+連線時使用 `Authorization: Bearer <ONEBOT_ACCESS_TOKEN>` 標頭；Worker 不接受 URL query string 傳遞 Token。
 
 上報自身訊息必須開啟，系統使用 `message_sent`、message ID 與 outbound fingerprint 區分同號人工指令及機器人 API 回覆。
 

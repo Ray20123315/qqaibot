@@ -40,8 +40,10 @@ assert.equal(envInteger("99", 12, 1, 30), 30);
 assert.equal(envInteger("bad", 12, 1, 30), 12);
 
 const activeWrangler = fs.readFileSync("wrangler.toml", "utf8");
-assert.match(activeWrangler, /DEVELOPER_IDS\s*=\s*""/);
-assert.match(activeWrangler, /DEVELOPER_ID\s*=\s*""/);
+assert.match(activeWrangler, /keep_vars\s*=\s*true/);
+assert.match(activeWrangler, /Dashboard-managed non-secret variables/i);
+assert.doesNotMatch(activeWrangler, /^\s*(?:DEVELOPER_IDS|ROOT_QQ_IDS|DEVELOPER_ID)\s*=/m,
+  "Active Wrangler config must not overwrite Dashboard-managed Developer identity variables");
 assert.match(activeWrangler, /PUBLIC_BASE_URL\s*=/);
 assert.match(activeWrangler, /AUTO_CHECKIN_ENABLED\s*=\s*"true"/);
 assert.doesNotMatch(activeWrangler, /DEVELOPER_ID(?:S)?\s*=\s*"\d{5,}"/);

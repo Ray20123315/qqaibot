@@ -5,7 +5,7 @@ import { callGemmaDecision, callGoogleDecision } from "../ai/runtime.js";
 import { DEFAULTS, VERSION } from "../config/runtime.js";
 import { isDeveloperId } from "../core/identity.js";
 import { appendIndex, callOneBotAction, listAiDecisionLogs, writeSystemAudit } from "../core/permissions.js";
-import { dbDel, dbGet, dbPut } from "../data/store.js";
+import { dbAppendJsonArrayCapped, dbClaimLeaseStrict, dbCompareAndSwapStrict, dbDel, dbDelStrict, dbDeleteKeyIfJsonFieldEquals, dbGet, dbGetStrict, dbPut, dbPutStrict, dbRenewLeaseStrict } from "../data/store.js";
 import { dispatchHumanAttentionNotification } from "../notifications/routing.js";
 import { canUseBotGroupOperations, getBotGroupRole, getBotIdentity } from "../group/runtime.js";
 import { createGroupWorkRequest, extractOneBotMessageId, normalizeRuleStrictness } from "../moderation/runtime.js";
@@ -226,15 +226,28 @@ async function opsGetSettings(env, groupId) {
 
 
 async function opsSaveSettings(env, groupId, patch) {
-  const current = await opsGetSettings(env, groupId);
-  const next = {
-    ...current,
-    ...patch,
-    operationQuota: { ...current.operationQuota, ...(patch?.operationQuota || {}) },
-    updatedAt: Date.now()
-  };
-  await dbPut(env, opsSettingsKey(groupId), JSON.stringify(next));
-  return next;
+  const key = opsSettingsKey(groupId);
+  for (let attempt = 0; attempt < 32; attempt += 1) {
+    const previousRaw = await dbGetStrict(env, key);
+    if (previousRaw) {
+      try {
+        const parsed = JSON.parse(previousRaw);
+        if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error("settings are not an object");
+      } catch (error) {
+        throw Object.assign(new Error("營運設定資料損壞，拒絕覆蓋。"), { code: "OPS_SETTINGS_DATA_INVALID", cause: error });
+      }
+    }
+    const current = await opsGetSettings(env, groupId);
+    const next = {
+      ...current,
+      ...patch,
+      operationQuota: { ...current.operationQuota, ...(patch?.operationQuota || {}) },
+      updatedAt: Date.now()
+    };
+    if (await dbCompareAndSwapStrict(env, key, previousRaw, JSON.stringify(next))) return next;
+    await new Promise(resolve => setTimeout(resolve, Math.min(20, 2 * (attempt + 1))));
+  }
+  throw Object.assign(new Error("營運設定剛被其他操作更新，請重新讀取後再試。"), { code: "OPS_SETTINGS_CONFLICT" });
 }
 
 
@@ -318,6 +331,13 @@ async function opsSaveRecord(env, { type, existing = null, groupId, actorId, act
   if (!def) throw new Error("不支持的记录类型");
   const now = Date.now();
   const id = existing?.id || `${type}_${now.toString(36)}_${crypto.randomUUID().slice(0, 8)}`;
+  let expectedRecordRaw = null;
+  if (existing) {
+    expectedRecordRaw = await dbGetStrict(env, opsRecordKey(type, id));
+    if (!expectedRecordRaw) throw Object.assign(new Error("记录已被删除或更新，请重新读取。"), { code: "OPS_RECORD_CONFLICT" });
+    try { existing = JSON.parse(expectedRecordRaw); }
+    catch (error) { throw Object.assign(new Error("记录资料损坏，拒绝覆盖。"), { code: "OPS_RECORD_DATA_INVALID", cause: error }); }
+  }
   const previous = existing ? JSON.parse(JSON.stringify(existing)) : null;
   const groupIds = [...new Set((Array.isArray(data.groupIds) ? data.groupIds : [data.groupId || groupId]).map(value => String(value || "").replace(/\D/g, "")).filter(Boolean))].slice(0, 30);
   const item = {
@@ -385,12 +405,14 @@ async function opsSaveRecord(env, { type, existing = null, groupId, actorId, act
   if (["suggestion", "bug", "quality_feedback"].includes(type)) {
     item.publicCode = existing?.publicCode || `${type === "bug" ? "BUG" : type === "suggestion" ? "SUG" : "QF"}-${opsTaipeiDateKey(now).replace(/-/g, "")}-${String(id).slice(-6).toUpperCase()}`;
   }
-  await dbPut(env, opsRecordKey(type, id), JSON.stringify(item));
+  const recordKey = opsRecordKey(type, id);
+  const itemRaw = JSON.stringify(item);
+  if (!(await dbCompareAndSwapStrict(env, recordKey, expectedRecordRaw, itemRaw))) {
+    throw Object.assign(new Error("记录刚被其他操作更新，请重新读取后再试。"), { code: "OPS_RECORD_CONFLICT" });
+  }
   if (!existing) await appendIndex(env, opsIndexKey(type), id, 5000);
   if (previous) {
-    const versions = await readJson(env, opsVersionKey(type, id), []);
-    versions.push({ at: now, actorId: String(actorId || ""), snapshot: previous });
-    await dbPut(env, opsVersionKey(type, id), JSON.stringify(versions.slice(-50)));
+    await dbAppendJsonArrayCapped(env, opsVersionKey(type, id), { at: now, actorId: String(actorId || ""), snapshot: previous }, 50);
   }
   await writeSystemAudit(env, { type: `ops_${type}`, groupId: item.groupId, actorId: String(actorId || ""), action: existing ? "update" : "create", recordId: id, title: item.title });
   if (!existing) {
@@ -408,7 +430,8 @@ async function opsSaveRecord(env, { type, existing = null, groupId, actorId, act
 请进入 Portal 对应页面处理。`,
         audit: { actorId: item.creatorId, recordId: item.id, recordType: type }
       }).catch(error => ({ ok: false, error: String(error?.message || error).slice(0, 500) }));
-      await dbPut(env, opsRecordKey(type, id), JSON.stringify(item));
+      const storedRaw = await dbGetStrict(env, recordKey);
+      if (storedRaw) await dbCompareAndSwapStrict(env, recordKey, storedRaw, JSON.stringify(item));
     }
   }
   return item;
@@ -446,23 +469,60 @@ async function opsActivityParticipants(env, activityId) {
 }
 
 
+async function opsUpdateActivityParticipants(env, activityId, mutate, attempts = 32) {
+  const key = opsParticipantsKey(activityId);
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    const previousRaw = await dbGetStrict(env, key);
+    let rows = [];
+    if (previousRaw) {
+      try {
+        rows = JSON.parse(previousRaw);
+        if (!Array.isArray(rows)) throw new Error("participant data is not an array");
+      } catch (error) {
+        throw Object.assign(new Error("活动报名资料损坏，拒绝覆盖。"), { code: "OPS_PARTICIPANT_DATA_INVALID", cause: error });
+      }
+    }
+    const outcome = await mutate(rows);
+    if (outcome?.commit === false) return { rows, ...outcome };
+    if (await dbCompareAndSwapStrict(env, key, previousRaw, JSON.stringify(rows.slice(-10000)))) return { rows, ...outcome };
+    await new Promise(resolve => setTimeout(resolve, Math.min(20, 2 * (attempt + 1))));
+  }
+  throw Object.assign(new Error("报名名单刚被其他操作更新，请重新读取后再试。"), { code: "OPS_PARTICIPANT_CONFLICT" });
+}
+
+
+async function opsPatchActivityParticipant(env, activityId, participant) {
+  const inviteFields = ["inviteStatus", "inviteError", "inviteUpdatedAt", "invitedBy"];
+  return opsUpdateActivityParticipants(env, activityId, rows => {
+    const current = rows.find(item => String(item.userId || "") === String(participant.userId || "") && Number(item.joinedAt || 0) === Number(participant.joinedAt || 0));
+    if (!current) return { commit: false, result: null };
+    for (const field of inviteFields) if (Object.prototype.hasOwnProperty.call(participant, field)) current[field] = participant[field];
+    return { result: current };
+  });
+}
+
+
 
 async function opsPromoteActivityWaitlist(env, activity) {
-  const rows = await opsActivityParticipants(env, activity.id);
-  const active = rows.filter(item => item.status === "confirmed");
-  const wait = rows.filter(item => item.status === "waitlist").sort((a, b) => Number(a.joinedAt) - Number(b.joinedAt));
-  const capacity = Number(activity.capacity || 0);
-  let slots = capacity > 0 ? Math.max(0, capacity - active.length) : wait.length;
-  const promoted = [];
-  for (const item of wait) {
-    if (slots <= 0) break;
-    item.status = "confirmed";
-    item.promotedAt = Date.now();
-    promoted.push(item);
-    slots -= 1;
-    try {
-      await sendPortalVerificationMessage(env, item.userId, `你报名的活动「${activity.title}」已有名额，已从候补转为正式报名。`);
-    } catch {}
+  const result = await opsUpdateActivityParticipants(env, activity.id, rows => {
+    const activeCount = rows.filter(item => item.status === "confirmed").length;
+    const wait = rows.filter(item => item.status === "waitlist").sort((a, b) => Number(a.joinedAt) - Number(b.joinedAt));
+    const capacity = Number(activity.capacity || 0);
+    let slots = capacity > 0 ? Math.max(0, capacity - activeCount) : wait.length;
+    const promoted = [];
+    for (const item of wait) {
+      if (slots <= 0) break;
+      item.status = "confirmed";
+      item.promotedAt = Date.now();
+      item.updatedAt = item.promotedAt;
+      promoted.push({ ...item });
+      slots -= 1;
+    }
+    return promoted.length ? { promoted } : { commit: false, promoted: [] };
+  });
+  const promoted = result.promoted || [];
+  for (const item of promoted) {
+    try { await sendPortalVerificationMessage(env, item.userId, `你报名的活动「${activity.title}」已有名额，已从候补转为正式报名。`); } catch {}
   }
 
   // 候补转正后沿用活动建立者当前的目标群邀请权限；权限或配额不足时只保留报名，不越权邀请。
@@ -477,6 +537,7 @@ async function opsPromoteActivityWaitlist(env, activity) {
       if (!permission.allowed) {
         item.inviteStatus = "permission_unavailable";
         item.inviteUpdatedAt = Date.now();
+        await opsPatchActivityParticipant(env, activity.id, item);
         continue;
       }
       const quota = await opsConsumeQuota(env, targetGroupId, creatorId, "activityInvite", 1);
@@ -484,13 +545,13 @@ async function opsPromoteActivityWaitlist(env, activity) {
         item.inviteStatus = "quota_deferred";
         item.inviteError = String(quota.message || "活动群邀请配额不足").slice(0, 500);
         item.inviteUpdatedAt = Date.now();
+        await opsPatchActivityParticipant(env, activity.id, item);
         continue;
       }
       await opsInviteActivityParticipant(env, activity, item, creatorId);
+      await opsPatchActivityParticipant(env, activity.id, item);
     }
   }
-
-  await dbPut(env, opsParticipantsKey(activity.id), JSON.stringify(rows.slice(-10000)));
   await writeSystemAudit(env, {
     type: "ops_activity_waitlist_promoted",
     groupId: String(activity.groupId || promoted[0]?.sourceGroupId || ""),
@@ -500,7 +561,7 @@ async function opsPromoteActivityWaitlist(env, activity) {
     promotedCount: promoted.length,
     autoInviteAttempted: Boolean(promoted.length && activity.autoInviteConfirmed && targetGroupId)
   }).catch(() => {});
-  return rows;
+  return await opsActivityParticipants(env, activity.id);
 }
 
 
@@ -510,25 +571,34 @@ async function opsJoinActivity(env, activity, { userId, userName, sourceGroupId 
   if (activity.signupDeadline && Date.now() > Number(activity.signupDeadline)) return { ok: false, message: "报名已经截止。" };
   const allowedGroups = Array.isArray(activity.groupIds) ? activity.groupIds.map(String) : [String(activity.groupId || "")];
   if (!allowedGroups.includes(String(sourceGroupId))) return { ok: false, message: "当前群不在此活动的报名范围。" };
-  const rows = await opsActivityParticipants(env, activity.id);
-  const existing = rows.find(item => String(item.userId) === String(userId));
-  if (existing && ["confirmed", "waitlist"].includes(existing.status)) return { ok: false, message: `你已经${existing.status === "confirmed" ? "报名" : "在候补名单中"}。`, participant: existing };
-  const confirmedCount = rows.filter(item => item.status === "confirmed").length;
-  const capacity = Number(activity.capacity || 0);
-  const status = capacity > 0 && confirmedCount >= capacity ? (activity.waitlistEnabled ? "waitlist" : "full") : "confirmed";
-  if (status === "full") return { ok: false, message: "活动名额已满，且未开放候补。" };
-  const participant = {
-    userId: String(userId),
-    userName: String(userName || userId),
-    sourceGroupId: String(sourceGroupId),
-    status,
-    joinedAt: Date.now(),
-    updatedAt: Date.now(),
-    inviteStatus: "not_requested"
-  };
-  if (existing) Object.assign(existing, participant);
-  else rows.push(participant);
-  await dbPut(env, opsParticipantsKey(activity.id), JSON.stringify(rows.slice(-10000)));
+  const mutation = await opsUpdateActivityParticipants(env, activity.id, rows => {
+    const existing = rows.find(item => String(item.userId) === String(userId));
+    if (existing && ["confirmed", "waitlist"].includes(existing.status)) return { commit: false, error: { ok: false, message: `你已经${existing.status === "confirmed" ? "报名" : "在候补名单中"}。`, participant: existing } };
+    const confirmedCount = rows.filter(item => item.status === "confirmed").length;
+    const capacity = Number(activity.capacity || 0);
+    const status = capacity > 0 && confirmedCount >= capacity ? (activity.waitlistEnabled ? "waitlist" : "full") : "confirmed";
+    if (status === "full") return { commit: false, error: { ok: false, message: "活动名额已满，且未开放候补。" } };
+    const participant = {
+      userId: String(userId),
+      userName: String(userName || userId),
+      sourceGroupId: String(sourceGroupId),
+      status,
+      joinedAt: Date.now(),
+      updatedAt: Date.now(),
+      inviteStatus: "not_requested"
+    };
+    if (existing) {
+      Object.assign(existing, participant);
+      delete existing.inviteError;
+      delete existing.inviteUpdatedAt;
+      delete existing.invitedBy;
+    }
+    else rows.push(participant);
+    return { participant: { ...participant }, status };
+  });
+  if (mutation.error) return mutation.error;
+  const participant = mutation.participant;
+  const status = mutation.status;
   let inviteResult = null;
   if (status === "confirmed" && activity.autoInviteConfirmed && String(activity.activityGroupId || "").replace(/\D/g, "")) {
     const targetGroupId = String(activity.activityGroupId).replace(/\D/g, "");
@@ -538,13 +608,18 @@ async function opsJoinActivity(env, activity, { userId, userName, sourceGroupId 
     if (permission.allowed) {
       const quota = await opsConsumeQuota(env, targetGroupId, creatorId, "activityInvite", 1);
       if (quota.ok) inviteResult = await opsInviteActivityParticipant(env, activity, participant, creatorId);
-      else inviteResult = { ok: false, message: quota.message, deferred: true };
+      else {
+        participant.inviteStatus = "quota_deferred";
+        participant.inviteError = String(quota.message || "活动群邀请额度不足").slice(0, 500);
+        participant.inviteUpdatedAt = Date.now();
+        inviteResult = { ok: false, message: quota.message, deferred: true };
+      }
     } else {
       participant.inviteStatus = "permission_unavailable";
       participant.inviteUpdatedAt = Date.now();
       inviteResult = { ok: false, message: "活动建立者目前已没有目标活动群的邀请权限，已保留报名并等待有权限的管理处理。", deferred: true };
     }
-    await dbPut(env, opsParticipantsKey(activity.id), JSON.stringify(rows.slice(-10000)));
+    await opsPatchActivityParticipant(env, activity.id, participant);
   }
   await writeSystemAudit(env, { type: "ops_activity_signup", groupId: String(sourceGroupId), actorId: String(userId), action: status, activityId: activity.id, activityGroupId: activity.activityGroupId || "", autoInvite: inviteResult?.ok || false });
   const baseMessage = status === "confirmed" ? "报名成功。" : "名额已满，已加入候补名单。";
@@ -554,12 +629,16 @@ async function opsJoinActivity(env, activity, { userId, userName, sourceGroupId 
 
 
 async function opsLeaveActivity(env, activity, userId) {
-  const rows = await opsActivityParticipants(env, activity.id);
-  const row = rows.find(item => String(item.userId) === String(userId) && ["confirmed", "waitlist"].includes(item.status));
-  if (!row) return { ok: false, message: "找不到有效报名。" };
-  row.status = "cancelled";
-  row.cancelledAt = Date.now();
-  await dbPut(env, opsParticipantsKey(activity.id), JSON.stringify(rows));
+  const mutation = await opsUpdateActivityParticipants(env, activity.id, rows => {
+    const row = rows.find(item => String(item.userId) === String(userId) && ["confirmed", "waitlist"].includes(item.status));
+    if (!row) return { commit: false, error: { ok: false, message: "找不到有效报名。" } };
+    row.status = "cancelled";
+    row.cancelledAt = Date.now();
+    row.updatedAt = row.cancelledAt;
+    return { row: { ...row } };
+  });
+  if (mutation.error) return mutation.error;
+  const row = mutation.row;
   await opsPromoteActivityWaitlist(env, activity);
   await writeSystemAudit(env, { type: "ops_activity_signup", groupId: row.sourceGroupId || activity.groupId, actorId: String(userId), action: "cancelled", activityId: activity.id });
   return { ok: true, message: "已取消报名。" };
@@ -689,11 +768,24 @@ async function opsVotePoll(env, poll, { userId, optionIndexes }) {
   const indexes = [...new Set((Array.isArray(optionIndexes) ? optionIndexes : [optionIndexes]).map(Number).filter(index => Number.isInteger(index) && index >= 0 && index < options.length))];
   if (!indexes.length) return { ok: false, message: "请选择有效选项。" };
   if (!poll.multiple && indexes.length > 1) return { ok: false, message: "此投票只能选择一项。" };
-  const votes = await readJson(env, opsPollVotesKey(poll.id), {});
-  if (votes[userId] && poll.allowChange === false) return { ok: false, message: "此投票不允许改票。" };
-  votes[userId] = { indexes, at: Date.now() };
-  await dbPut(env, opsPollVotesKey(poll.id), JSON.stringify(votes));
-  return { ok: true, message: "投票已记录。" };
+  const key = opsPollVotesKey(poll.id);
+  for (let attempt = 0; attempt < 32; attempt += 1) {
+    const previousRaw = await dbGetStrict(env, key);
+    let votes = {};
+    if (previousRaw) {
+      try {
+        votes = JSON.parse(previousRaw);
+        if (!votes || typeof votes !== "object" || Array.isArray(votes)) throw new Error("votes are not an object");
+      } catch (error) {
+        throw Object.assign(new Error("投票資料損壞，拒絕覆蓋。"), { code: "OPS_POLL_VOTE_DATA_INVALID", cause: error });
+      }
+    }
+    if (votes[userId] && poll.allowChange === false) return { ok: false, message: "此投票不允许改票。" };
+    votes[userId] = { indexes, at: Date.now() };
+    if (await dbCompareAndSwapStrict(env, key, previousRaw, JSON.stringify(votes))) return { ok: true, message: "投票已记录。" };
+    await new Promise(resolve => setTimeout(resolve, Math.min(20, 2 * (attempt + 1))));
+  }
+  throw Object.assign(new Error("投票刚被其他操作更新，请重新提交。"), { code: "OPS_POLL_VOTE_CONFLICT" });
 }
 
 
@@ -1276,7 +1368,10 @@ async function opsRetentionCleanup(env, groupId, now = Date.now()) {
   const cutoff = now - Number(settings.retentionDays || 90) * 86400000;
   let deleted = 0;
   for (const type of Object.keys(OPS_RECORD_TYPES)) {
-    const ids = await readJson(env, opsIndexKey(type), []);
+    const indexKey = opsIndexKey(type);
+    const indexRaw = await dbGetStrict(env, indexKey);
+    let ids = [];
+    try { const parsed = JSON.parse(indexRaw || "[]"); ids = Array.isArray(parsed) ? parsed : []; } catch {}
     const keep = [];
     for (const id of ids) {
       const item = await readJson(env, opsRecordKey(type, id), null);
@@ -1291,9 +1386,12 @@ async function opsRetentionCleanup(env, groupId, now = Date.now()) {
         deleted += 1;
       } else keep.push(id);
     }
-    if (keep.length !== ids.length) await dbPut(env, opsIndexKey(type), JSON.stringify(keep.slice(-5000)));
+    if (keep.length !== ids.length) await dbCompareAndSwapStrict(env, indexKey, indexRaw, JSON.stringify(keep.slice(-5000)));
   }
-  const aiIds = await readJson(env, `ai_decision_log:index:${groupId}`, []);
+  const aiIndexKey = `ai_decision_log:index:${groupId}`;
+  const aiIndexRaw = await dbGetStrict(env, aiIndexKey);
+  let aiIds = [];
+  try { const parsed = JSON.parse(aiIndexRaw || "[]"); aiIds = Array.isArray(parsed) ? parsed : []; } catch {}
   const aiKeep = [];
   for (const id of aiIds) {
     const item = await readJson(env, `ai_decision_log:${id}`, null);
@@ -1301,17 +1399,20 @@ async function opsRetentionCleanup(env, groupId, now = Date.now()) {
     if (item && at > 0 && at < cutoff) { await dbDel(env, `ai_decision_log:${id}`); deleted += 1; }
     else if (item) aiKeep.push(id);
   }
-  if (aiKeep.length !== aiIds.length) await dbPut(env, `ai_decision_log:index:${groupId}`, JSON.stringify(aiKeep.slice(-DEFAULTS.aiDecisionLogLimit)));
+  if (aiKeep.length !== aiIds.length) await dbCompareAndSwapStrict(env, aiIndexKey, aiIndexRaw, JSON.stringify(aiKeep.slice(-DEFAULTS.aiDecisionLogLimit)));
   const auditKey = `audit:system:group:${groupId}`;
-  const audits = await readJson(env, auditKey, []);
+  const auditRaw = await dbGetStrict(env, auditKey);
+  let audits = [];
+  try { const parsed = JSON.parse(auditRaw || "[]"); audits = Array.isArray(parsed) ? parsed : []; } catch {}
   const auditKeep = audits.filter(item => {
     const at = Number(item?.createdAt || 0) || Date.parse(item?.at || item?.createdAt || 0) || 0;
     return !at || at >= cutoff;
   });
-  const auditDeleted = Math.max(0, audits.length - auditKeep.length);
+  let auditDeleted = Math.max(0, audits.length - auditKeep.length);
   if (auditDeleted) {
-    await dbPut(env, auditKey, JSON.stringify(auditKeep.slice(-5000)));
-    deleted += auditDeleted;
+    const saved = await dbCompareAndSwapStrict(env, auditKey, auditRaw, JSON.stringify(auditKeep.slice(-5000)));
+    if (saved) deleted += auditDeleted;
+    else auditDeleted = 0;
   }
   await writeSystemAudit(env, { type: "ops_retention", groupId, actorId: "system", action: "cleanup", deleted, auditDeleted, retentionDays: settings.retentionDays });
   return { ok: true, deleted, auditDeleted, retentionDays: settings.retentionDays };
@@ -1337,18 +1438,50 @@ async function opsSendDailyDigest(env, groupId, now = Date.now()) {
   if (current < settings.dailyDigestTime) return { ok: true, skipped: true, reason: "not_due" };
   const dateKey = opsTaipeiDateKey(now);
   const sentKey = `ops:digest:sent:${groupId}:${dateKey}`;
-  if (await dbGet(env, sentKey)) return { ok: true, skipped: true, reason: "already_sent" };
-  const center = await opsTaskCenter(env, groupId, 1000);
-  const counts = center.tasks.reduce((acc, item) => { acc[item.status] = (acc[item.status] || 0) + 1; return acc; }, {});
-  const residuals = center.tasks.filter(item => item.kind === "thinking" || String(item.detail?.type || "").includes("thinking_indicator_residual")).length;
-  const text = `【群务每日摘要】\n群号：${groupId}\n待确认／进行中：${(counts.pending || 0) + (counts.pending_owner || 0) + (counts.active || 0) + (counts.open || 0)}\n失败／暂停：${(counts.failed || 0) + (counts.paused || 0)}\n任务总数：${center.tasks.length}\n疑似思考提示残留：${residuals}\n如需处理，请进入 Portal 对应页面：任务、排程、活动、群规或申诉。`;
-  const recipients = await opsResolveDigestRecipients(env, groupId, settings);
-  let sent = 0;
-  for (const qq of recipients) {
-    try { await sendPortalVerificationMessage(env, qq, text); sent += 1; } catch {}
+  if (await dbGetStrict(env, sentKey)) return { ok: true, skipped: true, reason: "already_sent" };
+  const retryKey = `ops:digest:retry:${groupId}:${dateKey}`;
+  const retry = await readJson(env, retryKey, {});
+  if (Number(retry.nextAt || 0) > now) return { ok: true, skipped: true, reason: "retry_backoff", nextAt: retry.nextAt };
+  const lockKey = `ops:digest:lock:${groupId}:${dateKey}`;
+  const owner = `digest:${crypto.randomUUID()}`;
+  if (!(await dbClaimLeaseStrict(env, lockKey, owner, now, 5 * 60 * 1000))) return { ok: true, skipped: true, reason: "already_claimed" };
+  try {
+    if (await dbGetStrict(env, sentKey)) return { ok: true, skipped: true, reason: "already_sent" };
+    const center = await opsTaskCenter(env, groupId, 1000);
+    const counts = center.tasks.reduce((acc, item) => { acc[item.status] = (acc[item.status] || 0) + 1; return acc; }, {});
+    const residuals = center.tasks.filter(item => item.kind === "thinking" || String(item.detail?.type || "").includes("thinking_indicator_residual")).length;
+    const text = `【群务每日摘要】\n群号：${groupId}\n待确认／进行中：${(counts.pending || 0) + (counts.pending_owner || 0) + (counts.active || 0) + (counts.open || 0)}\n失败／暂停：${(counts.failed || 0) + (counts.paused || 0)}\n任务总数：${center.tasks.length}\n疑似思考提示残留：${residuals}\n如需处理，请进入 Portal 对应页面：任务、排程、活动、群规或申诉。`;
+    const recipients = await opsResolveDigestRecipients(env, groupId, settings);
+    let sent = 0;
+    let confirmedSent = 0;
+    for (const qq of recipients) {
+      if (!(await dbRenewLeaseStrict(env, lockKey, owner, Date.now(), 5 * 60 * 1000))) {
+        return { ok: confirmedSent > 0, skipped: "lease_lost", sent, delivered: confirmedSent, recipients };
+      }
+      const recipientKey = `ops:digest:sent_recipient:${groupId}:${dateKey}:${qq}`;
+      if (await dbGetStrict(env, recipientKey)) { confirmedSent += 1; continue; }
+      try {
+        const result = await sendPortalVerificationMessage(env, qq, text);
+        if (!result?.ok) continue;
+        await dbPutStrict(env, recipientKey, String(now));
+        sent += 1;
+        confirmedSent += 1;
+      } catch (error) {
+        console.warn("daily digest delivery failed", groupId, String(error?.message || error));
+      }
+    }
+    if (confirmedSent > 0) {
+      await dbPutStrict(env, sentKey, String(now));
+      await dbDelStrict(env, retryKey);
+      return { ok: true, sent, delivered: confirmedSent, recipients };
+    }
+    const attempts = Math.min(10, Number(retry.attempts || 0) + 1);
+    const delayMs = Math.min(6 * 60 * 60 * 1000, 5 * 60 * 1000 * (2 ** (attempts - 1)));
+    await dbPutStrict(env, retryKey, JSON.stringify({ attempts, nextAt: now + delayMs, updatedAt: now }));
+    return { ok: false, sent: 0, recipients, retryAt: now + delayMs };
+  } finally {
+    await dbDeleteKeyIfJsonFieldEquals(env, lockKey, "$.owner", owner).catch(error => console.warn("daily digest lease release failed", String(error?.message || error)));
   }
-  if (sent > 0) await dbPut(env, sentKey, String(now));
-  return { ok: sent > 0, sent, recipients };
 }
 
 
@@ -1373,14 +1506,14 @@ async function opsHandleMemberLeave(env, groupId, userId, now = Date.now()) {
   for (const id of activityIds.slice(-2000)) {
     const activity = await opsGetRecord(env, "activity", id);
     if (!activity || !(activity.groupIds || [activity.groupId]).map(String).includes(String(groupId))) continue;
-    const rows = await opsActivityParticipants(env, id);
-    const participant = rows.find(item => String(item.userId || "") === String(userId) && String(item.sourceGroupId || "") === String(groupId));
-    if (participant) {
+    const mutation = await opsUpdateActivityParticipants(env, id, rows => {
+      const participant = rows.find(item => String(item.userId || "") === String(userId) && String(item.sourceGroupId || "") === String(groupId));
+      if (!participant) return { commit: false, updated: false };
       participant.memberLeftAt = now;
       participant.notificationsPaused = true;
-      activityRowsUpdated += 1;
-      await dbPut(env, opsParticipantsKey(id), JSON.stringify(rows));
-    }
+      return { updated: true };
+    });
+    if (mutation.updated) activityRowsUpdated += 1;
   }
   for (const key of [`thinking_active:group:${groupId}:${userId}`, `question_pending:group:${groupId}:user:${userId}`, `question-inflight:group:${groupId}:user:${userId}`]) await dbDel(env, key).catch(() => {});
   await writeSystemAudit(env, { type: "ops_member_leave_cleanup", groupId, actorId: String(userId), action: "cleanup", cancelledSchedules, activityRowsUpdated });
@@ -2209,4 +2342,4 @@ async function opsProcessAutomations(env, now = Date.now()) {
   }
 }
 
-export { OPS_CAPABILITIES, OPS_RECORD_TYPES, OPS_REMOVED_RECORD_TYPES, classifyCollaborationNaturalIntent, classifyNaturalLanguageCommandIntent, normalizeNaturalLanguageCommandText, opsActiveRuleRecords, opsActivityAnnouncementText, opsActivityContextGroup, opsActivityParticipants, opsActivitySummary, opsAnalytics, opsAnnounceActivity, opsCapabilityDef, opsCleanupThinking, opsConsumeQuota, opsCreateScheduleFromSpec, opsDeleteRecord, opsDependencyCheck, opsEffectiveCapability, opsExecuteHandoff, opsFuseAllows, opsFuseState, opsGetGroupMember, opsGetRecord, opsGetSettings, opsHandleActivityCommand, opsHandleMemberLeave, opsImpactPreview, opsIndexKey, opsInviteActivityParticipant, opsJoinActivity, opsLeaveActivity, opsListRecords, opsMemberSummary, opsMinutesOfDay, opsModelMetrics, opsNextScheduleRuns, opsParticipantsKey, opsPermissionKey, opsPollVotesKey, opsPreviewMessage, opsProcessAutomations, opsPromoteActivityWaitlist, opsPublishAnnouncement, opsPurgeRemovedRecordTypes, opsQuietState, opsRecordAutomationResult, opsRecordKey, opsRecordQualityFeedback, opsRemovedType, opsRequire, opsResetFuse, opsResolveActivity, opsResolveDigestRecipients, opsResolvePoll, opsRestoreSnapshot, opsRetentionCleanup, opsRoleRank, opsRuleConflictCheck, opsRuleExceptionMatch, opsRuleSandbox, opsSafeId, opsSaveRecord, opsSaveSettings, opsSchedulePreview, opsSendDailyDigest, opsSendDraftNow, opsSettingsKey, opsSnapshotConfig, opsTaipeiDateKey, opsTaskAction, opsTaskCenter, opsTypeDef, opsVersionKey, opsVotePoll, opsWelcomePreview, qqaiActivityPendingKey, qqaiChineseNumber, qqaiCollaborationCandidate, qqaiExtractActivityTitle, qqaiNaturalFutureDateTime, qqaiNaturalScheduleCommand, qqaiNaturalTimeOfDay, qqaiParseFixedActivityCreate, qqaiParseNaturalActivityCreate, qqaiPollPendingKey, shouldClassifyNaturalLanguageCommand };
+export { OPS_CAPABILITIES, OPS_RECORD_TYPES, OPS_REMOVED_RECORD_TYPES, classifyCollaborationNaturalIntent, classifyNaturalLanguageCommandIntent, normalizeNaturalLanguageCommandText, opsActiveRuleRecords, opsActivityAnnouncementText, opsActivityContextGroup, opsActivityParticipants, opsPatchActivityParticipant, opsActivitySummary, opsAnalytics, opsAnnounceActivity, opsCapabilityDef, opsCleanupThinking, opsConsumeQuota, opsCreateScheduleFromSpec, opsDeleteRecord, opsDependencyCheck, opsEffectiveCapability, opsExecuteHandoff, opsFuseAllows, opsFuseState, opsGetGroupMember, opsGetRecord, opsGetSettings, opsHandleActivityCommand, opsHandleMemberLeave, opsImpactPreview, opsIndexKey, opsInviteActivityParticipant, opsJoinActivity, opsLeaveActivity, opsListRecords, opsMemberSummary, opsMinutesOfDay, opsModelMetrics, opsNextScheduleRuns, opsParticipantsKey, opsPermissionKey, opsPollVotesKey, opsPreviewMessage, opsProcessAutomations, opsPromoteActivityWaitlist, opsPublishAnnouncement, opsPurgeRemovedRecordTypes, opsQuietState, opsRecordAutomationResult, opsRecordKey, opsRecordQualityFeedback, opsRemovedType, opsRequire, opsResetFuse, opsResolveActivity, opsResolveDigestRecipients, opsResolvePoll, opsRestoreSnapshot, opsRetentionCleanup, opsRoleRank, opsRuleConflictCheck, opsRuleExceptionMatch, opsRuleSandbox, opsSafeId, opsSaveRecord, opsSaveSettings, opsSchedulePreview, opsSendDailyDigest, opsSendDraftNow, opsSettingsKey, opsSnapshotConfig, opsTaipeiDateKey, opsTaskAction, opsTaskCenter, opsTypeDef, opsVersionKey, opsVotePoll, opsWelcomePreview, qqaiActivityPendingKey, qqaiChineseNumber, qqaiCollaborationCandidate, qqaiExtractActivityTitle, qqaiNaturalFutureDateTime, qqaiNaturalScheduleCommand, qqaiNaturalTimeOfDay, qqaiParseFixedActivityCreate, qqaiParseNaturalActivityCreate, qqaiPollPendingKey, shouldClassifyNaturalLanguageCommand };

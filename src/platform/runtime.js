@@ -3,7 +3,7 @@
 
 import { PLATFORM_FEATURES } from "../config/runtime.js";
 import { appendIndex, callOneBotAction, writeSystemAudit } from "../core/permissions.js";
-import { dbGet, dbPut } from "../data/store.js";
+import { dbGet, dbGetStrict, dbPut } from "../data/store.js";
 import { readJson } from "../portal/auth.js";
 import { numericId } from "../security/network.js";
 
@@ -22,10 +22,29 @@ function platformFeatureKey(feature,groupId){return feature.scope==='global'?`pl
 async function platformFeatureEnabled(env,feature,groupId){const v=await dbGet(env,platformFeatureKey(feature,groupId));return v==null?feature.defaultEnabled:v==='true'}
 
 
-async function listPlatformFeatures(env,{groupId='',role='member',query='',includeHidden=false}={}){const q=String(query||'').trim().toLowerCase(),rank=platformRoleRank(role),rows=[];for(const f of PLATFORM_FEATURES){if(!includeHidden&&platformRoleRank(f.minRole)>rank)continue;if(q&&!`${f.id} ${f.name} ${f.category} ${f.mode}`.toLowerCase().includes(q))continue;rows.push({...f,enabled:await platformFeatureEnabled(env,f,groupId)})}return rows}
+async function listPlatformFeatures(env, { groupId = '', role = 'member', query = '', includeHidden = false } = {}) {
+  const q = String(query || '').trim().toLowerCase();
+  const rank = platformRoleRank(role);
+  const rows = [];
+  for (const feature of PLATFORM_FEATURES) {
+    if (!includeHidden && platformRoleRank(feature.minRole) > rank) continue;
+    const searchable = [feature.id, feature.name, feature.category, feature.mode].join(' ').toLowerCase();
+    if (q && !searchable.includes(q)) continue;
+    const configuredEnabled = await platformFeatureEnabled(env, feature, groupId);
+    rows.push({ ...feature, enabled: configuredEnabled, configuredEnabled, enforced: false });
+  }
+  return rows;
+}
 
 
-async function setPlatformFeature(env,{feature,groupId,enabled,actorId,actorRole,auditMode='log'}){if(!feature)return{ok:false,message:'找不到功能。'};if(platformRoleRank(actorRole)<platformRoleRank(feature.minRole))return{ok:false,message:'你的权限等级无法修改此功能。'};if(feature.scope==='group'&&!groupId)return{ok:false,message:'请先选择群组。'};await dbPut(env,platformFeatureKey(feature,groupId),enabled?'true':'false');if(auditMode!=='silent')await writeSystemAudit(env,{type:'platform_feature',groupId,actorId,action:feature.id,featureName:feature.name,enabled:Boolean(enabled)});return{ok:true,message:`${feature.id} ${feature.name} 已${enabled?'開啟':'關閉'}。`}}
+async function setPlatformFeature(env, { feature }) {
+  if (!feature) return { ok: false, message: '找不到功能。' };
+  return {
+    ok: false,
+    code: 'FEATURE_NOT_ENFORCED',
+    message: '此功能目录尚未接入机器人执行路径，不能把记录状态当作开关使用。当前请求未更改保存状态。'
+  };
+}
 
 
 async function appendPlatformTrace(env,data){const id=`tr_${Date.now().toString(36)}_${crypto.randomUUID().slice(0,8)}`,item={id,at:Date.now(),...data};await dbPut(env,`platform:trace:${id}`,JSON.stringify(item));await appendIndex(env,'platform:trace:index',id,5000);if(item.groupId)await appendIndex(env,`platform:trace:index:${item.groupId}`,id,2000);return item}
@@ -40,6 +59,52 @@ async function enqueuePlatformJob(env,data){const id=`job_${Date.now().toString(
 async function listPlatformJobs(env,{groupId='',status='',limit=200}={}){const ids=await readJson(env,'platform:job:index',[]),rows=[];for(const id of ids.slice(-Math.max(1,Math.min(1000,Number(limit||200)))).reverse()){const x=await readJson(env,`platform:job:${id}`,null);if(!x)continue;if(groupId&&String(x.groupId||'')!==String(groupId))continue;if(status&&x.status!==status)continue;rows.push(x)}return rows}
 
 
-async function processPlatformJobs(env,now=Date.now()){const jobs=await listPlatformJobs(env,{status:'queued',limit:100});for(const job of jobs.reverse()){if(Number(job.nextRunAt||0)>now)continue;job.status='running';job.attempts=Number(job.attempts||0)+1;try{if(job.type==='notification'&&job.groupId&&job.message)await callOneBotAction(env,{action:'send_group_msg',params:{group_id:numericId(job.groupId),message:String(job.message),auto_escape:false}},15000);else await writeSystemAudit(env,{type:'platform_job',groupId:String(job.groupId||''),actorId:String(job.actorId||'system'),action:String(job.action||job.id)});job.status='completed';job.completedAt=Date.now()}catch(e){job.error=String(e?.message||e);if(job.attempts<job.maxAttempts){job.status='queued';job.nextRunAt=Date.now()+Math.min(3600000,2**job.attempts*30000)}else{job.status='dead_letter';await appendIndex(env,'platform:dead_letter:index',job.id,2000)}}await dbPut(env,`platform:job:${job.id}`,JSON.stringify(job))}}
+async function processPlatformJobs(env, now = Date.now()) {
+  if (!env?.DB) return;
+  const candidates = (await listPlatformJobs(env, { limit: 100 })).reverse();
+  for (const candidate of candidates) {
+    if (!["queued", "running"].includes(String(candidate.status || ""))) continue;
+    if (candidate.status === "queued" && Number(candidate.nextRunAt || 0) > now) continue;
+    if (candidate.status === "running" && Number(candidate.leaseUntil || 0) > now) continue;
+    const owner = `job:${crypto.randomUUID()}`;
+    const key = `platform:job:${candidate.id}`;
+    const claimResult = await env.DB.prepare(`UPDATE kv_store SET value = json_set(value,
+        '$.status', 'running',
+        '$.attempts', coalesce(CAST(json_extract(value, '$.attempts') AS INTEGER), 0) + 1,
+        '$.leaseOwner', ?, '$.leaseUntil', ?)
+      WHERE key = ? AND (
+        (json_extract(value, '$.status') = 'queued' AND CAST(coalesce(json_extract(value, '$.nextRunAt'), 0) AS INTEGER) <= ?)
+        OR (json_extract(value, '$.status') = 'running' AND CAST(coalesce(json_extract(value, '$.leaseUntil'), 0) AS INTEGER) <= ?)
+      )`).bind(owner, now + 2 * 60 * 1000, key, now, now).run();
+    if (claimResult?.success === false) throw Object.assign(new Error("D1 platform job claim failed"), { code: "D1_STORAGE_UNAVAILABLE" });
+    if (Number(claimResult?.meta?.changes || 0) !== 1) continue;
+    let job;
+    try { job = JSON.parse(await dbGetStrict(env, key)); } catch { continue; }
+    if (job?.leaseOwner !== owner) continue;
+    try {
+      if (job.type === "notification" && job.groupId && job.message) {
+        await callOneBotAction(env, { action: "send_group_msg", params: { group_id: numericId(job.groupId), message: String(job.message), auto_escape: false } }, 15000);
+      } else {
+        await writeSystemAudit(env, { type: "platform_job", groupId: String(job.groupId || ""), actorId: String(job.actorId || "system"), action: String(job.action || job.id) });
+      }
+      job.status = "completed";
+      job.completedAt = Date.now();
+    } catch (error) {
+      job.error = String(error?.message || error).slice(0, 500);
+      if (Number(job.attempts || 0) < Number(job.maxAttempts || 3)) {
+        job.status = "queued";
+        job.nextRunAt = Date.now() + Math.min(3600000, 2 ** Number(job.attempts || 1) * 30000);
+      } else {
+        job.status = "dead_letter";
+        await appendIndex(env, "platform:dead_letter:index", job.id, 2000);
+      }
+    }
+    delete job.leaseOwner;
+    delete job.leaseUntil;
+    const saveResult = await env.DB.prepare("UPDATE kv_store SET value = ? WHERE key = ? AND json_extract(value, '$.leaseOwner') = ?")
+      .bind(JSON.stringify(job), key, owner).run();
+    if (saveResult?.success === false) throw Object.assign(new Error("D1 platform job save failed"), { code: "D1_STORAGE_UNAVAILABLE" });
+  }
+}
 
 export { appendPlatformTrace, enqueuePlatformJob, listPlatformFeatures, listPlatformJobs, listPlatformTraces, platformFeatureById, platformFeatureEnabled, platformFeatureKey, platformRoleRank, processPlatformJobs, setPlatformFeature };

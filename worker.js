@@ -17,7 +17,7 @@ import { MASTER_RELATIONSHIP_DEFAULTS, MASTER_RELATIONSHIP_MAX_LEVEL, clearPartn
 import { appendPortalConversationRecord, applyConversationOutputGuards, auditIgnoredRobotMessage, botInteractionAllowKey, buildReplyPlan, cacheBotSenderClassification, clearRegisteredThinkingIndicators, detectLiteralPseudoElementLabels, eventHasBotMention, eventMentionedQqs, eventPlainText, eventSenderDisplayName, eventSenderRobotHint, extractFileDescriptors, extractForwardIds, extractMediaDescriptor, extractMessageText, extractOutboundMediaTypes, extractTextMentionIds, filterRobotMentionIds, formatForwardContext, getForwardMessageSnapshot, getQuotedMessage, getTaipeiTimeContext, isExplicitCurrentTimeQuestion, isExplicitRoleplayRequest, isGroupRobotInteractionAllowed, isIgnoredGroupRobotSender, isStandaloneCurrentTimeQuestion, looksLikeRobotDisplayName, normalizeFileDescriptor, parseDurationSeconds, prepareConversationHistory, purgeLegacyBotRepliesFromRecentLogs, qqaiTruthyRobotFlag, recordStructuredMessage, registerThinkingIndicator, removeTextMentionTokens, resolveOneBotMediaAsBase64, runOneBotGroupOperation, sanitizeAiReply, sendThinkingIndicator, thinkingIndicatorRegistryKey } from "./src/onebot/messages.js";
 import { classifyCollaborationNaturalIntent, classifyNaturalLanguageCommandIntent, normalizeNaturalLanguageCommandText, opsGetGroupMember, opsGetSettings, opsHandleActivityCommand, opsHandleMemberLeave, opsProcessAutomations } from "./src/operations/runtime.js";
 import { processPlatformJobs } from "./src/platform/runtime.js";
-import { authDbDelStrict, authDbGetStrict, authDbPutStrict, clearPasswordLoginGuard, commandChangesWebSettings, constantTimeEqual, createPortalPasswordRecord, createPortalSession, decryptPortalAuthSecret, deleteMemoryVector, generateSixDigitCode, getOneBotHub, getPortalSession, getPublicNebulaSeed, hashBackupCode, isMemoryBanned, isValidPortalPasswordRecord, jsonResponse, markGroupMemberLeft, notePasswordLoginFailure, portalSessionCookie, readCookie, readJson, readPasswordLoginGuard, readPortalAuthJson, sendOneBotAction, sendOneBotHttpAction, sendPortalVerificationMessage, upsertGroupMember, upsertMemoryVector, validatePortalPassword, verifyPortalPassword, verifyPortalVerificationCode, verifyTotpCode, writeMemoryAudit, writeSystemError } from "./src/portal/auth.js";
+import { authDbDelStrict, authDbGetStrict, authDbPutStrict, clearPasswordLoginGuard, commandChangesWebSettings, constantTimeEqual, createPortalPasswordRecord, createPortalSession, decryptPortalAuthSecret, encryptPortalAuthSecret, deleteMemoryVector, generateSixDigitCode, getOneBotHub, getPortalSession, getPublicNebulaSeed, hashBackupCode, isMemoryBanned, isValidPortalPasswordRecord, jsonResponse, markGroupMemberLeft, needsPortalPasswordRehash, normalizePortalAdminUsername, notePasswordLoginFailure, portalAdminCredentialConfig, portalAdminUsernameIsClaimed, portalEnvironmentWithManagedDeveloperIds, portalSessionCookie, readCookie, readJson, readPasswordLoginGuard, readPortalAuthJson, readPortalManagedDeveloperIds, rehashPortalPasswordIfNeeded, sendOneBotAction, sendOneBotHttpAction, sendPortalVerificationMessage, upsertGroupMember, upsertMemoryVector, validatePortalPassword, verifyPortalAdminCredentials, verifyPortalPassword, verifyPortalVerificationCode, verifyTotpCode, writeMemoryAudit, writePortalManagedDeveloperIds, writeSystemError } from "./src/portal/auth.js";
 import { getLiveHtmlPage, getPortalHomePage, handleGeminiLiveUpgrade, handlePortalApi } from "./src/portal/runtime.js";
 import { injectPortalLayoutClient } from "./src/portal/layout.js";
 import { injectPortalMembersClient } from "./src/portal/members.js";
@@ -134,11 +134,27 @@ const QQAI_V1_COMPLETE_MARKER = "QQAI_V1_COMPLETE_MARKER";
 
 const QQAI_V1_R3_MARKER = "QQAI_V1_R3_MARKER";
 
+async function checkPortalAuthRateLimit(env, scope, principal, request) {
+  if (typeof env?.MY_RATE_LIMITER?.limit !== "function") return { ok: false, unavailable: true };
+  const accountKey = `portal:${scope}:account:${String(principal || "unknown").slice(0, 96)}`;
+  const ip = String(request?.headers?.get("CF-Connecting-IP") || "unknown").slice(0, 96);
+  try {
+    const accountResult = await env.MY_RATE_LIMITER.limit({ key: accountKey });
+    if (!accountResult?.success) return { ok: false, unavailable: false };
+    const ipResult = await env.MY_RATE_LIMITER.limit({ key: `portal:${scope}:ip:${ip}` });
+    if (!ipResult?.success) return { ok: false, unavailable: false };
+    return { ok: true, unavailable: false };
+  } catch {
+    return { ok: false, unavailable: true };
+  }
+}
+
 
 
 
 const QQAIWorker = {
   async fetch(request, env, ctx) {
+    env = await portalEnvironmentWithManagedDeveloperIds(env);
     const url = new URL(request.url); // 👈 保留此行，避免後續代碼崩潰！
 
     // ==========================================
@@ -156,10 +172,51 @@ const QQAIWorker = {
     if (url.pathname === "/live") {
       if (!upgradeHeader || upgradeHeader.toLowerCase() !== "websocket") {
         return new Response(toSimplifiedChinese(getLiveHtmlPage(url.host)), {
-          headers: { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store" }
+          headers: { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store", "Strict-Transport-Security": "max-age=31536000", "X-Content-Type-Options": "nosniff", "X-Frame-Options": "DENY", "Referrer-Policy": "strict-origin-when-cross-origin", "Permissions-Policy": "camera=(), geolocation=()" }
         });
       }
       return handleGeminiLiveUpgrade(request, env);
+    }
+
+    if (request.method === "GET" && url.pathname === "/system-admin") {
+      const session = await getPortalSession(env, readCookie(request, "qqai_session"), { touch: false }).catch(() => null);
+      if (!session?.systemAdmin) return Response.redirect(`${url.origin}/`, 302);
+      return new Response(`<!doctype html><html lang="zh-Hant"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>系統管理員</title><style>*{box-sizing:border-box}body{margin:0;padding:24px;background:#101522;color:#eef3ff;font:16px system-ui}.card{max-width:760px;margin:8vh auto;padding:24px;border:1px solid #34405a;border-radius:16px;background:#192235}h1{margin-top:0}p{color:#bdc8dc;line-height:1.6}textarea{display:block;width:100%;min-height:220px;padding:12px;border-radius:10px;border:1px solid #46536e;background:#101522;color:#fff;font:15px monospace}button{margin:14px 8px 0 0;padding:11px 16px;border:0;border-radius:8px;background:#82d8ff;color:#06111c;font-weight:700;cursor:pointer}.secondary{background:#35425a;color:#fff}#status{min-height:24px;color:#9de9bd}.readonly{padding:12px;border-radius:8px;background:#101522;overflow-wrap:anywhere}</style><main class="card"><h1>系統管理員</h1><p>在這裡管理可用 QQ 驗證碼登入的開發者。每行一個 QQ 號；變更不會覆蓋 Cloudflare 的靜態開發者變數。</p><label for="ids">已管理的開發者 QQ</label><textarea id="ids" autocomplete="off" spellcheck="false" placeholder="每行一個 5 至 12 位 QQ 號"></textarea><div><button id="save">儲存開發者名單</button><button id="logout" class="secondary">登出</button></div><p id="status" role="status" aria-live="polite"></p><h2>由 Cloudflare 環境變數管理（唯讀）</h2><div id="static" class="readonly">載入中…</div></main><script>const statusNode=document.querySelector('#status'),idsNode=document.querySelector('#ids'),staticNode=document.querySelector('#static');async function api(method='GET',body){const response=await fetch('/api/system-admin/developers',{method,headers:method==='GET'?{}:{'Content-Type':'application/json'},body:body?JSON.stringify(body):undefined,credentials:'same-origin',cache:'no-store'});const data=await response.json().catch(()=>({ok:false,message:'伺服器回應無法解析'}));if(!response.ok||!data.ok)throw new Error(data.message||'請求失敗');return data}async function load(){try{const data=await api();idsNode.value=(data.managedIds||[]).join('\\n');staticNode.textContent=(data.environmentIds||[]).join('、')||'無';}catch(error){statusNode.textContent=error.message}}document.querySelector('#save').onclick=async()=>{const button=document.querySelector('#save');button.disabled=true;statusNode.textContent='儲存中…';try{const result=await api('POST',{ids:idsNode.value.split(/[\\n,;]+/).map(value=>value.trim()).filter(Boolean)});idsNode.value=result.managedIds.join('\\n');statusNode.textContent='已安全儲存。新的開發者登入將在數秒內生效。'}catch(error){statusNode.textContent=error.message}finally{button.disabled=false}};document.querySelector('#logout').onclick=async()=>{await fetch('/api/auth/logout',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}',credentials:'same-origin'});location.replace('/')}load();</script></html>`, {
+        headers: {
+          "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store", "Strict-Transport-Security": "max-age=31536000",
+          "X-Content-Type-Options": "nosniff", "X-Frame-Options": "DENY", "Referrer-Policy": "no-referrer",
+          "Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; connect-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'"
+        }
+      });
+    }
+
+    if (url.pathname === "/api/system-admin/developers") {
+      const session = await getPortalSession(env, readCookie(request, "qqai_session")).catch(() => null);
+      if (!session?.systemAdmin) return jsonResponse({ ok: false, message: "需要系統管理員帳號登入。" }, 401);
+      if (request.method === "GET") {
+        try {
+          const managedIds = await readPortalManagedDeveloperIds(env);
+          const environmentIds = String(env.qqaiStaticDeveloperIds || "").split(/[\n,;]+/g).map(value => value.trim()).filter(Boolean);
+          return jsonResponse({ ok: true, managedIds, environmentIds });
+        } catch {
+          return jsonResponse({ ok: false, code: "DEVELOPER_LIST_UNAVAILABLE", message: "開發者名單資料庫暫時無法讀取。" }, 503);
+        }
+      }
+      if (request.method !== "POST") return jsonResponse({ ok: false, message: "不支援的請求方式。" }, 405, { Allow: "GET, POST" });
+      let origin = "";
+      try { origin = new URL(request.headers.get("Origin") || "").origin; } catch {}
+      if (origin !== url.origin || !request.headers.get("Content-Type")?.toLowerCase().includes("application/json")) {
+        return jsonResponse({ ok: false, message: "請從同一個管理員頁面送出變更。" }, 403);
+      }
+      const payload = await request.json().catch(() => ({}));
+      try {
+        const managedIds = await writePortalManagedDeveloperIds(env, payload.ids);
+        await writeSystemAudit(env, { type: "system_developer_ids", actorId: "system-admin", action: "replace", count: managedIds.length });
+        return jsonResponse({ ok: true, managedIds });
+      } catch (error) {
+        const invalid = ["DEVELOPER_QQ_INVALID", "DEVELOPER_QQ_LIMIT"].includes(error?.code);
+        return jsonResponse({ ok: false, code: error?.code || "DEVELOPER_LIST_UNAVAILABLE", message: invalid ? (error.code === "DEVELOPER_QQ_LIMIT" ? "開發者名單最多 50 個 QQ 號。" : "每個 QQ 號必須是 5 至 12 位數字。") : "開發者名單無法安全儲存，請稍後重試。" }, invalid ? 400 : 503);
+      }
     }
 
     // ==========================================
@@ -168,7 +225,7 @@ const QQAIWorker = {
     if (request.method === 'GET' && ['/', '/portal', '/matrix'].includes(url.pathname)) {
       const portalHtml = injectPortalLayoutClient(injectWerewolfPortalClient(injectPortalMembersClient(injectDeploymentPortalClient(toSimplifiedChinese(getPortalHomePage(url.host))))));
       return new Response(portalHtml, {
-        headers: { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store" }
+        headers: { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store", "Strict-Transport-Security": "max-age=31536000", "X-Content-Type-Options": "nosniff", "X-Frame-Options": "DENY", "Referrer-Policy": "strict-origin-when-cross-origin", "Permissions-Policy": "camera=(), geolocation=()" }
       });
     }
 
@@ -180,7 +237,7 @@ const QQAIWorker = {
       const requestedGroupId = url.pathname.split('/').pop();
       const family = await getGroupFamilyForGroup(env, requestedGroupId);
       return new Response(getGroupJoinPage(family || { headGroupId: requestedGroupId, headAlias: requestedGroupId }, url.origin), {
-        headers: { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store" }
+        headers: { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store", "Strict-Transport-Security": "max-age=31536000", "X-Content-Type-Options": "nosniff", "X-Frame-Options": "DENY", "Referrer-Policy": "strict-origin-when-cross-origin", "Permissions-Policy": "camera=(), geolocation=()" }
       });
     }
 
@@ -208,7 +265,13 @@ const QQAIWorker = {
     }
 
     if (url.pathname.startsWith('/api/portal/')) {
-      return handlePortalApi(request, env, url);
+      try {
+        return await handlePortalApi(request, env, url);
+      } catch (error) {
+        const storageUnavailable = ["D1_STORAGE_UNAVAILABLE", "PORTAL_AUTH_STORAGE_UNAVAILABLE"].includes(String(error?.code || ""));
+        console.error("Portal API request failed", String(error?.code || error?.name || "unknown"));
+        return jsonResponse({ ok: false, code: storageUnavailable ? "STORAGE_UNAVAILABLE" : "PORTAL_REQUEST_FAILED", retryable: storageUnavailable, message: storageUnavailable ? "資料庫暫時無法完成操作，資料未確認寫入；請稍後重試。" : "控制台目前無法完成這項操作，請稍後重試。" }, storageUnavailable ? 503 : 500, storageUnavailable ? { "Retry-After": "30" } : {});
+      }
     }
 
     if (request.method === 'POST' && url.pathname === '/api/auth/request-code') {
@@ -216,9 +279,11 @@ const QQAIWorker = {
       try { payload = await request.json(); } catch (e) {}
       const qq = String(payload.qq || "").replace(/\D/g, "");
       const group = "";
-      if (!qq) {
+      if (!/^\d{5,12}$/.test(qq)) {
         return jsonResponse({ ok: false, message: "请先输入 QQ 号。" }, 400);
       }
+      const codeLimit = await checkPortalAuthRateLimit(env, "code-send", qq, request);
+      if (!codeLimit.ok) return jsonResponse({ ok: false, code: codeLimit.unavailable ? "AUTH_RATE_LIMIT_UNAVAILABLE" : "AUTH_RATE_LIMITED", message: codeLimit.unavailable ? "驗證碼服務目前無法安全啟動，請稍後再試。" : "驗證碼請求過於頻繁，請 10 秒後再試。" }, codeLimit.unavailable ? 503 : 429);
 
       const code = generateSixDigitCode();
       const authKey = `portal_auth_code:${qq}`;
@@ -247,13 +312,19 @@ const QQAIWorker = {
 
       if (!delivery.ok) {
         await authDbDelStrict(env, authKey).catch(() => {});
-        const httpConfigured = Boolean(String(env.ONEBOT_HTTP_ACTION_URL || env.ONEBOT_HTTP_URL || env.NAPCAT_HTTP_URL || "").trim());
+        const diagnostics = delivery.diagnostics || { websocketConnected: null, httpConfigured: Boolean(String(env.ONEBOT_HTTP_ACTION_URL || env.ONEBOT_HTTP_URL || env.NAPCAT_HTTP_URL || "").trim()) };
+        const message = diagnostics.websocketConnected === false && !diagnostics.httpConfigured
+          ? "驗證碼沒有送出，已取消這次驗證碼。NapCat WebSocket 目前未連線，請確認 NapCat 連到 Worker 的 /onebot WebSocket，且雙方使用相同 Access Token；也可設定 HTTP 備援。"
+          : diagnostics.websocketConnected === true
+            ? "驗證碼沒有送出，已取消這次驗證碼。NapCat 已連線但拒絕私訊；請確認機器人帳號可私訊此 QQ、Access Token 正確且沒有被對方封鎖。"
+            : diagnostics.httpConfigured
+              ? "驗證碼沒有送出，已取消這次驗證碼。WebSocket 與 HTTP 備援皆失敗，請檢查 NapCat HTTP URL／Token、連線狀態與 QQ 私訊權限。"
+              : "驗證碼沒有送出，已取消這次驗證碼。請連接 NapCat WebSocket，或設定 ONEBOT_HTTP_URL 作為備援。";
         return jsonResponse({
           ok: false,
           code: "VERIFICATION_DELIVERY_FAILED",
-          message: httpConfigured
-            ? "验证码发送失败。NapCat WebSocket 與 HTTP 備援皆無法送出，請檢查 NapCat 連線、Access Token 與私訊權限。"
-            : "验证码发送失败。請確認 NapCat WebSocket Client 已连接到 wss://qqai.ray2025.com/onebot；也可設定 ONEBOT_HTTP_URL 作為 HTTP 備援。"
+          message,
+          diagnostics
         }, 503);
       }
 
@@ -271,6 +342,8 @@ const QQAIWorker = {
       const qq = String(payload.qq || "").replace(/\D/g, "");
       const code = String(payload.code || "").replace(/\D/g, "");
       if (!/^\d{5,12}$/.test(qq) || !/^\d{6}$/.test(code)) return jsonResponse({ ok: false, message: "请输入正确的 QQ 号和六位验证码。" }, 400);
+      const verifyLimit = await checkPortalAuthRateLimit(env, "code-verify", qq, request);
+      if (!verifyLimit.ok) return jsonResponse({ ok: false, code: verifyLimit.unavailable ? "AUTH_RATE_LIMIT_UNAVAILABLE" : "AUTH_RATE_LIMITED", message: verifyLimit.unavailable ? "驗證碼服務目前無法安全啟動，請稍後再試。" : "驗證碼驗證過於頻繁，請 10 秒後再試。" }, verifyLimit.unavailable ? 503 : 429);
       let verified;
       try {
         verified = await verifyPortalVerificationCode(env, qq, code, { consume: false });
@@ -324,9 +397,47 @@ const QQAIWorker = {
     if (request.method === 'POST' && url.pathname === '/api/auth/login-password') {
       let payload = {};
       try { payload = await request.json(); } catch (e) {}
-      const qq = String(payload.qq || "").replace(/\D/g, "");
+      const loginName = String(payload.username ?? payload.qq ?? "").normalize("NFKC").trim();
+      const normalizedLoginName = normalizePortalAdminUsername(loginName);
       const password = String(payload.password || "");
+      const adminConfig = portalAdminCredentialConfig(env);
+      if (adminConfig.mode === "invalid" && (normalizedLoginName === normalizePortalAdminUsername(env.PORTAL_ADMIN_USERNAME) || normalizedLoginName === "admin")) {
+        return jsonResponse({ ok: false, code: "ADMIN_CREDENTIALS_MISCONFIGURED", message: "管理員帳號與密碼變數設定不完整或格式無效，請同時設定有效的 PORTAL_ADMIN_USERNAME 與 PORTAL_ADMIN_PASSWORD。" }, 503);
+      }
+      if (adminConfig.mode === "configured" && normalizedLoginName === adminConfig.normalizedUsername) {
+        if (!password) return jsonResponse({ ok: false, message: "請輸入帳號與密碼。" }, 400);
+        const adminRateLimit = await checkPortalAuthRateLimit(env, "password-login", normalizedLoginName, request);
+        if (!adminRateLimit.ok) return jsonResponse({ ok: false, code: adminRateLimit.unavailable ? "AUTH_RATE_LIMIT_UNAVAILABLE" : "AUTH_RATE_LIMITED", message: adminRateLimit.unavailable ? "登入服務目前無法安全啟動，請稍後再試。" : "登入嘗試過於頻繁，請 10 秒後再試。" }, adminRateLimit.unavailable ? 503 : 429);
+        const guardId = `system_admin:${adminConfig.normalizedUsername}`;
+        try {
+          const guard = await readPasswordLoginGuard(env, guardId);
+          if (Number(guard.lockUntil || 0) > Date.now()) {
+            return jsonResponse({ ok: false, code: "PASSWORD_LOGIN_LOCKED", message: `管理員登入嘗試過多，請在 ${Math.ceil((guard.lockUntil - Date.now()) / 60000)} 分鐘後重試。` }, 429);
+          }
+          const verified = verifyPortalAdminCredentials(env, loginName, password);
+          if (!verified.ok) {
+            await notePasswordLoginFailure(env, guardId);
+            return jsonResponse({ ok: false, code: "PASSWORD_INVALID", message: "管理員帳號或密碼錯誤。" }, 401);
+          }
+          if (await portalAdminUsernameIsClaimed(env, adminConfig.normalizedUsername)) {
+            return jsonResponse({ ok: false, code: "ADMIN_USERNAME_COLLISION", message: "這個管理員帳號名稱已被既有帳號使用，現有帳號資料已保留。請更改 PORTAL_ADMIN_USERNAME 後再登入。" }, 409);
+          }
+          const session = await createPortalSession(env, { systemAdmin: true, username: verified.username, persistent: false, authMethod: "environment_admin_password" });
+          await clearPasswordLoginGuard(env, guardId);
+          await writeSystemAudit(env, { type: "portal_auth_security", actorId: "system-admin", action: "environment_admin_login" }).catch(() => {});
+          return jsonResponse({ ok: true, systemAdmin: true, message: "系統管理員登入成功。" }, 200, { "Set-Cookie": portalSessionCookie(session.token, 30 * 60) });
+        } catch (error) {
+          return jsonResponse({ ok: false, code: "ADMIN_AUTH_STORAGE_UNAVAILABLE", message: "管理員登入暫時無法安全完成，請稍後重試。" }, 503);
+        }
+      }
+      if (adminConfig.mode === "configured" && normalizedLoginName === "admin" && normalizedLoginName !== adminConfig.normalizedUsername) {
+        return jsonResponse({ ok: false, code: "PASSWORD_INVALID", message: "管理員帳號或密碼錯誤。" }, 401);
+      }
+      const qqInput = String(payload.qq ?? (/^\d{5,12}$/.test(loginName) ? loginName : "")).trim();
+      const qq = /^\d{5,12}$/.test(qqInput) ? qqInput : "";
       if (!/^\d{5,12}$/.test(qq) || !password) return jsonResponse({ ok: false, message: "请输入正确的 QQ 号和密码。" }, 400);
+      const passwordRateLimit = await checkPortalAuthRateLimit(env, "password-login", qq, request);
+      if (!passwordRateLimit.ok) return jsonResponse({ ok: false, code: passwordRateLimit.unavailable ? "AUTH_RATE_LIMIT_UNAVAILABLE" : "AUTH_RATE_LIMITED", message: passwordRateLimit.unavailable ? "登入服務目前無法安全啟動，請稍後再試。" : "登入嘗試過於頻繁，請 10 秒後再試。" }, passwordRateLimit.unavailable ? 503 : 429);
       try {
         const guard = await readPasswordLoginGuard(env, qq);
         if (Number(guard.lockUntil || 0) > Date.now()) {
@@ -364,6 +475,19 @@ const QQAIWorker = {
             await notePasswordLoginFailure(env, qq);
             return jsonResponse({ ok: false, code: "TWO_FACTOR_INVALID", message: factorResult.message || "双因数验证码或备用码错误。" }, 401);
           }
+          if (factorResult.method === "totp" && Number(twoFactor.secret?.version || 1) < 2) {
+            try {
+              twoFactor.secret = await encryptPortalAuthSecret(env, await decryptPortalAuthSecret(env, twoFactor.secret));
+              twoFactor.updatedAt = Date.now();
+              await authDbPutStrict(env, `portal_auth_2fa:${qq}`, JSON.stringify(twoFactor));
+            } catch (migrationError) {
+              console.warn("legacy TOTP key migration deferred", String(migrationError?.code || migrationError?.message || migrationError));
+            }
+          }
+        }
+        if (needsPortalPasswordRehash(passwordRecord)) {
+          await rehashPortalPasswordIfNeeded(env, qq, password, passwordRecord)
+            .catch(error => console.warn("legacy portal password rehash deferred", String(error?.code || "D1_STORAGE_UNAVAILABLE")));
         }
         const remember = payload.remember !== false;
         const session = await createPortalSession(env, { qq, group: "", groupId: "", persistent: remember, authMethod: twoFactor?.enabled ? `password_${factorResult.method}` : "password" });
@@ -3024,11 +3148,15 @@ const QQAIWorker = {
                   
                   if (msgVector && Array.isArray(msgVector)) {
                      // 真正執行寫入 Cloudflare Vectorize 資料庫
+                     const vectorCreatedAt = Date.now();
+                     const vectorExpiresAt = vectorCreatedAt + 90 * 24 * 60 * 60 * 1000;
+                     const vectorId = `msg_${currentGroupId}_${userId}_${vectorCreatedAt}_${crypto.randomUUID()}`;
                      await env.VECTORIZE.upsert([
                         {
-                           id: `msg_${currentGroupId}_${userId}_${Date.now()}`,
+                           id: vectorId,
                            values: msgVector,
                            metadata: {
+                              kind: "chat_log",
                               text: logEntry,
                               qq: userId.toString(),
                               userId: userId.toString(),
@@ -3037,10 +3165,17 @@ const QQAIWorker = {
                               groupId: currentGroupId.toString(),
                               group: currentGroupId.toString(),
                               senderName: String(senderCard || userId),
-                              createdAt: Date.now()
+                              createdAt: vectorCreatedAt,
+                              expiresAt: vectorExpiresAt
                            }
                         }
                      ]);
+                     try {
+                       await authDbPutStrict(env, `vector_chat_expiry:${String(vectorExpiresAt).padStart(13, "0")}:${vectorId}`, vectorId);
+                     } catch (indexError) {
+                       if (env.VECTORIZE.deleteByIds) await env.VECTORIZE.deleteByIds([vectorId]).catch(() => {});
+                       throw indexError;
+                     }
                      console.log(`💾 [向量空間] 成功將 QQ:${userId} 的靈魂語料歸檔入庫`);
                   }
                } catch (vectorError) {
@@ -3745,6 +3880,7 @@ ${deepseekContextSummary}`;
   }, // 结束 fetch 函式
 
   async scheduled(controller, env, ctx) {
+    env = await portalEnvironmentWithManagedDeveloperIds(env);
     ctx.waitUntil(dbPut(env, "system:last_cron", String(Number(controller?.scheduledTime || Date.now()))));
     ctx.waitUntil(announceDeployedVersionFallback(env).catch(error => console.error("deployment self-fallback failed", error)));
     ctx.waitUntil(processDueSchedules(env, Number(controller?.scheduledTime || Date.now())));

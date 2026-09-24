@@ -9,6 +9,7 @@ import {
 const password = "correct horse battery staple 279";
 const record = await createPortalPasswordRecord(password);
 assert.equal(record.algorithm, "PBKDF2-SHA-256");
+assert.equal(record.iterations, 600000, "new password hashes must use the upgraded PBKDF2 work factor");
 assert.equal(isValidPortalPasswordRecord(record), true);
 assert.equal(await verifyPortalPassword(password, record), true, "correct password must verify");
 assert.equal(await verifyPortalPassword("wrong password value", record), false, "wrong password must fail");

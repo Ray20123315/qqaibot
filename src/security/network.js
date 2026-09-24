@@ -2,7 +2,7 @@
 // Cloudflare still deploys worker.js as the single Worker entry point.
 
 import { isDeveloperId } from "../core/identity.js";
-import { dbGet, dbPut } from "../data/store.js";
+import { dbGet, dbPutStrict } from "../data/store.js";
 
 
 
@@ -63,11 +63,9 @@ async function fetchMediaAsBase64(value, maxBytes, allowedPrefixes) {
 function verifyOneBotAccess(request, env) {
   const expected = String(env.ONEBOT_ACCESS_TOKEN || "").trim();
   if (!expected) return false;
-  const url = new URL(request.url);
   const auth = request.headers.get("Authorization") || "";
   const bearer = auth.replace(/^Bearer\s+/i, "").trim();
-  const queryToken = url.searchParams.get("access_token") || url.searchParams.get("token") || "";
-  return bearer === expected || queryToken === expected;
+  return bearer === expected;
 }
 
 
@@ -88,7 +86,7 @@ function envFlag(value, fallback = false) {
 
 
 async function setFeatureFlag(env, name, enabled) {
-  await dbPut(env, `feature:${name}`, enabled ? "true" : "false");
+  await dbPutStrict(env, `feature:${name}`, enabled ? "true" : "false");
 }
 
 

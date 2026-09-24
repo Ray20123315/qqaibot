@@ -5,7 +5,7 @@ import { callGeminiGenerate, callGoogleDecision, notifyDeveloper, parseList, tai
 import { DEFAULTS } from "../config/runtime.js";
 import { envBoolean } from "../config/deployment.js";
 import { appendIndex, callOneBotAction, removeFromIndex, writeSystemAudit } from "../core/permissions.js";
-import { dbDel, dbGet, dbPut } from "../data/store.js";
+import { dbClaimLeaseStrict, dbDel, dbDelStrict, dbDeleteKeyIfJsonFieldEquals, dbGet, dbGetStrict, dbPut, dbPutStrict, dbRenewLeaseStrict } from "../data/store.js";
 import { getAppealEligibleGroupsForUser } from "../group/runtime.js";
 import { retractModerationProposalMessage } from "../moderation/runtime.js";
 import { parseDurationSeconds, runOneBotGroupOperation } from "../onebot/messages.js";
@@ -317,17 +317,24 @@ function computeNextScheduleRun(record, after = Date.now()) {
 async function processDueSchedules(env, now = Date.now()) {
   const ids = await readJson(env, "schedule:index", []);
   for (const id of ids.slice(-5000)) {
-    const item = await readJson(env, `schedule:${id}`, null);
+    let item = await readJson(env, `schedule:${id}`, null);
     if (!item || !item.enabled || item.status !== "active" || Number(item.nextRunAt || Infinity) > now) continue;
+    const leaseOwner = `schedule:${crypto.randomUUID()}`;
+    const leaseKey = `schedule:lease:${id}`;
+    if (!(await dbClaimLeaseStrict(env, leaseKey, leaseOwner, now, 2 * 60 * 1000))) continue;
+    try {
+      const freshRaw = await dbGetStrict(env, `schedule:${id}`);
+      item = freshRaw ? JSON.parse(freshRaw) : null;
+      if (!item || !item.enabled || item.status !== "active" || Number(item.nextRunAt || Infinity) > now) continue;
     const scheduleFuse = await opsFuseAllows(env, item.groupId, "schedule");
     if (!scheduleFuse.allowed) {
       item.status = "paused";
       item.enabled = false;
       item.lastResult = "paused_by_automation_fuse";
-      await dbPut(env, `schedule:${id}`, JSON.stringify(item));
+      await dbPutStrict(env, `schedule:${id}`, JSON.stringify(item));
       continue;
     }
-    if (!(await isGroupWhitelisted(env, item.groupId))) { item.status = "paused"; item.lastResult = "群不在白名单"; await dbPut(env, `schedule:${id}`, JSON.stringify(item)); continue; }
+    if (!(await isGroupWhitelisted(env, item.groupId))) { item.status = "paused"; item.lastResult = "群不在白名单"; await dbPutStrict(env, `schedule:${id}`, JSON.stringify(item)); continue; }
     if (!item.managementAction && item.ignoreQuietHours !== true) {
       const opsSettings = await opsGetSettings(env, item.groupId);
       const quietState = opsQuietState(opsSettings, now);
@@ -335,14 +342,14 @@ async function processDueSchedules(env, now = Date.now()) {
         if (opsSettings.quietPolicy === "defer") {
           item.lastResult = "deferred_by_quiet_hours";
           item.nextRunAt = quietState.resumeAt;
-          await dbPut(env, `schedule:${id}`, JSON.stringify(item));
+          await dbPutStrict(env, `schedule:${id}`, JSON.stringify(item));
           continue;
         }
         if (opsSettings.quietPolicy === "admin_only") {
           await sendPortalVerificationMessage(env, item.creatorId, `排程 ${id} 在群安静时段到期，已暂缓群内发送。内容：${String(item.content || "").slice(0, 500)}`).catch(() => {});
           item.lastResult = "quiet_hours_admin_only";
           item.nextRunAt = quietState.resumeAt;
-          await dbPut(env, `schedule:${id}`, JSON.stringify(item));
+          await dbPutStrict(env, `schedule:${id}`, JSON.stringify(item));
           continue;
         }
         if (opsSettings.quietPolicy === "skip") {
@@ -353,11 +360,11 @@ async function processDueSchedules(env, now = Date.now()) {
             item.nextRunAt = null;
             item.lastRunAt = new Date(now).toISOString();
             item.lastResult = "skipped_by_quiet_hours";
-            await dbPut(env, `schedule:${id}`, JSON.stringify(item));
+            await dbPutStrict(env, `schedule:${id}`, JSON.stringify(item));
             await writeSystemAudit(env, { type: "schedule_quiet_skipped", groupId: item.groupId, actorId: item.creatorId, action: "once_skipped_kept", scheduleId: id });
           } else {
             item.nextRunAt = computeNextScheduleRun(item, now);
-            await dbPut(env, `schedule:${id}`, JSON.stringify(item));
+            await dbPutStrict(env, `schedule:${id}`, JSON.stringify(item));
           }
           continue;
         }
@@ -368,7 +375,7 @@ async function processDueSchedules(env, now = Date.now()) {
       item.lastResult = "skipped_once";
       item.lastSkippedAt = new Date(now).toISOString();
       item.nextRunAt = computeNextScheduleRun(item, now);
-      await dbPut(env, `schedule:${id}`, JSON.stringify(item));
+      await dbPutStrict(env, `schedule:${id}`, JSON.stringify(item));
       await writeSystemAudit(env, { type: "schedule_skipped_once", groupId: item.groupId, actorId: item.skipRequestedBy || item.creatorId, action: "skip_once", scheduleId: id, nextRunAt: item.nextRunAt });
       continue;
     }
@@ -420,9 +427,12 @@ async function processDueSchedules(env, now = Date.now()) {
         item.lastResult = `retry_${item.failureCount}:${item.lastResult}`;
       }
     }
-    await dbPut(env, `schedule:${id}`, JSON.stringify(item));
+    await dbPutStrict(env, `schedule:${id}`, JSON.stringify(item));
     if (item.status === "completed") {
       await writeSystemAudit(env, { type: "schedule_completed", groupId: item.groupId, actorId: item.creatorId, action: "completed_and_kept", scheduleId: id, content: String(item.content || "").slice(0, 500) }).catch(() => {});
+    }
+    } finally {
+      await dbDeleteKeyIfJsonFieldEquals(env, leaseKey, "$.owner", leaseOwner).catch(error => console.warn("schedule lease release failed", String(error?.message || error)));
     }
   }
   await processActiveSpeaking(env, now);
@@ -442,18 +452,33 @@ async function processActiveSpeaking(env, now = Date.now()) {
     const dayKey = taipeiDateKey(new Date(now)); const countKey = `active_speaking:count:${groupId}:${dayKey}`; const count = Number(await dbGet(env, countKey) || 0); if (count >= config.maxDaily) continue;
     const lastSpeak = Number(await dbGet(env, `active_speaking:last:${groupId}`) || 0); if (now - lastSpeak < config.quietMinutes * 60000) continue;
     const stateKey = `active_speaking:state:${groupId}`;
+    const leaseKey = `active_speaking:lease:${groupId}`;
+    const leaseOwner = `active-speaking:${crypto.randomUUID()}`;
+    if (!(await dbClaimLeaseStrict(env, leaseKey, leaseOwner, now, 5 * 60 * 1000))) continue;
     try {
-      const result = await callGeminiGenerate(env, { models: parseList(env.GEMINI_CHAT_MODELS, ["gemini-3.1-flash-lite", "gemini-3.5-flash"]), system: "生成一句自然的QQ群开场话题，简体中文，不提AI身份，不引用私人记忆，不@任何人。", contents: [{ role: "user", parts: [{ text: "群里有一段时间没人说话，请自然开启一个轻松话题。" }] }], maxOutputTokens: 120, temperature: 0.9, useSearch: false });
-      const sent = await callOneBotAction(env, { action: "send_group_msg", params: { group_id: numericId(groupId), message: result.text, auto_escape: false } }, 12000);
-      const messageId = String(sent?.message_id || sent?.data?.message_id || "");
-      await dbPut(env, countKey, String(count + 1));
-      await dbPut(env, `active_speaking:last:${groupId}`, String(now));
-      await dbPut(env, stateKey, JSON.stringify({ ok: true, at: now, source: "automatic", model: result.model || "Gemini", messageId, preview: String(result.text || "").slice(0, 180) }));
-      await writeSystemAudit(env, { type: "active_speaking", groupId, actorId: "system", action: "automatic_sent", model: result.model || "Gemini", messageId });
-    } catch (error) {
-      const message = String(error?.message || error).slice(0, 500);
-      await dbPut(env, stateKey, JSON.stringify({ ok: false, at: now, source: "automatic", error: message }));
-      await writeSystemAudit(env, { type: "active_speaking", groupId, actorId: "system", action: "automatic_failed", error: message }).catch(() => {});
+      // Recheck mutable limits after the atomic claim so parallel cron events cannot both send.
+      if (!(await getFeatureFlag(env, `active_speaking:${groupId}`, false)) || !(await isGroupWhitelisted(env, groupId))) continue;
+      const freshOpsSettings = await opsGetSettings(env, groupId);
+      if (freshOpsSettings.maintenanceMode || freshOpsSettings.emergencyLock || opsQuietState(freshOpsSettings, now).quiet) continue;
+      const freshLastMessage = Number(await dbGet(env, `group_last_message:${groupId}`) || 0);
+      const freshCount = Number(await dbGet(env, countKey) || 0);
+      const freshLastSpeak = Number(await dbGet(env, `active_speaking:last:${groupId}`) || 0);
+      if (now - freshLastMessage < config.quietMinutes * 60000 || freshCount >= config.maxDaily || now - freshLastSpeak < config.quietMinutes * 60000) continue;
+      try {
+        const result = await callGeminiGenerate(env, { models: parseList(env.GEMINI_CHAT_MODELS, ["gemini-3.1-flash-lite", "gemini-3.5-flash"]), system: "生成一句自然的QQ群开场话题，简体中文，不提AI身份，不引用私人记忆，不@任何人。", contents: [{ role: "user", parts: [{ text: "群里有一段时间没人说话，请自然开启一个轻松话题。" }] }], maxOutputTokens: 120, temperature: 0.9, useSearch: false });
+        const sent = await callOneBotAction(env, { action: "send_group_msg", params: { group_id: numericId(groupId), message: result.text, auto_escape: false } }, 12000);
+        const messageId = String(sent?.message_id || sent?.data?.message_id || "");
+        await dbPut(env, countKey, String(freshCount + 1));
+        await dbPut(env, `active_speaking:last:${groupId}`, String(now));
+        await dbPut(env, stateKey, JSON.stringify({ ok: true, at: now, source: "automatic", model: result.model || "Gemini", messageId, preview: String(result.text || "").slice(0, 180) }));
+        await writeSystemAudit(env, { type: "active_speaking", groupId, actorId: "system", action: "automatic_sent", model: result.model || "Gemini", messageId });
+      } catch (error) {
+        const message = String(error?.message || error).slice(0, 500);
+        await dbPut(env, stateKey, JSON.stringify({ ok: false, at: now, source: "automatic", error: message }));
+        await writeSystemAudit(env, { type: "active_speaking", groupId, actorId: "system", action: "automatic_failed", error: message }).catch(() => {});
+      }
+    } finally {
+      await dbDeleteKeyIfJsonFieldEquals(env, leaseKey, "$.owner", leaseOwner).catch(error => console.warn("active speaking lease release failed", String(error?.message || error)));
     }
   }
 }
@@ -538,22 +563,14 @@ async function checkinDoneForDay(env, groupId, dayKey) {
 
 async function claimAutomaticCheckinWindow(env, dayKey, owner, now = Date.now()) {
   const key = `auto_checkin_window_lock:${dayKey}`;
-  const current = await readJson(env, key, null);
-  const heartbeatAge = now - Number(current?.heartbeatAt || current?.startedAt || 0);
-  if (current?.owner && current.owner !== owner && heartbeatAge >= 0 && heartbeatAge < 15000) return false;
-  await dbPut(env, key, JSON.stringify({ owner, startedAt: Number(current?.startedAt || now), heartbeatAt: now, expiresAt: now + 180000 }));
-  const confirmed = await readJson(env, key, null);
-  return confirmed?.owner === owner;
+  return dbClaimLeaseStrict(env, key, owner, now, 180000);
 }
 
 
 
 async function heartbeatAutomaticCheckinWindow(env, dayKey, owner) {
   const key = `auto_checkin_window_lock:${dayKey}`;
-  const current = await readJson(env, key, null);
-  if (current?.owner !== owner) return false;
-  await dbPut(env, key, JSON.stringify({ ...current, heartbeatAt: Date.now(), expiresAt: Date.now() + 180000 }));
-  return true;
+  return dbRenewLeaseStrict(env, key, owner, Date.now(), 180000);
 }
 
 
@@ -579,7 +596,7 @@ async function runAutomaticGroupCheckins(env, now = Date.now()) {
     groups = await listOneBotGroups(env, true);
   } catch (error) {
     console.warn("自动群打卡无法取得群列表", error);
-    await dbDel(env, `auto_checkin_window_lock:${dayKey}`);
+    await dbDeleteKeyIfJsonFieldEquals(env, `auto_checkin_window_lock:${dayKey}`, "$.owner", owner);
     return;
   }
 
@@ -620,8 +637,7 @@ async function runAutomaticGroupCheckins(env, now = Date.now()) {
       if (Date.now() <= windowEndAt) await sleepMs(retryIntervalMs);
     }
   } finally {
-    const current = await readJson(env, `auto_checkin_window_lock:${dayKey}`, null);
-    if (current?.owner === owner) await dbDel(env, `auto_checkin_window_lock:${dayKey}`);
+    await dbDeleteKeyIfJsonFieldEquals(env, `auto_checkin_window_lock:${dayKey}`, "$.owner", owner);
   }
 }
 
@@ -630,16 +646,23 @@ async function runAutomaticGroupCheckins(env, now = Date.now()) {
 async function cleanupExpiredModerationProposals(env, now = Date.now()) {
   if (!env.DB) return;
   try {
-    const rows = await env.DB.prepare("SELECT key, value FROM kv_store WHERE key LIKE 'moderation:proposal:op_%'").all();
-    for (const row of rows.results || []) {
+    const prefix = "moderation:proposal:op_";
+    const cursorKey = "cleanup:cursor:moderation_proposal_expiry";
+    const rows = await env.DB.prepare("SELECT key, value FROM kv_store WHERE key >= ? AND key < ? AND key > coalesce((SELECT value FROM kv_store WHERE key = ?), '') ORDER BY key LIMIT ?")
+      .bind(prefix, prefix + "\uFFFF", cursorKey, 50)
+      .all();
+    const batch = rows.results || [];
+    for (const row of batch) {
       let proposal = null;
       try { proposal = JSON.parse(row.value); } catch {}
       if (!proposal || proposal.status !== "pending" || now <= Number(proposal.expiresAt || 0)) continue;
       proposal.status = "expired";
       proposal.expiredAt = now;
       await retractModerationProposalMessage(env, proposal, "expired");
-      await dbPut(env, row.key, JSON.stringify(proposal));
+      await dbPutStrict(env, row.key, JSON.stringify(proposal));
     }
+    if (batch.length) await dbPutStrict(env, cursorKey, batch[batch.length - 1].key);
+    else await dbDelStrict(env, cursorKey);
   } catch (error) {
     console.warn("moderation expiry cleanup failed", error);
   }
@@ -647,14 +670,92 @@ async function cleanupExpiredModerationProposals(env, now = Date.now()) {
 
 
 
-async function cleanupTransientState(env) {
+async function cleanupPrefixBatch(env, prefix, now, limit = 50) {
+  const cursorKey = "cleanup:cursor:" + encodeURIComponent(prefix);
+  const rows = await env.DB.prepare("SELECT key, value FROM kv_store WHERE key >= ? AND key < ? AND key > coalesce((SELECT value FROM kv_store WHERE key = ?), '') ORDER BY key LIMIT ?")
+    .bind(prefix, prefix + "\uFFFF", cursorKey, limit).all();
+  const batch = rows.results || [];
+  for (const row of batch) {
+    let value = row.value;
+    try { value = JSON.parse(row.value); } catch {}
+    const key = String(row.key);
+    let expiresAt = 0;
+    if (key.startsWith("portal_session:")) expiresAt = Math.min(Number(value?.expiresAt || 0), Number(value?.absoluteExpiresAt || value?.expiresAt || 0));
+    else if (key.startsWith("portal_auth_code:") || key.startsWith("portal_auth_2fa_pending:")) expiresAt = Number(value?.expiresAt || 0);
+    else if (key.startsWith("chat_turn:")) {
+      const encodedCreatedAt = Number(key.split(":").slice(-3, -2)[0] || 0);
+      const createdAt = Number(value?.createdAt || encodedCreatedAt || 0);
+      expiresAt = Number(value?.expiresAt || (createdAt + 2592000000));
+    }
+    else if (key.startsWith("outbound_pending:")) expiresAt = Number(value?.at || 0) + 120000;
+    else if (key.startsWith("outbound:")) expiresAt = Number(value?.at || 0) + 600000;
+    else if (key.startsWith("notice:not_whitelisted:")) expiresAt = Number(value?.at || value || 0) + 86400000;
+    else if (key.startsWith("bili:dedup:")) expiresAt = Number(value?.expiresAt || 0);
+    else if (key.startsWith("bili:event:")) expiresAt = Number(value?.at || 0) + 90 * 24 * 60 * 60 * 1000;
+    if (expiresAt > 0 && expiresAt < now) await dbDelStrict(env, key);
+  }
+  if (batch.length) await dbPutStrict(env, cursorKey, batch[batch.length - 1].key);
+  else await dbDelStrict(env, cursorKey);
+  return batch.length;
+}
+
+
+
+async function cleanupOrphanPayloadBatch(env, prefix, indexStateSql, limit = 50) {
+  const cursorKey = "cleanup:cursor:" + encodeURIComponent("orphan:" + prefix);
+  const rows = await env.DB.prepare("SELECT key, value, has_index, is_indexed FROM (SELECT record.key, record.value, " + indexStateSql +
+    " FROM kv_store AS record WHERE record.key >= ? AND record.key < ? AND record.key > coalesce((SELECT value FROM kv_store WHERE key = ?), '')) ORDER BY key LIMIT ?")
+    .bind(prefix, prefix + "\uFFFF", cursorKey, limit).all();
+  const batch = rows.results || [];
+  for (const row of batch) {
+    if (Number(row.has_index || 0) === 1 && Number(row.is_indexed || 0) === 0) await dbDelStrict(env, row.key);
+  }
+  if (batch.length) await dbPutStrict(env, cursorKey, batch[batch.length - 1].key);
+  else await dbDelStrict(env, cursorKey);
+  return batch.length;
+}
+
+
+
+async function cleanupTransientState(env, now = Date.now()) {
   if (!env.DB) return;
   try {
-    const cutoff = Date.now() - 24 * 60 * 60 * 1000;
-    const rows = await env.DB.prepare("SELECT key, value FROM kv_store WHERE key LIKE 'outbound_pending:%' OR key LIKE 'outbound:%' OR key LIKE 'notice:not_whitelisted:%'").all();
-    for (const row of rows.results || []) {
-      let at = Number(row.value || 0); try { at = Number(JSON.parse(row.value)?.at || at); } catch {}
-      if (at && at < cutoff) await dbDel(env, row.key);
+    // Bounded keyset scans resume between cron runs instead of reading whole prefixes.
+    for (const prefix of [
+      "outbound_pending:", "outbound:", "notice:not_whitelisted:",
+      "portal_session:", "portal_auth_code:", "portal_auth_2fa_pending:", "chat_turn:",
+      "bili:dedup:", "bili:event:"
+    ]) await cleanupPrefixBatch(env, prefix, now, 50);
+    const conversationIndexSql = "EXISTS (SELECT 1 FROM kv_store idx WHERE idx.key = 'conversation:index:' || substr(record.key, 14, instr(substr(record.key, 14), ':') - 1) AND json_valid(idx.value) AND json_type(idx.value) = 'array') AS has_index, " +
+      "EXISTS (SELECT 1 FROM kv_store idx, json_each(CASE WHEN json_valid(idx.value) AND json_type(idx.value) = 'array' THEN idx.value ELSE '[]' END) item WHERE idx.key = 'conversation:index:' || substr(record.key, 14, instr(substr(record.key, 14), ':') - 1) AND CAST(item.value AS TEXT) = substr(record.key, 14 + instr(substr(record.key, 14), ':'))) AS is_indexed";
+    const aiDecisionIndexSql = "EXISTS (SELECT 1 FROM kv_store idx WHERE idx.key = 'ai_decision_log:index' AND json_valid(idx.value) AND json_type(idx.value) = 'array') AS has_index, " +
+      "(EXISTS (SELECT 1 FROM kv_store idx, json_each(CASE WHEN json_valid(idx.value) AND json_type(idx.value) = 'array' THEN idx.value ELSE '[]' END) item WHERE idx.key = 'ai_decision_log:index' AND CAST(item.value AS TEXT) = substr(record.key, 17)) " +
+      "OR EXISTS (SELECT 1 FROM kv_store grp, json_each(CASE WHEN json_valid(grp.value) AND json_type(grp.value) = 'array' THEN grp.value ELSE '[]' END) item WHERE grp.key = 'ai_decision_log:index:' || coalesce(json_extract(record.value, '$.groupId'), '') AND CAST(item.value AS TEXT) = substr(record.key, 17))) AS is_indexed";
+    const platformTraceIndexSql = "EXISTS (SELECT 1 FROM kv_store idx WHERE idx.key = 'platform:trace:index' AND json_valid(idx.value) AND json_type(idx.value) = 'array') AS has_index, " +
+      "(EXISTS (SELECT 1 FROM kv_store idx, json_each(CASE WHEN json_valid(idx.value) AND json_type(idx.value) = 'array' THEN idx.value ELSE '[]' END) item WHERE idx.key = 'platform:trace:index' AND CAST(item.value AS TEXT) = substr(record.key, 16)) " +
+      "OR EXISTS (SELECT 1 FROM kv_store grp, json_each(CASE WHEN json_valid(grp.value) AND json_type(grp.value) = 'array' THEN grp.value ELSE '[]' END) item WHERE grp.key = 'platform:trace:index:' || coalesce(json_extract(record.value, '$.groupId'), '') AND CAST(item.value AS TEXT) = substr(record.key, 16))) AS is_indexed";
+    const platformJobIndexSql = "(CASE WHEN coalesce(json_extract(record.value, '$.status'), '') IN ('queued', 'running') THEN 0 ELSE EXISTS (SELECT 1 FROM kv_store idx WHERE idx.key = 'platform:job:index' AND json_valid(idx.value) AND json_type(idx.value) = 'array') END) AS has_index, " +
+      "(EXISTS (SELECT 1 FROM kv_store idx, json_each(CASE WHEN json_valid(idx.value) AND json_type(idx.value) = 'array' THEN idx.value ELSE '[]' END) item WHERE idx.key IN ('platform:job:index', 'platform:dead_letter:index') AND CAST(item.value AS TEXT) = substr(record.key, 14))) AS is_indexed";
+    await cleanupOrphanPayloadBatch(env, "conversation:", conversationIndexSql, 50);
+    await cleanupOrphanPayloadBatch(env, "ai_decision_log:ai_", aiDecisionIndexSql, 50);
+    await cleanupOrphanPayloadBatch(env, "platform:trace:tr_", platformTraceIndexSql, 50);
+    await cleanupOrphanPayloadBatch(env, "platform:job:job_", platformJobIndexSql, 50);
+    if (typeof env.VECTORIZE?.deleteByIds === "function") {
+      const expiryFloor = "vector_chat_expiry:0000000000000:";
+      const expiryCeiling = `vector_chat_expiry:${String(now).padStart(13, "0")}:\uFFFF`;
+      const expiredVectors = await env.DB.prepare("SELECT key, value FROM kv_store WHERE key >= ? AND key < ? ORDER BY key LIMIT 100")
+        .bind(expiryFloor, expiryCeiling).all();
+      const rowsToDelete = expiredVectors.results || [];
+      for (let offset = 0; offset < rowsToDelete.length; offset += 100) {
+        const batch = rowsToDelete.slice(offset, offset + 100);
+        try {
+          await env.VECTORIZE.deleteByIds(batch.map(row => String(row.value || "")).filter(Boolean));
+          for (const row of batch) await dbDelStrict(env, row.key);
+        } catch (error) {
+          console.warn("expired chat vector cleanup failed; retained cleanup markers for retry", error?.message || error);
+          break;
+        }
+      }
     }
   } catch (error) { console.warn("cleanup failed", error); }
 }
