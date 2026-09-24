@@ -269,8 +269,20 @@ async function runHealthChecks(env, { mode = "quick" } = {}) {
     return { matches: query?.matches?.length || 0 };
   }, { timeoutMs: 18000 }));
 
-  const lastCron = await dbGet(env, "system:last_cron");
-  checks.push({ name: "Cron 定时任务", status: lastCron && Date.now() - Number(lastCron) < 5 * 60 * 1000 ? "ok" : "warning", latencyMs: 0, detail: { lastRunAt: lastCron ? new Date(Number(lastCron)).toISOString() : null }, checkedAt: new Date().toISOString() });
+  let lastCron = null;
+  let cronReadError = "";
+  try {
+    lastCron = await dbGet(env, "system:last_cron");
+  } catch (error) {
+    cronReadError = String(error?.message || error).slice(0, 240);
+  }
+  checks.push({
+    name: "Cron 定时任务",
+    status: cronReadError ? "warning" : (lastCron && Date.now() - Number(lastCron) < 5 * 60 * 1000 ? "ok" : "warning"),
+    latencyMs: 0,
+    detail: { lastRunAt: lastCron ? new Date(Number(lastCron)).toISOString() : null, ...(cronReadError ? { error: cronReadError } : {}) },
+    checkedAt: new Date().toISOString()
+  });
   checks.push({ name: "D1 动态限速", status: env.DB ? "ok" : "warning", latencyMs: 0, detail: env.DB ? "D1 动态限速已启用" : "D1 未绑定", checkedAt: new Date().toISOString() });
 
   const summary = {
@@ -286,7 +298,11 @@ async function runHealthChecks(env, { mode = "quick" } = {}) {
     },
     checks
   };
-  await dbPut(env, `health:last:${mode}`, JSON.stringify(summary));
+  try {
+    await dbPut(env, `health:last:${mode}`, JSON.stringify(summary));
+  } catch (error) {
+    summary.persistence = { ok: false, error: String(error?.message || error).slice(0, 240) };
+  }
   return summary;
 }
 
