@@ -25,7 +25,7 @@ const echoGuard = worker.indexOf("self_outbound_echo_ignored", handlerStart);
 const werewolf = worker.indexOf("const werewolfHandled", handlerStart);
 const queueCheck = worker.indexOf("const explicitGroupQuestion = await this.shouldQueueUserQuestion", handlerStart);
 check(handlerStart >= 0 && echoGuard > handlerStart, "Durable Object outbound echo guard missing");
-check(echoGuard < werewolf && echoGuard < queueCheck, "outbound echo guard must run before games and question queueing");
+check(echoGuard < queueCheck, "outbound echo guard must run before question queueing");\ncheck(!worker.includes("werewolfHandled"), "retired werewolf event handler must stay removed");
 check(worker.includes('inboundPostType === "message_sent" || Boolean(inboundSelfId && inboundUserId === inboundSelfId)'), "self message event detection missing");
 check(worker.includes('text: extractMessageText(body.message || body.raw_message || "")'), "ingress fingerprint text must match sendAction normalization");
 check(worker.includes('mediaTypes: extractOutboundMediaTypes(body.message || body.raw_message || "")'), "ingress media fingerprint must match sendAction normalization");
