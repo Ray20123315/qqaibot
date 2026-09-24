@@ -19,12 +19,12 @@ const DEFAULTS = Object.freeze({
   groupContextExactMessages: 80,
   groupContextMaximumMessages: 600,
   conversationHistoryItems: 48,
-  meetingMinutesMaximumMessages: 500,
-  meetingMinutesBatchLimit: 3,
   outboundChunkChars: 1400,
   outboundMaxParts: 10,
   replyHardChars: 12000,
   aiDecisionLogLimit: 2000,
+  manualRuleCheckCooldownMs: 20 * 1000,
+  manualRuleCheckHourlyLimit: 8,
   thinkingDelayMs: 1200,
   inputDebounceMs: 1200,
   inputDebounceMaxMs: 3500,
@@ -209,21 +209,6 @@ function classifyOperationalFailure(errorLike, options = {}) {
     failureId: String(options.failureId || "").trim()
   };
 }
-
-
-const AFFINITY_DEFAULTS = Object.freeze({
-  fixedBase: 50,
-  fixedMin: 0,
-  fixedMax: 85,
-  aiMin: -15,
-  aiMax: 15,
-  aiRefreshMs: 6 * 60 * 60 * 1000,
-  dailyPositiveCap: 3,
-  dailyNegativeCap: 6,
-  manualCheckCooldownMs: 20 * 1000,
-  manualCheckHourlyLimit: 8
-});
-
 
 
 const AI_MEDIA_LIMITS = Object.freeze({
@@ -555,4 +540,4 @@ const PLATFORM_FEATURES = Object.freeze(PLATFORM_FEATURE_NAMES.map((name,index)=
   return Object.freeze({id:`F${String(index+1).padStart(3,'0')}`,name,category:index<60?'group_ops':index<120?'ai_tools':index<180?'knowledge_memory':index<240?'security_portal':'automation_integrations',minRole:ownerOnly?'owner':developerOnly?'developer':dangerous?'admin':'member',scope:developerOnly?'global':'group',mode:emulated?'single_worker_emulation':dangerous?'guarded':'native',defaultEnabled:true});
 }));
 
-export { AFFINITY_DEFAULTS, AI_MEDIA_LIMITS, BUILD_DATE, DEFAULTS, DEFAULT_DEVELOPER_ID, EXPLICIT_REPLY_FAILURE_MESSAGES, PLATFORM_FEATURES, PLATFORM_FEATURE_COUNT, PLATFORM_FEATURE_NAMES, VERSION, classifyOperationalFailure };
+export { AI_MEDIA_LIMITS, BUILD_DATE, DEFAULTS, DEFAULT_DEVELOPER_ID, EXPLICIT_REPLY_FAILURE_MESSAGES, PLATFORM_FEATURES, PLATFORM_FEATURE_COUNT, PLATFORM_FEATURE_NAMES, VERSION, classifyOperationalFailure };
