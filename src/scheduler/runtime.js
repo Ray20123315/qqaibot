@@ -561,97 +561,6 @@ async function performManualGroupCheckins(env, { targetGroupId = "", actorId = "
 
 
 
-async function checkinDoneForDay(env, groupId, dayKey) {
-  const raw = await dbGet(env, `auto_checkin_done:${groupId}:${dayKey}`);
-  if (!raw) return false;
-  if (raw === "true" || raw === "1") return true;
-  try { return JSON.parse(raw)?.ok === true; } catch { return false; }
-}
-
-
-
-async function claimAutomaticCheckinWindow(env, dayKey, owner, now = Date.now()) {
-  const key = `auto_checkin_window_lock:${dayKey}`;
-  return dbClaimLeaseStrict(env, key, owner, now, 180000);
-}
-
-
-
-async function heartbeatAutomaticCheckinWindow(env, dayKey, owner) {
-  const key = `auto_checkin_window_lock:${dayKey}`;
-  return dbRenewLeaseStrict(env, key, owner, Date.now(), 180000);
-}
-
-
-
-async function runAutomaticGroupCheckins(env, now = Date.now()) {
-  if (!envBoolean(env?.AUTO_CHECKIN_ENABLED, true)) return;
-  const parts = taipeiParts(now);
-  const hour = Number(parts.hour);
-  const minute = Number(parts.minute);
-  if (!((hour === 23 && minute === 59) || (hour === 0 && (minute === 0 || minute === 1)))) return;
-
-  const dayKey = hour === 23 ? taipeiDateKey(new Date(now + 2 * 60 * 1000)) : taipeiDateKey(new Date(now));
-  const midnightAt = parseTaipeiDateTime(`${dayKey} 00:00`);
-  const windowEndAt = midnightAt + 2 * 60 * 1000 - 1;
-  if (!Number.isFinite(midnightAt) || now > windowEndAt) return;
-
-  const owner = `cron:${crypto.randomUUID()}`;
-  if (!(await claimAutomaticCheckinWindow(env, dayKey, owner, now))) return;
-
-  let groups = [];
-  try {
-    // 23:59 先取得群列表并保持任务，午夜零秒立即开始；不会把 23:59 的旧日期打卡误记成隔日成功。
-    groups = await listOneBotGroups(env, true);
-  } catch (error) {
-    console.warn("自动群打卡无法取得群列表", error);
-    await dbDeleteKeyIfJsonFieldEquals(env, `auto_checkin_window_lock:${dayKey}`, "$.owner", owner);
-    return;
-  }
-
-  while (Date.now() < midnightAt) {
-    if (!(await heartbeatAutomaticCheckinWindow(env, dayKey, owner))) return;
-    await sleepMs(Math.min(5000, Math.max(0, midnightAt - Date.now())));
-  }
-  const retryIntervalMs = Math.max(500, Math.min(5000, Number(env.AUTO_CHECKIN_RETRY_INTERVAL_MS || DEFAULTS.autoCheckinRetryIntervalMs)));
-  const concurrency = Math.max(1, Math.min(30, Number(env.AUTO_CHECKIN_CONCURRENCY || DEFAULTS.autoCheckinConcurrency)));
-  const attempts = new Map();
-
-  try {
-    while (Date.now() <= windowEndAt) {
-      if (!(await heartbeatAutomaticCheckinWindow(env, dayKey, owner))) return;
-      const pending = [];
-      for (const group of groups) {
-        if (!(await checkinDoneForDay(env, group.groupId, dayKey))) pending.push(group);
-      }
-      if (!pending.length) break;
-
-      for (let index = 0; index < pending.length && Date.now() <= windowEndAt; index += concurrency) {
-        const batch = pending.slice(index, index + concurrency);
-        const results = await Promise.all(batch.map(async group => {
-          const attempt = Number(attempts.get(group.groupId) || 0) + 1;
-          attempts.set(group.groupId, attempt);
-          const result = await performGroupCheckin(env, group.groupId, `system:midnight_rush:${attempt}`);
-          return { group, result, attempt };
-        }));
-        for (const item of results) {
-          const timestamp = Date.now();
-          if (item.result.ok) {
-            await dbPut(env, `auto_checkin_done:${item.group.groupId}:${dayKey}`, JSON.stringify({ ok: true, scheduledAt: now, executedAt: timestamp, dayKey, attempt: item.attempt, result: item.result }));
-          } else {
-            await dbPut(env, `auto_checkin_attempt:${item.group.groupId}:${dayKey}`, JSON.stringify({ ok: false, scheduledAt: now, lastAttemptAt: timestamp, dayKey, attempt: item.attempt, error: item.result.error, result: item.result }));
-          }
-        }
-      }
-      if (Date.now() <= windowEndAt) await sleepMs(retryIntervalMs);
-    }
-  } finally {
-    await dbDeleteKeyIfJsonFieldEquals(env, `auto_checkin_window_lock:${dayKey}`, "$.owner", owner);
-  }
-}
-
-
-
 async function cleanupExpiredModerationProposals(env, now = Date.now()) {
   if (!env.DB) return;
   try {
@@ -710,45 +619,15 @@ async function cleanupPrefixBatch(env, prefix, now, limit = 50) {
 
 
 
-async function cleanupOrphanPayloadBatch(env, prefix, indexStateSql, limit = 50) {
-  const cursorKey = "cleanup:cursor:" + encodeURIComponent("orphan:" + prefix);
-  const rows = await env.DB.prepare("SELECT key, value, has_index, is_indexed FROM (SELECT record.key, record.value, " + indexStateSql +
-    " FROM kv_store AS record WHERE record.key >= ? AND record.key < ? AND record.key > coalesce((SELECT value FROM kv_store WHERE key = ?), '')) ORDER BY key LIMIT ?")
-    .bind(prefix, prefix + "\uFFFF", cursorKey, limit).all();
-  const batch = rows.results || [];
-  for (const row of batch) {
-    if (Number(row.has_index || 0) === 1 && Number(row.is_indexed || 0) === 0) await dbDelStrict(env, row.key);
-  }
-  if (batch.length) await dbPutStrict(env, cursorKey, batch[batch.length - 1].key);
-  else await dbDelStrict(env, cursorKey);
-  return batch.length;
-}
-
-
-
 async function cleanupTransientState(env, now = Date.now()) {
   if (!env.DB) return;
   try {
-    // Bounded keyset scans resume between cron runs instead of reading whole prefixes.
     for (const prefix of [
       "outbound_pending:", "outbound:", "notice:not_whitelisted:",
       "portal_session:", "portal_auth_code:", "portal_auth_2fa_pending:", "chat_turn:",
       "bili:dedup:", "bili:event:"
     ]) await cleanupPrefixBatch(env, prefix, now, 50);
-    const conversationIndexSql = "EXISTS (SELECT 1 FROM kv_store idx WHERE idx.key = 'conversation:index:' || substr(record.key, 14, instr(substr(record.key, 14), ':') - 1) AND json_valid(idx.value) AND json_type(idx.value) = 'array') AS has_index, " +
-      "EXISTS (SELECT 1 FROM kv_store idx, json_each(CASE WHEN json_valid(idx.value) AND json_type(idx.value) = 'array' THEN idx.value ELSE '[]' END) item WHERE idx.key = 'conversation:index:' || substr(record.key, 14, instr(substr(record.key, 14), ':') - 1) AND CAST(item.value AS TEXT) = substr(record.key, 14 + instr(substr(record.key, 14), ':'))) AS is_indexed";
-    const aiDecisionIndexSql = "EXISTS (SELECT 1 FROM kv_store idx WHERE idx.key = 'ai_decision_log:index' AND json_valid(idx.value) AND json_type(idx.value) = 'array') AS has_index, " +
-      "(EXISTS (SELECT 1 FROM kv_store idx, json_each(CASE WHEN json_valid(idx.value) AND json_type(idx.value) = 'array' THEN idx.value ELSE '[]' END) item WHERE idx.key = 'ai_decision_log:index' AND CAST(item.value AS TEXT) = substr(record.key, 17)) " +
-      "OR EXISTS (SELECT 1 FROM kv_store grp, json_each(CASE WHEN json_valid(grp.value) AND json_type(grp.value) = 'array' THEN grp.value ELSE '[]' END) item WHERE grp.key = 'ai_decision_log:index:' || coalesce(json_extract(record.value, '$.groupId'), '') AND CAST(item.value AS TEXT) = substr(record.key, 17))) AS is_indexed";
-    const platformTraceIndexSql = "EXISTS (SELECT 1 FROM kv_store idx WHERE idx.key = 'platform:trace:index' AND json_valid(idx.value) AND json_type(idx.value) = 'array') AS has_index, " +
-      "(EXISTS (SELECT 1 FROM kv_store idx, json_each(CASE WHEN json_valid(idx.value) AND json_type(idx.value) = 'array' THEN idx.value ELSE '[]' END) item WHERE idx.key = 'platform:trace:index' AND CAST(item.value AS TEXT) = substr(record.key, 16)) " +
-      "OR EXISTS (SELECT 1 FROM kv_store grp, json_each(CASE WHEN json_valid(grp.value) AND json_type(grp.value) = 'array' THEN grp.value ELSE '[]' END) item WHERE grp.key = 'platform:trace:index:' || coalesce(json_extract(record.value, '$.groupId'), '') AND CAST(item.value AS TEXT) = substr(record.key, 16))) AS is_indexed";
-    const platformJobIndexSql = "(CASE WHEN coalesce(json_extract(record.value, '$.status'), '') IN ('queued', 'running') THEN 0 ELSE EXISTS (SELECT 1 FROM kv_store idx WHERE idx.key = 'platform:job:index' AND json_valid(idx.value) AND json_type(idx.value) = 'array') END) AS has_index, " +
-      "(EXISTS (SELECT 1 FROM kv_store idx, json_each(CASE WHEN json_valid(idx.value) AND json_type(idx.value) = 'array' THEN idx.value ELSE '[]' END) item WHERE idx.key IN ('platform:job:index', 'platform:dead_letter:index') AND CAST(item.value AS TEXT) = substr(record.key, 14))) AS is_indexed";
-    await cleanupOrphanPayloadBatch(env, "conversation:", conversationIndexSql, 50);
-    await cleanupOrphanPayloadBatch(env, "ai_decision_log:ai_", aiDecisionIndexSql, 50);
-    await cleanupOrphanPayloadBatch(env, "platform:trace:tr_", platformTraceIndexSql, 50);
-    await cleanupOrphanPayloadBatch(env, "platform:job:job_", platformJobIndexSql, 50);
+
     if (typeof env.VECTORIZE?.deleteByIds === "function") {
       const expiryFloor = "vector_chat_expiry:0000000000000:";
       const expiryCeiling = `vector_chat_expiry:${String(now).padStart(13, "0")}:\uFFFF`;
@@ -768,7 +647,6 @@ async function cleanupTransientState(env, now = Date.now()) {
     }
   } catch (error) { console.warn("cleanup failed", error); }
 }
-
 
 
 async function createAppealFromText(env, applicantId, text) {
@@ -930,4 +808,4 @@ async function processConflictSignal(env, { groupId, userId, senderName, senderR
   return { replyText: "先停一下，语气有点冲了。把事情说清楚就好，别继续针对人。" };
 }
 
-export { appealApprovalReached, buildScheduledGroupMessage, cancelSchedule, checkinDoneForDay, claimAutomaticCheckinWindow, cleanupExpiredModerationProposals, cleanupTransientState, computeNextScheduleRun, countActiveSchedulesForUser, createAppealFromText, createScheduleRecord, deleteScheduleRecord, executeManagementSchedule, extractScheduleMentionIds, formatScheduleLine, heartbeatAutomaticCheckinWindow, listOneBotGroups, listUserSchedules, nextTaipeiMonthly, nextTaipeiTime, nextTaipeiWeekday, parseManagementScheduleAction, parseScheduleRequest, parseTaipeiDateTime, performGroupCheckin, performManualGroupCheckins, processActiveSpeaking, processConflictSignal, processDueSchedules, reviewScheduleWithGemma, reviseScheduleRecord, runAutomaticGroupCheckins, sanitizeAppealForReviewer, scheduleApprovalReached, scheduleSpecFromRecord, skipScheduleOnce, sleepMs, taipeiParts, voteAppeal, voteSchedule };
+export { appealApprovalReached, buildScheduledGroupMessage, cancelSchedule, cleanupExpiredModerationProposals, cleanupTransientState, computeNextScheduleRun, countActiveSchedulesForUser, createAppealFromText, createScheduleRecord, deleteScheduleRecord, executeManagementSchedule, extractScheduleMentionIds, formatScheduleLine, listOneBotGroups, listUserSchedules, nextTaipeiMonthly, nextTaipeiTime, nextTaipeiWeekday, parseManagementScheduleAction, parseScheduleRequest, parseTaipeiDateTime, performGroupCheckin, performManualGroupCheckins, processActiveSpeaking, processConflictSignal, processDueSchedules, reviewScheduleWithGemma, reviseScheduleRecord, sanitizeAppealForReviewer, scheduleApprovalReached, scheduleSpecFromRecord, skipScheduleOnce, sleepMs, taipeiParts, voteAppeal, voteSchedule };
