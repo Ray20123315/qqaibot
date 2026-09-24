@@ -386,7 +386,7 @@ async function listSnapshots(env, groupId) {
   const group = cleanId(groupId);
   if (!env?.DB || !group) return [];
   const prefix = `${SNAPSHOT_PREFIX}${group}:`;
-  const rows = await env.DB.prepare("SELECT value FROM kv_store WHERE substr(key, 1, ?) = ? ORDER BY key ASC").bind(prefix.length, prefix).all();
+  const rows = await env.DB.prepare("SELECT value FROM kv_store WHERE key >= ? AND key < ? ORDER BY key ASC").bind(prefix, `${prefix}\uFFFF`).all();
   const out = [];
   for (const row of rows.results || []) {
     try {
