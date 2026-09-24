@@ -11,9 +11,9 @@ assert.match(wrangler, /^preview_urls = true$/m);
 assert.match(wrangler, /^\[\[durable_objects\.bindings\]\]$/m);
 assert.match(wrangler, /^name = "ONEBOT_HUB"$/m);
 assert.match(wrangler, /^class_name = "OneBotHub"$/m);
-assert.match(wrangler, /^script_name = "qqai"$/m);
-assert.doesNotMatch(wrangler, /^\[\[migrations\]\]$/m, "staging must bind the production OneBotHub namespace instead of creating a second namespace");
-assert.match(wrangler, /^ONEBOT_READ_ONLY = "true"$/m);
+assert.match(wrangler, /^\[\[migrations\]\]$/m);
+assert.match(wrangler, /^tag = "v3test_onebot_hub_v1"$/m);
+assert.match(wrangler, /^new_sqlite_classes = \["OneBotHub"\]$/m);
 assert.match(wrangler, /^\[\[d1_databases\]\]$/m);
 assert.match(wrangler, /^binding = "DB"$/m);
 assert.match(wrangler, /^V3_RUNTIME_ENABLED = "true"$/m);
@@ -32,6 +32,8 @@ for (const forbidden of [
   "[triggers]",
   "index_name =",
   "namespace_id =",
+  'script_name = "qqai"',
+  "ONEBOT_READ_ONLY",
   "ONEBOT_ACCESS_TOKEN",
   "GEMINI_API",
   "OPENAI_API_KEY"
@@ -51,7 +53,6 @@ assert.match(workflow, /Deploy isolated V3 test Worker/);
 assert.match(workflow, /wrangler d1 execute DB --remote --config wrangler\.v3test\.toml/);
 assert.match(workflow, /\/plugin-security/);
 assert.match(workflow, /\/api\/v3\/plugin-security/);
-assert.match(workflow, /\/api\/v3\/diagnostics\/onebot-identity/);
 assert.match(workflow, /\/portal/);
 assert.doesNotMatch(workflow, /CLOUDFLARE_API_TOKEN:\s*["']?[A-Za-z0-9_-]{20,}/);
 assert.doesNotMatch(workflow, /CLOUDFLARE_ACCOUNT_ID:\s*["']?[a-f0-9]{32}/i);
