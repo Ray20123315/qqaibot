@@ -66,6 +66,7 @@ function sanitizeMessageForPlugin(message, { allowMedia = false } = {}) {
     senderRole: String(message.senderRole || "member"),
     senderName: String(message.senderName || ""),
     time: Number.isFinite(Number(message.time)) ? Number(message.time) : null,
+    text: String(message.text || ""),
     parts: Object.freeze(message.parts.map(part => sanitizePartForPlugin(part, allowMedia)))
   });
 }
