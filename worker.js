@@ -15,7 +15,7 @@ import { attachModerationProposalMessage, createGroupWorkRequest, createJoinRequ
 import { MAX_MUTE_SECONDS as MUTE_LOCK_MAX_SECONDS, canUnlockMute, clearMuteLock, createMasterMuteLock, createPartnerMuteLock, createSelfMuteLock, getMuteLock, listActiveSelfMuteLocks, markMuteLockReapplied, markMuteUnlockBlocked, muteLockRemainingSeconds, putMuteLock } from "./src/moderation/mute-locks.js";
 import { MASTER_RELATIONSHIP_DEFAULTS, MASTER_RELATIONSHIP_MAX_LEVEL, clearPartnerBinding, createMasterBindingRequest, createPartnerBindingRequest, decidePartnerBindingRequest, getBindingRequest, getPartnerBinding } from "./src/moderation/partner-bindings.js";
 import { applyConversationOutputGuards, auditIgnoredRobotMessage, botInteractionAllowKey, buildReplyPlan, cacheBotSenderClassification, clearRegisteredThinkingIndicators, detectLiteralPseudoElementLabels, eventHasBotMention, eventMentionedQqs, eventPlainText, eventSenderDisplayName, eventSenderRobotHint, extractFileDescriptors, extractForwardIds, extractMediaDescriptor, extractMessageText, extractOutboundMediaTypes, extractTextMentionIds, filterRobotMentionIds, formatForwardContext, getForwardMessageSnapshot, getQuotedMessage, getTaipeiTimeContext, isExplicitCurrentTimeQuestion, isExplicitRoleplayRequest, isGroupRobotInteractionAllowed, isIgnoredGroupRobotSender, isStandaloneCurrentTimeQuestion, looksLikeRobotDisplayName, normalizeFileDescriptor, parseDurationSeconds, prepareConversationHistory, purgeLegacyBotRepliesFromRecentLogs, qqaiTruthyRobotFlag, recordStructuredMessage, registerThinkingIndicator, removeTextMentionTokens, resolveOneBotMediaAsBase64, runOneBotGroupOperation, sanitizeAiReply, sendThinkingIndicator, thinkingIndicatorRegistryKey } from "./src/onebot/messages.js";
-import { classifyCollaborationNaturalIntent, classifyNaturalLanguageCommandIntent, normalizeNaturalLanguageCommandText, opsGetGroupMember, opsGetSettings, opsHandleActivityCommand, opsHandleMemberLeave } from "./src/operations/runtime.js";
+import { classifyNaturalLanguageCommandIntent, normalizeNaturalLanguageCommandText, opsGetGroupMember, opsGetSettings, opsHandleMemberLeave } from "./src/operations/runtime.js";
 import { authDbDelStrict, authDbGetStrict, authDbPutStrict, clearPasswordLoginGuard, commandChangesWebSettings, constantTimeEqual, createPortalPasswordRecord, createPortalSession, decryptPortalAuthSecret, encryptPortalAuthSecret, deleteMemoryVector, generateSixDigitCode, getOneBotHub, getPortalSession, getPublicNebulaSeed, hashBackupCode, isMemoryBanned, isValidPortalPasswordRecord, jsonResponse, markGroupMemberLeft, needsPortalPasswordRehash, normalizePortalAdminUsername, notePasswordLoginFailure, portalAdminCredentialConfig, portalAdminUsernameIsClaimed, portalEnvironmentWithManagedDeveloperIds, portalSessionCookie, readCookie, readJson, readPasswordLoginGuard, readPortalAuthJson, readPortalManagedDeveloperIds, rehashPortalPasswordIfNeeded, sendOneBotAction, sendOneBotHttpAction, sendPortalVerificationMessage, upsertGroupMember, upsertMemoryVector, validatePortalPassword, verifyPortalAdminCredentials, verifyPortalPassword, verifyPortalVerificationCode, verifyTotpCode, writeMemoryAudit, writePortalManagedDeveloperIds, writeSystemError } from "./src/portal/auth.js";
 import { getPortalHomePage, handlePortalApi } from "./src/portal/runtime.js";
 import { injectPortalLayoutClient } from "./src/portal/layout.js";
@@ -1375,25 +1375,6 @@ const QQAIWorker = {
         }
         if (result?.status === "disabled") return jsonReply(`${atSender}${result.message || "当前无法执行群规检查。"}`);
         return jsonReply(`${atSender}检查完成，但没有取得可用结论，请稍后重试。`);
-      }
-
-      const collaborationText = stripBotMentionFromConversation(cleanMessage, botId) || cleanMessage;
-      const collaborationFixed = /^[!！](?:活动|活動|报名|報名|取消报名|取消報名|活动名单|活動名單|活动通知|活動通知|投票)(?:\s|$)/i.test(String(collaborationText || "").trim());
-      const collaborationConfirm = /^(?:确认建立活动|確認建立活動|确认创建活动|確認創建活動|取消建立活动|取消建立活動|取消创建活动|取消創建活動|确认建立投票|確認建立投票|取消建立投票|确认结束投票|確認結束投票|取消结束投票|取消結束投票)$/i.test(String(collaborationText || "").trim());
-      let collaborationNaturalIntent = null;
-      const collaborationNaturalEligible = !collaborationFixed && !collaborationConfirm && !isCommandMessage && (isPrivate || botMentioned || repliedToBot || sameQqSelfAsk);
-      if (collaborationNaturalEligible) collaborationNaturalIntent = await classifyCollaborationNaturalIntent(env, collaborationText, currentGroupId);
-      if (collaborationFixed || collaborationConfirm || collaborationNaturalIntent) {
-        const opsActivityCommand = await opsHandleActivityCommand(env, {
-          groupId: currentGroupId,
-          userId,
-          userName: senderCard,
-          role: isDeveloper ? "developer" : senderRole,
-          text: collaborationText,
-          isPrivate,
-          naturalIntent: collaborationNaturalIntent
-        });
-        if (opsActivityCommand.handled) return jsonReply(`${atSender}${opsActivityCommand.text}`);
       }
 
       const noViolationCommand = cleanMessage.match(/^[!！](?:无违规|無違規)(?:\s|$)/i);
