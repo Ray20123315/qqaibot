@@ -308,6 +308,16 @@ async function runHealthChecks(env, { mode = "quick" } = {}) {
 
 
 
+async function safeHealthFeatureFlag(env, name, fallback = false) {
+  try {
+    return await getFeatureFlag(env, name, fallback);
+  } catch {
+    return fallback;
+  }
+}
+
+
+
 async function buildHealthState(env) {
   const health = await runHealthChecks(env, { mode: "quick" });
   let onebot = null;
@@ -337,9 +347,9 @@ async function buildHealthState(env) {
       liveModel: env.GEMINI_LIVE_MODEL || "gemini-3.1-flash-live-preview"
     },
     onebot,
-    privateChat: await getFeatureFlag(env, "private_chat_enabled", false),
-    privateSchedule: await getFeatureFlag(env, "private_schedule_enabled", false),
-    privateAppeal: await getFeatureFlag(env, "private_appeal_enabled", true)
+    privateChat: await safeHealthFeatureFlag(env, "private_chat_enabled", false),
+    privateSchedule: await safeHealthFeatureFlag(env, "private_schedule_enabled", false),
+    privateAppeal: await safeHealthFeatureFlag(env, "private_appeal_enabled", true)
   };
 }
 
