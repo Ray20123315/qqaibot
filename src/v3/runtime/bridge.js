@@ -90,6 +90,22 @@ async function handleV3RuntimeFetch(request, env, url = null, runtimeOverrides =
   }
 }
 
+async function dispatchV3RuntimeEvent(env, body = {}, runtimeOverrides = {}) {
+  if (!v3RuntimeEnabled(env)) return Object.freeze({ enabled: false, handled: false, consumed: false, results: Object.freeze([]) });
+  try {
+    const runtime = await getV3Runtime(env, v3RuntimeOptionsFromEnv(env, runtimeOverrides));
+    const result = await runtime.dispatchOneBotEvent(body || {});
+    const results = Array.isArray(result?.results) ? result.results : [];
+    const consumed = results.some(item => item && typeof item === "object" && item.consume === true);
+    return Object.freeze({ enabled: true, ...result, results: Object.freeze(results), consumed });
+  } catch (error) {
+    if (v3RuntimeStorageUnavailable(error)) {
+      return Object.freeze({ enabled: true, handled: false, consumed: false, degraded: true, code: "D1_STORAGE_UNAVAILABLE", results: Object.freeze([]) });
+    }
+    throw error;
+  }
+}
+
 async function runV3RuntimeScheduled(env, scheduledTime = Date.now(), runtimeOverrides = {}) {
   if (!v3RuntimeEnabled(env)) return Object.freeze({ enabled: false, jobs: 0, results: Object.freeze([]) });
   const runtime = await getV3Runtime(env, v3RuntimeOptionsFromEnv(env, runtimeOverrides));
@@ -102,6 +118,7 @@ export {
   V3_BILIBILI_MIN_POLL_MS,
   V3_PUBLIC_STATUS_PATH,
   degradedPublicStatusResponse,
+  dispatchV3RuntimeEvent,
   handleV3RuntimeFetch,
   parseCreatorJson,
   runV3RuntimeScheduled,
