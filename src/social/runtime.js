@@ -293,6 +293,7 @@ function normalizeRelationship(value, userId) {
 }
 
 async function getSocialRelationship(env, groupId, userId) {
+  if (String(env?.PERSIST_SOCIAL_RELATIONSHIPS || "").toLowerCase() !== "true") return normalizeRelationship(null, userId);
   const item = normalizeRelationship(await readJson(env, socialRelationshipKey(groupId, userId), null), userId);
   if (item.lastAt && Date.now() - item.lastAt > SOCIAL_RELATION_TTL_MS) return normalizeRelationship(null, userId);
   return item;
@@ -314,7 +315,7 @@ async function updateSocialRelationship(env, groupId, userId, sceneType) {
   } else if (sceneType === "casual" || sceneType === "question") {
     next.familiarity = clamp(next.familiarity + 0.003, 0, 1);
   }
-  await dbPut(env, socialRelationshipKey(groupId, userId), JSON.stringify(next));
+  if (String(env?.PERSIST_SOCIAL_RELATIONSHIPS || "").toLowerCase() === "true") await dbPut(env, socialRelationshipKey(groupId, userId), JSON.stringify(next));
   return next;
 }
 
