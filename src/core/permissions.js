@@ -378,6 +378,7 @@ async function writeAiDecisionLog(env, data) {
     ...data,
     id
   };
+  if (String(env?.PERSIST_AI_DECISION_LOGS || "").toLowerCase() !== "true") return item;
   await dbPut(env, `ai_decision_log:${id}`, JSON.stringify(item));
   await appendIndex(env, "ai_decision_log:index", id, DEFAULTS.aiDecisionLogLimit);
   if (item.groupId) await appendIndex(env, `ai_decision_log:index:${item.groupId}`, id, DEFAULTS.aiDecisionLogLimit);
@@ -385,9 +386,8 @@ async function writeAiDecisionLog(env, data) {
 }
 
 
-
 async function updateAiDecisionLog(env, id, patch = {}) {
-  if (!id) return null;
+  if (String(env?.PERSIST_AI_DECISION_LOGS || "").toLowerCase() !== "true" || !id) return null;
   const current = await readJson(env, `ai_decision_log:${id}`, null);
   if (!current) return null;
   const next = { ...current, ...patch, id: current.id, updatedAt: Date.now() };
@@ -396,8 +396,8 @@ async function updateAiDecisionLog(env, id, patch = {}) {
 }
 
 
-
 async function listAiDecisionLogs(env, { groupId = "", query = "", decision = "", triggerType = "", limit = 300 } = {}) {
+  if (String(env?.PERSIST_AI_DECISION_LOGS || "").toLowerCase() !== "true") return [];
   const ids = await readJson(env, groupId ? `ai_decision_log:index:${groupId}` : "ai_decision_log:index", []);
   const out = [];
   const q = String(query || "").trim().toLowerCase();
