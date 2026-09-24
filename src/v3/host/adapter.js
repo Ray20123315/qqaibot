@@ -1,6 +1,7 @@
 import { VERSION } from "../../config/runtime.js";
 import { createPluginLifecycleRegistry } from "../../plugins/lifecycle.js";
 import { callGeminiGenerate, effectiveRuntimeModels, geminiVisionApiKeys, googleApiKeysFor, parseList } from "../../ai/runtime.js";
+import { recentConversationMessagesForUser } from "../../core/identity.js";
 import { callOneBotAction } from "../../core/permissions.js";
 import { dbDel, dbGet, dbPut } from "../../data/store.js";
 import { createPluginHost } from "../../plugins/runtime.js";
@@ -266,6 +267,15 @@ function createV3HostAdapter(env, {
     "scheduler.list": async ({ plugin, input }) => pluginScheduler.list(plugin.id, input || {}),
     "scheduler.get": async ({ plugin, id }) => pluginScheduler.get(plugin.id, id),
     "scheduler.cancel": async ({ plugin, id }) => pluginScheduler.cancel(plugin.id, id),
+    "member.recent_messages": async ({ input, eventContext }) => {
+      const source = input && typeof input === "object" ? input : {};
+      const message = eventContext?.message || {};
+      const groupId = String(source.groupId || message.groupId || "");
+      const userId = String(source.userId || message.userId || "");
+      const limit = clampNumber(source.limit, 30, 1, 80);
+      if (!groupId || !userId) throw new Error("PLUGIN_MEMBER_RECENT_TARGET_REQUIRED");
+      return recentConversationMessagesForUser(env, groupId, userId, limit);
+    },
     "network.fetch": async ({ input }) => {
       const source = typeof input === "string" ? { url: input } : (input && typeof input === "object" ? input : {});
       const url = String(source.url || "").trim();
