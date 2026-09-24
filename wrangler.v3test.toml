@@ -1,0 +1,41 @@
+"$schema" = "./node_modules/wrangler/config-schema.json"
+
+name = "qqai-v3test"
+main = "worker.js"
+compatibility_date = "2026-07-21"
+compatibility_flags = ["nodejs_compat"]
+workers_dev = true
+preview_urls = true
+
+[[durable_objects.bindings]]
+name = "ONEBOT_HUB"
+class_name = "OneBotHub"
+
+[[migrations]]
+tag = "v3test_onebot_hub_v1"
+new_sqlite_classes = ["OneBotHub"]
+
+[[d1_databases]]
+binding = "DB"
+database_name = "qqaibot"
+database_id = "569a01fe-3297-40e1-832f-09c3793056ed"
+
+[vars]
+BOT_DISPLAY_NAME = "QQAI V3 Test"
+PUBLIC_BASE_URL = ""
+DEVELOPER_IDS = ""
+DEVELOPER_ID = ""
+ROOT_QQ_IDS = ""
+ENABLE_ONEBOT_HTTP_EVENTS = "false"
+AUTO_CHECKIN_ENABLED = "false"
+V3_RUNTIME_ENABLED = "true"
+V3_BILIBILI_ENABLED = "false"
+V3_BILIBILI_CREATORS_JSON = "[]"
+V3_PLUGIN_ADMIN_IDS = ""
+PLUGIN_SECURITY_GPT_ENABLED = "false"
+PLUGIN_SECURITY_GPT_MODEL = ""
+PLUGIN_SECURITY_GPT_WEB_SEARCH_ENABLED = "false"
+V3_TEST_DB_TABLE = "kv_store_v3test_20260924"
+
+[observability]
+enabled = false

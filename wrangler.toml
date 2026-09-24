@@ -1,0 +1,105 @@
+"$schema" = "./node_modules/wrangler/config-schema.json"
+
+# Active maintainer deployment. New installations should start from wrangler.example.toml.
+name = "qqai"
+main = "worker.js"
+compatibility_date = "2026-07-21"
+compatibility_flags = ["nodejs_compat"]
+workers_dev = true
+# Keep Dashboard-managed non-secret variables that are intentionally not declared below.
+# This prevents deployments from deleting DEVELOPER_IDS / ROOT_QQ_IDS / DEVELOPER_ID and other web-managed vars.
+keep_vars = true
+
+# Custom domain for this deployment; fork owners may replace or remove this block.
+[[routes]]
+pattern = "aibot.ray2025.com"
+custom_domain = true
+
+# Temporary compatibility host. HTTP requests are redirected to aibot.ray2025.com by worker.js.
+# WebSocket /onebot remains accepted so existing NapCat clients can migrate without downtime.
+[[routes]]
+pattern = "qqai.ray2025.com"
+custom_domain = true
+
+[ai]
+binding = "AI"
+
+[[durable_objects.bindings]]
+name = "ONEBOT_HUB"
+class_name = "OneBotHub"
+
+# Durable Object migration history must not be deleted, renamed or reordered.
+[[migrations]]
+tag = "v1_onebot_hub"
+new_sqlite_classes = ["OneBotHub"]
+
+[[migrations]]
+tag = "v2_budget_guard"
+new_sqlite_classes = ["BudgetGuard"]
+
+[[migrations]]
+tag = "v3_remove_budget_guard"
+deleted_classes = ["BudgetGuard"]
+
+# Active production resources. Fork owners must create and substitute their own IDs.
+[[d1_databases]]
+binding = "DB"
+database_name = "qqaibot"
+database_id = "569a01fe-3297-40e1-832f-09c3793056ed"
+
+[[vectorize]]
+binding = "VECTORIZE"
+index_name = "qqai"
+
+# Minute scheduler plus hourly D1 cleanup.
+[triggers]
+crons = ["* * * * *", "17 * * * *"]
+
+[[ratelimits]]
+name = "MY_RATE_LIMITER"
+namespace_id = "999"
+
+  [ratelimits.simple]
+  limit = 1
+  period = 10
+
+[vars]
+# Developer / Root identity is intentionally Dashboard-managed and NOT declared here.
+# Set DEVELOPER_IDS / ROOT_QQ_IDS / legacy DEVELOPER_ID in Cloudflare Dashboard Variables.
+# keep_vars=true preserves those values across Wrangler/Git deployments.
+
+# Public links shown by the bot. Change this when using another domain or workers.dev URL.
+PUBLIC_BASE_URL = "https://aibot.ray2025.com"
+BOT_DISPLAY_NAME = "QQAI"
+
+# Deployment notification scope and timing.
+DEPLOY_NOTIFY_WORKER_NAME = "qqai"
+DEPLOY_NOTIFY_BRANCH = "main"
+DEPLOY_NOTIFY_DEVELOPER_IDS = ""
+DEPLOY_NOTIFY_START_COOLDOWN_SECONDS = "600"
+DEPLOY_NOTIFY_SELF_GRACE_SECONDS = "90"
+
+# OneBot HTTP event fallback.
+ENABLE_ONEBOT_HTTP_EVENTS = "false"
+
+# Manual all-group check-in batch concurrency. Automatic midnight check-in is disabled in the lean v2 runtime.
+AUTO_CHECKIN_CONCURRENCY = "12"
+
+# Paid-model policy and model lists.
+DEEPSEEK_FLASH_MODEL = "deepseek-v4-flash"
+DEEPSEEK_PRO_MODEL = "deepseek-v4-pro"
+DEEPSEEK_DAILY_BUDGET_CNY = "0.35"
+GEMINI_CHAT_MODELS = "gemini-3.5-flash,gemini-3.1-flash-lite,gemini-3-flash-preview,gemini-2.5-flash,gemini-2.5-flash-lite,gemma-4-26b-a4b-it,gemma-4-31b-it"
+GEMMA_DECISION_MODELS = "gemma-4-26b-a4b-it,gemma-4-31b-it"
+GEMINI_IMAGE_MODELS = ""
+IMAGEN_MODELS = "imagen-4.0-fast-generate-001,imagen-4.0-generate-001,imagen-4.0-ultra-generate-001"
+GEMINI_TTS_MODELS = "gemini-3.1-flash-tts-preview,gemini-2.5-flash-preview-tts"
+GEMINI_LIVE_MODEL = "models/gemini-3.1-flash-live-preview"
+
+# Optional: sandboxed external plugins require Cloudflare Dynamic Workers (Workers Paid).
+# Uncomment only after confirming the production account supports Dynamic Workers.
+# [[worker_loaders]]
+# binding = "PLUGIN_LOADER"
+
+[observability]
+enabled = false
