@@ -94,9 +94,11 @@ jobs:
           curl -fsS --retry 10 --retry-delay 3 --retry-all-errors "$V3TEST_URL/healthz" -o /tmp/health.json
           curl -fsS --retry 10 --retry-delay 3 --retry-all-errors "$V3TEST_URL/plugin-security" -o /tmp/plugin-security.html
           curl -fsS --retry 10 --retry-delay 3 --retry-all-errors "$V3TEST_URL/api/v3/plugin-security" -o /tmp/plugin-security.json
+          curl -fsS --retry 10 --retry-delay 3 --retry-all-errors "$V3TEST_URL/api/v3/diagnostics/onebot-identity" -o /tmp/onebot-identity.json
           curl -fsS --retry 10 --retry-delay 3 --retry-all-errors "$V3TEST_URL/portal" -o /tmp/portal.html
           node --input-type=module -e 'JSON.parse(await (await import("node:fs/promises")).readFile("/tmp/health.json","utf8"));'
           node --input-type=module -e 'const x=JSON.parse(await (await import("node:fs/promises")).readFile("/tmp/plugin-security.json","utf8")); if(x.ok!==true||!Array.isArray(x.entries)) process.exit(1);'
+          node --input-type=module -e 'const x=JSON.parse(await (await import("node:fs/promises")).readFile("/tmp/onebot-identity.json","utf8")); if(x.readOnly!==true||x.identityAvailable!==true||Object.prototype.hasOwnProperty.call(x,"qq")||Object.prototype.hasOwnProperty.call(x,"user_id")) process.exit(1);'
           grep -q 'QQAI 插件安全中心' /tmp/plugin-security.html
           grep -q 'v3PluginManagerNav' /tmp/portal.html
           grep -q 'data-v3-permission' /tmp/portal.html

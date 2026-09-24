@@ -8,6 +8,7 @@ import { dbCompareAndSwapStrict, dbDel, dbGet, dbPut } from "../data/store.js";
 import { toSimplifiedChinese } from "../i18n/commands.js";
 import { normalizeRuleProxyMode, normalizeRuleStrictness, parseUnlimitedNonNegativeInteger } from "../moderation/runtime.js";
 import { getFeatureFlag, numericId, setFeatureFlag } from "../security/network.js";
+import { wrapOneBotHubForReadOnly } from "../onebot/read-only.js";
 
 
 
@@ -552,7 +553,8 @@ function generateSixDigitCode() {
 
 function getOneBotHub(env) {
   if (!env.ONEBOT_HUB) throw new Error("Missing Durable Object binding: ONEBOT_HUB");
-  return env.ONEBOT_HUB.get(env.ONEBOT_HUB.idFromName("default"));
+  const stub = env.ONEBOT_HUB.get(env.ONEBOT_HUB.idFromName("default"));
+  return wrapOneBotHubForReadOnly(env, stub);
 }
 
 

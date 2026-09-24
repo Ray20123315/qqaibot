@@ -32,6 +32,7 @@ import { handleV3PluginManagerApi, injectV3PluginManagerClient } from "./src/v3/
 import { handleV3PackageManagerApi, injectV3PackageManagerClient } from "./src/v3/portal/package-manager.js";
 import { handleV3PluginSecurityPublic, runV3PluginSecurityScheduled } from "./src/v3/public/plugin-security.js";
 import { withV3TestDatabaseNamespace } from "./src/v3/testing/db-namespace.js";
+import { oneBotReadOnlyMode } from "./src/onebot/read-only.js";
 
 
 const POLITICAL_TOPIC_PATTERN = /(?:政治|政党|政黨|选举|選舉|总统|總統|主席|国会|國會|立法院|立法委员|立法委員|立委|议员|議員|首相|总理|總理|内阁|內閣|政府|政权|政權|执政|執政|在野|政治人物|政治制度|公共政策|外交|制裁|领土争议|領土爭議|两岸|兩岸|统一|統一|台独|台獨|罢免|罷免|公投|意识形态|意識形態|民进党|民進黨|国民党|國民黨|共产党|共產黨|民主党|民主黨|共和党|共和黨|\b(?:politics|political|election|government|parliament|congress|president|prime minister)\b)/i;
@@ -167,6 +168,41 @@ const QQAIWorker = {
 
     const v3PluginSecurityResponse = await handleV3PluginSecurityPublic(request, env, url);
     if (v3PluginSecurityResponse) return v3PluginSecurityResponse;
+
+    if (request.method === "GET" && url.pathname === "/api/v3/diagnostics/onebot-identity" && oneBotReadOnlyMode(env)) {
+      let connected = false;
+      try {
+        const statusResponse = await getOneBotHub(env).fetch("https://onebot-hub/status");
+        const status = await statusResponse.json().catch(() => ({}));
+        connected = Boolean(status?.connected);
+      } catch {}
+      try {
+        const response = await callOneBotAction(env, { action: "get_login_info", params: {} }, 8000);
+        const raw = response?.data && typeof response.data === "object" ? response.data : (response && typeof response === "object" ? response : {});
+        const qq = String(raw?.user_id ?? raw?.userId ?? "").replace(/\D/g, "");
+        const nickname = String(raw?.nickname ?? raw?.name ?? "").trim();
+        return jsonResponse({
+          ok: Boolean(qq),
+          connected,
+          identityAvailable: Boolean(qq),
+          nicknameAvailable: Boolean(nickname),
+          readOnly: true,
+          source: "get_login_info"
+        });
+      } catch (error) {
+        const rawCode = String(error?.message || error || "");
+        const errorCode = /^ONEBOT_[A-Z0-9_]+$/.test(rawCode) ? rawCode : "ONEBOT_IDENTITY_UNAVAILABLE";
+        return jsonResponse({
+          ok: false,
+          connected,
+          identityAvailable: false,
+          nicknameAvailable: false,
+          readOnly: true,
+          source: "get_login_info",
+          errorCode
+        }, 503);
+      }
+    }
 
     // ==========================================
     // 🔌 NapCat / OneBot WebSocket Client 主動回覆入口
