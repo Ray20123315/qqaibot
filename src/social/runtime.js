@@ -122,14 +122,15 @@ async function readAtomicPersonaFacts(env) {
 
 async function getSocialProfile(env, groupId) {
   const stored = await readJson(env, socialProfileKey(), null);
-  const learnedStyle = normalizeStyle(await readJson(env, socialStyleKey(groupId), DEFAULT_STYLE));
   const profile = stored && typeof stored === "object" ? stored : {};
-  const atomicFacts = await readAtomicPersonaFacts(env);
+  const atomicFacts = String(env?.READ_ATOMIC_PERSONA_FACTS || "").toLowerCase() === "true"
+    ? await readAtomicPersonaFacts(env)
+    : {};
   return {
     version: SOCIAL_PROFILE_VERSION,
     canon: normalizeCanon(profile.canon || DEFAULT_CANON),
     generatedCanon: { ...normalizeGeneratedCanon(profile.generatedCanon), ...atomicFacts },
-    style: learnedStyle,
+    style: DEFAULT_STYLE,
     updatedAt: Number(profile.updatedAt || 0)
   };
 }
@@ -142,7 +143,7 @@ async function saveSocialProfile(env, groupId, profile) {
     updatedAt: Date.now()
   };
   await dbPut(env, socialProfileKey(), JSON.stringify(next));
-  return { ...next, style: normalizeStyle(await readJson(env, socialStyleKey(groupId), DEFAULT_STYLE)) };
+  return { ...next, style: DEFAULT_STYLE };
 }
 
 function effectivePersonaFact(profile, key) {
@@ -250,31 +251,6 @@ function hasEmoji(text) {
 
 function hasKaomoji(text) {
   return /[（(][^）)]{0,24}(?:ω|▽|≧|≦|＾|•|﹏|Д|皿|￣|｀|´)[^）)]{0,24}[）)]/.test(text);
-}
-
-async function observeSocialStyle(env, { groupId, text, isCommand = false, isRobot = false }) {
-  const source = String(text || "").trim();
-  if (!groupId || !source || isCommand || isRobot || source.length > 500 || /^https?:\/\//i.test(source)) return null;
-  const previous = normalizeStyle(await readJson(env, socialStyleKey(groupId), DEFAULT_STYLE));
-  const chars = [...source.replace(/\s+/g, "")].length;
-  const punctuationOnly = /^[.。…?？!！~～]{1,8}$/.test(source) ? 1 : 0;
-  const repeatedQuestion = /(?:\?\?+|？？+)/.test(source) ? 1 : 0;
-  const ellipsis = /(?:\.\.\.+|……+|。。。+)/.test(source) ? 1 : 0;
-  const actionText = /^[（(][^）)]{1,30}[）)]$/.test(source) ? 1 : 0;
-  const next = {
-    samples: previous.samples + 1,
-    averageChars: ema(previous.averageChars, clamp(chars, 1, 300)),
-    emojiRate: ema(previous.emojiRate, hasEmoji(source) ? 1 : 0),
-    kaomojiRate: ema(previous.kaomojiRate, hasKaomoji(source) ? 1 : 0),
-    punctuationOnlyRate: ema(previous.punctuationOnlyRate, punctuationOnly),
-    repeatedQuestionRate: ema(previous.repeatedQuestionRate, repeatedQuestion),
-    ellipsisRate: ema(previous.ellipsisRate, ellipsis),
-    actionTextRate: ema(previous.actionTextRate, actionText),
-    lineBreakRate: ema(previous.lineBreakRate, source.includes("\n") ? 1 : 0),
-    updatedAt: Date.now()
-  };
-  await dbPut(env, socialStyleKey(groupId), JSON.stringify(next));
-  return next;
 }
 
 function normalizeRelationship(value, userId) {
@@ -667,7 +643,6 @@ export {
   oneBotEventHasMedia,
   oneBotEventIsBareMention,
   oneBotEventIsPunctuationOnly,
-  observeSocialStyle,
   shouldSendSocialBufferNotice,
   socialInputDelayMs,
   socialTypingDelayMs,
