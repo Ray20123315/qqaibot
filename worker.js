@@ -2,7 +2,7 @@ import { aiReplyPromisesFutureSearch, aiReplySignalsUncertainty, appendSearchSou
 import { buildImmediateConversationContext, buildMeetingMinuteBatches, normalizeMeetingMinuteCount, splitOutboundText } from "./src/ai/conversation-quality.js";
 import { AI_MEDIA_LIMITS, DEFAULTS, VERSION, classifyOperationalFailure } from "./src/config/runtime.js";
 import { publicBaseUrl } from "./src/config/deployment.js";
-import { consumeManualRuleCheckRate, developerIds, getAffinityProfile, isDeveloperId, latestConversationMessageForUser, recentConversationMessagesForUser, refreshAffinityAiAssessment, stripGroupAiOptOutPrefix, updateAffinityFixedFromMessage } from "./src/core/identity.js";
+import { consumeManualRuleCheckRate, developerIds, getAffinityProfile, isDeveloperId, latestConversationMessageForUser, recentConversationMessagesForUser, stripGroupAiOptOutPrefix } from "./src/core/identity.js";
 import { appendIndex, buildLongGroupConversationContext, callOneBotAction, checkRuntimeRateLimit, getEffectivePermissions, isKnownOutboundMessage, markOutboundPending, modelPreferenceLabel, normalizeMemoryItems, normalizeModelPreference, normalizePermissionName, permissionLabel, removeFromIndex, setExplicitPermission, updateAiDecisionLog, writeAiDecisionLog, writeSystemAudit } from "./src/core/permissions.js";
 import { appendChatHistoryTurn, clearChatSessionHistory, dbDel, dbGet, dbPut, readChatHistory, withTimeout } from "./src/data/store.js";
 import { getDeploymentStatusForViewer, handleDeploymentBuildQueue, injectDeploymentPortalClient } from "./src/deployment/notifications.js";
@@ -20,7 +20,7 @@ import { authDbDelStrict, authDbGetStrict, authDbPutStrict, clearPasswordLoginGu
 import { getLiveHtmlPage, getPortalHomePage, handleGeminiLiveUpgrade, handlePortalApi } from "./src/portal/runtime.js";
 import { injectPortalLayoutClient } from "./src/portal/layout.js";
 import { injectPortalMembersClient } from "./src/portal/members.js";
-import { applySocialOutputPolicy, buildSocialDecision, buildSocialPromptBlock, capturePersonaContinuity, oneBotBotMentionCount, oneBotEventHasMedia, oneBotEventIsBareMention, oneBotEventIsPunctuationOnly, observeSocialStyle, shouldSendSocialBufferNotice, socialInputDelayMs, waitForSocialTyping } from "./src/social/runtime.js";
+import { applySocialOutputPolicy, buildSocialDecision, buildSocialPromptBlock, capturePersonaContinuity, oneBotBotMentionCount, oneBotEventHasMedia, oneBotEventIsBareMention, oneBotEventIsPunctuationOnly, shouldSendSocialBufferNotice, socialInputDelayMs, waitForSocialTyping } from "./src/social/runtime.js";
 import { pickSticker, pickStickerForText, stickerCqMessage } from "./src/social/sticker-library.js";
 import { cancelSchedule, cleanupExpiredModerationProposals, cleanupTransientState, countActiveSchedulesForUser, createAppealFromText, createScheduleRecord, extractScheduleMentionIds, formatScheduleLine, listUserSchedules, parseManagementScheduleAction, parseScheduleRequest, performManualGroupCheckins, processConflictSignal, processDueSchedules, reviewScheduleWithGemma, reviseScheduleRecord, scheduledCronMode, skipScheduleOnce } from "./src/scheduler/runtime.js";
 import { handleEntertainmentCommand } from "./src/games/entertainment.js";
@@ -1003,16 +1003,6 @@ const QQAIWorker = {
         return new Response(null, { status: 204 });
       }
 
-      // 只学习群体结构统计，不保存原句或复制单一群友的私人表达。
-      if (isGroup && !isSelfAccount && cleanMessage) {
-        ctx.waitUntil(observeSocialStyle(env, {
-          groupId: currentGroupId,
-          text: cleanMessage,
-          isCommand: isCommandMessage,
-          isRobot: false
-        }).catch(error => console.warn("social style observation failed", error?.message || error)));
-      }
-
       // 先解析明确触发关系。非白名单群的普通聊天必须完全静默，不能见人就提示。
       let quotedMessage = null;
       if (quotedMessageId) {
@@ -1224,17 +1214,6 @@ const QQAIWorker = {
       const hasAdminAuth = permissionSet.aiAdmin;
       const hasGroupOpsAuth = permissionSet.groupOps;
       const isOnlyMe = isDeveloper;
-
-      // 固定好感度只采用可解释、限额且幂等的规则更新；AI 调整分另行缓存评估。
-      if (isGroup && !isCommandMessage && meaningfulText && (botMentioned || repliedToBot)) {
-        ctx.waitUntil(updateAffinityFixedFromMessage(env, {
-          groupId: currentGroupId,
-          userId,
-          text: cleanMessage,
-          messageId: replyMessageId,
-          direct: true
-        }).catch(error => console.warn("affinity fixed update failed", error?.message || error)));
-      }
 
       // 同號人工普通發言只納入上下文，不觸發 AI；人工命令與 ?? 提問可繼續。
       if (sameQqHumanOnly) {
@@ -3313,26 +3292,6 @@ ${profileLines.join("\n")}
             console.warn("member profile context unavailable", error?.message || error);
           }
         }
-      }
-
-      // 好感度由固定规则分与缓存 AI 调整分组成。默认提供给聊天 AI，可由群 AI 管理员关闭。
-      if (isGroup && await dbGet(env, `affinity_context_enabled:${currentGroupId}`) !== "false") {
-        const affinity = await getAffinityProfile(env, {
-          groupId: currentGroupId,
-          userId,
-          senderName: senderCard,
-          refreshAi: false
-        });
-        const aiPart = affinity.aiAdjustment >= 0 ? `+${affinity.aiAdjustment}` : String(affinity.aiAdjustment);
-        finalStylePrompt += `\n\n【当前用户好感度资料】
-当前用户（QQ:${userId}）好感度为 ${affinity.total}/100，固定规则分 ${affinity.fixed}，AI 调整分 ${aiPart}，关系等级为“${affinity.level}”。
-这只是互动语气参考：分数高可更熟络，分数低应保持礼貌边界；不得歧视、羞辱、拒绝正常回答，也不得主动公开具体分数。只有用户明确询问好感度时才可说明。开发者分数永久为 100。`;
-        ctx.waitUntil(refreshAffinityAiAssessment(env, {
-          groupId: currentGroupId,
-          userId,
-          senderName: senderCard,
-          force: false
-        }).catch(error => console.warn("affinity AI refresh failed", error?.message || error)));
       }
 
       // 社交决策层只决定场景、行为和输出形态，不直接生成公开措辞。
