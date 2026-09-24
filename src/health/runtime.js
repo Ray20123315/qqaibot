@@ -280,7 +280,9 @@ async function runHealthChecks(env, { mode = "quick" } = {}) {
     name: "Cron 定时任务",
     status: cronReadError ? "warning" : (lastCron && Date.now() - Number(lastCron) < 5 * 60 * 1000 ? "ok" : "warning"),
     latencyMs: 0,
-    detail: { lastRunAt: lastCron ? new Date(Number(lastCron)).toISOString() : null, ...(cronReadError ? { error: cronReadError } : {}) },
+    detail: cronReadError
+      ? { lastRunAt: null, storageUnavailable: true, errorCode: "D1_STORAGE_UNAVAILABLE", error: cronReadError }
+      : { lastRunAt: lastCron ? new Date(Number(lastCron)).toISOString() : null },
     checkedAt: new Date().toISOString()
   });
   checks.push({ name: "D1 动态限速", status: env.DB ? "ok" : "warning", latencyMs: 0, detail: env.DB ? "D1 动态限速已启用" : "D1 未绑定", checkedAt: new Date().toISOString() });
