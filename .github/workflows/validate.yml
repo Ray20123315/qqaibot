@@ -5,6 +5,7 @@ on:
     branches:
       - main
       - refactor/v2-modular-worker
+      - codex/v3-forward-staging-20260924
   pull_request:
     branches:
       - main
@@ -27,5 +28,7 @@ jobs:
         run: npm ci --ignore-scripts
       - name: Run regression checks
         run: npm run check
+      - name: Run V3 regression checks
+        run: npm run check:v3
       - name: Build the single Worker bundle
         run: npm run check:bundle
