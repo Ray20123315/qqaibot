@@ -69,7 +69,7 @@ async function dbGetStrict(env, key) {
 async function dbPutStrict(env, key, value) {
   if (!env?.DB) throw d1StorageError("write", key);
   return dbRetryStrict("write", key, async () => {
-    const result = await env.DB.prepare("INSERT INTO kv_store (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value").bind(key, value).run();
+    const result = await env.DB.prepare("INSERT INTO kv_store (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value WHERE kv_store.value IS NOT excluded.value").bind(key, value).run();
     if (result?.success === false) throw new Error("D1 reported write failure");
     return result;
   });
@@ -161,7 +161,7 @@ async function dbClaimLeaseStrict(env, key, owner, now = Date.now(), leaseMs = 1
   if (!env?.DB) throw d1StorageError("lease claim", key);
   const value = JSON.stringify({ owner: String(owner), startedAt: now, heartbeatAt: now, expiresAt: now + Math.max(1000, Number(leaseMs) || 180000) });
   const result = await dbRetryStrict("lease claim", key, async () => env.DB.prepare(`INSERT INTO kv_store (key, value) VALUES (?, ?)
-    ON CONFLICT(key) DO UPDATE SET value = excluded.value
+    ON CONFLICT(key) DO UPDATE SET value = excluded.value WHERE kv_store.value IS NOT excluded.value
     WHERE CAST(coalesce(json_extract(kv_store.value, '$.expiresAt'), 0) AS INTEGER) <= ?
        OR json_extract(kv_store.value, '$.owner') = ?`).bind(key, value, now, String(owner)).run());
   if (result?.success === false) throw d1StorageError("lease claim", key);
