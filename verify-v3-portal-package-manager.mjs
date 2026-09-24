@@ -107,6 +107,13 @@ assert.match(injected,/Stage metadata install/);
 assert.match(injected,/runtimeCodeLoaded/);
 assert.equal(injectV3PackageManagerClient(injected),injected,"package client injection must be idempotent");
 
+const packageManagerSource = fs.readFileSync("src/v3/portal/package-manager.js","utf8");
+assert.equal(
+  (packageManagerSource.match(/PLUGIN_QUARANTINE_STATE_INVALID:/g) || []).length,
+  1,
+  "package-manager error map must not define PLUGIN_QUARANTINE_STATE_INVALID more than once"
+);
+
 const worker = fs.readFileSync("worker.js","utf8");
 assert.match(worker,/handleV3PackageManagerApi/);
 assert.match(worker,/injectV3PackageManagerClient\(injectV3PluginManagerClient/);

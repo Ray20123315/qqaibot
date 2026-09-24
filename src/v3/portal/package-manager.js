@@ -312,7 +312,6 @@ function packageManagerErrorResponse(error, fallbackStatus = 400) {
     PLUGIN_EXTERNAL_FETCH_FAILED: "无法安全下载外部 plugin artifact。",
     PLUGIN_EXTERNAL_FETCH_HTTP: "外部 plugin artifact 下载失败。",
     PLUGIN_QUARANTINE_NOT_FOUND: "找不到 quarantine 记录。",
-    PLUGIN_QUARANTINE_STATE_INVALID: "quarantine 状态不允许此操作。"
   };
   return jsonResponse({ ok:false, code, message:messages[code] || "套件操作失败，请检查当前状态。" }, fallbackStatus);
 }
