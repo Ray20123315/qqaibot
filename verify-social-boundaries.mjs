@@ -35,6 +35,10 @@ const stopContext = managerExchangeContext([
 assert(stopContext.managerStopActive === true, 'A recent management stop signal must activate post-intervention enforcement');
 
 const scheduler = fs.readFileSync('src/scheduler/runtime.js', 'utf8');
+const socialBoundaries = fs.readFileSync('src/moderation/social-boundaries.js', 'utf8');
+assert(!socialBoundaries.includes('conversation:index:'), 'Lean v2 conflict history must not use legacy conversation indexes');
+assert(socialBoundaries.includes('recent_logs:'), 'Lean v2 conflict history must use compact recent logs');
+assert(scheduler.includes('if (!rough && !currentManagerStop) return null'), 'Ordinary messages must bypass conflict D1 work locally');
 assert(scheduler.includes('conflict_manager_intervention'), 'Conflict guard must audit management intervention');
 assert(scheduler.includes('conflict_warning_after_manager_stop'), 'Conflict guard must warn only after management intervention is ignored');
 assert(!scheduler.includes('群冲突升级'), 'Conflict guard must not notify or summon management after failed persuasion');
