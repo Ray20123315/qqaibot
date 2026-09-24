@@ -269,8 +269,22 @@ async function runHealthChecks(env, { mode = "quick" } = {}) {
     return { matches: query?.matches?.length || 0 };
   }, { timeoutMs: 18000 }));
 
-  const lastCron = await dbGet(env, "system:last_cron");
-  checks.push({ name: "Cron 定时任务", status: lastCron && Date.now() - Number(lastCron) < 5 * 60 * 1000 ? "ok" : "warning", latencyMs: 0, detail: { lastRunAt: lastCron ? new Date(Number(lastCron)).toISOString() : null }, checkedAt: new Date().toISOString() });
+  let lastCron = null;
+  let cronStorageUnavailable = false;
+  try {
+    lastCron = await dbGet(env, "system:last_cron");
+  } catch {
+    cronStorageUnavailable = true;
+  }
+  checks.push({
+    name: "Cron 定时任务",
+    status: cronStorageUnavailable ? "warning" : (lastCron && Date.now() - Number(lastCron) < 5 * 60 * 1000 ? "ok" : "warning"),
+    latencyMs: 0,
+    detail: cronStorageUnavailable
+      ? { lastRunAt: null, storageUnavailable: true, errorCode: "D1_STORAGE_UNAVAILABLE" }
+      : { lastRunAt: lastCron ? new Date(Number(lastCron)).toISOString() : null },
+    checkedAt: new Date().toISOString()
+  });
   checks.push({ name: "D1 动态限速", status: env.DB ? "ok" : "warning", latencyMs: 0, detail: env.DB ? "D1 动态限速已启用" : "D1 未绑定", checkedAt: new Date().toISOString() });
 
   const summary = {
@@ -286,8 +300,22 @@ async function runHealthChecks(env, { mode = "quick" } = {}) {
     },
     checks
   };
-  await dbPut(env, `health:last:${mode}`, JSON.stringify(summary));
+  try {
+    await dbPut(env, `health:last:${mode}`, JSON.stringify(summary));
+  } catch {
+    // Health endpoints must stay observable even when D1 itself is degraded or quota-limited.
+  }
   return summary;
+}
+
+
+
+async function safeHealthFeatureFlag(env, name, fallback = false) {
+  try {
+    return await getFeatureFlag(env, name, fallback);
+  } catch {
+    return fallback;
+  }
 }
 
 
@@ -321,9 +349,9 @@ async function buildHealthState(env) {
       liveModel: env.GEMINI_LIVE_MODEL || "gemini-3.1-flash-live-preview"
     },
     onebot,
-    privateChat: await getFeatureFlag(env, "private_chat_enabled", false),
-    privateSchedule: await getFeatureFlag(env, "private_schedule_enabled", false),
-    privateAppeal: await getFeatureFlag(env, "private_appeal_enabled", true)
+    privateChat: await safeHealthFeatureFlag(env, "private_chat_enabled", false),
+    privateSchedule: await safeHealthFeatureFlag(env, "private_schedule_enabled", false),
+    privateAppeal: await safeHealthFeatureFlag(env, "private_appeal_enabled", true)
   };
 }
 
