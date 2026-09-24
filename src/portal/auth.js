@@ -98,7 +98,7 @@ async function authDbGetStrict(env, key) {
 async function authDbPutStrict(env, key, value) {
   if (!env?.DB) throw authStorageError("Missing D1 binding for Portal authentication");
   await authDbRetry(`auth write ${key}`, async () => {
-    const result = await env.DB.prepare("INSERT INTO kv_store (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value").bind(key, value).run();
+    const result = await env.DB.prepare("INSERT INTO kv_store (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value WHERE kv_store.value IS NOT excluded.value").bind(key, value).run();
     if (result && result.success === false) throw new Error("D1 write reported failure");
     return result;
   });
