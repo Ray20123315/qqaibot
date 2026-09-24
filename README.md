@@ -132,7 +132,7 @@ npm run deploy
 | `VECTORIZE` | Vectorize | 長期記憶需要 | 群組／使用者隔離的語意記憶 |
 | `MY_RATE_LIMITER` | Rate Limiter | 建議 | Cloudflare 原生速率限制 |
 
-Cron 預設每分鐘執行，用於排程、自動化、暫存清理、主動發話與自動群打卡。更改 Cron 會影響所有上述工作，不應只為調整打卡時間而降低觸發頻率。
+Cron 分成每分鐘的使用者排程與每小時的資料清理。精簡版 v2 不再於 Cron 執行自動群打卡、Bilibili 輪詢、狼人殺計時、平台背景工作或其他自動化 fan-out，以降低 D1 與 Worker 背景負載。
 
 ## 公開 Worker 變數
 
@@ -170,16 +170,14 @@ npx wrangler secret put PORTAL_ADMIN_PASSWORD
 | `DEPLOY_NOTIFY_START_COOLDOWN_SECONDS` | `600` | 部署開始事件冷卻。 |
 | `DEPLOY_NOTIFY_SELF_GRACE_SECONDS` | `90` | Worker 自我版本確認等待時間，範圍由程式限制。 |
 
-### OneBot 與自動群打卡
+### OneBot 與手動群打卡
 
 | 變數 | 預設／範圍 | 說明 |
 | --- | --- | --- |
 | `ENABLE_ONEBOT_HTTP_EVENTS` | `false` | 是否允許 OneBot HTTP 事件入口。 |
-| `AUTO_CHECKIN_ENABLED` | `true` | 全域停用或啟用自動群打卡。 |
-| `AUTO_CHECKIN_RETRY_INTERVAL_MS` | `1000`，限制 500～5000 | 午夜打卡失敗後的重試間隔。 |
-| `AUTO_CHECKIN_CONCURRENCY` | `12`，限制 1～30 | 同時處理的群數量。 |
+| `AUTO_CHECKIN_CONCURRENCY` | `12`，限制 1～30 | 手動執行全群打卡時的批次並行數。 |
 
-自動群打卡目前使用 Asia/Taipei 語意：23:59 預載群列表，00:00:00～00:01:59 重試。這個時區與日期邏輯屬於完整演算法，不是單一字串即可安全更換；要支援其他時區需連同日期解析與測試一起修改。
+自動午夜群打卡已自精簡版 v2 移除；仍可由具權限者主動執行群打卡。
 
 ### 模型與預算
 
@@ -257,8 +255,8 @@ npx wrangler secret put SECRET_NAME
 - 自動歡迎、歡迎詞、入群輔助與新人觀察期
 - 人工通知路由；預設只找開發者，群主通知總開關預設關閉
 - AI 管理、群操作、排程審核與申訴審核權限
-- 活動、報名、候補、投票、排程與狼人殺
-- Bilibili 監控設定
+- 活動、報名、候補、投票、排程與狼人殺（精簡版不執行背景狼人殺 timer）
+- Bilibili 串接設定（精簡版不做每分鐘自動輪詢）
 - 使用者記憶、免打擾、黑名單、好感度與申訴資料
 
 開發者 QQ 清單、API Key、Token、加密金鑰、Cloudflare binding 與 migration 不開放給一般 Portal 使用者修改。
@@ -344,7 +342,7 @@ Token: 與 ONEBOT_ACCESS_TOKEN 相同
 
 1. 在 Cloudflare 先設定 `DEVELOPER_IDS`，內容為你自己的 QQ；可用逗號分隔多人。
 2. 設定 `PUBLIC_BASE_URL`，避免 `!help` 產生錯誤網址。
-3. 確認 `AUTO_CHECKIN_ENABLED`、重試間隔與 concurrency。
+3. 如需手動批次群打卡，確認 `AUTO_CHECKIN_CONCURRENCY`。
 4. 不要刪除既有 Durable Object migrations。
 5. 執行完整 regression 與 dry-run bundle。
 6. 部署後用開發者 QQ 測試 `!help`、Portal 登入、通知與私訊 `!群打卡`。
