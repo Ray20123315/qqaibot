@@ -1747,10 +1747,6 @@ function normalizeNaturalLanguageCommandText(text, now = Date.now()) {
     [/^(?:请|請)?(?:帮我|幫我)?\s*(?:关闭|關閉)\s*(?:本群)?\s*AI$/i, "!关闭ai"],
     [/^(?:查看|查询|查詢)(?:一下)?\s*(?:系统)?(?:状态|狀態|配额|配額)$/i, "!status"],
     [/^(?:查看|显示|顯示)(?:一下)?\s*(?:帮助|幫助|指令)$/i, "!帮助"],
-    [/^(?:查看|查询|查詢|查|看看|告诉我|告訴我)(?:一下)?\s*(?:我的|我和你的)?\s*好感度(?:是多少)?$/i, "!好感度"],
-    [/^(?:请|請)?(?:帮我|幫我)?\s*(?:开启|開啟|打开|打開)?\s*(?:把)?好感度(?:资料|資料)?(?:提供|给|給|加入)(?:给|給)?\s*AI$/i, "!好感度注入 开"],
-    [/^(?:请|請)?(?:帮我|幫我)?\s*(?:关闭|關閉|停止|不要|別|别)\s*(?:把)?好感度(?:资料|資料)?(?:提供|给|給|加入)(?:给|給)?\s*AI$/i, "!好感度注入 关"],
-    [/^(?:查看|查询|查詢)\s*好感度(?:给|給)?AI(?:的)?(?:状态|狀態|设置|設定)?$/i, "!好感度注入 状态"],
     [/^(?:请|請)?(?:帮我|幫我)?\s*(?:开启|開啟|打开|打開)\s*群规监控$/i, "!群规监控 开"],
     [/^(?:请|請)?(?:帮我|幫我)?\s*(?:关闭|關閉)\s*群规监控$/i, "!群规监控 关"],
     [/^(?:查看|查询|查詢)\s*群规监控(?:状态|狀態)?$/i, "!群规监控 状态"],
@@ -1773,8 +1769,6 @@ function normalizeNaturalLanguageCommandText(text, now = Date.now()) {
   if (match) return { commandText: `!检查 ${match[1].trim()}`, intent: "manual_rule_check", confidence: 1 };
   match = source.match(/^(?:这条|這條)(?:消息|訊息|发言|發言)(?:可能|好像|应该|應該)?(?:违规|違規)\s*(?:，|,|：|:)?\s*(?:原因(?:是|为|為)?|因为|因為|理由)?\s*([\s\S]{2,})$/i);
   if (match) return { commandText: `!检查 ${match[1].trim()}`, intent: "manual_rule_check", confidence: 0.99 };
-  match = source.match(/^(?:查看|查询|查詢|查|看看|告诉我|告訴我)(?:一下)?\s*(@?\d{5,})\s*(?:的)?好感度(?:是多少)?$/i);
-  if (match) return { commandText: `!好感度 ${match[1]}`, intent: "affinity_query", confidence: 1 };
   match = source.match(/^(?:请|請)?(?:帮我|幫我)?\s*(?:把)?(?:模型|回答模型)\s*(?:切换到|切換到|改成|设为|設為|使用)\s*([A-Za-z0-9 ._-]+)$/i);
   if (match) return { commandText: `!模型 ${match[1].trim()}`, intent: "model_preference", confidence: 1 };
   match = source.match(/^(?:我要|我想|帮我|幫我|请帮我|請幫我)?\s*(?:申诉|申訴)\s+([\s\S]+)$/i);
@@ -1785,8 +1779,6 @@ function normalizeNaturalLanguageCommandText(text, now = Date.now()) {
   if (match) return { commandText: `!群规严格度 ${match[1]}`, intent: "rule_strictness", confidence: 1 };
   match = source.match(/^(?:请|請)?(?:帮我|幫我)?\s*(?:把)?欢迎词\s*(?:改成|设为|設為)\s*([\s\S]+)$/i);
   if (match) return { commandText: `!欢迎词 ${match[1].trim()}`, intent: "welcome_text", confidence: 1 };
-  match = source.match(/^(?:请|請)?(?:帮我|幫我)?\s*(?:把)?(?:主动)?插话率\s*(?:改成|设为|設為|调整为|調整為)\s*(\d{1,3})\s*%?$/i);
-  if (match) return { commandText: `!设置插话率 ${Math.max(0, Math.min(100, Number(match[1])))}`, intent: "interject_rate", confidence: 1 };
   match = source.match(/^(?:请|請)?(?:帮我|幫我)?\s*记住\s+([\s\S]+)$/i);
   if (match) return { commandText: `!记住 ${match[1].trim()}`, intent: "memory_remember", confidence: 1 };
   match = source.match(/^(?:请|請)?(?:帮我|幫我)?\s*忘记\s+([\s\S]+)$/i);
@@ -1801,7 +1793,7 @@ function normalizeNaturalLanguageCommandText(text, now = Date.now()) {
 function shouldClassifyNaturalLanguageCommand(text) {
   const source = String(text || "").trim();
   if (!/^(?:请|請|帮我|幫我|麻烦|麻煩|把|将|將|设置|設定|开启|開啟|打开|打開|关闭|關閉|查看|查询|查詢|显示|顯示|看看|告诉我|告訴我|检查|檢查|复核|復核|切换|切換|调整|調整|取消|暂停|暫停|记住|記住|忘记|忘記|申请|申請)/i.test(source)) return false;
-  return /(?:本群\s*AI|群规|群規|排程|定时|定時|提醒|欢迎|歡迎|插话|插話|记忆|記憶|模型|入群辅助|入群輔助|违规禁言保护|違規禁言保護|违规检查|違規檢查|检查这条|檢查這條|复核这条|復核這條|好感度|申诉|申訴|系统状态|系統狀態|配额|配額)/i.test(source);
+  return /(?:本群\s*AI|群规|群規|排程|定时|定時|提醒|欢迎|歡迎|记忆|記憶|模型|入群辅助|入群輔助|违规禁言保护|違規禁言保護|违规检查|違規檢查|检查这条|檢查這條|复核这条|復核這條|申诉|申訴|系统状态|系統狀態|配额|配額)/i.test(source);
 }
 
 
@@ -1810,7 +1802,7 @@ async function classifyNaturalLanguageCommandIntent(env, text) {
   if (!shouldClassifyNaturalLanguageCommand(text)) return null;
   try {
     const result = await callGoogleDecision(env, {
-      system: `你是 QQ Bot 自然语言操作解析器。只输出 JSON，不回答用户问题。格式：{"intent":"none|ai_on|ai_off|status|help|schedule_list|rule_monitor_on|rule_monitor_off|rule_monitor_status|rule_strictness|join_assist_on|join_assist_off|welcome_on|welcome_off|welcome_text|memory_on|memory_off|memory_list|memory_remember|memory_forget|model_set|interject_rate|mute_guard_on|mute_guard_off|mute_guard_status|manual_rule_check|affinity_query|affinity_context_on|affinity_context_off|affinity_context_status|appeal_create|appeal_status","confidence":0到1,"value":"参数"}。只有明确要求执行操作时才识别；讨论、假设、引用、抱怨、询问功能原理一律 none。manual_rule_check 的 value 必须保留用户解释的具体违规原因；没有原因时输出 none。不要输出 ! 指令。`,
+      system: `你是 QQAI 的 Gemma 服务路由器。只负责把自然语言转成白名单服务意图与参数，只输出 JSON，不回答用户问题。格式：{"intent":"none|ai_on|ai_off|status|help|schedule_list|rule_monitor_on|rule_monitor_off|rule_monitor_status|rule_strictness|join_assist_on|join_assist_off|welcome_on|welcome_off|welcome_text|memory_on|memory_off|memory_list|memory_remember|memory_forget|model_set|mute_guard_on|mute_guard_off|mute_guard_status|manual_rule_check|appeal_create|appeal_status","confidence":0到1,"value":"参数"}。只有明确要求执行操作时才识别；讨论、假设、引用、抱怨、询问功能原理一律 none。manual_rule_check 的 value 必须保留用户解释的具体违规原因；没有原因时输出 none。不要输出 ! 指令。`,
       prompt: String(text || "").slice(0, 2000),
       maxOutputTokens: 180
     });
@@ -1824,8 +1816,7 @@ async function classifyNaturalLanguageCommandIntent(env, text) {
       join_assist_on: "!入群辅助 开", join_assist_off: "!入群辅助 关",
       welcome_on: "!自动欢迎 开", welcome_off: "!自动欢迎 关",
       memory_on: "!记忆开", memory_off: "!记忆关", memory_list: "!你记住了什么",
-      mute_guard_on: "!违规禁言保护 开", mute_guard_off: "!违规禁言保护 关", mute_guard_status: "!违规禁言保护 状态",
-      affinity_query: "!好感度", affinity_context_on: "!好感度注入 开", affinity_context_off: "!好感度注入 关", affinity_context_status: "!好感度注入 状态"
+      mute_guard_on: "!违规禁言保护 开", mute_guard_off: "!违规禁言保护 关", mute_guard_status: "!违规禁言保护 状态"
     };
     let commandText = commandByIntent[parsed.intent] || "";
     if (parsed.intent === "rule_strictness" && value) commandText = `!群规严格度 ${value}`;
@@ -1833,12 +1824,10 @@ async function classifyNaturalLanguageCommandIntent(env, text) {
     if (parsed.intent === "memory_remember" && value) commandText = `!记住 ${value}`;
     if (parsed.intent === "memory_forget" && value) commandText = `!忘记 ${value}`;
     if (parsed.intent === "model_set" && value) commandText = `!模型 ${value}`;
-    if (parsed.intent === "interject_rate" && value) commandText = `!设置插话率 ${Math.max(0, Math.min(100, Number(value.replace(/\D/g, "")) || 0))}`;
     if (parsed.intent === "appeal_create" && value) commandText = `!申诉 ${value}`;
     if (parsed.intent === "appeal_status" && value) commandText = `!申诉状态 ${value}`;
     if (parsed.intent === "manual_rule_check" && value) commandText = `!检查 ${value}`;
-    if (parsed.intent === "affinity_query" && value) commandText = `!好感度 ${value}`;
-    return commandText ? { commandText, intent: parsed.intent, confidence: Number(parsed.confidence || 0), parser: "gemma_json" } : null;
+    return commandText ? { commandText, intent: parsed.intent, confidence: Number(parsed.confidence || 0), parser: "gemma_service_router" } : null;
   } catch (error) {
     console.warn("Natural language command classifier unavailable:", error?.message || error);
     return null;
