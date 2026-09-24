@@ -32,7 +32,7 @@ function v3BilibiliCreators(env = {}) {
 
 function v3RuntimeOptionsFromEnv(env = {}, overrides = {}) {
   const source = overrides && typeof overrides === "object" ? overrides : {};
-  const official = {};
+  const official = { adminUserIds: envList(env?.V3_PLUGIN_ADMIN_IDS, developerIds(env)) };
   if (v3BilibiliEnabled(env)) {
     official.bilibili = {
       creators: v3BilibiliCreators(env),
