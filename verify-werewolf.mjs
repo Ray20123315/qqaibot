@@ -67,7 +67,7 @@ const moduleText = fs.readFileSync("src/games/werewolf.js", "utf8");
 const packageJson = JSON.parse(fs.readFileSync("package.json", "utf8"));
 const releaseNotes = JSON.parse(fs.readFileSync("release-notes.json", "utf8"));
 assert.match(worker, /handleWerewolfOneBotEvent/);
-assert.match(worker, /processWerewolfTimers/);
+assert.doesNotMatch(worker, /processWerewolfTimers/, "lean v2 keeps werewolf event handling but removes the per-minute timer");
 assert.match(worker, /injectWerewolfPortalClient/);
 assert.match(portal, /handleWerewolfPortalApi/);
 assert.match(moduleText, /狼人密谈禁止在群内发送/);
