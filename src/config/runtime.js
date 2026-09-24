@@ -14,7 +14,7 @@ const DEFAULT_DEVELOPER_ID = "";
 
 const DEFAULTS = Object.freeze({
   deepseekFlashModel: "deepseek-v4-flash",
-  interjectRate: 25,
+  interjectRate: 0,
   contextSummaryThreshold: 20,
   groupContextExactMessages: 80,
   groupContextMaximumMessages: 600,
