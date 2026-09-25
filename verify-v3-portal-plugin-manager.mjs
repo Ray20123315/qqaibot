@@ -30,7 +30,15 @@ response = await handleV3PluginManagerApi(
   { getSession: async () => ({ qq: "7" }), isDeveloper: () => false }
 );
 assert.equal(response.status, 403);
-assert.equal((await response.json()).code, "PLUGIN_MANAGER_DEVELOPER_REQUIRED");
+assert.equal((await response.json()).code, "PLUGIN_MANAGER_ADMIN_REQUIRED");
+
+response = await handleV3PluginManagerApi(
+  new Request("https://example.com/api/portal/v3/plugins"),
+  disabledEnv,
+  null,
+  { getSession: async () => ({ qq: "system-admin", systemAdmin: true, role: "developer" }), isDeveloper: () => false }
+);
+assert.equal(response.status, 200, "system admin must be able to open V3 plugin management without a numeric developer QQ");
 
 const env = {
   V3_RUNTIME_ENABLED: "true",
@@ -181,7 +189,7 @@ assert.match(injected, /qqai-v3-plugin-manager-client/);
 assert.match(injected, /qqai-v3-plugin-lifecycle-style/);
 assert.match(injected, /data-v3-toggle/);
 assert.match(injected, /data-v3-permission/);
-assert.match(injected, /外部傳輸/);
+assert.match(injected, /外部傳輸|外部传输/);
 assert.match(injected, /必要/);
 assert.match(injected, /保存版本偏好/);
 assert.match(injected, /data-v3-save-channel/);
@@ -190,6 +198,7 @@ assert.equal(injectV3PluginManagerClient(injected), injected, "Portal injection 
 const workerSource = fs.readFileSync("worker.js", "utf8");
 assert.match(workerSource, /handleV3PluginManagerApi/);
 assert.match(workerSource, /injectV3PluginManagerClient/);
+assert.match(workerSource, /portalHtml = toSimplifiedChinese\(portalHtml\)/, "the final injected Portal, including V3 plugin UI, must be simplified Chinese");
 assert.match(workerSource, /const v3PluginManagerResponse = await handleV3PluginManagerApi\(request, env, url\)/);
 
 console.log("verify-v3-portal-plugin-manager: ok");
