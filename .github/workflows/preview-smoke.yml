@@ -1,0 +1,44 @@
+name: Smoke test ChatGPT Worker Preview
+
+on:
+  push:
+    branches:
+      - chatgpt/preview-smoke-20260925
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      PREVIEW_URL: https://chatgpt-test-20260925-qqai.ray20123315.workers.dev
+    steps:
+      - name: Check Preview public routes
+        shell: bash
+        run: |
+          set -euo pipefail
+          retry=(--retry 12 --retry-delay 5 --retry-all-errors --connect-timeout 10 --max-time 30)
+          curl -fsS "${retry[@]}" "$PREVIEW_URL/" -o /tmp/root.html
+          curl -fsS "${retry[@]}" "$PREVIEW_URL/portal" -o /tmp/portal.html
+          curl -fsS "${retry[@]}" "$PREVIEW_URL/plugin-security" -o /tmp/plugin-security.html
+          curl -fsS "${retry[@]}" "$PREVIEW_URL/api/v3/plugin-security" -o /tmp/plugin-security.json
+          curl -fsS "${retry[@]}" "$PREVIEW_URL/healthz" -o /tmp/health.json
+
+          grep -qi 'QQAI' /tmp/root.html
+          grep -qi 'QQAI' /tmp/portal.html
+          grep -q 'QQAI 插件安全中心' /tmp/plugin-security.html
+          node --input-type=module -e 'const fs=await import("node:fs/promises"); const x=JSON.parse(await fs.readFile("/tmp/plugin-security.json","utf8")); if(x.ok!==true||!Array.isArray(x.entries)) process.exit(1);'
+          node --input-type=module -e 'const fs=await import("node:fs/promises"); const x=JSON.parse(await fs.readFile("/tmp/health.json","utf8")); if(!x.bindings||x.bindings.db!==false) process.exit(1); console.log(JSON.stringify({ok:x.ok,db:x.bindings.db,onebotHub:x.bindings.onebotHub}));'
+
+      - name: Check Preview OneBot WebSocket auth gate
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -sS --http1.1 --max-time 20             -o /tmp/ws-body.txt -D /tmp/ws-headers.txt             -H 'Connection: Upgrade'             -H 'Upgrade: websocket'             -H 'Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ=='             -H 'Sec-WebSocket-Version: 13'             "$PREVIEW_URL/onebot"
+          status="$(awk 'NR==1 {print $2}' /tmp/ws-headers.txt)"
+          test "$status" = "401"
+          grep -q '^Unauthorized$' /tmp/ws-body.txt
+          echo "Preview WSS auth gate returned expected HTTP 401"
