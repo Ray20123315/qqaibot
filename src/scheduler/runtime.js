@@ -499,67 +499,6 @@ function sleepMs(ms) {
 
 
 
-async function listOneBotGroups(env, noCache = true) {
-  const data = await callOneBotAction(env, { action: "get_group_list", params: { no_cache: Boolean(noCache) } }, 20000);
-  const rows = Array.isArray(data) ? data : Array.isArray(data?.data) ? data.data : [];
-  const seen = new Set();
-  return rows.map(group => ({
-    groupId: String(group?.group_id || group?.groupId || group?.id || "").replace(/\D/g, ""),
-    groupName: String(group?.group_name || group?.groupName || group?.name || "")
-  })).filter(group => group.groupId && !seen.has(group.groupId) && seen.add(group.groupId)).slice(0, 500);
-}
-
-
-
-async function performGroupCheckin(env, groupId, actorId = "system") {
-  const normalizedGroupId = String(groupId || "").replace(/\D/g, "");
-  if (!normalizedGroupId) return { ok: false, error: "群号无效", attempts: [] };
-  const params = { group_id: numericId(normalizedGroupId) };
-  const attempts = [];
-  let lastError = "未知错误";
-  for (const action of ["set_group_sign", "send_group_sign"]) {
-    try {
-      const data = await callOneBotAction(env, { action, params }, 8000);
-      attempts.push({ action, ok: true, at: Date.now() });
-      await writeSystemAudit(env, { type: "group_checkin", groupId: normalizedGroupId, actorId: String(actorId), action, result: "ok" });
-      return { ok: true, action, data, attempts };
-    } catch (error) {
-      lastError = String(error?.message || error);
-      attempts.push({ action, ok: false, error: lastError.slice(0, 300), at: Date.now() });
-    }
-  }
-  if (!String(actorId).startsWith("system:midnight_rush:")) {
-    await writeSystemAudit(env, { type: "group_checkin", groupId: normalizedGroupId, actorId: String(actorId), action: "failed", error: lastError.slice(0, 500) }).catch(() => {});
-  }
-  return { ok: false, error: lastError, attempts };
-}
-
-
-
-async function performManualGroupCheckins(env, { targetGroupId = "", actorId = "manual" } = {}) {
-  let groups = [];
-  try {
-    groups = await listOneBotGroups(env, true);
-  } catch (error) {
-    return { total: 0, success: 0, failed: [{ groupId: targetGroupId || "all", error: String(error?.message || error) }] };
-  }
-  if (targetGroupId) groups = groups.filter(group => group.groupId === String(targetGroupId));
-  const failed = [];
-  let success = 0;
-  const concurrency = Math.max(1, Math.min(20, Number(env.AUTO_CHECKIN_CONCURRENCY || DEFAULTS.autoCheckinConcurrency)));
-  for (let index = 0; index < groups.length; index += concurrency) {
-    const batch = groups.slice(index, index + concurrency);
-    const results = await Promise.all(batch.map(async group => ({ group, result: await performGroupCheckin(env, group.groupId, actorId) })));
-    for (const item of results) {
-      if (item.result.ok) success++;
-      else failed.push({ groupId: item.group.groupId, groupName: item.group.groupName, error: item.result.error });
-    }
-  }
-  return { total: groups.length, success, failed };
-}
-
-
-
 async function cleanupExpiredModerationProposals(env, now = Date.now()) {
   if (!env.DB) return;
   try {
@@ -809,4 +748,4 @@ async function processConflictSignal(env, { groupId, userId, senderName, senderR
   return { replyText: "先停一下，语气有点冲了。把事情说清楚就好，别继续针对人。" };
 }
 
-export { appealApprovalReached, buildScheduledGroupMessage, cancelSchedule, cleanupExpiredModerationProposals, cleanupTransientState, computeNextScheduleRun, countActiveSchedulesForUser, createAppealFromText, createScheduleRecord, deleteScheduleRecord, executeManagementSchedule, extractScheduleMentionIds, formatScheduleLine, listOneBotGroups, listUserSchedules, nextTaipeiMonthly, nextTaipeiTime, nextTaipeiWeekday, parseManagementScheduleAction, parseScheduleRequest, parseTaipeiDateTime, performGroupCheckin, performManualGroupCheckins, processActiveSpeaking, processConflictSignal, processDueSchedules, reviewScheduleWithGemma, reviseScheduleRecord, sanitizeAppealForReviewer, scheduleApprovalReached, scheduleSpecFromRecord, skipScheduleOnce, sleepMs, taipeiParts, voteAppeal, voteSchedule };
+export { appealApprovalReached, buildScheduledGroupMessage, cancelSchedule, cleanupExpiredModerationProposals, cleanupTransientState, computeNextScheduleRun, countActiveSchedulesForUser, createAppealFromText, createScheduleRecord, deleteScheduleRecord, executeManagementSchedule, extractScheduleMentionIds, formatScheduleLine, listUserSchedules, nextTaipeiMonthly, nextTaipeiTime, nextTaipeiWeekday, parseManagementScheduleAction, parseScheduleRequest, parseTaipeiDateTime, processActiveSpeaking, processConflictSignal, processDueSchedules, reviewScheduleWithGemma, reviseScheduleRecord, sanitizeAppealForReviewer, scheduleApprovalReached, scheduleSpecFromRecord, skipScheduleOnce, sleepMs, taipeiParts, voteAppeal, voteSchedule };
