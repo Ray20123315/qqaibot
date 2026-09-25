@@ -1,0 +1,48 @@
+name: Smoke production Portal IA
+
+on:
+  push:
+    branches:
+      - chatgpt/portal-production-smoke-20260925
+
+permissions:
+  contents: read
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      BASE_URL: https://aibot.ray2025.com
+    steps:
+      - name: Verify production Portal information architecture
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -fsS --retry 6 --retry-delay 2 --retry-all-errors --connect-timeout 10 --max-time 30 "$BASE_URL/portal" -o /tmp/portal.html
+          grep -q 'v3PluginManagerNav' /tmp/portal.html
+          grep -q '插件管理' /tmp/portal.html
+          grep -q '成员资料' /tmp/portal.html
+          grep -q '清人建议' /tmp/portal.html
+          grep -q '系统维护' /tmp/portal.html
+          grep -q '展开诊断工具' /tmp/portal.html
+          grep -q '暂停本群自动化' /tmp/portal.html
+          grep -q '内置插件目录' /tmp/portal.html
+          grep -q '外部插件隔离区' /tmp/portal.html
+          ! grep -q '>关系管理<' /tmp/portal.html
+          ! grep -q '>清人分析<' /tmp/portal.html
+          ! grep -q '>事件模拟器<' /tmp/portal.html
+          ! grep -q '人工通知路由' /tmp/portal.html
+          ! grep -q '群规版本与测试资料' /tmp/portal.html
+          ! grep -q '保存設定' /tmp/portal.html
+          echo "Production Portal IA smoke passed"
+
+      - name: Verify production public V3 and health
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -fsS --retry 6 --retry-delay 2 --retry-all-errors "$BASE_URL/api/v3/status" -o /tmp/v3.json
+          node --input-type=module -e 'const fs=await import("node:fs/promises");const x=JSON.parse(await fs.readFile("/tmp/v3.json","utf8"));if(x.schemaVersion!==1||!Array.isArray(x.plugins))process.exit(1);'
+          curl -fsS --retry 6 --retry-delay 2 --retry-all-errors "$BASE_URL/healthz" -o /tmp/health.json
+          node --input-type=module -e 'const fs=await import("node:fs/promises");JSON.parse(await fs.readFile("/tmp/health.json","utf8"));'
+          echo "Production V3/status and health smoke passed"
