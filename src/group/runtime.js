@@ -277,6 +277,30 @@ async function getWhitelistedGroupsForUser(env, userId) {
 
 
 
+async function getWhitelistedGroupsForSystemAdmin(env) {
+  let groups = [];
+  try {
+    const list = await callOneBotAction(env, { action: "get_group_list", params: { no_cache: false } }, 15000);
+    groups = Array.isArray(list) ? list : Array.isArray(list?.data) ? list.data : [];
+  } catch {
+    groups = await readJson(env, "known_groups", []);
+  }
+  const result = [];
+  for (const group of groups.slice(0, 300)) {
+    const groupId = String(group?.group_id || group?.groupId || group?.id || group || "");
+    if (!groupId || !(await isGroupWhitelisted(env, groupId))) continue;
+    result.push({
+      groupId,
+      groupName: String(group?.group_name || group?.groupName || groupId),
+      role: "developer",
+      card: "system-admin"
+    });
+  }
+  return result;
+}
+
+
+
 async function getAppealEligibleGroupsForUser(env, userId) {
   const current = await getWhitelistedGroupsForUser(env, userId);
   const byId = new Map(current.map(group => [String(group.groupId), { ...group, former: false, eligibility: "current" }]));
@@ -430,4 +454,4 @@ async function verifyGroupMembership(env, groupId, userId) {
   }
 }
 
-export { botCanRunRuleMonitor, canUseBotGroupOperations, enrichPortalGroupsWithBindings, familyAliasForGroup, filterAuthorizedReviewers, getAppealEligibleGroupsForUser, getBotGroupRole, getBotIdentity, getGroupFamilyForGroup, getGroupJoinPage, getGroupOwnerId, getLiveGroupMemberList, getWhitelistedGroupsForUser, isBotVerifiedGroupOwner, isVerifiedGroupOwner, normalizeJoinUrl, notifyModerationProposalGroup, oneBotSnapshotMentionIds, proposalActorText, saveGroupFamily, sendGroupSelectedMentions, sendMissingHeadGroupGuide, serverHtmlEscape, verifyGroupMembership };
+export { botCanRunRuleMonitor, canUseBotGroupOperations, enrichPortalGroupsWithBindings, familyAliasForGroup, filterAuthorizedReviewers, getAppealEligibleGroupsForUser, getBotGroupRole, getBotIdentity, getGroupFamilyForGroup, getGroupJoinPage, getGroupOwnerId, getLiveGroupMemberList, getWhitelistedGroupsForSystemAdmin, getWhitelistedGroupsForUser, isBotVerifiedGroupOwner, isVerifiedGroupOwner, normalizeJoinUrl, notifyModerationProposalGroup, oneBotSnapshotMentionIds, proposalActorText, saveGroupFamily, sendGroupSelectedMentions, sendMissingHeadGroupGuide, serverHtmlEscape, verifyGroupMembership };
