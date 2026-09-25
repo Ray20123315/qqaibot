@@ -3,7 +3,7 @@ import fs from "node:fs";
 import { releaseV3Runtime } from "./src/v3/runtime/runtime.js";
 import { handleV3RuntimeFetch, parseCreatorJson, runV3RuntimeScheduled, v3BilibiliCreators, v3RuntimeEnabled, v3RuntimeOptionsFromEnv } from "./src/v3/runtime/bridge.js";
 
-assert.equal(v3RuntimeEnabled({}), false);
+assert.equal(v3RuntimeEnabled({}), true, "V3 runtime defaults on unless explicitly disabled");
 assert.equal(v3RuntimeEnabled({ V3_RUNTIME_ENABLED: "true" }), true);
 assert.deepEqual(parseCreatorJson('[{"uid":"123","label":"A"}]'), [{ uid: "123", label: "A" }]);
 assert.deepEqual(parseCreatorJson('{"uid":"456"}'), [{ uid: "456" }]);
@@ -25,14 +25,23 @@ const maxPollOptions = v3RuntimeOptionsFromEnv({
 });
 assert.equal(maxPollOptions.official.bilibili.pollIntervalMs, 21600000, "poll interval must clamp to six-hour maximum");
 
-const disabledEnv = {};
+const disabledOfficial = Object.freeze({
+  entertainment: false,
+  activity: false,
+  poll: false,
+  memberSpeechAnalysis: false,
+  qqInteractions: false,
+  autoCheckin: false
+});
+
+const disabledEnv = { V3_RUNTIME_ENABLED: "false" };
 let response = await handleV3RuntimeFetch(new Request("https://example.com/api/v3/status"), disabledEnv);
 assert.equal(response.status, 404);
 assert.equal((await response.json()).code, "V3_RUNTIME_DISABLED");
 const disabledCron = await runV3RuntimeScheduled(disabledEnv, 1700000000000);
 assert.equal(disabledCron.enabled, false);
 
-const enabledEnv = { V3_RUNTIME_ENABLED: "true" };
+const enabledEnv = {};
 const db = new Map();
 const reads = [];
 const deps = {
@@ -42,22 +51,22 @@ const deps = {
   onebotCall: async () => ({ ok: true }),
   safeFetch: async () => { throw new Error("network must not be called"); }
 };
-response = await handleV3RuntimeFetch(new Request("https://example.com/api/v3/status"), enabledEnv, null, { dependencies: deps, logger: { info(){}, warn(){}, error(){}, debug(){} } });
+response = await handleV3RuntimeFetch(new Request("https://example.com/api/v3/status"), enabledEnv, null, { official: disabledOfficial, dependencies: deps, logger: { info(){}, warn(){}, error(){}, debug(){} } });
 assert.equal(response.status, 200);
 const payload = await response.json();
 assert.equal(payload.schemaVersion, 1);
 assert.equal(payload.plugins.length, 0);
 assert.equal(payload.live.active, false);
-const cron = await runV3RuntimeScheduled(enabledEnv, 1700000000000, { dependencies: deps, logger: { info(){}, warn(){}, error(){}, debug(){} } });
+const cron = await runV3RuntimeScheduled(enabledEnv, 1700000000000, { official: disabledOfficial, dependencies: deps, logger: { info(){}, warn(){}, error(){}, debug(){} } });
 assert.equal(cron.enabled, true);
 assert.equal(cron.jobs, 0);
 assert(db.has("plugin_scheduler:due"), "first enabled empty cron should persist repaired empty due index");
 reads.length = 0;
-await runV3RuntimeScheduled(enabledEnv, 1700000060000, { dependencies: deps });
+await runV3RuntimeScheduled(enabledEnv, 1700000060000, { official: disabledOfficial, dependencies: deps });
 assert.deepEqual(reads, ["plugin_scheduler:due"], "steady-state empty V3 cron must read only due index");
 await releaseV3Runtime(enabledEnv);
 
-const degradedEnv = { V3_RUNTIME_ENABLED: "true" };
+const degradedEnv = {};
 const d1Failure = () => Object.assign(new Error("D1 quota exhausted"), { code: "D1_STORAGE_UNAVAILABLE" });
 const degradedDeps = {
   ...deps,
@@ -69,7 +78,7 @@ response = await handleV3RuntimeFetch(
   new Request("https://example.com/api/v3/status"),
   degradedEnv,
   null,
-  { dependencies: degradedDeps, logger: { info(){}, warn(){}, error(){}, debug(){} } }
+  { official: disabledOfficial, dependencies: degradedDeps, logger: { info(){}, warn(){}, error(){}, debug(){} } }
 );
 assert.equal(response.status, 200, "public V3 status must stay observable when D1 storage is unavailable");
 const degradedPayload = await response.json();
@@ -90,7 +99,7 @@ response = await handleV3RuntimeFetch(
   new Request("https://example.com/api/v3/status"),
   degradedEnv,
   null,
-  { dependencies: recoveredDeps, logger: { info(){}, warn(){}, error(){}, debug(){} } }
+  { official: disabledOfficial, dependencies: recoveredDeps, logger: { info(){}, warn(){}, error(){}, debug(){} } }
 );
 assert.equal(response.status, 200, "failed runtime initialization must be evicted so the next request can recover");
 const recoveredPayload = await response.json();
