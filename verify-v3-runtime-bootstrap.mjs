@@ -1,9 +1,18 @@
 import assert from "node:assert/strict";
 import { createOfficialV3Plugins, createV3Runtime, getV3Runtime, releaseV3Runtime } from "./src/v3/runtime/runtime.js";
 
-assert.equal(createOfficialV3Plugins({}).length, 0, "official plugins must not auto-enable");
-assert.equal(createOfficialV3Plugins({ bilibili: { creators: [{ uid: "123" }] } }).length, 1);
-assert.throws(() => createOfficialV3Plugins({ bilibili: true }), /V3_BILIBILI_OPTIONS_INVALID/);
+const disabledOfficial = Object.freeze({
+  entertainment: false,
+  activity: false,
+  poll: false,
+  memberSpeechAnalysis: false,
+  qqInteractions: false,
+  autoCheckin: false
+});
+assert.equal(createOfficialV3Plugins({}).length, 6, "six low-risk official plugins should be bundled by default");
+assert.equal(createOfficialV3Plugins(disabledOfficial).length, 0);
+assert.equal(createOfficialV3Plugins({ ...disabledOfficial, bilibili: { creators: [{ uid: "123" }] } }).length, 1);
+assert.throws(() => createOfficialV3Plugins({ ...disabledOfficial, bilibili: true }), /V3_BILIBILI_OPTIONS_INVALID/);
 
 const env = {};
 const db = new Map();
@@ -20,7 +29,7 @@ const dependencies = {
   }
 };
 const runtime = createV3Runtime(env, {
-  official: { bilibili: { creators: [{ uid: "123", label: "Alpha" }], pollIntervalMs: 60000, adminUserIds: ["42"] } },
+  official: { ...disabledOfficial, bilibili: { creators: [{ uid: "123", label: "Alpha" }], pollIntervalMs: 60000, adminUserIds: ["42"] } },
   dependencies,
   logger: { info(){}, warn(){}, error(){}, debug(){} }
 });
@@ -41,7 +50,7 @@ const surface = await runtime.getPluginSurface("official.bilibili-live", { userI
 assert.equal(surface.status.state, "OK");
 
 const cachedEnv = {};
-const cachedA = await getV3Runtime(cachedEnv, { dependencies, logger: { info(){}, warn(){}, error(){}, debug(){} } });
+const cachedA = await getV3Runtime(cachedEnv, { official: disabledOfficial, dependencies, logger: { info(){}, warn(){}, error(){}, debug(){} } });
 const cachedB = await getV3Runtime(cachedEnv, { official: { bilibili: { creators: [{ uid: "999" }] } }, dependencies });
 assert.equal(cachedA, cachedB, "one env must keep one runtime instance");
 assert.equal(cachedB.listPlugins().length, 0, "later options must not mutate an existing runtime");
