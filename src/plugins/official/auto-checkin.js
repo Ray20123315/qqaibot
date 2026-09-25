@@ -4,6 +4,7 @@ const AUTO_CHECKIN_PLUGIN_ID = "qqai.auto-checkin";
 const AUTO_CHECKIN_JOB_NAME = "qqai-auto-checkin-daily";
 const AUTO_CHECKIN_CONTINUE_JOB_NAME = "qqai-auto-checkin-continue";
 const DAY_MS = 24 * 60 * 60 * 1000;
+const MAX_BATCH_SIZE = 20;
 
 function integer(value, fallback, min, max) {
   const n = Number(value);
@@ -24,7 +25,7 @@ function normalizeSettings(input = {}, fallback = {}) {
   const source = input && typeof input === "object" && !Array.isArray(input) ? input : {};
   return Object.freeze({
     enabled: bool(source.enabled, fallback.enabled ?? true),
-    batchSize: integer(source.batchSize ?? source.batchsize, fallback.batchSize ?? 20, 1, 20),
+    batchSize: integer(source.batchSize ?? source.batchsize, fallback.batchSize ?? MAX_BATCH_SIZE, 1, MAX_BATCH_SIZE),
     startSecond: integer(source.startSecond ?? source.startsecond, fallback.startSecond ?? 20, 0, 59)
   });
 }
@@ -183,6 +184,7 @@ export {
   AUTO_CHECKIN_JOB_NAME,
   AUTO_CHECKIN_PLUGIN_ID,
   DAY_MS,
+  MAX_BATCH_SIZE,
   autoCheckinPlugin,
   createAutoCheckinPlugin,
   nextTaipeiMidnight,
