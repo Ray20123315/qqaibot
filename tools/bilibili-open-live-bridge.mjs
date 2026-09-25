@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { createHash, createHmac, randomUUID } from "node:crypto";
 import { brotliDecompressSync, inflateSync } from "node:zlib";
+import { pathToFileURL } from "node:url";
 
 const BILI_BASE = "https://open-live.bilibili.com";
 const WS_HEADER_BYTES = 16;
@@ -29,14 +30,14 @@ function bodyMd5(bodyText) {
   return createHash("md5").update(bodyText).digest("hex");
 }
 
-function signedHeaders(bodyText, accessKeyId, accessKeySecret) {
+function signedHeaders(bodyText, accessKeyId, accessKeySecret, options = {}) {
   const unsigned = {
     "x-bili-accesskeyid": accessKeyId,
     "x-bili-content-md5": bodyMd5(bodyText),
     "x-bili-signature-method": "HMAC-SHA256",
-    "x-bili-signature-nonce": randomUUID().replaceAll("-", ""),
+    "x-bili-signature-nonce": String(options.nonce || randomUUID().replaceAll("-", "")),
     "x-bili-signature-version": "1.0",
-    "x-bili-timestamp": String(Math.floor(Date.now() / 1000))
+    "x-bili-timestamp": String(options.timestamp || Math.floor(Date.now() / 1000))
   };
   const canonical = Object.keys(unsigned).sort().map(key => key + ":" + unsigned[key]).join("\n");
   const authorization = createHmac("sha256", accessKeySecret).update(canonical).digest("hex");
@@ -351,7 +352,19 @@ async function main() {
   }
 }
 
-main().catch(error => {
-  console.error("[bridge] fatal:", String(error?.stack || error));
-  process.exitCode = 1;
-});
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  main().catch(error => {
+    console.error("[bridge] fatal:", String(error?.stack || error));
+    process.exitCode = 1;
+  });
+}
+
+export {
+  bodyMd5,
+  decodePackets,
+  makePacket,
+  normalizedTypeForCommand,
+  parseJsonBody,
+  signedHeaders,
+  splitPackets
+};
