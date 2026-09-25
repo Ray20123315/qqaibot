@@ -39,7 +39,7 @@ class MemoryD1 {
   }
 }
 
-const env = { DB: new MemoryD1(), DEVELOPER_IDS: "42,77" };
+const env = { DB: new MemoryD1(), DEVELOPER_IDS: "90001,90002" };
 let state = await getPortalMaintenanceState(env);
 assert.equal(state.enabled, false);
 
@@ -49,16 +49,16 @@ state = await setPortalMaintenanceState(env, {
   title: "升级维护",
   message: "正在升级 QQAIbot。",
   until: future
-}, "42");
+}, "90001");
 assert.equal(state.enabled, true);
 assert.equal(state.title, "升级维护");
 assert.equal(state.message, "正在升级 QQAIbot。");
-assert.equal(state.updatedBy, "42");
+assert.equal(state.updatedBy, "90001");
 assert.equal(state.until, future);
 
 const readBack = await getPortalMaintenanceState(env);
 assert.equal(readBack.enabled, true);
-assert.equal(portalMaintenanceViewerCanBypass(env, { qq: "42", systemAdmin: false }), true, "developer must bypass maintenance");
+assert.equal(portalMaintenanceViewerCanBypass(env, { qq: "90001", systemAdmin: false }), true, "developer must bypass maintenance");
 assert.equal(portalMaintenanceViewerCanBypass(env, { qq: "10000", systemAdmin: true }), true, "system admin must bypass maintenance");
 assert.equal(portalMaintenanceViewerCanBypass(env, { qq: "10000", systemAdmin: false }), false, "ordinary users must not bypass maintenance");
 
@@ -69,11 +69,11 @@ assert.match(html, /\/portal\?developer=1/);
 assert.doesNotMatch(html, /token|secret/i);
 
 await assert.rejects(
-  () => setPortalMaintenanceState(env, { enabled: true, until: Date.now() - 1000 }, "42"),
+  () => setPortalMaintenanceState(env, { enabled: true, until: Date.now() - 1000 }, "90001"),
   /MAINTENANCE_UNTIL_INVALID/
 );
 
-state = await setPortalMaintenanceState(env, { enabled: false, title: "系统维护中", message: "完成" }, "42");
+state = await setPortalMaintenanceState(env, { enabled: false, title: "系统维护中", message: "完成" }, "90001");
 assert.equal(state.enabled, false);
 
 const worker = fs.readFileSync("worker.js", "utf8");
