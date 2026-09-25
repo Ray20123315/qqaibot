@@ -6,7 +6,7 @@ const V3_BILIBILI_MIN_POLL_MS = 60_000;
 const V3_BILIBILI_MAX_POLL_MS = 30 * 60_000;
 
 function v3RuntimeEnabled(env = {}) {
-  return envBoolean(env?.V3_RUNTIME_ENABLED, false);
+  return envBoolean(env?.V3_RUNTIME_ENABLED, true);
 }
 
 function v3BilibiliEnabled(env = {}) {
