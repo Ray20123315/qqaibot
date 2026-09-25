@@ -106,6 +106,11 @@ assert.match(injected,/受信任插件包/);
 assert.match(injected,/暂存安装信息/);
 assert.match(injected,/运行代码加载状态/);
 assert.doesNotMatch(injected,/Trusted Package Metadata|Stage metadata install|metadata installed/);
+assert.match(injected,/内置插件目录/);
+assert.match(injected,/待提交操作/);
+assert.match(injected,/最近操作记录/);
+assert.match(injected,/外部插件隔离区/);
+assert.doesNotMatch(injected,/Bundled Catalog|Staged Transactions|Recent History|Trust Store/);
 assert.equal(injectV3PackageManagerClient(injected),injected,"package client injection must be idempotent");
 
 const packageManagerSource = fs.readFileSync("src/v3/portal/package-manager.js","utf8");
@@ -114,6 +119,12 @@ assert.equal(
   1,
   "package-manager error map must not define PLUGIN_QUARANTINE_STATE_INVALID more than once"
 );
+assert.match(packageManagerSource, /runtimeCodeLoaded: null/);
+assert.match(packageManagerSource, /author: record\.author \?/);
+assert.match(packageManagerSource, /record\.security\.findings/);
+assert.match(packageManagerSource, /scope: String\(transaction\.integrity\.scope/);
+assert.match(packageManagerSource, /PLUGIN_AUTHOR_KEY_REVOKED:/);
+assert.doesNotMatch(packageManagerSource, /record\.作者|record\.security\.问题数|运行代码加载状态: null|范围：String|PLUGIN_AUTHOR_KEY_已撤销/);
 
 const worker = fs.readFileSync("worker.js","utf8");
 assert.match(worker,/handleV3PackageManagerApi/);
