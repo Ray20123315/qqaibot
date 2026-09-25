@@ -1,6 +1,7 @@
 import { VERSION } from "../../config/runtime.js";
 import { createPluginLifecycleRegistry } from "../../plugins/lifecycle.js";
 import { callGeminiGenerate, effectiveRuntimeModels, geminiVisionApiKeys, googleApiKeysFor, parseList } from "../../ai/runtime.js";
+import { callProviderRoute } from "../../ai/provider-client.js";
 import { recentConversationMessagesForUser } from "../../core/identity.js";
 import { callOneBotAction } from "../../core/permissions.js";
 import { dbDel, dbGet, dbPut } from "../../data/store.js";
@@ -97,6 +98,12 @@ function oneBotCapabilityValue(value) {
 
 async function defaultAiChat(env, input) {
   const source = typeof input === "string" ? { text: input } : (input && typeof input === "object" ? input : {});
+  try {
+    const routed = await callProviderRoute(env, "chat", source);
+    if (routed?.text) return safeAiResult(routed);
+  } catch (error) {
+    console.warn("[v3-host] configured chat providers unavailable; falling back to legacy route", String(error?.message || error).slice(0, 240));
+  }
   const text = String(source.text || "").slice(0, 30000);
   const contents = Array.isArray(source.contents) && source.contents.length
     ? source.contents
