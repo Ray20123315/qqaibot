@@ -14,6 +14,11 @@ DEEPSEEK_API_KEYS=
 
 # OneBot / NapCat authentication.
 ONEBOT_ACCESS_TOKEN=replace_with_random_onebot_token
+
+# Optional local Codex bridge. The local desktop client connects outbound to
+# wss://<your-worker>/v3/codex-bridge with this dedicated Bearer token.
+CODEX_BRIDGE_ACCESS_TOKEN=replace_with_random_codex_bridge_token
+
 ONEBOT_HTTP_URL=
 ONEBOT_HTTP_ACCESS_TOKEN=
 
