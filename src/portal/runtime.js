@@ -2988,4 +2988,4 @@ boot();
 </body></html>`);
 }
 
-export { getAppealPage, getPortalHomePage, handleAppealApi, handleOpsPortalApi, handlePortalApi };
+export { getPortalHomePage, handleOpsPortalApi, handlePortalApi };
