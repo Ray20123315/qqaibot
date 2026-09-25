@@ -1,4 +1,5 @@
-import { aiReplyPromisesFutureSearch, aiReplySignalsUncertainty, appendSearchSources, buildDeepSeekContextSummary, callDeepSeekSummaryTask, callGeminiGenerate, callGoogleDecision, decideReplyMentionRouting, deepSeekApiKeys, effectiveRuntimeModels, enforceExecutedSearchForReply, generateHybridReply, googleApiKeysFor, imageInspectionEnabled, isLightweightAcknowledgement, isLowContextInterjectionFragment, mergeAbortSignal, notifyDeveloper, roundRobinKeys, stripBotMentionFromConversation } from "./src/ai/runtime.js";
+import { aiReplyPromisesFutureSearch, aiReplySignalsUncertainty, appendSearchSources, buildDeepSeekContextSummary, callDeepSeekSummaryTask, callGoogleDecision, decideReplyMentionRouting, deepSeekApiKeys, effectiveRuntimeModels, enforceExecutedSearchForReply, generateHybridReply, googleApiKeysFor, imageInspectionEnabled, isLightweightAcknowledgement, isLowContextInterjectionFragment, mergeAbortSignal, notifyDeveloper, roundRobinKeys, stripBotMentionFromConversation } from "./src/ai/runtime.js";
+import { providerRegistryState } from "./src/ai/provider-registry.js";
 import { buildImmediateConversationContext, splitOutboundText } from "./src/ai/conversation-quality.js";
 import { AI_MEDIA_LIMITS, DEFAULTS, VERSION, classifyOperationalFailure } from "./src/config/runtime.js";
 import { publicBaseUrl } from "./src/config/deployment.js";
@@ -1567,11 +1568,11 @@ const QQAIWorker = {
 
       let settingMatch = cleanMessage.match(/^[!！](?:自动打卡|自動打卡)(?:\s*(?:开|開|关|關))?$/i);
       if (settingMatch) {
-        return jsonReply(`${atSender}自动 QQ 群打卡会在台北时间 23:59 预热群列表，并从 00:00:00 到 00:01:59 快速重试；成功后立即停止，不受 AI 开关或白名单影响。`);
+        return jsonReply(`${atSender}自动群打卡由 qqai.auto-checkin 插件每日执行；这个指令不会手动触发打卡。请到 Portal 插件设置调整启用状态、每批群数与 00:00 后执行秒数。`);
       }
       settingMatch = cleanMessage.match(/^[!！](?:打卡时间|打卡時間)(?:\s+[^\s]+)?$/i);
       if (settingMatch) {
-        return jsonReply(`${atSender}自动群打卡窗口：台北时间 23:59 预热，00:00:00～00:01:59 快速重试。`);
+        return jsonReply(`${atSender}自动群打卡由 qqai.auto-checkin 插件排程执行；不提供 QQ 手动执行。时间与批次请在 Portal 插件设置查看。`);
       }
       settingMatch = cleanMessage.match(/^[!！](?:自动欢迎|自動歡迎)\s*(开|開|关|關)$/i);
       if (settingMatch) {
@@ -1712,7 +1713,6 @@ const QQAIWorker = {
       // 🤖 依據 AI Studio 權限清單與最新模型庫對齊
       // ==========================================
       const chatModels = await effectiveRuntimeModels(env, "chat");
-      const ttsModels = await effectiveRuntimeModels(env, "tts");
       const modelList = chatModels;
 
 
@@ -2379,11 +2379,19 @@ const QQAIWorker = {
         const currentMemSwitch = await dbGet(env, `memo:${currentGroupId}`) !== "false" ? "🟢 开启" : "🔴 关闭";
         const currentAiSwitch = await dbGet(env, `ai_off:${currentGroupId}`) !== "true" ? "🟢 开启" : "🔴 关闭";
         const totalKeys = [...(env.GEMINI_API_KEYS || "").split(',').filter(k => k.trim() !== ""), ...(env.VECTORIZE_GEMINI_KEYS || "").split(',').filter(k => k.trim() !== "")].length;
-        
+        const providerState = await providerRegistryState(env).catch(() => null);
+        const providerAccounts = Array.isArray(providerState?.accounts) ? providerState.accounts : [];
+        const enabledProviderAccounts = providerAccounts.filter(account => account?.enabled !== false);
+        const providerKinds = [...new Set(enabledProviderAccounts.map(account => String(account?.provider || "")).filter(Boolean))];
+        const quotaBlocked = Object.values(providerState?.quotaStates || {}).filter(state => state?.ok === false).length;
+        const providerLine = providerState ? `${enabledProviderAccounts.length}/${providerAccounts.length} 启用` : "暂不可读取（沿用现有模型路由）";
         const statusMsg = `📊 【系统运行状态报告】\n` +
                           `--------------------\n` +
-                          `🔑 Gemini 金钥总数: ${totalKeys} 把\n` +
-                          `🧩 DeepSeek Flash 金钥: ${deepSeekApiKeys(env).length} 把\n` +
+                          `🔌 Provider 帐号: ${providerLine}\n` +
+                          `📦 Provider 类型: ${providerKinds.length ? providerKinds.join("、") : "旧模型路由"}\n` +
+                          `🧮 当前额度受限: ${providerState ? quotaBlocked + " 个帐号" : "未知"}\n` +
+                          `🔑 Gemini 金钥池: ${totalKeys} 把\n` +
+                          `🧩 旧 DeepSeek Key 池: ${deepSeekApiKeys(env).length} 把\n` +
                           `🧠 核心回复开关: ${currentAiSwitch}\n` +
                           `💾 向量记忆开关: ${currentMemSwitch}\n` +
                           `--------------------\n` +
@@ -2391,44 +2399,11 @@ const QQAIWorker = {
                           `⚙️ 最后响应模型:\n${lastModel}`;
         return jsonReply(`${atSender}${statusMsg}`);
       }
-      
+
       // 第二段到此結束，準備進入第三段的讀網頁與翻譯工具模組。
 
       // ==========================================
-      // 🎙️ 语音智能对答：先生成简体中文文字，再由 TTS 专用模型输出音频。
-      if (/^[!！](?:语音|語音|speak|tts)\s+(.+)/i.test(cleanMessage)) {
-        const userPrompt = cleanMessage.match(/^[!！](?:语音|語音|speak|tts)\s+(.+)/i)?.[1]?.trim() || "";
-        if (!userPrompt) return jsonReply(`${atSender}请告诉我想说什么。`);
-        activeThinkingMessageId = await sendThinkingIndicator(env, { isGroup, groupId: currentGroupId, userId, text: "正在生成语音..." }).catch(() => null);
-        const textResult = await callGeminiGenerate(env, {
-          models: chatModels,
-          system: "使用自然简洁的简体中文回答，适合直接朗读；不要讨论、承认或否认模型与系统身份。",
-          contents: [{ role: "user", parts: [{ text: userPrompt }] }], maxOutputTokens: 500, temperature: 0.7, useSearch: false
-        }).catch(() => null);
-        if (!textResult?.text) return jsonReply(`${atSender}暂时无法生成语音内容。`);
-        const keys = roundRobinKeys(googleApiKeysFor(env, "gemini_chat"), "gemini_chat");
-        let lastError = "没有音频结果";
-        for (const model of ttsModels) {
-          for (const key of keys.slice(0, 4)) {
-            try {
-              const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(key)}`, {
-                method: "POST", headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ contents: [{ role: "user", parts: [{ text: textResult.text }] }], generationConfig: { responseModalities: ["AUDIO"], speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: "Aoede" } } } } }),
-                signal: AbortSignal.timeout(30000)
-              });
-              if (!res.ok) { lastError = `${model}: ${res.status}`; continue; }
-              const data = await res.json();
-              const part = data.candidates?.[0]?.content?.parts?.find(p => p.inlineData?.data || p.inline_data?.data);
-              const inline = part?.inlineData || part?.inline_data;
-              if (inline?.data) return jsonReply(`${atSender}[CQ:record,file=base64://${inline.data}]`);
-              lastError = `${model}: 未返回音频`;
-            } catch (error) { lastError = error.message || String(error); }
-          }
-        }
-        return jsonReply(`${atSender}语音转换失败：${lastError}`);
-      }
-
-      // 🌐 读网页精炼摘要 (纯抓文字并交由 AI 总结)
+      // QQ 語音回覆已移至 qqai.qq-interactions 插件；Beta 預設關閉並由 Portal 插件設定啟用。\n\n      // 🌐 读网页精炼摘要 (纯抓文字并交由 AI 总结)
       // ==========================================
       const readMatch = cleanMessage.match(/^[!！](?:读网页|讀網頁)\s+(https?:\/\/[^\s]+)/);
       if (readMatch) {
