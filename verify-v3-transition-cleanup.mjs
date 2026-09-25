@@ -10,7 +10,7 @@ assert.doesNotMatch(worker, /handleBilibiliWebhook|\/api\/integrations\/bilibili
 assert.doesNotMatch(worker, /(?:会议纪要|會議紀要|吃瓜|好感度|affinity|狼人杀|狼人殺)/i);
 assert.doesNotMatch(worker, /语音智能对答|語音智能對答/);
 assert.match(worker, /standalone Gemini Live page was removed/);
-assert.match(worker, /url\.pathname[^\n]*\/live[^\n]*\)[^\n]*\{[\s\S]{0,180}status: 404/);
+assert.match(worker, /\[\'\/live\'\]\.includes\(url\.pathname\)[\s\S]{0,180}status:\s*404/);
 assert.match(worker, /qqai\.qq-interactions 插件；Beta 預設關閉/);
 assert.match(worker, /Provider 帐号/);
 assert.match(worker, /qqai\.auto-checkin 插件每日执行/);
