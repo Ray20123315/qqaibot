@@ -8,7 +8,7 @@ function assert(condition, message) { if (!condition) throw new Error(message); 
 
 const baseHtml = '<!doctype html><html><head></head><body><aside><nav><button data-view="home">首页</button><button data-view="logs">操作日志</button></nav></aside><main><section id="v-home" class="view active"></section><section id="v-logs" class="view"></section></main></body></html>';
 const html = injectPortalMembersClient(baseHtml);
-assert(html.includes('id="memberConsoleNav"'), 'The member console navigation entry must always be injected');
+assert(html.includes('id="memberDataNav"'), 'The consolidated member-data navigation entry must always be injected');
 assert(!html.includes("function syncNav()"), 'The injected client must not hide the member entry by guessing a private session variable');
 assert(html.includes('qqai-community-suite-client'), 'The Portal community suite client must be injected');
 assert(html.includes('Portal 自我诊断'), 'Diagnostics UI must be present');
