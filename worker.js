@@ -19,6 +19,7 @@ import { applyConversationOutputGuards, auditIgnoredRobotMessage, botInteraction
 import { classifyNaturalLanguageCommandIntent, normalizeNaturalLanguageCommandText, opsGetGroupMember, opsGetSettings, opsHandleMemberLeave } from "./src/operations/runtime.js";
 import { authDbDelStrict, authDbGetStrict, authDbPutStrict, clearPasswordLoginGuard, commandChangesWebSettings, constantTimeEqual, createPortalPasswordRecord, createPortalSession, decryptPortalAuthSecret, encryptPortalAuthSecret, deleteMemoryVector, generateSixDigitCode, getOneBotHub, getPortalSession, getPublicNebulaSeed, hashBackupCode, isMemoryBanned, isValidPortalPasswordRecord, jsonResponse, markGroupMemberLeft, needsPortalPasswordRehash, normalizePortalAdminUsername, notePasswordLoginFailure, portalAdminCredentialConfig, portalAdminUsernameIsClaimed, portalEnvironmentWithManagedDeveloperIds, portalSessionCookie, readCookie, readJson, readPasswordLoginGuard, readPortalAuthJson, readPortalManagedDeveloperIds, rehashPortalPasswordIfNeeded, sendOneBotAction, sendOneBotHttpAction, sendPortalVerificationMessage, upsertGroupMember, upsertMemoryVector, validatePortalPassword, verifyPortalAdminCredentials, verifyPortalPassword, verifyPortalVerificationCode, verifyTotpCode, writeMemoryAudit, writePortalManagedDeveloperIds, writeSystemError } from "./src/portal/auth.js";
 import { getPortalHomePage, handlePortalApi } from "./src/portal/runtime.js";
+import { getPortalMaintenanceState, portalMaintenanceHtmlResponse, portalMaintenanceJsonResponse, portalMaintenanceViewerCanBypass } from "./src/portal/maintenance.js";
 import { injectPortalLayoutClient } from "./src/portal/layout.js";
 import { injectPortalMembersClient } from "./src/portal/members.js";
 import { applySocialOutputPolicy, buildSocialDecision, buildSocialPromptBlock, capturePersonaContinuity, oneBotBotMentionCount, oneBotEventHasMedia, oneBotEventIsBareMention, oneBotEventIsPunctuationOnly, shouldSendSocialBufferNotice, socialInputDelayMs, waitForSocialTyping } from "./src/social/runtime.js";
@@ -255,8 +256,18 @@ const QQAIWorker = {
     // 🌌 公共首頁與記憶矩陣中心
     // ==========================================
     if (request.method === 'GET' && ['/', '/portal', '/matrix'].includes(url.pathname)) {
+      const maintenance = await getPortalMaintenanceState(env).catch(() => null);
+      if (maintenance?.enabled) {
+        const token = readCookie(request, "qqai_session");
+        const session = token ? await getPortalSession(env, token, { touch: false }).catch(() => null) : null;
+        const developerEntry = url.searchParams.get("developer") === "1";
+        if (!portalMaintenanceViewerCanBypass(env, session) && !developerEntry) {
+          return portalMaintenanceHtmlResponse(maintenance, url.origin);
+        }
+      }
       let portalHtml = injectPortalLayoutClient(injectPortalMembersClient(injectDeploymentPortalClient(toSimplifiedChinese(getPortalHomePage(url.host)))));
       portalHtml = injectV3PackageManagerClient(injectV3PluginManagerClient(portalHtml));
+      portalHtml = toSimplifiedChinese(portalHtml);
       return new Response(portalHtml, {
         headers: { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store", "Strict-Transport-Security": "max-age=31536000", "X-Content-Type-Options": "nosniff", "X-Frame-Options": "DENY", "Referrer-Policy": "strict-origin-when-cross-origin", "Permissions-Policy": "camera=(), geolocation=()" }
       });
@@ -284,6 +295,16 @@ const QQAIWorker = {
 
     if (url.pathname.startsWith('/api/appeal/')) {
       return jsonResponse({ ok: false, message: "独立申诉接口已停用，请登录 Control Center 使用匿名申诉。" }, 410);
+    }
+
+    if (url.pathname === '/api/deployment/status' || url.pathname.startsWith('/api/portal/')) {
+      const maintenance = await getPortalMaintenanceState(env).catch(() => null);
+      if (maintenance?.enabled) {
+        const bearer = request.headers.get("Authorization")?.replace(/^Bearer\s+/i, "") || "";
+        const token = bearer || readCookie(request, "qqai_session");
+        const session = token ? await getPortalSession(env, token, { touch: false }).catch(() => null) : null;
+        if (!portalMaintenanceViewerCanBypass(env, session)) return portalMaintenanceJsonResponse(maintenance);
+      }
     }
 
     if (request.method === 'GET' && url.pathname === '/api/deployment/status') {
