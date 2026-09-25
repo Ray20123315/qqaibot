@@ -4,7 +4,7 @@ import { buildImmediateConversationContext, splitOutboundText } from "./src/ai/c
 import { AI_MEDIA_LIMITS, DEFAULTS, VERSION, classifyOperationalFailure } from "./src/config/runtime.js";
 import { publicBaseUrl } from "./src/config/deployment.js";
 import { consumeManualRuleCheckRate, developerIds, isDeveloperId, latestConversationMessageForUser, recentConversationMessagesForUser, stripGroupAiOptOutPrefix } from "./src/core/identity.js";
-import { appendIndex, buildLongGroupConversationContext, callOneBotAction, checkRuntimeRateLimit, getEffectivePermissions, isKnownOutboundMessage, markOutboundPending, modelPreferenceLabel, normalizeMemoryItems, normalizeModelPreference, normalizePermissionName, permissionLabel, removeFromIndex, setExplicitPermission, updateAiDecisionLog, writeAiDecisionLog, writeSystemAudit } from "./src/core/permissions.js";
+import { appendIndex, buildLongGroupConversationContext, callOneBotAction, checkRuntimeRateLimit, getEffectivePermissions, isKnownOutboundMessage, markOutboundPending, markRuntimeRateLimitCompletion, modelPreferenceLabel, normalizeMemoryItems, normalizeModelPreference, normalizePermissionName, permissionLabel, removeFromIndex, setExplicitPermission, updateAiDecisionLog, writeAiDecisionLog, writeSystemAudit } from "./src/core/permissions.js";
 import { appendChatHistoryTurn, clearChatSessionHistory, dbDel, dbGet, dbPut, readChatHistory, withTimeout } from "./src/data/store.js";
 import { getDeploymentStatusForViewer, handleDeploymentBuildQueue, injectDeploymentPortalClient } from "./src/deployment/notifications.js";
 import { botCanRunRuleMonitor, getBotGroupRole, getGroupFamilyForGroup, getGroupJoinPage, isVerifiedGroupOwner } from "./src/group/runtime.js";
@@ -25,7 +25,8 @@ import { applySocialOutputPolicy, buildSocialDecision, buildSocialPromptBlock, c
 import { pickSticker, pickStickerForText, stickerCqMessage } from "./src/social/sticker-library.js";
 import { cancelSchedule, cleanupExpiredModerationProposals, cleanupTransientState, countActiveSchedulesForUser, createAppealFromText, createScheduleRecord, extractScheduleMentionIds, formatScheduleLine, listUserSchedules, parseManagementScheduleAction, parseScheduleRequest, processConflictSignal, processDueSchedules, reviewScheduleWithGemma, reviseScheduleRecord, scheduledCronMode, skipScheduleOnce } from "./src/scheduler/runtime.js";
 import { buildHelpText } from "./src/help/commands.js";
-import { fetchPublicUrl, getFeatureFlag, getPrivateAccessMode, isGroupWhitelisted, numericId, verifyOneBotAccess } from "./src/security/network.js";
+import { fetchPublicUrl, getFeatureFlag, getPrivateAccessMode, isGroupWhitelisted, numericId, verifyCodexBridgeAccess, verifyOneBotAccess } from "./src/security/network.js";
+import { CODEX_BRIDGE_INTERNAL_CHAT_PATH, CODEX_BRIDGE_PATH, CODEX_BRIDGE_PROTOCOL, normalizeCodexBridgeRequest, normalizeCodexBridgeResponse } from "./src/v3/ai/codex-bridge.js";
 import { dispatchV3RuntimeEvent, handleV3RuntimeFetch, runV3RuntimeScheduled } from "./src/v3/runtime/bridge.js";
 import { handleV3PluginManagerApi, injectV3PluginManagerClient } from "./src/v3/portal/plugin-manager.js";
 import { handleV3PackageManagerApi, injectV3PackageManagerClient } from "./src/v3/portal/package-manager.js";
@@ -204,6 +205,12 @@ const QQAIWorker = {
     // 🔌 NapCat / OneBot WebSocket Client 主動回覆入口
     // ==========================================
     const upgradeHeader = request.headers.get("Upgrade");
+    if (upgradeHeader && upgradeHeader.toLowerCase() === "websocket" && url.pathname === CODEX_BRIDGE_PATH) {
+      if (!verifyCodexBridgeAccess(request, env)) return new Response("Unauthorized", { status: 401 });
+      if (!env.ONEBOT_HUB) return new Response("Codex bridge unavailable", { status: 503 });
+      const stub = env.ONEBOT_HUB.get(env.ONEBOT_HUB.idFromName("default"));
+      return stub.fetch(request);
+    }
     if (upgradeHeader && upgradeHeader.toLowerCase() === "websocket" && ["/onebot", "/ws", "/ws/onebot"].includes(url.pathname)) {
       if (!verifyOneBotAccess(request, env)) return new Response("Unauthorized", { status: 401 });
       return getOneBotHub(env).fetch(request);
