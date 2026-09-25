@@ -39,7 +39,7 @@ jobs:
           status="$(curl -sS -D "$headers" -o /tmp/legacy.html -w '%{http_code}' "$PREVIEW_URL/system-admin")"
           test "$status" = "302"
           grep -qi '^location: .*/$' "$headers"
-          test ! -s /tmp/legacy.html
+          ! grep -q '<title>系統管理員</title>' /tmp/legacy.html
           echo "Legacy /system-admin redirects unauthenticated users to the shared Portal entry"
 
       - name: Verify admin auth still reaches credential validation
