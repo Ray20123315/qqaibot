@@ -2,7 +2,7 @@
 
 目前版本：**2.7.12**
 
-QQ AI Bot 是部署在 Cloudflare Workers 的單一 Worker QQ 群聊機器人。它透過 NapCat／OneBot WebSocket 接收 QQ 事件，整合 Gemini、Gemma、DeepSeek、D1、Vectorize、Durable Objects 與內建 Portal，提供聊天、記憶、群規、活動、排程、通知、狼人殺與管理工具。
+QQ AI Bot 是部署在 Cloudflare Workers 的單一 Worker QQ 群聊機器人。它透過 NapCat／OneBot WebSocket 接收 QQ 事件，整合 Gemini、Gemma、DeepSeek、D1、Vectorize、Durable Objects 與內建 Portal，提供聊天、記憶、群規、活動、排程、通知與管理工具。
 
 本儲存庫不再把維護者 QQ 號當成程式預設。部署者必須設定自己的開發者 QQ、公開網址、Cloudflare 資源與 API 憑證。
 
@@ -28,7 +28,7 @@ worker.js
       ├─ src/operations/     活動、投票、協作與自動化
       ├─ src/scheduler/      排程、衝突守衛、群打卡
       ├─ src/social/         人格、關係、輸出風格與表情庫
-      ├─ src/games/          狼人殺與本地娛樂指令
+      ├─ src/games/          與本地娛樂指令
       └─ src/data/           D1／KV 相容資料存取
 ```
 
@@ -132,7 +132,7 @@ npm run deploy
 | `VECTORIZE` | Vectorize | 長期記憶需要 | 群組／使用者隔離的語意記憶 |
 | `MY_RATE_LIMITER` | Rate Limiter | 建議 | Cloudflare 原生速率限制 |
 
-Cron 分成每分鐘的使用者排程與每小時的資料清理。精簡版 v2 不再於 Cron 執行自動群打卡、Bilibili 輪詢、狼人殺計時、平台背景工作或其他自動化 fan-out，以降低 D1 與 Worker 背景負載。
+Cron 將一般排程與高成本背景工作分流；Bilibili 使用 30 分鐘以上低頻 polling 與小批次 cursor 掃描，D1 清理使用小批次 cursor，避免全量掃描。
 
 ## 公開 Worker 變數
 
@@ -255,9 +255,9 @@ npx wrangler secret put SECRET_NAME
 - 自動歡迎、歡迎詞、入群輔助與新人觀察期
 - 人工通知路由；預設只找開發者，群主通知總開關預設關閉
 - AI 管理、群操作、排程審核與申訴審核權限
-- 活動、報名、候補、投票、排程與狼人殺（精簡版不執行背景狼人殺 timer）
-- Bilibili 串接設定（精簡版不做每分鐘自動輪詢）
-- 使用者記憶、免打擾、黑名單、好感度與申訴資料
+- 活動、報名、投票與排程；活動與投票使用不同插件與資料流程
+- Bilibili 串接設定（低頻 polling；不使用 Webhook／bridge；可選 BILIBILI_COOKIE secret）
+- 使用者記憶、免打擾、黑名單與申訴資料
 
 開發者 QQ 清單、API Key、Token、加密金鑰、Cloudflare binding 與 migration 不開放給一般 Portal 使用者修改。
 
@@ -299,18 +299,18 @@ npx wrangler secret put SECRET_NAME
 
 ### Portal
 
-Portal 入口由 `PUBLIC_BASE_URL` 或實際請求來源決定，不再固定指向維護者網站。包含登入、密碼重設、群組與群友、權限、群規、通知、模型、對話、違規、申訴、活動、投票、狼人殺與系統維護。
+Portal 入口由 `PUBLIC_BASE_URL` 或實際請求來源決定，不再固定指向維護者網站。包含登入、密碼重設、群組與群友、權限、群規、通知、模型、對話、違規、申訴、活動、投票、插件與系統維護。
 
 ## 指令
 
-QQ 內輸入 `!help` 可取得依目前權限產生的條列清單。Portal 與 Live 連結會依 `PUBLIC_BASE_URL`／目前請求網域產生。
+QQ 內輸入 `!help` 可取得依目前權限產生的條列清單。Portal 連結會依 `PUBLIC_BASE_URL`／目前請求網域產生。
 
 本地娛樂指令不呼叫模型 API：
 
 | 指令 | 說明 |
 | --- | --- |
 | `!娛樂` | 顯示娛樂指令 |
-| `!骰子 [面數／NdM]` | 擲骰，例如 `!骰子 2d6` |
+| `!骰子 [面數／2d6]` | 擲骰；`2d6` 代表 2 顆 6 面骰 |
 | `!隨機數 [最小] [最大]` | 預設 1～100 |
 | `!硬幣` | 擲硬幣 |
 | `!猜拳 石頭／剪刀／布` | 與機器人猜拳 |
