@@ -39,16 +39,16 @@ assert(worker.includes('partnerCommand: true'), 'Partner unmute must use the res
 assert(worker.includes('只能解除由对象关系产生的禁言'), 'Partner unmute must reject other mute sources');
 
 const portal = fs.readFileSync('src/portal/runtime.js', 'utf8');
-assert(portal.includes("members:'群友列表'"), 'Portal title map must include the member list');
-assert(portal.includes("'groups','moderation','members','ruleviolations'"), 'Portal management visibility must include the member list');
-assert(portal.includes('data-open-view="members"'), 'Portal dashboard must expose a member-list shortcut when the navigation permission is available');
+assert(portal.includes("'member-data':'成员资料'"), 'Portal title map must include member data');
+assert(portal.includes("'groups','moderation','member-data','member-actions','ruleviolations'"), 'Portal management visibility must include member data');
+assert(portal.includes('data-open-view="member-data"'), 'Portal dashboard must expose a member-data shortcut when the navigation permission is available');
 assert(portal.includes('id="opProtect"'), 'Pending moderation form must expose prevent-unmute');
 assert(portal.includes('id="opOwnerUnlock"'), 'Pending moderation form must expose owner-can-unmute');
 assert(portal.includes('id="opSkipConfirm"'), 'Pending moderation form must expose skip-confirmation');
 assert(portal.includes('preventUnmute:$('), 'Pending moderation request must submit prevent-unmute');
 
 const members = fs.readFileSync('src/portal/members.js', 'utf8');
-assert(!members.includes('id="memberConsoleNav" class="hidden"'), 'Member list navigation must not be permanently hidden');
+assert(members.includes('id="memberDataNav"'), 'Member data navigation must be injected');
 assert(!members.includes('setInterval(syncNav,3000)'), 'Injected member script must not hide navigation using an inaccessible session variable');
 
 const deployment = fs.readFileSync('src/deployment/notifications.js', 'utf8');
