@@ -16,7 +16,7 @@ const config = normalizeConfig({
   pollIntervalMs: 120000
 });
 assert.equal(config.creators.length, 2);
-assert.equal(config.pollIntervalMs, 120000);
+assert.equal(config.pollIntervalMs, 1800000, "polling must clamp to the 30-minute safety minimum");
 
 const live = normalizeProviderRecord("123", {
   uid: 123,
