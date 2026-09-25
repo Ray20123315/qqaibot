@@ -20,12 +20,12 @@ function integer(value, fallback, min, max) {
 function normalizeSettings(input = {}, fallback = {}) {
   const source = input && typeof input === "object" && !Array.isArray(input) ? input : {};
   return Object.freeze({
-    pokeReplyEnabled: bool(source.pokeReplyEnabled, fallback.pokeReplyEnabled ?? true),
-    messageReactionEnabled: bool(source.messageReactionEnabled, fallback.messageReactionEnabled ?? true),
-    favoriteFaceEnabled: bool(source.favoriteFaceEnabled, fallback.favoriteFaceEnabled ?? true),
-    mallFaceEnabled: bool(source.mallFaceEnabled, fallback.mallFaceEnabled ?? true),
-    voiceReplyBetaEnabled: bool(source.voiceReplyBetaEnabled, fallback.voiceReplyBetaEnabled ?? false),
-    favoriteFaceCount: integer(source.favoriteFaceCount, fallback.favoriteFaceCount ?? 24, 1, 48)
+    pokeReplyEnabled: bool(source.pokeReplyEnabled ?? source.pokereplyenabled, fallback.pokeReplyEnabled ?? true),
+    messageReactionEnabled: bool(source.messageReactionEnabled ?? source.messagereactionenabled, fallback.messageReactionEnabled ?? true),
+    favoriteFaceEnabled: bool(source.favoriteFaceEnabled ?? source.favoritefaceenabled, fallback.favoriteFaceEnabled ?? true),
+    mallFaceEnabled: bool(source.mallFaceEnabled ?? source.mallfaceenabled, fallback.mallFaceEnabled ?? true),
+    voiceReplyBetaEnabled: bool(source.voiceReplyBetaEnabled ?? source.voicereplybetaenabled, fallback.voiceReplyBetaEnabled ?? false),
+    favoriteFaceCount: integer(source.favoriteFaceCount ?? source.favoritefacecount, fallback.favoriteFaceCount ?? 24, 1, 48)
   });
 }
 
