@@ -95,6 +95,92 @@ async function handleBilibiliWebhook(request, env, url) {
 }
 
 
+async function handleBilibiliOpenLiveBridge(request, env, url) {
+  const declaredLength = Number(request.headers.get("Content-Length") || 0);
+  if (declaredLength > 65536) return jsonResponse({ ok: false, message: "Open Live bridge payload 過大。" }, 413);
+  if (!String(request.headers.get("Content-Type") || "").toLowerCase().includes("application/json")) {
+    return jsonResponse({ ok: false, message: "Open Live bridge 僅接受 JSON。" }, 415);
+  }
+  const secret = url.pathname.split("/").pop() || "";
+  const connectorId = await dbGet(env, "bili:bridge_secret:" + secret);
+  if (!connectorId) return jsonResponse({ ok: false, message: "未知 Open Live bridge 密鑰。" }, 404);
+  const connector = await readJson(env, "bili:connector:" + connectorId, null);
+  if (!connector || connector.enabled === false || connector.mode !== "open_live_bridge") {
+    return jsonResponse({ ok: false, message: "Open Live bridge 串接未啟用。" }, 403);
+  }
+  const body = await request.json().catch(() => null);
+  if (!body || typeof body !== "object" || Array.isArray(body)) {
+    return jsonResponse({ ok: false, message: "Open Live bridge JSON 格式無效。" }, 400);
+  }
+  const kind = String(body.kind || "event").trim().toLowerCase();
+  const now = Date.now();
+
+  if (kind === "hello" || kind === "heartbeat" || kind === "status") {
+    const lastSaved = Number(connector.lastBridgeStateSavedAt || 0);
+    connector.lastBridgeSeenAt = now;
+    connector.bridgeConnected = body.connected !== false;
+    connector.bridgeGameId = String(body.gameId || connector.bridgeGameId || "").slice(0, 128);
+    connector.bridgeAnchor = body.anchor && typeof body.anchor === "object"
+      ? {
+          uid: String(body.anchor.uid || "").slice(0, 32),
+          uname: String(body.anchor.uname || "").slice(0, 120),
+          roomId: String(body.anchor.roomId || body.anchor.room_id || "").slice(0, 32)
+        }
+      : (connector.bridgeAnchor || null);
+    // Open Live heartbeats happen frequently. Persist status at most once every 5 minutes
+    // so reliable long-connection health does not become a D1 write loop.
+    if (kind !== "heartbeat" || now - lastSaved >= 5 * 60 * 1000) {
+      connector.lastBridgeStateSavedAt = now;
+      await dbPut(env, "bili:connector:" + connector.id, JSON.stringify(connector));
+    }
+    return jsonResponse({ ok: true, connectorId: connector.id, accepted: kind });
+  }
+
+  const rawEvent = body.event && typeof body.event === "object" ? body.event : body;
+  const event = normalizeBilibiliEvent(rawEvent);
+  if (body.normalizedType) event.type = String(body.normalizedType);
+  if (!["live_start", "live_end", "video_publish"].includes(event.type)) {
+    return jsonResponse({ ok: true, ignored: true, message: "此 Open Live 事件目前不需要通知。", rawType: event.rawType });
+  }
+  if (connector.creatorId && event.creatorId && String(connector.creatorId) !== String(event.creatorId)) {
+    return jsonResponse({ ok: true, ignored: true, message: "Open Live 事件的創作者與串接 UID 不符。" });
+  }
+
+  const dedupKey = "bili:dedup:" + connector.id + ":" + event.eventId;
+  const owner = "bili-open-live:" + crypto.randomUUID();
+  if (!(await dbClaimLeaseStrict(env, dedupKey, owner, now, 10 * 60 * 1000))) {
+    return jsonResponse({ ok: true, duplicate: true });
+  }
+
+  let result = { ok: true, sent: false };
+  if (event.type === "live_start" || event.type === "video_publish") {
+    result = await sendBilibiliConnectorNotification(env, connector, event).catch(error => ({ ok: false, error: String(error?.message || error) }));
+  } else {
+    await dbPutStrict(env, "bili:event:" + connector.id + ":" + event.eventId, JSON.stringify({
+      at: now,
+      connectorId: connector.id,
+      groupId: connector.groupId,
+      event,
+      status: "record_only"
+    })).catch(() => {});
+  }
+
+  if (!result.ok) {
+    await dbDeleteKeyIfJsonFieldEquals(env, dedupKey, "$.owner", owner).catch(() => {});
+    return jsonResponse({ ok: false, event, ...result }, 502);
+  }
+  await dbPutStrict(env, dedupKey, JSON.stringify({ owner, status: "completed", createdAt: now, expiresAt: now + 30 * 24 * 60 * 60 * 1000 }));
+  connector.lastEventAt = now;
+  connector.lastEvent = event;
+  connector.lastBridgeSeenAt = now;
+  connector.bridgeConnected = true;
+  if (event.type === "live_start") connector.pollState = { ...(connector.pollState || {}), live: true };
+  if (event.type === "live_end") connector.pollState = { ...(connector.pollState || {}), live: false };
+  await dbPutStrict(env, "bili:connector:" + connector.id, JSON.stringify(connector)).catch(() => {});
+  return jsonResponse({ ok: true, event, ...result });
+}
+
+
 
 async function listBilibiliConnectors(env, groupId) {
   const ids = await readJson(env, `bili:connector:index:${groupId}`, []);
@@ -373,4 +459,4 @@ async function pollAutomaticBilibiliConnectors(env, now = Date.now()) {
   }
 }
 
-export { BILIBILI_BLOCK_BACKOFF_MAX_SECONDS, BILIBILI_POLL_DEFAULT_SECONDS, BILIBILI_POLL_MAX_SECONDS, BILIBILI_POLL_MIN_SECONDS, bilibiliPollIntervalSeconds, extractBilibiliVideoFromArchiveSearch, extractBilibiliVideoFromDynamic, fetchBilibiliAutomaticSnapshot, fetchBilibiliJson, fetchBilibiliLiveSnapshot, fetchBilibiliVideoSnapshot, handleBilibiliWebhook, isBilibiliBlockedError, listAllBilibiliConnectorIds, listBilibiliConnectors, normalizeBilibiliEvent, normalizeBilibiliUid, pollAutomaticBilibiliConnectors, pollOneAutomaticBilibiliConnector, sendBilibiliConnectorNotification, waitMs };
+export { handleBilibiliOpenLiveBridge, BILIBILI_BLOCK_BACKOFF_MAX_SECONDS, BILIBILI_POLL_DEFAULT_SECONDS, BILIBILI_POLL_MAX_SECONDS, BILIBILI_POLL_MIN_SECONDS, bilibiliPollIntervalSeconds, extractBilibiliVideoFromArchiveSearch, extractBilibiliVideoFromDynamic, fetchBilibiliAutomaticSnapshot, fetchBilibiliJson, fetchBilibiliLiveSnapshot, fetchBilibiliVideoSnapshot, handleBilibiliWebhook, isBilibiliBlockedError, listAllBilibiliConnectorIds, listBilibiliConnectors, normalizeBilibiliEvent, normalizeBilibiliUid, pollAutomaticBilibiliConnectors, pollOneAutomaticBilibiliConnector, sendBilibiliConnectorNotification, waitMs };
