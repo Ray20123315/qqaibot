@@ -764,7 +764,7 @@ function injectMemberCleanupClient(html) {
   </div>`;
   const cleanupPanel = `
   <div class="card cleanup-console">
-    <div class="section-head compact"><div><h3>清人建议</h3><p>根据活跃时间、保护条件与现有资料提供清理候选建议；这里只是辅助判断，执行前仍需预览、即时复核及确认文字。</p></div></div>
+    <div class="section-head compact"><div><h3>清人建议</h3><p>根据活跃时间、保护条件与现有资料提供清理候选建议；这里只是辅助判断。所选清理人数不设上限，执行前仍需预览、即时复核及确认文字，系统会自动分批处理。</p></div></div>
     <div class="cleanup-summary" id="cleanupSummary"><div class="empty">尚未同步清人资料</div></div>
     <div class="cleanup-policy">
       <div class="field"><label>活跃天数</label><input id="cleanupActiveDays" type="number" min="1" max="180" value="30"></div>
