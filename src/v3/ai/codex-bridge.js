@@ -45,7 +45,11 @@ function normalizeCodexBridgeRequest(account = {}, input = {}) {
     model: String(account.model || input.model || "").trim().slice(0, 180),
     messages: Object.freeze(messages.map(row => Object.freeze(row))),
     maxOutputTokens: clampInteger(input.maxOutputTokens, 1000, 1, CODEX_BRIDGE_MAX_OUTPUT_TOKENS),
-    timeoutMs: clampInteger(input.timeoutMs, CODEX_BRIDGE_DEFAULT_TIMEOUT_MS, 1000, CODEX_BRIDGE_MAX_TIMEOUT_MS)
+    timeoutMs: clampInteger(input.timeoutMs, CODEX_BRIDGE_DEFAULT_TIMEOUT_MS, 1000, CODEX_BRIDGE_MAX_TIMEOUT_MS),
+    reasoningEffort: ["none", "low", "medium", "high", "xhigh", "max"].includes(String(input.reasoningEffort ?? input.reasoning_effort ?? "").trim().toLowerCase())
+      ? String(input.reasoningEffort ?? input.reasoning_effort).trim().toLowerCase()
+      : "",
+    originalPromptOnly: input.originalPromptOnly === true || input.original_prompt_only === true
   });
 }
 
