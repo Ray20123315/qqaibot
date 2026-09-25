@@ -1323,7 +1323,7 @@ ${summary}`.slice(0, 4000),
     }
     const id = String(body.id || `bili_${Date.now().toString(36)}_${crypto.randomUUID().slice(0, 8)}`);
     const existing = await readJson(env, `bili:connector:${id}`, null);
-    const requestedMode = body.mode === "official_webhook" ? "generic_webhook" : "automatic_polling";
+    const requestedMode = body.mode === "open_live_bridge" ? "open_live_bridge" : body.mode === "official_webhook" ? "generic_webhook" : "automatic_polling";
     const creatorId = normalizeBilibiliUid(body.creatorId || existing?.creatorId || "");
     if (!creatorId) return jsonResponse({ ok: false, message: "请填写 B站用户的数字 UID，用于核对事件来源。" }, 400);
     const item = {
@@ -1341,7 +1341,9 @@ ${summary}`.slice(0, 4000),
       nextPollAt: 0
     };
     if (existing?.webhookSecret && requestedMode !== "generic_webhook") await dbDel(env, `bili:webhook_secret:${existing.webhookSecret}`);
+    if (existing?.bridgeSecret && requestedMode !== "open_live_bridge") await dbDel(env, `bili:bridge_secret:${existing.bridgeSecret}`);
     let webhookUrl = "";
+    let bridgeUrl = "";
     if (requestedMode === "generic_webhook") {
       item.webhookSecret = existing?.webhookSecret || crypto.randomUUID().replaceAll("-", "");
       await dbPut(env, `bili:webhook_secret:${item.webhookSecret}`, id);
