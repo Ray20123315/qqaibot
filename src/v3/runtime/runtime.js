@@ -1,4 +1,4 @@
-import { autoCheckinPlugin, createActivityPlugin, createBilibiliLivePlugin, createPollPlugin, entertainmentPlugin, memberSpeechAnalysisPlugin, qqInteractionsPlugin } from "../../plugins/official/index.js";
+import { createActivityPlugin, createAutoCheckinPlugin, createBilibiliLivePlugin, createPollPlugin, createQqInteractionsPlugin, entertainmentPlugin, memberSpeechAnalysisPlugin } from "../../plugins/official/index.js";
 import { createV3HostAdapter } from "../host/adapter.js";
 import { buildV3PublicStatus, v3PublicStatusResponse } from "../public/status.js";
 
@@ -16,8 +16,8 @@ function createOfficialV3Plugins(options = {}) {
   if (source.activity !== false) plugins.push(createActivityPlugin({ adminUserIds }));
   if (source.poll !== false) plugins.push(createPollPlugin({ adminUserIds }));
   if (source.memberSpeechAnalysis !== false) plugins.push(memberSpeechAnalysisPlugin);
-  if (source.qqInteractions !== false) plugins.push(qqInteractionsPlugin);
-  if (source.autoCheckin !== false) plugins.push(autoCheckinPlugin);
+  if (source.qqInteractions !== false) plugins.push(createQqInteractionsPlugin(source.qqInteractions && typeof source.qqInteractions === "object" ? source.qqInteractions : {}));
+  if (source.autoCheckin !== false) plugins.push(createAutoCheckinPlugin(source.autoCheckin && typeof source.autoCheckin === "object" ? source.autoCheckin : {}));
   if (source.bilibili && source.bilibili !== false) {
     if (typeof source.bilibili !== "object") throw new Error("V3_BILIBILI_OPTIONS_INVALID");
     plugins.push(createBilibiliLivePlugin(source.bilibili));
