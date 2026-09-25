@@ -8,7 +8,7 @@ const auth = {
   isDeveloper: () => true
 };
 
-const disabledEnv = {};
+const disabledEnv = { V3_RUNTIME_ENABLED: "false" };
 let storageReads = 0;
 let response = await handleV3PluginManagerApi(
   new Request("https://example.com/api/portal/v3/plugins"),
@@ -54,21 +54,22 @@ assert.equal(response.status, 200);
 payload = await response.json();
 assert.equal(payload.runtimeEnabled, true);
 assert.equal(payload.bilibiliEnabled, true);
-assert.equal(payload.pluginCount, 1);
-assert.equal(payload.plugins[0].id, "official.bilibili-live");
-assert.equal(payload.plugins[0].settings.pollintervalms, 120000);
-assert.equal(payload.plugins[0].surface.writableSettings, true);
-assert.equal(payload.plugins[0].active, true);
-assert.equal(payload.plugins[0].lifecycle.state, "enabled");
-assert.deepEqual(payload.plugins[0].requestedPermissions, ["network", "scheduler", "storage"]);
-assert.deepEqual(payload.plugins[0].grantedPermissions, ["network", "scheduler", "storage"]);
-assert.deepEqual(payload.plugins[0].requiredPermissions, ["network", "scheduler", "storage"]);
-assert.equal(payload.plugins[0].trustStatus, "official_beta");
-assert.equal(payload.plugins[0].trustLabelZh, "官方 Beta");
-assert.equal(payload.plugins[0].releaseChannel, "preview");
-assert.equal(payload.plugins[0].releaseChannelLabelZh, "抢先体验版");
-assert.equal(payload.plugins[0].channelPreference, "stable");
-assert.equal(payload.plugins[0].permissionDisclosures.find(row => row.capability === "network").externalDestinations[0], "api.live.bilibili.com");
+assert.equal(payload.pluginCount, 7, "six default official plugins plus Bilibili should be visible");
+const biliPlugin = payload.plugins.find(plugin => plugin.id === "official.bilibili-live");
+assert.ok(biliPlugin, "Bilibili plugin must be present in the manager list");
+assert.equal(biliPlugin.settings.pollintervalms, 1800000);
+assert.equal(biliPlugin.surface.writableSettings, true);
+assert.equal(biliPlugin.active, true);
+assert.equal(biliPlugin.lifecycle.state, "enabled");
+assert.deepEqual(biliPlugin.requestedPermissions, ["network", "scheduler", "storage"]);
+assert.deepEqual(biliPlugin.grantedPermissions, ["network", "scheduler", "storage"]);
+assert.deepEqual(biliPlugin.requiredPermissions, ["network", "scheduler", "storage"]);
+assert.equal(biliPlugin.trustStatus, "official_beta");
+assert.equal(biliPlugin.trustLabelZh, "官方 Beta");
+assert.equal(biliPlugin.releaseChannel, "preview");
+assert.equal(biliPlugin.releaseChannelLabelZh, "抢先体验版");
+assert.equal(biliPlugin.channelPreference, "stable");
+assert.equal(biliPlugin.permissionDisclosures.find(row => row.capability === "network").externalDestinations[0], "api.live.bilibili.com");
 
 response = await handleV3PluginManagerApi(
   new Request("https://example.com/api/portal/v3/plugins/official.bilibili-live/state", {
@@ -146,7 +147,7 @@ response = await handleV3PluginManagerApi(
   new Request("https://example.com/api/portal/v3/plugins/official.bilibili-live/settings", {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ settings: { pollintervalms: 180000 } })
+    body: JSON.stringify({ settings: { pollintervalms: 3600000 } })
   }),
   env,
   null,
@@ -154,7 +155,7 @@ response = await handleV3PluginManagerApi(
 );
 assert.equal(response.status, 200);
 payload = await response.json();
-assert.equal(payload.plugin.settings.pollintervalms, 180000);
+assert.equal(payload.plugin.settings.pollintervalms, 3600000);
 assert.equal(payload.plugin.status.state, "OK");
 
 response = await handleV3PluginManagerApi(
@@ -166,7 +167,7 @@ response = await handleV3PluginManagerApi(
 assert.equal(response.status, 200);
 payload = await response.json();
 assert.equal(payload.plugin.id, "official.bilibili-live");
-assert.equal(payload.plugin.settings.pollintervalms, 180000);
+assert.equal(payload.plugin.settings.pollintervalms, 3600000);
 assert.throws(() => normalizePortalPluginSettings(payload.plugin, { pollintervalms: 999999999 }), /PLUGIN_MANAGER_SETTING_RANGE/);
 
 await releaseV3Runtime(env);
