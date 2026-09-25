@@ -15,8 +15,15 @@ const options = v3RuntimeOptionsFromEnv({
   V3_BILIBILI_UIDS: "123",
   V3_BILIBILI_POLL_INTERVAL_MS: "1"
 });
-assert.equal(options.official.bilibili.pollIntervalMs, 60000, "poll interval must clamp to one minute minimum");
+assert.equal(options.official.bilibili.pollIntervalMs, 1800000, "poll interval must clamp to thirty-minute minimum");
 assert.equal(options.official.bilibili.creators[0].uid, "123");
+const maxPollOptions = v3RuntimeOptionsFromEnv({
+  V3_RUNTIME_ENABLED: "true",
+  V3_BILIBILI_ENABLED: "true",
+  V3_BILIBILI_UIDS: "123",
+  V3_BILIBILI_POLL_INTERVAL_MS: "999999999"
+});
+assert.equal(maxPollOptions.official.bilibili.pollIntervalMs, 21600000, "poll interval must clamp to six-hour maximum");
 
 const disabledEnv = {};
 let response = await handleV3RuntimeFetch(new Request("https://example.com/api/v3/status"), disabledEnv);
