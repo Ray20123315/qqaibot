@@ -238,14 +238,22 @@ async function getRuntimeRateLimitSeconds(env, groupId) {
 
 async function checkRuntimeRateLimit(env, { groupId, userId, isPrivate }) {
   const seconds = await getRuntimeRateLimitSeconds(env, groupId);
-  if (seconds <= 0) return { allowed: true, seconds: 0, remaining: 0 };
-  const key = `runtime_rate_limit_last:${isPrivate ? "private" : "group"}:${groupId || ""}:${userId}`;
+  if (seconds <= 0) return { allowed: true, seconds: 0, remaining: 0, notify: false };
+  const scope = `${isPrivate ? "private" : "group"}:${groupId || ""}:${userId}`;
+  const key = `runtime_rate_limit_last:${scope}`;
+  const noticeKey = `runtime_rate_limit_notice:${scope}`;
   const now = Date.now();
   const lastAt = Number(await dbGet(env, key) || 0);
   const remainingMs = seconds * 1000 - (now - lastAt);
-  if (lastAt && remainingMs > 0) return { allowed: false, seconds, remaining: Math.ceil(remainingMs / 1000) };
+  if (lastAt && remainingMs > 0) {
+    const lastNotifiedFor = Number(await dbGet(env, noticeKey) || 0);
+    const notify = lastNotifiedFor !== lastAt;
+    if (notify) await dbPut(env, noticeKey, String(lastAt));
+    return { allowed: false, seconds, remaining: Math.ceil(remainingMs / 1000), notify };
+  }
   await dbPut(env, key, String(now));
-  return { allowed: true, seconds, remaining: 0 };
+  await dbDel(env, noticeKey);
+  return { allowed: true, seconds, remaining: 0, notify: false };
 }
 
 

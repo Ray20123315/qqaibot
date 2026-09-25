@@ -1695,12 +1695,17 @@ const QQAIWorker = {
         if (sticker && Math.random() < 0.35) return jsonReply(stickerCqMessage(sticker));
       }
 
-      // ⏳ Cloudflare 原生速率限制器 (10秒冷卻鎖) - 開發者、群主、管理員豁免
-      const isBypassCooldown = isDeveloper || senderRole === 'owner' || senderRole === 'admin' || body.__qqai_queued === true;
-      if (!isBypassCooldown) {
+      // ⏳ 每使用者 AI 对话冷却。群聊 WebSocket 入口已先检查；HTTP/私聊在此兜底。
+      // 明确控制指令不计入聊天冷却；developer / owner / admin 的普通 AI 对话与一般成员一致。
+      const shouldCheckRuntimeCooldown = explicitlyTriggered
+        && !isCommandMessage
+        && body.__qqai_rate_limit_prechecked !== true
+        && body.__qqai_queued !== true;
+      if (shouldCheckRuntimeCooldown) {
         const rate = await checkRuntimeRateLimit(env, { groupId: currentGroupId, userId, isPrivate });
         if (!rate.allowed) {
           ctx.waitUntil(writeAiDecisionLog(env, { ...aiDecisionBase, decision: "blocked", reason: "rate_limited", triggerType: botMentioned ? "mention" : repliedToBot ? "reply_to_ai" : isPrivate ? "private" : "none", remainingSeconds: rate.remaining }));
+          if (!rate.notify) return new Response(null, { status: 204 });
           return jsonReply(`${atSender}请求过于频繁，请等待约 ${rate.remaining} 秒后再试。此提示不会调用任何 AI 模型。`);
         }
       }
@@ -4491,6 +4496,22 @@ export class OneBotHub {
       }
     }
     const key = this.userQueueKey(body);
+    const bufferedContinuation = this.inputBuffers.has(key);
+    if (body?.message_type === "group" && body?.__qqai_rate_limit_prechecked !== true && !bufferedContinuation) {
+      const rate = await checkRuntimeRateLimit(this.env, { groupId: String(body.group_id || ""), userId: String(body.user_id || ""), isPrivate: false });
+      if (!rate.allowed) {
+        await this.recordIngress(body, "rate_limited", { explicit: true, remainingSeconds: rate.remaining }).catch(() => {});
+        if (rate.notify) {
+          await this.sendQueueNotice(body, `请求过于频繁，请等待约 ${rate.remaining} 秒后再试。`)
+            .catch(error => console.error("rate limit notice failed", error));
+        }
+        return;
+      }
+      body = { ...body, __qqai_rate_limit_prechecked: true };
+    } else if (bufferedContinuation && body?.__qqai_rate_limit_prechecked !== true) {
+      // 同一 debounce 批次的补充消息属于同一个问题，不重复消耗冷却额度。
+      body = { ...body, __qqai_rate_limit_prechecked: true };
+    }
     const incoming = this.questionBodies(body);
     const activeParts = this.userInFlight.has(key) ? await this.cancelActiveQuestion(key, "cancelled_by_new_input") : [];
     const existingCount = Number(this.inputBuffers.get(key)?.parts?.length || 0);
