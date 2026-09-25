@@ -10,24 +10,6 @@ import { numericId } from "../security/network.js";
 
 
 
-function normalizeBilibiliEvent(payload) {
-  const data = payload?.data || payload?.event_data || payload?.body || payload || {};
-  const rawType = String(payload?.event_type || payload?.event || payload?.cmd || payload?.type || data?.event_type || data?.type || "").toLowerCase();
-  let type = "unknown";
-  if (/live.*start|start.*live|live_open_platform_live_start|开播|開播/.test(rawType)) type = "live_start";
-  else if (/video.*publish|archive.*publish|稿件.*发布|投稿|new_video/.test(rawType)) type = "video_publish";
-  const creatorId = String(data?.open_id || data?.uid || data?.mid || data?.creator_id || payload?.open_id || payload?.uid || "");
-  const creatorName = String(data?.uname || data?.name || data?.creator_name || payload?.creator_name || "");
-  const title = String(data?.title || data?.room_title || data?.archive_title || payload?.title || "");
-  const roomId = String(data?.room_id || data?.roomid || payload?.room_id || "");
-  const bvid = String(data?.bvid || data?.bv_id || payload?.bvid || "");
-  const url = String(data?.url || data?.link || payload?.url || (type === "live_start" && roomId ? `https://live.bilibili.com/${roomId}` : type === "video_publish" && bvid ? `https://www.bilibili.com/video/${bvid}` : ""));
-  const eventId = String(payload?.event_id || payload?.id || data?.event_id || `${type}:${creatorId}:${roomId || bvid}:${title}`).slice(0, 256);
-  return { type, creatorId, creatorName, title, roomId, bvid, url, eventId, rawType };
-}
-
-
-
 async function sendBilibiliConnectorNotification(env, connector, event) {
   const notify = event.type === "live_start" ? connector.liveNotify : event.type === "video_publish" ? connector.videoNotify : false;
   const atAllRequested = event.type === "live_start" ? connector.liveAtAll : event.type === "video_publish" ? connector.videoAtAll : false;
@@ -346,4 +328,4 @@ async function pollAutomaticBilibiliConnectors(env, now = Date.now()) {
   }
 }
 
-export { BILIBILI_BLOCK_BACKOFF_MAX_SECONDS, BILIBILI_POLL_DEFAULT_SECONDS, BILIBILI_POLL_MAX_SECONDS, BILIBILI_POLL_MIN_SECONDS, bilibiliPollIntervalSeconds, extractBilibiliVideoFromArchiveSearch, extractBilibiliVideoFromDynamic, fetchBilibiliAutomaticSnapshot, fetchBilibiliJson, fetchBilibiliLiveSnapshot, fetchBilibiliVideoSnapshot, isBilibiliBlockedError, listAllBilibiliConnectorIds, listBilibiliConnectors, normalizeBilibiliEvent, normalizeBilibiliUid, pollAutomaticBilibiliConnectors, pollOneAutomaticBilibiliConnector, sendBilibiliConnectorNotification, waitMs };
+export { BILIBILI_BLOCK_BACKOFF_MAX_SECONDS, BILIBILI_POLL_DEFAULT_SECONDS, BILIBILI_POLL_MAX_SECONDS, BILIBILI_POLL_MIN_SECONDS, bilibiliPollIntervalSeconds, extractBilibiliVideoFromArchiveSearch, extractBilibiliVideoFromDynamic, fetchBilibiliAutomaticSnapshot, fetchBilibiliJson, fetchBilibiliLiveSnapshot, fetchBilibiliVideoSnapshot, isBilibiliBlockedError, listAllBilibiliConnectorIds, listBilibiliConnectors, normalizeBilibiliUid, pollAutomaticBilibiliConnectors, pollOneAutomaticBilibiliConnector, sendBilibiliConnectorNotification, waitMs };
