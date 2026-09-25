@@ -39,8 +39,11 @@ assert(cachedMember.muteRemainingSeconds >= 115 && cachedMember.muteRemainingSec
 
 const sampleHtml = '<!doctype html><html><head></head><body><nav><button data-view="logs">操作日志</button></nav><main><section id="v-logs" class="view"></section></main></body></html>';
 const injected = injectPortalMembersClient(sampleHtml);
-assert(injected.includes('id="memberConsoleNav"'), "Member navigation must be injected");
-assert(injected.includes('id="v-members"'), "Member console page must be injected");
+assert(injected.includes('id="memberDataNav"'), "Unified member-data navigation must be injected");
+assert(injected.includes('id="v-member-data"'), "Unified member-data page must be injected");
+assert(!injected.includes('id="v-members"'), "Standalone roster page must stay removed");
+assert(!injected.includes('id="v-member-cleanup"'), "Standalone cleanup-analysis page must stay removed");
+assert(injected.includes('清人建议'), "Cleanup recommendations must be embedded in member data");
 assert(injected.includes('id="qqai-member-console-client"'), "Member console client must be injected");
 assert(injected.includes('禁言（秒）'), "Member console must expose second-based mute controls");
 assert(injected.includes('member-unmute'), "Member console must expose unmute controls");
