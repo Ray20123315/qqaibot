@@ -67,15 +67,15 @@ function biliCtx(userId = "42") {
 }
 await bili.onLoad(biliCtx());
 const initial = await bili.surface.readSettings(biliCtx());
-assert.equal(initial.pollintervalms, 120000);
+assert.equal(initial.pollintervalms, 1800000, "initial Bilibili polling must clamp to the 30-minute safety minimum");
 const status = await bili.surface.status(biliCtx());
 assert.equal(status.state, "OK");
 assert.equal(status.creatorCount, 1);
-await assert.rejects(() => bili.surface.updateSettings(biliCtx("7"), { pollintervalms: 180000 }), /BILIBILI_LIVE_ADMIN_REQUIRED/);
-await bili.surface.updateSettings(biliCtx("42"), { pollintervalms: 180000 });
-assert.equal((await bili.surface.readSettings(biliCtx())).pollintervalms, 180000);
+await assert.rejects(() => bili.surface.updateSettings(biliCtx("7"), { pollintervalms: 3600000 }), /BILIBILI_LIVE_ADMIN_REQUIRED/);
+await bili.surface.updateSettings(biliCtx("42"), { pollintervalms: 3600000 });
+assert.equal((await bili.surface.readSettings(biliCtx())).pollintervalms, 3600000);
 assert.equal(biliJobs.filter(x => x.status === "active").length, 1);
-assert.equal(biliJobs.find(x => x.status === "active").intervalMs, 180000);
+assert.equal(biliJobs.find(x => x.status === "active").intervalMs, 3600000);
 
 await host.stop();
 console.log("verify-v3-plugin-surface: ok");
