@@ -11,6 +11,7 @@ import {
   publicPortalUrl
 } from "./src/config/deployment.js";
 import { DEFAULT_DEVELOPER_ID, VERSION } from "./src/config/runtime.js";
+import { createAutoCheckinPlugin } from "./src/plugins/official/auto-checkin.js";
 
 assert.equal(VERSION, "2.7.12");
 assert.equal(DEFAULT_DEVELOPER_ID, "", "Source must not grant the maintainer account implicit developer authority");
@@ -81,7 +82,7 @@ assert.doesNotMatch(scheduler, /runAutomaticGroupCheckins|performManualGroupChec
 const autoCheckinPlugin = fs.readFileSync("src/plugins/official/auto-checkin.js", "utf8");
 assert.match(autoCheckinPlugin, /AUTO_CHECKIN_JOB_NAME/);
 assert.match(autoCheckinPlugin, /MAX_BATCH_SIZE\s*=\s*20/);
-assert.match(autoCheckinPlugin, /commands:\s*\[\]/, "auto check-in must not expose a manual command");
+assert.equal(createAutoCheckinPlugin().commands.length, 0, "auto check-in must not expose a manual command");
 
 const readme = fs.readFileSync("README.md", "utf8");
 for (const marker of [
