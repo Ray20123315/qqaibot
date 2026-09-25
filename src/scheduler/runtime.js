@@ -11,7 +11,7 @@ import { parseDurationSeconds, runOneBotGroupOperation } from "../onebot/message
 import { opsFuseAllows, opsGetSettings, opsQuietState, opsRecordAutomationResult } from "../operations/runtime.js";
 import { readJson, sendPortalVerificationMessage } from "../portal/auth.js";
 import { getFeatureFlag, isGroupWhitelisted, numericId } from "../security/network.js";
-import { isManagementRole, looksLikeRoughBanter, managerExchangeContext, readRecentConversationRecords } from "../moderation/social-boundaries.js";
+import { isManagementRole, isManagerStopSignal, looksLikeRoughBanter, managerExchangeContext, readRecentConversationRecords } from "../moderation/social-boundaries.js";
 
 export const SCHEDULED_ROUTINE_CRON = "* * * * *";
 export const SCHEDULED_D1_CLEANUP_CRON = "17 * * * *";
