@@ -129,7 +129,7 @@ function outboundMediaFile(media, { allowLocalPath = false } = {}) {
   const ref = cleanMediaRef(media);
   if (ref.base64) return `base64://${ref.base64}`;
   if (/^https?:\/\//i.test(ref.url)) return ref.url;
-  if (/^https?:\/\//i.test(ref.file) || /^base64:\/\//i.test(ref.file)) return ref.file;
+  if (/^https?:\/\//i.test(ref.file) || /^base64:\/\//i.test(ref.file) || /^file:\/\//i.test(ref.file)) return ref.file;
   if (ref.file && !/^[/\\]|^[a-zA-Z]:[\\/]/.test(ref.file)) return ref.file;
   if (allowLocalPath && ref.path) return ref.path;
   if (allowLocalPath && ref.file) return ref.file;
