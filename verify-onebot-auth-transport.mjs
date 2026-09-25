@@ -14,6 +14,6 @@ const verifyStart = networkSource.indexOf("function verifyOneBotAccess");
 const verifyEnd = networkSource.indexOf("async function getFeatureFlag", verifyStart);
 const verifySource = verifyStart >= 0 && verifyEnd > verifyStart ? networkSource.slice(verifyStart, verifyEnd) : "";
 assert.match(verifySource, /headers\.get\(["']Authorization["']\)/);
-assert.doesNotMatch(verifySource, /searchParams|access_token|[?&]token=/i, "OneBot auth must not accept URL query credentials");
+assert.doesNotMatch(verifySource, /request\.url|new URL\(|searchParams/, "OneBot auth must not inspect URL query credentials");
 
 console.log("verify-onebot-auth-transport: ok");
