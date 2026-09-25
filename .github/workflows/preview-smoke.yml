@@ -31,7 +31,7 @@ jobs:
           grep -qi 'QQAI' /tmp/portal.html
           grep -q 'QQAI 插件安全中心' /tmp/plugin-security.html
           node --input-type=module -e 'const fs=await import("node:fs/promises"); const x=JSON.parse(await fs.readFile("/tmp/plugin-security.json","utf8")); if(x.ok!==true||!Array.isArray(x.entries)) process.exit(1);'
-          node --input-type=module -e 'const fs=await import("node:fs/promises"); const x=JSON.parse(await fs.readFile("/tmp/health.json","utf8")); if(!x.bindings||x.bindings.db!==false) process.exit(1); console.log(JSON.stringify({ok:x.ok,db:x.bindings.db,onebotHub:x.bindings.onebotHub}));'
+          node --input-type=module -e 'const fs=await import("node:fs/promises"); const x=JSON.parse(await fs.readFile("/tmp/health.json","utf8")); if(!x.bindings||x.bindings.db!==true||x.bindings.onebotHub!==true) process.exit(1); console.log(JSON.stringify({ok:x.ok,db:x.bindings.db,onebotHub:x.bindings.onebotHub}));'
 
       - name: Check Preview OneBot WebSocket auth gate
         shell: bash
