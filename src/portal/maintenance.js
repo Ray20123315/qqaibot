@@ -4,16 +4,45 @@ import { getPortalSession, jsonResponse, readCookie } from "./auth.js";
 
 const PORTAL_MAINTENANCE_KEY = "portal_maintenance:global";
 const PORTAL_MAINTENANCE_API = "/api/portal/maintenance";
-const PORTAL_MAINTENANCE_LOGIN_QUERY = "maintenance_login";
+const PORTAL_MAINTENANCE_TYPES = Object.freeze({
+  data_update: Object.freeze({ title: "数据更新中", description: "系统正在进行数据库同步，请稍后再试。" }),
+  data_maint: Object.freeze({ title: "数据维护中", description: "系统正在进行数据整理与备份，请稍候。" }),
+  sys_update: Object.freeze({ title: "系统升级中", description: "我们正在部署新功能，敬请期待！" }),
+  sys_maint: Object.freeze({ title: "系统维护中", description: "服务器正在进行例行维护，暂时无法提供服务。" })
+});
+const PORTAL_MAINTENANCE_DEFAULT_TYPE = "sys_maint";
+
+function maintenanceType(value) {
+  const type = String(value || "").trim();
+  return Object.prototype.hasOwnProperty.call(PORTAL_MAINTENANCE_TYPES, type) ? type : PORTAL_MAINTENANCE_DEFAULT_TYPE;
+}
+
+function maintenanceEnd(value) {
+  const raw = String(value || "").trim();
+  if (!raw) return "";
+  const timestamp = Date.parse(raw);
+  return Number.isFinite(timestamp) ? new Date(timestamp).toISOString() : "";
+}
 
 function normalizeMaintenanceState(value = {}) {
   const source = value && typeof value === "object" && !Array.isArray(value) ? value : {};
+  const type = maintenanceType(source.type);
+  const message = String(source.message ?? "").trim().slice(0, 500);
   return Object.freeze({
     enabled: source.enabled === true,
-    message: String(source.message || "系统正在维护中，请稍后再试。").trim().slice(0, 500) || "系统正在维护中，请稍后再试。",
+    type,
+    message,
+    end: maintenanceEnd(source.end),
     updatedAt: Math.max(0, Number(source.updatedAt || 0)),
     updatedBy: String(source.updatedBy || "").slice(0, 64)
   });
+}
+
+function maintenanceStateActive(state, now = Date.now()) {
+  if (state?.enabled !== true) return false;
+  if (!state.end) return true;
+  const endAt = Date.parse(state.end);
+  return !Number.isFinite(endAt) || endAt >= Number(now);
 }
 
 async function readPortalMaintenanceState(env) {
@@ -41,20 +70,48 @@ async function canBypassPortalMaintenance(request, env) {
   return Object.freeze({ allowed: maintenancePrivileged(session, env), session });
 }
 
+function escapeMaintenanceHtml(value) {
+  return String(value ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#039;");
+}
+
+function maintenanceEndText(value) {
+  if (!value) return "";
+  const date = new Date(value);
+  if (!Number.isFinite(date.getTime())) return "";
+  try {
+    return new Intl.DateTimeFormat("zh-CN", {
+      timeZone: "Asia/Taipei",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      hour12: false
+    }).format(date);
+  } catch {
+    return date.toISOString().replace("T", " ").slice(0, 16) + " UTC";
+  }
+}
+
 function maintenanceHtml(state) {
-  const message = String(state?.message || "系统正在维护中，请稍后再试。")
-    .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
-  return `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="dark light"><title>QQAI 系统维护</title><style>
-  :root{font-family:Inter,"Noto Sans SC","Microsoft YaHei",system-ui,sans-serif;color-scheme:dark;background:#070914;color:#f7f8ff}
-  *{box-sizing:border-box}body{margin:0;min-height:100vh;display:grid;place-items:center;background:radial-gradient(circle at 50% 12%,#17204a 0,#0c1025 34%,#070914 68%);padding:24px}
-  .shell{width:min(720px,100%);border:1px solid rgba(255,255,255,.11);border-radius:28px;background:rgba(12,16,37,.88);box-shadow:0 30px 90px rgba(0,0,0,.45);padding:42px}
-  .mark{width:54px;height:54px;border-radius:17px;display:grid;place-items:center;background:#fff;color:#0b1022;font-weight:900;letter-spacing:-.04em;margin-bottom:28px}
-  .eyebrow{font-size:12px;font-weight:800;letter-spacing:.16em;text-transform:uppercase;color:#9da8d6}.title{font-size:clamp(30px,6vw,52px);line-height:1.04;margin:10px 0 14px}.desc{color:#b8bfda;line-height:1.8;font-size:16px;white-space:pre-wrap}
-  .status{display:flex;gap:10px;align-items:center;margin:28px 0;padding:14px 16px;border-radius:14px;background:rgba(255,255,255,.05);color:#dfe3f6}.dot{width:9px;height:9px;border-radius:99px;background:#f5b642;box-shadow:0 0 20px #f5b642}
-  .actions{display:flex;gap:10px;flex-wrap:wrap}.btn{appearance:none;border:1px solid rgba(255,255,255,.14);border-radius:12px;padding:11px 15px;background:rgba(255,255,255,.06);color:#fff;text-decoration:none;font:inherit;font-weight:750}.btn.primary{background:#fff;color:#10152d}
-  .foot{margin-top:22px;color:#6f789d;font-size:12px}
-  @media(max-width:600px){.shell{padding:28px 22px;border-radius:22px}.actions{display:grid}.btn{text-align:center}}
-  </style></head><body><main class="shell"><div class="mark">AI</div><div class="eyebrow">QQAI Maintenance</div><h1 class="title">系统维护中</h1><div class="desc">${message}</div><div class="status"><span class="dot"></span><span>一般使用者暂时无法进入控制台或使用控制台后端功能。</span></div><div class="actions"><a class="btn primary" href="/portal?${PORTAL_MAINTENANCE_LOGIN_QUERY}=1">开发者／系统管理员登录</a><button class="btn" onclick="location.reload()">重新检查</button></div><div class="foot">已登录的 System Admin 与 Developer 可继续进入后台进行维护。</div></main></body></html>`;
+  const normalized = normalizeMaintenanceState(state);
+  const detail = PORTAL_MAINTENANCE_TYPES[normalized.type] || PORTAL_MAINTENANCE_TYPES[PORTAL_MAINTENANCE_DEFAULT_TYPE];
+  const title = escapeMaintenanceHtml(detail.title);
+  const message = escapeMaintenanceHtml(normalized.message || detail.description);
+  const endText = escapeMaintenanceHtml(maintenanceEndText(normalized.end));
+  const endBlock = endText
+    ? `<div class="bg-gray-700/50 p-4 rounded-xl"><p class="text-sm text-gray-400">预计结束时间</p><p class="text-xl font-mono text-green-400 font-bold mt-1">${endText}</p></div>`
+    : "";
+  return `<!DOCTYPE html><html lang="zh-CN" class="dark"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>${title}</title><script src="https://cdn.tailwindcss.com"></script><link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css"><style>
+    ::-webkit-scrollbar { width: 8px; height: 8px; }
+    ::-webkit-scrollbar-track { background: #1f2937; }
+    ::-webkit-scrollbar-thumb { background: #4b5563; border-radius: 4px; }
+  </style></head><body class="bg-gray-900 text-white min-h-screen flex items-center justify-center p-4"><div class="max-w-md w-full text-center space-y-8 bg-gray-800 p-10 rounded-3xl shadow-2xl border border-gray-700"><div class="text-7xl text-yellow-500 animate-pulse"><i class="fas fa-tools"></i></div><div><h1 class="text-3xl font-bold text-white mb-2">${title}</h1><p class="text-gray-400 text-lg">${message}</p></div>${endBlock}</div></body></html>`;
 }
 
 function isMaintenanceWebSurface(url) {
@@ -69,14 +126,18 @@ async function handlePortalMaintenanceGate(request, env, url = null) {
   const target = url instanceof URL ? url : new URL(request.url);
   if (target.pathname === PORTAL_MAINTENANCE_API) return null;
   if (!isMaintenanceWebSurface(target) && !isMaintenanceProtectedApi(target)) return null;
-  const state = await readPortalMaintenanceState(env);
-  if (!state.enabled) return null;
 
-  const { allowed } = await canBypassPortalMaintenance(request, env);
+  const state = await readPortalMaintenanceState(env);
+  if (!maintenanceStateActive(state)) return null;
+
+  const { allowed, session } = await canBypassPortalMaintenance(request, env);
   if (allowed) return null;
 
+  // Match the reference backend-maintenance flow: public/login entry remains reachable.
+  // Maintenance only replaces the authenticated backend for ordinary users.
+  if (!session) return null;
+
   if (isMaintenanceWebSurface(target) && request.method === "GET") {
-    if (target.searchParams.get(PORTAL_MAINTENANCE_LOGIN_QUERY) === "1") return null;
     return new Response(maintenanceHtml(state), {
       status: 503,
       headers: {
@@ -89,11 +150,13 @@ async function handlePortalMaintenanceGate(request, env, url = null) {
   }
 
   if (isMaintenanceProtectedApi(target)) {
+    const detail = PORTAL_MAINTENANCE_TYPES[state.type] || PORTAL_MAINTENANCE_TYPES[PORTAL_MAINTENANCE_DEFAULT_TYPE];
     return jsonResponse({
       ok: false,
       code: "PORTAL_MAINTENANCE",
       maintenance: true,
-      message: state.message
+      state: { type: state.type, end: state.end },
+      message: state.message || detail.description
     }, 503, { "Retry-After": "300" });
   }
   return null;
@@ -125,10 +188,19 @@ async function handlePortalMaintenanceApi(request, env, url = null) {
   if (typeof body.enabled !== "boolean") {
     return jsonResponse({ ok: false, code: "MAINTENANCE_ENABLED_REQUIRED", message: "enabled 必须是 boolean。" }, 400);
   }
+  if (body.type !== undefined && !Object.prototype.hasOwnProperty.call(PORTAL_MAINTENANCE_TYPES, String(body.type || ""))) {
+    return jsonResponse({ ok: false, code: "MAINTENANCE_TYPE_INVALID", message: "维护类型无效。" }, 400);
+  }
+  if (body.end !== undefined && String(body.end || "").trim() && !maintenanceEnd(body.end)) {
+    return jsonResponse({ ok: false, code: "MAINTENANCE_END_INVALID", message: "预计结束时间格式无效。" }, 400);
+  }
+
   const previous = await readPortalMaintenanceState(env);
   const next = normalizeMaintenanceState({
     enabled: body.enabled,
+    type: body.type === undefined ? previous.type : body.type,
     message: body.message === undefined ? previous.message : body.message,
+    end: body.end === undefined ? previous.end : body.end,
     updatedAt: Date.now(),
     updatedBy: session?.systemAdmin ? "system-admin" : String(session?.qq || "")
   });
@@ -136,19 +208,22 @@ async function handlePortalMaintenanceApi(request, env, url = null) {
   return jsonResponse({
     ok: true,
     state: next,
-    message: next.enabled ? "系统维护模式已开启。一般使用者将看到维护页面。" : "系统维护模式已关闭。"
+    message: next.enabled
+      ? "系统维护模式已开启。未登录时仍可进入登录页，一般账号登录后进入后台时会看到维护页面。"
+      : "系统维护模式已关闭。"
   });
 }
 
 export {
   PORTAL_MAINTENANCE_API,
   PORTAL_MAINTENANCE_KEY,
-  PORTAL_MAINTENANCE_LOGIN_QUERY,
+  PORTAL_MAINTENANCE_TYPES,
   canBypassPortalMaintenance,
   handlePortalMaintenanceApi,
   handlePortalMaintenanceGate,
   maintenanceHtml,
   maintenancePrivileged,
+  maintenanceStateActive,
   normalizeMaintenanceState,
   readPortalMaintenanceState
 };
