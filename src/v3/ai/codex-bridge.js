@@ -49,7 +49,9 @@ function normalizeCodexBridgeRequest(account = {}, input = {}) {
     reasoningEffort: ["none", "low", "medium", "high", "xhigh", "max"].includes(String(input.reasoningEffort ?? input.reasoning_effort ?? "").trim().toLowerCase())
       ? String(input.reasoningEffort ?? input.reasoning_effort).trim().toLowerCase()
       : "",
-    originalPromptOnly: input.originalPromptOnly === true || input.original_prompt_only === true
+    originalPromptOnly: input.originalPromptOnly === true || input.original_prompt_only === true,
+    sessionKey: String(input.sessionKey || input.session_key || "").trim().slice(0, 240),
+    contextHash: String(input.contextHash || input.context_hash || "").trim().slice(0, 128)
   });
 }
 
