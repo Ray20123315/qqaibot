@@ -1270,10 +1270,13 @@ ${summary}`.slice(0, 4000),
       await writeSystemAudit(env, { type: "bilibili_auto_monitor", groupId, actorId: authed.qq, action: "switch_mode", connectorId: item.id, creatorId: item.creatorId, mode: nextMode });
       return jsonResponse({
         ok: true,
-        message: nextMode === "generic_webhook"
-          ? "已切换为 Webhook：现在只等待外部事件，不会主动检查 B站。"
-          : "已切换为兼容轮询：可以使用检查频率与立即检查。",
-        webhookUrl
+        message: nextMode === "open_live_bridge"
+          ? "已切换为 Open Live 官方长连接；B站端不需要设置 Webhook。"
+          : nextMode === "generic_webhook"
+            ? "已切换为 Webhook：现在只等待外部事件，不会主动检查 B站。"
+            : "已切换为兼容低频轮询：可以使用检查频率与立即检查。",
+        webhookUrl,
+        bridgeUrl
       });
     }
     if (action === "webhook_self_test") {
