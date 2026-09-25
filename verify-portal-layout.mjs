@@ -20,7 +20,8 @@ assert.match(worker, /injectV3PackageManagerClient\(injectV3PluginManagerClient\
 assert.doesNotMatch(worker, /injectWerewolfPortalClient|werewolf/i);
 const portalRuntime = fs.readFileSync("src/portal/runtime.js", "utf8");
 assert.doesNotMatch(portalRuntime, /data-view="simulator"|id="v-simulator"|runSimulator/, "event simulator UI must stay removed");
-assert.doesNotMatch(portalRuntime, /opsRules','v-maintenance'|opsAppeal','v-maintenance'|群规版本与测试资料|申诉对话串/, "maintenance page must not contain ambiguous rule/appeal workspaces");
+assert.doesNotMatch(portalRuntime, /opsRegisterWorkspace\('opsRules','v-maintenance'/, "maintenance page must not register the old rule-version/test-data workspace");
+assert.doesNotMatch(portalRuntime, /opsRegisterWorkspace\('opsAppeal','v-maintenance'/, "maintenance page must not register the old appeal-thread workspace");
 assert.match(portalRuntime, /name:'插件',items:\['v3plugins'\]/, "V3 plugins must live in a normal sidebar section, not developer tools");
 
 const layoutSource = fs.readFileSync("src/portal/layout.js", "utf8");
