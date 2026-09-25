@@ -1237,12 +1237,17 @@ ${summary}`.slice(0, 4000),
     if (action === "switch_mode") {
       const item = await readJson(env, `bili:connector:${body.id}`, null);
       if (!item || item.groupId !== groupId) return jsonResponse({ ok: false, message: "找不到监控项目。" }, 404);
-      const nextMode = body.mode === "official_webhook" ? "generic_webhook" : "automatic_polling";
+      const nextMode = body.mode === "open_live_bridge" ? "open_live_bridge" : body.mode === "official_webhook" ? "generic_webhook" : "automatic_polling";
       if (item.webhookSecret && nextMode !== "generic_webhook") {
         await dbDel(env, `bili:webhook_secret:${item.webhookSecret}`);
         delete item.webhookSecret;
       }
+      if (item.bridgeSecret && nextMode !== "open_live_bridge") {
+        await dbDel(env, `bili:bridge_secret:${item.bridgeSecret}`);
+        delete item.bridgeSecret;
+      }
       let webhookUrl = "";
+      let bridgeUrl = "";
       if (nextMode === "generic_webhook") {
         item.webhookSecret = item.webhookSecret || crypto.randomUUID().replaceAll("-", "");
         await dbPut(env, `bili:webhook_secret:${item.webhookSecret}`, item.id);
