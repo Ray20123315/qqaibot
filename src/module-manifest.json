@@ -1,0 +1,109 @@
+{
+  "generatedAt": "2026-07-25T03:07:29.414Z",
+  "sourceSha256": "9ec5204125c3b9e85f3fe759193c6ed176be1e69f3c3d2877faa4b04d494464f",
+  "entryStatements": 26,
+  "modules": [
+    {
+      "name": "config",
+      "file": "src/config/runtime.js",
+      "statements": 11,
+      "exports": 11
+    },
+    {
+      "name": "i18n",
+      "file": "src/i18n/commands.js",
+      "statements": 7,
+      "exports": 7
+    },
+    {
+      "name": "data",
+      "file": "src/data/store.js",
+      "statements": 11,
+      "exports": 11
+    },
+    {
+      "name": "identity",
+      "file": "src/core/identity.js",
+      "statements": 16,
+      "exports": 16
+    },
+    {
+      "name": "ai",
+      "file": "src/ai/runtime.js",
+      "statements": 62,
+      "exports": 62
+    },
+    {
+      "name": "security",
+      "file": "src/security/network.js",
+      "statements": 11,
+      "exports": 11
+    },
+    {
+      "name": "permissions",
+      "file": "src/core/permissions.js",
+      "statements": 29,
+      "exports": 29
+    },
+    {
+      "name": "messages",
+      "file": "src/onebot/messages.js",
+      "statements": 63,
+      "exports": 63
+    },
+    {
+      "name": "groups",
+      "file": "src/group/runtime.js",
+      "statements": 24,
+      "exports": 24
+    },
+    {
+      "name": "schedules",
+      "file": "src/scheduler/runtime.js",
+      "statements": 40,
+      "exports": 40
+    },
+    {
+      "name": "moderation",
+      "file": "src/moderation/runtime.js",
+      "statements": 73,
+      "exports": 73
+    },
+    {
+      "name": "health",
+      "file": "src/health/runtime.js",
+      "statements": 7,
+      "exports": 7
+    },
+    {
+      "name": "portalAuth",
+      "file": "src/portal/auth.js",
+      "statements": 65,
+      "exports": 65
+    },
+    {
+      "name": "bilibili",
+      "file": "src/integrations/bilibili.js",
+      "statements": 21,
+      "exports": 21
+    },
+    {
+      "name": "platform",
+      "file": "src/platform/runtime.js",
+      "statements": 11,
+      "exports": 11
+    },
+    {
+      "name": "operations",
+      "file": "src/operations/runtime.js",
+      "statements": 88,
+      "exports": 88
+    },
+    {
+      "name": "portal",
+      "file": "src/portal/runtime.js",
+      "statements": 7,
+      "exports": 7
+    }
+  ]
+}
