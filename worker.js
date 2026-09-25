@@ -2481,6 +2481,24 @@ const QQAIWorker = {
         const providerKinds = [...new Set(enabledProviderAccounts.map(account => String(account?.provider || "")).filter(Boolean))];
         const quotaBlocked = Object.values(providerState?.quotaStates || {}).filter(state => state?.ok === false).length;
         const providerLine = providerState ? `${enabledProviderAccounts.length}/${providerAccounts.length} 启用` : "暂不可读取（沿用现有模型路由）";
+        let codexStatusBlock = "";
+        if (isDeveloper) {
+          const quota = this.codexQuota;
+          const codexConnected = this.restoreCodexSocket()?.readyState === WebSocket.OPEN;
+          const quotaWindowText = (label, window) => {
+            if (!window) return `${label}：暂时无资料`;
+            const remaining = Math.round(Math.max(0, Math.min(100, Number(window.remainingPercent || 0))));
+            const resetRaw = Number(window.resetsAt || 0);
+            const resetMs = resetRaw > 1e12 ? resetRaw : resetRaw > 0 ? resetRaw * 1000 : 0;
+            const reset = resetMs ? new Date(resetMs).toLocaleString("zh-CN", { timeZone: "Asia/Taipei", hour12: false }) : "未知";
+            return `${label}：${remaining}% 剩余｜重置 ${reset}`;
+          };
+          codexStatusBlock = `\n--------------------\n🧩 Codex Bridge：${codexConnected ? "🟢 已连接" : "🔴 未连接"}` +
+            `\n⏱️ ${quotaWindowText("5 小时额度", quota?.fiveHour)}` +
+            `\n📅 ${quotaWindowText("每周额度", quota?.weekly)}` +
+            (quota?.planType ? `\n💳 Codex 方案：${quota.planType}` : "") +
+            (quota?.sampledAt ? `\n🕒 额度快照：${new Date(Number(quota.sampledAt)).toLocaleString("zh-CN", { timeZone: "Asia/Taipei", hour12: false })}` : "");
+        }
         const statusMsg = `📊 【系统运行状态报告】\n` +
                           `--------------------\n` +
                           `🔌 Provider 帐号: ${providerLine}\n` +
@@ -2492,7 +2510,8 @@ const QQAIWorker = {
                           `💾 向量记忆开关: ${currentMemSwitch}\n` +
                           `--------------------\n` +
                           `🔥 全局累计对话: ${totalCalls} 次\n` +
-                          `⚙️ 最后响应模型:\n${lastModel}`;
+                          `⚙️ 最后响应模型:\n${lastModel}` +
+                          codexStatusBlock;
         return jsonReply(`${atSender}${statusMsg}`);
       }
 
@@ -3736,6 +3755,7 @@ export class OneBotHub {
     this.codexConnectionId = "";
     this.codexConnectedAt = null;
     this.codexLastEventAt = null;
+    this.codexQuota = null;
     this.eventTasks = new Set();
     this.toolInFlight = new Map();
     this.toolCounts = new Map();
@@ -3753,12 +3773,14 @@ export class OneBotHub {
     this.queueReady = Promise.resolve();
     if (state?.storage && typeof state.blockConcurrencyWhile === "function") {
       this.queueReady = state.blockConcurrencyWhile(async () => {
-        const [saved, savedInFlight, diagnostics] = await Promise.all([
+        const [saved, savedInFlight, diagnostics, codexQuota] = await Promise.all([
           state.storage.list({ prefix: "userqueue:" }),
           state.storage.list({ prefix: "question-inflight:" }),
-          state.storage.get("napcat:socket-diagnostics")
+          state.storage.get("napcat:socket-diagnostics"),
+          state.storage.get("codex:quota")
         ]);
         if (diagnostics && typeof diagnostics === "object") this.socketDiagnostics = { ...this.socketDiagnostics, ...diagnostics };
+        if (codexQuota && typeof codexQuota === "object") this.codexQuota = codexQuota;
         for (const [storageKey, value] of saved) {
           const queue = Array.isArray(value) ? value.filter(item => item?.body && Date.now() - Number(item?.enqueuedAt || 0) <= DEFAULTS.userQueueTtlMs) : [];
           await state.storage.delete(storageKey);
@@ -4019,7 +4041,8 @@ export class OneBotHub {
           connectedAt: this.codexConnectedAt,
           lastEventAt: this.codexLastEventAt,
           pending: this.codexPending.size,
-          protocol: CODEX_BRIDGE_PROTOCOL
+          protocol: CODEX_BRIDGE_PROTOCOL,
+          quota: this.codexQuota
         },
         inFlightQuestions: this.userInFlight.size,
         queuedQuestions: [...this.userQueues.values()].reduce((sum, list) => sum + list.length, 0),
@@ -4229,6 +4252,33 @@ export class OneBotHub {
         return;
       }
       this.codexLastEventAt = Date.now();
+      return;
+    }
+
+    if (payload.type === "quota") {
+      const source = payload.quota && typeof payload.quota === "object" && !Array.isArray(payload.quota) ? payload.quota : {};
+      const normalizeWindow = value => {
+        if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+        const usedPercent = Math.max(0, Math.min(100, Number(value.usedPercent || 0)));
+        const remainingPercent = Math.max(0, Math.min(100, Number.isFinite(Number(value.remainingPercent)) ? Number(value.remainingPercent) : 100 - usedPercent));
+        const windowDurationMins = Math.max(0, Math.trunc(Number(value.windowDurationMins || 0)));
+        const resetsAt = Math.max(0, Math.trunc(Number(value.resetsAt || 0)));
+        if (!windowDurationMins) return null;
+        return { usedPercent, remainingPercent, windowDurationMins, resetsAt };
+      };
+      const fiveHour = normalizeWindow(source.fiveHour);
+      const weekly = normalizeWindow(source.weekly);
+      this.codexQuota = {
+        available: Boolean(source.available && (fiveHour || weekly)),
+        sampledAt: Math.max(0, Math.trunc(Number(source.sampledAt || Date.now()))),
+        source: String(source.source || "codex_app_server").slice(0, 80),
+        planType: String(source.planType || "").slice(0, 80),
+        fiveHour,
+        weekly,
+        error: String(source.error || "").slice(0, 240)
+      };
+      this.codexLastEventAt = Date.now();
+      if (this.state?.storage) await this.state.storage.put("codex:quota", this.codexQuota);
       return;
     }
 
