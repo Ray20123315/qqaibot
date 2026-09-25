@@ -1420,7 +1420,9 @@ async function performRuleAdditionalActions(env, item, actionSpecs, options = {}
 
 
 async function performRuleProxyAction(env, item, review) {
-  const mode = normalizeRuleProxyMode(await dbGet(env, `rule_proxy_mode:${item.groupId}`) || DEFAULTS.ruleProxyMode);
+  // The old record/warn/mute/auto switch is no longer a user-facing execution gate.
+  // Category policy chooses the action; the GPT-style approval mode decides whether it may run automatically.
+  const mode = "auto";
   const approvalMode = normalizeModerationApprovalMode(await dbGet(env, `moderation_approval_mode:${item.groupId}`) || "require_approval");
   const policies = await getRuleCategoryPolicies(env, item.groupId);
   const policy = matchRuleCategoryPolicy(item.violationType, policies);
@@ -2601,6 +2603,15 @@ async function executeModerationProposal(env, proposal, confirmer) {
   if (!validation.ok) return { ok: false, message: validation.message };
   const group_id = numericId(proposal.groupId);
   const user_id = numericId(proposal.targetId);
+  const recordProposalStrike = async () => {
+    if (!proposal.countStrike || !proposal.violationId || !proposal.targetId) return;
+    await addRuleStrike(env, {
+      id: proposal.violationId,
+      groupId: proposal.groupId,
+      userId: proposal.targetId,
+      violationType: proposal.violationType || proposal.classifierReason || "群規"
+    }, proposal.ruleStrikeWindowDays).catch(() => {});
+  };
   let action = "";
   let params = {};
   if (proposal.action === "remind" || proposal.action === "warn") {
@@ -2610,11 +2621,13 @@ async function executeModerationProposal(env, proposal, confirmer) {
     if (proposal.targetId) message.push({ type: "at", data: { qq: String(proposal.targetId) } });
     message.push({ type: "text", data: { text: `\n${title}：${proposal.reason || proposal.classifierReason || "請留意群規"}` } });
     const sent = await callOneBotAction(env, { action: "send_group_msg", params: { group_id, message, auto_escape: false } }, 15000);
+    await recordProposalStrike();
     return { ok: true, message: `已執行：${title}。`, messageId: extractOneBotMessageId(sent) };
   }
   if (proposal.action === "recall") {
     if (!proposal.messageId) return { ok: false, message: "提案缺少原訊息 ID，無法撤回。" };
     await callOneBotAction(env, { action: "delete_msg", params: { message_id: numericId(proposal.messageId) } }, 15000);
+    await recordProposalStrike();
     return { ok: true, message: "已執行：撤回訊息。" };
   }
   if (proposal.action === "kick") { action = "set_group_kick"; params = { group_id, user_id, reject_add_request: Boolean(proposal.rejectAddRequest) }; }
@@ -2693,14 +2706,7 @@ async function executeModerationProposal(env, proposal, confirmer) {
   } else if (proposal.action === "mute" && !proposal.preventUnmute && previousMuteLock) {
     await clearMuteLock(env, proposal.groupId, proposal.targetId).catch(() => {});
   }
-  if (result.ok && proposal.countStrike && proposal.violationId && proposal.targetId) {
-    await addRuleStrike(env, {
-      id: proposal.violationId,
-      groupId: proposal.groupId,
-      userId: proposal.targetId,
-      violationType: proposal.violationType || proposal.classifierReason || "群規"
-    }, proposal.ruleStrikeWindowDays).catch(() => {});
-  }
+  if (result.ok) await recordProposalStrike();
   return result.ok ? { ok: true, message: `已执行：${moderationActionLabel(proposal.action)}。` } : { ok: false, message: `操作失败：${result.error}` };
 }
 
