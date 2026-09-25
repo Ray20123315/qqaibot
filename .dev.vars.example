@@ -31,7 +31,8 @@ PORTAL_ADMIN_PASSWORD=
 # Optional Cloudflare Builds detail lookup.
 CLOUDFLARE_BUILDS_API_TOKEN=
 
-# Optional authenticated Bilibili browser session for low-frequency polling only.
+# Optional Bilibili browser-session Cookie for WBI/video compatibility requests.
+# It may help with browser-state checks but cannot bypass an egress-IP risk-control block.
 # Put the real value in a Cloudflare Worker secret; never commit it or store it in D1.
 BILIBILI_COOKIE=
 BILIBILI_POLL_SCAN_LIMIT=25

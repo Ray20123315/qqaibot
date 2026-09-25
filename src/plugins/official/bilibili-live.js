@@ -199,7 +199,14 @@ async function fetchBilibiliLiveBatch(ctx, creators, checkedAt = Date.now()) {
   for (const creator of rows) url.searchParams.append("uids[]", creator.uid);
   const response = await ctx.network.fetch({
     url: url.toString(),
-    init: {headers: { Accept: "application/json" } }
+    init: {
+      headers: {
+        Accept: "application/json, text/plain, */*",
+        "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
+        Referer: "https://www.bilibili.com/",
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36"
+      }
+    }
   });
   if (!response?.ok) throw new Error(`BILIBILI_LIVE_HTTP_${Number(response?.status || 0)}`);
   const payload = await response.json().catch(() => null);
