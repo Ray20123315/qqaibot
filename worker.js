@@ -73,6 +73,16 @@ async function shouldSuppressRepeatedShortReply(env, { isGroup, groupId, text, w
   return duplicate;
 }
 
+function explicitDirectFallbackReply(value) {
+  const text = String(value || "")
+    .replace(/\[CQ:[^\]]+\]/g, "")
+    .replace(/@\d{5,}/g, "")
+    .trim();
+  if (/^(?:hi|hello|hey|嗨|你好|哈[啰囉喽]|在吗|在嗎)[~～!！.。?？\s]*$/i.test(text)) return "你好～我在呀。";
+  if (/^(?:谢谢|謝謝|thank(?:s| you)?)[~～!！.。\s]*$/i.test(text)) return "不客气～";
+  return "我在～刚才这句没正常接上，你再发一次，我会直接回。";
+}
+
 const QQAI_V1_R54_PROGRESSIVE_MULTI_ACTION_MARKER = "QQAI_V1_R54_PROGRESSIVE_MULTI_ACTION_MARKER";
 
 
@@ -3191,6 +3201,12 @@ ${profileLines.join("\n")}
 
       // 社交决策层只决定场景、行为和输出形态，不直接生成公开措辞。
       const socialDirectTrigger = !aiReplyOptOut && (isAtMeOrAi || isPrivate || body.__qqai_explicit_question === true || body.__qqai_force_explicit_reply === true);
+      if (socialDirectTrigger) {
+        finalStylePrompt += "\n\n【明确对话必须回应】当前消息是私聊、明确 @／回复机器人，或运输层已确认的明确问题。不得输出 [SKIP]；[SKIP] 只允许用于系统选择的可选主动插话。必须直接回应当前发言者。";
+      }
+      if (body.__qqai_force_explicit_reply === true) {
+        finalStylePrompt += "\n\n【强制重试】上一轮明确问题意外没有产生可发送回复。本轮绝对禁止 [SKIP]、空回答或故意跳过；即使只能简短回应，也必须输出可发送文本。";
+      }
       const socialDecision = await buildSocialDecision(env, {
         groupId: currentGroupId,
         userId,
@@ -3541,9 +3557,23 @@ ${deepseekContextSummary}`;
       }
 
       if (/^\s*\[SKIP\]\s*$/i.test(baseText)) {
-        ctx.waitUntil(writeAiDecisionLog(env, { ...aiDecisionBase, decision: "skipped", reason: isAutoInterject ? "model_declined_interjection" : "model_declined_response", triggerType, provider: usedProvider, model: usedModel, interjectJudgement, searchRequired: searchInfo.required, searchAttempted: searchInfo.attempted, searchPerformed: searchInfo.performed, searchQuery: searchInfo.query, searchContext: searchInfo.context, searchSources: searchInfo.sources, searchQueries: searchInfo.queries, searchProvider: searchInfo.provider, searchModel: searchInfo.model, searchError: searchInfo.error, contextMessageCount: groupConversationLogs.length, contextSummaryProvider: longGroupContext?.summaryProvider || "" }));
-        await clearThinkingIndicator();
-        return new Response(null, { status: 204 });
+        const forcedExplicitRetry = body.__qqai_force_explicit_reply === true;
+        ctx.waitUntil(writeAiDecisionLog(env, {
+          ...aiDecisionBase,
+          decision: isAutoInterject ? "skipped" : (forcedExplicitRetry ? "fallback_reply" : "skipped"),
+          reason: isAutoInterject ? "model_declined_interjection" : (forcedExplicitRetry ? "forced_explicit_skip_fallback" : "model_declined_response"),
+          triggerType, provider: usedProvider, model: usedModel, interjectJudgement,
+          searchRequired: searchInfo.required, searchAttempted: searchInfo.attempted, searchPerformed: searchInfo.performed,
+          searchQuery: searchInfo.query, searchContext: searchInfo.context, searchSources: searchInfo.sources,
+          searchQueries: searchInfo.queries, searchProvider: searchInfo.provider, searchModel: searchInfo.model,
+          searchError: searchInfo.error, contextMessageCount: groupConversationLogs.length,
+          contextSummaryProvider: longGroupContext?.summaryProvider || ""
+        }));
+        if (isAutoInterject || !forcedExplicitRetry) {
+          await clearThinkingIndicator();
+          return new Response(null, { status: 204 });
+        }
+        baseText = explicitDirectFallbackReply(conversationText);
       }
 
       // ==========================================
@@ -3589,7 +3619,7 @@ ${deepseekContextSummary}`;
           : "这个问题需要查证，但本轮没有成功取得可验证的联网检索结果。我不会假装稍后还会继续处理，请稍后重新提问。";
       }
 
-      if (await shouldSuppressRepeatedShortReply(env, {
+      if (isAutoInterject && await shouldSuppressRepeatedShortReply(env, {
         isGroup,
         groupId: currentGroupId,
         text: replyText
@@ -5387,63 +5417,44 @@ export class OneBotHub {
     const key = this.thinkingRegistryKey(body);
     const rows = await readJson(this.env, key, []);
     const ids = [...new Set([...(Array.isArray(rows) ? rows : []), ...(Array.isArray(extraIds) ? extraIds : [])].map(String).filter(Boolean))];
-    if (!ids.length) return { ok: true, cleared: 0 };
+    if (!ids.length) return { ok: true, cleared: 0, failed: [] };
+
+    // 先丢弃 registry，避免 NapCat recallMsg 事件确认超时后在下一条消息再次撤同一个 ID。
+    await dbDel(this.env, key).catch(() => {});
+
     let cleared = 0;
     const failed = [];
     for (const id of ids) {
       const result = await this.retractThinkingIndicator(body, id).catch(error => ({ ok: false, error: String(error?.message || error) }));
       if (result?.ok) cleared += 1;
-      else failed.push(id);
+      else failed.push({ id, error: String(result?.error || result?.firstError || "recall_failed").slice(0, 500) });
     }
-    if (failed.length) await dbPut(this.env, key, JSON.stringify(failed.slice(-12)));
-    else await dbDel(this.env, key);
-    return { ok: failed.length === 0, cleared, failed };
+    return { ok: failed.length === 0, cleared, failed, forgotten: ids.length };
   }
 
   async retractThinkingIndicator(body, messageId) {
     const normalizedMessageId = numericId(messageId);
     if (!normalizedMessageId) return { ok: true, skipped: true };
-    let firstError = "";
+
+    // 无论 NapCat 最终是否回传 recall 成功事件，都不允许此临时消息 ID 进入下一轮重试。
+    await this.forgetThinkingIndicator(body, messageId).catch(() => {});
     try {
       await this.sendAction({ action: "delete_msg", params: { message_id: normalizedMessageId } }, 8000);
-      await this.forgetThinkingIndicator(body, messageId);
-      return { ok: true, mode: "normal_recall" };
+      return { ok: true, mode: "best_effort_recall" };
     } catch (error) {
-      firstError = String(error?.message || error);
+      const firstError = String(error?.message || error);
+      const groupId = String(body?.group_id || "");
+      await writeSystemAudit(this.env, {
+        type: "thinking_indicator_recall_best_effort",
+        groupId,
+        actorId: String(body?.self_id || "bot"),
+        userId: String(body?.user_id || ""),
+        action: "recall_failed_not_retried",
+        messageId: String(messageId),
+        error: firstError.slice(0, 1000)
+      }).catch(() => {});
+      return { ok: false, mode: "best_effort_recall_failed", firstError };
     }
-
-    const groupId = String(body?.group_id || "");
-    let botRole = "unknown";
-    let adminRetryError = "";
-    if (body?.message_type === "group" && groupId) {
-      const state = await getBotGroupRole(this.env, groupId).catch(() => ({ role: "unknown" }));
-      botRole = String(state?.role || "unknown");
-      if (botRole === "owner" || botRole === "admin") {
-        try {
-          await this.sendAction({ action: "delete_msg", params: { message_id: normalizedMessageId } }, 12000);
-          await this.forgetThinkingIndicator(body, messageId);
-          await writeSystemAudit(this.env, { type: "thinking_indicator_recall", groupId, actorId: String(body?.self_id || "bot"), action: "admin_group_recall_retry", messageId: String(messageId), firstError: firstError.slice(0, 500) }).catch(() => {});
-          return { ok: true, mode: "admin_group_recall_retry", botRole };
-        } catch (error) {
-          adminRetryError = String(error?.message || error);
-        }
-      }
-    }
-
-    const residual = {
-      at: Date.now(),
-      groupId,
-      userId: String(body?.user_id || ""),
-      botId: String(body?.self_id || ""),
-      messageId: String(messageId),
-      botRole,
-      firstError: firstError.slice(0, 1000),
-      adminRetryError: adminRetryError.slice(0, 1000),
-      status: "residual"
-    };
-    await dbPut(this.env, `thinking_indicator_residual:${groupId || "private"}:${messageId}`, JSON.stringify(residual)).catch(() => {});
-    await writeSystemAudit(this.env, { type: "thinking_indicator_residual", groupId, actorId: String(body?.self_id || "bot"), action: "recall_failed", ...residual }).catch(() => {});
-    return { ok: false, ...residual };
   }
 
   classifyToolTask(body) {

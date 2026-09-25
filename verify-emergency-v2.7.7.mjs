@@ -19,12 +19,16 @@ check(worker.includes("cleanMessage.startsWith('//')") && worker.includes("expli
 check(worker.includes("await isKnownOutboundMessage(env"), "same-account outbound echo guard missing");
 check(worker.includes("if (!isSentEvent && !explicitSelfChat && !explicitSelfCommand) return new Response(null, { status: 204 });"), "same-account non-command safety gate missing");
 
-// Political conversation is dropped before model intent classification and direct [SKIP] is silent.
+// Political conversation is dropped before model intent classification.
+// [SKIP] remains silent only for optional auto-interjection; direct explicit chat gets one safe retry,
+// and a forced retry that still returns [SKIP] must become a sendable fallback.
 const politicalIndex = worker.indexOf("political_topic_silent_drop");
 const naturalIntentIndex = worker.indexOf("const naturalLanguageTrigger");
 check(politicalIndex >= 0 && naturalIntentIndex >= 0 && politicalIndex < naturalIntentIndex, "political filter must run before natural-language model classification");
 check(worker.includes("if (!isCommandMessage && isPoliticalTopicText(cleanMessage))"), "political command exemption or silent filter missing");
-check(worker.includes('reason: isAutoInterject ? "model_declined_interjection" : "model_declined_response"'), "direct model [SKIP] must be silent");
+check(worker.includes('reason: isAutoInterject ? "model_declined_interjection"'), "optional interjection [SKIP] must remain silent");
+check(worker.includes("forced_explicit_skip_fallback"), "forced explicit [SKIP] must become a sendable fallback");
+check(worker.includes("baseText = explicitDirectFallbackReply(conversationText)"), "forced explicit fallback assignment missing");
 check(!worker.includes("严厉警告机制"), "political topics must not produce warning replies");
 
 // Non-whitelisted groups never receive failure notices.

@@ -55,6 +55,19 @@ assert(worker.includes('setTimeout(resolve, 1800)'), 'Slow semantic questions mu
 assert(worker.includes('processingFinished = true'), 'Delayed indicators must be cancelled or retracted when processing finishes');
 assert(worker.includes('oneBotEventHasMedia(body));'), 'Worker content validation must recognize native face/media payloads');
 
+assert(worker.includes('【明确对话必须回应】'), 'Direct explicit conversations must instruct the model not to emit [SKIP]');
+assert(worker.includes('【强制重试】'), 'Forced explicit retries must explicitly forbid [SKIP] and empty replies');
+assert(worker.includes('forced_explicit_skip_fallback'), 'A second explicit [SKIP] must become a sendable fallback instead of another 204');
+assert(worker.includes('if (isAutoInterject && await shouldSuppressRepeatedShortReply'), 'Repeated-short suppression must be limited to optional auto interjections');
+
+const fallbackStart = worker.indexOf('function explicitDirectFallbackReply');
+const fallbackEnd = worker.indexOf('\n}\n', fallbackStart) + 3;
+assert(fallbackStart >= 0 && fallbackEnd > fallbackStart, 'Explicit direct fallback helper missing');
+const fallbackFactory = new Function(fallbackStart >= 0 ? worker.slice(fallbackStart, fallbackEnd) + '\nreturn explicitDirectFallbackReply;' : 'throw new Error("fallback missing")');
+const explicitDirectFallbackReply = fallbackFactory();
+assert(explicitDirectFallbackReply('HI') === '你好～我在呀。', 'HI must have a sendable greeting fallback');
+assert(explicitDirectFallbackReply('你好~') === '你好～我在呀。', 'Chinese greeting must have a sendable greeting fallback');
+
 const pkg = JSON.parse(fs.readFileSync('package.json', 'utf8'));
 assert(pkg.version === '2.7.12', 'Package version must be 2.5.2');
 assert(pkg.scripts.check.includes('verify-explicit-question-priority.mjs'), 'Priority regression test must run in the permanent suite');
