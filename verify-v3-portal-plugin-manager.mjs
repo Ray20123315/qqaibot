@@ -208,4 +208,11 @@ assert.match(workerSource, /handleV3PluginManagerApi/);
 assert.match(workerSource, /injectV3PluginManagerClient/);
 assert.match(workerSource, /const v3PluginManagerResponse = await handleV3PluginManagerApi\(request, env, url\)/);
 
+const pluginManagerDoc = fs.readFileSync("docs/v3-portal-plugin-manager.md", "utf8");
+assert.match(pluginManagerDoc, /System Admin or a configured Developer/);
+assert.match(pluginManagerDoc, /standalone 插件 navigation group/);
+assert.match(pluginManagerDoc, /Package metadata operations do not hot-load or unload JavaScript runtime code/);
+assert.doesNotMatch(pluginManagerDoc, /developer-only/);
+assert.doesNotMatch(pluginManagerDoc, /persistent enable\/disable lifecycle are intentionally the next platform layer/);
+
 console.log("verify-v3-portal-plugin-manager: ok");
