@@ -30,8 +30,12 @@ jobs:
         run: |
           set -euo pipefail
           status="$(curl -sS -D /tmp/legacy.headers -o /tmp/legacy.body -w '%{http_code}' "$PREVIEW_URL/system-admin")"
+          echo "status=$status"
+          cat /tmp/legacy.headers
           test "$status" = "302"
-          grep -qi '^location: .*/$' /tmp/legacy.headers
+          location="$(awk 'BEGIN{IGNORECASE=1} /^location:/ {sub(/^[^:]+:[[:space:]]*/, ""); sub(/\r$/, ""); print; exit}' /tmp/legacy.headers)"
+          echo "location=$location"
+          test "$location" = "$PREVIEW_URL/" || test "$location" = "/"
           ! grep -q '<title>系統管理員</title>' /tmp/legacy.body
           echo "Legacy standalone admin page is gone"
 
