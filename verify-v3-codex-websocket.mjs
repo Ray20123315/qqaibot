@@ -112,6 +112,10 @@ assert.match(worker, /parseCodexCommand\(cleanMessage\)/);
 assert.match(worker, /只有开发者可以使用 !codex/);
 assert.match(worker, /reasoningEffort: codexCommand\.reasoningEffort/);
 assert.match(worker, /originalPromptOnly: codexCommand\.originalPromptOnly/);
+assert.match(worker, /group_persona:\$\{currentGroupId\}/);
+assert.match(worker, /group_rules:\$\{currentGroupId\}/);
+assert.match(worker, /qqaibot:\$\{codexSessionScope\}:developer:\$\{userId\}:\$\{codexSessionMode\}/);
+assert.match(worker, /sessionKey: codexSessionKey/);
 assert.doesNotMatch(worker, /CODEX_BRIDGE.*(?:shell|filesystem|file_read|exec_command)/i);
 
 console.log("V3 local Codex WebSocket bridge checks passed.");
