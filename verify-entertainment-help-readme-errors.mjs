@@ -97,6 +97,9 @@ assert.match(readme, /本地娛樂指令/);
 assert.match(readme, /2d6` 代表 2 顆 6 面骰/);
 assert.doesNotMatch(readme, /NdM/);
 assert.match(readme, /Portal／群組動態設定/);
+assert.match(readme, /src\/notifications\/\s+系統通知投遞與收件策略/);
+assert.doesNotMatch(readme, /人工通知路由/);
+assert.doesNotMatch(readme, /Portal／群組動態設定：[^\n]*通知路由/);
 assert.doesNotMatch(readme, /!画图|!畫圖/);
 assert.doesNotMatch(readme, /6 條上下文|快捷登入 API 預留|尚未接入 QQ 私訊/);
 
