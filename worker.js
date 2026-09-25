@@ -2883,7 +2883,7 @@ const QQAIWorker = {
                      // 真正執行寫入 Cloudflare Vectorize 資料庫
                      const vectorCreatedAt = Date.now();
                      const vectorExpiresAt = vectorCreatedAt + 90 * 24 * 60 * 60 * 1000;
-                     const vectorId = `msg_${currentGroupId}_${userId}_${vectorCreatedAt}_${crypto.randomUUID()}`;
+                     const vectorId = `msg_${crypto.randomUUID()}`;
                      await env.VECTORIZE.upsert([
                         {
                            id: vectorId,
@@ -2919,7 +2919,7 @@ const QQAIWorker = {
       }
 
       // 群內衝突分級處理：先勸阻；持續無效時只私訊開發者，不擅自私訊其他管理。
-      if (isGroup && !isCommandMessage && !isSelfAccount && body.__qqai_suppress_optional_ai !== true && !isPoliticalTopicText(cleanMessage)) {
+      if (isGroup && (botMentioned || repliedToBot || sameQqSelfAsk) && !isCommandMessage && !isSelfAccount && body.__qqai_suppress_optional_ai !== true && !isPoliticalTopicText(cleanMessage)) {
         const conflictResult = await processConflictSignal(env, {
           groupId: currentGroupId, userId, senderName: senderCard, senderRole: isDeveloper ? "developer" : senderRole, text: cleanMessage, botId, mentionedQqs, quotedSenderId: String(quotedMessage?.senderId || ""), messageId: replyMessageId
         });

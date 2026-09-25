@@ -32,6 +32,10 @@ check(worker.includes("failure_notice_suppressed_non_whitelist"), "non-whitelist
 check(worker.includes("!(await isGroupWhitelisted(this.env, groupId))"), "failure notice whitelist gate missing");
 
 // Repeated tiny replies such as ??? cannot spam the group.
+check(worker.includes('const vectorId = `msg_${crypto.randomUUID()}`;'), "chat Vectorize IDs must use the bounded UUID-only format");
+check(!worker.includes('msg_${currentGroupId}_${userId}_${vectorCreatedAt}_${crypto.randomUUID()}'), "legacy overlong chat Vectorize ID format must be removed");
+check(worker.includes("if (isGroup && (botMentioned || repliedToBot || sameQqSelfAsk) && !isCommandMessage"), "conflict replies must require an explicit chat trigger");
+check(worker.includes("const interjectChance = 0;"), "proactive interjection must remain disabled");
 check(worker.includes("shouldSuppressRepeatedShortReply"), "short reply repeat guard missing");
 check(worker.includes("repeated_short_reply_guard"), "short reply suppression audit missing");
 check(worker.includes("short_reply_guard:${String(groupId)}"), "short reply guard must be group scoped");
