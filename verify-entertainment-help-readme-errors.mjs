@@ -45,8 +45,7 @@ assert.equal(handleEntertainmentCommand({ text: "普通聊天" }).handled, false
 
 const memberHelp = buildHelpText({ roleLabel: "群成员", permissionSet: {} });
 assert.match(memberHelp, /^QQAI 2\.7\.12 指令帮助/);
-assert.match(memberHelp, /【娱乐】/);
-assert.match(memberHelp, /• !骰子/);
+assert.doesNotMatch(memberHelp, /【娱乐】|• !骰子/, "entertainment commands belong to the optional official plugin, not Core help");
 assert.match(memberHelp, /• !模型/);
 assert.match(memberHelp, /• !排程/);
 assert.doesNotMatch(memberHelp, /!授权 @成员/);
@@ -102,7 +101,10 @@ assert.doesNotMatch(readme, /!画图|!畫圖/);
 assert.doesNotMatch(readme, /6 條上下文|快捷登入 API 預留|尚未接入 QQ 私訊/);
 
 const worker = fs.readFileSync("worker.js", "utf8");
-assert.match(worker, /handleEntertainmentCommand/);
+assert.doesNotMatch(worker, /handleEntertainmentCommand/, "Core worker must not directly execute entertainment commands");
+const entertainmentPlugin = fs.readFileSync("src/plugins/official/entertainment.js", "utf8");
+assert.match(entertainmentPlugin, /id: "official\.entertainment"/);
+assert.match(entertainmentPlugin, /handleEntertainmentCommand/);
 assert.match(worker, /buildHelpText/);
 assert.doesNotMatch(worker, /let helpMsg = `🤖 QQAI 机器人指令清单/);
 
