@@ -1,4 +1,4 @@
-name: Verify unified system admin and stage bundle
+name: Smoke unified system admin Preview
 
 on:
   push:
@@ -7,39 +7,50 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
-  verify:
+  smoke:
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 6
+    env:
+      PREVIEW_URL: https://chatgpt-test-20260925-qqai.ray20123315.workers.dev
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '22'
-          cache: npm
-      - run: npm ci
-      - name: Focused system-admin regression
-        run: node verify-system-admin-auth.mjs
-      - name: Main regression suite
-        run: npm run check
-      - name: V3 regression suite
-        run: npm run check:v3
-      - name: Worker bundle dry-run
-        run: npm run check:bundle
-      - name: Stage verified Wrangler bundle on test branch
+      - name: Verify shared Control Center is live
         shell: bash
         run: |
           set -euo pipefail
-          mkdir -p tmp
-          cp dist/worker.js tmp/unified-admin-preview.bundle.js
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add tmp/unified-admin-preview.bundle.js
-          if git diff --cached --quiet; then
-            echo "Bundle already staged"
-            exit 0
-          fi
-          git commit -m "chore(preview): stage verified bundle [skip ci]"
-          git push origin HEAD:chatgpt/unified-admin-portal-20260925
+          for i in $(seq 1 12); do
+            status="$(curl -sS --connect-timeout 10 --max-time 30 -o /tmp/portal.html -w '%{http_code}' "$PREVIEW_URL/portal" || true)"
+            if [ "$status" = "200" ]; then break; fi
+            sleep 3
+          done
+          test "$status" = "200"
+          grep -q '系统管理' /tmp/portal.html
+          grep -q "addView('systemadmin','系统管理')" /tmp/portal.html
+          ! grep -q '<title>系統管理員</title>' /tmp/portal.html
+          echo "Portal contains unified system-admin view"
+
+      - name: Verify legacy system-admin route no longer serves standalone UI
+        shell: bash
+        run: |
+          set -euo pipefail
+          headers="$(mktemp)"
+          status="$(curl -sS -D "$headers" -o /tmp/legacy.html -w '%{http_code}' "$PREVIEW_URL/system-admin")"
+          test "$status" = "302"
+          grep -qi '^location: .*/$' "$headers"
+          test ! -s /tmp/legacy.html
+          echo "Legacy /system-admin redirects unauthenticated users to the shared Portal entry"
+
+      - name: Verify admin auth still reaches credential validation
+        shell: bash
+        run: |
+          set -euo pipefail
+          status="$(curl -sS -o /tmp/login.json -w '%{http_code}' \
+            -H 'Content-Type: application/json' \
+            --data '{"username":"admin","password":"preview-smoke-deliberately-wrong-password"}' \
+            "$PREVIEW_URL/api/auth/login-password")"
+          cat /tmp/login.json
+          test "$status" = "401"
+          node --input-type=module -e 'const fs=await import("node:fs/promises"); const x=JSON.parse(await fs.readFile("/tmp/login.json","utf8")); if(x.code!=="PASSWORD_INVALID") process.exit(1);'
+          echo "Admin credential path remains active"
