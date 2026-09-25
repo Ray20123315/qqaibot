@@ -110,6 +110,7 @@ const DEVELOPER_SECTION = Object.freeze({
     "!禁记忆 @成员／!解禁记忆 @成员",
     "!重置／!clear",
     "!自我调整／!自我修正",
+    "!codex [模型] [思考等级] [原版输入:是否] 问题：直接调用本机 Codex Bridge；默认 GPT-6 Luna／无思考",
     "Root 与 Portal 可管理模型、通知、权限、资料与系统维护"
   ]
 });
