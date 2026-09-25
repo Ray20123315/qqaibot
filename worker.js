@@ -10,7 +10,6 @@ import { botCanRunRuleMonitor, getBotGroupRole, getGroupFamilyForGroup, getGroup
 import { buildHealthState } from "./src/health/runtime.js";
 import { normalizeMultilingualCommand, toSimplifiedChinese } from "./src/i18n/commands.js";
 import { collectFullMemberDetails, formatFullMemberDetailsReport } from "./src/members/details.js";
-import { handleBilibiliOpenLiveBridge, handleBilibiliWebhook } from "./src/integrations/bilibili.js";
 import { attachModerationProposalMessage, createGroupWorkRequest, createJoinRequestAssist, createModerationProposal, decideJoinRequestAssist, detectNaturalModerationProposal, findLatestActiveRuleViolationForUser, formatModerationPermissionDenied, formatModerationProposal, getGroupMemberSafe, handleGroupWorkDecision, handleModerationConfirmation, inspectMessageAgainstGroupRules, normalizeRuleProxyMode, normalizeRuleStrictness, parseModerationConfirmation, parseUnlimitedNonNegativeInteger, recordRuleViolationFeedback, ruleStrictnessLabel } from "./src/moderation/runtime.js";
 import { moderationApprovalModeDescription, moderationApprovalModeLabel, normalizeModerationApprovalMode } from "./src/moderation/approval-mode.js";
 import { MAX_MUTE_SECONDS as MUTE_LOCK_MAX_SECONDS, canUnlockMute, clearMuteLock, createMasterMuteLock, createPartnerMuteLock, createSelfMuteLock, getMuteLock, listActiveSelfMuteLocks, markMuteLockReapplied, markMuteUnlockBlocked, muteLockRemainingSeconds, putMuteLock } from "./src/moderation/mute-locks.js";
@@ -286,13 +285,6 @@ const QQAIWorker = {
 
     if (url.pathname.startsWith('/api/appeal/')) {
       return jsonResponse({ ok: false, message: "独立申诉接口已停用，请登录 Control Center 使用匿名申诉。" }, 410);
-    }
-
-    if (request.method === 'POST' && url.pathname.startsWith('/api/integrations/bilibili/open-live/')) {
-      return handleBilibiliOpenLiveBridge(request, env, url);
-    }
-    if (request.method === 'POST' && url.pathname.startsWith('/api/integrations/bilibili/webhook/')) {
-      return handleBilibiliWebhook(request, env, url);
     }
 
     if (request.method === 'GET' && url.pathname === '/api/deployment/status') {
@@ -5117,7 +5109,6 @@ export class OneBotHub {
     const definitions = [
       { type: "tts", label: "语音生成", limit: 2, pattern: /^[!！](?:语音|語音|speak|tts)(?:\s|$)/i },
       { type: "web", label: "网页分析", limit: 3, pattern: /^[!！](?:读网页|讀網頁)(?:\s|$)/i },
-      { type: "minutes", label: "会议纪要", limit: 2, pattern: /^[!！](?:会议纪要|會議紀要)(?:\s|$)/i }
     ];
     return definitions.find(item => item.pattern.test(text)) || null;
   }
