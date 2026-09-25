@@ -29,7 +29,7 @@ assert.equal(payload.catalogCount,1);
 assert.equal(payload.packages[0].metadataInstalled,false);
 assert.equal(payload.packages[0].runtimeCodeBundled,true);
 assert.equal(payload.packages[0].runtimeCodeLoaded,null);
-assert.match(payload.notice,/does not load JavaScript/);
+assert.match(payload.notice,/不会加载 JavaScript/);
 
 response = await handleV3PackageManagerApi(new Request("https://example.com/api/portal/v3/packages/official.bilibili-live/stage",{
   method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({action:"install"})
