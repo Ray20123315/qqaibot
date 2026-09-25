@@ -102,9 +102,10 @@ const baseHtml = '<html><head></head><body><div id="v3PluginManagerNav"></div><d
 const injected = injectV3PackageManagerClient(baseHtml);
 assert.match(injected,/qqai-v3-package-manager-style/);
 assert.match(injected,/qqai-v3-package-manager-client/);
-assert.match(injected,/Trusted Package Metadata/);
-assert.match(injected,/Stage metadata install/);
-assert.match(injected,/runtimeCodeLoaded/);
+assert.match(injected,/受信任插件包/);
+assert.match(injected,/暂存安装信息/);
+assert.match(injected,/运行代码加载状态/);
+assert.doesNotMatch(injected,/Trusted Package Metadata|Stage metadata install|metadata installed/);
 assert.equal(injectV3PackageManagerClient(injected),injected,"package client injection must be idempotent");
 
 const packageManagerSource = fs.readFileSync("src/v3/portal/package-manager.js","utf8");
