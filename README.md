@@ -25,7 +25,7 @@ worker.js
       ├─ src/config/         執行期與部署設定正規化
       ├─ src/moderation/     群規、群管提案、禁言鎖、關係綁定
       ├─ src/portal/         Portal、登入、密碼、API
-      ├─ src/notifications/  人工通知路由
+      ├─ src/notifications/  系統通知投遞與收件策略
       ├─ src/operations/     活動、投票、協作與自動化
       ├─ src/scheduler/      排程、衝突守衛、群打卡
       ├─ src/social/         人格、關係、輸出風格與表情庫
@@ -42,7 +42,7 @@ Wrangler 會把所有模組打包成同一個 Worker，不需要建立第二個 
 1. **Cloudflare 基礎資源**：Worker 名稱、網域、D1、Vectorize、Durable Object、Cron、Rate Limiter。設定於 `wrangler.toml`。
 2. **公開執行期變數**：開發者 QQ、公開網址、模型名稱、預算、功能開關與安全範圍內的限制值。設定於 `[vars]` 或 Cloudflare Dashboard Variables。
 3. **Secrets**：API Key、OneBot Token、Portal 加密金鑰。使用 `wrangler secret put`，不得提交至 GitHub。
-4. **Portal／群組動態設定**：人格、群規、通知路由、模型偏好、活動、排程、權限與各群開關。保存於 D1，不必重新部署。
+4. **Portal／群組動態設定**：人格、群規、模型偏好、活動、排程、權限與各群開關。保存於 D1，不必重新部署。
 5. **不可任意關閉的系統不變量**：權限驗證、資料隔離、政治靜默、安全規則、危險操作二次確認、Durable Object migration 歷史與資料結構完整性。
 
 優先順序通常是：Portal／群組明確設定 → Worker 公開變數 → 程式安全預設。Secrets 只提供憑證，不應被 Portal 回傳或顯示。
@@ -256,7 +256,6 @@ npx wrangler secret put SECRET_NAME
 - 群組人格、個人人格、模仿模式與表情庫
 - 群規內容、嚴格度、代理模式、多動作與處置冷卻
 - 自動歡迎、歡迎詞、入群輔助與新人觀察期
-- 人工通知路由；預設只找開發者，群主通知總開關預設關閉
 - AI 管理、群操作、排程審核與申訴審核權限
 - 活動、報名、投票與排程；活動與投票使用不同插件與資料流程
 - Bilibili 串接設定（低頻 polling；不使用 Webhook／bridge；可選 BILIBILI_COOKIE secret）
