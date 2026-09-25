@@ -1,4 +1,4 @@
-name: Verify unified system admin portal
+name: Verify and deploy unified system admin preview
 
 on:
   push:
@@ -12,7 +12,11 @@ permissions:
 jobs:
   verify:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 25
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      PREVIEW_URL: https://chatgpt-test-20260925-qqai.ray20123315.workers.dev
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -28,3 +32,88 @@ jobs:
         run: npm run check:v3
       - name: Worker bundle dry-run
         run: npm run check:bundle
+
+      - name: Build Preview-only Wrangler config
+        shell: bash
+        run: |
+          set -euo pipefail
+          cp wrangler.toml /tmp/wrangler.preview-ci.toml
+          cat >> /tmp/wrangler.preview-ci.toml <<'EOF'
+
+          [previews.ai]
+          binding = "AI"
+
+          [[previews.durable_objects.bindings]]
+          name = "ONEBOT_HUB"
+          class_name = "OneBotHub"
+
+          [[previews.d1_databases]]
+          binding = "DB"
+          database_name = "qqaibot"
+          database_id = "569a01fe-3297-40e1-832f-09c3793056ed"
+
+          [[previews.ratelimits]]
+          name = "MY_RATE_LIMITER"
+          namespace_id = "20260925"
+            [previews.ratelimits.simple]
+            limit = 1
+            period = 10
+
+          [previews.vars]
+          AUTO_CHECKIN_ENABLED = "false"
+          BOT_DISPLAY_NAME = "QQAI Preview"
+          DEVELOPER_ID = ""
+          DEVELOPER_IDS = ""
+          ENABLE_ONEBOT_HTTP_EVENTS = "false"
+          ONEBOT_READ_ONLY = "true"
+          PLUGIN_SECURITY_GPT_ENABLED = "false"
+          PLUGIN_SECURITY_GPT_MODEL = ""
+          PLUGIN_SECURITY_GPT_WEB_SEARCH_ENABLED = "false"
+          PORTAL_ADMIN_USERNAME = "admin"
+          PUBLIC_BASE_URL = "https://chatgpt-test-20260925-qqai.ray20123315.workers.dev"
+          ROOT_QQ_IDS = ""
+          V3_BILIBILI_CREATORS_JSON = "[]"
+          V3_BILIBILI_ENABLED = "false"
+          V3_PLUGIN_ADMIN_IDS = ""
+          V3_RUNTIME_ENABLED = "true"
+          V3_TEST_DB_TABLE = "kv_store_preview_20260925"
+          EOF
+
+      - name: Deploy verified branch to existing Cloudflare Preview
+        shell: bash
+        run: |
+          set -euo pipefail
+          npx wrangler preview \
+            --config /tmp/wrangler.preview-ci.toml \
+            --name chatgpt-test-20260925 \
+            --worker-name qqai \
+            --tag unified-admin-portal \
+            --message "Unified admin portal ${GITHUB_SHA}" \
+            --json | tee /tmp/preview.json
+
+      - name: Public Preview smoke
+        shell: bash
+        run: |
+          set -euo pipefail
+          for i in $(seq 1 12); do
+            status="$(curl -sS --connect-timeout 10 --max-time 30 -o /tmp/portal.html -w '%{http_code}' "$PREVIEW_URL/portal" || true)"
+            if [ "$status" = "200" ]; then break; fi
+            sleep 3
+          done
+          test "$status" = "200"
+          grep -q '系统管理' /tmp/portal.html
+          grep -q "addView('systemadmin','系统管理')" /tmp/portal.html
+          ! grep -q '<title>系統管理員</title>' /tmp/portal.html
+
+          legacy_headers="$(mktemp)"
+          legacy_status="$(curl -sS -D "$legacy_headers" -o /dev/null -w '%{http_code}' "$PREVIEW_URL/system-admin")"
+          test "$legacy_status" = "302"
+          grep -qi '^location: .*/$' "$legacy_headers"
+
+          login_status="$(curl -sS -o /tmp/login.json -w '%{http_code}' \
+            -H 'Content-Type: application/json' \
+            --data '{"username":"admin","password":"preview-smoke-deliberately-wrong-password"}' \
+            "$PREVIEW_URL/api/auth/login-password")"
+          test "$login_status" = "401"
+          node --input-type=module -e 'const fs=await import("node:fs/promises");const x=JSON.parse(await fs.readFile("/tmp/login.json","utf8"));if(x.code!=="PASSWORD_INVALID")process.exit(1);'
+          echo "Unified admin Preview smoke passed"
