@@ -1,7 +1,7 @@
 import { createBilibiliLivePlugin } from "./official/bilibili-live.js";
 import { normalizePluginPackageDescriptor } from "./package.js";
 
-const BILIBILI_LIVE_SOURCE_SHA256 = "a3226b27b8a9e4212266b845567d75e1ab378b018b4c53da5d10b5ea875d47ff";
+const BILIBILI_LIVE_SOURCE_SHA256 = "2bf5dabcc0ca796e331909e862fbfed650618610db77a0ac5961b5772dc6ef09";
 
 function freezeCatalogEntry(value) {
   return Object.freeze({
