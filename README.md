@@ -170,14 +170,13 @@ npx wrangler secret put PORTAL_ADMIN_PASSWORD
 | `DEPLOY_NOTIFY_START_COOLDOWN_SECONDS` | `600` | 部署開始事件冷卻。 |
 | `DEPLOY_NOTIFY_SELF_GRACE_SECONDS` | `90` | Worker 自我版本確認等待時間，範圍由程式限制。 |
 
-### OneBot 與手動群打卡
+### OneBot 與自動群打卡
 
 | 變數 | 預設／範圍 | 說明 |
 | --- | --- | --- |
 | `ENABLE_ONEBOT_HTTP_EVENTS` | `false` | 是否允許 OneBot HTTP 事件入口。 |
-| `AUTO_CHECKIN_CONCURRENCY` | `12`，限制 1～30 | 手動執行全群打卡時的批次並行數。 |
 
-自動午夜群打卡已自精簡版 v2 移除；仍可由具權限者主動執行群打卡。
+群打卡由 `qqai.auto-checkin` 官方插件每日自動執行，不提供 QQ 手動執行指令。每批最多 20 群，後續批次延後執行，避免單次 Worker subrequest 過量。
 
 ### 模型與預算
 
@@ -342,10 +341,10 @@ Token: 與 ONEBOT_ACCESS_TOKEN 相同
 
 1. 在 Cloudflare 先設定 `DEVELOPER_IDS`，內容為你自己的 QQ；可用逗號分隔多人。
 2. 設定 `PUBLIC_BASE_URL`，避免 `!help` 產生錯誤網址。
-3. 如需手動批次群打卡，確認 `AUTO_CHECKIN_CONCURRENCY`。
+3. 到 Portal 插件設定確認 `Auto Check-in` 的啟用狀態、批次大小與執行秒數。
 4. 不要刪除既有 Durable Object migrations。
 5. 執行完整 regression 與 dry-run bundle。
-6. 部署後用開發者 QQ 測試 `!help`、Portal 登入、通知與私訊 `!群打卡`。
+6. 部署後用開發者 QQ 測試 `!help`、Portal 登入、QQ Interactions 與插件狀態。
 
 若沒有設定任何有效的開發者 QQ，系統不會偷偷回退到原作者帳號；所有開發者專屬功能都會保持不可用，直到部署者正確設定。
 
