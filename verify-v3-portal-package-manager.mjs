@@ -110,6 +110,7 @@ assert.match(injected,/内置插件目录/);
 assert.match(injected,/待提交操作/);
 assert.match(injected,/最近操作记录/);
 assert.match(injected,/外部插件隔离区/);
+assert.match(injected,/actionLabel\(t\.type\)/);
 assert.doesNotMatch(injected,/Bundled Catalog|Staged Transactions|Recent History|Trust Store/);
 assert.equal(injectV3PackageManagerClient(injected),injected,"package client injection must be idempotent");
 
@@ -124,6 +125,8 @@ assert.match(packageManagerSource, /author: record\.author \?/);
 assert.match(packageManagerSource, /record\.security\.findings/);
 assert.match(packageManagerSource, /scope: String\(transaction\.integrity\.scope/);
 assert.match(packageManagerSource, /PLUGIN_AUTHOR_KEY_REVOKED:/);
+assert.match(packageManagerSource, /此接口只允许 POST/);
+assert.doesNotMatch(packageManagerSource, /此接口只允許 POST|staged transaction|metadata transaction|metadata rollback|quarantine 记录|plugin artifact|private key|public JWK|build-verified|catalog 不一致|标记 rejected/);
 assert.doesNotMatch(packageManagerSource, /record\.作者|record\.security\.问题数|运行代码加载状态: null|范围：String|PLUGIN_AUTHOR_KEY_已撤销/);
 
 const worker = fs.readFileSync("worker.js","utf8");
