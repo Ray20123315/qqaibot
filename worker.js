@@ -12,6 +12,7 @@ import { normalizeMultilingualCommand, toSimplifiedChinese } from "./src/i18n/co
 import { collectFullMemberDetails, formatFullMemberDetailsReport } from "./src/members/details.js";
 import { handleBilibiliWebhook } from "./src/integrations/bilibili.js";
 import { attachModerationProposalMessage, createGroupWorkRequest, createJoinRequestAssist, createModerationProposal, decideJoinRequestAssist, detectNaturalModerationProposal, findLatestActiveRuleViolationForUser, formatModerationPermissionDenied, formatModerationProposal, getGroupMemberSafe, handleGroupWorkDecision, handleModerationConfirmation, inspectMessageAgainstGroupRules, normalizeRuleProxyMode, normalizeRuleStrictness, parseModerationConfirmation, parseUnlimitedNonNegativeInteger, recordRuleViolationFeedback, ruleStrictnessLabel } from "./src/moderation/runtime.js";
+import { moderationApprovalModeDescription, moderationApprovalModeLabel, normalizeModerationApprovalMode } from "./src/moderation/approval-mode.js";
 import { MAX_MUTE_SECONDS as MUTE_LOCK_MAX_SECONDS, canUnlockMute, clearMuteLock, createMasterMuteLock, createPartnerMuteLock, createSelfMuteLock, getMuteLock, listActiveSelfMuteLocks, markMuteLockReapplied, markMuteUnlockBlocked, muteLockRemainingSeconds, putMuteLock } from "./src/moderation/mute-locks.js";
 import { MASTER_RELATIONSHIP_DEFAULTS, MASTER_RELATIONSHIP_MAX_LEVEL, clearPartnerBinding, createMasterBindingRequest, createPartnerBindingRequest, decidePartnerBindingRequest, getBindingRequest, getPartnerBinding } from "./src/moderation/partner-bindings.js";
 import { applyConversationOutputGuards, auditIgnoredRobotMessage, botInteractionAllowKey, buildReplyPlan, cacheBotSenderClassification, clearRegisteredThinkingIndicators, detectLiteralPseudoElementLabels, eventHasBotMention, eventMentionedQqs, eventPlainText, eventSenderDisplayName, eventSenderRobotHint, extractFileDescriptors, extractForwardIds, extractMediaDescriptor, extractMessageText, extractOutboundMediaTypes, extractTextMentionIds, filterRobotMentionIds, formatForwardContext, getForwardMessageSnapshot, getQuotedMessage, getTaipeiTimeContext, isExplicitCurrentTimeQuestion, isExplicitRoleplayRequest, isGroupRobotInteractionAllowed, isIgnoredGroupRobotSender, isStandaloneCurrentTimeQuestion, looksLikeRobotDisplayName, normalizeFileDescriptor, parseDurationSeconds, prepareConversationHistory, purgeLegacyBotRepliesFromRecentLogs, qqaiTruthyRobotFlag, recordStructuredMessage, registerThinkingIndicator, removeTextMentionTokens, resolveOneBotMediaAsBase64, runOneBotGroupOperation, sanitizeAiReply, sendThinkingIndicator, thinkingIndicatorRegistryKey } from "./src/onebot/messages.js";
@@ -1438,20 +1439,20 @@ const QQAIWorker = {
         return jsonReply(`${atSender}群规判断严格度已设为：${ruleStrictnessLabel(nextLevel)}。测试、引用和讨论管理功能不会仅凭关键词判违规；链接会结合域名、页面信息和发送语境判断。`);
       }
 
-      const proxySetting = cleanMessage.match(/^[!！](?:AI群规代理|AI群規代理|群规代理|群規代理)\s*(关闭|關閉|记录|記錄|警告|禁言|自动|自動|状态|狀態)$/i);
-      if (proxySetting) {
-        const rawMode = proxySetting[1];
-        if (!hasAdminAuth) return jsonReply(`${atSender}⚠️ 权限不足\n当前权限等级：${isDeveloper ? "开发者" : senderRole === "owner" ? "群主" : senderRole === "admin" ? "QQ 管理员" : "普通成员"}\n需要权限等级：QQ 管理员或以上`);
-        if (/状态|狀態/.test(rawMode)) {
-          const currentMode = normalizeRuleProxyMode(await dbGet(env, `rule_proxy_mode:${currentGroupId}`) || DEFAULTS.ruleProxyMode);
-          const kick = await dbGet(env, `rule_proxy_kick_authorized:${currentGroupId}`) === "true";
-          return jsonReply(`${atSender}AI 群规代理模式：${currentMode}；AI 踢出授权：${kick ? "已授权" : "未授权"}。`);
+      const approvalModeSetting = cleanMessage.match(/^[!！](?:AI群规代理|AI群規代理|群规代理|群規代理|自动管理|自動管理|核准模式)\s*(要求核准|每次核准|代我核准|智慧核准|完整存取权|完整存取權|完整|状态|狀態)$/i);
+      if (approvalModeSetting) {
+        if (!(isDeveloper || await isVerifiedGroupOwner(env, currentGroupId, userId))) {
+          return jsonReply(`${atSender}只有目前群主或開發者可以變更群規 / 自動管理核准模式。`);
         }
-        const nextMode = /关闭|關閉|记录|記錄/.test(rawMode) ? "record" : /警告/.test(rawMode) ? "warn" : /禁言/.test(rawMode) ? "mute" : "auto";
-        if (nextMode === "auto" && !(await isVerifiedGroupOwner(env, currentGroupId, userId))) return jsonReply(`${atSender}只有 NapCat 即时确认的当前群主可以启用 auto 模式；QQ 管理员可使用 record、warn 或 mute。`);
-        await dbPut(env, `rule_proxy_mode:${currentGroupId}`, nextMode);
-        await writeSystemAudit(env, { type: "rule_proxy_setting", groupId: currentGroupId, actorId: userId, action: nextMode });
-        return jsonReply(`${atSender}AI 群规代理已设为 ${nextMode}。record 只记录；warn 以警告为主，但分类明确设为撤回时会执行撤回；mute 以禁言为主并遵守分类撤回；auto 由 AI 按分类处理（仅群主可启用）。`);
+        const rawMode = approvalModeSetting[1];
+        const currentMode = normalizeModerationApprovalMode(await dbGet(env, `moderation_approval_mode:${currentGroupId}`) || "require_approval");
+        if (/状态|狀態/.test(rawMode)) {
+          return jsonReply(`${atSender}群規 / 自動管理：${moderationApprovalModeLabel(currentMode)}。\n${moderationApprovalModeDescription(currentMode)}`);
+        }
+        const nextMode = normalizeModerationApprovalMode(rawMode);
+        await dbPut(env, `moderation_approval_mode:${currentGroupId}`, nextMode);
+        await writeSystemAudit(env, { type: "moderation_approval_mode_setting", groupId: currentGroupId, actorId: userId, action: nextMode });
+        return jsonReply(`${atSender}群規 / 自動管理已切換為「${moderationApprovalModeLabel(nextMode)}」。\n${moderationApprovalModeDescription(nextMode)}`);
       }
 
       if (/^[!！](?:授权AI踢出|授權AI踢出)$/i.test(cleanMessage)) {
