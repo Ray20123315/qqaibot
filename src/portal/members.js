@@ -1,6 +1,6 @@
-import { isDeveloperId, recentConversationMessagesForUser } from "../core/identity.js";
+import { recentConversationMessagesForUser } from "../core/identity.js";
 import { canUnlockMute, clearMuteLock, createManualMuteLock, getMuteLock, listGroupMuteLocks, putMuteLock } from "../moderation/mute-locks.js";
-import { clearPartnerBinding, createDirectMasterBinding, listGroupBindings } from "../moderation/partner-bindings.js";
+import { listGroupBindings } from "../moderation/partner-bindings.js";
 import { callOneBotAction, writeSystemAudit } from "../core/permissions.js";
 import { isVerifiedGroupOwner } from "../group/runtime.js";
 import { dbPut } from "../data/store.js";
@@ -20,10 +20,6 @@ function memberConsoleAllowed(authed) {
     || permissions.groupOps
     || ["owner", "admin", "developer"].includes(String(authed?.role || ""))
   );
-}
-
-function coreDeveloperAllowed(env, authed) {
-  return Boolean(authed?.qq && isDeveloperId(env, String(authed.qq)));
 }
 
 function publicRelationship(binding) {
@@ -46,36 +42,7 @@ function publicRelationship(binding) {
   };
 }
 
-async function resolveLiveRelationshipMember(env, groupId, qq) {
-  const userId = String(qq || "").replace(/\D/g, "");
-  if (!userId) return null;
-  try {
-    const response = await callOneBotAction(env, {
-      action: "get_group_member_info",
-      params: { group_id: numericId(groupId), user_id: numericId(userId), no_cache: true }
-    }, 12000);
-    const raw = response?.data && typeof response.data === "object" ? response.data : response;
-    const member = normalizeMember(raw);
-    if (!member.isRobot) {
-      const cached = await readJson(env, `group_members:${groupId}`, []);
-      const known = Array.isArray(cached) ? cached.find(item => String(item?.qq || item?.user_id || "") === userId) : null;
-      if (known?.isRobot || known?.is_robot) member.isRobot = true;
-    }
-    return member;
-  } catch {
-    return null;
-  }
-}
 
-async function getLiveBotId(env) {
-  try {
-    const response = await callOneBotAction(env, { action: "get_login_info", params: {} }, 10000);
-    const raw = response?.data && typeof response.data === "object" ? response.data : response;
-    return String(raw?.user_id || raw?.userId || "").replace(/\D/g, "");
-  } catch {
-    return "";
-  }
-}
 function normalizeEpochMs(primarySeconds, fallbackValue = 0) {
   const primary = Number(primarySeconds || 0);
   if (primary > 0) return primary > 100000000000 ? primary : primary * 1000;
@@ -386,10 +353,6 @@ function injectPortalMembersClient(html) {
   function renderMembers(){var root=el('memberList');if(!root)return;root.innerHTML=directoryRows().map(function(member){var activity='入群 '+dateText(member.joinTime)+'｜最近发言 '+dateText(member.lastSentTime);return'<div class="item member-directory-row"><div class="member-main"><div class="member-name member-role-'+safe(member.role)+'">'+safe(member.name||member.qq)+'</div><div class="member-meta">QQ '+safe(member.qq)+'｜'+safe(roleText(member.role))+(member.title?'｜'+safe(member.title):'')+'</div><div class="member-meta">'+safe(activity)+'</div></div><div>'+memberState(member)+'</div><div class="member-actions"><button class="btn ghost member-copy" data-qq="'+safe(member.qq)+'">复制 QQ</button><button class="btn member-history" data-qq="'+safe(member.qq)+'">历史消息</button></div></div>'}).join('')||'<div class="empty">没有符合条件的群友</div>'}
   function renderMemberActions(){var root=el('memberActionList');if(!root)return;var rows=filteredMembers('memberActionSearch','memberActionRole','memberActionMute');root.innerHTML=rows.map(function(member){return'<div class="item member-action-row"><div class="member-main"><div class="member-name member-role-'+safe(member.role)+'">'+safe(member.name||member.qq)+'</div><div class="member-meta">QQ '+safe(member.qq)+'｜'+safe(roleText(member.role))+'</div></div><div>'+memberState(member)+'</div><div class="member-actions"><input class="member-seconds" type="number" min="1" max="2592000" value="60" aria-label="禁言秒数"><label class="member-toggle"><input class="member-protect" type="checkbox">防解除</label><label class="member-toggle"><input class="member-owner-unlock" type="checkbox" disabled>群主可解除</label><label class="member-toggle"><input class="member-skip-confirm" type="checkbox">跳过确认</label><button class="btn danger member-mute" data-qq="'+safe(member.qq)+'">禁言（秒）</button><button class="btn member-unmute" data-qq="'+safe(member.qq)+'">解禁</button></div></div>'}).join('')||'<div class="empty">没有符合条件的成员</div>'}
   function exportMembers(){var rows=[['QQ','名称','身份','禁言状态','剩余禁言秒数','关系身份','入群时间','最近发言时间']];cachedMembers.forEach(function(item){var relation=relationshipFor(item.qq),relationRole=relation?(relation.mode==='master'?(String(relation.masterId)===String(item.qq)?'主人':'所属成员'):'对象'):'';rows.push([item.qq,item.name||'',roleText(item.role),item.muted?'禁言中':'可发言',item.muteRemainingSeconds||0,relationRole,dateText(item.joinTime),dateText(item.lastSentTime)])});var csv='\\ufeff'+rows.map(function(row){return row.map(csvCell).join(',')}).join('\\r\\n');var blob=new Blob([csv],{type:'text/csv;charset=utf-8'}),url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download='群友名册-'+new Date().toISOString().slice(0,10)+'.csv';document.body.appendChild(a);a.click();a.remove();setTimeout(function(){URL.revokeObjectURL(url)},1000)}
-  function populateRelationshipSelectors(){var master=el('relationshipMaster'),member=el('relationshipMember');if(!master||!member)return;var masters=cachedMembers.filter(function(item){return item.relationshipEligibility&&item.relationshipEligibility.master});var members=cachedMembers.filter(function(item){return item.relationshipEligibility&&item.relationshipEligibility.member});master.innerHTML=masters.map(function(item){return'<option value="'+safe(item.qq)+'">'+safe(item.name||item.qq)+'｜QQ '+safe(item.qq)+'｜'+safe(roleText(item.role))+'</option>'}).join('')||'<option value="">没有可选主人</option>';member.innerHTML=members.map(function(item){return'<option value="'+safe(item.qq)+'">'+safe(item.name||item.qq)+'｜QQ '+safe(item.qq)+'</option>'}).join('')||'<option value="">没有可选所属成员</option>'}
-  function renderRelationships(){var status=el('relationshipStatus'),panel=el('relationshipDirectPanel'),root=el('relationshipList');if(!root)return;var canDirect=!!relationshipPermissions.directRelationship;if(panel)panel.classList.toggle('hidden',!canDirect);if(status)status.textContent='当前共 '+cachedRelationships.length+' 段关系。'+(canDirect?'你拥有最高核心开发者权限，可直接配对、替换或解除。':'当前帐号为只读查看；普通管理层不能跳过双方同意。');populateRelationshipSelectors();root.innerHTML=cachedRelationships.map(function(item){var ids=item.userIds||[];var remove=canDirect&&ids[0]?'<button class="btn danger relationship-remove" data-user-id="'+safe(ids[0])+'">强制解除</button>':'';var created=item.createdAt?new Date(Number(item.createdAt)).toLocaleString():'时间未提供';return'<div class="item relationship-row"><div><div class="member-name">'+safe(relationshipText(item))+'</div><div class="member-meta">'+safe(item.mode==='master'?'主人关系':'对象关系')+'｜建立于 '+safe(created)+'</div></div><div class="relationship-actions">'+remove+'</div></div>'}).join('')||'<div class="empty">当前群没有任何绑定关系</div>'}
-  async function directPairRelationship(){if(!relationshipPermissions.directRelationship){notify('只有最高核心开发者可以直接配对');return}var master=el('relationshipMaster'),member=el('relationshipMember'),replace=el('relationshipReplace');var masterId=String(master&&master.value||''),memberId=String(member&&member.value||'');if(!masterId||!memberId){notify('请选择主人和所属成员');return}if(masterId===memberId){notify('主人和所属成员不能是同一个帐号');return}var replaceExisting=!!(replace&&replace.checked);var text='确定直接建立主人关系？\\n主人：'+relationshipMemberName(masterId)+'（'+masterId+'）\\n所属成员：'+relationshipMemberName(memberId)+'（'+memberId+'）'+(replaceExisting?'\\n双方既有关系会被强制替换。':'');var ok=typeof confirmModal==='function'?await confirmModal(text,'最高权限直接配对'):window.confirm(text);if(!ok)return;var result=await call('/members/relationships/direct','POST',{masterId:masterId,memberId:memberId,replaceExisting:replaceExisting});notify(result.message||'操作完成');if(result.ok)loadMembers()}
-  async function removeRelationship(button){if(!relationshipPermissions.removeRelationship){notify('只有最高核心开发者可以强制解除关系');return}var userId=String(button&&button.dataset.userId||'');if(!userId)return;var item=relationshipFor(userId);var text='确定强制解除关系：'+relationshipText(item)+'？';var ok=typeof confirmModal==='function'?await confirmModal(text,'强制解除关系'):window.confirm(text);if(!ok)return;var result=await call('/members/relationships/remove','POST',{userId:userId});notify(result.message||'操作完成');if(result.ok)loadMembers()}
   async function loadMembers(){var status=el('memberConsoleStatus'),actionStatus=el('memberActionStatus');if(status)status.textContent='正在读取群友列表…';if(actionStatus)actionStatus.textContent='正在读取禁言状态…';var result=await call('/members');if(!result.ok){var message=result.message||'读取失败';if(status)status.textContent=message+'｜可点击刷新重试';if(actionStatus)actionStatus.textContent=message;cachedMembers=[];cachedRelationships=[];relationshipPermissions={};renderMembers();renderMemberActions();return}cachedMembers=result.members||[];cachedRelationships=result.relationships||[];relationshipPermissions=result.permissions||{};renderMembers();renderMemberActions();var mutedCount=cachedMembers.filter(function(item){return item.muted}).length,adminCount=cachedMembers.filter(function(item){return item.role==='owner'||item.role==='admin'}).length;var summary='共 '+cachedMembers.length+' 位群友｜管理层 '+adminCount+'｜禁言中 '+mutedCount+'｜关系 '+cachedRelationships.length+(result.stale?'｜当前显示缓存资料':'｜即时资料')+(result.warning?'｜'+result.warning:'');if(status)status.textContent=summary;if(actionStatus)actionStatus.textContent=summary}
   window.qqaiLoadMembers=loadMembers;
   async function showHistory(qq){var panel=el('memberHistoryPanel'),list=el('memberHistoryList'),title=el('memberHistoryTitle');if(!panel||!list)return;panel.classList.remove('hidden');list.innerHTML='<div class="empty">正在读取历史消息…</div>';var result=await call('/members/history?qq='+encodeURIComponent(qq)+'&limit=120');if(!result.ok){list.innerHTML='<div class="empty">'+safe(result.message||'读取失败')+'</div>';return}if(title)title.textContent=(result.member&&result.member.name||qq)+' 的历史消息';list.innerHTML=(result.records||[]).map(function(item){return'<div class="item"><div class="member-history-time">'+safe(item.createdAt?new Date(Number(item.createdAt)).toLocaleString():'时间未提供')+'｜消息 '+safe(item.messageId||item.id||'')+'</div><div class="member-history-message">'+safe(item.text||'[无文字内容]')+'</div></div>'}).join('')||'<div class="empty">没有已保存的历史消息</div>'}
