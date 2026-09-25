@@ -22,7 +22,9 @@ const normalized = normalizeCodexBridgeRequest({ model: "gpt-codex" }, {
   maxOutputTokens: 2000,
   timeoutMs: 40000,
   reasoningEffort: "high",
-  originalPromptOnly: true
+  originalPromptOnly: true,
+  sessionKey: "qqaibot:group:123:developer:456:group",
+  contextHash: "ctx-123"
 });
 assert.equal(normalized.protocol, CODEX_BRIDGE_PROTOCOL);
 assert.equal(normalized.type, "request");
@@ -30,6 +32,8 @@ assert.equal(normalized.messages[0].content, "hello");
 assert.equal(normalized.maxOutputTokens, 2000);
 assert.equal(normalized.reasoningEffort, "high");
 assert.equal(normalized.originalPromptOnly, true);
+assert.equal(normalized.sessionKey, "qqaibot:group:123:developer:456:group");
+assert.equal(normalized.contextHash, "ctx-123");
 
 assert.equal(verifyCodexBridgeAccess(new Request("https://qqai.test/v3/codex-bridge", {
   headers: { Authorization: "Bearer bridge-test-token" }
