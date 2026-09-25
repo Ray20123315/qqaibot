@@ -1,0 +1,46 @@
+name: Smoke current unified-admin Preview
+
+on:
+  push:
+    branches:
+      - chatgpt/preview-public-smoke-20260925
+
+permissions:
+  contents: read
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      PREVIEW_URL: https://chatgpt-test-20260925-qqai.ray20123315.workers.dev
+    steps:
+      - name: Verify unified Portal HTML
+        shell: bash
+        run: |
+          set -euo pipefail
+          status="$(curl -sS --retry 8 --retry-delay 2 --retry-all-errors --connect-timeout 10 --max-time 30 -o /tmp/portal.html -w '%{http_code}' "$PREVIEW_URL/portal")"
+          test "$status" = "200"
+          grep -q "addView('systemadmin','系统管理')" /tmp/portal.html
+          ! grep -q '<title>系統管理員</title>' /tmp/portal.html
+          echo "Unified Portal HTML served"
+
+      - name: Verify legacy system-admin unauthenticated redirect
+        shell: bash
+        run: |
+          set -euo pipefail
+          status="$(curl -sS -D /tmp/legacy.headers -o /tmp/legacy.body -w '%{http_code}' "$PREVIEW_URL/system-admin")"
+          test "$status" = "302"
+          grep -qi '^location: .*/$' /tmp/legacy.headers
+          ! grep -q '<title>系統管理員</title>' /tmp/legacy.body
+          echo "Legacy standalone admin page is gone"
+
+      - name: Verify current admin failure is only missing credential secret
+        shell: bash
+        run: |
+          set -euo pipefail
+          status="$(curl -sS -o /tmp/login.json -w '%{http_code}'             -H 'Content-Type: application/json'             --data '{"username":"admin","password":"preview-smoke-deliberately-wrong-password"}'             "$PREVIEW_URL/api/auth/login-password")"
+          cat /tmp/login.json
+          test "$status" = "503"
+          node --input-type=module -e 'const fs=await import("node:fs/promises"); const x=JSON.parse(await fs.readFile("/tmp/login.json","utf8")); if(x.code!=="ADMIN_CREDENTIALS_MISCONFIGURED") process.exit(1);'
+          echo "Preview UI is live; only PORTAL_ADMIN_PASSWORD must be restored"
