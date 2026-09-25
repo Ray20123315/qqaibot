@@ -109,9 +109,6 @@ const QQAI_V1_R40_MAINTENANCE_LATENCY_INVITE_MARKER = "QQAI_V1_R40_MAINTENANCE_L
 const QQAI_V1_R39_PRIVATE_GATE_SELF_SLASH_BANG_MARKER = "QQAI_V1_R39_PRIVATE_GATE_SELF_SLASH_BANG_MARKER";
 
 
-const QQAI_V1_R38_AFFINITY_MANUAL_CHECK_MARKER = "QQAI_V1_R38_AFFINITY_MANUAL_CHECK_MARKER";
-
-
 const QQAI_V1_R37_PORTAL_SIMPLIFIED_MARKER = "QQAI_V1_R37_PORTAL_SIMPLIFIED_MARKER";
 
 
@@ -1234,7 +1231,7 @@ const QQAIWorker = {
       };
 
       // /! 是群友明确要求“只作为普通群聊，不进入任何 AI 流程”。
-      // 除了不生成聊天回复，也跳过群规分类、插话判断、摘要、向量检索与好感度 AI 评估。
+      // 除了不生成聊天回复，也跳过群规分类、插话判断、摘要與向量检索。
       if (aiReplyOptOut) {
         if (isGroup) {
           await recordStructuredMessage(env, {
