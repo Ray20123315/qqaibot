@@ -4,15 +4,17 @@ The first real scheduler-backed official plugin is a webhook-free Bilibili live-
 
 ## Why this shape
 
-The legacy integration polls live status and new-video feeds together and currently enforces a 30-minute minimum polling interval to reduce Bilibili risk-control failures. Live UI needs a much fresher signal, but video discovery does not.
+The legacy integration and the v3 plugin now share the same low-risk live-status direction: the batch live endpoint is used instead of the older per-UID `getRoomInfoOld` request. Video discovery remains a different risk profile and is handled separately.
 
-v3 therefore separates the concerns:
+The current design separates the concerns:
 
 - live status: lightweight batch endpoint, default every 30 minutes
-- video publishing: keep low-frequency polling in the legacy/optional integration until migrated separately
+- video publishing: low-frequency WBI-signed archive lookup, with dynamic-feed compatibility fallback
 - no webhook requirement
 - no Bilibili login cookie requirement for the selected live-status endpoint
+- optional `BILIBILI_COOKIE` is used only as browser-session context for compatibility requests
 - API failure never flips a last-known live state to offline
+- video-only risk control does not suspend live-status polling
 
 ## Provider
 
@@ -121,6 +123,14 @@ Under the current YouTube Data API granular quota model, `search.list` has its o
 
 ## Video / dynamic polling
 
-The live-status endpoint above is the preferred anonymous path because it does not require a login cookie. New-video / dynamic discovery is a different risk profile: space/dynamic endpoints may require Cookie/WBI state depending on the endpoint and can return 412/risk-control responses.
+The live-status endpoint above is the preferred anonymous path because it does not require a login cookie. New-video discovery is a different risk profile and now prefers the WBI-signed archive endpoint:
 
-QQAI therefore does not increase their frequency to match live status. Any compatibility video polling must remain low-frequency, cached, deduplicated and back off on 412/429. If a deployment provides `BILIBILI_COOKIE`, it must remain a Worker secret and must never be stored in plugin settings or returned by Portal APIs.
+```text
+GET https://api.bilibili.com/x/space/wbi/arc/search?mid=<uid>&pn=1&ps=1&order=pubdate&wts=<unix>&w_rid=<md5>
+```
+
+QQAI obtains the current WBI image/sub keys from `/x/web-interface/nav`, caches them briefly, derives the mixin key, and signs the archive query. Dynamic-feed endpoints remain compatibility fallbacks.
+
+A 412/429 from video discovery is isolated from live polling: the connector keeps the last video baseline, marks the check partial, and backs off video requests separately while the anonymous live-status checks continue. Existing connectors created by the older provider revision automatically clear the old long global block once so they can retry with the upgraded provider path.
+
+If a deployment provides `BILIBILI_COOKIE`, it is sent only as browser-session context and must remain a Worker secret; it is never stored in plugin settings or returned by Portal APIs. A valid Cookie can help endpoints that expect browser state, but it does not guarantee success when Bilibili is rejecting the Worker egress IP or another request characteristic.
