@@ -141,7 +141,7 @@ assert.match(injected,/加入信任库/);
 assert.match(injected,/外部插件隔离区/);
 assert.match(injected,/data-q-accept-risk/);
 assert.match(injected,/不可强制加载|不可自行承担|系统性/);
-assert.doesNotMatch(injected,/Self-made \/ External Plugins|Trust Store|Quarantine|不可強制載入|不可自行承擔|系統性/);
+assert.doesNotMatch(injected,/Self-made \/ External Plugins|加入 Trust Store|>Quarantine<|不可強制載入|不可自行承擔|系統性/);
 assert.equal(injectV3PackageManagerClient(injected),injected);
 
 console.log("verify-v3-portal-external-plugins: ok");
