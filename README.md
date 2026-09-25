@@ -146,7 +146,7 @@ Cron 將一般排程與高成本背景工作分流；Bilibili 使用 30 分鐘�
 | `DEVELOPER_ID` | 單一 QQ；預設空 | 舊版相容欄位，只有一位開發者時仍可用。 |
 | `ROOT_QQ_IDS` | QQ 清單；預設空 | 額外 Root 清單，相容部署使用；會與 `DEVELOPER_IDS` 合併去重。 |
 | `PORTAL_ADMIN_USERNAME` | 4～32 字元的獨立帳號 | 系統管理員登入帳號；必須含英文字母，可用數字、`.`、`_`、`-`。若已被一般 QQ 帳號占用，管理員登入會拒絕且保留該帳號資料。 |
-| `PUBLIC_BASE_URL` | `https://bot.example.com`；預設使用請求來源 | `!help`、Portal 與 Live 對外連結的基底網址，不加結尾 `/`。 |
+| `PUBLIC_BASE_URL` | `https://bot.example.com`；預設使用請求來源 | `!help` 與 Portal 對外連結的基底網址，不加結尾 `/`。 |
 | `BOT_DISPLAY_NAME` | `QQAI` | 對外顯示名稱，供可支援的 UI／訊息使用。 |
 
 `DEVELOPER_IDS` 不屬於密碼，但它授予最高權限。不要允許一般 Portal 管理員修改，否則會形成自行提權。應由部署者在 Cloudflare 設定。
