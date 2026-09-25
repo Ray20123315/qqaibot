@@ -1,5 +1,6 @@
 import { isDeveloperId } from "../../core/identity.js";
 import { writeSystemAudit } from "../../core/permissions.js";
+import { toSimplifiedChinese } from "../../i18n/commands.js";
 import { getPortalSession, jsonResponse, readCookie } from "../../portal/auth.js";
 import { pluginPermissionDisclosures, pluginTrustLabelZh, releaseChannelLabelZh } from "../../plugins/governance.js";
 import { getV3Runtime } from "../runtime/runtime.js";
@@ -50,13 +51,20 @@ async function authenticatePluginManager(request, env, url, body = {}, overrides
       response: jsonResponse({ ok: false, code: "SESSION_INVALID", message: "未登录或登录已过期。" }, 401)
     });
   }
-  if (!checkDeveloper(env, session.qq)) {
+  if (!(session.systemAdmin === true || checkDeveloper(env, session.qq))) {
     return Object.freeze({
       ok: false,
-      response: jsonResponse({ ok: false, code: "PLUGIN_MANAGER_DEVELOPER_REQUIRED", message: "只有核心开发者可以管理 V3 插件。" }, 403)
+      response: jsonResponse({ ok: false, code: "PLUGIN_MANAGER_ADMIN_REQUIRED", message: "只有开发者或系统管理员可以管理 V3 插件。" }, 403)
     });
   }
   return Object.freeze({ ok: true, session });
+}
+
+function simplifyUiTree(value) {
+  if (typeof value === "string") return toSimplifiedChinese(value);
+  if (Array.isArray(value)) return value.map(simplifyUiTree);
+  if (!value || typeof value !== "object") return value;
+  return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, simplifyUiTree(item)]));
 }
 
 function pluginSummary(plugin, surface = null) {
@@ -69,11 +77,11 @@ function pluginSummary(plugin, surface = null) {
   const releaseChannel = String(plugin?.releaseChannel || lifecycle?.releaseChannel || "stable");
   return Object.freeze({
     id: String(plugin?.id || ""),
-    name: String(plugin?.name || ""),
+    name: toSimplifiedChinese(String(plugin?.name || "")),
     version: String(plugin?.version || ""),
     apiVersion: String(plugin?.apiVersion || ""),
-    description: String(plugin?.description || ""),
-    author: String(plugin?.author || ""),
+    description: toSimplifiedChinese(String(plugin?.description || "")),
+    author: toSimplifiedChinese(String(plugin?.author || "")),
     official: plugin?.official === true,
     trustStatus,
     trustLabelZh: pluginTrustLabelZh(trustStatus),
@@ -86,10 +94,10 @@ function pluginSummary(plugin, surface = null) {
     requestedPermissions: Object.freeze([...(Array.isArray(requestedPermissions) ? requestedPermissions : [])]),
     requiredPermissions: Object.freeze([...(Array.isArray(requiredPermissions) ? requiredPermissions : [])]),
     grantedPermissions: Object.freeze([...(Array.isArray(grantedPermissions) ? grantedPermissions : [])]),
-    permissionDisclosures: pluginPermissionDisclosures(plugin),
+    permissionDisclosures: simplifyUiTree(pluginPermissionDisclosures(plugin)),
     capabilities: Object.freeze([...(Array.isArray(plugin?.capabilities) ? plugin.capabilities : [])]),
     commands: Object.freeze([...(Array.isArray(plugin?.commands) ? plugin.commands : [])]),
-    settingsSchema: schema,
+    settingsSchema: simplifyUiTree(schema),
     surface: plugin?.surface || null,
     settings: surface?.settings ?? null,
     status: surface?.status ?? null,
