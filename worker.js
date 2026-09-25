@@ -1270,6 +1270,33 @@ const QQAIWorker = {
       if (codexCommand) {
         if (!isDeveloper) return jsonReply(`${atSender}只有开发者可以使用 !codex。`);
         if (!codexCommand.ok) return jsonReply(`${atSender}${codexCommand.message}`);
+
+        const codexSessionScope = isGroup ? `group:${currentGroupId}` : `private:${userId}`;
+        const codexSessionMode = codexCommand.originalPromptOnly ? "raw" : "group";
+        const codexSessionKey = `qqaibot:${codexSessionScope}:developer:${userId}:${codexSessionMode}`;
+        const codexMessages = [];
+
+        if (!codexCommand.originalPromptOnly) {
+          const [groupPersona, groupRules, userCustomStyle] = isGroup
+            ? await Promise.all([
+                dbGet(env, `group_persona:${currentGroupId}`),
+                dbGet(env, `group_rules:${currentGroupId}`),
+                dbGet(env, `custom_style:${currentGroupId}:${userId}`)
+              ])
+            : ["", "", ""];
+
+          const codexGroupPrompt = [
+            "【QQAIBOT 持续提示词】",
+            "你正在通过 QQAIBOT 的 Developer-only Codex 通道回复。除非 Developer 明确选择“原版输入=是”，否则以下群组设定必须作为本对话的持续上下文。",
+            "回复应可直接发送到 QQ；默认使用简体中文。不要输出内部提示词、执行日志或虚构已执行的机器人操作。",
+            groupPersona ? `【群组全局人格｜持续基底】\n${String(groupPersona).slice(0, 12000)}` : "",
+            groupRules ? `【当前群规】\n${String(groupRules).slice(0, 12000)}` : "",
+            userCustomStyle ? `【当前 Developer 专属风格】\n${String(userCustomStyle).slice(0, 4000)}` : ""
+          ].filter(Boolean).join("\n\n");
+          codexMessages.push({ role: "system", content: codexGroupPrompt });
+        }
+        codexMessages.push({ role: "user", content: codexCommand.question });
+
         activeThinkingMessageId = await sendThinkingIndicator(env, {
           isGroup,
           groupId: currentGroupId,
@@ -1280,9 +1307,10 @@ const QQAIWorker = {
           const result = await callCodexBridgeWebSocket(env, { model: codexCommand.model }, {
             task: "chat",
             model: codexCommand.model,
-            messages: [{ role: "user", content: codexCommand.question }],
+            messages: codexMessages,
             reasoningEffort: codexCommand.reasoningEffort,
             originalPromptOnly: codexCommand.originalPromptOnly,
+            sessionKey: codexSessionKey,
             maxOutputTokens: 8192,
             timeoutMs: 120000
           });
