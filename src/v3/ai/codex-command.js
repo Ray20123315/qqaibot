@@ -41,7 +41,7 @@ function consumeModel(source) {
   const word = consumeWord(text);
   if (!word) return null;
   const token = word.token;
-  if (/^(?:gpt-[a-z0-9][a-z0-9._-]*|o\d[a-z0-9._-]*|codex(?:-[a-z0-9._-]+)?)$/i.test(token)) {
+  if (/^(?:gpt-[a-z0-9][a-z0-9._-]*|o\d[a-z0-9._-]*|codex-[a-z0-9._-]+)$/i.test(token)) {
     return { value: token.toLowerCase(), rest: word.rest };
   }
   return null;
@@ -64,7 +64,7 @@ function consumeBoolean(source) {
 
 function codexCommandUsage() {
   return [
-    "格式：!codex <模型> <思考等級> <只用原始問題:是否> <問題>",
+    "格式：!codex <模型> <思考等級> <忽略程式碼及其他提示詞（原版輸入）:是否> <問題>",
     "思考等級：無 / 低 / 中 / 高 / 超高 / 最大",
     "模型、思考等級、是否都可省略；預設模型 GPT-6 Luna，預設無思考。",
     "例：!codex GPT-6 Luna 高 是 幫我分析這段錯誤"
