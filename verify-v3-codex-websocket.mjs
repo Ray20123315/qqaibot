@@ -120,6 +120,22 @@ assert.match(worker, /group_persona:\$\{currentGroupId\}/);
 assert.match(worker, /group_rules:\$\{currentGroupId\}/);
 assert.match(worker, /qqaibot:\$\{codexSessionScope\}:developer:\$\{userId\}:\$\{codexSessionMode\}/);
 assert.match(worker, /sessionKey: codexSessionKey/);
+assert.match(worker, /payload\.type === "quota"/);
+assert.match(worker, /state\.storage\.put\("codex:quota"/);
+assert.match(worker, /state\.storage\.get\("codex:quota"/);
+assert.match(worker, /quota: this\.codexQuota/);
+assert.match(worker, /5 小时额度/);
+assert.match(worker, /每周额度/);
+assert.match(worker, /if \(isDeveloper\)/);
 assert.doesNotMatch(worker, /CODEX_BRIDGE.*(?:shell|filesystem|file_read|exec_command)/i);
+
+const portal = fs.readFileSync("src/portal/runtime.js", "utf8");
+assert.match(portal, /id="codexQuotaStatus"/);
+assert.match(portal, /id="codexQuotaGrid"/);
+assert.match(portal, /renderCodexQuota\(r\.codexBridge\)/);
+assert.match(portal, /getOneBotHub\(env\)\.fetch\("https:\/\/onebot-hub\/status"\)/);
+assert.match(portal, /codexBridge,/);
+assert.match(portal, /5 小時額度/);
+assert.match(portal, /每週額度/);
 
 console.log("V3 local Codex WebSocket bridge checks passed.");
