@@ -48,16 +48,13 @@ assert.deepEqual(selectNotificationRecipientIds({ route: { enabled: true, mode: 
 assert.deepEqual(resolveNotificationRecipientIds({ route: { enabled: true, mode: "managers", managerIds: ["10002"] }, candidates: { managers: [], owner: null, source: "none" }, developer: "90001" }), ["10002"]);
 
 const routingSource = fs.readFileSync("src/notifications/routing.js", "utf8");
-const portalSource = fs.readFileSync("src/portal/notification-routing.js", "utf8");
 const moderationSource = fs.readFileSync("src/moderation/runtime.js", "utf8");
 const operationsSource = fs.readFileSync("src/operations/runtime.js", "utf8");
 assert.match(routingSource, /group_members:/);
 assert.match(routingSource, /candidates\.source !== "none"/);
-assert.match(portalSource, /fetch\('\/api\/portal\/notification-routing'/, "client must call the authenticated Portal API path");
-assert.doesNotMatch(portalSource, /fetch\('\/api\/notification-routing'/, "obsolete non-Portal path must be absent");
-assert.match(portalSource, /NOTIFICATION_ROUTING_UNAVAILABLE/, "server errors must remain JSON");
-assert.match(portalSource, /NON_JSON_RESPONSE/, "client must report non-JSON diagnostics");
-assert.match(portalSource, /默认只通知开发者/);
+assert.equal(fs.existsSync("src/portal/notification-routing.js"), false, "manual notification-routing Portal surface must stay removed");
+const membersSource = fs.readFileSync("src/portal/members.js", "utf8");
+assert.doesNotMatch(membersSource, /notification-routing|injectNotificationRoutingClient|handleNotificationRoutingApi/, "member Portal must not expose manual notification routing");
 for (const eventId of ["join_request_pending", "join_request_failed", "group_work_request"]) assert.match(moderationSource, new RegExp(eventId));
 for (const eventId of ["appeal_created", "suggestion_created", "bug_created", "quality_feedback_created"]) assert.match(operationsSource, new RegExp(eventId));
 console.log("verify-notification-routing: ok");
