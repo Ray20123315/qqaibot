@@ -236,24 +236,42 @@ async function getRuntimeRateLimitSeconds(env, groupId) {
 
 
 
+function runtimeRateLimitScope({ groupId, userId, isPrivate }) {
+  return `${isPrivate ? "private" : "group"}:${groupId || ""}:${userId}`;
+}
+
+
+
 async function checkRuntimeRateLimit(env, { groupId, userId, isPrivate }) {
   const seconds = await getRuntimeRateLimitSeconds(env, groupId);
-  if (seconds <= 0) return { allowed: true, seconds: 0, remaining: 0, notify: false };
-  const scope = `${isPrivate ? "private" : "group"}:${groupId || ""}:${userId}`;
+  if (seconds <= 0) return { allowed: true, seconds: 0, remaining: 0, notify: false, completedAt: 0 };
+  const scope = runtimeRateLimitScope({ groupId, userId, isPrivate });
   const key = `runtime_rate_limit_last:${scope}`;
   const noticeKey = `runtime_rate_limit_notice:${scope}`;
   const now = Date.now();
-  const lastAt = Number(await dbGet(env, key) || 0);
-  const remainingMs = seconds * 1000 - (now - lastAt);
-  if (lastAt && remainingMs > 0) {
+  const completedAt = Number(await dbGet(env, key) || 0);
+  const remainingMs = seconds * 1000 - (now - completedAt);
+  if (completedAt && remainingMs > 0) {
     const lastNotifiedFor = Number(await dbGet(env, noticeKey) || 0);
-    const notify = lastNotifiedFor !== lastAt;
-    if (notify) await dbPut(env, noticeKey, String(lastAt));
-    return { allowed: false, seconds, remaining: Math.ceil(remainingMs / 1000), notify };
+    const notify = lastNotifiedFor !== completedAt;
+    if (notify) await dbPut(env, noticeKey, String(completedAt));
+    return { allowed: false, seconds, remaining: Math.ceil(remainingMs / 1000), notify, completedAt };
   }
-  await dbPut(env, key, String(now));
+  return { allowed: true, seconds, remaining: 0, notify: false, completedAt };
+}
+
+
+
+async function markRuntimeRateLimitCompletion(env, { groupId, userId, isPrivate }, completedAt = Date.now()) {
+  const seconds = await getRuntimeRateLimitSeconds(env, groupId);
+  if (seconds <= 0) return { marked: false, seconds: 0, completedAt: 0 };
+  const scope = runtimeRateLimitScope({ groupId, userId, isPrivate });
+  const key = `runtime_rate_limit_last:${scope}`;
+  const noticeKey = `runtime_rate_limit_notice:${scope}`;
+  const at = Math.max(1, Number(completedAt) || Date.now());
+  await dbPut(env, key, String(at));
   await dbDel(env, noticeKey);
-  return { allowed: true, seconds, remaining: 0, notify: false };
+  return { marked: true, seconds, completedAt: at };
 }
 
 
@@ -604,4 +622,4 @@ async function callOneBotAction(env, actionPayload, timeoutMs = 15000) {
   return data.data;
 }
 
-export { PERMISSIONS, appendIndex, buildLongGroupConversationContext, callOneBotAction, checkRuntimeRateLimit, enrichAuditLogsForPortal, explicitProgramPermissionIndexKey, getEffectivePermissions, getRuntimeRateLimitSeconds, isKnownOutboundMessage, listAiDecisionLogs, listExplicitPrivateAccess, listExplicitProgramPermissions, markOutboundPending, modelCapabilityLabel, modelHealthStatusLabel, modelHealthStatusRank, modelPreferenceLabel, normalizeFingerprintText, normalizeMemoryItems, normalizeModelPreference, normalizePermissionName, outboundFingerprint, permissionLabel, removeFromIndex, setExplicitPermission, setPrivateAccessMode, updateAiDecisionLog, updateExplicitProgramPermissionIndex, writeAiDecisionLog, writeSystemAudit };
+export { PERMISSIONS, appendIndex, buildLongGroupConversationContext, callOneBotAction, checkRuntimeRateLimit, enrichAuditLogsForPortal, explicitProgramPermissionIndexKey, getEffectivePermissions, getRuntimeRateLimitSeconds, isKnownOutboundMessage, listAiDecisionLogs, listExplicitPrivateAccess, listExplicitProgramPermissions, markOutboundPending, markRuntimeRateLimitCompletion, modelCapabilityLabel, modelHealthStatusLabel, modelHealthStatusRank, modelPreferenceLabel, normalizeFingerprintText, normalizeMemoryItems, normalizeModelPreference, normalizePermissionName, outboundFingerprint, permissionLabel, removeFromIndex, runtimeRateLimitScope, setExplicitPermission, setPrivateAccessMode, updateAiDecisionLog, updateExplicitProgramPermissionIndex, writeAiDecisionLog, writeSystemAudit };
