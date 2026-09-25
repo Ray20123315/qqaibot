@@ -10,6 +10,7 @@ import { botCanRunRuleMonitor, enrichPortalGroupsWithBindings, filterAuthorizedR
 import { apiModelHealthCandidates, buildHealthState, runHealthChecks, runSingleApiModelHealthCheck } from "../health/runtime.js";
 import { toSimplifiedChinese } from "../i18n/commands.js";
 import { BILIBILI_POLL_DEFAULT_SECONDS, bilibiliPollIntervalSeconds, listBilibiliConnectors, normalizeBilibiliUid, pollOneAutomaticBilibiliConnector, sendBilibiliConnectorNotification } from "../integrations/bilibili.js";
+import { AI_PROVIDER_TASKS, AI_PROVIDER_TYPES, deleteProviderAccount, providerRegistryState, upsertProviderAccount, writeProviderRoute } from "../ai/provider-registry.js";
 import { appendRuleViolationRecord, createModerationProposal, defaultRuleCategoryPolicies, getGroupMemberSafe, getRuleCategoryPolicies, getRuleProgressivePolicy, handleGroupWorkDecision, handleModerationConfirmation, listModerationProposals, localModerationIntent, moderationActionLabel, moderationActionNeedsTarget, normalizeRuleCategoryPolicies, normalizeRulePolicyActions, normalizeRuleProgressivePolicy, normalizeRuleProxyMode, normalizeRuleSeverity, normalizeRuleStrictness, parseUnlimitedNonNegativeInteger, performRuleProxyAction, recordRuleViolationFeedback, reverseRuleViolationAction, updateRuleViolationRecord } from "../moderation/runtime.js";
 import { fetchConversationAttachmentResponse, getForwardMessageSnapshot, getTaipeiTimeContext, parseDurationSeconds, sendGroupRoleMentions, updatePortalConversationRecord } from "../onebot/messages.js";
 import { OPS_CAPABILITIES, OPS_RECORD_TYPES, opsActiveRuleRecords, opsActivityParticipants, opsActivitySummary, opsAnalytics, opsAnnounceActivity, opsCapabilityDef, opsCleanupThinking, opsConsumeQuota, opsCreateScheduleFromSpec, opsDeleteRecord, opsDependencyCheck, opsEffectiveCapability, opsExecuteHandoff, opsFuseState, opsGetRecord, opsGetSettings, opsImpactPreview, opsInviteActivityParticipant, opsJoinActivity, opsLeaveActivity, opsListRecords, opsMemberSummary, opsModelMetrics, opsPatchActivityParticipant, opsPermissionKey, opsPollVotesKey, opsPreviewMessage, opsPublishAnnouncement, opsPurgeRemovedRecordTypes, opsRecordKey, opsRecordQualityFeedback, opsRemovedType, opsRequire, opsResetFuse, opsRestoreSnapshot, opsRetentionCleanup, opsRoleRank, opsRuleConflictCheck, opsRuleSandbox, opsSaveRecord, opsSaveSettings, opsSchedulePreview, opsSendDailyDigest, opsSendDraftNow, opsSnapshotConfig, opsTaipeiDateKey, opsTaskAction, opsTaskCenter, opsTypeDef, opsVersionKey, opsVotePoll, opsWelcomePreview } from "../operations/runtime.js";
@@ -2166,6 +2167,60 @@ if (request.method === "POST" && path === "/admin/active-speaking-test") {
         private_appeal_enabled: await getFeatureFlag(env, "private_appeal_enabled", true)
       }
     });
+  }
+
+  if (request.method === "GET" && path === "/root/ai-providers") {
+    const state = await providerRegistryState(env);
+    return jsonResponse({
+      ok: true,
+      providerTypes: AI_PROVIDER_TYPES,
+      taskKinds: AI_PROVIDER_TASKS,
+      ...state,
+      encryptionReady: Boolean(String(env.AI_PROVIDER_ENCRYPTION_KEY || env.PORTAL_AUTH_SECRET || "").trim().length >= 24),
+      note: "帳號秘密只會以環境變數參照或 AES-GCM 加密資料保存；API 回應不回傳明文秘密。"
+    });
+  }
+
+  if (request.method === "POST" && path === "/root/ai-providers") {
+    const action = String(body.action || "upsert").trim().toLowerCase();
+    try {
+      if (action === "delete") {
+        const id = String(body.id || "").trim();
+        if (!id) return jsonResponse({ ok: false, message: "缺少 Provider 帳號 ID。" }, 400);
+        await deleteProviderAccount(env, id);
+        await writeSystemAudit(env, { type: "ai_provider_account", groupId, actorId: authed.qq, action: "delete", targetId: id });
+        return jsonResponse({ ok: true, state: await providerRegistryState(env), message: "Provider 帳號已刪除。" });
+      }
+      if (action === "route") {
+        const task = String(body.task || "").trim().toLowerCase();
+        const route = await writeProviderRoute(env, task, Array.isArray(body.accountIds) ? body.accountIds : []);
+        await writeSystemAudit(env, { type: "ai_provider_route", groupId, actorId: authed.qq, action: task, route });
+        return jsonResponse({ ok: true, task, route, state: await providerRegistryState(env), message: "Provider 路由已更新。" });
+      }
+      const account = await upsertProviderAccount(env, {
+        id: body.id,
+        provider: body.provider,
+        label: body.label,
+        enabled: body.enabled,
+        tasks: body.tasks,
+        endpoint: body.endpoint,
+        model: body.model,
+        accountId: body.accountId,
+        gatewayId: body.gatewayId,
+        billingMode: body.billingMode,
+        currency: body.currency,
+        quota: body.quota,
+        secretEnv: body.secretEnv,
+        ...(Object.prototype.hasOwnProperty.call(body, "secret") ? { secret: body.secret } : {}),
+        metadata: body.metadata
+      });
+      await writeSystemAudit(env, { type: "ai_provider_account", groupId, actorId: authed.qq, action: "upsert", targetId: account.id, provider: account.provider, tasks: account.tasks });
+      return jsonResponse({ ok: true, account, state: await providerRegistryState(env), message: "Provider 帳號與額度設定已保存。" });
+    } catch (error) {
+      const code = String(error?.code || error?.message || "AI_PROVIDER_UPDATE_FAILED");
+      const status = /ENCRYPTION_KEY_REQUIRED/.test(code) ? 503 : 400;
+      return jsonResponse({ ok: false, code, message: /ENCRYPTION_KEY_REQUIRED/.test(code) ? "要在後台保存 Provider 密鑰，請先設定 AI_PROVIDER_ENCRYPTION_KEY（至少 24 字元）；也可只填 secretEnv 使用 Cloudflare Secret。" : String(error?.message || error) }, status);
+    }
   }
 
   if (request.method === "GET" && path === "/root/program-permissions") {
