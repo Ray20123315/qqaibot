@@ -4,6 +4,7 @@ import {
   readProviderRoute,
   recordProviderUsage
 } from "./provider-registry.js";
+import { callCodexBridgeWebSocket, usesWorkerCodexWebSocket } from "../v3/ai/codex-bridge.js";
 
 function clampNumber(value, fallback, min, max) {
   const n = Number(value);
@@ -160,7 +161,18 @@ async function callCloudflareWorkersAi(account, secret, input, fetchImpl) {
   return { text, model, usage: normalizeUsage(account.provider, payload), rawUsage: result?.usage || payload?.usage || null };
 }
 
-async function callCodexBridge(account, secret, input, fetchImpl) {
+async function callCodexBridge(account, secret, input, fetchImpl, env = null) {
+  if (usesWorkerCodexWebSocket(account)) {
+    if (!env) throw new Error("AI_PROVIDER_CODEX_BRIDGE_WS_ENV_REQUIRED");
+    const result = await callCodexBridgeWebSocket(env, account, input);
+    return {
+      text: result.text,
+      model: result.model,
+      usage: normalizeUsage(account.provider, { usage: result.usage || {} }),
+      rawUsage: result.usage || null,
+      allowance: result.allowance || null
+    };
+  }
   if (!account.endpoint) throw new Error("AI_PROVIDER_CODEX_BRIDGE_ENDPOINT_REQUIRED");
   const url = /\/v1\/qqai\/chat(?:\?|$)/i.test(account.endpoint) ? account.endpoint : joinUrl(account.endpoint, "v1/qqai/chat");
   const messages = normalizeMessages(input);
@@ -205,7 +217,7 @@ async function executeProviderAccount(env, account, input = {}, dependencies = {
   } else if (full.provider === "cloudflare_workers_ai") {
     result = await callCloudflareWorkersAi(full, secret, input, fetchImpl);
   } else if (full.provider === "codex_bridge") {
-    result = await callCodexBridge(full, secret, input, fetchImpl);
+    result = await callCodexBridge(full, secret, input, fetchImpl, env);
   } else {
     throw new Error("AI_PROVIDER_NOT_IMPLEMENTED:" + full.provider);
   }
