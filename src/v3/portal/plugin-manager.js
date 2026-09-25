@@ -454,7 +454,7 @@ function injectV3PluginManagerClient(html) {
     + "var modalClose=document.getElementById('v3PluginModalClose');\n"
     + "var pluginCache={};var activeDetailId='';\n"
     + "if(!nav||!list||!state||!modal||!modalBody)return;\n"
-    + "function esc(v){return String(v==null?'':v).replace(/[&<>\\\"']/g,function(c){return{'&':'&amp;','<':'&lt;','>':'&gt;','\\\"':'&quot;',\\\"'\\\":'&#39;'}[c]})}\n"
+    + "function esc(v){return String(v==null?'':v).replace(/[&<>\\\"']/g,function(c){if(c==='&')return'&amp;';if(c==='<')return'&lt;';if(c==='>')return'&gt;';if(c==='\\\"')return'&quot;';return'&#39;'})}\n"
     + "function statusClass(v){v=String(v||'').toUpperCase();return v==='OK'||v==='ENABLED'?'ok':v==='DEGRADED'||v==='DISABLED'||v==='BLOCKED'?'warning':'error'}\n"
     + "function statusLabel(v){v=String(v||'').toUpperCase();return({OK:'正常',ENABLED:'已启用',DEGRADED:'部分可用',DISABLED:'已停用',BLOCKED:'已阻止',ERROR:'错误',UNKNOWN:'未知'})[v]||v}\n"
     + "async function req(path,method,body){var init={method:method||'GET',headers:{Accept:'application/json'}};if(body!==undefined){init.headers['Content-Type']='application/json';init.body=JSON.stringify(body)}var res=await fetch('/api/portal/v3/plugins'+(path||''),init),data={};try{data=await res.json()}catch(e){}return{status:res.status,data:data}}\n"
