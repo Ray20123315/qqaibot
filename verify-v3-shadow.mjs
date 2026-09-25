@@ -59,11 +59,6 @@ assert.match(log, /\[v3-shadow\]/);
 assert.match(log, /group_message/);
 assert.match(log, /mface/);
 
-const wrapper = fs.readFileSync("src/games/werewolf.js", "utf8");
-assert.match(wrapper, /runV3ShadowEvent/);
-assert.match(wrapper, /shadowEnabled\(env\)/);
-assert.match(wrapper, /async function handleLegacyWerewolfOneBotEvent/);
-assert.match(wrapper, /return handleLegacyWerewolfOneBotEvent\(env, body\)/);
-assert.match(wrapper, /catch/);
+assert.equal(fs.existsSync("src/games/werewolf.js"), false, "removed werewolf wrapper must stay absent");
 
 console.log("verify-v3-shadow: ok");
