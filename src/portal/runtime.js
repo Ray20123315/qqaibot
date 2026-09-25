@@ -1365,11 +1365,14 @@ ${summary}`.slice(0, 4000),
     const { webhookSecret, bridgeSecret, ...safeItem } = item;
     return jsonResponse({
       ok: true,
-      message: requestedMode === "generic_webhook"
-        ? "Webhook 监控已保存。请把回调地址配置到哔哩哔哩开放平台，或合法授权的事件中继。"
-        : "兼容轮询已保存；首次检查只建立基准。建议优先改用 Webhook。",
+      message: requestedMode === "open_live_bridge"
+        ? "Open Live 官方长连接已保存；B站端不需要设置 Webhook。请把 bridge 地址配置到随项目提供的 bridge 进程。"
+        : requestedMode === "generic_webhook"
+          ? "Webhook 监控已保存。请把回调地址配置到开放平台或合法授权的事件中继。"
+          : "兼容低频轮询已保存；首次检查只建立基准。公开接口只作为备援。",
       connector: safeItem,
-      webhookUrl
+      webhookUrl,
+      bridgeUrl
     });
   }
 
