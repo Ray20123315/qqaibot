@@ -123,8 +123,7 @@ function buildHelpText({
   permissionSet = {},
   isDeveloper = false,
   isOwner = false,
-  portalUrl = "",
-  liveUrl = ""
+  portalUrl = ""
 } = {}) {
   const sections = [...COMMON_SECTIONS];
   if (permissionSet.aiAdmin) sections.push(AI_ADMIN_SECTION);
@@ -132,10 +131,7 @@ function buildHelpText({
   if (isOwner || isDeveloper) sections.push(OWNER_SECTION);
   if (isDeveloper) sections.push(DEVELOPER_SECTION);
 
-  const publicLinks = [
-    portalUrl ? `• Portal：${portalUrl}` : "",
-    liveUrl ? `• Live：${liveUrl}` : ""
-  ].filter(Boolean);
+  const publicLinks = [portalUrl ? `• Portal：${portalUrl}` : ""].filter(Boolean);
 
   return [
     `QQAI ${VERSION} 指令帮助`,
