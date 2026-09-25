@@ -9,9 +9,11 @@ assert.equal(verifyOneBotAccess(new Request("https://qqai.test/onebot?access_tok
 assert.equal(verifyOneBotAccess(new Request("https://qqai.test/onebot?token=test-onebot-secret"), env), false);
 assert.equal(verifyOneBotAccess(new Request("https://qqai.test/onebot", { headers: { Authorization: "Bearer wrong" } }), env), false);
 
-const portalSource = fs.readFileSync("src/portal/runtime.js", "utf8");
-const appealApi = portalSource.slice(portalSource.indexOf("async function handleAppealApi"), portalSource.indexOf("function renderAppeal", portalSource.indexOf("async function handleAppealApi")));
-assert.doesNotMatch(appealApi, /body\.token|searchParams\.get\(['"]token['"]\)/);
-assert.match(appealApi, /headers\.get\(['"]Authorization['"]\)/);
+const networkSource = fs.readFileSync("src/security/network.js", "utf8");
+const verifyStart = networkSource.indexOf("function verifyOneBotAccess");
+const verifyEnd = networkSource.indexOf("async function getFeatureFlag", verifyStart);
+const verifySource = verifyStart >= 0 && verifyEnd > verifyStart ? networkSource.slice(verifyStart, verifyEnd) : "";
+assert.match(verifySource, /headers\.get\(["']Authorization["']\)/);
+assert.doesNotMatch(verifySource, /request\.url|new URL\(|searchParams/, "OneBot auth must not inspect URL query credentials");
 
 console.log("verify-onebot-auth-transport: ok");

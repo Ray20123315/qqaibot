@@ -6,7 +6,6 @@ function assert(condition, message) {
 }
 
 const exact = new Map([
-  ['GET https://qqai.ray2025.com/live', [200, '442975303baab9496a23faa71f30d466eb3b8b00ab538a0bb6586eef598027c5']],
   ['GET https://qqai.ray2025.com/appeal', [302, 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855']],
   ['GET https://qqai.ray2025.com/api/public/nebula', [200, '2c0c8c47f8c1bf6065a949b54eb3e92d67a6b3e02421a763c24c955332ae117a']],
   ['GET https://qqai.ray2025.com/api/appeal/legacy', [410, '742af5935f732e949d512573364e3672fcdc6a01ee0c266510b7582bcf46304e']],
@@ -25,6 +24,11 @@ for (const path of ['/', '/portal', '/matrix']) {
   else assert(hash === portalHash, `${key}: Portal route variants must remain identical`);
 }
 
+const removedLive = await worker.fetch(new Request('https://qqai.ray2025.com/live', { method: 'GET' }), {}, ctx);
+const removedLiveBody = await removedLive.text();
+assert(removedLive.status === 404, `GET /live: expected deleted route status 404, got ${removedLive.status}`);
+assert(!/Gemini Live|实时语音|即時語音/i.test(removedLiveBody), 'GET /live: legacy Live page content must stay removed');
+
 for (const [key, [expectedStatus, expectedHash]] of exact) {
   const splitAt = key.indexOf(' ');
   const method = key.slice(0, splitAt);
@@ -35,4 +39,4 @@ for (const [key, [expectedStatus, expectedHash]] of exact) {
   assert(response.status === expectedStatus, `${key}: expected status ${expectedStatus}, got ${response.status}`);
   assert(hash === expectedHash, `${key}: response body changed (${hash})`);
 }
-console.log(`verify-routes: ok (${exact.size + 3} public routes)`);
+console.log(`verify-routes: ok (${exact.size + 4} checked public routes; /live removed)`);

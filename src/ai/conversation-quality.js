@@ -131,27 +131,6 @@ function splitOutboundText(value, options = {}) {
   return parts.filter(Boolean);
 }
 
-function normalizeMeetingMinuteCount(value, options = {}) {
-  const fallback = Math.max(1, Number(options.fallback || 50));
-  const minimum = Math.max(1, Number(options.minimum || 10));
-  const maximum = Math.max(minimum, Number(options.maximum || 500));
-  const parsed = Number.parseInt(String(value ?? ""), 10);
-  return Math.max(minimum, Math.min(maximum, Number.isFinite(parsed) ? parsed : fallback));
-}
-
-function buildMeetingMinuteBatches(logs, options = {}) {
-  const requested = normalizeMeetingMinuteCount(options.requested ?? (Array.isArray(logs) ? logs.length : 50));
-  const target = (Array.isArray(logs) ? logs : []).map(String).filter(Boolean).slice(-requested);
-  if (!target.length) return [];
-  const directLimit = Math.max(50, Number(options.directLimit || 170));
-  const maxBatches = Math.max(1, Math.min(3, Number(options.maxBatches || 3)));
-  const batchCount = target.length <= directLimit ? 1 : Math.min(maxBatches, Math.ceil(target.length / directLimit));
-  const size = Math.ceil(target.length / batchCount);
-  const batches = [];
-  for (let index = 0; index < target.length; index += size) batches.push(target.slice(index, index + size));
-  return batches;
-}
-
 function buildImmediateConversationContext({ logs = [], currentText = "", relationContext = "", maxMessages = 80, maxChars = 16000 } = {}) {
   const source = (Array.isArray(logs) ? logs : []).map(String).filter(Boolean).slice(-Math.max(1, Number(maxMessages || 80)));
   const current = String(currentText || "").trim();
@@ -175,14 +154,12 @@ export {
   DEFAULT_OUTBOUND_MAX_PARTS,
   DEFAULT_REPLY_HARD_CHARS,
   buildImmediateConversationContext,
-  buildMeetingMinuteBatches,
   closeIncompleteReply,
   compactInterjectionAtBoundary,
   completeTextAtBoundary,
   finishReasonReachedLimit,
   mergeContinuationText,
   normalizeFinishReason,
-  normalizeMeetingMinuteCount,
   replyLooksIncomplete,
   splitOutboundText,
   unicodeLength

@@ -78,17 +78,12 @@ function publicPortalUrl(env = {}, requestOrigin = "") {
   return base ? `${base}/` : "";
 }
 
-function publicLiveUrl(env = {}, requestOrigin = "") {
-  const base = publicBaseUrl(env, requestOrigin);
-  return base ? `${base}/live` : "";
-}
 
 function deploymentPublicConfig(env = {}, requestOrigin = "") {
   return Object.freeze({
     developerIds: developerIds(env),
     publicBaseUrl: publicBaseUrl(env, requestOrigin),
     botDisplayName: envString(env?.BOT_DISPLAY_NAME, "QQAI"),
-    autoCheckinConcurrency: envInteger(env?.AUTO_CHECKIN_CONCURRENCY, 12, 1, 30),
     deployNotifyWorkerName: envString(env?.DEPLOY_NOTIFY_WORKER_NAME, "qqai"),
     deployNotifyBranch: envString(env?.DEPLOY_NOTIFY_BRANCH, "main")
   });
@@ -107,6 +102,5 @@ export {
   normalizePublicBaseUrl,
   normalizeQqId,
   publicBaseUrl,
-  publicLiveUrl,
   publicPortalUrl
 };

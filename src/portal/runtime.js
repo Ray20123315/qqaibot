@@ -10,17 +10,27 @@ import { botCanRunRuleMonitor, enrichPortalGroupsWithBindings, filterAuthorizedR
 import { apiModelHealthCandidates, buildHealthState, runHealthChecks, runSingleApiModelHealthCheck } from "../health/runtime.js";
 import { toSimplifiedChinese } from "../i18n/commands.js";
 import { BILIBILI_POLL_DEFAULT_SECONDS, bilibiliPollIntervalSeconds, listBilibiliConnectors, normalizeBilibiliUid, pollOneAutomaticBilibiliConnector, sendBilibiliConnectorNotification } from "../integrations/bilibili.js";
+import { AI_PROVIDER_TASKS, AI_PROVIDER_TYPES, deleteProviderAccount, providerRegistryState, upsertProviderAccount, writeProviderRoute } from "../ai/provider-registry.js";
 import { appendRuleViolationRecord, createModerationProposal, defaultRuleCategoryPolicies, getGroupMemberSafe, getRuleCategoryPolicies, getRuleProgressivePolicy, handleGroupWorkDecision, handleModerationConfirmation, listModerationProposals, localModerationIntent, moderationActionLabel, moderationActionNeedsTarget, normalizeRuleCategoryPolicies, normalizeRulePolicyActions, normalizeRuleProgressivePolicy, normalizeRuleProxyMode, normalizeRuleSeverity, normalizeRuleStrictness, parseUnlimitedNonNegativeInteger, performRuleProxyAction, recordRuleViolationFeedback, reverseRuleViolationAction, updateRuleViolationRecord } from "../moderation/runtime.js";
 import { fetchConversationAttachmentResponse, getForwardMessageSnapshot, getTaipeiTimeContext, parseDurationSeconds, sendGroupRoleMentions, updatePortalConversationRecord } from "../onebot/messages.js";
 import { OPS_CAPABILITIES, OPS_RECORD_TYPES, opsActiveRuleRecords, opsActivityParticipants, opsActivitySummary, opsAnalytics, opsAnnounceActivity, opsCapabilityDef, opsCleanupThinking, opsConsumeQuota, opsCreateScheduleFromSpec, opsDeleteRecord, opsDependencyCheck, opsEffectiveCapability, opsExecuteHandoff, opsFuseState, opsGetRecord, opsGetSettings, opsImpactPreview, opsInviteActivityParticipant, opsJoinActivity, opsLeaveActivity, opsListRecords, opsMemberSummary, opsModelMetrics, opsPatchActivityParticipant, opsPermissionKey, opsPollVotesKey, opsPreviewMessage, opsPublishAnnouncement, opsPurgeRemovedRecordTypes, opsRecordKey, opsRecordQualityFeedback, opsRemovedType, opsRequire, opsResetFuse, opsRestoreSnapshot, opsRetentionCleanup, opsRoleRank, opsRuleConflictCheck, opsRuleSandbox, opsSaveRecord, opsSaveSettings, opsSchedulePreview, opsSendDailyDigest, opsSendDraftNow, opsSnapshotConfig, opsTaipeiDateKey, opsTaskAction, opsTaskCenter, opsTypeDef, opsVersionKey, opsVotePoll, opsWelcomePreview } from "../operations/runtime.js";
 import { appendPlatformTrace, enqueuePlatformJob, listPlatformFeatures, listPlatformJobs, listPlatformTraces, platformFeatureById, setPlatformFeature } from "../platform/runtime.js";
 import { PORTAL_SETTING_DEFINITIONS, authDbDelStrict, authDbPutStrict, base32Encode, createPortalPasswordRecord, decryptPortalAuthSecret, deleteMemoryVector, encryptPortalAuthSecret, extractGroupId, generateBackupCodes, generateSixDigitCode, getOneBotHub, getPortalSession, getUserQuota, hashBackupCode, isMemoryBanned, jsonResponse, migratePortalMemories, portalAuthEncryptionMaterial, portalRoleRank, portalSessionCookie, randomBytes, readCookie, readJson, readPortalAuthJson, readPortalSettingValue, resolvePortalRole, searchPortalVectors, sendOneBotAction, sendPortalVerificationMessage, sha256Hex, upsertMemoryVector, validatePortalPassword, verifyPortalPassword, verifyPortalVerificationCode, verifyTotpCode, writeMemoryAudit, writePortalSettingValue } from "./auth.js";
+import { resolvePortalAccountIdentity } from "./account-identity.js";
 import { handlePortalMemberApi } from "./members.js";
-import { handleWerewolfPortalApi } from "../games/werewolf.js";
 import { cancelSchedule, countActiveSchedulesForUser, createScheduleRecord, deleteScheduleRecord, extractScheduleMentionIds, listUserSchedules, parseManagementScheduleAction, parseScheduleRequest, reviewScheduleWithGemma, reviseScheduleRecord, sanitizeAppealForReviewer, scheduleSpecFromRecord, skipScheduleOnce, voteAppeal, voteSchedule } from "../scheduler/runtime.js";
 import { envFlag, getFeatureFlag, getPrivateAccessMode, isGroupWhitelisted, numericId, setFeatureFlag } from "../security/network.js";
 
 
+
+function normalizePortalIdentityFallback(session = {}) {
+  if (session.systemAdmin) return {
+    kind: "system_admin", qq: "", username: String(session.username || "admin"), nickname: "", card: "",
+    displayName: String(session.username || "admin"), groupRole: "developer", source: "system_admin", live: false
+  };
+  const qq = String(session.qq || "").replace(/\D/g, "");
+  return { kind: "qq", qq, username: "", nickname: "", card: "", displayName: qq ? `QQ ${qq}` : "QQ 使用者", groupRole: session.role || "member", source: "portal_session", live: false };
+}
 
 async function handleOpsPortalApi(request, env, url, path, body, authed) {
   if (!path.startsWith("/ops/")) return null;
@@ -827,15 +837,15 @@ async function handlePortalApi(request, env, url) {
   const operationsResponse = await handleOpsPortalApi(request, env, url, path, body, authed);
   if (operationsResponse) return operationsResponse;
 
-  const werewolfPortalResponse = await handleWerewolfPortalApi(request, env, url, path, body, authed);
-  if (werewolfPortalResponse) return werewolfPortalResponse;
   const memberResponse = await handlePortalMemberApi(request, env, url, path, body, authed);
   if (memberResponse) return memberResponse;
 
   if (request.method === "GET" && path === "/me") {
+    const account = await resolvePortalAccountIdentity(env, authed).catch(() => normalizePortalIdentityFallback(authed));
     return jsonResponse({
       ok: true,
       session: authed,
+      account,
       quota: groupId ? await getUserQuota(env, groupId, authed.qq) : "未选择群组",
       modelPreference: groupId ? (await dbGet(env, `model_pref:${groupId}:${authed.qq}`) || "auto") : "auto",
       privateAccess: await getPrivateAccessMode(env, authed.qq),
@@ -1168,153 +1178,87 @@ ${summary}`.slice(0, 4000),
   }
 
   if (request.method === "GET" && path === "/integrations/bilibili") {
-    if (!(permissions.aiAdmin || permissions.groupOps || permissions.nativeAdmin || portalIsDeveloper)) return jsonResponse({ ok: false, message: "缺少 B站监控管理权限。" }, 403);
+    if (!(permissions.aiAdmin || permissions.groupOps || permissions.nativeAdmin || portalIsDeveloper)) return jsonResponse({ ok: false, message: "缺少 B站監控管理權限。" }, 403);
     const connectors = await listBilibiliConnectors(env, groupId);
     return jsonResponse({
       ok: true,
-      connectors: connectors.map(item => { const { webhookSecret, ...safe } = item; return { ...safe, mode: item.mode === "generic_webhook" ? "official_webhook" : "automatic_polling", webhookUrl: item.webhookSecret ? `${url.origin}/api/integrations/bilibili/webhook/${item.webhookSecret}` : "" }; }),
-      note: "推荐使用哔哩哔哩开放平台 Webhook 或经过合法授权的中继。412／429 属于平台风控，系统不会伪造身份、代理轮换或提高频率绕过；兼容轮询最低 30 分钟一次并自动退避。"
+      connectors: connectors.map(item => {
+        const { webhookSecret, bridgeSecret, ...safe } = item;
+        return { ...safe, mode: "automatic_polling" };
+      }),
+      note: "B站監控只使用低頻輪詢，不需要 Webhook 或 bridge。預設／最低 30 分鐘；412／429 會自動退避。需要登入態時僅從 Worker secret BILIBILI_COOKIE 讀取。"
     });
   }
   if (request.method === "POST" && path === "/integrations/bilibili") {
-    if (!(permissions.aiAdmin || permissions.groupOps || permissions.nativeAdmin || portalIsDeveloper)) return jsonResponse({ ok: false, message: "缺少 B站监控管理权限。" }, 403);
+    if (!(permissions.aiAdmin || permissions.groupOps || permissions.nativeAdmin || portalIsDeveloper)) return jsonResponse({ ok: false, message: "缺少 B站監控管理權限。" }, 403);
     const action = String(body.action || "save");
     if (action === "delete") {
       const item = await readJson(env, `bili:connector:${body.id}`, null);
-      if (!item || item.groupId !== groupId) return jsonResponse({ ok: false, message: "找不到监控项目。" }, 404);
-      if (item.webhookSecret) await dbDel(env, `bili:webhook_secret:${item.webhookSecret}`);
+      if (!item || item.groupId !== groupId) return jsonResponse({ ok: false, message: "找不到監控項目。" }, 404);
+      if (item.webhookSecret) await dbDel(env, `bili:webhook_secret:${item.webhookSecret}`).catch(() => {});
+      if (item.bridgeSecret) await dbDel(env, `bili:bridge_secret:${item.bridgeSecret}`).catch(() => {});
       await dbDel(env, `bili:connector:${item.id}`);
       await removeFromIndex(env, `bili:connector:index:${groupId}`, item.id);
       await removeFromIndex(env, "bili:connector:index:all", item.id);
       await writeSystemAudit(env, { type: "bilibili_auto_monitor", groupId, actorId: authed.qq, action: "delete", connectorId: item.id });
-      return jsonResponse({ ok: true, message: "B站自动监控已删除。" });
-    }
-
-    if (action === "rotate_webhook") {
-      const item = await readJson(env, `bili:connector:${body.id}`, null);
-      if (!item || item.groupId !== groupId) return jsonResponse({ ok: false, message: "找不到监控项目。" }, 404);
-      if (item.mode !== "generic_webhook") return jsonResponse({ ok: false, message: "当前不是 Webhook 模式。" }, 400);
-      if (item.webhookSecret) await dbDel(env, `bili:webhook_secret:${item.webhookSecret}`);
-      item.webhookSecret = crypto.randomUUID().replaceAll("-", "");
-      item.updatedAt = Date.now();
-      await dbPut(env, `bili:webhook_secret:${item.webhookSecret}`, item.id);
-      await dbPut(env, `bili:connector:${item.id}`, JSON.stringify(item));
-      await writeSystemAudit(env, { type: "bilibili_auto_monitor", groupId, actorId: authed.qq, action: "rotate_webhook", connectorId: item.id, creatorId: item.creatorId });
-      return jsonResponse({ ok: true, message: "Webhook 回调密钥已重新生成；旧地址立即失效。", webhookUrl: `${url.origin}/api/integrations/bilibili/webhook/${item.webhookSecret}` });
-    }
-    if (action === "switch_mode") {
-      const item = await readJson(env, `bili:connector:${body.id}`, null);
-      if (!item || item.groupId !== groupId) return jsonResponse({ ok: false, message: "找不到监控项目。" }, 404);
-      const nextMode = body.mode === "official_webhook" ? "generic_webhook" : "automatic_polling";
-      if (item.webhookSecret && nextMode !== "generic_webhook") {
-        await dbDel(env, `bili:webhook_secret:${item.webhookSecret}`);
-        delete item.webhookSecret;
-      }
-      let webhookUrl = "";
-      if (nextMode === "generic_webhook") {
-        item.webhookSecret = item.webhookSecret || crypto.randomUUID().replaceAll("-", "");
-        await dbPut(env, `bili:webhook_secret:${item.webhookSecret}`, item.id);
-        webhookUrl = `${url.origin}/api/integrations/bilibili/webhook/${item.webhookSecret}`;
-        item.pollIntervalSeconds = 0;
-        item.nextPollAt = 0;
-      } else {
-        item.pollIntervalSeconds = bilibiliPollIntervalSeconds(body.pollIntervalSeconds || BILIBILI_POLL_DEFAULT_SECONDS);
-        item.nextPollAt = Date.now();
-      }
-      item.mode = nextMode;
-      item.updatedAt = Date.now();
-      await dbPut(env, `bili:connector:${item.id}`, JSON.stringify(item));
-      await writeSystemAudit(env, { type: "bilibili_auto_monitor", groupId, actorId: authed.qq, action: "switch_mode", connectorId: item.id, creatorId: item.creatorId, mode: nextMode });
-      return jsonResponse({
-        ok: true,
-        message: nextMode === "generic_webhook"
-          ? "已切换为 Webhook：现在只等待外部事件，不会主动检查 B站。"
-          : "已切换为兼容轮询：可以使用检查频率与立即检查。",
-        webhookUrl
-      });
-    }
-    if (action === "webhook_self_test") {
-      const item = await readJson(env, `bili:connector:${body.id}`, null);
-      if (!item || item.groupId !== groupId) return jsonResponse({ ok: false, message: "找不到监控项目。" }, 404);
-      if (item.mode !== "generic_webhook" || !item.webhookSecret) return jsonResponse({ ok: false, message: "请先切换为 Webhook 模式。" }, 400);
-      const mapped = await dbGet(env, `bili:webhook_secret:${item.webhookSecret}`);
-      if (String(mapped || "") !== String(item.id)) return jsonResponse({ ok: false, message: "Webhook 密钥映射异常，请重新生成回调地址。" }, 409);
-      const testEvent = { type: "video_publish", creatorId: item.creatorId, creatorName: item.creatorName, title: "Webhook 接收自检事件", url: `https://space.bilibili.com/${item.creatorId}`, eventId: `webhook-self-test:${Date.now()}` };
-      const result = await sendBilibiliConnectorNotification(env, item, testEvent);
-      item.lastWebhookTestAt = Date.now();
-      item.lastWebhookTestOk = Boolean(result.ok);
-      item.lastWebhookTestError = result.ok ? "" : String(result.error || "发送失败").slice(0, 500);
-      await dbPut(env, `bili:connector:${item.id}`, JSON.stringify(item));
-      await writeSystemAudit(env, { type: "bilibili_auto_monitor", groupId, actorId: authed.qq, action: "webhook_self_test", connectorId: item.id, ok: result.ok, error: item.lastWebhookTestError });
-      return jsonResponse({ ok: result.ok, message: result.ok ? "Webhook 端点、密钥映射与 QQ 通知发送均通过自检。外部平台仍需实际 POST 事件才能自动通知。" : `Webhook 密钥有效，但 QQ 通知发送失败：${item.lastWebhookTestError}` }, result.ok ? 200 : 502);
+      return jsonResponse({ ok: true, message: "B站自動監控已刪除。" });
     }
     if (action === "test") {
       const item = await readJson(env, `bili:connector:${body.id}`, null);
-      if (!item || item.groupId !== groupId) return jsonResponse({ ok: false, message: "找不到监控项目。" }, 404);
+      if (!item || item.groupId !== groupId) return jsonResponse({ ok: false, message: "找不到監控項目。" }, 404);
       const eventType = body.eventType === "video_publish" ? "video_publish" : "live_start";
-      const result = await sendBilibiliConnectorNotification(env, item, { type: eventType, creatorId: item.creatorId, creatorName: item.creatorName, title: eventType === "live_start" ? "测试直播通知" : "测试新视频通知", url: `https://space.bilibili.com/${item.creatorId}`, eventId: `test:${Date.now()}` });
-      return jsonResponse({ ok: result.ok, message: result.ok ? "测试通知已处理。" : result.error }, result.ok ? 200 : 502);
+      const result = await sendBilibiliConnectorNotification(env, item, { type: eventType, creatorId: item.creatorId, creatorName: item.creatorName, title: eventType === "live_start" ? "測試直播通知" : "測試新影片通知", url: `https://space.bilibili.com/${item.creatorId}`, eventId: `test:${Date.now()}` });
+      return jsonResponse({ ok: result.ok, message: result.ok ? "測試通知已處理。" : result.error }, result.ok ? 200 : 502);
     }
     if (action === "check_now") {
       const item = await readJson(env, `bili:connector:${body.id}`, null);
-      if (!item || item.groupId !== groupId) return jsonResponse({ ok: false, message: "找不到监控项目。" }, 404);
-      if (item.mode === "generic_webhook") return jsonResponse({ ok: false, message: "Webhook 模式不执行主动抓取；请从开放平台或授权中继发送测试事件。" }, 400);
-      const result = await pollOneAutomaticBilibiliConnector(env, item, Date.now(), { force: true });
-      const { webhookSecret, ...safeConnector } = result.connector || item;
-      return jsonResponse({ ok: result.ok, message: result.ok ? (result.baseline ? "检查成功，已建立当前状态基准。" : `检查成功，发现 ${result.events?.length || 0} 个新事件。`) : `检查失败：${result.message}`, connector: safeConnector }, result.ok ? 200 : 502);
+      if (!item || item.groupId !== groupId) return jsonResponse({ ok: false, message: "找不到監控項目。" }, 404);
+      const result = await pollOneAutomaticBilibiliConnector(env, { ...item, mode: "automatic_polling" }, Date.now(), { force: true });
+      const { webhookSecret, bridgeSecret, ...safeConnector } = result.connector || item;
+      return jsonResponse({ ok: result.ok, message: result.ok ? (result.baseline ? "檢查成功，已建立目前狀態基準。" : `檢查成功，發現 ${result.events?.length || 0} 個新事件。`) : `檢查失敗：${result.message}`, connector: safeConnector }, result.ok ? 200 : 502);
     }
     if (action === "update_interval") {
       const item = await readJson(env, `bili:connector:${body.id}`, null);
-      if (!item || item.groupId !== groupId) return jsonResponse({ ok: false, message: "找不到监控项目。" }, 404);
-      if (item.mode === "generic_webhook") return jsonResponse({ ok: false, message: "Webhook 模式没有轮询频率。" }, 400);
+      if (!item || item.groupId !== groupId) return jsonResponse({ ok: false, message: "找不到監控項目。" }, 404);
+      if (item.webhookSecret) await dbDel(env, `bili:webhook_secret:${item.webhookSecret}`).catch(() => {});
+      if (item.bridgeSecret) await dbDel(env, `bili:bridge_secret:${item.bridgeSecret}`).catch(() => {});
+      item.mode = "automatic_polling";
       item.pollIntervalSeconds = bilibiliPollIntervalSeconds(body.pollIntervalSeconds || item.pollIntervalSeconds);
       item.nextPollAt = Date.now() + item.pollIntervalSeconds * 1000;
       item.updatedAt = Date.now();
+      delete item.webhookSecret;
+      delete item.bridgeSecret;
       await dbPut(env, `bili:connector:${item.id}`, JSON.stringify(item));
       await writeSystemAudit(env, { type: "bilibili_auto_monitor", groupId, actorId: authed.qq, action: "update_interval", connectorId: item.id, creatorId: item.creatorId, pollIntervalSeconds: item.pollIntervalSeconds });
-      return jsonResponse({ ok: true, message: `检查频率已改为每 ${Math.round(item.pollIntervalSeconds / 60)} 分钟。`, connector: item });
+      return jsonResponse({ ok: true, message: `檢查頻率已改為每 ${Math.round(item.pollIntervalSeconds / 60)} 分鐘。`, connector: item });
     }
+    if (["switch_mode","rotate_bridge","rotate_webhook","webhook_self_test"].includes(action)) return jsonResponse({ ok: false, message: "Webhook／Open Live bridge 模式已移除；請使用低頻輪詢。" }, 410);
     const id = String(body.id || `bili_${Date.now().toString(36)}_${crypto.randomUUID().slice(0, 8)}`);
     const existing = await readJson(env, `bili:connector:${id}`, null);
-    const requestedMode = body.mode === "official_webhook" ? "generic_webhook" : "automatic_polling";
     const creatorId = normalizeBilibiliUid(body.creatorId || existing?.creatorId || "");
-    if (!creatorId) return jsonResponse({ ok: false, message: "请填写 B站用户的数字 UID，用于核对事件来源。" }, 400);
+    if (!creatorId) return jsonResponse({ ok: false, message: "請填寫 B站使用者的數字 UID。" }, 400);
+    if (existing?.webhookSecret) await dbDel(env, `bili:webhook_secret:${existing.webhookSecret}`).catch(() => {});
+    if (existing?.bridgeSecret) await dbDel(env, `bili:bridge_secret:${existing.bridgeSecret}`).catch(() => {});
     const item = {
-      ...existing,
-      id, groupId,
-      creatorId,
+      ...existing, id, groupId, creatorId,
       creatorName: String(body.creatorName || existing?.creatorName || "").trim().slice(0, 120),
-      mode: requestedMode,
+      mode: "automatic_polling",
       enabled: body.enabled !== false,
-      pollIntervalSeconds: requestedMode === "automatic_polling" ? bilibiliPollIntervalSeconds(body.pollIntervalSeconds || existing?.pollIntervalSeconds) : 0,
+      pollIntervalSeconds: bilibiliPollIntervalSeconds(body.pollIntervalSeconds || existing?.pollIntervalSeconds || BILIBILI_POLL_DEFAULT_SECONDS),
       liveNotify: Boolean(body.liveNotify), liveAtAll: Boolean(body.liveAtAll),
       videoNotify: Boolean(body.videoNotify), videoAtAll: Boolean(body.videoAtAll),
       createdBy: existing?.createdBy || authed.qq,
       createdAt: existing?.createdAt || Date.now(), updatedAt: Date.now(),
-      nextPollAt: 0
+      nextPollAt: Date.now()
     };
-    if (existing?.webhookSecret && requestedMode !== "generic_webhook") await dbDel(env, `bili:webhook_secret:${existing.webhookSecret}`);
-    let webhookUrl = "";
-    if (requestedMode === "generic_webhook") {
-      item.webhookSecret = existing?.webhookSecret || crypto.randomUUID().replaceAll("-", "");
-      await dbPut(env, `bili:webhook_secret:${item.webhookSecret}`, id);
-      webhookUrl = `${url.origin}/api/integrations/bilibili/webhook/${item.webhookSecret}`;
-    } else {
-      delete item.webhookSecret;
-    }
+    delete item.webhookSecret;
+    delete item.bridgeSecret;
     await dbPut(env, `bili:connector:${id}`, JSON.stringify(item));
     await appendIndex(env, `bili:connector:index:${groupId}`, id, 500);
     await appendIndex(env, "bili:connector:index:all", id, 5000);
-    await writeSystemAudit(env, { type: "bilibili_auto_monitor", groupId, actorId: authed.qq, action: existing ? "update" : "create", connectorId: id, creatorId, mode: requestedMode, pollIntervalSeconds: item.pollIntervalSeconds });
-    const { webhookSecret, ...safeItem } = item;
-    return jsonResponse({
-      ok: true,
-      message: requestedMode === "generic_webhook"
-        ? "Webhook 监控已保存。请把回调地址配置到哔哩哔哩开放平台，或合法授权的事件中继。"
-        : "兼容轮询已保存；首次检查只建立基准。建议优先改用 Webhook。",
-      connector: safeItem,
-      webhookUrl
-    });
+    await writeSystemAudit(env, { type: "bilibili_auto_monitor", groupId, actorId: authed.qq, action: existing ? "update" : "create", connectorId: id, creatorId, mode: "automatic_polling", pollIntervalSeconds: item.pollIntervalSeconds });
+    const { webhookSecret, bridgeSecret, ...safeItem } = item;
+    return jsonResponse({ ok: true, message: "低頻輪詢已儲存；首次檢查只建立基準。遇到 B站風控會自動退避。", connector: safeItem });
   }
 
   if (request.method === "GET" && path === "/health/model-candidates") {
@@ -1406,7 +1350,7 @@ ${summary}`.slice(0, 4000),
         chat: `Gemini 聊天优先（${pools.geminiChat.length} 把 Key），Gemma 聊天备用（${pools.gemmaChat.length} 把 Key）`,
         vision: visionConfigured ? `Gemini 独立图片 Key 池（${geminiVisionApiKeys(env).length} 把）` : "未配置，自动关闭",
         search: geminiSearchApiKeys(env).length ? `Gemini 独立搜索 Key 池（${geminiSearchApiKeys(env).length} 把）` : "未配置独立搜索 Key",
-        contextSummary: "DeepSeek 优先整理聊天上下文、会议纪要与吃瓜总结；失败时回退 Google 免费模型",
+        contextSummary: "上下文摘要依模型路由与配额策略执行；失败时自动选择可用的低成本备用模型",
         deepseekChat: portalIsDeveloper ? "开发者可手动使用；普通成员仅在 Google 免费模型连续失败后临时开放" : "普通成员不可手动选择；仅连续失败后临时开放"
       },
       keyPools: portalIsDeveloper ? {
@@ -1465,13 +1409,12 @@ ${summary}`.slice(0, 4000),
     const localManagement = ["owner", "admin"].includes(senderRole) ? localModerationIntent(text) : { action: "none", confidence: 0 };
     const managementCandidate = localManagement.action !== "none" && !isCommand;
     const explicitQuestion = mentionsBot && Boolean(text || hasImage) && !isCommand && !managementCandidate;
-    const interjectRate = groupId ? Math.max(0, Math.min(100, Number(await dbGet(env, `interject_rate:${groupId}`) || DEFAULTS.interjectRate))) : DEFAULTS.interjectRate;
+    const interjectRate = 0; // 主動插話目前全域暫停，不讀取舊 D1 設定。
     let final = "静默";
     if (isCommand) final = "执行指令；指令回复不写入聊天记忆";
     else if (managementCandidate) final = `建立「${moderationActionLabel(localManagement.action)}」提案，等待二次确认；不直接执行`;
     else if (explicitQuestion && currentlyBusy) final = "加入该群友的个人等待列";
     else if (explicitQuestion) final = "立即进入 AI 回答流程";
-    else if (interjectRate > 0) final = "可进入随机插话候选；仍需 Gemma 判断与概率检查";
     return jsonResponse({ ok: true, parsed: { text, senderRole, mentionsBot, hasImage, isCommand, managementCandidate, managementAction: localManagement.action, explicitQuestion, currentlyBusy, interjectRate }, decisions: { queue: explicitQuestion && currentlyBusy, thinking: explicitQuestion && !currentlyBusy, recordReply: explicitQuestion && !isCommand, commandOrSystemRecordedAsChat: false, final }, steps: ["解析 OneBot 事件", `发送者角色：${senderRole}`, mentionsBot ? "检测到 @机器人" : "未检测到 @机器人", managementCandidate ? `检测到待确认操作：${moderationActionLabel(localManagement.action)}` : "未检测到明确待确认操作", final] });
   }
 
@@ -2160,6 +2103,60 @@ if (request.method === "POST" && path === "/admin/active-speaking-test") {
     });
   }
 
+  if (request.method === "GET" && path === "/root/ai-providers") {
+    const state = await providerRegistryState(env);
+    return jsonResponse({
+      ok: true,
+      providerTypes: AI_PROVIDER_TYPES,
+      taskKinds: AI_PROVIDER_TASKS,
+      ...state,
+      encryptionReady: Boolean(String(env.AI_PROVIDER_ENCRYPTION_KEY || env.PORTAL_AUTH_SECRET || "").trim().length >= 24),
+      note: "帳號秘密只會以環境變數參照或 AES-GCM 加密資料保存；API 回應不回傳明文秘密。"
+    });
+  }
+
+  if (request.method === "POST" && path === "/root/ai-providers") {
+    const action = String(body.action || "upsert").trim().toLowerCase();
+    try {
+      if (action === "delete") {
+        const id = String(body.id || "").trim();
+        if (!id) return jsonResponse({ ok: false, message: "缺少 Provider 帳號 ID。" }, 400);
+        await deleteProviderAccount(env, id);
+        await writeSystemAudit(env, { type: "ai_provider_account", groupId, actorId: authed.qq, action: "delete", targetId: id });
+        return jsonResponse({ ok: true, state: await providerRegistryState(env), message: "Provider 帳號已刪除。" });
+      }
+      if (action === "route") {
+        const task = String(body.task || "").trim().toLowerCase();
+        const route = await writeProviderRoute(env, task, Array.isArray(body.accountIds) ? body.accountIds : []);
+        await writeSystemAudit(env, { type: "ai_provider_route", groupId, actorId: authed.qq, action: task, route });
+        return jsonResponse({ ok: true, task, route, state: await providerRegistryState(env), message: "Provider 路由已更新。" });
+      }
+      const account = await upsertProviderAccount(env, {
+        id: body.id,
+        provider: body.provider,
+        label: body.label,
+        enabled: body.enabled,
+        tasks: body.tasks,
+        endpoint: body.endpoint,
+        model: body.model,
+        accountId: body.accountId,
+        gatewayId: body.gatewayId,
+        billingMode: body.billingMode,
+        currency: body.currency,
+        quota: body.quota,
+        secretEnv: body.secretEnv,
+        ...(Object.prototype.hasOwnProperty.call(body, "secret") ? { secret: body.secret } : {}),
+        metadata: body.metadata
+      });
+      await writeSystemAudit(env, { type: "ai_provider_account", groupId, actorId: authed.qq, action: "upsert", targetId: account.id, provider: account.provider, tasks: account.tasks });
+      return jsonResponse({ ok: true, account, state: await providerRegistryState(env), message: "Provider 帳號與額度設定已保存。" });
+    } catch (error) {
+      const code = String(error?.code || error?.message || "AI_PROVIDER_UPDATE_FAILED");
+      const status = /ENCRYPTION_KEY_REQUIRED/.test(code) ? 503 : 400;
+      return jsonResponse({ ok: false, code, message: /ENCRYPTION_KEY_REQUIRED/.test(code) ? "要在後台保存 Provider 密鑰，請先設定 AI_PROVIDER_ENCRYPTION_KEY（至少 24 字元）；也可只填 secretEnv 使用 Cloudflare Secret。" : String(error?.message || error) }, status);
+    }
+  }
+
   if (request.method === "GET" && path === "/root/program-permissions") {
     return jsonResponse({ ok: true, records: await listExplicitProgramPermissions(env, groupId) });
   }
@@ -2483,109 +2480,6 @@ if (request.method === "POST" && path === "/root/schedule-action") {
 
 
 
-async function handleGeminiLiveUpgrade(request, env) {
-  const keys = roundRobinKeys(googleApiKeysFor(env, "gemini_chat"), "gemini_chat");
-  if (!keys.length) return new Response("未配置 Gemini API 金钥", { status: 500 });
-  const key = keys[Math.floor(Math.random() * keys.length)];
-  const model = env.GEMINI_LIVE_MODEL || "gemini-3.1-flash-live-preview";
-  const pair = new WebSocketPair();
-  const [client, server] = Object.values(pair);
-  server.accept();
-  const upstream = new WebSocket(`wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1alpha.GenerativeService.BidiGenerateContent?key=${encodeURIComponent(key)}`);
-  const queue = [];
-  let upstreamReady = false;
-  let closed = false;
-  const closeBoth = (code = 1000, reason = "closed") => {
-    if (closed) return; closed = true;
-    try { if (server.readyState === WebSocket.OPEN) server.close(code, reason); } catch {}
-    try { if (upstream.readyState === WebSocket.OPEN || upstream.readyState === WebSocket.CONNECTING) upstream.close(code, reason); } catch {}
-  };
-  upstream.addEventListener("open", () => {
-    upstreamReady = true;
-    while (queue.length && upstream.readyState === WebSocket.OPEN) upstream.send(queue.shift());
-  });
-  upstream.addEventListener("message", event => { if (server.readyState === WebSocket.OPEN) server.send(event.data); });
-  upstream.addEventListener("error", () => { if (server.readyState === WebSocket.OPEN) server.send(JSON.stringify({ error: { message: "Gemini Live 上游连接错误" } })); });
-  upstream.addEventListener("close", event => closeBoth(event.code || 1011, "Gemini Live closed"));
-  server.addEventListener("message", event => {
-    const data = event.data;
-    if (typeof data === "string" && data.length > 2_000_000) return closeBoth(1009, "message too large");
-    if (queue.length > 300) return closeBoth(1013, "queue overflow");
-    if (upstreamReady && upstream.readyState === WebSocket.OPEN) upstream.send(data); else queue.push(data);
-  });
-  server.addEventListener("close", event => closeBoth(event.code || 1000, "client closed"));
-  server.addEventListener("error", () => closeBoth(1011, "client error"));
-  server.send(JSON.stringify({ qqai: { version: VERSION, model, status: "connecting" } }));
-  return new Response(null, { status: 101, webSocket: client });
-}
-
-
-
-function getLiveHtmlPage(host) {
-  return toSimplifiedChinese(`<!doctype html>
-<html lang="zh-Hans-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>QQAI Live</title><style>
-*{box-sizing:border-box}body{margin:0;min-height:100vh;font-family:system-ui,-apple-system,"Segoe UI",sans-serif;background:radial-gradient(circle at 50% 20%,#183c61,#07101e 42%,#03050a);color:#eef7ff;display:grid;place-items:center;padding:20px}.card{width:min(760px,100%);border:1px solid #ffffff24;background:#07101ed9;backdrop-filter:blur(18px);border-radius:18px;padding:24px;box-shadow:0 30px 80px #0008}h1{margin:0 0 8px}.muted{color:#a8b8ca;line-height:1.65}.row{display:flex;gap:10px;flex-wrap:wrap;margin-top:16px}button{border:0;border-radius:10px;height:44px;padding:0 18px;font-weight:800;cursor:pointer;background:#65dcff;color:#02101a}button.stop{background:#ff7474;color:#1a0505}button:disabled{opacity:.45;cursor:not-allowed}.meter{height:10px;background:#ffffff12;border-radius:99px;overflow:hidden;margin-top:16px}.bar{height:100%;width:0;background:linear-gradient(90deg,#60dcff,#86ffbd);transition:width .08s}.log{margin-top:16px;background:#02060d;border:1px solid #ffffff18;border-radius:12px;padding:12px;min-height:150px;max-height:320px;overflow:auto;white-space:pre-wrap;line-height:1.55}.status{font-weight:800;color:#8ff0c0}.warn{color:#ffd58a}@media(max-width:520px){button{width:100%}}
-</style></head><body><main class="card"><h1>QQAI Live</h1><div class="muted">即時麥克風對話。瀏覽器會傳送 16 kHz PCM 音訊，回傳語音會在本機播放。請勿在對話中提供密碼或敏感資料。</div><div class="row"><button id="start">開始通話</button><button id="mute" disabled>靜音</button><button id="stop" class="stop" disabled>結束</button></div><div class="meter"><div class="bar" id="bar"></div></div><div class="log"><div class="status" id="status">尚未连接</div><div id="transcript"></div></div></main>
-<script>
-const startBtn=document.getElementById('start'),stopBtn=document.getElementById('stop'),muteBtn=document.getElementById('mute'),statusEl=document.getElementById('status'),transcript=document.getElementById('transcript'),bar=document.getElementById('bar');
-let ws,stream,inputCtx,processor,source,muted=false,ready=false,playCtx,playAt=0;
-const modelParam=new URLSearchParams(location.search).get('model')||'gemini-3.1-flash-live-preview';const MODEL='models/'+modelParam;
-function log(t){transcript.textContent+=(transcript.textContent?'\\n':'')+t;transcript.parentElement.scrollTop=transcript.parentElement.scrollHeight}
-function b64FromBytes(bytes){let s='';for(let i=0;i<bytes.length;i+=0x8000)s+=String.fromCharCode(...bytes.subarray(i,i+0x8000));return btoa(s)}
-function bytesFromB64(s){const b=atob(s),a=new Uint8Array(b.length);for(let i=0;i<b.length;i++)a[i]=b.charCodeAt(i);return a}
-function f32ToPcm16(input){const out=new Uint8Array(input.length*2),view=new DataView(out.buffer);let peak=0;for(let i=0;i<input.length;i++){const v=Math.max(-1,Math.min(1,input[i]));peak=Math.max(peak,Math.abs(v));view.setInt16(i*2,v<0?v*32768:v*32767,true)}bar.style.width=Math.min(100,peak*180)+'%';return out}
-function playPcm(base64,rate=24000){playCtx||=new AudioContext({sampleRate:rate});const bytes=bytesFromB64(base64),view=new DataView(bytes.buffer,bytes.byteOffset,bytes.byteLength),f=new Float32Array(bytes.byteLength/2);for(let i=0;i<f.length;i++)f[i]=view.getInt16(i*2,true)/32768;const buf=playCtx.createBuffer(1,f.length,rate);buf.copyToChannel(f,0);const src=playCtx.createBufferSource();src.buffer=buf;src.connect(playCtx.destination);playAt=Math.max(playCtx.currentTime+.03,playAt);src.start(playAt);playAt+=buf.duration}
-function handleMessage(obj){if(obj.setupComplete){ready=true;statusEl.textContent='已连接，可以說話';return}if(obj.error){statusEl.textContent='錯誤：'+(obj.error.message||JSON.stringify(obj.error));return}const sc=obj.serverContent;if(!sc)return;if(sc.inputTranscription?.text)log('你：'+sc.inputTranscription.text);if(sc.outputTranscription?.text)log('助手：'+sc.outputTranscription.text);for(const part of sc.modelTurn?.parts||[]){const d=part.inlineData?.data;if(d)playPcm(d,Number((part.inlineData.mimeType||'').match(/rate=(\\d+)/)?.[1]||24000));if(part.text)log('助手：'+part.text)}if(sc.interrupted&&playCtx){playAt=playCtx.currentTime}}
-async function start(){startBtn.disabled=true;statusEl.textContent='取得麥克風權限…';try{stream=await navigator.mediaDevices.getUserMedia({audio:{channelCount:1,echoCancellation:true,noiseSuppression:true,autoGainControl:true}});ws=new WebSocket((location.protocol==='https:'?'wss://':'ws://')+location.host+'/live');ws.onopen=()=>{statusEl.textContent='正在初始化 Gemini Live…';ws.send(JSON.stringify({setup:{model:MODEL,generationConfig:{responseModalities:['AUDIO'],speechConfig:{voiceConfig:{prebuiltVoiceConfig:{voiceName:'Aoede'}}}},systemInstruction:{parts:[{text:'你是QQ群里的自然简体中文语音助手。回答简洁、口语化；不要讨论、承认或否认模型、AI、机器人或系统身份，直接回到话题。'}]},inputAudioTranscription:{},outputAudioTranscription:{}}}))};ws.onmessage=e=>{try{handleMessage(JSON.parse(e.data))}catch(err){console.warn(err)}};ws.onerror=()=>statusEl.textContent='WebSocket 連線錯誤';ws.onclose=()=>{statusEl.textContent='連線已結束';cleanup(false)};
-inputCtx=new AudioContext({sampleRate:16000});source=inputCtx.createMediaStreamSource(stream);processor=inputCtx.createScriptProcessor(4096,1,1);processor.onaudioprocess=e=>{if(!ready||muted||!ws||ws.readyState!==1)return;const pcm=f32ToPcm16(e.inputBuffer.getChannelData(0));ws.send(JSON.stringify({realtimeInput:{audio:{mimeType:'audio/pcm;rate=16000',data:b64FromBytes(pcm)}}}))};source.connect(processor);processor.connect(inputCtx.destination);stopBtn.disabled=false;muteBtn.disabled=false}catch(e){statusEl.textContent='無法啟動：'+e.message;cleanup(false)}}
-function cleanup(close=true){ready=false;if(close&&ws&&ws.readyState<2)ws.close();try{processor?.disconnect();source?.disconnect();inputCtx?.close();stream?.getTracks().forEach(t=>t.stop())}catch{}ws=null;stream=null;processor=null;source=null;inputCtx=null;startBtn.disabled=false;stopBtn.disabled=true;muteBtn.disabled=true;bar.style.width='0'}
-startBtn.onclick=start;stopBtn.onclick=()=>cleanup(true);muteBtn.onclick=()=>{muted=!muted;muteBtn.textContent=muted?'取消靜音':'靜音'};
-</script></body></html>`);
-}
-
-
-
-async function handleAppealApi(request, env, url) {
-  const body = request.method === "GET" ? {} : await request.json().catch(() => ({}));
-  const path = url.pathname.replace("/api/appeal", "");
-  if (!(await getFeatureFlag(env, "private_appeal_enabled", true))) return jsonResponse({ ok: false, message: "申诉入口暂时关闭。" }, 503);
-  if (request.method === "POST" && path === "/request-code") {
-    const qq = String(body.qq || "").replace(/\D/g, ""); if (!qq) return jsonResponse({ ok: false, message: "请输入 QQ 号。" }, 400);
-    const code = generateSixDigitCode(); await dbPut(env, `appeal_auth_code:${qq}`, JSON.stringify({ code, expiresAt: Date.now()+300000, attempts:0 }));
-    const sent = await sendOneBotAction(env, { action:"send_private_msg", params:{ user_id:numericId(qq), message:`【匿名申诉验证码】\n验证码：${code}\n有效期：5分钟。`, auto_escape:false } });
-    return jsonResponse({ ok: sent, message: sent ? "验证码已发送至 QQ 私讯。" : "NapCat 当前未连接。" }, sent ? 200 : 503);
-  }
-  if (request.method === "POST" && path === "/verify-code") {
-    const qq=String(body.qq||"").replace(/\D/g,""),code=String(body.code||"").replace(/\D/g,""); const raw=await dbGet(env,`appeal_auth_code:${qq}`); if(!raw)return jsonResponse({ok:false,message:"验证码不存在或已过期。"},400);
-    let item;try{item=JSON.parse(raw)}catch{} if(!item||Date.now()>item.expiresAt){await dbDel(env,`appeal_auth_code:${qq}`);return jsonResponse({ok:false,message:"验证码已过期。"},400)}
-    if(item.code!==code){item.attempts=(item.attempts||0)+1;item.attempts>=5?await dbDel(env,`appeal_auth_code:${qq}`):await dbPut(env,`appeal_auth_code:${qq}`,JSON.stringify(item));return jsonResponse({ok:false,message:"验证码错误。"},400)}
-    await dbDel(env,`appeal_auth_code:${qq}`);const token=crypto.randomUUID()+crypto.randomUUID();await dbPut(env,`appeal_session:${token}`,JSON.stringify({qq,expiresAt:Date.now()+3600000}));return jsonResponse({ok:true,token,message:"验证成功。"});
-  }
-  const token=request.headers.get("Authorization")?.replace(/^Bearer\s+/i,"").trim()||"";const sess=await readJson(env,`appeal_session:${token}`,null);if(!sess||Date.now()>Number(sess.expiresAt||0))return jsonResponse({ok:false,message:"申诉验证已过期。"},401);
-  if(request.method==="GET"&&path==="/groups")return jsonResponse({ok:true,groups:await getWhitelistedGroupsForUser(env,sess.qq)});
-  if(request.method==="POST"&&path==="/submit"){
-    const groupId=String(body.groupId||"").replace(/\D/g,"");if(!groupId||!(await isGroupWhitelisted(env,groupId))||!(await verifyGroupMembership(env,groupId,sess.qq)))return jsonResponse({ok:false,message:"无法确认你属于该 AI 白名单群。"},403);
-    const type=String(body.type||"其他").trim(),content=String(body.content||"").trim();if(content.length<5)return jsonResponse({ok:false,message:"请填写较完整的申诉内容。"},400);
-    const id=`app_${Date.now().toString(36)}_${crypto.randomUUID().slice(0,8)}`;const appeal={id,anonymousLabel:`匿名申诉-${id.slice(-6)}`,applicantId:String(sess.qq),groupId,type,content,evidenceMessageId:String(body.evidenceMessageId||""),status:"pending_owner",createdAt:new Date().toISOString(),reviewerIds:[],votes:{},approvalRule:"single",result:"",againstAdmin:/管理|群主|开发者|開發者/i.test(type+content),recommendedReviewerRole:/管理|群主|开发者|開發者/i.test(type+content)?"owner":"developer_choice"};
-    await dbPut(env,`appeal:${id}`,JSON.stringify(appeal));await appendIndex(env,"appeal:index",id,5000);await appendIndex(env,`appeal:user:${sess.qq}`,id,200);
-    await notifyDeveloper(env,`【收到匿名申诉】\n编号：${id}\n群号：${groupId}\n申诉人QQ：${sess.qq}\n类型：${type}\n内容：${content}\n只通知了你，请在 Portal 自行处理或指派审核人。`);
-    return jsonResponse({ok:true,id,message:"申诉已匿名提交，仅开发者可查看你的 QQ。"});
-  }
-  if(request.method==="GET"&&path==="/mine"){
-    const ids=await readJson(env,`appeal:user:${sess.qq}`,[]),appeals=[];for(const id of ids.slice(-100).reverse()){const a=await readJson(env,`appeal:${id}`,null);if(a)appeals.push({id:a.id,groupId:a.groupId,type:a.type,content:a.content,status:a.status,result:a.result,createdAt:a.createdAt})}return jsonResponse({ok:true,appeals});
-  }
-  return jsonResponse({ok:false,message:"未知申诉 API。"},404);
-}
-
-
-
-function getAppealPage(host) {
-  return toSimplifiedChinese(`<!doctype html><html lang="zh-Hans-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>QQAI 匿名申訴</title><style>*{box-sizing:border-box}body{margin:0;min-height:100vh;font-family:system-ui;background:radial-gradient(circle at 30% 10%,#173b60,#060d18 45%,#020409);color:#edf7ff;padding:22px}.wrap{max-width:760px;margin:auto}.card{background:#07101ee8;border:1px solid #ffffff22;border-radius:16px;padding:20px;margin:14px 0}h1{margin-bottom:6px}.muted{color:#a9bacd;line-height:1.6}label{display:block;margin-top:12px;color:#b8c7d9}input,select,textarea{width:100%;border:1px solid #ffffff24;background:#081525;color:#fff;border-radius:9px;padding:11px;margin-top:6px}textarea{min-height:150px}button{margin-top:14px;border:0;border-radius:9px;background:#67ddff;color:#03111a;font-weight:800;padding:11px 16px;cursor:pointer}.hidden{display:none}.msg{white-space:pre-wrap;color:#8ff0c0;margin-top:12px}.item{border-top:1px solid #ffffff17;padding:10px 0}</style></head><body><div class="wrap"><h1>匿名申訴</h1><div class="muted">審核人看不到申訴人的 QQ；只有開發者可查看真實身分。系統會先确认你屬於可使用 AI 的白名單群。</div><section class="card" id="login"><label>QQ 号</label><input id="qq" inputmode="numeric"><button id="send">發送驗證碼</button><label>驗證碼</label><input id="code" maxlength="6" inputmode="numeric"><button id="verify">驗證</button><div class="msg" id="loginMsg"></div></section><section class="card hidden" id="form"><label>所屬白名單群</label><select id="group"></select><label>申訴類型</label><select id="type"><option>禁言</option><option>踢出</option><option>AI黑名单</option><option>管理操作</option><option>排程</option><option>其他</option></select><label>相關訊息 ID（選填）</label><input id="evidence"><label>申訴內容</label><textarea id="content"></textarea><button id="submit">匿名提交</button><button id="refresh">查看我的案件</button><div class="msg" id="formMsg"></div><div id="cases"></div></section></div><script>let token='';const post=async(p,d)=>{const r=await fetch('/api/appeal'+p,{method:'POST',headers:{'Content-Type':'application/json',...(token?{Authorization:'Bearer '+token}:{})},body:JSON.stringify(d||{})});return r.json()},get=async p=>(await fetch('/api/appeal'+p,{headers:token?{Authorization:'Bearer '+token}:{}})).json();send.onclick=async()=>loginMsg.textContent=(await post('/request-code',{qq:qq.value})).message;verify.onclick=async()=>{const r=await post('/verify-code',{qq:qq.value,code:code.value});loginMsg.textContent=r.message;if(r.ok){token=r.token;const g=await get('/groups');group.innerHTML=(g.groups||[]).map(x=>'<option value="'+x.groupId+'">'+x.groupName+'（'+x.groupId+'）</option>').join('');login.classList.add('hidden');form.classList.remove('hidden')}};submit.onclick=async()=>{const r=await post('/submit',{groupId:group.value,type:type.value,content:content.value,evidenceMessageId:evidence.value});formMsg.textContent=r.message;if(r.ok){content.value='';load()}};async function load(){const r=await get('/mine');cases.innerHTML=(r.appeals||[]).map(a=>'<div class="item"><b>'+a.id+'</b>｜'+a.status+'<br>'+a.type+'｜'+a.content+(a.result?'<br>結果：'+a.result:'')+'</div>').join('')||'<div class="muted">暂无案件</div>'}refresh.onclick=load;</script></body></html>`);
-}
-
-
-
 function getPortalHomePage(host) {
   return toSimplifiedChinese(String.raw`<!doctype html>
 <html lang="zh-Hans-CN">
@@ -2733,11 +2627,32 @@ function getPortalHomePage(host) {
         <div class="split"><div class="card"><div class="field"><label>模擬訊息</label><textarea id="simText" placeholder="例如：把 @某人 殺了"></textarea></div><div class="field"><label>發送者角色</label><select id="simRole"><option value="member">群友</option><option value="admin">管理員</option><option value="owner">群主</option></select></div><label class="switch"><input id="simMention" type="checkbox" checked>有 @ 機器人</label><label class="switch"><input id="simImage" type="checkbox">含圖片</label><label class="switch"><input id="simBusy" type="checkbox">此群友已有問題執行中</label></div><div class="card"><h3>模擬結果</h3><div id="simDecision" class="notice">尚未執行</div><div id="simSteps" class="timeline" style="margin-top:14px"></div></div></div>
       </section>
       <section id="v-models" class="view">
-        <div class="section-head"><div><h2>模型中心</h2><p>聊天默认使用 Gemini，Gemma 作为免费备用；DeepSeek 主要负责上下文、会议纪要与聊天总结。普通成员不可手动选择 DeepSeek，连续失败时才临时开放。</p></div><button id="reloadModels" class="btn">重新加载</button></div><div id="modelRoutingSummary" class="card" style="margin-bottom:16px"><div class="empty">尚未加载模型路由</div></div><div id="modelList" class="grid"><div class="empty span-12">尚未加载</div></div>
+        <div class="section-head"><div><h2>模型中心</h2><p>模型依用途、帐号与配额分类管理；聊天、判断、图片、语音与摘要可分别指定模型与备用顺序。</p></div><button id="reloadModels" class="btn">重新加载</button></div><div id="modelRoutingSummary" class="card" style="margin-bottom:16px"><div class="empty">尚未加载模型路由</div></div><div id="modelList" class="grid"><div class="empty span-12">尚未加载</div></div>
       </section>
       <section id="v-quota" class="view">
-        <div class="section-head"><div><h2>DeepSeek 额度与限制</h2><p>留空代表不限制；填 0 代表完全禁止；正數代表每日人民幣上限。</p></div><button id="saveQuota" class="btn primary">儲存額度</button></div>
-        <div class="grid"><div class="card span-6"><h3>全站每日 CNY</h3><div class="field"><label>所有群組合計上限</label><input id="globalQuota" type="number" min="0" step="0.01" placeholder="留空＝無限制"></div><div class="notice">0＝完全停用 DeepSeek；空白＝不設每日上限。</div></div><div class="card span-6"><h3>目前群每日 CNY</h3><div class="field"><label>目前选择群组上限</label><input id="groupQuota" type="number" min="0" step="0.01" placeholder="留空＝無限制"></div><div id="quotaStatus" class="notice">僅開發者可以修改。</div></div></div>
+        <div class="section-head"><div><h2>AI Provider、帳號與額度</h2><p>依 Provider、帳號與用途分開管理模型、金額與 Token 上限。Cloudflare、OpenAI-compatible、Codex Bridge、Google 與 DeepSeek 可並存。</p></div><button id="reloadQuota" class="btn">重新載入</button></div>
+        <div class="grid">
+          <div class="card span-5"><h3>新增 / 更新 Provider 帳號</h3>
+            <div class="field"><label>Provider</label><select id="providerType"><option value="google_gemini">Google Gemini</option><option value="google_gemma">Google Gemma</option><option value="deepseek">DeepSeek</option><option value="openai_api">OpenAI API</option><option value="codex_bridge">Codex Bridge</option><option value="cloudflare_workers_ai">Cloudflare Workers AI</option><option value="cloudflare_ai_gateway">Cloudflare AI Gateway</option><option value="openai_compatible">OpenAI-compatible</option></select></div>
+            <div class="row"><div class="field grow"><label>帳號 ID</label><input id="providerAccountId" placeholder="例如 cf-main"></div><div class="field grow"><label>顯示名稱</label><input id="providerLabel" placeholder="主帳號"></div></div>
+            <div class="row"><div class="field grow"><label>模型</label><input id="providerModel" placeholder="模型 ID"></div><div class="field grow"><label>用途</label><input id="providerTasks" placeholder="chat,vision,tts"></div></div>
+            <div class="field"><label>Endpoint</label><input id="providerEndpoint" placeholder="留空使用 Provider 預設；Codex Bridge 必填"></div>
+            <div class="row"><div class="field grow"><label>Cloudflare Account ID</label><input id="providerCloudflareAccountId"></div><div class="field grow"><label>AI Gateway ID</label><input id="providerGatewayId"></div></div>
+            <div class="row"><div class="field grow"><label>Secret 環境變數名稱</label><input id="providerSecretEnv" placeholder="例如 CF_AI_TOKEN"></div><div class="field grow"><label>或更新密鑰</label><input id="providerSecret" type="password" autocomplete="new-password" placeholder="留空＝不變更"></div></div>
+            <div class="row"><div class="field grow"><label>每日金額上限</label><input id="providerDailyMoney" type="number" min="0" step="0.0001"></div><div class="field grow"><label>每月金額上限</label><input id="providerMonthlyMoney" type="number" min="0" step="0.0001"></div></div>
+            <div class="row"><div class="field grow"><label>每日 Input Token</label><input id="providerDailyInput" type="number" min="0" step="1"></div><div class="field grow"><label>每日 Output Token</label><input id="providerDailyOutput" type="number" min="0" step="1"></div></div>
+            <div class="row"><div class="field grow"><label>供應商回報剩餘金額</label><input id="providerRemainingMoney" type="number" min="0" step="0.0001"></div><div class="field grow"><label>供應商回報剩餘 Token</label><input id="providerRemainingTokens" type="number" min="0" step="1"></div></div>
+            <button id="saveProviderAccount" class="btn primary">儲存 Provider 帳號</button><div id="providerEncryptionStatus" class="notice">正在讀取密鑰保存能力。</div>
+          </div>
+          <div class="card span-7"><h3>帳號狀態與用量</h3><div id="providerList" class="list"><div class="empty">尚未載入</div></div></div>
+          <div class="card span-7"><h3>用途路由</h3><p class="item-meta">由左到右依序嘗試；額度不足或呼叫失敗才走下一個帳號。未設定時沿用既有 Gemini/Gemma 路徑。</p>
+            <div class="row"><div class="field grow"><label>用途</label><select id="providerRouteTask"><option value="chat">chat</option><option value="decision">decision</option><option value="summary">summary</option><option value="vision">vision</option><option value="tts">tts</option><option value="code">code</option><option value="image">image</option></select></div><div class="field grow"><label>帳號 ID（逗號分隔）</label><input id="providerRouteIds" placeholder="cf-main,google-main"></div></div>
+            <button id="saveProviderRoute" class="btn primary">儲存用途路由</button><div id="providerRouteSummary" class="notice">尚未載入路由。</div>
+          </div>
+          <div class="card span-5"><h3>舊 DeepSeek 相容額度</h3><p class="item-meta">保留給 v2 / 尚未切到 Provider Registry 的舊路徑；新 Provider 請使用上方各帳號額度。</p>
+            <div class="field"><label>全站每日 CNY</label><input id="globalQuota" type="number" min="0" step="0.01" placeholder="留空＝無限制"></div><div class="field"><label>目前群每日 CNY</label><input id="groupQuota" type="number" min="0" step="0.01" placeholder="留空＝無限制"></div><button id="saveQuota" class="btn">儲存相容額度</button><div id="quotaStatus" class="notice">僅開發者可以修改。</div>
+          </div>
+        </div>
       </section>
       <section id="v-groups" class="view">
         <div class="section-head"><div><h2>群组设置</h2><p>修改目前選擇群的 AI、記憶、插話率與人格。</p></div><button id="saveGroup" class="btn primary">儲存設定</button></div>
@@ -2858,7 +2773,8 @@ function ensureR3Views(){
   if(!$('v-appeals').dataset.ready){$('v-appeals').dataset.ready='1';$('v-appeals').innerHTML='<div class="section-head"><div><h2>匿名申诉</h2><p>审核者看不到你的 QQ；只有开发者可以查看真实身份。当前成员和退出未满 30 天的前成员都可以申诉。</p></div><button id="appealReload" class="btn">刷新案件</button></div><div class="grid"><div class="card span-5"><h3>提交申诉</h3><div class="field"><label>所属群组</label><select id="appealGroup"><option value="">请选择群组</option></select></div><div class="field"><label>申诉类型</label><select id="appealType"><option>禁言</option><option>踢出</option><option>AI黑名单</option><option>管理操作</option><option>排程</option><option>其他</option></select></div><div class="field"><label>相关消息 ID（选填）</label><input id="appealEvidence"></div><div class="field"><label>申诉内容</label><textarea id="appealContent" placeholder="请说明发生了什么、希望如何处理"></textarea></div><button id="appealSubmit" class="btn primary" style="width:100%">匿名提交</button><div id="appealMessage" class="notice">提交后可在“我的案件”查看处理状态。前成员资格从系统收到退群事件起保留 30 天。</div></div><div class="card span-7"><h3>我的案件</h3><div id="appealList" class="list"><div class="empty">暂无案件</div></div></div></div>';$('appealReload').onclick=loadAppeals;$('appealSubmit').onclick=submitAppeal}
   if(!$('v-violationhistory').dataset.ready){$('v-violationhistory').dataset.ready='1';$('v-violationhistory').innerHTML='<div class="section-head"><div><h2>历史违规记录</h2><p>你可以查看自己的群规记录，并对单条或多条记录一键申诉。只有属于你的记录会显示。</p></div><button id="vhReload" class="btn">重新加载</button></div><div class="card"><div class="row"><select id="vhGroup"><option value="">全部可申诉群组</option></select><button id="vhSelectAll" class="btn">全选当前列表</button><button id="vhAppealSelected" class="btn primary">申诉所选记录</button></div><div class="notice" style="margin-top:12px">退出群聊未满 30 天仍可查看并申诉；超过期限后不能再提交新申诉。</div></div><div id="vhList" class="list" style="margin-top:16px"><div class="empty">尚未加载</div></div>';$('vhReload').onclick=loadViolationHistory;$('vhGroup').onchange=loadViolationHistory;$('vhSelectAll').onclick=function(){document.querySelectorAll('.vhCheck:not(:disabled)').forEach(function(x){x.checked=true})};$('vhAppealSelected').onclick=function(){appealViolationRecords(Array.from(document.querySelectorAll('.vhCheck:checked')).map(function(x){return x.value}))}}
   if(!$('v-appealreview').dataset.ready){$('v-appealreview').dataset.ready='1';$('v-appealreview').innerHTML='<div class="section-head"><div><h2>申诉处理</h2><p>处理当前选中群组的匿名申诉。非开发者看不到申诉人的真实 QQ。</p></div><button id="appealReviewReload" class="btn">重新加载</button></div><div class="card"><div class="row"><select id="appealReviewStatus"><option value="">全部状态</option><option value="pending_owner">待处理</option><option value="pending_review">审核中</option><option value="approved">已通过</option><option value="rejected">已驳回</option></select><button id="appealReviewSearch" class="btn primary">筛选</button></div></div><div id="appealReviewList" class="list" style="margin-top:16px"><div class="empty">请选择群组后加载案件</div></div>';$('appealReviewReload').onclick=loadAppealReviews;$('appealReviewSearch').onclick=loadAppealReviews}
-  if(!$('v-bilibili').dataset.ready){$('v-bilibili').dataset.ready='1';$('v-bilibili').innerHTML='<div class="section-head"><div><h2>B站监控</h2><p>可选择主动低频检查，或接收外部服务推送的事件。</p></div><button id="biliReload" class="btn">重新加载</button></div><div class="card"><div class="row"><input id="biliCreatorName" placeholder="创作者名称（选填）"><input id="biliCreatorId" inputmode="numeric" placeholder="B站用户 UID（必填）"><select id="biliMode"><option value="automatic_polling" selected>兼容轮询（输入 UID 即可使用）</option><option value="official_webhook">接收 Webhook（高级，需要外部事件来源）</option></select><select id="biliPollInterval"><option value="1800" selected>每 30 分钟</option><option value="3600">每 1 小时</option><option value="7200">每 2 小时</option><option value="21600">每 6 小时</option></select></div><div class="row"><label class="switch"><input id="biliLiveNotify" type="checkbox" checked>开播通知</label><label class="switch"><input id="biliLiveAtAll" type="checkbox">开播 @全体</label><label class="switch"><input id="biliVideoNotify" type="checkbox" checked>新视频通知</label><label class="switch"><input id="biliVideoAtAll" type="checkbox">新视频 @全体</label><button id="biliAdd" class="btn primary">保存监控</button></div><div id="biliModeHelp" class="notice"></div><div class="notice">兼容轮询最低 30 分钟一次；若 B站返回 412／429，系统会自动暂停 12～72 小时。Webhook 不会主动访问 B站，但必须另有开放平台应用或合法事件中继把事件发送到回调地址。</div><div id="biliWebhookResult" class="notice hidden"></div></div><div id="biliList" class="list" style="margin-top:16px"></div>';$('biliReload').onclick=loadBilibili;$('biliAdd').onclick=saveBilibiliConnector;$('biliMode').onchange=function(){var webhook=this.value==='official_webhook';$('biliPollInterval').disabled=webhook;$('biliModeHelp').textContent=webhook?'Webhook 模式：本 Worker 只负责接收事件。仅填写 UID 不会自动检查；保存后请复制回调地址到你的开放平台应用或事件中继。':'兼容轮询：Worker 会按频率主动检查该 UID，可以使用“立即检查”。首次检查只建立当前状态基准。'};$('biliMode').onchange()}
+  if(!$('v-bilibili').dataset.ready){$('v-bilibili').dataset.ready='1';$('v-bilibili').innerHTML='<div class="section-head"><div><h2>B站監控</h2><p>只使用低頻輪詢，不需要 Webhook 或 bridge。</p></div><button id="biliReload" class="btn">重新載入</button></div><div class="card"><div class="row"><input id="biliCreatorName" placeholder="創作者名稱（選填）"><input id="biliCreatorId" inputmode="numeric" placeholder="B站使用者 UID（必填）"><select id="biliPollInterval"><option value="1800" selected>每 30 分鐘</option><option value="3600">每 1 小時</option><option value="7200">每 2 小時</option><option value="21600">每 6 小時</option></select></div><div class="row"><label class="switch"><input id="biliLiveNotify" type="checkbox" checked>開播通知</label><label class="switch"><input id="biliLiveAtAll" type="checkbox">開播 @全體</label><label class="switch"><input id="biliVideoNotify" type="checkbox" checked>新影片通知</label><label class="switch"><input id="biliVideoAtAll" type="checkbox">新影片 @全體</label><button id="biliAdd" class="btn primary">儲存監控</button></div><div class="notice">最低／預設 30 分鐘；412／429 會自動退避。需要登入態時，僅在 Worker secret 設定 <code>BILIBILI_COOKIE</code>；Cookie 不會存入 D1 或顯示在頁面。</div></div><div id="biliList" class="list" style="margin-top:16px"></div>';$('biliReload').onclick=loadBilibili;$('biliAdd').onclick=saveBilibiliConnector}
+
   if(!$('v-platform')){var b=document.createElement('button');b.dataset.view='platform';b.textContent='平台功能目录';b.hidden=true;$('nav').appendChild(b);b.onclick=function(){showView('platform')};var v=document.createElement('section');v.id='v-platform';v.className='view';v.innerHTML='<div class="section-head"><div><h2>平台功能目录</h2><p>这里只显示功能分类与历史记录状态；这些条目尚未接入机器人执行路径，不会启用或停用核心功能。</p></div><button id="pfReload" class="btn">重新加载</button></div><div class="card"><div class="row"><input id="pfSearch" class="grow" placeholder="搜索功能名称、ID、类别"><button id="pfGo" class="btn primary">搜索</button></div><div id="pfSummary" class="notice">尚未加载</div></div><div id="pfList" class="list" style="margin-top:16px"></div>';document.querySelector('.content').appendChild(v);$('pfReload').onclick=loadPlatformFeatures;$('pfGo').onclick=loadPlatformFeatures;$('pfSearch').onkeydown=function(e){if(e.key==='Enter')loadPlatformFeatures()}}
   ensureOperationsViews();
 }
@@ -2899,11 +2815,8 @@ async function saveRuleViolationSettings(){var payload={strictness:$('rvStrictne
 async function loadSettingsCenter(){var dev=session&&(session.permissions||{}).developer;if(!currentGroup){$('scMessage').textContent='请先从右上角选择需要维护的群组。';$('scList').innerHTML='<div class="empty">尚未选择群组</div>';return}$('scMessage').textContent='正在加载设置…';$('scList').innerHTML='<div class="empty">正在读取当前群设置</div>';try{var p=new URLSearchParams();p.set('targetQq',dev?($('scTargetQq').value||session.qq):session.qq);var r=await api('/settings-center?'+p.toString());if(!r.ok){$('scMessage').textContent=r.message||'加载失败';$('scList').innerHTML='<div class="empty">'+esc(r.message)+'</div>';return}if(!$('scTargetQq').value)$('scTargetQq').value=r.targetQq||session.qq;if($('scResolvedRole')){$('scResolvedRole').textContent='识别权限：'+portalRoleLabel(r.targetRole);$('scResolvedRole').className='status ok'}$('scMessage').textContent='已加载 '+(r.settings||[]).length+' 项设置；只会提交实际改动的项目。';$('scList').innerHTML='';(r.settings||[]).forEach(function(s){var d=document.createElement('div');d.className='item';var input;if(s.type==='boolean'){input=document.createElement('input');input.type='checkbox';input.checked=!!s.value}else if(s.type==='select'){input=document.createElement('select');(s.options||[]).forEach(function(v){var o=document.createElement('option');o.value=v;o.textContent=(s.optionLabels&&s.optionLabels[v])||v;input.appendChild(o)});input.value=String(s.value)}else if(s.type==='textarea'){input=document.createElement('textarea');input.value=String(s.value==null?'':s.value)}else{input=document.createElement('input');input.type=s.type==='number'?'number':'text';input.value=String(s.value==null?'':s.value);if(s.min!=null)input.min=s.min;if(s.max!=null)input.max=s.max}input.dataset.settingKey=s.key;input.dataset.initialValue=input.type==='checkbox'?String(input.checked):String(input.value);var roleText=portalRoleLabel(s.minRole);if(s.key==='rule_proxy_mode')roleText+='（auto 仅群主）';d.innerHTML='<div class="item-title">'+esc(s.label)+'</div><div class="item-meta">最低权限：'+esc(roleText)+'｜对应指令：'+esc(s.command||'无')+'</div>';d.appendChild(input);$('scList').appendChild(d)});if(!$('scList').children.length)$('scList').innerHTML='<div class="empty">当前没有可维护的设置项目</div>'}catch(e){$('scMessage').textContent='加载设置时发生错误。';$('scList').innerHTML='<div class="empty">'+esc(String(e&&e.message||e))+'</div>'}}
 async function saveAllSettings(){var dev=session&&(session.permissions||{}).developer;var settings=Array.from(document.querySelectorAll('#scList [data-setting-key]')).filter(function(input){var now=input.type==='checkbox'?String(input.checked):String(input.value);return now!==String(input.dataset.initialValue)}).map(function(input){return{key:input.dataset.settingKey,value:input.type==='checkbox'?input.checked:input.value}});if(!settings.length){toast('没有检测到设置变化');return}var button=$('scSaveAll');button.disabled=true;button.textContent='保存中…';var payload={settings:settings,targetQq:dev?$('scTargetQq').value:session.qq,auditMode:dev&&$('scAuditLog').checked?'log':'silent'};var r=await api('/settings-center','POST',payload);button.disabled=false;button.textContent='保存全部设置';$('scMessage').textContent=r.message||'保存失败';toast(r.message||'保存失败');if(r.ok)loadSettingsCenter()}
 async function copyPortalText(value){var text=String(value||'');if(!text)return false;try{await navigator.clipboard.writeText(text);toast('已复制');return true}catch(e){var input=document.createElement('textarea');input.value=text;input.style.position='fixed';input.style.opacity='0';document.body.appendChild(input);input.select();var ok=false;try{ok=document.execCommand('copy')}catch(x){}input.remove();toast(ok?'已复制':'复制失败，请手动选择地址');return ok}}
-async function loadBilibili(){var r=await api('/integrations/bilibili');if(!r.ok){$('biliList').innerHTML='<div class="empty">'+esc(r.message)+'</div>';return}$('biliList').innerHTML='';(r.connectors||[]).forEach(function(c){var d=document.createElement('div');d.className='item bili-connector';var state=c.pollState||{};var status=c.lastCheckStatus||'等待首次事件';var webhook=c.mode==='official_webhook';var next=webhook?'等待外部事件推送':(c.nextPollAt?new Date(Number(c.nextPollAt)).toLocaleString():'等待定时任务');d.innerHTML='<div class="item-title">'+esc(c.creatorName||('UID '+c.creatorId))+'</div><div class="item-meta">模式：'+(webhook?'开放平台／授权中继 Webhook':'兼容低频轮询')+'｜UID：'+esc(c.creatorId)+'｜直播：'+(c.liveNotify?'通知':'仅记录')+(c.liveAtAll?'＋@全体':'')+'｜视频：'+(c.videoNotify?'通知':'仅记录')+(c.videoAtAll?'＋@全体':'')+'</div><div class="item-body">状态：'+esc(status)+'｜当前直播：'+(state.live?'是':'否')+'｜最新视频：'+esc(state.latestVideoBvid||'尚未建立基准')+'<br>上次处理：'+esc(c.lastCheckAt?new Date(Number(c.lastCheckAt)).toLocaleString():(c.lastEventAt?new Date(Number(c.lastEventAt)).toLocaleString():'尚未处理'))+'｜下一步：'+esc(next)+(c.lastWebhookTestAt?'<br>Webhook 自检：'+(c.lastWebhookTestOk?'通过':'失败')+'｜'+esc(new Date(Number(c.lastWebhookTestAt)).toLocaleString())+(c.lastWebhookTestError?'｜'+esc(c.lastWebhookTestError):''):'')+(c.lastCheckError?'<br><b>错误：</b>'+esc(c.lastCheckError):'')+'</div>';if(webhook){var info=document.createElement('div');info.className='notice bili-webhook-box';info.style.marginTop='10px';info.innerHTML='<b>Webhook 不主动访问 B站</b><br>请将下方地址配置到哔哩哔哩开放平台，或你有权使用的事件中继。自检会验证回调密钥映射与 QQ 通知发送，但外部平台仍必须实际 POST 事件。<div class="row" style="margin-top:10px"><input class="grow" readonly value="'+esc(c.webhookUrl||'回调地址不可用')+'"><button class="btn" data-copy-webhook>复制回调地址</button><button class="btn" data-rotate-webhook>重新生成地址</button><button class="btn primary" data-webhook-self-test>Webhook 接收自检</button><button class="btn" data-switch-polling>改用兼容轮询</button></div>';d.appendChild(info);info.querySelector('[data-copy-webhook]').onclick=function(){copyPortalText(c.webhookUrl)};info.querySelector('[data-rotate-webhook]').onclick=function(){rotateBilibiliWebhook(c.id)};info.querySelector('[data-webhook-self-test]').onclick=function(){testBilibiliWebhook(c.id)};info.querySelector('[data-switch-polling]').onclick=function(){switchBilibiliMode(c.id,'automatic_polling')};}var row=document.createElement('div');row.className='row';row.style.marginTop='10px';if(!webhook){var interval=document.createElement('select');[[1800,'30 分钟'],[3600,'1 小时'],[7200,'2 小时'],[21600,'6 小时']].forEach(function(v){var o=document.createElement('option');o.value=v[0];o.textContent='每 '+v[1];interval.appendChild(o)});interval.value=String(c.pollIntervalSeconds||1800);var saveInterval=document.createElement('button');saveInterval.className='btn';saveInterval.textContent='保存检查频率';saveInterval.onclick=function(){updateBilibiliInterval(c.id,interval.value)};var check=document.createElement('button');check.className='btn primary';check.textContent='立即检查';check.onclick=function(){checkBilibiliNow(c.id)};var toWebhook=document.createElement('button');toWebhook.className='btn';toWebhook.textContent='改为 Webhook（推荐）';toWebhook.onclick=function(){switchBilibiliMode(c.id,'official_webhook')};row.append(interval,saveInterval,check,toWebhook)}var testLive=document.createElement('button');testLive.className='btn';testLive.textContent='测试发送开播通知';testLive.title='只测试发送到 QQ 群';testLive.onclick=function(){testBilibili(c.id,'live_start')};var testVideo=document.createElement('button');testVideo.className='btn';testVideo.textContent='测试发送新视频通知';testVideo.title='只测试发送到 QQ 群';testVideo.onclick=function(){testBilibili(c.id,'video_publish')};var del=document.createElement('button');del.className='btn danger';del.textContent='删除';del.onclick=async function(){if(!(await confirmModal('删除此 B站监控？','确认删除')))return;var x=await api('/integrations/bilibili','POST',{action:'delete',id:c.id});toast(x.message);if(x.ok)loadBilibili()};row.append(testLive,testVideo,del);d.appendChild(row);$('biliList').appendChild(d)});if(!$('biliList').children.length)$('biliList').innerHTML='<div class="empty">暂无 B站监控</div>'}
-async function saveBilibiliConnector(){var uid=String($('biliCreatorId').value||'').replace(/\D/g,'');if(!uid){toast('请输入 B站用户 UID');return}var r=await api('/integrations/bilibili','POST',{action:'save',mode:$('biliMode').value,creatorName:$('biliCreatorName').value,creatorId:uid,pollIntervalSeconds:Number($('biliPollInterval').value||1800),liveNotify:$('biliLiveNotify').checked,liveAtAll:$('biliLiveAtAll').checked,videoNotify:$('biliVideoNotify').checked,videoAtAll:$('biliVideoAtAll').checked});toast(r.message);if(r.ok){if(r.webhookUrl){$('biliWebhookResult').innerHTML='Webhook 回调地址：<code>'+esc(r.webhookUrl)+'</code><br>请复制到你的开放平台应用或事件中继；若没有外部事件来源，请改用兼容轮询。';$('biliWebhookResult').classList.remove('hidden')}else $('biliWebhookResult').classList.add('hidden');$('biliCreatorName').value='';$('biliCreatorId').value='';loadBilibili()}}
-async function rotateBilibiliWebhook(id){if(!(await confirmModal('重新生成后，旧回调地址会立即失效。','重新生成 Webhook 地址')))return;var r=await api('/integrations/bilibili','POST',{action:'rotate_webhook',id:id});toast(r.message);if(r.ok&&r.webhookUrl){await copyPortalText(r.webhookUrl);loadBilibili()}}
-async function testBilibiliWebhook(id){var r=await api('/integrations/bilibili','POST',{action:'webhook_self_test',id:id});toast(r.message||'自检完成');loadBilibili()}
-async function switchBilibiliMode(id,mode){var label=mode==='official_webhook'?'Webhook':'兼容轮询';if(!(await confirmModal('确定切换为'+label+'？切换后会停止原模式。','切换监控模式')))return;var r=await api('/integrations/bilibili','POST',{action:'switch_mode',id:id,mode:mode,pollIntervalSeconds:1800});toast(r.message);if(r.ok){if(r.webhookUrl)await copyPortalText(r.webhookUrl);loadBilibili()}}
+async function loadBilibili(){var r=await api('/integrations/bilibili');if(!r.ok){$('biliList').innerHTML='<div class="empty">'+esc(r.message)+'</div>';return}$('biliList').innerHTML='';(r.connectors||[]).forEach(function(c){var d=document.createElement('div');d.className='item bili-connector';var state=c.pollState||{};var status=c.lastCheckStatus||'等待首次檢查';var next=c.nextPollAt?new Date(Number(c.nextPollAt)).toLocaleString():'等待定時任務';d.innerHTML='<div class="item-title">'+esc(c.creatorName||('UID '+c.creatorId))+'</div><div class="item-meta">模式：低頻輪詢｜UID：'+esc(c.creatorId)+'｜直播：'+(c.liveNotify?'通知':'僅記錄')+(c.liveAtAll?'＋@全體':'')+'｜影片：'+(c.videoNotify?'通知':'僅記錄')+(c.videoAtAll?'＋@全體':'')+'</div><div class="item-body">狀態：'+esc(status)+'｜目前直播：'+(state.live?'是':'否')+'｜最新影片：'+esc(state.latestVideoBvid||'尚未建立基準')+'<br>上次檢查：'+esc(c.lastCheckAt?new Date(Number(c.lastCheckAt)).toLocaleString():'尚未檢查')+'｜下次：'+esc(next)+(c.lastCheckError?'<br><b>錯誤：</b>'+esc(c.lastCheckError):'')+'</div>';var row=document.createElement('div');row.className='row';row.style.marginTop='10px';var interval=document.createElement('select');[[1800,'30 分鐘'],[3600,'1 小時'],[7200,'2 小時'],[21600,'6 小時']].forEach(function(v){var o=document.createElement('option');o.value=v[0];o.textContent='每 '+v[1];interval.appendChild(o)});interval.value=String(c.pollIntervalSeconds||1800);var saveInterval=document.createElement('button');saveInterval.className='btn';saveInterval.textContent='儲存檢查頻率';saveInterval.onclick=function(){updateBilibiliInterval(c.id,interval.value)};var check=document.createElement('button');check.className='btn primary';check.textContent='立即檢查';check.onclick=function(){checkBilibiliNow(c.id)};var testLive=document.createElement('button');testLive.className='btn';testLive.textContent='測試開播通知';testLive.onclick=function(){testBilibili(c.id,'live_start')};var testVideo=document.createElement('button');testVideo.className='btn';testVideo.textContent='測試新影片通知';testVideo.onclick=function(){testBilibili(c.id,'video_publish')};var del=document.createElement('button');del.className='btn danger';del.textContent='刪除';del.onclick=async function(){if(!(await confirmModal('刪除此 B站監控？','確認刪除')))return;var x=await api('/integrations/bilibili','POST',{action:'delete',id:c.id});toast(x.message);if(x.ok)loadBilibili()};row.append(interval,saveInterval,check,testLive,testVideo,del);d.appendChild(row);$('biliList').appendChild(d)});if(!$('biliList').children.length)$('biliList').innerHTML='<div class="empty">暫無 B站監控</div>'}
+async function saveBilibiliConnector(){var uid=String($('biliCreatorId').value||'').replace(/\D/g,'');if(!uid){toast('請輸入 B站使用者 UID');return}var r=await api('/integrations/bilibili','POST',{action:'save',creatorName:$('biliCreatorName').value,creatorId:uid,pollIntervalSeconds:Number($('biliPollInterval').value||1800),liveNotify:$('biliLiveNotify').checked,liveAtAll:$('biliLiveAtAll').checked,videoNotify:$('biliVideoNotify').checked,videoAtAll:$('biliVideoAtAll').checked});toast(r.message);if(r.ok){$('biliCreatorName').value='';$('biliCreatorId').value='';loadBilibili()}}
 async function updateBilibiliInterval(id,seconds){var r=await api('/integrations/bilibili','POST',{action:'update_interval',id:id,pollIntervalSeconds:Number(seconds)});toast(r.message);if(r.ok)loadBilibili()}
 async function checkBilibiliNow(id){var r=await api('/integrations/bilibili','POST',{action:'check_now',id:id});toast(r.message);loadBilibili()}
 async function testBilibili(id,eventType){var r=await api('/integrations/bilibili','POST',{action:'test',id:id,eventType:eventType});toast(r.message)}
@@ -3001,7 +2914,7 @@ async function rootScheduleAction(id,action){if(action==='assign'){var reviewers
 async function loadSchedules(){if(!$('scheduleMine'))return;if(!currentGroup){$('scheduleMine').innerHTML='<div class="empty">请先选择群组。</div>';return}var r=await api('/schedules');if(!r.ok){$('scheduleMine').innerHTML='<div class="empty">'+esc(r.message)+'</div>';return}var cron=r.cron||{};$('scheduleCronState').textContent=cron.lastRunAt?'Cron 最近执行：'+new Date(Number(cron.lastRunAt)).toLocaleString()+(cron.recent?'（正常）':'（超过 5 分钟，可能未持续触发）'):(cron.message||'尚未记录 Cron 执行');$('scheduleMine').innerHTML=(r.schedules||[]).map(function(x){return renderScheduleItem(x,'mine')}).join('')||'<div class="empty">目前群没有你建立的排程</div>';$('scheduleMine').querySelectorAll('[data-schedule-cancel]').forEach(function(b){b.onclick=function(){cancelScheduleFromPortal(this.dataset.scheduleCancel)}});$('scheduleMine').querySelectorAll('[data-schedule-delete]').forEach(function(b){b.onclick=function(){deleteScheduleFromPortal(this.dataset.scheduleDelete)}});$('scheduleMine').querySelectorAll('[data-schedule-edit]').forEach(function(b){b.onclick=function(){editScheduleFromPortal(this.dataset.scheduleEdit)}});$('scheduleMine').querySelectorAll('[data-schedule-skip]').forEach(function(b){b.onclick=function(){skipScheduleOnceFromPortal(this.dataset.scheduleSkip)}});var canReview=!!(r.permissions&&r.permissions.canReview),dev=!!(r.permissions&&r.permissions.developer);$('scheduleReviewCard').classList.toggle('hidden',!canReview);$('scheduleRootCard').classList.toggle('hidden',!dev);if(canReview){var q=await api('/review/schedules');$('scheduleReviewList').innerHTML=q.ok?(q.schedules||[]).map(function(x){return renderScheduleItem(x,'review')}).join('')||'<div class="empty">没有分配给你的排程审核</div>':'<div class="empty">'+esc(q.message||'无法读取审核排程')+'</div>';$('scheduleReviewList').querySelectorAll('[data-schedule-vote]').forEach(function(b){b.onclick=function(){voteScheduleFromPortal(this.dataset.id,this.dataset.scheduleVote)}})}if(dev){var all=await api('/root/schedules');$('scheduleRootList').innerHTML=all.ok?(all.schedules||[]).map(function(x){return renderScheduleItem(x,'root')}).join('')||'<div class="empty">没有排程</div>':'<div class="empty">'+esc(all.message||'无法读取全部排程')+'</div>';$('scheduleRootList').querySelectorAll('[data-schedule-root]').forEach(function(b){b.onclick=function(){rootScheduleAction(this.dataset.id,this.dataset.scheduleRoot)}})}}
 
 async function loadGroups(){var r=await api('/groups');if(!r.ok){toast(r.message);return false}var sel=$('groupSelect'),groups=r.groups||[];sel.innerHTML='<option value="">选择群组</option>';groups.forEach(function(g){var o=document.createElement('option');o.value=g.groupId;o.textContent=(g.displayName||g.groupName||g.groupId)+' ('+g.groupId+')';sel.appendChild(o)});if(r.selectedGroupId){sel.value=r.selectedGroupId;currentGroup=r.selectedGroupId}else if(groups.length===1){sel.value=groups[0].groupId;await selectGroup(groups[0].groupId)}else if(!groups.length){toast('没有找到你已加入且启用 QQAI 的群组；仍可使用匿名申诉与个人功能。')}return true}
-async function selectGroup(id){if(!id){currentGroup='';setNativeAdminVisibility(false);refreshOverview();return}var r=await api('/select-group','POST',{groupId:id});if(!r.ok){toast(r.message);return}currentGroup=id;session=r.session;$('identity').innerHTML='<b>QQ '+esc(session.qq)+'</b><br><span style="color:#98a2b7">'+esc(portalRoleLabel(session.role||'member'))+'</span>';await refreshCapabilities();applyR3RoleVisibility();toast('已切换群组');refreshOverview()}
+async function selectGroup(id){if(!id){currentGroup='';setNativeAdminVisibility(false);refreshOverview();return}var r=await api('/select-group','POST',{groupId:id});if(!r.ok){toast(r.message);return}currentGroup=id;session=r.session;renderPortalIdentity(window.__qqaiPortalAccount||{},session);await refreshCapabilities();applyR3RoleVisibility();toast('已切换群组');refreshOverview()}
 function ensureAccountSecurityPanel(){var view=$('v-settingscenter');if(!view||$('accountSecurityPanel'))return;var panel=document.createElement('div');panel.id='accountSecurityPanel';panel.className='card';panel.style.marginBottom='16px';panel.innerHTML='<div class="section-head" style="margin-bottom:12px"><div><h3>登录与双因数验证</h3><p>验证码登录永远保留；密码为可选。启用 2FA 后，密码登录还需要验证器动态码、单次备用码或 QQ 私信验证码。</p></div><button id="authSecurityReload" class="btn">刷新状态</button></div><div id="authSecurityStatus" class="notice">尚未加载。</div><div class="security-grid" style="margin-top:14px"><div class="card"><h3>设置或修改密码</h3><div class="field"><label>当前密码（首次设置可留空）</label><input id="authCurrentPassword" type="password" autocomplete="current-password"></div><div class="field"><label>新密码（至少 10 个字符）</label><input id="authNewPassword" type="password" maxlength="128" autocomplete="new-password"></div><div class="field"><label>确认新密码</label><input id="authConfirmPassword" type="password" maxlength="128" autocomplete="new-password"></div><div class="field"><label>QQ 验证码（登录超过 15 分钟或忘记当前密码时使用）</label><input id="authVerificationCode" inputmode="numeric" maxlength="6" autocomplete="one-time-code"></div><div class="row"><button id="authSendCode" class="btn ghost">发送 QQ 验证码</button><button id="authSavePassword" class="btn primary">保存密码</button></div></div><div class="card"><h3>双因数验证（TOTP）</h3><div class="field"><label>当前密码</label><input id="auth2faPassword" type="password" autocomplete="current-password"></div><div class="row"><button id="auth2faSetup" class="btn primary">开始设置 2FA</button><button id="auth2faDisable" class="btn danger">关闭 2FA</button></div><div id="auth2faSetupArea" class="hidden"><div class="field"><label>验证器密钥</label><input id="auth2faSecret" readonly></div><div class="field"><label>otpauth URI</label><textarea id="auth2faUri" readonly></textarea></div><div class="field"><label>验证器当前六位动态码</label><input id="auth2faCode" inputmode="numeric" maxlength="6" autocomplete="one-time-code"></div><div class="row"><button id="auth2faEnable" class="btn primary">验证并启用</button><button id="authBackupRegenerate" class="btn">重新生成备用码</button></div></div></div></div><div id="authBackupCodes" class="notice hidden backup-codes"></div>';var anchor=$('scMessage');view.insertBefore(panel,anchor||view.firstChild);$('authSecurityReload').onclick=loadAccountSecurity;$('authSendCode').onclick=sendAccountSecurityCode;$('authSavePassword').onclick=saveAccountPassword;$('auth2faSetup').onclick=setupAccount2fa;$('auth2faEnable').onclick=enableAccount2fa;$('auth2faDisable').onclick=disableAccount2fa;$('authBackupRegenerate').onclick=regenerateBackupCodes}
 async function loadAccountSecurity(){if(!$('authSecurityStatus'))return;var r=await api('/security/auth-state');if(!r.ok){$('authSecurityStatus').textContent=r.message||'读取失败';return}$('authSecurityStatus').textContent='密码：'+(r.passwordSet?'已设置':'未设置')+'；双因数验证：'+(r.twoFactorEnabled?'已启用':'未启用')+(r.twoFactorEnabled?'；剩余备用码 '+Number(r.backupCodesRemaining||0)+' 组':'')+(r.encryptionReady?'':'；管理员尚未设置 PORTAL_AUTH_SECRET，暂时不能启用 2FA');$('auth2faSetup').disabled=!r.passwordSet||!r.encryptionReady||r.twoFactorEnabled;$('auth2faDisable').disabled=!r.twoFactorEnabled;$('authBackupRegenerate').disabled=!r.twoFactorEnabled;$('auth2faSetupArea').classList.toggle('hidden',!r.twoFactorEnabled)}
 async function sendAccountSecurityCode(){if(!session)return;var r=await raw('/api/auth/request-code','POST',{qq:session.qq});toast(r.message||'发送失败')}
@@ -3011,7 +2924,8 @@ function showBackupCodes(codes,message){var box=$('authBackupCodes');box.classLi
 async function enableAccount2fa(){var r=await api('/security/2fa/enable','POST',{code:$('auth2faCode').value});toast(r.message||'启用失败');if(r.ok){showBackupCodes(r.backupCodes,r.message);$('auth2faPassword').value='';$('auth2faCode').value='';loadAccountSecurity()}}
 async function regenerateBackupCodes(){var code=$('auth2faCode').value;if(!code){toast('请先输入验证器当前六位动态码');return}if(!(await confirmModal('旧备用码会立即全部失效，确定重新生成吗？','重新生成备用码')))return;var r=await api('/security/2fa/backup-codes','POST',{code:code});toast(r.message||'生成失败');if(r.ok)showBackupCodes(r.backupCodes,r.message)}
 async function disableAccount2fa(){var password=$('auth2faPassword').value,code=$('auth2faCode').value;if(!password||!code){toast('关闭 2FA 需要当前密码和验证器动态码');return}if(!(await confirmModal('关闭后所有备用码都会失效，确定继续吗？','关闭双因数验证')))return;var r=await api('/security/2fa/disable','POST',{currentPassword:password,code:code});toast(r.message||'关闭失败');if(r.ok){$('auth2faPassword').value='';$('auth2faCode').value='';$('auth2faSetupArea').classList.add('hidden');$('authBackupCodes').classList.add('hidden');loadAccountSecurity()}}
-async function boot(attempt){attempt=Number(attempt||0);migratePortalMaintenanceV140();ensureR3Views();ensureAccountSecurityPanel();organizeSidebarNavigation();bindDashboardActions();var me=await api('/me');if(!me.ok){if(me.retryable||me.code==='SESSION_STORAGE_UNAVAILABLE'){setNativeAdminVisibility(false);$('loginNotice').textContent=me.message||'登录会话资料库暂时不可用，正在重试…';if(attempt<3){setTimeout(function(){boot(attempt+1)},500*(attempt+1));return}showLogin();return}setNativeAdminVisibility(false);showLogin();return}showApp();session=me.session;loadAccountSecurity();$('identity').innerHTML='<b>QQ '+esc(session.qq)+'</b><br><span style="color:#98a2b7">'+esc(portalRoleLabel(session.role||'member'))+'</span>';var loaded=await loadGroups();if(!loaded)return;await refreshCapabilities();applyR3RoleVisibility();var hash=String(location.hash||'').replace(/^#/,'');if(hash&&$('v-'+hash)){var b=document.querySelector('#nav button[data-view="'+hash+'"]');if(b&&!b.hidden&&b.style.display!=='none')showView(hash);else showView('overview')}else showView('overview')}
+function renderPortalIdentity(account,currentSession){account=account||{};currentSession=currentSession||{};var title=account.displayName||(currentSession.systemAdmin?(currentSession.username||'系统管理员'):(currentSession.qq?'QQ '+currentSession.qq:'QQ 使用者'));var meta=currentSession.systemAdmin?'系统管理员':((account.qq||currentSession.qq)?'QQ '+(account.qq||currentSession.qq)+'｜':'')+portalRoleLabel(currentSession.role||account.groupRole||'member');$('identity').innerHTML='<b>'+esc(title)+'</b><br><span style="color:#98a2b7">'+esc(meta)+'</span>'}
+async function boot(attempt){attempt=Number(attempt||0);migratePortalMaintenanceV140();ensureR3Views();ensureAccountSecurityPanel();organizeSidebarNavigation();bindDashboardActions();var me=await api('/me');if(!me.ok){if(me.retryable||me.code==='SESSION_STORAGE_UNAVAILABLE'){setNativeAdminVisibility(false);$('loginNotice').textContent=me.message||'登录会话资料库暂时不可用，正在重试…';if(attempt<3){setTimeout(function(){boot(attempt+1)},500*(attempt+1));return}showLogin();return}setNativeAdminVisibility(false);showLogin();return}showApp();session=me.session;window.__qqaiPortalAccount=me.account||{};loadAccountSecurity();renderPortalIdentity(window.__qqaiPortalAccount,session);var loaded=await loadGroups();if(!loaded)return;await refreshCapabilities();applyR3RoleVisibility();var hash=String(location.hash||'').replace(/^#/,'');if(hash&&$('v-'+hash)){var b=document.querySelector('#nav button[data-view="'+hash+'"]');if(b&&!b.hidden&&b.style.display!=='none')showView(hash);else showView('overview')}else showView('overview')}
 async function loadHealth(mode){$('healthList').innerHTML='<div class="empty">检查中…</div>';var r=await api('/health?mode='+encodeURIComponent(mode||'quick'));if(!r.checks){$('healthList').innerHTML='<div class="empty">'+esc(r.message||'检查失败')+'</div>';return}renderHealth(r)}
 function renderHealth(r){$('healthSummary').innerHTML='<div class="card span-4"><div class="metric-label">正常</div><div class="metric-value">'+esc(r.counts.ok)+'</div></div><div class="card span-4"><div class="metric-label">警告</div><div class="metric-value">'+esc(r.counts.warning)+'</div></div><div class="card span-4"><div class="metric-label">错误</div><div class="metric-value">'+esc(r.counts.error)+'</div></div>';$('healthList').innerHTML=(r.checks||[]).map(function(c){var detail=c.error||humanizeHealthDetail(c.detail);return '<div class="health-card"><div class="item-head"><div class="item-title">'+esc(c.name)+'</div><span class="status '+statusClass(c.status)+'">'+esc(healthStatusText(c.status))+'</span></div><div class="latency">耗时：'+esc(c.latencyMs)+' ms</div><div class="detail">'+esc(detail)+'</div></div>'}).join('')||'<div class="empty">没有检查项目</div>';var issues=(r.checks||[]).filter(function(c){return c.status!=='ok'});$('overviewIssues').innerHTML=issues.map(function(c){return '<div class="item"><div class="item-head"><div class="item-title">'+esc(c.name)+'</div><span class="status '+statusClass(c.status)+'">'+esc(healthStatusText(c.status))+'</span></div><div class="item-meta">'+esc(c.error||humanizeHealthDetail(c.detail))+'</div></div>'}).join('')||'<div class="empty">所有检查项目正常</div>';$('overallStatus').className='status '+(r.ok?'ok':'error');$('overallStatus').textContent=r.ok?'系统正常':'需要处理'}
 async function loadTasks(){var r=await api('/tasks');if(!r.ok){$('taskList').innerHTML='<div class="empty">'+esc(r.message)+'</div>';return}$('mActive').textContent=r.inFlightQuestions||0;$('mQueued').textContent=r.queuedQuestions||0;$('taskStats').innerHTML='<div class="card span-6"><div class="metric-label">執行中</div><div class="metric-value">'+esc(r.inFlightQuestions||0)+'</div></div><div class="card span-6"><div class="metric-label">等待中</div><div class="metric-value">'+esc(r.queuedQuestions||0)+'</div></div>';$('taskList').innerHTML='';(r.queues||[]).forEach(function(q){var d=document.createElement('div');d.className='item';d.innerHTML='<div class="item-head"><div><div class="item-title">群 '+esc(q.groupId)+'／QQ '+esc(q.userId)+'</div><div class="item-meta">執行中：'+esc(q.preview||'無')+'<br>排隊：'+esc((q.queued||[]).length)+' 題</div></div></div>';(q.queued||[]).forEach(function(x){var p=document.createElement('div');p.className='item-body';p.textContent='等待：'+x.preview;d.appendChild(p)});var b=document.createElement('button');b.className='btn danger';b.textContent='取消此使用者等待列';b.addEventListener('click',async function(){var x=await api('/tasks/cancel','POST',{groupId:q.groupId,userId:q.userId});toast(x.message||'完成');loadTasks()});d.appendChild(b);$('taskList').appendChild(d)});if(!$('taskList').children.length)$('taskList').innerHTML='<div class="empty">目前沒有執行中或等待中的問題</div>'}
@@ -3019,7 +2933,13 @@ function proposalState(p){if(p.status==='pending'&&Date.now()>Number(p.expiresAt
 function proposalStatusText(v){return({pending:'待确认',executed:'已执行',failed:'失败',cancelled:'已取消',expired:'已过期'})[String(v||'')]||String(v||'未知')}
 async function loadProposals(){await refreshCapabilities();var r=await api('/moderation/proposals');if(!r.ok){$('proposalList').innerHTML='<div class="empty">'+esc(r.message)+'</div>';return}var pending=(r.proposals||[]).filter(function(p){return proposalState(p)==='pending'});$('mProposals').textContent=pending.length;$('proposalList').innerHTML='';(r.proposals||[]).forEach(function(p){var st=proposalState(p);var d=document.createElement('div');d.className='item';d.innerHTML='<div class="item-head"><div><div class="item-title">'+esc(p.id)+'｜'+esc(p.actionLabel||p.action)+'</div><div class="item-meta">提出者：'+esc((p.actorName||p.actorId)+(p.actorId&&String(p.actorName||'').indexOf(String(p.actorId))<0?'（QQ:'+p.actorId+'）':''))+'｜目标：'+esc(p.targetName||p.targetId||'全群')+'｜状态：'+esc(proposalStatusText(st))+'</div></div><span class="status '+(st==='executed'?'ok':st==='pending'?'warning':st==='failed'?'error':'')+'">'+esc(proposalStatusText(st))+'</span></div><div class="item-body">'+esc(p.sourceText||'')+(p.reason?'<br><b>原因：</b>'+esc(p.reason):'')+(p.classifierReason?'<br><b>识别依据：</b>'+esc(p.classifierReason):'')+(p.action==='mute'&&p.preventUnmute?'<br><b>防解除：</b>'+(p.allowOwnerUnmute?'开发者或群主可解除':'仅开发者可解除'):'')+(p.skipConfirmation?'<br><b>网页确认：</b>执行按钮将跳过确认视窗':'')+'</div>';if(st==='pending'){var a=document.createElement('div');a.className='row';a.style.marginTop='10px';var yes=document.createElement('button');yes.className='btn primary';yes.textContent='确认并执行';yes.onclick=async function(){if(!p.skipConfirmation&&!(await confirmModal('确定执行 '+p.id+'？','确认待执行操作')))return;var x=await api('/moderation/confirm','POST',{id:p.id});toast(x.message);loadProposals()};var no=document.createElement('button');no.className='btn danger';no.textContent='取消';no.onclick=async function(){var x=await api('/moderation/cancel','POST',{id:p.id});toast(x.message);loadProposals()};a.append(yes,no);d.appendChild(a)}$('proposalList').appendChild(d)});if(!$('proposalList').children.length)$('proposalList').innerHTML='<div class="empty">暂无待确认操作</div>'}
 async function loadModels(){var r=await api('/models');if(!r.ok){$('modelList').innerHTML='<div class="empty span-12">'+esc(r.message)+'</div>';return}var routing=r.routing||{},lines=Object.keys(routing).map(function(k){var names={decision:'审查判断',chat:'聊天回答',vision:'图片理解',search:'联网搜索',contextSummary:'上下文整理',deepseekChat:'DeepSeek 聊天权限'};return '<div class="item"><div class="item-title">'+esc(names[k]||k)+'</div><div class="item-meta">'+esc(routing[k])+'</div></div>'}).join('');var dev=session&&(session.permissions||{}).developer,windows=dev?(r.deepseekEmergencyWindows||[]):[];if(dev&&windows.length){lines+='<div class="item"><div class="item-title">DeepSeek 临时开放记录（永久保留）</div><div class="item-meta">'+windows.slice(0,20).map(function(w){var start=w.startedAt?new Date(w.startedAt).toLocaleString():'未记录',end=(w.endedAt||w.expiresAt)?new Date(w.endedAt||w.expiresAt).toLocaleString():'进行中',actual=Math.round(Number(w.totalModelCallMs||0)/1000*10)/10;return esc('群 '+(w.groupId||'私聊')+'／QQ '+(w.userId||'未知')+'｜'+start+' ～ '+end+'｜调用 '+Number(w.useCount||0)+' 次｜模型实际耗时 '+actual+' 秒')}).join('<br>')+'</div></div>'}$('modelRoutingSummary').innerHTML=lines||'<div class="empty">没有路由资料</div>';$('modelList').innerHTML=(r.models||[]).map(function(m){return '<div class="card span-4"><div class="item-head"><div><div class="item-title">'+esc(m.id)+'</div><div class="item-meta">'+esc(m.provider)+'／'+esc(m.family)+(m.billing?'／'+esc(m.billing):'')+'</div></div><span class="status '+statusClass(m.status)+'">'+esc(m.statusLabel||m.status)+'</span></div><div style="margin-top:10px">'+(m.capabilities||[]).map(function(x){return'<span class="pill">'+esc(x)+'</span>'}).join('')+'</div></div>'}).join('')||'<div class="empty span-12">没有模型</div>';if(dev){ensureModelRegistryPanel();loadRuntimeModels()}}
-async function loadQuota(){var r=await api('/root/quotas');if(!r.ok){$('quotaStatus').textContent=r.message;$('globalQuota').disabled=true;$('groupQuota').disabled=true;$('saveQuota').disabled=true;return}$('globalQuota').disabled=false;$('groupQuota').disabled=false;$('saveQuota').disabled=false;$('globalQuota').value=r.globalDailyCny||'';$('groupQuota').value=r.groupDailyCny||'';$('quotaStatus').textContent='全站：'+(r.globalDailyCny===''?'無限制':r.globalDailyCny+' CNY／日')+'；目前群：'+(r.groupDailyCny===''?'無限制':r.groupDailyCny+' CNY／日')}
+function providerMaybeNumber(id){var el=$(id),v=el?String(el.value||'').trim():'';if(v==='')return null;var n=Number(v);return Number.isFinite(n)&&n>=0?n:null}
+function providerTaskLabel(v){return({chat:'聊天',decision:'判斷',summary:'摘要',vision:'圖片理解',tts:'語音回覆',code:'程式任務',image:'圖片生成'})[String(v||'')]||String(v||'')}
+function providerTypeLabel(v){return({google_gemini:'Google Gemini',google_gemma:'Google Gemma',deepseek:'DeepSeek',openai_api:'OpenAI API',codex_bridge:'Codex Bridge',cloudflare_workers_ai:'Cloudflare Workers AI',cloudflare_ai_gateway:'Cloudflare AI Gateway',openai_compatible:'OpenAI-compatible'})[String(v||'')]||String(v||'')}
+function providerQuotaText(q,u){q=q||{};u=u||{};var parts=[];if(q.dailyMoney!==null&&q.dailyMoney!==undefined)parts.push('今日金額 '+Number(u.money||0).toFixed(4)+' / '+q.dailyMoney);if(q.dailyInputTokens!==null&&q.dailyInputTokens!==undefined)parts.push('今日 Input '+Number(u.inputTokens||0)+' / '+q.dailyInputTokens);if(q.dailyOutputTokens!==null&&q.dailyOutputTokens!==undefined)parts.push('今日 Output '+Number(u.outputTokens||0)+' / '+q.dailyOutputTokens);if(q.remainingMoneyReported!==null&&q.remainingMoneyReported!==undefined)parts.push('供應商回報剩餘金額 '+q.remainingMoneyReported);if(q.remainingTokensReported!==null&&q.remainingTokensReported!==undefined)parts.push('供應商回報剩餘 Token '+q.remainingTokensReported);return parts.join('｜')||'未設定帳號額度'}
+function renderProviderAccounts(r){window.__qqaiProviderState=r||{};var accounts=r.accounts||[],states=r.quotaStates||{};$('providerEncryptionStatus').textContent=r.encryptionReady?'可使用加密密鑰保存；也可只填 Cloudflare Secret 的環境變數名稱。':'尚未設定 AI_PROVIDER_ENCRYPTION_KEY；目前建議只使用 Secret 環境變數名稱。';$('providerList').innerHTML='';accounts.forEach(function(a){var state=states[a.id]||{},d=document.createElement('div');d.className='item';var tasks=(a.tasks||[]).map(providerTaskLabel).join('、')||'未指定';d.innerHTML='<div class="item-head"><div><div class="item-title">'+esc(a.label||a.id)+' <span class="pill">'+esc(a.id)+'</span></div><div class="item-meta">'+esc(providerTypeLabel(a.provider))+'｜'+esc(a.model||'未指定模型')+'｜用途：'+esc(tasks)+'</div></div><span class="status '+(a.enabled!==false&&state.ok!==false?'ok':'warning')+'">'+(a.enabled===false?'已停用':state.ok===false?'額度阻擋':'可用')+'</span></div><div class="item-meta">'+esc(providerQuotaText(a.quota,state.dayUsage))+(a.accountId?'<br>Cloudflare Account：'+esc(a.accountId):'')+(a.gatewayId?'<br>Gateway：'+esc(a.gatewayId):'')+'<br>密鑰來源：'+esc(a.secretEnv?('Secret '+a.secretEnv):(a.hasSecret?'已加密保存':'未設定'))+'</div>';var row=document.createElement('div');row.className='row';var edit=document.createElement('button');edit.className='btn';edit.textContent='載入設定';edit.onclick=function(){$('providerType').value=a.provider;$('providerAccountId').value=a.id;$('providerLabel').value=a.label||'';$('providerModel').value=a.model||'';$('providerTasks').value=(a.tasks||[]).join(',');$('providerEndpoint').value=a.endpoint||'';$('providerCloudflareAccountId').value=a.accountId||'';$('providerGatewayId').value=a.gatewayId||'';$('providerSecretEnv').value=a.secretEnv||'';$('providerSecret').value='';var q=a.quota||{};$('providerDailyMoney').value=q.dailyMoney??'';$('providerMonthlyMoney').value=q.monthlyMoney??'';$('providerDailyInput').value=q.dailyInputTokens??'';$('providerDailyOutput').value=q.dailyOutputTokens??'';$('providerRemainingMoney').value=q.remainingMoneyReported??'';$('providerRemainingTokens').value=q.remainingTokensReported??''};var del=document.createElement('button');del.className='btn danger';del.textContent='刪除';del.onclick=async function(){if(!(await confirmModal('刪除 Provider 帳號「'+(a.label||a.id)+'」？相關用途路由也會移除它。','刪除 Provider')))return;var x=await api('/root/ai-providers','POST',{action:'delete',id:a.id});toast(x.message||'已刪除');if(x.ok)loadQuota()};row.append(edit,del);d.appendChild(row);$('providerList').appendChild(d)});if(!accounts.length)$('providerList').innerHTML='<div class="empty">還沒有 Provider 帳號。可先新增 Google、Cloudflare、OpenAI-compatible 或 Codex Bridge。</div>';renderProviderRouteSummary(r)}
+function renderProviderRouteSummary(r){var routes=(r&&r.routes)||{},task=$('providerRouteTask').value||'chat',ids=routes[task]||[];$('providerRouteIds').value=ids.join(',');$('providerRouteSummary').textContent=providerTaskLabel(task)+'：'+(ids.length?ids.join(' → '):'未設定，沿用既有路由')}
+async function loadQuota(){var legacy=await api('/root/quotas');if(legacy.ok){$('globalQuota').disabled=false;$('groupQuota').disabled=false;$('saveQuota').disabled=false;$('globalQuota').value=legacy.globalDailyCny||'';$('groupQuota').value=legacy.groupDailyCny||'';$('quotaStatus').textContent='v2/舊路徑相容額度：全站 '+(legacy.globalDailyCny===''?'無限制':legacy.globalDailyCny+' CNY／日')+'；目前群 '+(legacy.groupDailyCny===''?'無限制':legacy.groupDailyCny+' CNY／日')}else{$('quotaStatus').textContent=legacy.message||'無法讀取相容額度'}var r=await api('/root/ai-providers');if(!r.ok){$('providerList').innerHTML='<div class="empty">'+esc(r.message||'無法讀取 Provider')+'</div>';$('providerRouteSummary').textContent=r.message||'無法讀取 Provider';return}renderProviderAccounts(r)}
 async function loadGroupSettings(){ensureGroupSettingsExtras();var r=await api('/admin/state');if(!r.ok){toast(r.message);return}$('groupAi').checked=!!r.ai_on;$('groupMemory').checked=!!r.memory_on;$('activeSpeaking').checked=!!r.active_speaking;var as=r.active_speaking_status||{};if($('activeSpeakingStatus')){var last=as.lastResult||{};$('activeSpeakingStatus').innerHTML='<b>状态：</b>'+(as.enabled?'已开启':'已关闭')+'｜今日自动发话 '+esc(as.todayCount||0)+' 次'+(last.at?'<br>最近结果：'+(last.ok?'成功':'失败')+'｜'+esc(new Date(Number(last.at)).toLocaleString())+(last.error?'｜'+esc(last.error):''):'<br>尚无发送记录')};if($('activeSpeakingTest'))$('activeSpeakingTest').classList.toggle('hidden',!as.canTest);$('interjectRate').value=r.interject_rate;$('groupPersona').value=r.persona||'';$('groupKeywords').value=(r.keywords||[]).join('\n');$('welcomeEnabled').checked=!!r.welcome_enabled;$('joinAssistEnabled').checked=!!r.join_assist_enabled;$('joinAiApproveEnabled').checked=!!r.join_ai_approve_enabled;$('ruleMonitorEnabled').checked=!!r.rule_monitor_enabled;$('ruleMuteGuardEnabled').checked=!!r.rule_mute_guard_enabled;$('ruleSpamWindow').value=Number(r.rule_spam_window_seconds||60);$('ruleSpamThreshold').value=Number(r.rule_spam_threshold||4);$('ruleSpamKeep').value=Number(r.rule_spam_keep_count||3);$('welcomeText').value=r.welcome_text||'欢迎 {at} 加入本群 🎉 请先阅读群规，有问题可以询问管理员。';$('moderationCooldown').value=Number(r.moderation_target_cooldown_seconds||0);$('newcomerDays').value=Number(r.newcomer_observation_days||0);var canSetCommon=!!(session&&((session.permissions||{}).aiAdmin||(session.permissions||{}).developer));$('joinAssistEnabled').disabled=!canSetCommon;$('joinAiApproveEnabled').disabled=!canSetCommon;['ruleSpamWindow','ruleSpamThreshold','ruleSpamKeep'].forEach(function(id){$(id).disabled=!canSetCommon});var canMonitor=!!r.can_manage_rule_monitor;$('ruleMonitorEnabled').disabled=!canMonitor;$('ruleMonitorHint').textContent=canMonitor?'机器人与当前账号均具备所需权限，可以开关群规监控。':(r.rule_monitor_available===false?'机器人在当前群不是群主或管理员：群规监控完全停用，也不会建立记录。':'你在当前群不是 QQ 管理员或群主，暂不开放群规监控。');var owner=!!(session&&session.role==='owner'),ownerOrDeveloper=!!(session&&(owner||(session.permissions||{}).developer));['welcomeEnabled','welcomeText','moderationCooldown','newcomerDays','ruleMuteGuardEnabled'].forEach(function(id){$(id).disabled=!ownerOrDeveloper});setNativeAdminVisibility(!!r.bot_is_owner);ensureDeveloperPermissionPanel();if(session&&(session.permissions||{}).developer)await loadProgramPermissions();await loadGroupBindings()}
 async function loadMemory(){var r=await api('/memories');if(!r.ok){$('memoryList').innerHTML='<div class="empty">'+esc(r.message)+'</div>';return}var all=(r.private||[]).map(function(x){return Object.assign({},x,{_scope:'private'})}).concat((r.public||[]).map(function(x){return Object.assign({},x,{_scope:'public'})})).filter(function(x){return x.id&&String(x.text||'').trim()});$('memoryList').innerHTML='';all.forEach(function(m){var d=document.createElement('div');d.className='item';d.innerHTML='<div class="item-head"><div><div class="item-title">'+esc(m.text)+'</div><div class="item-meta">'+esc(m._scope)+'｜'+esc(m.at||m.updatedAt||'')+'</div></div></div>';var row=document.createElement('div');row.className='row';var edit=document.createElement('button');edit.className='btn';edit.textContent='编辑';edit.onclick=async function(){var text=await textModal('修改记忆内容',m.text,'编辑记忆');if(text===null)return;var x=await api('/memories','PUT',{scope:m._scope,id:m.id,text:text});toast(x.message|| (x.ok?'已更新':'更新失败'));loadMemory()};var del=document.createElement('button');del.className='btn danger';del.textContent='删除';del.onclick=async function(){if(!(await confirmModal('删除这条记忆？对应的长期记忆向量也会删除。','删除记忆')))return;var x=await api('/memories','DELETE',{scope:m._scope,id:m.id});toast(x.message||'已删除');loadMemory()};row.append(edit,del);d.appendChild(row);$('memoryList').appendChild(d)});if(!$('memoryList').children.length)$('memoryList').innerHTML='<div class="empty">暂无记忆</div>';ensureSearchTools()}
 function ruleSeverityText(v){return({minor:'轻微',moderate:'一般',severe:'严重',critical:'紧急'})[v]||v||'一般'}
@@ -3060,7 +2980,7 @@ try{var lastLoginQq=localStorage.getItem('qqai_last_login_qq');if(lastLoginQq)$(
 $('logout').onclick=async function(){await raw('/api/auth/logout','POST',{});location.reload()};if($('advancedToggle'))$('advancedToggle').onclick=function(){setPortalAdvanced(!portalAdvancedEnabled())};bindDashboardActions();$('menu').onclick=toggleMobileSidebar;if($('sidebarBackdrop'))$('sidebarBackdrop').onclick=closeMobileSidebar;document.addEventListener('keydown',function(e){if(e.key==='Escape')closeMobileSidebar()});window.addEventListener('resize',syncResponsivePortal,{passive:true});syncResponsivePortal();$('refresh').onclick=function(){var active=document.querySelector('#nav button[data-view].active');showView(active?active.dataset.view:'overview')};$('groupSelect').onchange=function(){selectGroup(this.value)};document.querySelectorAll('#nav button[data-view]').forEach(function(b){b.onclick=function(){showView(b.dataset.view)}});
 $('quickHealth').onclick=function(){loadHealth('quick')};$('fullHealth').onclick=function(){loadHealth('full')};$('runModelCheck').onclick=runSingleModelCheck;$('modelCheckProvider').onchange=function(){var p=this.value;$('modelCheckKeyPool').disabled=p!=='gemini'};$('reloadTasks').onclick=loadTasks;$('clearQueue').onclick=async function(){if(!currentGroup){toast('请先选择群组');return}if(!(await confirmModal('清空当前群所有等待中的问题？正在生成的问题不会被强制中断。','清空等待队列')))return;var r=await api('/tasks/clear','POST',{groupId:currentGroup});toast(r.message||'完成');loadTasks()};$('reloadProposals').onclick=loadProposals;
 $('opProtect').onchange=function(){$('opOwnerUnlock').disabled=!this.checked;if(!this.checked)$('opOwnerUnlock').checked=false};$('opAction').onchange=function(){var mute=this.value==='mute';$('opProtect').disabled=!mute;$('opOwnerUnlock').disabled=!mute||!$('opProtect').checked;if(!mute){$('opProtect').checked=false;$('opOwnerUnlock').checked=false}};$('createProposal').onclick=async function(){var r=await api('/ops/action','POST',{action:$('opAction').value,qq:$('opQq').value,duration:$('opDuration').value,reason:$('opReason').value,preventUnmute:$('opProtect').checked,allowOwnerUnmute:$('opOwnerUnlock').checked,skipConfirmation:$('opSkipConfirm').checked});$('opMessage').textContent=r.message;toast(r.message);if(r.ok)loadProposals()};
-$('runSimulator').onclick=async function(){var r=await api('/simulator','POST',{text:$('simText').value,senderRole:$('simRole').value,mentionsBot:$('simMention').checked,hasImage:$('simImage').checked,currentlyBusy:$('simBusy').checked});if(!r.ok){toast(r.message);return}$('simDecision').textContent=r.decisions.final;$('simSteps').innerHTML=(r.steps||[]).map(function(x){return'<div class="step"><i></i><span>'+esc(x)+'</span></div>'}).join('')};$('reloadModels').onclick=loadModels;$('saveQuota').onclick=async function(){var r=await api('/root/quotas','POST',{globalDailyCny:$('globalQuota').value,groupDailyCny:$('groupQuota').value});toast(r.message);if(r.ok)loadQuota()};
+$('runSimulator').onclick=async function(){var r=await api('/simulator','POST',{text:$('simText').value,senderRole:$('simRole').value,mentionsBot:$('simMention').checked,hasImage:$('simImage').checked,currentlyBusy:$('simBusy').checked});if(!r.ok){toast(r.message);return}$('simDecision').textContent=r.decisions.final;$('simSteps').innerHTML=(r.steps||[]).map(function(x){return'<div class="step"><i></i><span>'+esc(x)+'</span></div>'}).join('')};$('reloadModels').onclick=loadModels;$('reloadQuota').onclick=loadQuota;$('providerRouteTask').onchange=function(){renderProviderRouteSummary(window.__qqaiProviderState||{})};$('saveProviderAccount').onclick=async function(){var id=String($('providerAccountId').value||'').trim();if(!id){toast('請先填 Provider 帳號 ID');return}var payload={action:'upsert',id:id,provider:$('providerType').value,label:$('providerLabel').value,model:$('providerModel').value,tasks:String($('providerTasks').value||'').split(',').map(function(x){return x.trim()}).filter(Boolean),endpoint:$('providerEndpoint').value,accountId:$('providerCloudflareAccountId').value,gatewayId:$('providerGatewayId').value,secretEnv:$('providerSecretEnv').value,quota:{dailyMoney:providerMaybeNumber('providerDailyMoney'),monthlyMoney:providerMaybeNumber('providerMonthlyMoney'),dailyInputTokens:providerMaybeNumber('providerDailyInput'),dailyOutputTokens:providerMaybeNumber('providerDailyOutput'),remainingMoneyReported:providerMaybeNumber('providerRemainingMoney'),remainingTokensReported:providerMaybeNumber('providerRemainingTokens')}};if($('providerSecret').value)payload.secret=$('providerSecret').value;var r=await api('/root/ai-providers','POST',payload);toast(r.message||'保存完成');if(r.ok){$('providerSecret').value='';loadQuota()}};$('saveProviderRoute').onclick=async function(){var ids=String($('providerRouteIds').value||'').split(',').map(function(x){return x.trim()}).filter(Boolean);var r=await api('/root/ai-providers','POST',{action:'route',task:$('providerRouteTask').value,accountIds:ids});toast(r.message||'路由已保存');if(r.ok)loadQuota()};$('saveQuota').onclick=async function(){var r=await api('/root/quotas','POST',{globalDailyCny:$('globalQuota').value,groupDailyCny:$('groupQuota').value});toast(r.message);if(r.ok)loadQuota()};
 if($('activeSpeakingTest'))$('activeSpeakingTest').onclick=async function(){if(!currentGroup){toast('请先选择群组');return}var r=await api('/admin/active-speaking-test','POST',{});toast(r.message||'测试完成');loadGroupSettings()};$('saveGroup').onclick=async function(){ensureGroupSettingsExtras();var payload={ai_on:$('groupAi').checked,memory_on:$('groupMemory').checked,active_speaking:$('activeSpeaking').checked,interject_rate:$('interjectRate').value,persona:$('groupPersona').value,keywords:$('groupKeywords').value};var perms=(session&&session.permissions)||{};if(perms.aiAdmin||perms.developer){payload.join_assist_enabled=$('joinAssistEnabled').checked;payload.join_ai_approve_enabled=$('joinAiApproveEnabled').checked;payload.rule_spam_window_seconds=$('ruleSpamWindow').value;payload.rule_spam_threshold=$('ruleSpamThreshold').value;payload.rule_spam_keep_count=$('ruleSpamKeep').value;}if(!$('ruleMonitorEnabled').disabled)payload.rule_monitor_enabled=$('ruleMonitorEnabled').checked;if(session&&(session.role==='owner'||perms.developer)){payload.welcome_enabled=$('welcomeEnabled').checked;payload.welcome_text=$('welcomeText').value;payload.moderation_target_cooldown_seconds=$('moderationCooldown').value;payload.newcomer_observation_days=$('newcomerDays').value;payload.rule_mute_guard_enabled=$('ruleMuteGuardEnabled').checked}var r=await api('/admin/state','POST',payload);toast(r.message)};$('reloadMemory').onclick=loadMemory;$('addMemory').onclick=async function(){var r=await api('/memories','POST',{scope:$('memoryScope').value,text:$('memoryText').value});toast(r.message||'已新增');if(r.ok){$('memoryText').value='';loadMemory()}};$('reloadLogs').onclick=loadLogs;
 boot();
 })();
@@ -3068,4 +2988,4 @@ boot();
 </body></html>`);
 }
 
-export { getAppealPage, getLiveHtmlPage, getPortalHomePage, handleAppealApi, handleGeminiLiveUpgrade, handleOpsPortalApi, handlePortalApi };
+export { getPortalHomePage, handleOpsPortalApi, handlePortalApi };

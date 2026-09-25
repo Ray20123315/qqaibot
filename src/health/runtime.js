@@ -270,18 +270,18 @@ async function runHealthChecks(env, { mode = "quick" } = {}) {
   }, { timeoutMs: 18000 }));
 
   let lastCron = null;
-  let cronStorageUnavailable = false;
+  let cronReadError = "";
   try {
     lastCron = await dbGet(env, "system:last_cron");
-  } catch {
-    cronStorageUnavailable = true;
+  } catch (error) {
+    cronReadError = String(error?.message || error).slice(0, 240);
   }
   checks.push({
     name: "Cron 定时任务",
-    status: cronStorageUnavailable ? "warning" : (lastCron && Date.now() - Number(lastCron) < 5 * 60 * 1000 ? "ok" : "warning"),
+    status: cronReadError ? "warning" : (lastCron && Date.now() - Number(lastCron) < 5 * 60 * 1000 ? "ok" : "warning"),
     latencyMs: 0,
-    detail: cronStorageUnavailable
-      ? { lastRunAt: null, storageUnavailable: true, errorCode: "D1_STORAGE_UNAVAILABLE" }
+    detail: cronReadError
+      ? { lastRunAt: null, storageUnavailable: true, errorCode: "D1_STORAGE_UNAVAILABLE", error: cronReadError }
       : { lastRunAt: lastCron ? new Date(Number(lastCron)).toISOString() : null },
     checkedAt: new Date().toISOString()
   });
@@ -302,8 +302,8 @@ async function runHealthChecks(env, { mode = "quick" } = {}) {
   };
   try {
     await dbPut(env, `health:last:${mode}`, JSON.stringify(summary));
-  } catch {
-    // Health endpoints must stay observable even when D1 itself is degraded or quota-limited.
+  } catch (error) {
+    summary.persistence = { ok: false, error: String(error?.message || error).slice(0, 240) };
   }
   return summary;
 }

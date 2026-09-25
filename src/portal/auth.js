@@ -7,7 +7,9 @@ import { callOneBotAction, getEffectivePermissions, getRuntimeRateLimitSeconds, 
 import { dbCompareAndSwapStrict, dbDel, dbGet, dbPut } from "../data/store.js";
 import { toSimplifiedChinese } from "../i18n/commands.js";
 import { normalizeRuleProxyMode, normalizeRuleStrictness, parseUnlimitedNonNegativeInteger } from "../moderation/runtime.js";
+import { normalizeModerationApprovalMode } from "../moderation/approval-mode.js";
 import { getFeatureFlag, numericId, setFeatureFlag } from "../security/network.js";
+import { wrapOneBotHubForReadOnly } from "../onebot/read-only.js";
 
 
 
@@ -552,7 +554,8 @@ function generateSixDigitCode() {
 
 function getOneBotHub(env) {
   if (!env.ONEBOT_HUB) throw new Error("Missing Durable Object binding: ONEBOT_HUB");
-  return env.ONEBOT_HUB.get(env.ONEBOT_HUB.idFromName("default"));
+  const stub = env.ONEBOT_HUB.get(env.ONEBOT_HUB.idFromName("default"));
+  return wrapOneBotHubForReadOnly(env, stub);
 }
 
 
@@ -880,7 +883,7 @@ function commandChangesWebSettings(message) {
     "记忆开", "記憶開", "记忆关", "記憶關",
     "切换人格", "切換人格", "恢复人格", "恢復人格", "取消使用",
     "set群规", "set群規", "群规设置", "群規設定",
-    "拉黑", "洗白",
+    "拉黑", "解除拉黑", "移出黑名单", "移出黑名單",
     "免打扰", "免打擾", "取消免打扰", "取消免打擾",
     "set人格", "del人格",
     "记住", "記住", "忘记", "忘記",
@@ -891,8 +894,7 @@ function commandChangesWebSettings(message) {
     "入群辅助", "入群輔助", "授权ai拒绝入群", "授權ai拒絕入群",
     "撤回ai拒绝入群", "撤回ai拒絕入群", "设置处置冷却", "設定處置冷卻",
     "设置速率限制", "設定速率限制", "设置全局速率限制", "設定全域速率限制",
-    "自动欢迎", "自動歡迎", "欢迎词", "歡迎詞",
-    "好感度注入", "好感度给ai", "好感度給ai", "好感度上下文"
+    "自动欢迎", "自動歡迎", "欢迎词", "歡迎詞"
   ].some(cmd => text.startsWith("!" + cmd) || text.startsWith("！" + cmd));
 }
 
@@ -1037,7 +1039,6 @@ const PORTAL_SETTING_DEFINITIONS = Object.freeze([
   { key: "ai_on", label: "启用群 AI", command: "!开启ai / !关闭ai", minRole: "admin", scope: "group", type: "boolean", defaultValue: true },
   { key: "memory_on", label: "启用长期记忆", command: "!记忆开 / !记忆关", minRole: "admin", scope: "group", type: "boolean", defaultValue: true },
   { key: "commands_enabled", label: "启用设置型 ! 指令", command: "!指令开 / !指令关", minRole: "admin", scope: "group", type: "boolean", defaultValue: true },
-  { key: "interject_rate", label: "随机插话率", command: "!设置插话率", minRole: "admin", scope: "group", type: "number", min: 0, max: 100, defaultValue: 25 },
   { key: "join_assist_enabled", label: "入群申请辅助", command: "!入群辅助 开/关", minRole: "admin", scope: "group", type: "boolean", defaultValue: true },
   { key: "join_ai_approve_enabled", label: "Gemma 审查后自动同意入群", command: "网页设置", minRole: "admin", scope: "group", type: "boolean", defaultValue: true },
   { key: "join_pattern_threshold", label: "重复申请方式自动同意门槛", command: "网页设置", minRole: "admin", scope: "group", type: "number", min: 1, defaultValue: 2 },
@@ -1047,7 +1048,7 @@ const PORTAL_SETTING_DEFINITIONS = Object.freeze([
   { key: "welcome_enabled", label: "自动欢迎", command: "!自动欢迎 开/关", minRole: "owner", scope: "group", type: "boolean", defaultValue: false },
   { key: "welcome_text", label: "欢迎词", command: "!欢迎词", minRole: "owner", scope: "group", type: "textarea", defaultValue: DEFAULTS.welcomeText },
   { key: "rule_monitor_enabled", label: "群规持续监控", command: "!群规监控", minRole: "owner", scope: "group", type: "boolean", defaultValue: true },
-  { key: "rule_proxy_mode", label: "AI 群规代理模式", command: "!AI群规代理（auto 仅群主）", minRole: "admin", scope: "group", type: "select", options: ["record", "warn", "mute", "auto"], defaultValue: "record" },
+  { key: "moderation_approval_mode", label: "群規 / 自動管理核准模式", command: "!AI群規代理 要求核准/代我核准/完整存取權", minRole: "owner", scope: "group", type: "select", options: ["require_approval", "smart_approval", "full_access"], optionLabels: { require_approval: "要求核准", smart_approval: "代我核准", full_access: "完整存取權" }, defaultValue: "require_approval" },
   { key: "rule_strictness", label: "群规判断严格度", command: "!群规严格度 智慧/宽松/低/中/高/严格", minRole: "admin", scope: "group", type: "select", options: ["smart", "loose", "low", "medium", "high", "strict"], optionLabels: { smart: "智慧（自动校准）", loose: "宽松", low: "低", medium: "中", high: "高", strict: "严格" }, defaultValue: "medium" },
   { key: "rule_proxy_mute_seconds", label: "AI 代理禁言秒数", command: "网页 / AI代理设置", minRole: "admin", scope: "group", type: "number", min: 0, defaultValue: 600 },
   { key: "rule_spam_window_seconds", label: "刷屏判定时间窗（秒）", command: "网页设置", minRole: "admin", scope: "group", type: "number", min: 5, max: 3600, defaultValue: DEFAULTS.ruleSpamWindowSeconds },
@@ -1080,7 +1081,6 @@ async function readPortalSettingValue(env, definition, groupId, targetQq) {
     case "ai_on": return await dbGet(env, `ai_off:${groupId}`) !== "true";
     case "memory_on": return await dbGet(env, `memo:${groupId}`) !== "false";
     case "commands_enabled": return await dbGet(env, `web_command_off:${groupId}`) !== "true";
-    case "interject_rate": return Number(await dbGet(env, `interject_rate:${groupId}`) || DEFAULTS.interjectRate);
     case "join_assist_enabled": return await dbGet(env, `join_assist_enabled:${groupId}`) !== "false";
     case "join_ai_approve_enabled": return await dbGet(env, `join_ai_approve_enabled:${groupId}`) !== "false";
     case "join_pattern_threshold": return Math.max(1, parseUnlimitedNonNegativeInteger(await dbGet(env, `join_pattern_auto_approve_threshold:${groupId}`), DEFAULTS.joinPatternAutoApproveThreshold));
@@ -1090,6 +1090,7 @@ async function readPortalSettingValue(env, definition, groupId, targetQq) {
     case "welcome_enabled": return await dbGet(env, `welcome_enabled:${groupId}`) === "true";
     case "welcome_text": return await dbGet(env, `welcome_text:${groupId}`) || DEFAULTS.welcomeText;
     case "rule_monitor_enabled": return await dbGet(env, `rule_monitor_enabled:${groupId}`) !== "false";
+    case "moderation_approval_mode": return normalizeModerationApprovalMode(await dbGet(env, `moderation_approval_mode:${groupId}`) || "require_approval");
     case "rule_proxy_mode": return normalizeRuleProxyMode(await dbGet(env, `rule_proxy_mode:${groupId}`) || DEFAULTS.ruleProxyMode);
     case "rule_strictness": return normalizeRuleStrictness(await dbGet(env, `rule_strictness:${groupId}`) || DEFAULTS.ruleStrictness);
     case "rule_proxy_mute_seconds": return parseUnlimitedNonNegativeInteger(await dbGet(env, `rule_proxy_mute_seconds:${groupId}`), DEFAULTS.ruleProxyMuteSeconds);
@@ -1119,7 +1120,6 @@ async function writePortalSettingValue(env, definition, groupId, targetQq, value
     case "ai_on": return value ? dbDel(env, `ai_off:${groupId}`) : dbPut(env, `ai_off:${groupId}`, "true");
     case "memory_on": return dbPut(env, `memo:${groupId}`, value ? "true" : "false");
     case "commands_enabled": return value ? dbDel(env, `web_command_off:${groupId}`) : dbPut(env, `web_command_off:${groupId}`, "true");
-    case "interject_rate": return dbPut(env, `interject_rate:${groupId}`, String(Math.max(0, Math.min(100, Number(value || 0)))));
     case "join_assist_enabled": return dbPut(env, `join_assist_enabled:${groupId}`, value ? "true" : "false");
     case "join_ai_approve_enabled": return dbPut(env, `join_ai_approve_enabled:${groupId}`, value ? "true" : "false");
     case "join_pattern_threshold": return dbPut(env, `join_pattern_auto_approve_threshold:${groupId}`, String(Math.max(1, parseUnlimitedNonNegativeInteger(value, DEFAULTS.joinPatternAutoApproveThreshold))));
@@ -1129,6 +1129,7 @@ async function writePortalSettingValue(env, definition, groupId, targetQq, value
     case "welcome_enabled": return dbPut(env, `welcome_enabled:${groupId}`, value ? "true" : "false");
     case "welcome_text": return dbPut(env, `welcome_text:${groupId}`, String(value || DEFAULTS.welcomeText).slice(0, 1000));
     case "rule_monitor_enabled": return dbPut(env, `rule_monitor_enabled:${groupId}`, value ? "true" : "false");
+    case "moderation_approval_mode": return dbPut(env, `moderation_approval_mode:${groupId}`, normalizeModerationApprovalMode(value));
     case "rule_proxy_mode": return dbPut(env, `rule_proxy_mode:${groupId}`, normalizeRuleProxyMode(value));
     case "rule_strictness": return dbPut(env, `rule_strictness:${groupId}`, normalizeRuleStrictness(value));
     case "rule_proxy_mute_seconds": return dbPut(env, `rule_proxy_mute_seconds:${groupId}`, String(parseUnlimitedNonNegativeInteger(value, DEFAULTS.ruleProxyMuteSeconds)));

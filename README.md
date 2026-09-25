@@ -2,7 +2,7 @@
 
 目前版本：**2.7.12**
 
-QQ AI Bot 是部署在 Cloudflare Workers 的單一 Worker QQ 群聊機器人。它透過 NapCat／OneBot WebSocket 接收 QQ 事件，整合 Gemini、Gemma、DeepSeek、D1、Vectorize、Durable Objects 與內建 Portal，提供聊天、記憶、群規、活動、排程、通知、狼人殺與管理工具。
+QQ AI Bot 是部署在 Cloudflare Workers 的單一 Worker QQ 群聊機器人。它透過 NapCat／OneBot WebSocket 接收 QQ 事件，整合 Gemini、Gemma、DeepSeek、D1、Vectorize、Durable Objects 與內建 Portal，提供聊天、記憶、群規、活動、排程、通知與管理工具。
 
 本儲存庫不再把維護者 QQ 號當成程式預設。部署者必須設定自己的開發者 QQ、公開網址、Cloudflare 資源與 API 憑證。
 
@@ -28,7 +28,7 @@ worker.js
       ├─ src/operations/     活動、投票、協作與自動化
       ├─ src/scheduler/      排程、衝突守衛、群打卡
       ├─ src/social/         人格、關係、輸出風格與表情庫
-      ├─ src/games/          狼人殺與本地娛樂指令
+      ├─ src/games/          與本地娛樂指令
       └─ src/data/           D1／KV 相容資料存取
 ```
 
@@ -132,7 +132,7 @@ npm run deploy
 | `VECTORIZE` | Vectorize | 長期記憶需要 | 群組／使用者隔離的語意記憶 |
 | `MY_RATE_LIMITER` | Rate Limiter | 建議 | Cloudflare 原生速率限制 |
 
-Cron 分成每分鐘的使用者排程與每小時的資料清理。精簡版 v2 不再於 Cron 執行自動群打卡、Bilibili 輪詢、狼人殺計時、平台背景工作或其他自動化 fan-out，以降低 D1 與 Worker 背景負載。
+Cron 將一般排程與高成本背景工作分流；Bilibili 使用 30 分鐘以上低頻 polling 與小批次 cursor 掃描，D1 清理使用小批次 cursor，避免全量掃描。
 
 ## 公開 Worker 變數
 
@@ -146,7 +146,7 @@ Cron 分成每分鐘的使用者排程與每小時的資料清理。精簡版 v2
 | `DEVELOPER_ID` | 單一 QQ；預設空 | 舊版相容欄位，只有一位開發者時仍可用。 |
 | `ROOT_QQ_IDS` | QQ 清單；預設空 | 額外 Root 清單，相容部署使用；會與 `DEVELOPER_IDS` 合併去重。 |
 | `PORTAL_ADMIN_USERNAME` | 4～32 字元的獨立帳號 | 系統管理員登入帳號；必須含英文字母，可用數字、`.`、`_`、`-`。若已被一般 QQ 帳號占用，管理員登入會拒絕且保留該帳號資料。 |
-| `PUBLIC_BASE_URL` | `https://bot.example.com`；預設使用請求來源 | `!help`、Portal 與 Live 對外連結的基底網址，不加結尾 `/`。 |
+| `PUBLIC_BASE_URL` | `https://bot.example.com`；預設使用請求來源 | `!help` 與 Portal 對外連結的基底網址，不加結尾 `/`。 |
 | `BOT_DISPLAY_NAME` | `QQAI` | 對外顯示名稱，供可支援的 UI／訊息使用。 |
 
 `DEVELOPER_IDS` 不屬於密碼，但它授予最高權限。不要允許一般 Portal 管理員修改，否則會形成自行提權。應由部署者在 Cloudflare 設定。
@@ -170,14 +170,13 @@ npx wrangler secret put PORTAL_ADMIN_PASSWORD
 | `DEPLOY_NOTIFY_START_COOLDOWN_SECONDS` | `600` | 部署開始事件冷卻。 |
 | `DEPLOY_NOTIFY_SELF_GRACE_SECONDS` | `90` | Worker 自我版本確認等待時間，範圍由程式限制。 |
 
-### OneBot 與手動群打卡
+### OneBot 與自動群打卡
 
 | 變數 | 預設／範圍 | 說明 |
 | --- | --- | --- |
 | `ENABLE_ONEBOT_HTTP_EVENTS` | `false` | 是否允許 OneBot HTTP 事件入口。 |
-| `AUTO_CHECKIN_CONCURRENCY` | `12`，限制 1～30 | 手動執行全群打卡時的批次並行數。 |
 
-自動午夜群打卡已自精簡版 v2 移除；仍可由具權限者主動執行群打卡。
+群打卡由 `qqai.auto-checkin` 官方插件每日自動執行，不提供 QQ 手動執行指令。每批最多 20 群，後續批次延後執行，避免單次 Worker subrequest 過量。
 
 ### 模型與預算
 
@@ -255,9 +254,9 @@ npx wrangler secret put SECRET_NAME
 - 自動歡迎、歡迎詞、入群輔助與新人觀察期
 - 人工通知路由；預設只找開發者，群主通知總開關預設關閉
 - AI 管理、群操作、排程審核與申訴審核權限
-- 活動、報名、候補、投票、排程與狼人殺（精簡版不執行背景狼人殺 timer）
-- Bilibili 串接設定（精簡版不做每分鐘自動輪詢）
-- 使用者記憶、免打擾、黑名單、好感度與申訴資料
+- 活動、報名、投票與排程；活動與投票使用不同插件與資料流程
+- Bilibili 串接設定（低頻 polling；不使用 Webhook／bridge；可選 BILIBILI_COOKIE secret）
+- 使用者記憶、免打擾、黑名單與申訴資料
 
 開發者 QQ 清單、API Key、Token、加密金鑰、Cloudflare binding 與 migration 不開放給一般 Portal 使用者修改。
 
@@ -299,18 +298,18 @@ npx wrangler secret put SECRET_NAME
 
 ### Portal
 
-Portal 入口由 `PUBLIC_BASE_URL` 或實際請求來源決定，不再固定指向維護者網站。包含登入、密碼重設、群組與群友、權限、群規、通知、模型、對話、違規、申訴、活動、投票、狼人殺與系統維護。
+Portal 入口由 `PUBLIC_BASE_URL` 或實際請求來源決定，不再固定指向維護者網站。包含登入、密碼重設、群組與群友、權限、群規、通知、模型、對話、違規、申訴、活動、投票、插件與系統維護。
 
 ## 指令
 
-QQ 內輸入 `!help` 可取得依目前權限產生的條列清單。Portal 與 Live 連結會依 `PUBLIC_BASE_URL`／目前請求網域產生。
+QQ 內輸入 `!help` 可取得依目前權限產生的條列清單。Portal 連結會依 `PUBLIC_BASE_URL`／目前請求網域產生。
 
 本地娛樂指令不呼叫模型 API：
 
 | 指令 | 說明 |
 | --- | --- |
 | `!娛樂` | 顯示娛樂指令 |
-| `!骰子 [面數／NdM]` | 擲骰，例如 `!骰子 2d6` |
+| `!骰子 [面數／2d6]` | 擲骰；`2d6` 代表 2 顆 6 面骰 |
 | `!隨機數 [最小] [最大]` | 預設 1～100 |
 | `!硬幣` | 擲硬幣 |
 | `!猜拳 石頭／剪刀／布` | 與機器人猜拳 |
@@ -342,10 +341,10 @@ Token: 與 ONEBOT_ACCESS_TOKEN 相同
 
 1. 在 Cloudflare 先設定 `DEVELOPER_IDS`，內容為你自己的 QQ；可用逗號分隔多人。
 2. 設定 `PUBLIC_BASE_URL`，避免 `!help` 產生錯誤網址。
-3. 如需手動批次群打卡，確認 `AUTO_CHECKIN_CONCURRENCY`。
+3. 到 Portal 插件設定確認 `Auto Check-in` 的啟用狀態、批次大小與執行秒數。
 4. 不要刪除既有 Durable Object migrations。
 5. 執行完整 regression 與 dry-run bundle。
-6. 部署後用開發者 QQ 測試 `!help`、Portal 登入、通知與私訊 `!群打卡`。
+6. 部署後用開發者 QQ 測試 `!help`、Portal 登入、QQ Interactions 與插件狀態。
 
 若沒有設定任何有效的開發者 QQ，系統不會偷偷回退到原作者帳號；所有開發者專屬功能都會保持不可用，直到部署者正確設定。
 

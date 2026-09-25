@@ -38,12 +38,7 @@ async function listPlatformFeatures(env, { groupId = '', role = 'member', query 
 
 
 async function setPlatformFeature(env, { feature }) {
-  if (!feature) return { ok: false, message: '找不到功能。' };
-  return {
-    ok: false,
-    code: 'FEATURE_NOT_ENFORCED',
-    message: '此功能目录尚未接入机器人执行路径，不能把记录状态当作开关使用。当前请求未更改保存状态。'
-  };
+  return { ok: false, code: "LEGACY_FEATURE_CATALOG_REMOVED", message: "舊功能目錄已移除；請改用 V3 插件管理。" };
 }
 
 

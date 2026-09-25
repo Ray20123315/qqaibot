@@ -10,24 +10,6 @@ import { numericId } from "../security/network.js";
 
 
 
-function normalizeBilibiliEvent(payload) {
-  const data = payload?.data || payload?.event_data || payload?.body || payload || {};
-  const rawType = String(payload?.event_type || payload?.event || payload?.cmd || payload?.type || data?.event_type || data?.type || "").toLowerCase();
-  let type = "unknown";
-  if (/live.*start|start.*live|live_open_platform_live_start|开播|開播/.test(rawType)) type = "live_start";
-  else if (/video.*publish|archive.*publish|稿件.*发布|投稿|new_video/.test(rawType)) type = "video_publish";
-  const creatorId = String(data?.open_id || data?.uid || data?.mid || data?.creator_id || payload?.open_id || payload?.uid || "");
-  const creatorName = String(data?.uname || data?.name || data?.creator_name || payload?.creator_name || "");
-  const title = String(data?.title || data?.room_title || data?.archive_title || payload?.title || "");
-  const roomId = String(data?.room_id || data?.roomid || payload?.room_id || "");
-  const bvid = String(data?.bvid || data?.bv_id || payload?.bvid || "");
-  const url = String(data?.url || data?.link || payload?.url || (type === "live_start" && roomId ? `https://live.bilibili.com/${roomId}` : type === "video_publish" && bvid ? `https://www.bilibili.com/video/${bvid}` : ""));
-  const eventId = String(payload?.event_id || payload?.id || data?.event_id || `${type}:${creatorId}:${roomId || bvid}:${title}`).slice(0, 256);
-  return { type, creatorId, creatorName, title, roomId, bvid, url, eventId, rawType };
-}
-
-
-
 async function sendBilibiliConnectorNotification(env, connector, event) {
   const notify = event.type === "live_start" ? connector.liveNotify : event.type === "video_publish" ? connector.videoNotify : false;
   const atAllRequested = event.type === "live_start" ? connector.liveAtAll : event.type === "video_publish" ? connector.videoAtAll : false;
@@ -55,43 +37,6 @@ async function sendBilibiliConnectorNotification(env, connector, event) {
     await dbPut(env, `bili:event:${connector.id}:${event.eventId}`, JSON.stringify(log)).catch(() => {});
     return { ok: false, error: log.error };
   }
-}
-
-
-
-async function handleBilibiliWebhook(request, env, url) {
-  const declaredLength = Number(request.headers.get("Content-Length") || 0);
-  if (declaredLength > 65536) return jsonResponse({ ok: false, message: "Webhook payload 過大。" }, 413);
-  if (!String(request.headers.get("Content-Type") || "").toLowerCase().includes("application/json")) return jsonResponse({ ok: false, message: "Webhook 僅接受 JSON。" }, 415);
-  const secret = url.pathname.split("/").pop() || "";
-  const connectorId = await dbGet(env, `bili:webhook_secret:${secret}`);
-  if (!connectorId) return jsonResponse({ ok: false, message: "未知串接密钥。" }, 404);
-  const connector = await readJson(env, `bili:connector:${connectorId}`, null);
-  if (!connector || connector.enabled === false) return jsonResponse({ ok: false, message: "串接已停用。" }, 403);
-  const rawPayload = await request.text();
-  if (new TextEncoder().encode(rawPayload).byteLength > 65536) return jsonResponse({ ok: false, message: "Webhook payload 過大。" }, 413);
-  let payload;
-  try { payload = JSON.parse(rawPayload); } catch { return jsonResponse({ ok: false, message: "Webhook JSON 格式無效。" }, 400); }
-  if (!payload || typeof payload !== "object" || Array.isArray(payload)) return jsonResponse({ ok: false, message: "Webhook JSON 必須是物件。" }, 400);
-  if (payload?.challenge) return jsonResponse({ challenge: payload.challenge });
-  const event = normalizeBilibiliEvent(payload);
-  if (event.type === "unknown") return jsonResponse({ ok: true, ignored: true, message: "未识别事件类型。" });
-  if (connector.creatorId && event.creatorId && String(connector.creatorId) !== String(event.creatorId)) return jsonResponse({ ok: true, ignored: true, message: "创作者不匹配。" });
-  const dedupKey = `bili:dedup:${connector.id}:${event.eventId}`;
-  const owner = `bili-webhook:${crypto.randomUUID()}`;
-  const now = Date.now();
-  if (!(await dbClaimLeaseStrict(env, dedupKey, owner, now, 10 * 60 * 1000))) return jsonResponse({ ok: true, duplicate: true });
-  let result;
-  try { result = await sendBilibiliConnectorNotification(env, connector, event); }
-  catch (error) { result = { ok: false, error: String(error?.message || error).slice(0, 300) }; }
-  if (!result.ok) {
-    await dbDeleteKeyIfJsonFieldEquals(env, dedupKey, "$.owner", owner).catch(() => {});
-    return jsonResponse({ ok: false, event, ...result }, 502);
-  }
-  await dbPutStrict(env, dedupKey, JSON.stringify({ owner, status: "completed", createdAt: now, expiresAt: now + 30 * 24 * 60 * 60 * 1000 }));
-  connector.lastEventAt = Date.now(); connector.lastEvent = event;
-  await dbPutStrict(env, `bili:connector:${connector.id}`, JSON.stringify(connector)).catch(error => console.warn("Bilibili webhook state save failed", String(error?.code || error?.message || error)));
-  return jsonResponse({ ok: true, event, ...result }, 200);
 }
 
 
@@ -138,17 +83,19 @@ function isBilibiliBlockedError(error) { return /HTTP\s*(?:412|429)|错误\s*-41
 
 
 
-async function fetchBilibiliJson(url, timeoutMs = 12000) {
+async function fetchBilibiliJson(url, timeoutMs = 12000, options = {}) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort("timeout"), timeoutMs);
   try {
-    const response = await fetch(url, {
-      headers: {
-        "Accept": "application/json",
-        "User-Agent": `QQAIbot/${VERSION} (compatibility-public-polling; developer=${DEFAULT_DEVELOPER_ID})`
-      },
-      signal: controller.signal
-    });
+    const headers = {
+      "Accept": "application/json, text/plain, */*",
+      "Accept-Language": "zh-TW,zh;q=0.9,en;q=0.8",
+      "Referer": "https://www.bilibili.com/",
+      "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36"
+    };
+    const cookie = String(options?.cookie || "").trim();
+    if (cookie) headers.Cookie = cookie;
+    const response = await fetch(url, { headers, signal: controller.signal });
     const raw = await response.text();
     if (!response.ok) throw new Error(`HTTP ${response.status}: ${raw.slice(0, 180)}`);
     let payload;
@@ -164,8 +111,8 @@ async function fetchBilibiliJson(url, timeoutMs = 12000) {
 
 
 
-async function fetchBilibiliLiveSnapshot(uid) {
-  const payload = await fetchBilibiliJson(`https://api.live.bilibili.com/room/v1/Room/getRoomInfoOld?mid=${encodeURIComponent(uid)}`);
+async function fetchBilibiliLiveSnapshot(uid, env = {}) {
+  const payload = await fetchBilibiliJson(`https://api.live.bilibili.com/room/v1/Room/getRoomInfoOld?mid=${encodeURIComponent(uid)}`, 12000, { cookie: env.BILIBILI_COOKIE });
   const data = payload?.data || {};
   const roomId = String(data.roomid || data.room_id || "");
   return {
@@ -219,40 +166,47 @@ function extractBilibiliVideoFromArchiveSearch(payload) {
 
 
 
-async function fetchBilibiliVideoSnapshot(uid) {
+async function fetchBilibiliVideoSnapshot(uid, env = {}) {
   const errors = [];
-  try {
-    const payload = await fetchBilibiliJson(`https://api.bilibili.com/x/polymer/web-dynamic/v1/feed/space?host_mid=${encodeURIComponent(uid)}`);
-    const video = extractBilibiliVideoFromDynamic(payload, uid);
-    if (video) return video;
-    errors.push("动态接口没有找到视频稿件");
-  } catch (error) {
-    errors.push(String(error?.message || error));
-    if (isBilibiliBlockedError(error)) throw error;
+  const cookie = env.BILIBILI_COOKIE;
+  const urls = [
+    `https://api.bilibili.com/x/polymer/web-dynamic/v1/feed/space?host_mid=${encodeURIComponent(uid)}&timezone_offset=-480&features=itemOpusStyle`,
+    `https://api.bilibili.com/x/polymer/web-dynamic/desktop/v1/feed/space?host_mid=${encodeURIComponent(uid)}&timezone_offset=-480&features=itemOpusStyle`
+  ];
+  for (const endpoint of urls) {
+    try {
+      const payload = await fetchBilibiliJson(endpoint, 12000, { cookie });
+      const video = extractBilibiliVideoFromDynamic(payload, uid);
+      if (video) return video;
+      errors.push("動態接口沒有找到影片稿件");
+    } catch (error) {
+      errors.push(String(error?.message || error));
+      if (isBilibiliBlockedError(error) && !cookie) break;
+    }
+    await waitMs(1200);
   }
-  await waitMs(1500);
   try {
-    const payload = await fetchBilibiliJson(`https://api.bilibili.com/x/space/arc/search?mid=${encodeURIComponent(uid)}&pn=1&ps=1&order=pubdate`);
+    const payload = await fetchBilibiliJson(`https://api.bilibili.com/x/space/arc/search?mid=${encodeURIComponent(uid)}&pn=1&ps=1&order=pubdate`, 12000, { cookie });
     const video = extractBilibiliVideoFromArchiveSearch(payload);
     if (video) return video;
-    errors.push("投稿接口没有返回视频");
+    errors.push("投稿接口沒有返回影片");
   } catch (error) { errors.push(String(error?.message || error)); }
-  throw new Error(errors.join("；").slice(0, 800) || "无法取得最新视频");
+  throw new Error(errors.join("；").slice(0, 800) || "無法取得最新影片");
 }
 
 
 
-async function fetchBilibiliAutomaticSnapshot(uid) {
+async function fetchBilibiliAutomaticSnapshot(uid, env = {}) {
   const errors = [];
   let live = null; let video = null;
-  try { live = await fetchBilibiliLiveSnapshot(uid); }
+  try { live = await fetchBilibiliLiveSnapshot(uid, env); }
   catch (error) {
     errors.push(`直播：${String(error?.message || error)}`);
     if (isBilibiliBlockedError(error)) throw new Error(errors.join("；"));
   }
   // 避免同一秒连续请求多个 B站接口，降低被风控的概率。
   await waitMs(1800);
-  try { video = await fetchBilibiliVideoSnapshot(uid); }
+  try { video = await fetchBilibiliVideoSnapshot(uid, env); }
   catch (error) { errors.push(`视频：${String(error?.message || error)}`); }
   if (!live && !video) throw new Error(errors.join("；") || "B站检查失败");
   return { checkedAt: Date.now(), live, video, errors };
@@ -261,15 +215,8 @@ async function fetchBilibiliAutomaticSnapshot(uid) {
 
 
 async function listAllBilibiliConnectorIds(env) {
-  const ids = new Set(await readJson(env, "bili:connector:index:all", []));
-  // 向后兼容旧版本：旧连接只有群索引，自动补进全局索引。
-  const groups = await readJson(env, "group_whitelist:index", []);
-  for (const groupId of groups.slice(0, 2000)) {
-    for (const id of await readJson(env, `bili:connector:index:${groupId}`, [])) ids.add(id);
-  }
-  const result = [...ids].slice(0, 5000);
-  await Promise.all(result.map(id => appendIndex(env, "bili:connector:index:all", id, 5000)));
-  return result;
+  const ids = await readJson(env, "bili:connector:index:all", []);
+  return [...new Set((Array.isArray(ids) ? ids : []).map(String).filter(Boolean))].slice(0, 5000);
 }
 
 
@@ -287,7 +234,7 @@ async function pollOneAutomaticBilibiliConnector(env, connector, now = Date.now(
   connector.pollIntervalSeconds = intervalSeconds;
   connector.lastCheckAt = now;
   try {
-    const snapshot = await fetchBilibiliAutomaticSnapshot(uid);
+    const snapshot = await fetchBilibiliAutomaticSnapshot(uid, env);
     const previous = connector.pollState || {};
     const initialized = Boolean(previous.initialized);
     const events = [];
@@ -338,7 +285,7 @@ async function pollOneAutomaticBilibiliConnector(env, connector, now = Date.now(
       : Math.min(BILIBILI_POLL_MAX_SECONDS, Math.max(intervalSeconds, 15 * 60 * (2 ** Math.min(4, connector.consecutiveFailures - 1))));
     connector.lastCheckStatus = blocked ? "blocked" : "failed";
     connector.lastCheckError = blocked
-      ? `B站返回 412／429 风控或限流。兼容轮询已暂停 ${Math.round(backoffSeconds / 3600)} 小时；建议改用开放平台 Webhook 或合法授权的中继，不要提高抓取频率。原始错误：${String(error?.message || error)}`.slice(0, 1200)
+      ? `B站返回 412／429 風控或限流。輪詢已暫停 ${Math.round(backoffSeconds / 3600)} 小時；可設定 BILIBILI_COOKIE Worker secret 後再以低頻輪詢重試，不要提高抓取頻率。原始錯誤：${String(error?.message || error)}`.slice(0, 1200)
       : String(error?.message || error).slice(0, 1200);
     connector.nextPollAt = now + backoffSeconds * 1000;
     connector.updatedAt = Date.now();
@@ -352,25 +299,33 @@ async function pollOneAutomaticBilibiliConnector(env, connector, now = Date.now(
 
 async function pollAutomaticBilibiliConnectors(env, now = Date.now()) {
   const lockAt = Number(await dbGet(env, "bili:auto_poll:lock") || 0);
-  if (lockAt && now - lockAt < 50000) return;
+  if (lockAt && now - lockAt < 25 * 60 * 1000) return;
   await dbPut(env, "bili:auto_poll:lock", String(now));
   try {
     const ids = await listAllBilibiliConnectorIds(env);
+    if (!ids.length) return;
+    const scanLimit = Math.max(5, Math.min(50, Number(env.BILIBILI_POLL_SCAN_LIMIT || 25)));
+    const dueLimit = Math.max(1, Math.min(5, Number(env.BILIBILI_POLL_DUE_LIMIT || 3)));
+    let cursor = Math.max(0, Number(await dbGet(env, "bili:auto_poll:cursor") || 0)) % ids.length;
     const due = [];
-    for (const id of ids) {
-      if (due.length >= 5) break;
-      const connector = await readJson(env, `bili:connector:${id}`, null);
-      if (!connector || connector.enabled === false || connector.mode === "generic_webhook") continue;
+    const scanned = Math.min(scanLimit, ids.length);
+    for (let offset = 0; offset < scanned; offset++) {
+      const index = (cursor + offset) % ids.length;
+      const connector = await readJson(env, `bili:connector:${ids[index]}`, null);
+      if (!connector || connector.enabled === false) continue;
       if (Number(connector.nextPollAt || 0) > now) continue;
       due.push(connector);
+      if (due.length >= dueLimit) break;
     }
+    cursor = (cursor + scanned) % ids.length;
+    await dbPut(env, "bili:auto_poll:cursor", String(cursor));
     for (let index = 0; index < due.length; index++) {
       await pollOneAutomaticBilibiliConnector(env, due[index], Date.now());
-      if (index < due.length - 1) await waitMs(2000);
+      if (index < due.length - 1) await waitMs(1500);
     }
   } finally {
     await dbDel(env, "bili:auto_poll:lock");
   }
 }
 
-export { BILIBILI_BLOCK_BACKOFF_MAX_SECONDS, BILIBILI_POLL_DEFAULT_SECONDS, BILIBILI_POLL_MAX_SECONDS, BILIBILI_POLL_MIN_SECONDS, bilibiliPollIntervalSeconds, extractBilibiliVideoFromArchiveSearch, extractBilibiliVideoFromDynamic, fetchBilibiliAutomaticSnapshot, fetchBilibiliJson, fetchBilibiliLiveSnapshot, fetchBilibiliVideoSnapshot, handleBilibiliWebhook, isBilibiliBlockedError, listAllBilibiliConnectorIds, listBilibiliConnectors, normalizeBilibiliEvent, normalizeBilibiliUid, pollAutomaticBilibiliConnectors, pollOneAutomaticBilibiliConnector, sendBilibiliConnectorNotification, waitMs };
+export { BILIBILI_BLOCK_BACKOFF_MAX_SECONDS, BILIBILI_POLL_DEFAULT_SECONDS, BILIBILI_POLL_MAX_SECONDS, BILIBILI_POLL_MIN_SECONDS, bilibiliPollIntervalSeconds, extractBilibiliVideoFromArchiveSearch, extractBilibiliVideoFromDynamic, fetchBilibiliAutomaticSnapshot, fetchBilibiliJson, fetchBilibiliLiveSnapshot, fetchBilibiliVideoSnapshot, isBilibiliBlockedError, listAllBilibiliConnectorIds, listBilibiliConnectors, normalizeBilibiliUid, pollAutomaticBilibiliConnectors, pollOneAutomaticBilibiliConnector, sendBilibiliConnectorNotification, waitMs };

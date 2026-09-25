@@ -8,6 +8,7 @@ import { dbAddJsonArrayItemUnique, dbAppendJsonArrayCapped, dbDel, dbDelStrict, 
 import { parseUnlimitedNonNegativeInteger } from "../moderation/runtime.js";
 import { getOneBotHub, readJson, sha256Hex } from "../portal/auth.js";
 import { numericId } from "../security/network.js";
+import { oneBotReadOnlyActionAllowed, oneBotReadOnlyMode } from "../onebot/read-only.js";
 
 
 
@@ -580,7 +581,11 @@ async function isKnownOutboundMessage(env, info) {
 
 async function callOneBotAction(env, actionPayload, timeoutMs = 15000) {
   if (!env.ONEBOT_HUB) throw new Error("ONEBOT_HUB_NOT_BOUND");
-  const payload = actionPayload.action ? actionPayload : { action: actionPayload?.action, params: actionPayload?.params || {} };
+  const payload = actionPayload?.action ? actionPayload : { action: actionPayload?.action, params: actionPayload?.params || {} };
+  const action = String(payload?.action || "").trim();
+  if (oneBotReadOnlyMode(env) && !oneBotReadOnlyActionAllowed(action)) {
+    throw new Error("ONEBOT_READ_ONLY_ACTION_BLOCKED");
+  }
   const res = await getOneBotHub(env).fetch("https://onebot-hub/rpc", {
     method: "POST",
     headers: { "Content-Type": "application/json" },

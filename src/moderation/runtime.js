@@ -10,6 +10,7 @@ import { dispatchHumanAttentionNotification } from "../notifications/routing.js"
 import { canUnlockMute, clearMuteLock, createManualMuteLock, getMuteLock, putMuteLock } from "./mute-locks.js";
 import { FLIRT_MUTE_MAX_SECONDS, clampFlirtMuteSeconds, isFlirtRefusalSignal, isManagementRole, looksLikeFlirtCandidate, looksLikeRoughBanter, managerExchangeContext, normalizeFlirtAction, readRecentConversationRecords } from "./social-boundaries.js";
 import { botCanRunRuleMonitor, canUseBotGroupOperations, getBotGroupRole, isBotVerifiedGroupOwner } from "../group/runtime.js";
+import { moderationApprovalDecision, moderationApprovalModeLabel, normalizeModerationApprovalMode } from "./approval-mode.js";
 import { formatDuration, parseDurationSeconds, runOneBotGroupOperation } from "../onebot/messages.js";
 import { opsActiveRuleRecords, opsFuseAllows, opsGetSettings, opsRecordAutomationResult, opsRuleExceptionMatch, opsSaveRecord } from "../operations/runtime.js";
 import { getOneBotHub, readJson, resolvePortalRole, sendPortalVerificationMessage, sha256Hex } from "../portal/auth.js";
@@ -52,6 +53,9 @@ function isRacialDiscriminationReview(item, review) {
 
 function moderationActionLabel(action) {
   return ({
+    remind: "群規提醒",
+    warn: "群規警告",
+    recall: "撤回訊息",
     kick: "踢出群聊",
     mute: "禁言",
     unmute: "解除禁言",
@@ -65,7 +69,7 @@ function moderationActionLabel(action) {
 
 
 function moderationActionNeedsTarget(action) {
-  return ["kick", "mute", "unmute", "set_admin", "unset_admin"].includes(action);
+  return ["remind", "warn", "recall", "kick", "mute", "unmute", "set_admin", "unset_admin"].includes(action);
 }
 
 
@@ -1416,7 +1420,10 @@ async function performRuleAdditionalActions(env, item, actionSpecs, options = {}
 
 
 async function performRuleProxyAction(env, item, review) {
-  const mode = normalizeRuleProxyMode(await dbGet(env, `rule_proxy_mode:${item.groupId}`) || DEFAULTS.ruleProxyMode);
+  // The old record/warn/mute/auto switch is no longer a user-facing execution gate.
+  // Category policy chooses the action; the GPT-style approval mode decides whether it may run automatically.
+  const mode = "auto";
+  const approvalMode = normalizeModerationApprovalMode(await dbGet(env, `moderation_approval_mode:${item.groupId}`) || "require_approval");
   const policies = await getRuleCategoryPolicies(env, item.groupId);
   const policy = matchRuleCategoryPolicy(item.violationType, policies);
   const progressivePolicy = await getRuleProgressivePolicy(env, item.groupId);
@@ -1517,6 +1524,64 @@ async function performRuleProxyAction(env, item, review) {
   if ((action === "mute" || action === "kick" || action === "recall") && !botCanModerate) {
     action = "warn";
     fallbackNote = "机器人没有足够的群管理权限，已降级为警告";
+  }
+
+  const approval = moderationApprovalDecision(approvalMode, action);
+  if (approval.requiresApproval) {
+    if (strikeCounted) {
+      await removeRuleStrike(env, item).catch(() => {});
+      strikeCounted = false;
+      progressiveCount = Math.max(0, progressiveCount - 1);
+    }
+    if (action === "mute") {
+      const configured = parseUnlimitedNonNegativeInteger(await dbGet(env, `rule_proxy_mute_seconds:${item.groupId}`), DEFAULTS.ruleProxyMuteSeconds);
+      const suggested = parseUnlimitedNonNegativeInteger(duration || policy.muteSeconds || review?.muteSeconds, configured);
+      duration = Math.max(60, Math.min(30 * 24 * 3600, suggested || configured || 600));
+    }
+    const proposal = await createModerationProposal(env, {
+      groupId: item.groupId,
+      actorId: "system:rule_proxy",
+      actorName: "QQAI 自動群規",
+      actorRole: "system",
+      action,
+      targetId: item.userId,
+      targetName: item.senderName || item.userName || item.userId,
+      targetRole: item.senderRole || "member",
+      durationSeconds: duration,
+      sourceText: item.content || "",
+      classifierReason: `群規自動管理：${item.violationType || "違規"}`,
+      reason: item.reason || item.rule || "",
+      messageId: item.messageId,
+      violationId: item.id,
+      violationType: item.violationType,
+      countStrike: eligibleForStrike,
+      ruleStrikeWindowDays: progressivePolicy.windowDays,
+      approvalMode
+    });
+    await writeSystemAudit(env, {
+      type: "rule_proxy_approval_required",
+      groupId: item.groupId,
+      actorId: "system:rule_proxy",
+      targetId: item.userId,
+      action,
+      proposalId: proposal.id,
+      approvalMode
+    }).catch(() => {});
+    return updateRuleViolationRecord(env, item, {
+      actionTaken: "pending_approval",
+      actionsTaken: [],
+      actionResult: `${moderationApprovalModeLabel(approvalMode)}：等待管理員核准 ${moderationActionLabel(action)}（${proposal.id}）`,
+      actionResults: [],
+      actionOk: false,
+      actionDurationSeconds: duration,
+      progressiveCount,
+      strikeCounted: false,
+      severity,
+      intentional,
+      proxyMode: mode,
+      approvalMode,
+      moderationProposalId: proposal.id
+    });
   }
 
   const appealHint = "如认为判断有误，请登录 Control Center → 历史违规记录，可对单条或多条记录一键申诉。";
@@ -1627,8 +1692,8 @@ ${appealHint}`).catch(() => null);
   const warningMessageIds = [...new Set([warningMessageId, ...(additional.warningMessageIds || [])].filter(Boolean))];
   const combinedResult = actionResults.join("；");
   if (result.ok || additional.ok) await dbPut(env, `rule_proxy_last_action:${item.groupId}:${item.userId}`, String(Date.now()));
-  await writeSystemAudit(env, { type: "rule_proxy_action", groupId: item.groupId, actorId: "system:rule_proxy", targetId: item.userId, action: actionsTaken.join("+"), result: combinedResult, violationId: item.id, progressiveCount, strikeCounted, severity, proxyMode: mode });
-  return updateRuleViolationRecord(env, item, { actionTaken, actionsTaken, actionResult: combinedResult, actionResults, actionOk: result.ok || additional.ok, actionDurationSeconds: Math.max(duration, Number(additional.muteDurationSeconds || 0)), warningMessageId: warningMessageIds[0] || "", warningMessageIds, progressiveCount, strikeCounted, severity, intentional, proxyMode: mode });
+  await writeSystemAudit(env, { type: "rule_proxy_action", groupId: item.groupId, actorId: "system:rule_proxy", targetId: item.userId, action: actionsTaken.join("+"), result: combinedResult, violationId: item.id, progressiveCount, strikeCounted, severity, proxyMode: mode, approvalMode });
+  return updateRuleViolationRecord(env, item, { actionTaken, actionsTaken, actionResult: combinedResult, actionResults, actionOk: result.ok || additional.ok, actionDurationSeconds: Math.max(duration, Number(additional.muteDurationSeconds || 0)), warningMessageId: warningMessageIds[0] || "", warningMessageIds, progressiveCount, strikeCounted, severity, intentional, proxyMode: mode, approvalMode });
 }
 
 
@@ -2473,7 +2538,12 @@ async function createModerationProposal(env, data) {
     sourceText: String(data.sourceText || "").slice(0, 1000),
     classifierReason: String(data.classifierReason || ""),
     reason: String(data.reason || "").trim().slice(0, 1000),
-    messageId: String(data.messageId || "")
+    messageId: String(data.messageId || ""),
+    violationId: String(data.violationId || ""),
+    violationType: String(data.violationType || ""),
+    countStrike: data.countStrike === true,
+    ruleStrikeWindowDays: Math.max(1, Number(data.ruleStrikeWindowDays || DEFAULTS.ruleStrikeWindowDays || 7)),
+    approvalMode: normalizeModerationApprovalMode(data.approvalMode || "require_approval")
   };
   await dbPut(env, `moderation:proposal:${id}`, JSON.stringify(proposal));
   await dbPut(env, `moderation:last:${proposal.groupId}:${proposal.actorId}`, id);
@@ -2533,8 +2603,33 @@ async function executeModerationProposal(env, proposal, confirmer) {
   if (!validation.ok) return { ok: false, message: validation.message };
   const group_id = numericId(proposal.groupId);
   const user_id = numericId(proposal.targetId);
+  const recordProposalStrike = async () => {
+    if (!proposal.countStrike || !proposal.violationId || !proposal.targetId) return;
+    await addRuleStrike(env, {
+      id: proposal.violationId,
+      groupId: proposal.groupId,
+      userId: proposal.targetId,
+      violationType: proposal.violationType || proposal.classifierReason || "群規"
+    }, proposal.ruleStrikeWindowDays).catch(() => {});
+  };
   let action = "";
   let params = {};
+  if (proposal.action === "remind" || proposal.action === "warn") {
+    const title = proposal.action === "warn" ? "群規警告" : "群規提醒";
+    const message = [];
+    if (proposal.messageId) message.push({ type: "reply", data: { id: String(proposal.messageId) } });
+    if (proposal.targetId) message.push({ type: "at", data: { qq: String(proposal.targetId) } });
+    message.push({ type: "text", data: { text: `\n${title}：${proposal.reason || proposal.classifierReason || "請留意群規"}` } });
+    const sent = await callOneBotAction(env, { action: "send_group_msg", params: { group_id, message, auto_escape: false } }, 15000);
+    await recordProposalStrike();
+    return { ok: true, message: `已執行：${title}。`, messageId: extractOneBotMessageId(sent) };
+  }
+  if (proposal.action === "recall") {
+    if (!proposal.messageId) return { ok: false, message: "提案缺少原訊息 ID，無法撤回。" };
+    await callOneBotAction(env, { action: "delete_msg", params: { message_id: numericId(proposal.messageId) } }, 15000);
+    await recordProposalStrike();
+    return { ok: true, message: "已執行：撤回訊息。" };
+  }
   if (proposal.action === "kick") { action = "set_group_kick"; params = { group_id, user_id, reject_add_request: Boolean(proposal.rejectAddRequest) }; }
   else if (proposal.action === "mute") { action = "set_group_ban"; params = { group_id, user_id, duration: Math.max(60, Math.min(30 * 24 * 3600, Number(proposal.durationSeconds || 600))) }; }
   else if (proposal.action === "unmute") { action = "set_group_ban"; params = { group_id, user_id, duration: 0 }; }
@@ -2611,6 +2706,7 @@ async function executeModerationProposal(env, proposal, confirmer) {
   } else if (proposal.action === "mute" && !proposal.preventUnmute && previousMuteLock) {
     await clearMuteLock(env, proposal.groupId, proposal.targetId).catch(() => {});
   }
+  if (result.ok) await recordProposalStrike();
   return result.ok ? { ok: true, message: `已执行：${moderationActionLabel(proposal.action)}。` } : { ok: false, message: `操作失败：${result.error}` };
 }
 
