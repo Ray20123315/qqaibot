@@ -1025,6 +1025,12 @@ async function clearRegisteredThinkingIndicators(env, target, extraIds = []) {
   const stored = await readJson(env, key, []);
   const ids = [...new Set([...(Array.isArray(stored) ? stored : []), ...(Array.isArray(extraIds) ? extraIds : [])].map(String).filter(Boolean))];
   if (!ids.length) return { ok: true, cleared: 0, failed: [] };
+
+  // “正在思考”只是临时 UX。先清除 registry，再对每个 ID 最多撤回一次。
+  // NapCat recallMsg 可能底层 result=0，但因为 onMsgInfoListUpdate 未在时限内到达而返回 Timeout；
+  // 这种不确定结果绝不能把旧 message_id 永久留给后续消息反复 delete_msg。
+  await dbDel(env, key).catch(() => {});
+
   const failed = [];
   let cleared = 0;
   for (const id of ids) {
@@ -1035,13 +1041,11 @@ async function clearRegisteredThinkingIndicators(env, target, extraIds = []) {
       failed.push({ id, error: String(error?.message || error).slice(0, 500) });
     }
   }
-  if (failed.length) await dbPut(env, key, JSON.stringify(failed.map(item => item.id).slice(-12)));
-  else await dbDel(env, key);
   if (failed.length) await writeSystemAudit(env, {
-    type: "thinking_indicator_residual", groupId: String(target?.groupId || ""), actorId: String(target?.userId || ""),
-    action: "registry_cleanup_failed", failed
+    type: "thinking_indicator_recall_best_effort", groupId: String(target?.groupId || ""), actorId: String(target?.userId || ""),
+    action: "recall_failed_not_retried", attempted: ids.length, failed
   }).catch(() => {});
-  return { ok: failed.length === 0, cleared, failed };
+  return { ok: failed.length === 0, cleared, failed, forgotten: ids.length };
 }
 
 
