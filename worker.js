@@ -549,6 +549,11 @@ const QQAIWorker = {
       return jsonResponse({ ok: true, message: "已退出登录。" }, 200, { "Set-Cookie": portalSessionCookie("", 0) });
     }
 
+    // The standalone Gemini Live page was removed. Do not let the generic GET health fallback make /live look alive.
+    if (request.method === 'GET' && ['/live'].includes(url.pathname)) {
+      return new Response("Not Found", { status: 404, headers: { "Cache-Control": "no-store" } });
+    }
+
     // ==========================================
     // 🤖 OneBot 事件入口：預設只接受 Durable Object 內部轉送
     // ==========================================
