@@ -8,7 +8,7 @@ The legacy integration polls live status and new-video feeds together and curren
 
 v3 therefore separates the concerns:
 
-- live status: lightweight batch endpoint, default every 2 minutes
+- live status: lightweight batch endpoint, default every 30 minutes
 - video publishing: keep low-frequency polling in the legacy/optional integration until migrated separately
 - no webhook requirement
 - no Bilibili login cookie requirement for the selected live-status endpoint
@@ -76,11 +76,11 @@ If a batch succeeds but one configured UID is missing, that creator's prior reco
 
 ## Scheduler
 
-On load, the plugin ensures one owned `live-poll` interval job. The default interval is 120 seconds and the accepted range is 60 seconds through 30 minutes.
+On load, the plugin ensures one owned `live-poll` interval job. The default and minimum interval are 30 minutes; the maximum is 6 hours. This deliberately trades freshness for much lower provider risk and background-resource usage.
 
 The job is owned by `official.bilibili-live`, so the v3 scheduler dispatches only that plugin's `onCron` hook.
 
-This phase does **not** connect the plugin scheduler to the production Cloudflare `scheduled()` handler. Production remains unchanged until a later cutover.
+The production Worker `scheduled()` handler calls `runV3RuntimeScheduled()`, so due plugin-owned jobs are dispatched through the V3 scheduler. The host cron remains minute-level, but Bilibili network fetches only occur when the plugin job is due or when an authorized manual refresh is requested.
 
 ## Control surface
 
@@ -103,7 +103,7 @@ Recommended flow:
 ```text
 Cloudflare Cron (1 minute host cadence)
         |
-Plugin Scheduler (Bilibili due every 1-2 minutes)
+Plugin Scheduler (Bilibili due every 30 minutes by default)
         |
 Official Bilibili Live Plugin
         |
@@ -117,3 +117,10 @@ browser UI refresh every 20-30 seconds
 ## YouTube follow-up
 
 Under the current YouTube Data API granular quota model, `search.list` has its own default quota bucket of 100 calls/day. Polling every 15 minutes consumes 96 calls/day, leaving almost no operational headroom. The future YouTube provider should prefer roughly 20-minute polling (72 calls/day) or adaptive polling that becomes more frequent only near expected live windows.
+
+
+## Video / dynamic polling
+
+The live-status endpoint above is the preferred anonymous path because it does not require a login cookie. New-video / dynamic discovery is a different risk profile: space/dynamic endpoints may require Cookie/WBI state depending on the endpoint and can return 412/risk-control responses.
+
+QQAI therefore does not increase their frequency to match live status. Any compatibility video polling must remain low-frequency, cached, deduplicated and back off on 412/429. If a deployment provides `BILIBILI_COOKIE`, it must remain a Worker secret and must never be stored in plugin settings or returned by Portal APIs.
