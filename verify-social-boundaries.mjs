@@ -38,6 +38,7 @@ const scheduler = fs.readFileSync('src/scheduler/runtime.js', 'utf8');
 const socialBoundaries = fs.readFileSync('src/moderation/social-boundaries.js', 'utf8');
 assert(!socialBoundaries.includes('conversation:index:'), 'Lean v2 conflict history must not use legacy conversation indexes');
 assert(socialBoundaries.includes('recent_logs:'), 'Lean v2 conflict history must use compact recent logs');
+assert(/import\s*\{[^}]*\bisManagerStopSignal\b[^}]*\}\s*from\s*["']\.\.\/moderation\/social-boundaries\.js["'];/.test(scheduler), 'Scheduler must import isManagerStopSignal from social boundaries');
 assert(scheduler.includes('if (!rough && !currentManagerStop) return null'), 'Ordinary messages must bypass conflict D1 work locally');
 assert(scheduler.includes('conflict_manager_intervention'), 'Conflict guard must audit management intervention');
 assert(scheduler.includes('conflict_warning_after_manager_stop'), 'Conflict guard must warn only after management intervention is ignored');
