@@ -56,7 +56,7 @@ const DEFAULTS = Object.freeze({
   ruleProxyMode: "record",
   ruleProxyMuteSeconds: 600,
   ruleStrictness: "smart",
-  runtimeRateLimitSeconds: 0,
+  runtimeRateLimitSeconds: 10,
   joinPatternAutoApproveThreshold: 2,
   joinAiApproveConfidence: 0.90,
   ruleSpamWindowSeconds: 60,
