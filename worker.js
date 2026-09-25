@@ -27,7 +27,8 @@ import { pickSticker, pickStickerForText, stickerCqMessage } from "./src/social/
 import { cancelSchedule, cleanupExpiredModerationProposals, cleanupTransientState, countActiveSchedulesForUser, createAppealFromText, createScheduleRecord, extractScheduleMentionIds, formatScheduleLine, listUserSchedules, parseManagementScheduleAction, parseScheduleRequest, processConflictSignal, processDueSchedules, reviewScheduleWithGemma, reviseScheduleRecord, scheduledCronMode, skipScheduleOnce } from "./src/scheduler/runtime.js";
 import { buildHelpText } from "./src/help/commands.js";
 import { fetchPublicUrl, getFeatureFlag, getPrivateAccessMode, isGroupWhitelisted, numericId, verifyCodexBridgeAccess, verifyOneBotAccess } from "./src/security/network.js";
-import { CODEX_BRIDGE_INTERNAL_CHAT_PATH, CODEX_BRIDGE_PATH, CODEX_BRIDGE_PROTOCOL, normalizeCodexBridgeRequest, normalizeCodexBridgeResponse } from "./src/v3/ai/codex-bridge.js";
+import { CODEX_BRIDGE_INTERNAL_CHAT_PATH, CODEX_BRIDGE_PATH, CODEX_BRIDGE_PROTOCOL, callCodexBridgeWebSocket, normalizeCodexBridgeRequest, normalizeCodexBridgeResponse } from "./src/v3/ai/codex-bridge.js";
+import { parseCodexCommand } from "./src/v3/ai/codex-command.js";
 import { dispatchV3RuntimeEvent, handleV3RuntimeFetch, runV3RuntimeScheduled } from "./src/v3/runtime/bridge.js";
 import { handleV3PluginManagerApi, injectV3PluginManagerClient } from "./src/v3/portal/plugin-manager.js";
 import { handleV3PackageManagerApi, injectV3PackageManagerClient } from "./src/v3/portal/package-manager.js";
@@ -1264,6 +1265,59 @@ const QQAIWorker = {
       const hasAdminAuth = permissionSet.aiAdmin;
       const hasGroupOpsAuth = permissionSet.groupOps;
       const isOnlyMe = isDeveloper;
+
+      const codexCommand = parseCodexCommand(cleanMessage);
+      if (codexCommand) {
+        if (!isDeveloper) return jsonReply(`${atSender}只有开发者可以使用 !codex。`);
+        if (!codexCommand.ok) return jsonReply(`${atSender}${codexCommand.message}`);
+        activeThinkingMessageId = await sendThinkingIndicator(env, {
+          isGroup,
+          groupId: currentGroupId,
+          userId,
+          text: "Codex 正在处理..."
+        }).catch(() => null);
+        try {
+          const result = await callCodexBridgeWebSocket(env, { model: codexCommand.model }, {
+            task: "chat",
+            model: codexCommand.model,
+            messages: [{ role: "user", content: codexCommand.question }],
+            reasoningEffort: codexCommand.reasoningEffort,
+            originalPromptOnly: codexCommand.originalPromptOnly,
+            maxOutputTokens: 8192,
+            timeoutMs: 120000
+          });
+          await clearThinkingIndicator();
+          await writeSystemAudit(env, {
+            type: "developer_codex_command",
+            groupId: currentGroupId,
+            actorId: userId,
+            action: "codex",
+            model: codexCommand.model,
+            reasoningEffort: codexCommand.reasoningEffort,
+            originalPromptOnly: codexCommand.originalPromptOnly
+          }).catch(() => {});
+          const chunks = splitOutboundText(String(result.text || ""), {
+            maxChars: DEFAULTS.outboundChunkChars,
+            maxParts: DEFAULTS.outboundMaxParts,
+            hardTotalChars: DEFAULTS.replyHardChars
+          });
+          return jsonReplyChunks(chunks.map((chunk, index) => index === 0 ? `${atSender}${chunk}` : chunk), {
+            reply_kind: "developer_codex",
+            codex_model: codexCommand.model,
+            codex_reasoning_effort: codexCommand.reasoningEffort,
+            codex_original_prompt_only: codexCommand.originalPromptOnly
+          });
+        } catch (error) {
+          await clearThinkingIndicator();
+          const detail = String(error?.message || error || "Codex bridge failed");
+          const friendly = /CODEX_BRIDGE_NOT_CONNECTED/i.test(detail)
+            ? "Codex Bridge 尚未连接，请先启动电脑上的 QQAIBOT Bridge。"
+            : /CODEX_BRIDGE_TIMEOUT/i.test(detail)
+              ? "Codex 处理超时，请稍后重试或降低思考等级。"
+              : `Codex 调用失败：${detail.slice(0, 300)}`;
+          return jsonReply(`${atSender}${friendly}`);
+        }
+      }
 
       // 同號人工普通發言只納入上下文，不觸發 AI；人工命令與 ?? 提問可繼續。
       if (sameQqHumanOnly) {
