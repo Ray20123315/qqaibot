@@ -91,5 +91,7 @@ assert.match(portal,/展开诊断工具/);
 assert.doesNotMatch(portal,/收起系统维护|展开系统维护/);
 assert.match(portal,/暂停本群自动化/);
 assert.doesNotMatch(portal,/>维护模式<\/label>/);
+assert.doesNotMatch(portal,/loadPortalMaintenance\(\)if\(name==='health'\)/,"Portal inline script must not concatenate adjacent if statements");
+assert.match(portal,/loadPortalMaintenance\(\);if\(name==='health'\)/,"Portal maintenance view switch must terminate before health branch");
 
 console.log("Portal maintenance and information architecture checks passed.");
