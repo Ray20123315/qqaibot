@@ -147,7 +147,7 @@ function md5Hex(value) {
   tail[14]=text.length*8;
   cycle(state,tail);
   const hex="0123456789abcdef";
-  return state.map(n=>[0,8,16,24].map(shift=>hex[(n>>shift)&15]+hex[(n>>(shift+4))&15]).join("")).join("");
+  return state.map(n=>[0,8,16,24].map(shift=>hex[(n>>(shift+4))&15]+hex[(n>>shift)&15]).join("")).join("");
 }
 
 
