@@ -6,6 +6,7 @@ on:
       - main
       - refactor/v2-modular-worker
       - codex/v3-forward-staging-20260924
+      - chatgpt/qqaibot-continue-20260925
   pull_request:
     branches:
       - main
