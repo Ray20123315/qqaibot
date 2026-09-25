@@ -84,5 +84,12 @@ assert.doesNotMatch(portal,/opsRegisterWorkspace\('opsAppeal','v-maintenance'/);
 assert.doesNotMatch(portal,/data-view="simulator"/);
 assert.doesNotMatch(portal,/id="v-simulator"/);
 assert.match(portal,/name:'插件',items:\['v3plugins','bilibili'\]/);
+assert.match(portal,/name:'系统管理',items:\['systemadmin','maintenance'\]/);
+assert.match(portal,/name:'诊断工具'/);
+assert.match(portal,/收起诊断工具/);
+assert.match(portal,/展开诊断工具/);
+assert.doesNotMatch(portal,/收起系统维护|展开系统维护/);
+assert.match(portal,/暂停本群自动化/);
+assert.doesNotMatch(portal,/>维护模式<\/label>/);
 
 console.log("Portal maintenance and information architecture checks passed.");
