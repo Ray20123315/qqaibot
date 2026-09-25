@@ -310,12 +310,17 @@ async function main() {
       await pushBridge(config, { kind: "hello", connected: true, gameId: session.gameId, anchor: session.anchor });
 
       let sessionHeartbeatRunning = true;
+      let lastBridgeHealthPushAt = Date.now();
       const sessionHeartbeat = (async () => {
         while (!stopping && sessionHeartbeatRunning) {
           await sleep(config.sessionHeartbeatMs);
           if (stopping || !sessionHeartbeatRunning) break;
           await heartbeatSession(config, session.gameId);
-          await pushBridge(config, { kind: "heartbeat", connected: true, gameId: session.gameId, anchor: session.anchor }).catch(() => {});
+          const now = Date.now();
+          if (now - lastBridgeHealthPushAt >= 5 * 60 * 1000) {
+            lastBridgeHealthPushAt = now;
+            await pushBridge(config, { kind: "heartbeat", connected: true, gameId: session.gameId, anchor: session.anchor }).catch(() => {});
+          }
         }
       })();
 
