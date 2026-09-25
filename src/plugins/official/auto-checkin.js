@@ -24,8 +24,8 @@ function normalizeSettings(input = {}, fallback = {}) {
   const source = input && typeof input === "object" && !Array.isArray(input) ? input : {};
   return Object.freeze({
     enabled: bool(source.enabled, fallback.enabled ?? true),
-    batchSize: integer(source.batchSize, fallback.batchSize ?? 20, 1, 20),
-    startSecond: integer(source.startSecond, fallback.startSecond ?? 20, 0, 59)
+    batchSize: integer(source.batchSize ?? source.batchsize, fallback.batchSize ?? 20, 1, 20),
+    startSecond: integer(source.startSecond ?? source.startsecond, fallback.startSecond ?? 20, 0, 59)
   });
 }
 
