@@ -1202,6 +1202,7 @@ ${summary}`.slice(0, 4000),
       const item = await readJson(env, `bili:connector:${body.id}`, null);
       if (!item || item.groupId !== groupId) return jsonResponse({ ok: false, message: "找不到监控项目。" }, 404);
       if (item.webhookSecret) await dbDel(env, `bili:webhook_secret:${item.webhookSecret}`);
+      if (item.bridgeSecret) await dbDel(env, `bili:bridge_secret:${item.bridgeSecret}`);
       await dbDel(env, `bili:connector:${item.id}`);
       await removeFromIndex(env, `bili:connector:index:${groupId}`, item.id);
       await removeFromIndex(env, "bili:connector:index:all", item.id);
@@ -1209,6 +1210,18 @@ ${summary}`.slice(0, 4000),
       return jsonResponse({ ok: true, message: "B站自动监控已删除。" });
     }
 
+    if (action === "rotate_bridge") {
+      const item = await readJson(env, `bili:connector:${body.id}`, null);
+      if (!item || item.groupId !== groupId) return jsonResponse({ ok: false, message: "找不到监控项目。" }, 404);
+      if (item.mode !== "open_live_bridge") return jsonResponse({ ok: false, message: "当前不是 Open Live 长连接模式。" }, 400);
+      if (item.bridgeSecret) await dbDel(env, `bili:bridge_secret:${item.bridgeSecret}`);
+      item.bridgeSecret = crypto.randomUUID().replaceAll("-", "");
+      item.updatedAt = Date.now();
+      await dbPut(env, `bili:bridge_secret:${item.bridgeSecret}`, item.id);
+      await dbPut(env, `bili:connector:${item.id}`, JSON.stringify(item));
+      await writeSystemAudit(env, { type: "bilibili_auto_monitor", groupId, actorId: authed.qq, action: "rotate_open_live_bridge", connectorId: item.id, creatorId: item.creatorId });
+      return jsonResponse({ ok: true, message: "Open Live bridge 地址已重新生成；旧地址立即失效。", bridgeUrl: `${url.origin}/api/integrations/bilibili/open-live/${item.bridgeSecret}` });
+    }
     if (action === "rotate_webhook") {
       const item = await readJson(env, `bili:connector:${body.id}`, null);
       if (!item || item.groupId !== groupId) return jsonResponse({ ok: false, message: "找不到监控项目。" }, 404);
