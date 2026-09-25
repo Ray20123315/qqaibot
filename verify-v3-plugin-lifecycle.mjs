@@ -95,9 +95,10 @@ const runtime = createV3Runtime({}, {
   logger: { info(){}, warn(){}, error(){}, debug(){} }
 });
 await runtime.start();
+const runtimePluginState = () => runtime.listPlugins().find(plugin => plugin.id === "test.runtime-life");
 assert.equal(loads, 1);
-assert.equal(runtime.listPlugins()[0].active, true);
-assert.equal(runtime.listPlugins()[0].lifecycle.state, "enabled");
+assert.equal(runtimePluginState().active, true);
+assert.equal(runtimePluginState().lifecycle.state, "enabled");
 let result = await runtime.runCommand("runtime-life");
 assert.equal(result.handled, true);
 assert.equal(commands, 1);
@@ -105,7 +106,7 @@ assert.equal(commands, 1);
 record = await runtime.setPluginEnabled("test.runtime-life", false, { userId: "42" });
 assert.equal(record.state, "disabled");
 assert.equal(unloads, 1);
-assert.equal(runtime.listPlugins()[0].active, false);
+assert.equal(runtimePluginState().active, false);
 result = await runtime.runCommand("runtime-life");
 assert.equal(result.handled, false);
 assert.equal(result.inactive, true);
@@ -116,13 +117,13 @@ assert.equal(loads, 2);
 
 record = await runtime.setPluginPermissions("test.runtime-life", [], { userId: "42" });
 assert.equal(record.state, "blocked");
-assert.equal(runtime.listPlugins()[0].active, false);
+assert.equal(runtimePluginState().active, false);
 result = await runtime.runCommand("runtime-life");
 assert.equal(result.handled, false);
 
 record = await runtime.setPluginPermissions("test.runtime-life", ["storage"], { userId: "42" });
 assert.equal(record.state, "enabled");
-assert.equal(runtime.listPlugins()[0].active, true);
+assert.equal(runtimePluginState().active, true);
 assert.equal(loads, 3);
 result = await runtime.runCommand("runtime-life");
 assert.equal(result.handled, true);
