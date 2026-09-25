@@ -131,12 +131,7 @@ const imageEvent = event({ segments: [
 }
 
 {
-  const source = fs.readFileSync("src/games/werewolf.js", "utf8");
-  const canaryIndex = source.indexOf("runV3MultimodalCanary(env, body)");
-  const legacyIndex = source.lastIndexOf("return handleLegacyWerewolfOneBotEvent(env, body)");
-  assert.ok(canaryIndex >= 0, "ingress wrapper must invoke multimodal canary");
-  assert.ok(legacyIndex > canaryIndex, "legacy v2 handler must remain the fallback after canary");
-  assert.match(source, /if \(canary\?\.handled\) return canary;/, "only a handled canary may short-circuit v2");
+  assert.equal(fs.existsSync("src/games/werewolf.js"), false, "removed werewolf game must stay absent");
 }
 
 console.log("verify-v3-multimodal-canary: ok");
