@@ -7,7 +7,7 @@ assert(match, 'Injected Portal member client script must exist');
 new Function(match[1]);
 assert(html.includes('memberRoleFilter'), 'Role filter must be present');
 assert(html.includes('memberMuteFilter'), 'Mute filter must be present');
-assert(html.includes('memberRelationshipFilter'), 'Relationship filter must be present');
+assert(!html.includes('memberRelationshipFilter'), 'Relationship-management filter must be removed');
 assert(html.includes('memberExport'), 'CSV export must be present');
 assert(match[1].includes('if(memberAreaActive())setTimeout(loadMembers,0)'), 'Member console must initialize across split member views');
 assert(!match[1].includes('syncNav()'), 'Injected member client must not hide navigation by guessing private session state');
