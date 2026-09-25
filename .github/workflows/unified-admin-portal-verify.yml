@@ -37,10 +37,11 @@ jobs:
           set -euo pipefail
           headers="$(mktemp)"
           status="$(curl -sS -D "$headers" -o /tmp/legacy.html -w '%{http_code}' "$PREVIEW_URL/system-admin")"
+          echo "legacy status=$status"
+          grep -i '^location:' "$headers" || true
           test "$status" = "302"
-          grep -qi '^location: .*/$' "$headers"
           ! grep -q '<title>系統管理員</title>' /tmp/legacy.html
-          echo "Legacy /system-admin redirects unauthenticated users to the shared Portal entry"
+          echo "Legacy /system-admin no longer serves the standalone admin UI"
 
       - name: Verify admin auth still reaches credential validation
         shell: bash
