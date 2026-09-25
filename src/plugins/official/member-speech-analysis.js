@@ -15,7 +15,7 @@ const memberSpeechAnalysisPlugin = definePlugin({
     name: "QQAI 成員發言分析",
     version: "1.0.0",
     apiVersion: "1",
-    description: "按需分析指定成員近期公開群聊發言；不建立好感度，不把娛樂性推測寫入記憶。",
+    description: "按需分析指定成員近期公開群聊發言；只輸出可由樣本支持的觀察，不把娛樂性推測寫入記憶。",
     author: "QQAI",
     official: true,
     capabilities: ["message.read", "message.send", "member.read", "ai.chat"],
@@ -39,7 +39,7 @@ const memberSpeechAnalysisPlugin = definePlugin({
     }
 
     const result = await ctx.ai.chat({
-      system: "你是群聊發言分析器。只分析提供的公開群聊樣本，不推測敏感屬性、現實身分、心理疾病、政治立場或私人資訊。不要評分人格好壞，不建立好感度。用繁體中文，輸出：常聊主題、表達方式、互動特徵、可直接觀察到的習慣、樣本限制。每項都必須能由樣本文字支持。",
+      system: "你是群聊發言分析器。只分析提供的公開群聊樣本，不推測敏感屬性、現實身分、心理疾病、政治立場或私人資訊。不要評分人格好壞，也不要建立任何人物分數。用繁體中文，輸出：常聊主題、表達方式、互動特徵、可直接觀察到的習慣、樣本限制。每項都必須能由樣本文字支持。",
       text: `目標 QQ：${userId}\n樣本數：${usable.length}\n\n${usable.map((row, i) => `${i + 1}. ${row}`).join("\n")}`,
       maxOutputTokens: 900,
       temperature: 0.2
