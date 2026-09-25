@@ -1178,202 +1178,87 @@ ${summary}`.slice(0, 4000),
   }
 
   if (request.method === "GET" && path === "/integrations/bilibili") {
-    if (!(permissions.aiAdmin || permissions.groupOps || permissions.nativeAdmin || portalIsDeveloper)) return jsonResponse({ ok: false, message: "缺少 B站监控管理权限。" }, 403);
+    if (!(permissions.aiAdmin || permissions.groupOps || permissions.nativeAdmin || portalIsDeveloper)) return jsonResponse({ ok: false, message: "缺少 B站監控管理權限。" }, 403);
     const connectors = await listBilibiliConnectors(env, groupId);
     return jsonResponse({
       ok: true,
       connectors: connectors.map(item => {
         const { webhookSecret, bridgeSecret, ...safe } = item;
-        const portalMode = item.mode === "open_live_bridge" ? "open_live_bridge" : item.mode === "generic_webhook" ? "official_webhook" : "automatic_polling";
-        return {
-          ...safe,
-          mode: portalMode,
-          webhookUrl: item.webhookSecret ? `${url.origin}/api/integrations/bilibili/webhook/${item.webhookSecret}` : "",
-          bridgeUrl: item.bridgeSecret ? `${url.origin}/api/integrations/bilibili/open-live/${item.bridgeSecret}` : ""
-        };
+        return { ...safe, mode: "automatic_polling" };
       }),
-      note: "推荐 Open Live 官方长连接：不需要在 B站设置 Webhook，也不依赖容易触发 412／429 的公开网页接口。Webhook 保留为相容模式；公开 UID 轮询只作为低频备援。"
+      note: "B站監控只使用低頻輪詢，不需要 Webhook 或 bridge。預設／最低 30 分鐘；412／429 會自動退避。需要登入態時僅從 Worker secret BILIBILI_COOKIE 讀取。"
     });
   }
   if (request.method === "POST" && path === "/integrations/bilibili") {
-    if (!(permissions.aiAdmin || permissions.groupOps || permissions.nativeAdmin || portalIsDeveloper)) return jsonResponse({ ok: false, message: "缺少 B站监控管理权限。" }, 403);
+    if (!(permissions.aiAdmin || permissions.groupOps || permissions.nativeAdmin || portalIsDeveloper)) return jsonResponse({ ok: false, message: "缺少 B站監控管理權限。" }, 403);
     const action = String(body.action || "save");
     if (action === "delete") {
       const item = await readJson(env, `bili:connector:${body.id}`, null);
-      if (!item || item.groupId !== groupId) return jsonResponse({ ok: false, message: "找不到监控项目。" }, 404);
-      if (item.webhookSecret) await dbDel(env, `bili:webhook_secret:${item.webhookSecret}`);
-      if (item.bridgeSecret) await dbDel(env, `bili:bridge_secret:${item.bridgeSecret}`);
+      if (!item || item.groupId !== groupId) return jsonResponse({ ok: false, message: "找不到監控項目。" }, 404);
+      if (item.webhookSecret) await dbDel(env, `bili:webhook_secret:${item.webhookSecret}`).catch(() => {});
+      if (item.bridgeSecret) await dbDel(env, `bili:bridge_secret:${item.bridgeSecret}`).catch(() => {});
       await dbDel(env, `bili:connector:${item.id}`);
       await removeFromIndex(env, `bili:connector:index:${groupId}`, item.id);
       await removeFromIndex(env, "bili:connector:index:all", item.id);
       await writeSystemAudit(env, { type: "bilibili_auto_monitor", groupId, actorId: authed.qq, action: "delete", connectorId: item.id });
-      return jsonResponse({ ok: true, message: "B站自动监控已删除。" });
-    }
-
-    if (action === "rotate_bridge") {
-      const item = await readJson(env, `bili:connector:${body.id}`, null);
-      if (!item || item.groupId !== groupId) return jsonResponse({ ok: false, message: "找不到监控项目。" }, 404);
-      if (item.mode !== "open_live_bridge") return jsonResponse({ ok: false, message: "当前不是 Open Live 长连接模式。" }, 400);
-      if (item.bridgeSecret) await dbDel(env, `bili:bridge_secret:${item.bridgeSecret}`);
-      item.bridgeSecret = crypto.randomUUID().replaceAll("-", "");
-      item.updatedAt = Date.now();
-      await dbPut(env, `bili:bridge_secret:${item.bridgeSecret}`, item.id);
-      await dbPut(env, `bili:connector:${item.id}`, JSON.stringify(item));
-      await writeSystemAudit(env, { type: "bilibili_auto_monitor", groupId, actorId: authed.qq, action: "rotate_open_live_bridge", connectorId: item.id, creatorId: item.creatorId });
-      return jsonResponse({ ok: true, message: "Open Live bridge 地址已重新生成；旧地址立即失效。", bridgeUrl: `${url.origin}/api/integrations/bilibili/open-live/${item.bridgeSecret}` });
-    }
-    if (action === "rotate_webhook") {
-      const item = await readJson(env, `bili:connector:${body.id}`, null);
-      if (!item || item.groupId !== groupId) return jsonResponse({ ok: false, message: "找不到监控项目。" }, 404);
-      if (item.mode !== "generic_webhook") return jsonResponse({ ok: false, message: "当前不是 Webhook 模式。" }, 400);
-      if (item.webhookSecret) await dbDel(env, `bili:webhook_secret:${item.webhookSecret}`);
-      item.webhookSecret = crypto.randomUUID().replaceAll("-", "");
-      item.updatedAt = Date.now();
-      await dbPut(env, `bili:webhook_secret:${item.webhookSecret}`, item.id);
-      await dbPut(env, `bili:connector:${item.id}`, JSON.stringify(item));
-      await writeSystemAudit(env, { type: "bilibili_auto_monitor", groupId, actorId: authed.qq, action: "rotate_webhook", connectorId: item.id, creatorId: item.creatorId });
-      return jsonResponse({ ok: true, message: "Webhook 回调密钥已重新生成；旧地址立即失效。", webhookUrl: `${url.origin}/api/integrations/bilibili/webhook/${item.webhookSecret}` });
-    }
-    if (action === "switch_mode") {
-      const item = await readJson(env, `bili:connector:${body.id}`, null);
-      if (!item || item.groupId !== groupId) return jsonResponse({ ok: false, message: "找不到监控项目。" }, 404);
-      const nextMode = body.mode === "open_live_bridge" ? "open_live_bridge" : body.mode === "official_webhook" ? "generic_webhook" : "automatic_polling";
-      if (item.webhookSecret && nextMode !== "generic_webhook") {
-        await dbDel(env, `bili:webhook_secret:${item.webhookSecret}`);
-        delete item.webhookSecret;
-      }
-      if (item.bridgeSecret && nextMode !== "open_live_bridge") {
-        await dbDel(env, `bili:bridge_secret:${item.bridgeSecret}`);
-        delete item.bridgeSecret;
-      }
-      let webhookUrl = "";
-      let bridgeUrl = "";
-      if (nextMode === "generic_webhook") {
-        item.webhookSecret = item.webhookSecret || crypto.randomUUID().replaceAll("-", "");
-        await dbPut(env, `bili:webhook_secret:${item.webhookSecret}`, item.id);
-        webhookUrl = `${url.origin}/api/integrations/bilibili/webhook/${item.webhookSecret}`;
-        item.pollIntervalSeconds = 0;
-        item.nextPollAt = 0;
-      } else if (nextMode === "open_live_bridge") {
-        item.bridgeSecret = item.bridgeSecret || crypto.randomUUID().replaceAll("-", "");
-        await dbPut(env, `bili:bridge_secret:${item.bridgeSecret}`, item.id);
-        bridgeUrl = `${url.origin}/api/integrations/bilibili/open-live/${item.bridgeSecret}`;
-        item.pollIntervalSeconds = 0;
-        item.nextPollAt = 0;
-      } else {
-        item.pollIntervalSeconds = bilibiliPollIntervalSeconds(body.pollIntervalSeconds || BILIBILI_POLL_DEFAULT_SECONDS);
-        item.nextPollAt = Date.now();
-      }
-      item.mode = nextMode;
-      item.updatedAt = Date.now();
-      await dbPut(env, `bili:connector:${item.id}`, JSON.stringify(item));
-      await writeSystemAudit(env, { type: "bilibili_auto_monitor", groupId, actorId: authed.qq, action: "switch_mode", connectorId: item.id, creatorId: item.creatorId, mode: nextMode });
-      return jsonResponse({
-        ok: true,
-        message: nextMode === "open_live_bridge"
-          ? "已切换为 Open Live 官方长连接；B站端不需要设置 Webhook。"
-          : nextMode === "generic_webhook"
-            ? "已切换为 Webhook：现在只等待外部事件，不会主动检查 B站。"
-            : "已切换为兼容低频轮询：可以使用检查频率与立即检查。",
-        webhookUrl,
-        bridgeUrl
-      });
-    }
-    if (action === "webhook_self_test") {
-      const item = await readJson(env, `bili:connector:${body.id}`, null);
-      if (!item || item.groupId !== groupId) return jsonResponse({ ok: false, message: "找不到监控项目。" }, 404);
-      if (item.mode !== "generic_webhook" || !item.webhookSecret) return jsonResponse({ ok: false, message: "请先切换为 Webhook 模式。" }, 400);
-      const mapped = await dbGet(env, `bili:webhook_secret:${item.webhookSecret}`);
-      if (String(mapped || "") !== String(item.id)) return jsonResponse({ ok: false, message: "Webhook 密钥映射异常，请重新生成回调地址。" }, 409);
-      const testEvent = { type: "video_publish", creatorId: item.creatorId, creatorName: item.creatorName, title: "Webhook 接收自检事件", url: `https://space.bilibili.com/${item.creatorId}`, eventId: `webhook-self-test:${Date.now()}` };
-      const result = await sendBilibiliConnectorNotification(env, item, testEvent);
-      item.lastWebhookTestAt = Date.now();
-      item.lastWebhookTestOk = Boolean(result.ok);
-      item.lastWebhookTestError = result.ok ? "" : String(result.error || "发送失败").slice(0, 500);
-      await dbPut(env, `bili:connector:${item.id}`, JSON.stringify(item));
-      await writeSystemAudit(env, { type: "bilibili_auto_monitor", groupId, actorId: authed.qq, action: "webhook_self_test", connectorId: item.id, ok: result.ok, error: item.lastWebhookTestError });
-      return jsonResponse({ ok: result.ok, message: result.ok ? "Webhook 端点、密钥映射与 QQ 通知发送均通过自检。外部平台仍需实际 POST 事件才能自动通知。" : `Webhook 密钥有效，但 QQ 通知发送失败：${item.lastWebhookTestError}` }, result.ok ? 200 : 502);
+      return jsonResponse({ ok: true, message: "B站自動監控已刪除。" });
     }
     if (action === "test") {
       const item = await readJson(env, `bili:connector:${body.id}`, null);
-      if (!item || item.groupId !== groupId) return jsonResponse({ ok: false, message: "找不到监控项目。" }, 404);
+      if (!item || item.groupId !== groupId) return jsonResponse({ ok: false, message: "找不到監控項目。" }, 404);
       const eventType = body.eventType === "video_publish" ? "video_publish" : "live_start";
-      const result = await sendBilibiliConnectorNotification(env, item, { type: eventType, creatorId: item.creatorId, creatorName: item.creatorName, title: eventType === "live_start" ? "测试直播通知" : "测试新视频通知", url: `https://space.bilibili.com/${item.creatorId}`, eventId: `test:${Date.now()}` });
-      return jsonResponse({ ok: result.ok, message: result.ok ? "测试通知已处理。" : result.error }, result.ok ? 200 : 502);
+      const result = await sendBilibiliConnectorNotification(env, item, { type: eventType, creatorId: item.creatorId, creatorName: item.creatorName, title: eventType === "live_start" ? "測試直播通知" : "測試新影片通知", url: `https://space.bilibili.com/${item.creatorId}`, eventId: `test:${Date.now()}` });
+      return jsonResponse({ ok: result.ok, message: result.ok ? "測試通知已處理。" : result.error }, result.ok ? 200 : 502);
     }
     if (action === "check_now") {
       const item = await readJson(env, `bili:connector:${body.id}`, null);
-      if (!item || item.groupId !== groupId) return jsonResponse({ ok: false, message: "找不到监控项目。" }, 404);
-      if (item.mode === "generic_webhook") return jsonResponse({ ok: false, message: "Webhook 模式不执行主动抓取；请从开放平台或授权中继发送测试事件。" }, 400);
-      if (item.mode === "open_live_bridge") return jsonResponse({ ok: false, message: "Open Live 长连接模式由 bridge 持续接收官方事件，不执行公开 UID 抓取。" }, 400);
-      const result = await pollOneAutomaticBilibiliConnector(env, item, Date.now(), { force: true });
-      const { webhookSecret, ...safeConnector } = result.connector || item;
-      return jsonResponse({ ok: result.ok, message: result.ok ? (result.baseline ? "检查成功，已建立当前状态基准。" : `检查成功，发现 ${result.events?.length || 0} 个新事件。`) : `检查失败：${result.message}`, connector: safeConnector }, result.ok ? 200 : 502);
+      if (!item || item.groupId !== groupId) return jsonResponse({ ok: false, message: "找不到監控項目。" }, 404);
+      const result = await pollOneAutomaticBilibiliConnector(env, { ...item, mode: "automatic_polling" }, Date.now(), { force: true });
+      const { webhookSecret, bridgeSecret, ...safeConnector } = result.connector || item;
+      return jsonResponse({ ok: result.ok, message: result.ok ? (result.baseline ? "檢查成功，已建立目前狀態基準。" : `檢查成功，發現 ${result.events?.length || 0} 個新事件。`) : `檢查失敗：${result.message}`, connector: safeConnector }, result.ok ? 200 : 502);
     }
     if (action === "update_interval") {
       const item = await readJson(env, `bili:connector:${body.id}`, null);
-      if (!item || item.groupId !== groupId) return jsonResponse({ ok: false, message: "找不到监控项目。" }, 404);
-      if (item.mode !== "automatic_polling") return jsonResponse({ ok: false, message: "只有兼容低频轮询模式可以设置检查频率。" }, 400);
+      if (!item || item.groupId !== groupId) return jsonResponse({ ok: false, message: "找不到監控項目。" }, 404);
+      if (item.webhookSecret) await dbDel(env, `bili:webhook_secret:${item.webhookSecret}`).catch(() => {});
+      if (item.bridgeSecret) await dbDel(env, `bili:bridge_secret:${item.bridgeSecret}`).catch(() => {});
+      item.mode = "automatic_polling";
       item.pollIntervalSeconds = bilibiliPollIntervalSeconds(body.pollIntervalSeconds || item.pollIntervalSeconds);
       item.nextPollAt = Date.now() + item.pollIntervalSeconds * 1000;
       item.updatedAt = Date.now();
+      delete item.webhookSecret;
+      delete item.bridgeSecret;
       await dbPut(env, `bili:connector:${item.id}`, JSON.stringify(item));
       await writeSystemAudit(env, { type: "bilibili_auto_monitor", groupId, actorId: authed.qq, action: "update_interval", connectorId: item.id, creatorId: item.creatorId, pollIntervalSeconds: item.pollIntervalSeconds });
-      return jsonResponse({ ok: true, message: `检查频率已改为每 ${Math.round(item.pollIntervalSeconds / 60)} 分钟。`, connector: item });
+      return jsonResponse({ ok: true, message: `檢查頻率已改為每 ${Math.round(item.pollIntervalSeconds / 60)} 分鐘。`, connector: item });
     }
+    if (["switch_mode","rotate_bridge","rotate_webhook","webhook_self_test"].includes(action)) return jsonResponse({ ok: false, message: "Webhook／Open Live bridge 模式已移除；請使用低頻輪詢。" }, 410);
     const id = String(body.id || `bili_${Date.now().toString(36)}_${crypto.randomUUID().slice(0, 8)}`);
     const existing = await readJson(env, `bili:connector:${id}`, null);
-    const requestedMode = body.mode === "open_live_bridge" ? "open_live_bridge" : body.mode === "official_webhook" ? "generic_webhook" : "automatic_polling";
     const creatorId = normalizeBilibiliUid(body.creatorId || existing?.creatorId || "");
-    if (!creatorId) return jsonResponse({ ok: false, message: "请填写 B站用户的数字 UID，用于核对事件来源。" }, 400);
+    if (!creatorId) return jsonResponse({ ok: false, message: "請填寫 B站使用者的數字 UID。" }, 400);
+    if (existing?.webhookSecret) await dbDel(env, `bili:webhook_secret:${existing.webhookSecret}`).catch(() => {});
+    if (existing?.bridgeSecret) await dbDel(env, `bili:bridge_secret:${existing.bridgeSecret}`).catch(() => {});
     const item = {
-      ...existing,
-      id, groupId,
-      creatorId,
+      ...existing, id, groupId, creatorId,
       creatorName: String(body.creatorName || existing?.creatorName || "").trim().slice(0, 120),
-      mode: requestedMode,
+      mode: "automatic_polling",
       enabled: body.enabled !== false,
-      pollIntervalSeconds: requestedMode === "automatic_polling" ? bilibiliPollIntervalSeconds(body.pollIntervalSeconds || existing?.pollIntervalSeconds) : 0,
+      pollIntervalSeconds: bilibiliPollIntervalSeconds(body.pollIntervalSeconds || existing?.pollIntervalSeconds || BILIBILI_POLL_DEFAULT_SECONDS),
       liveNotify: Boolean(body.liveNotify), liveAtAll: Boolean(body.liveAtAll),
       videoNotify: Boolean(body.videoNotify), videoAtAll: Boolean(body.videoAtAll),
       createdBy: existing?.createdBy || authed.qq,
       createdAt: existing?.createdAt || Date.now(), updatedAt: Date.now(),
-      nextPollAt: 0
+      nextPollAt: Date.now()
     };
-    if (existing?.webhookSecret && requestedMode !== "generic_webhook") await dbDel(env, `bili:webhook_secret:${existing.webhookSecret}`);
-    if (existing?.bridgeSecret && requestedMode !== "open_live_bridge") await dbDel(env, `bili:bridge_secret:${existing.bridgeSecret}`);
-    let webhookUrl = "";
-    let bridgeUrl = "";
-    if (requestedMode === "generic_webhook") {
-      item.webhookSecret = existing?.webhookSecret || crypto.randomUUID().replaceAll("-", "");
-      await dbPut(env, `bili:webhook_secret:${item.webhookSecret}`, id);
-      webhookUrl = `${url.origin}/api/integrations/bilibili/webhook/${item.webhookSecret}`;
-      delete item.bridgeSecret;
-    } else if (requestedMode === "open_live_bridge") {
-      item.bridgeSecret = existing?.bridgeSecret || crypto.randomUUID().replaceAll("-", "");
-      await dbPut(env, `bili:bridge_secret:${item.bridgeSecret}`, id);
-      bridgeUrl = `${url.origin}/api/integrations/bilibili/open-live/${item.bridgeSecret}`;
-      delete item.webhookSecret;
-    } else {
-      delete item.webhookSecret;
-      delete item.bridgeSecret;
-    }
+    delete item.webhookSecret;
+    delete item.bridgeSecret;
     await dbPut(env, `bili:connector:${id}`, JSON.stringify(item));
     await appendIndex(env, `bili:connector:index:${groupId}`, id, 500);
     await appendIndex(env, "bili:connector:index:all", id, 5000);
-    await writeSystemAudit(env, { type: "bilibili_auto_monitor", groupId, actorId: authed.qq, action: existing ? "update" : "create", connectorId: id, creatorId, mode: requestedMode, pollIntervalSeconds: item.pollIntervalSeconds });
+    await writeSystemAudit(env, { type: "bilibili_auto_monitor", groupId, actorId: authed.qq, action: existing ? "update" : "create", connectorId: id, creatorId, mode: "automatic_polling", pollIntervalSeconds: item.pollIntervalSeconds });
     const { webhookSecret, bridgeSecret, ...safeItem } = item;
-    return jsonResponse({
-      ok: true,
-      message: requestedMode === "open_live_bridge"
-        ? "Open Live 官方长连接已保存；B站端不需要设置 Webhook。请把 bridge 地址配置到随项目提供的 bridge 进程。"
-        : requestedMode === "generic_webhook"
-          ? "Webhook 监控已保存。请把回调地址配置到开放平台或合法授权的事件中继。"
-          : "兼容低频轮询已保存；首次检查只建立基准。公开接口只作为备援。",
-      connector: safeItem,
-      webhookUrl,
-      bridgeUrl
-    });
+    return jsonResponse({ ok: true, message: "低頻輪詢已儲存；首次檢查只建立基準。遇到 B站風控會自動退避。", connector: safeItem });
   }
 
   if (request.method === "GET" && path === "/health/model-candidates") {
@@ -2991,7 +2876,8 @@ function ensureR3Views(){
   if(!$('v-appeals').dataset.ready){$('v-appeals').dataset.ready='1';$('v-appeals').innerHTML='<div class="section-head"><div><h2>匿名申诉</h2><p>审核者看不到你的 QQ；只有开发者可以查看真实身份。当前成员和退出未满 30 天的前成员都可以申诉。</p></div><button id="appealReload" class="btn">刷新案件</button></div><div class="grid"><div class="card span-5"><h3>提交申诉</h3><div class="field"><label>所属群组</label><select id="appealGroup"><option value="">请选择群组</option></select></div><div class="field"><label>申诉类型</label><select id="appealType"><option>禁言</option><option>踢出</option><option>AI黑名单</option><option>管理操作</option><option>排程</option><option>其他</option></select></div><div class="field"><label>相关消息 ID（选填）</label><input id="appealEvidence"></div><div class="field"><label>申诉内容</label><textarea id="appealContent" placeholder="请说明发生了什么、希望如何处理"></textarea></div><button id="appealSubmit" class="btn primary" style="width:100%">匿名提交</button><div id="appealMessage" class="notice">提交后可在“我的案件”查看处理状态。前成员资格从系统收到退群事件起保留 30 天。</div></div><div class="card span-7"><h3>我的案件</h3><div id="appealList" class="list"><div class="empty">暂无案件</div></div></div></div>';$('appealReload').onclick=loadAppeals;$('appealSubmit').onclick=submitAppeal}
   if(!$('v-violationhistory').dataset.ready){$('v-violationhistory').dataset.ready='1';$('v-violationhistory').innerHTML='<div class="section-head"><div><h2>历史违规记录</h2><p>你可以查看自己的群规记录，并对单条或多条记录一键申诉。只有属于你的记录会显示。</p></div><button id="vhReload" class="btn">重新加载</button></div><div class="card"><div class="row"><select id="vhGroup"><option value="">全部可申诉群组</option></select><button id="vhSelectAll" class="btn">全选当前列表</button><button id="vhAppealSelected" class="btn primary">申诉所选记录</button></div><div class="notice" style="margin-top:12px">退出群聊未满 30 天仍可查看并申诉；超过期限后不能再提交新申诉。</div></div><div id="vhList" class="list" style="margin-top:16px"><div class="empty">尚未加载</div></div>';$('vhReload').onclick=loadViolationHistory;$('vhGroup').onchange=loadViolationHistory;$('vhSelectAll').onclick=function(){document.querySelectorAll('.vhCheck:not(:disabled)').forEach(function(x){x.checked=true})};$('vhAppealSelected').onclick=function(){appealViolationRecords(Array.from(document.querySelectorAll('.vhCheck:checked')).map(function(x){return x.value}))}}
   if(!$('v-appealreview').dataset.ready){$('v-appealreview').dataset.ready='1';$('v-appealreview').innerHTML='<div class="section-head"><div><h2>申诉处理</h2><p>处理当前选中群组的匿名申诉。非开发者看不到申诉人的真实 QQ。</p></div><button id="appealReviewReload" class="btn">重新加载</button></div><div class="card"><div class="row"><select id="appealReviewStatus"><option value="">全部状态</option><option value="pending_owner">待处理</option><option value="pending_review">审核中</option><option value="approved">已通过</option><option value="rejected">已驳回</option></select><button id="appealReviewSearch" class="btn primary">筛选</button></div></div><div id="appealReviewList" class="list" style="margin-top:16px"><div class="empty">请选择群组后加载案件</div></div>';$('appealReviewReload').onclick=loadAppealReviews;$('appealReviewSearch').onclick=loadAppealReviews}
-  if(!$('v-bilibili').dataset.ready){$('v-bilibili').dataset.ready='1';$('v-bilibili').innerHTML='<div class="section-head"><div><h2>B站监控</h2><p>可选择主动低频检查，或接收外部服务推送的事件。</p></div><button id="biliReload" class="btn">重新加载</button></div><div class="card"><div class="row"><input id="biliCreatorName" placeholder="创作者名称（选填）"><input id="biliCreatorId" inputmode="numeric" placeholder="B站用户 UID（必填）"><select id="biliMode"><option value="open_live_bridge" selected>Open Live 官方长连接（推荐，不用 Webhook）</option><option value="automatic_polling">兼容低频轮询（备援）</option><option value="official_webhook">接收 Webhook（相容模式）</option></select><select id="biliPollInterval"><option value="1800" selected>每 30 分钟</option><option value="3600">每 1 小时</option><option value="7200">每 2 小时</option><option value="21600">每 6 小时</option></select></div><div class="row"><label class="switch"><input id="biliLiveNotify" type="checkbox" checked>开播通知</label><label class="switch"><input id="biliLiveAtAll" type="checkbox">开播 @全体</label><label class="switch"><input id="biliVideoNotify" type="checkbox" checked>新视频通知</label><label class="switch"><input id="biliVideoAtAll" type="checkbox">新视频 @全体</label><button id="biliAdd" class="btn primary">保存监控</button></div><div id="biliModeHelp" class="notice"></div><div class="notice">推荐 Open Live：使用 B站开放平台开发密钥、项目 ID 与主播身份码建立官方长连接，不需要配置 B站 Webhook。公开 UID 轮询最低 30 分钟一次，只作备援；遇到 412／429 会自动退避。</div><div id="biliWebhookResult" class="notice hidden"></div></div><div id="biliList" class="list" style="margin-top:16px"></div>';$('biliReload').onclick=loadBilibili;$('biliAdd').onclick=saveBilibiliConnector;$('biliMode').onchange=function(){var bridge=this.value==='open_live_bridge',webhook=this.value==='official_webhook';$('biliPollInterval').disabled=bridge||webhook;$('biliModeHelp').textContent=bridge?'Open Live：保存后复制 bridge 地址，并在 tools/bilibili-open-live-bridge.mjs 的环境变量中配置官方 access key、app id 与主播身份码；B站端不需要设置 Webhook。':webhook?'Webhook 相容模式：Worker 只接收外部事件；保存后复制回调地址到有权使用的事件来源。':'兼容低频轮询：Worker 会低频检查该 UID；首次只建立基准，公开接口失败时会自动退避。'};$('biliMode').onchange()}
+  if(!$('v-bilibili').dataset.ready){$('v-bilibili').dataset.ready='1';$('v-bilibili').innerHTML='<div class="section-head"><div><h2>B站監控</h2><p>只使用低頻輪詢，不需要 Webhook 或 bridge。</p></div><button id="biliReload" class="btn">重新載入</button></div><div class="card"><div class="row"><input id="biliCreatorName" placeholder="創作者名稱（選填）"><input id="biliCreatorId" inputmode="numeric" placeholder="B站使用者 UID（必填）"><select id="biliPollInterval"><option value="1800" selected>每 30 分鐘</option><option value="3600">每 1 小時</option><option value="7200">每 2 小時</option><option value="21600">每 6 小時</option></select></div><div class="row"><label class="switch"><input id="biliLiveNotify" type="checkbox" checked>開播通知</label><label class="switch"><input id="biliLiveAtAll" type="checkbox">開播 @全體</label><label class="switch"><input id="biliVideoNotify" type="checkbox" checked>新影片通知</label><label class="switch"><input id="biliVideoAtAll" type="checkbox">新影片 @全體</label><button id="biliAdd" class="btn primary">儲存監控</button></div><div class="notice">最低／預設 30 分鐘；412／429 會自動退避。需要登入態時，僅在 Worker secret 設定 <code>BILIBILI_COOKIE</code>；Cookie 不會存入 D1 或顯示在頁面。</div></div><div id="biliList" class="list" style="margin-top:16px"></div>';$('biliReload').onclick=loadBilibili;$('biliAdd').onclick=saveBilibiliConnector}
+
   if(!$('v-platform')){var b=document.createElement('button');b.dataset.view='platform';b.textContent='平台功能目录';b.hidden=true;$('nav').appendChild(b);b.onclick=function(){showView('platform')};var v=document.createElement('section');v.id='v-platform';v.className='view';v.innerHTML='<div class="section-head"><div><h2>平台功能目录</h2><p>这里只显示功能分类与历史记录状态；这些条目尚未接入机器人执行路径，不会启用或停用核心功能。</p></div><button id="pfReload" class="btn">重新加载</button></div><div class="card"><div class="row"><input id="pfSearch" class="grow" placeholder="搜索功能名称、ID、类别"><button id="pfGo" class="btn primary">搜索</button></div><div id="pfSummary" class="notice">尚未加载</div></div><div id="pfList" class="list" style="margin-top:16px"></div>';document.querySelector('.content').appendChild(v);$('pfReload').onclick=loadPlatformFeatures;$('pfGo').onclick=loadPlatformFeatures;$('pfSearch').onkeydown=function(e){if(e.key==='Enter')loadPlatformFeatures()}}
   ensureOperationsViews();
 }
@@ -3032,12 +2918,8 @@ async function saveRuleViolationSettings(){var payload={strictness:$('rvStrictne
 async function loadSettingsCenter(){var dev=session&&(session.permissions||{}).developer;if(!currentGroup){$('scMessage').textContent='请先从右上角选择需要维护的群组。';$('scList').innerHTML='<div class="empty">尚未选择群组</div>';return}$('scMessage').textContent='正在加载设置…';$('scList').innerHTML='<div class="empty">正在读取当前群设置</div>';try{var p=new URLSearchParams();p.set('targetQq',dev?($('scTargetQq').value||session.qq):session.qq);var r=await api('/settings-center?'+p.toString());if(!r.ok){$('scMessage').textContent=r.message||'加载失败';$('scList').innerHTML='<div class="empty">'+esc(r.message)+'</div>';return}if(!$('scTargetQq').value)$('scTargetQq').value=r.targetQq||session.qq;if($('scResolvedRole')){$('scResolvedRole').textContent='识别权限：'+portalRoleLabel(r.targetRole);$('scResolvedRole').className='status ok'}$('scMessage').textContent='已加载 '+(r.settings||[]).length+' 项设置；只会提交实际改动的项目。';$('scList').innerHTML='';(r.settings||[]).forEach(function(s){var d=document.createElement('div');d.className='item';var input;if(s.type==='boolean'){input=document.createElement('input');input.type='checkbox';input.checked=!!s.value}else if(s.type==='select'){input=document.createElement('select');(s.options||[]).forEach(function(v){var o=document.createElement('option');o.value=v;o.textContent=(s.optionLabels&&s.optionLabels[v])||v;input.appendChild(o)});input.value=String(s.value)}else if(s.type==='textarea'){input=document.createElement('textarea');input.value=String(s.value==null?'':s.value)}else{input=document.createElement('input');input.type=s.type==='number'?'number':'text';input.value=String(s.value==null?'':s.value);if(s.min!=null)input.min=s.min;if(s.max!=null)input.max=s.max}input.dataset.settingKey=s.key;input.dataset.initialValue=input.type==='checkbox'?String(input.checked):String(input.value);var roleText=portalRoleLabel(s.minRole);if(s.key==='rule_proxy_mode')roleText+='（auto 仅群主）';d.innerHTML='<div class="item-title">'+esc(s.label)+'</div><div class="item-meta">最低权限：'+esc(roleText)+'｜对应指令：'+esc(s.command||'无')+'</div>';d.appendChild(input);$('scList').appendChild(d)});if(!$('scList').children.length)$('scList').innerHTML='<div class="empty">当前没有可维护的设置项目</div>'}catch(e){$('scMessage').textContent='加载设置时发生错误。';$('scList').innerHTML='<div class="empty">'+esc(String(e&&e.message||e))+'</div>'}}
 async function saveAllSettings(){var dev=session&&(session.permissions||{}).developer;var settings=Array.from(document.querySelectorAll('#scList [data-setting-key]')).filter(function(input){var now=input.type==='checkbox'?String(input.checked):String(input.value);return now!==String(input.dataset.initialValue)}).map(function(input){return{key:input.dataset.settingKey,value:input.type==='checkbox'?input.checked:input.value}});if(!settings.length){toast('没有检测到设置变化');return}var button=$('scSaveAll');button.disabled=true;button.textContent='保存中…';var payload={settings:settings,targetQq:dev?$('scTargetQq').value:session.qq,auditMode:dev&&$('scAuditLog').checked?'log':'silent'};var r=await api('/settings-center','POST',payload);button.disabled=false;button.textContent='保存全部设置';$('scMessage').textContent=r.message||'保存失败';toast(r.message||'保存失败');if(r.ok)loadSettingsCenter()}
 async function copyPortalText(value){var text=String(value||'');if(!text)return false;try{await navigator.clipboard.writeText(text);toast('已复制');return true}catch(e){var input=document.createElement('textarea');input.value=text;input.style.position='fixed';input.style.opacity='0';document.body.appendChild(input);input.select();var ok=false;try{ok=document.execCommand('copy')}catch(x){}input.remove();toast(ok?'已复制':'复制失败，请手动选择地址');return ok}}
-async function loadBilibili(){var r=await api('/integrations/bilibili');if(!r.ok){$('biliList').innerHTML='<div class="empty">'+esc(r.message)+'</div>';return}$('biliList').innerHTML='';(r.connectors||[]).forEach(function(c){var d=document.createElement('div');d.className='item bili-connector';var state=c.pollState||{};var status=c.lastCheckStatus||'等待首次事件';var bridge=c.mode==='open_live_bridge',webhook=c.mode==='official_webhook',polling=!bridge&&!webhook;var next=bridge?(c.lastBridgeSeenAt?'Bridge 最近连线：'+new Date(Number(c.lastBridgeSeenAt)).toLocaleString():'等待 Open Live bridge 连线'):webhook?'等待外部事件推送':(c.nextPollAt?new Date(Number(c.nextPollAt)).toLocaleString():'等待定时任务');d.innerHTML='<div class="item-title">'+esc(c.creatorName||('UID '+c.creatorId))+'</div><div class="item-meta">模式：'+(bridge?'Open Live 官方长连接':webhook?'开放平台／授权中继 Webhook':'兼容低频轮询')+'｜UID：'+esc(c.creatorId)+'｜直播：'+(c.liveNotify?'通知':'仅记录')+(c.liveAtAll?'＋@全体':'')+'｜视频：'+(c.videoNotify?'通知':'仅记录')+(c.videoAtAll?'＋@全体':'')+'</div><div class="item-body">状态：'+esc(status)+'｜当前直播：'+(state.live?'是':'否')+'｜最新视频：'+esc(state.latestVideoBvid||'尚未建立基准')+'<br>上次处理：'+esc(c.lastCheckAt?new Date(Number(c.lastCheckAt)).toLocaleString():(c.lastEventAt?new Date(Number(c.lastEventAt)).toLocaleString():'尚未处理'))+'｜下一步：'+esc(next)+(c.lastWebhookTestAt?'<br>Webhook 自检：'+(c.lastWebhookTestOk?'通过':'失败')+'｜'+esc(new Date(Number(c.lastWebhookTestAt)).toLocaleString())+(c.lastWebhookTestError?'｜'+esc(c.lastWebhookTestError):''):'')+(c.lastCheckError?'<br><b>错误：</b>'+esc(c.lastCheckError):'')+'</div>';if(bridge){var bridgeInfo=document.createElement('div');bridgeInfo.className='notice bili-webhook-box';bridgeInfo.style.marginTop='10px';bridgeInfo.innerHTML='<b>Open Live 官方長連</b><br>不需要在 B站設定 Webhook。請在可長時間執行 Node.js 22+ 的環境啟動 <code>tools/bilibili-open-live-bridge.mjs</code>，並把下方地址設為 <code>QQAI_BILIBILI_BRIDGE_URL</code>。B站 access key、secret、app id 與身份碼只放在 bridge 環境變數。<div class="row" style="margin-top:10px"><input class="grow" readonly value="'+esc(c.bridgeUrl||'Bridge 地址不可用')+'"><button class="btn" data-copy-bridge>复制 Bridge 地址</button><button class="btn" data-rotate-bridge>重新生成地址</button><button class="btn" data-switch-polling>改用低频轮询</button><button class="btn" data-switch-webhook>改用 Webhook</button></div>';d.appendChild(bridgeInfo);bridgeInfo.querySelector('[data-copy-bridge]').onclick=function(){copyPortalText(c.bridgeUrl)};bridgeInfo.querySelector('[data-rotate-bridge]').onclick=function(){rotateBilibiliBridge(c.id)};bridgeInfo.querySelector('[data-switch-polling]').onclick=function(){switchBilibiliMode(c.id,'automatic_polling')};bridgeInfo.querySelector('[data-switch-webhook]').onclick=function(){switchBilibiliMode(c.id,'official_webhook')}}if(webhook){var info=document.createElement('div');info.className='notice bili-webhook-box';info.style.marginTop='10px';info.innerHTML='<b>Webhook 不主动访问 B站</b><br>请将下方地址配置到哔哩哔哩开放平台，或你有权使用的事件中继。自检会验证回调密钥映射与 QQ 通知发送，但外部平台仍必须实际 POST 事件。<div class="row" style="margin-top:10px"><input class="grow" readonly value="'+esc(c.webhookUrl||'回调地址不可用')+'"><button class="btn" data-copy-webhook>复制回调地址</button><button class="btn" data-rotate-webhook>重新生成地址</button><button class="btn primary" data-webhook-self-test>Webhook 接收自检</button><button class="btn" data-switch-polling>改用兼容轮询</button></div>';d.appendChild(info);info.querySelector('[data-copy-webhook]').onclick=function(){copyPortalText(c.webhookUrl)};info.querySelector('[data-rotate-webhook]').onclick=function(){rotateBilibiliWebhook(c.id)};info.querySelector('[data-webhook-self-test]').onclick=function(){testBilibiliWebhook(c.id)};info.querySelector('[data-switch-polling]').onclick=function(){switchBilibiliMode(c.id,'automatic_polling')};}var row=document.createElement('div');row.className='row';row.style.marginTop='10px';if(polling){var interval=document.createElement('select');[[1800,'30 分钟'],[3600,'1 小时'],[7200,'2 小时'],[21600,'6 小时']].forEach(function(v){var o=document.createElement('option');o.value=v[0];o.textContent='每 '+v[1];interval.appendChild(o)});interval.value=String(c.pollIntervalSeconds||1800);var saveInterval=document.createElement('button');saveInterval.className='btn';saveInterval.textContent='保存检查频率';saveInterval.onclick=function(){updateBilibiliInterval(c.id,interval.value)};var check=document.createElement('button');check.className='btn primary';check.textContent='立即检查';check.onclick=function(){checkBilibiliNow(c.id)};var toBridge=document.createElement('button');toBridge.className='btn primary';toBridge.textContent='改用 Open Live（推荐）';toBridge.onclick=function(){switchBilibiliMode(c.id,'open_live_bridge')};row.append(interval,saveInterval,check,toBridge)}var testLive=document.createElement('button');testLive.className='btn';testLive.textContent='测试发送开播通知';testLive.title='只测试发送到 QQ 群';testLive.onclick=function(){testBilibili(c.id,'live_start')};var testVideo=document.createElement('button');testVideo.className='btn';testVideo.textContent='测试发送新视频通知';testVideo.title='只测试发送到 QQ 群';testVideo.onclick=function(){testBilibili(c.id,'video_publish')};var del=document.createElement('button');del.className='btn danger';del.textContent='删除';del.onclick=async function(){if(!(await confirmModal('删除此 B站监控？','确认删除')))return;var x=await api('/integrations/bilibili','POST',{action:'delete',id:c.id});toast(x.message);if(x.ok)loadBilibili()};row.append(testLive,testVideo,del);d.appendChild(row);$('biliList').appendChild(d)});if(!$('biliList').children.length)$('biliList').innerHTML='<div class="empty">暂无 B站监控</div>'}
-async function saveBilibiliConnector(){var uid=String($('biliCreatorId').value||'').replace(/\D/g,'');if(!uid){toast('请输入 B站用户 UID');return}var r=await api('/integrations/bilibili','POST',{action:'save',mode:$('biliMode').value,creatorName:$('biliCreatorName').value,creatorId:uid,pollIntervalSeconds:Number($('biliPollInterval').value||1800),liveNotify:$('biliLiveNotify').checked,liveAtAll:$('biliLiveAtAll').checked,videoNotify:$('biliVideoNotify').checked,videoAtAll:$('biliVideoAtAll').checked});toast(r.message);if(r.ok){if(r.bridgeUrl){$('biliWebhookResult').innerHTML='Open Live Bridge 地址：<code>'+esc(r.bridgeUrl)+'</code><br>将此地址设为 <code>QQAI_BILIBILI_BRIDGE_URL</code>；B站 access key、secret、app id、身份码只放在 bridge 环境变量，不要贴到网页或聊天。';$('biliWebhookResult').classList.remove('hidden')}else if(r.webhookUrl){$('biliWebhookResult').innerHTML='Webhook 回调地址：<code>'+esc(r.webhookUrl)+'</code><br>请复制到你的开放平台应用或事件中继。';$('biliWebhookResult').classList.remove('hidden')}else $('biliWebhookResult').classList.add('hidden');$('biliCreatorName').value='';$('biliCreatorId').value='';loadBilibili()}}
-async function rotateBilibiliWebhook(id){if(!(await confirmModal('重新生成后，旧回调地址会立即失效。','重新生成 Webhook 地址')))return;var r=await api('/integrations/bilibili','POST',{action:'rotate_webhook',id:id});toast(r.message);if(r.ok&&r.webhookUrl){await copyPortalText(r.webhookUrl);loadBilibili()}}
-async function rotateBilibiliBridge(id){if(!(await confirmModal('重新生成后，旧 Bridge 地址会立即失效，正在运行的 bridge 需要更新环境变量。','重新生成 Open Live Bridge 地址')))return;var r=await api('/integrations/bilibili','POST',{action:'rotate_bridge',id:id});toast(r.message);if(r.ok&&r.bridgeUrl){await copyPortalText(r.bridgeUrl);loadBilibili()}}
-async function testBilibiliWebhook(id){var r=await api('/integrations/bilibili','POST',{action:'webhook_self_test',id:id});toast(r.message||'自检完成');loadBilibili()}
-async function switchBilibiliMode(id,mode){var label=mode==='open_live_bridge'?'Open Live 官方长连接':mode==='official_webhook'?'Webhook':'兼容低频轮询';if(!(await confirmModal('确定切换为'+label+'？切换后会停止原模式。','切换监控模式')))return;var r=await api('/integrations/bilibili','POST',{action:'switch_mode',id:id,mode:mode,pollIntervalSeconds:1800});toast(r.message);if(r.ok){if(r.bridgeUrl)await copyPortalText(r.bridgeUrl);else if(r.webhookUrl)await copyPortalText(r.webhookUrl);loadBilibili()}}
+async function loadBilibili(){var r=await api('/integrations/bilibili');if(!r.ok){$('biliList').innerHTML='<div class="empty">'+esc(r.message)+'</div>';return}$('biliList').innerHTML='';(r.connectors||[]).forEach(function(c){var d=document.createElement('div');d.className='item bili-connector';var state=c.pollState||{};var status=c.lastCheckStatus||'等待首次檢查';var next=c.nextPollAt?new Date(Number(c.nextPollAt)).toLocaleString():'等待定時任務';d.innerHTML='<div class="item-title">'+esc(c.creatorName||('UID '+c.creatorId))+'</div><div class="item-meta">模式：低頻輪詢｜UID：'+esc(c.creatorId)+'｜直播：'+(c.liveNotify?'通知':'僅記錄')+(c.liveAtAll?'＋@全體':'')+'｜影片：'+(c.videoNotify?'通知':'僅記錄')+(c.videoAtAll?'＋@全體':'')+'</div><div class="item-body">狀態：'+esc(status)+'｜目前直播：'+(state.live?'是':'否')+'｜最新影片：'+esc(state.latestVideoBvid||'尚未建立基準')+'<br>上次檢查：'+esc(c.lastCheckAt?new Date(Number(c.lastCheckAt)).toLocaleString():'尚未檢查')+'｜下次：'+esc(next)+(c.lastCheckError?'<br><b>錯誤：</b>'+esc(c.lastCheckError):'')+'</div>';var row=document.createElement('div');row.className='row';row.style.marginTop='10px';var interval=document.createElement('select');[[1800,'30 分鐘'],[3600,'1 小時'],[7200,'2 小時'],[21600,'6 小時']].forEach(function(v){var o=document.createElement('option');o.value=v[0];o.textContent='每 '+v[1];interval.appendChild(o)});interval.value=String(c.pollIntervalSeconds||1800);var saveInterval=document.createElement('button');saveInterval.className='btn';saveInterval.textContent='儲存檢查頻率';saveInterval.onclick=function(){updateBilibiliInterval(c.id,interval.value)};var check=document.createElement('button');check.className='btn primary';check.textContent='立即檢查';check.onclick=function(){checkBilibiliNow(c.id)};var testLive=document.createElement('button');testLive.className='btn';testLive.textContent='測試開播通知';testLive.onclick=function(){testBilibili(c.id,'live_start')};var testVideo=document.createElement('button');testVideo.className='btn';testVideo.textContent='測試新影片通知';testVideo.onclick=function(){testBilibili(c.id,'video_publish')};var del=document.createElement('button');del.className='btn danger';del.textContent='刪除';del.onclick=async function(){if(!(await confirmModal('刪除此 B站監控？','確認刪除')))return;var x=await api('/integrations/bilibili','POST',{action:'delete',id:c.id});toast(x.message);if(x.ok)loadBilibili()};row.append(interval,saveInterval,check,testLive,testVideo,del);d.appendChild(row);$('biliList').appendChild(d)});if(!$('biliList').children.length)$('biliList').innerHTML='<div class="empty">暫無 B站監控</div>'}
+async function saveBilibiliConnector(){var uid=String($('biliCreatorId').value||'').replace(/\D/g,'');if(!uid){toast('請輸入 B站使用者 UID');return}var r=await api('/integrations/bilibili','POST',{action:'save',creatorName:$('biliCreatorName').value,creatorId:uid,pollIntervalSeconds:Number($('biliPollInterval').value||1800),liveNotify:$('biliLiveNotify').checked,liveAtAll:$('biliLiveAtAll').checked,videoNotify:$('biliVideoNotify').checked,videoAtAll:$('biliVideoAtAll').checked});toast(r.message);if(r.ok){$('biliCreatorName').value='';$('biliCreatorId').value='';loadBilibili()}}
 async function updateBilibiliInterval(id,seconds){var r=await api('/integrations/bilibili','POST',{action:'update_interval',id:id,pollIntervalSeconds:Number(seconds)});toast(r.message);if(r.ok)loadBilibili()}
 async function checkBilibiliNow(id){var r=await api('/integrations/bilibili','POST',{action:'check_now',id:id});toast(r.message);loadBilibili()}
 async function testBilibili(id,eventType){var r=await api('/integrations/bilibili','POST',{action:'test',id:id,eventType:eventType});toast(r.message)}
