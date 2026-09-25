@@ -110,7 +110,7 @@ function makeCtx(userId = "") {
 await plugin.onLoad(makeCtx());
 assert.equal(jobs.length, 1, "onLoad must create exactly one polling job");
 assert.equal(jobs[0].name, "live-poll");
-assert.equal(jobs[0].intervalMs, 120000);
+assert.equal(jobs[0].intervalMs, 1800000, "scheduled polling must use the normalized 30-minute safety minimum");
 await plugin.onLoad(makeCtx());
 assert.equal(jobs.filter(job => job.status === "active").length, 1, "onLoad must not duplicate an existing job");
 
