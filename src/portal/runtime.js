@@ -1348,14 +1348,21 @@ ${summary}`.slice(0, 4000),
       item.webhookSecret = existing?.webhookSecret || crypto.randomUUID().replaceAll("-", "");
       await dbPut(env, `bili:webhook_secret:${item.webhookSecret}`, id);
       webhookUrl = `${url.origin}/api/integrations/bilibili/webhook/${item.webhookSecret}`;
+      delete item.bridgeSecret;
+    } else if (requestedMode === "open_live_bridge") {
+      item.bridgeSecret = existing?.bridgeSecret || crypto.randomUUID().replaceAll("-", "");
+      await dbPut(env, `bili:bridge_secret:${item.bridgeSecret}`, id);
+      bridgeUrl = `${url.origin}/api/integrations/bilibili/open-live/${item.bridgeSecret}`;
+      delete item.webhookSecret;
     } else {
       delete item.webhookSecret;
+      delete item.bridgeSecret;
     }
     await dbPut(env, `bili:connector:${id}`, JSON.stringify(item));
     await appendIndex(env, `bili:connector:index:${groupId}`, id, 500);
     await appendIndex(env, "bili:connector:index:all", id, 5000);
     await writeSystemAudit(env, { type: "bilibili_auto_monitor", groupId, actorId: authed.qq, action: existing ? "update" : "create", connectorId: id, creatorId, mode: requestedMode, pollIntervalSeconds: item.pollIntervalSeconds });
-    const { webhookSecret, ...safeItem } = item;
+    const { webhookSecret, bridgeSecret, ...safeItem } = item;
     return jsonResponse({
       ok: true,
       message: requestedMode === "generic_webhook"
