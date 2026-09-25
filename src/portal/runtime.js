@@ -1254,6 +1254,12 @@ ${summary}`.slice(0, 4000),
         webhookUrl = `${url.origin}/api/integrations/bilibili/webhook/${item.webhookSecret}`;
         item.pollIntervalSeconds = 0;
         item.nextPollAt = 0;
+      } else if (nextMode === "open_live_bridge") {
+        item.bridgeSecret = item.bridgeSecret || crypto.randomUUID().replaceAll("-", "");
+        await dbPut(env, `bili:bridge_secret:${item.bridgeSecret}`, item.id);
+        bridgeUrl = `${url.origin}/api/integrations/bilibili/open-live/${item.bridgeSecret}`;
+        item.pollIntervalSeconds = 0;
+        item.nextPollAt = 0;
       } else {
         item.pollIntervalSeconds = bilibiliPollIntervalSeconds(body.pollIntervalSeconds || BILIBILI_POLL_DEFAULT_SECONDS);
         item.nextPollAt = Date.now();
