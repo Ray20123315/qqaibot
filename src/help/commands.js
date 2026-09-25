@@ -9,7 +9,7 @@ const COMMON_SECTIONS = Object.freeze([
       "!help／!帮助：查看当前权限可用的指令",
       "!status／!配额：查看模型、AI、记忆与调用状态",
       "!模型 自动／Gemma 26B／Gemma 31B／Gemini：切换个人模型偏好",
-      "!语音 问题：生成语音回答",
+      "QQ 语音回复 Beta：默认关闭；在 QQ Interactions 插件启用后使用 !QQ语音角色／!QQ语音 角色 内容",
       "!读网页 URL：抓取公开网页并摘要",
       "!翻译 语言 内容：翻译文字",
       "图片理解：图片与问题同一则发送，或回复图片后 @机器人",
