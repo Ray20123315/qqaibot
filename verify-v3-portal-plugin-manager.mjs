@@ -36,7 +36,7 @@ response = await handleV3PluginManagerApi(
   new Request("https://example.com/api/portal/v3/plugins"),
   disabledEnv,
   null,
-  { getSession: async () => ({ qq: "system-admin", systemAdmin: true, permissions: { developer: true } }), isDeveloper: () => false }
+  { getSession: async () => ({ qq: "system-admin", systemAdmin: true, permissions: {} }), isDeveloper: () => false }
 );
 assert.equal(response.status, 200, "System Admin must be allowed to manage V3 plugins even without a QQ developer id");
 assert.equal((await response.json()).runtimeEnabled, false);
@@ -194,6 +194,7 @@ assert.match(injected, /外部传输/);
 assert.match(injected, /必要/);
 assert.match(injected, /生命周期与权限/);
 assert.doesNotMatch(injected, /生命週期與權限|外部傳輸|設定唯讀/);
+assert.doesNotMatch(injected, /必要權限|被阻擋|未授權|啟用|切換|優先|保存設定/);
 assert.match(injected, /保存版本偏好/);
 assert.match(injected, /data-v3-save-channel/);
 assert.equal(injectV3PluginManagerClient(injected), injected, "Portal injection must be idempotent");
