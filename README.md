@@ -21,6 +21,7 @@ OneBotHub Durable Object
       ▼
 worker.js
       ├─ src/ai/             模型路由、搜尋、TTS、回答完整性
+      ├─ src/v3/ai/          V3 多模態、TTS 與本地 Codex WebSocket bridge
       ├─ src/config/         執行期與部署設定正規化
       ├─ src/moderation/     群規、群管提案、禁言鎖、關係綁定
       ├─ src/portal/         Portal、登入、密碼、API
@@ -108,6 +109,8 @@ cp .dev.vars.example .dev.vars
 ```bash
 npx wrangler secret put GEMINI_API_KEYS
 npx wrangler secret put ONEBOT_ACCESS_TOKEN
+# 若要使用本地 Codex bridge，再設定：
+npx wrangler secret put CODEX_BRIDGE_ACCESS_TOKEN
 npx wrangler secret put PORTAL_AUTH_SECRET
 npx wrangler secret put TOTP_ENCRYPTION_KEY
 ```
@@ -224,6 +227,7 @@ Secrets 不可放在 `[vars]`、README 範例值、Portal 回應、Git log 或�
 | `GEMINI_VISION_API_KEYS` | 圖片理解；未設定時自動停用。 |
 | `DEEPSEEK_API_KEYS` | DeepSeek Key 池。 |
 | `ONEBOT_ACCESS_TOKEN` | NapCat WebSocket 驗證 Token。 |
+| `CODEX_BRIDGE_ACCESS_TOKEN` | 本地 Codex bridge 專用 WebSocket Bearer Token；不可與 OneBot Token 共用。 |
 | `ONEBOT_HTTP_URL` | 可選 OneBot HTTP 備援網址。若含憑證資訊仍應視為 Secret。 |
 | `ONEBOT_HTTP_ACCESS_TOKEN` | HTTP 備援 Token。 |
 | `PORTAL_AUTH_SECRET` | Portal 敏感資料與登入相關加密。 |
@@ -286,6 +290,26 @@ npx wrangler secret put SECRET_NAME
 - 即時資料問題進入獨立搜尋流程；搜尋失敗不得假裝已查證。
 - 長回答會檢查截斷、續寫並按完整句子分段。
 - 圖片理解使用獨立 Vision Key 池；沒有設定時停用。
+
+### 本地 Codex WebSocket bridge
+
+V3 可以把 `codex_bridge` provider 路由到本機 Codex connector。這條路徑採「本機主動連出去」：本機程式不需要開放入站連接埠，也不會把檔案系統、Shell、桌面控制或瀏覽器代理暴露給 Worker。
+
+本機 connector 連線：
+
+```text
+URL: wss://你的網域/v3/codex-bridge
+Authorization: Bearer <CODEX_BRIDGE_ACCESS_TOKEN>
+Protocol: qqai-codex-bridge-v1
+```
+
+Worker 只會送出有界限的 AI inference RPC：`id`、`task`、`model`、`messages`、`maxOutputTokens`、`timeoutMs`。本機回覆使用相同 `id`，並回傳 `text`、可選 `model`／`usage`／`allowance`。單一 Worker 同時只採用最新一條 Codex connector 連線，並限制並行請求與訊息大小。
+
+`codex_bridge` provider 的 `endpoint` 留空、設為 `worker://codex`，或在 provider metadata 設定 `transport=worker_ws` 時，V3 會走本機 WebSocket connector；既有 `https://...` endpoint 仍維持原本的 `POST /v1/qqai/chat` HTTP 相容模式。
+
+### AI 聊天冷卻
+
+一般 AI 對話預設冷卻為 10 秒，可沿用既有群組／全域設定調整。冷卻時間**從上一個問題完成生成與處理後開始計算**，模型仍在生成時不會先扣掉冷卻時間。相同 debounce 批次、尚未開始生成的補充訊息仍會合併成同一題；一旦已開始生成，新問題不會取消並重啟正在進行的模型請求，而是等該題完成後再依冷卻規則接受下一題。
 
 ### 記憶、人格與群規
 
