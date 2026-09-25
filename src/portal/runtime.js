@@ -2799,8 +2799,29 @@ function getPortalHomePage(host) {
         <div class="section-head"><div><h2>模型中心</h2><p>模型依用途、帐号与配额分类管理；聊天、判断、图片、语音与摘要可分别指定模型与备用顺序。</p></div><button id="reloadModels" class="btn">重新加载</button></div><div id="modelRoutingSummary" class="card" style="margin-bottom:16px"><div class="empty">尚未加载模型路由</div></div><div id="modelList" class="grid"><div class="empty span-12">尚未加载</div></div>
       </section>
       <section id="v-quota" class="view">
-        <div class="section-head"><div><h2>DeepSeek 额度与限制</h2><p>留空代表不限制；填 0 代表完全禁止；正數代表每日人民幣上限。</p></div><button id="saveQuota" class="btn primary">儲存額度</button></div>
-        <div class="grid"><div class="card span-6"><h3>全站每日 CNY</h3><div class="field"><label>所有群組合計上限</label><input id="globalQuota" type="number" min="0" step="0.01" placeholder="留空＝無限制"></div><div class="notice">0＝完全停用 DeepSeek；空白＝不設每日上限。</div></div><div class="card span-6"><h3>目前群每日 CNY</h3><div class="field"><label>目前选择群组上限</label><input id="groupQuota" type="number" min="0" step="0.01" placeholder="留空＝無限制"></div><div id="quotaStatus" class="notice">僅開發者可以修改。</div></div></div>
+        <div class="section-head"><div><h2>AI Provider、帳號與額度</h2><p>依 Provider、帳號與用途分開管理模型、金額與 Token 上限。Cloudflare、OpenAI-compatible、Codex Bridge、Google 與 DeepSeek 可並存。</p></div><button id="reloadQuota" class="btn">重新載入</button></div>
+        <div class="grid">
+          <div class="card span-5"><h3>新增 / 更新 Provider 帳號</h3>
+            <div class="field"><label>Provider</label><select id="providerType"><option value="google_gemini">Google Gemini</option><option value="google_gemma">Google Gemma</option><option value="deepseek">DeepSeek</option><option value="openai_api">OpenAI API</option><option value="codex_bridge">Codex Bridge</option><option value="cloudflare_workers_ai">Cloudflare Workers AI</option><option value="cloudflare_ai_gateway">Cloudflare AI Gateway</option><option value="openai_compatible">OpenAI-compatible</option></select></div>
+            <div class="row"><div class="field grow"><label>帳號 ID</label><input id="providerAccountId" placeholder="例如 cf-main"></div><div class="field grow"><label>顯示名稱</label><input id="providerLabel" placeholder="主帳號"></div></div>
+            <div class="row"><div class="field grow"><label>模型</label><input id="providerModel" placeholder="模型 ID"></div><div class="field grow"><label>用途</label><input id="providerTasks" placeholder="chat,vision,tts"></div></div>
+            <div class="field"><label>Endpoint</label><input id="providerEndpoint" placeholder="留空使用 Provider 預設；Codex Bridge 必填"></div>
+            <div class="row"><div class="field grow"><label>Cloudflare Account ID</label><input id="providerCloudflareAccountId"></div><div class="field grow"><label>AI Gateway ID</label><input id="providerGatewayId"></div></div>
+            <div class="row"><div class="field grow"><label>Secret 環境變數名稱</label><input id="providerSecretEnv" placeholder="例如 CF_AI_TOKEN"></div><div class="field grow"><label>或更新密鑰</label><input id="providerSecret" type="password" autocomplete="new-password" placeholder="留空＝不變更"></div></div>
+            <div class="row"><div class="field grow"><label>每日金額上限</label><input id="providerDailyMoney" type="number" min="0" step="0.0001"></div><div class="field grow"><label>每月金額上限</label><input id="providerMonthlyMoney" type="number" min="0" step="0.0001"></div></div>
+            <div class="row"><div class="field grow"><label>每日 Input Token</label><input id="providerDailyInput" type="number" min="0" step="1"></div><div class="field grow"><label>每日 Output Token</label><input id="providerDailyOutput" type="number" min="0" step="1"></div></div>
+            <div class="row"><div class="field grow"><label>供應商回報剩餘金額</label><input id="providerRemainingMoney" type="number" min="0" step="0.0001"></div><div class="field grow"><label>供應商回報剩餘 Token</label><input id="providerRemainingTokens" type="number" min="0" step="1"></div></div>
+            <button id="saveProviderAccount" class="btn primary">儲存 Provider 帳號</button><div id="providerEncryptionStatus" class="notice">正在讀取密鑰保存能力。</div>
+          </div>
+          <div class="card span-7"><h3>帳號狀態與用量</h3><div id="providerList" class="list"><div class="empty">尚未載入</div></div></div>
+          <div class="card span-7"><h3>用途路由</h3><p class="item-meta">由左到右依序嘗試；額度不足或呼叫失敗才走下一個帳號。未設定時沿用既有 Gemini/Gemma 路徑。</p>
+            <div class="row"><div class="field grow"><label>用途</label><select id="providerRouteTask"><option value="chat">chat</option><option value="decision">decision</option><option value="summary">summary</option><option value="vision">vision</option><option value="tts">tts</option><option value="code">code</option><option value="image">image</option></select></div><div class="field grow"><label>帳號 ID（逗號分隔）</label><input id="providerRouteIds" placeholder="cf-main,google-main"></div></div>
+            <button id="saveProviderRoute" class="btn primary">儲存用途路由</button><div id="providerRouteSummary" class="notice">尚未載入路由。</div>
+          </div>
+          <div class="card span-5"><h3>舊 DeepSeek 相容額度</h3><p class="item-meta">保留給 v2 / 尚未切到 Provider Registry 的舊路徑；新 Provider 請使用上方各帳號額度。</p>
+            <div class="field"><label>全站每日 CNY</label><input id="globalQuota" type="number" min="0" step="0.01" placeholder="留空＝無限制"></div><div class="field"><label>目前群每日 CNY</label><input id="groupQuota" type="number" min="0" step="0.01" placeholder="留空＝無限制"></div><button id="saveQuota" class="btn">儲存相容額度</button><div id="quotaStatus" class="notice">僅開發者可以修改。</div>
+          </div>
+        </div>
       </section>
       <section id="v-groups" class="view">
         <div class="section-head"><div><h2>群组设置</h2><p>修改目前選擇群的 AI、記憶、插話率與人格。</p></div><button id="saveGroup" class="btn primary">儲存設定</button></div>
