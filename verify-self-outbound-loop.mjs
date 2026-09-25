@@ -22,7 +22,6 @@ check(!/await dbDel\(env, key\);\s*return true;/.test(known), "fresh outbound ma
 
 const handlerStart = worker.indexOf("async handleMessage(socket, request, event)");
 const echoGuard = worker.indexOf("self_outbound_echo_ignored", handlerStart);
-const werewolf = worker.indexOf("const werewolfHandled", handlerStart);
 const queueCheck = worker.indexOf("const explicitGroupQuestion = await this.shouldQueueUserQuestion", handlerStart);
 check(handlerStart >= 0 && echoGuard > handlerStart, "Durable Object outbound echo guard missing");
 check(echoGuard < queueCheck, "outbound echo guard must run before question queueing");\ncheck(!worker.includes("werewolfHandled"), "retired werewolf event handler must stay removed");
