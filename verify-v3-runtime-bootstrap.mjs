@@ -29,7 +29,7 @@ const dependencies = {
   }
 };
 const runtime = createV3Runtime(env, {
-  official: { ...disabledOfficial, bilibili: { creators: [{ uid: "123", label: "Alpha" }], pollIntervalMs: 60000, adminUserIds: ["42"] } },
+  official: { ...disabledOfficial, bilibili: { creators: [{ uid: "123", label: "Alpha" }], pollIntervalMs: 1800000, adminUserIds: ["42"] } },
   dependencies,
   logger: { info(){}, warn(){}, error(){}, debug(){} }
 });
@@ -41,7 +41,7 @@ const jobs = await runtime.adapter.pluginScheduler.list("official.bilibili-live"
 assert.equal(jobs.length, 1, "idempotent start must create one polling job");
 let status = await runtime.publicStatus({ now: 1700000000000 });
 assert.equal(status.live.active, false);
-await runtime.runDuePluginJobs({ now: Date.now() + 120000 });
+await runtime.runDuePluginJobs({ now: Date.now() + 31 * 60 * 1000 });
 assert.equal(providerCalls, 1);
 status = await runtime.publicStatus({ now: 1700000000000 });
 assert.equal(status.live.active, true);
