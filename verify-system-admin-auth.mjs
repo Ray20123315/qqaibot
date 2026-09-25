@@ -103,6 +103,8 @@ const portalEnv = {
   MY_RATE_LIMITER: { limit: async () => ({ success: true }) }
 };
 portalEnv.DB.values.set("portal_auth_password:55555", "existing-user-password-record");
+portalEnv.DB.values.set("known_groups", JSON.stringify([{ group_id: "12345", group_name: "Unified Admin Test" }]));
+portalEnv.DB.values.set("group_whitelist:12345", "true");
 const postJson = (path, body, origin = "https://qqai.test", cookie = "") => new Request(`https://qqai.test${path}`, {
   method: "POST",
   headers: { "Content-Type": "application/json", Origin: origin, ...(cookie ? { Cookie: cookie } : {}) },
@@ -137,9 +139,27 @@ const invalidUpdate = await worker.fetch(postJson("/api/system-admin/developers"
 assert.equal(invalidUpdate.status, 400);
 assert.deepEqual(await readPortalManagedDeveloperIds(portalEnv), ["22222", "33333"], "invalid updates must leave the saved list unchanged");
 
-const systemAdminPage = await worker.fetch(new Request("https://qqai.test/system-admin", { headers: { Cookie: adminCookie } }), portalEnv, {});
-assert.equal(systemAdminPage.status, 200);
-assert.match(await systemAdminPage.text(), /開發者 QQ/);
+const portalGroups = await worker.fetch(new Request("https://qqai.test/api/portal/groups", { headers: { Cookie: adminCookie } }), portalEnv, {});
+assert.equal(portalGroups.status, 200);
+const portalGroupsBody = await portalGroups.json();
+assert.deepEqual(portalGroupsBody.groups.map(group => group.groupId), ["12345"], "system admin must see whitelisted groups without requiring a QQ membership identity");
+
+const selectAdminGroup = await worker.fetch(postJson("/api/portal/select-group", { groupId: "12345" }, "https://qqai.test", adminCookie), portalEnv, {});
+assert.equal(selectAdminGroup.status, 200);
+const selectedAdminSession = (await selectAdminGroup.json()).session;
+assert.equal(selectedAdminSession.systemAdmin, true);
+assert.equal(selectedAdminSession.groupId, "12345");
+assert.equal(selectedAdminSession.role, "developer");
+assert.equal(selectedAdminSession.permissions.developer, true);
+
+const systemAdminPage = await worker.fetch(new Request("https://qqai.test/system-admin", { headers: { Cookie: adminCookie }, redirect: "manual" }), portalEnv, {});
+assert.equal(systemAdminPage.status, 302);
+assert.equal(systemAdminPage.headers.get("Location"), "https://qqai.test/portal#systemadmin");
+const unauthenticatedSystemAdminPage = await worker.fetch(new Request("https://qqai.test/system-admin", { redirect: "manual" }), portalEnv, {});
+assert.equal(unauthenticatedSystemAdminPage.status, 302);
+assert.equal(unauthenticatedSystemAdminPage.headers.get("Location"), "https://qqai.test/");
+const unauthenticatedDevelopers = await worker.fetch(new Request("https://qqai.test/api/system-admin/developers"), portalEnv, {});
+assert.equal(unauthenticatedDevelopers.status, 401);
 
 const legacyPasswordEnv = {
   DB: new MemoryD1(),
@@ -233,6 +253,11 @@ assert.match(workerSource, /origin !== url\.origin/);
 assert.match(workerSource, /writePortalManagedDeveloperIds\(env, payload\.ids\)/);
 assert.match(workerSource, /portalEnvironmentWithManagedDeveloperIds\(env\)/);
 assert.match(portal, /管理員帳號或 QQ 号/);
-assert.match(portal, /location\.replace\('\/system-admin'\)/);
+assert.doesNotMatch(portal, /location\.replace\('\/system-admin'\)/);
+assert.match(portal, /addView\('systemadmin','系统管理'\)/);
+assert.match(portal, /\/api\/system-admin\/developers/);
+assert.match(portal, /session\.systemAdmin/);
+assert.match(workerSource, /\/portal#systemadmin/);
+assert.doesNotMatch(workerSource, /<title>系統管理員<\/title>/);
 
 console.log("verify-system-admin-auth: ok");
