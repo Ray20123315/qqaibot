@@ -1,0 +1,30 @@
+name: Verify unified system admin portal
+
+on:
+  push:
+    branches:
+      - chatgpt/unified-admin-portal-20260925
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci
+      - name: Focused system-admin regression
+        run: node verify-system-admin-auth.mjs
+      - name: Main regression suite
+        run: npm run check
+      - name: V3 regression suite
+        run: npm run check:v3
+      - name: Worker bundle dry-run
+        run: npm run check:bundle
