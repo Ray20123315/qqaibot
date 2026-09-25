@@ -2,8 +2,8 @@ import { developerIds, envBoolean, envInteger, envList } from "../../config/depl
 import { getV3Runtime } from "./runtime.js";
 
 const V3_PUBLIC_STATUS_PATH = "/api/v3/status";
-const V3_BILIBILI_MIN_POLL_MS = 60_000;
-const V3_BILIBILI_MAX_POLL_MS = 30 * 60_000;
+const V3_BILIBILI_MIN_POLL_MS = 30 * 60_000;
+const V3_BILIBILI_MAX_POLL_MS = 6 * 60 * 60_000;
 
 function v3RuntimeEnabled(env = {}) {
   return envBoolean(env?.V3_RUNTIME_ENABLED, true);
@@ -36,7 +36,7 @@ function v3RuntimeOptionsFromEnv(env = {}, overrides = {}) {
   if (v3BilibiliEnabled(env)) {
     official.bilibili = {
       creators: v3BilibiliCreators(env),
-      pollIntervalMs: envInteger(env?.V3_BILIBILI_POLL_INTERVAL_MS, 120_000, V3_BILIBILI_MIN_POLL_MS, V3_BILIBILI_MAX_POLL_MS),
+      pollIntervalMs: envInteger(env?.V3_BILIBILI_POLL_INTERVAL_MS, 30 * 60_000, V3_BILIBILI_MIN_POLL_MS, V3_BILIBILI_MAX_POLL_MS),
       adminUserIds: envList(env?.V3_PLUGIN_ADMIN_IDS, developerIds(env))
     };
   }
