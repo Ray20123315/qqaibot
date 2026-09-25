@@ -11,12 +11,17 @@ assert.match(injected, /@media\(max-width:1024px\)/);
 assert.match(injected, /@media\(max-width:700px\)/);
 assert.match(injected, /@media\(max-width:430px\)/);
 assert.match(injected, /max-height:min\(88dvh,900px\)/);
-assert.match(injected, /\.ww-layout\{grid-template-columns/);
 assert.match(injected, /\.member-action-row\{grid-template-columns/);
 assert.match(injected, /\.cleanup-summary\{grid-template-columns/);
 
 const worker = fs.readFileSync("worker.js", "utf8");
-assert.match(worker, /injectPortalLayoutClient\(injectWerewolfPortalClient\(injectPortalMembersClient/);
+assert.match(worker, /injectPortalLayoutClient\(injectPortalMembersClient\(injectDeploymentPortalClient/);
+assert.match(worker, /injectV3PackageManagerClient\(injectV3PluginManagerClient\(portalHtml\)\)/);
+assert.doesNotMatch(worker, /injectWerewolfPortalClient|werewolf/i);
+
+const layoutSource = fs.readFileSync("src/portal/layout.js", "utf8");
+assert.doesNotMatch(layoutSource, /\.ww-|werewolf/i);
+
 for (const path of ["src/portal/community-suite.js", "src/portal/member-cleanup.js"]) {
   const source = fs.readFileSync(path, "utf8");
   assert.ok(!source.includes("var(--border)"), `${path} must use the Portal --line token`);
