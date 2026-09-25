@@ -20,12 +20,16 @@ const normalized = normalizeCodexBridgeRequest({ model: "gpt-codex" }, {
   task: "chat",
   messages: [{ role: "user", content: "hello" }],
   maxOutputTokens: 2000,
-  timeoutMs: 40000
+  timeoutMs: 40000,
+  reasoningEffort: "high",
+  originalPromptOnly: true
 });
 assert.equal(normalized.protocol, CODEX_BRIDGE_PROTOCOL);
 assert.equal(normalized.type, "request");
 assert.equal(normalized.messages[0].content, "hello");
 assert.equal(normalized.maxOutputTokens, 2000);
+assert.equal(normalized.reasoningEffort, "high");
+assert.equal(normalized.originalPromptOnly, true);
 
 assert.equal(verifyCodexBridgeAccess(new Request("https://qqai.test/v3/codex-bridge", {
   headers: { Authorization: "Bearer bridge-test-token" }
@@ -104,6 +108,10 @@ assert.match(worker, /acceptWebSocket\(server, \["codex"\]\)/);
 assert.match(worker, /sendCodexBridgeRequest/);
 assert.match(worker, /CODEX_BRIDGE_INTERNAL_CHAT_PATH/);
 assert.match(worker, /CODEX_BRIDGE_NOT_CONNECTED/);
+assert.match(worker, /parseCodexCommand\(cleanMessage\)/);
+assert.match(worker, /只有开发者可以使用 !codex/);
+assert.match(worker, /reasoningEffort: codexCommand\.reasoningEffort/);
+assert.match(worker, /originalPromptOnly: codexCommand\.originalPromptOnly/);
 assert.doesNotMatch(worker, /CODEX_BRIDGE.*(?:shell|filesystem|file_read|exec_command)/i);
 
 console.log("V3 local Codex WebSocket bridge checks passed.");
