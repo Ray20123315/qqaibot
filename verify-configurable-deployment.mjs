@@ -8,7 +8,6 @@ import {
   envInteger,
   normalizePublicBaseUrl,
   publicBaseUrl,
-  publicLiveUrl,
   publicPortalUrl
 } from "./src/config/deployment.js";
 import { DEFAULT_DEVELOPER_ID, VERSION } from "./src/config/runtime.js";
@@ -32,7 +31,6 @@ assert.equal(normalizePublicBaseUrl("javascript:alert(1)"), "");
 assert.equal(publicBaseUrl({ PUBLIC_BASE_URL: "https://public.example" }, "https://request.example"), "https://public.example");
 assert.equal(publicBaseUrl({}, "https://request.example/"), "https://request.example");
 assert.equal(publicPortalUrl({}, "https://request.example"), "https://request.example/");
-assert.equal(publicLiveUrl({}, "https://request.example"), "https://request.example/live");
 
 assert.equal(envBoolean("true", false), true);
 assert.equal(envBoolean("关闭", true), false);
@@ -45,7 +43,7 @@ assert.match(activeWrangler, /Dashboard-managed non-secret variables/i);
 assert.doesNotMatch(activeWrangler, /^\s*(?:DEVELOPER_IDS|ROOT_QQ_IDS|DEVELOPER_ID)\s*=/m,
   "Active Wrangler config must not overwrite Dashboard-managed Developer identity variables");
 assert.match(activeWrangler, /PUBLIC_BASE_URL\s*=/);
-assert.doesNotMatch(activeWrangler, /AUTO_CHECKIN_ENABLED|AUTO_CHECKIN_RETRY_INTERVAL_MS/, "lean v2 removes automatic midnight check-in");
+assert.doesNotMatch(activeWrangler, /AUTO_CHECKIN_(?:ENABLED|RETRY_INTERVAL_MS|CONCURRENCY)/, "legacy environment-driven check-in settings stay removed");
 assert.doesNotMatch(activeWrangler, /DEVELOPER_ID(?:S)?\s*=\s*"\d{5,}"/);
 
 const exampleWrangler = fs.readFileSync("wrangler.example.toml", "utf8");
@@ -53,8 +51,7 @@ assert.match(exampleWrangler, /REPLACE_WITH_D1_DATABASE_ID/);
 assert.match(exampleWrangler, /REPLACE_WITH_RATE_LIMITER_NAMESPACE_ID/);
 assert.match(exampleWrangler, /DEVELOPER_IDS\s*=\s*"123456789,987654321"/);
 assert.match(exampleWrangler, /PUBLIC_BASE_URL\s*=\s*"https:\/\/bot\.example\.com"/);
-assert.match(exampleWrangler, /AUTO_CHECKIN_CONCURRENCY/);
-assert.doesNotMatch(exampleWrangler, /AUTO_CHECKIN_ENABLED|AUTO_CHECKIN_RETRY_INTERVAL_MS/);
+assert.doesNotMatch(exampleWrangler, /AUTO_CHECKIN_(?:ENABLED|RETRY_INTERVAL_MS|CONCURRENCY)/);
 assert.match(exampleWrangler, /\[observability\]/);
 
 const devVars = fs.readFileSync(".dev.vars.example", "utf8");
@@ -79,8 +76,12 @@ assert.match(worker, /publicBaseUrl/);
 assert.doesNotMatch(worker, /portalUrl:\s*['"]https:\/\/qqai\.ray2025\.com/);
 
 const scheduler = fs.readFileSync("src/scheduler/runtime.js", "utf8");
-assert.doesNotMatch(scheduler, /runAutomaticGroupCheckins|AUTO_CHECKIN_ENABLED|AUTO_CHECKIN_RETRY_INTERVAL_MS/, "automatic check-in loop stays removed");
-assert.match(scheduler, /AUTO_CHECKIN_CONCURRENCY/, "manual all-group check-in keeps bounded concurrency");
+assert.doesNotMatch(scheduler, /runAutomaticGroupCheckins|performManualGroupCheckins|performGroupCheckin|AUTO_CHECKIN_/,
+  "legacy scheduler/manual check-in paths must stay removed");
+const autoCheckinPlugin = fs.readFileSync("src/plugins/official/auto-checkin.js", "utf8");
+assert.match(autoCheckinPlugin, /AUTO_CHECKIN_JOB_NAME/);
+assert.match(autoCheckinPlugin, /MAX_BATCH_SIZE\s*=\s*20/);
+assert.match(autoCheckinPlugin, /commands:\s*\[\]/, "auto check-in must not expose a manual command");
 
 const readme = fs.readFileSync("README.md", "utf8");
 for (const marker of [
