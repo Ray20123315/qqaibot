@@ -4,7 +4,7 @@ import { buildImmediateConversationContext, splitOutboundText } from "./src/ai/c
 import { AI_MEDIA_LIMITS, DEFAULTS, VERSION, classifyOperationalFailure } from "./src/config/runtime.js";
 import { publicBaseUrl } from "./src/config/deployment.js";
 import { consumeManualRuleCheckRate, developerIds, isDeveloperId, latestConversationMessageForUser, recentConversationMessagesForUser, stripGroupAiOptOutPrefix } from "./src/core/identity.js";
-import { appendIndex, buildLongGroupConversationContext, callOneBotAction, checkRuntimeRateLimit, getEffectivePermissions, isKnownOutboundMessage, markOutboundPending, modelPreferenceLabel, normalizeMemoryItems, normalizeModelPreference, normalizePermissionName, permissionLabel, removeFromIndex, setExplicitPermission, updateAiDecisionLog, writeAiDecisionLog, writeSystemAudit } from "./src/core/permissions.js";
+import { appendIndex, buildLongGroupConversationContext, callOneBotAction, checkRuntimeRateLimit, getEffectivePermissions, isKnownOutboundMessage, markOutboundPending, markRuntimeRateLimitCompletion, modelPreferenceLabel, normalizeMemoryItems, normalizeModelPreference, normalizePermissionName, permissionLabel, removeFromIndex, setExplicitPermission, updateAiDecisionLog, writeAiDecisionLog, writeSystemAudit } from "./src/core/permissions.js";
 import { appendChatHistoryTurn, clearChatSessionHistory, dbDel, dbGet, dbPut, readChatHistory, withTimeout } from "./src/data/store.js";
 import { getDeploymentStatusForViewer, handleDeploymentBuildQueue, injectDeploymentPortalClient } from "./src/deployment/notifications.js";
 import { botCanRunRuleMonitor, getBotGroupRole, getGroupFamilyForGroup, getGroupJoinPage, isVerifiedGroupOwner } from "./src/group/runtime.js";
@@ -25,7 +25,8 @@ import { applySocialOutputPolicy, buildSocialDecision, buildSocialPromptBlock, c
 import { pickSticker, pickStickerForText, stickerCqMessage } from "./src/social/sticker-library.js";
 import { cancelSchedule, cleanupExpiredModerationProposals, cleanupTransientState, countActiveSchedulesForUser, createAppealFromText, createScheduleRecord, extractScheduleMentionIds, formatScheduleLine, listUserSchedules, parseManagementScheduleAction, parseScheduleRequest, processConflictSignal, processDueSchedules, reviewScheduleWithGemma, reviseScheduleRecord, scheduledCronMode, skipScheduleOnce } from "./src/scheduler/runtime.js";
 import { buildHelpText } from "./src/help/commands.js";
-import { fetchPublicUrl, getFeatureFlag, getPrivateAccessMode, isGroupWhitelisted, numericId, verifyOneBotAccess } from "./src/security/network.js";
+import { fetchPublicUrl, getFeatureFlag, getPrivateAccessMode, isGroupWhitelisted, numericId, verifyCodexBridgeAccess, verifyOneBotAccess } from "./src/security/network.js";
+import { CODEX_BRIDGE_INTERNAL_CHAT_PATH, CODEX_BRIDGE_PATH, CODEX_BRIDGE_PROTOCOL, normalizeCodexBridgeRequest, normalizeCodexBridgeResponse } from "./src/v3/ai/codex-bridge.js";
 import { dispatchV3RuntimeEvent, handleV3RuntimeFetch, runV3RuntimeScheduled } from "./src/v3/runtime/bridge.js";
 import { handleV3PluginManagerApi, injectV3PluginManagerClient } from "./src/v3/portal/plugin-manager.js";
 import { handleV3PackageManagerApi, injectV3PackageManagerClient } from "./src/v3/portal/package-manager.js";
@@ -204,6 +205,12 @@ const QQAIWorker = {
     // 🔌 NapCat / OneBot WebSocket Client 主動回覆入口
     // ==========================================
     const upgradeHeader = request.headers.get("Upgrade");
+    if (upgradeHeader && upgradeHeader.toLowerCase() === "websocket" && url.pathname === CODEX_BRIDGE_PATH) {
+      if (!verifyCodexBridgeAccess(request, env)) return new Response("Unauthorized", { status: 401 });
+      if (!env.ONEBOT_HUB) return new Response("Codex bridge unavailable", { status: 503 });
+      const stub = env.ONEBOT_HUB.get(env.ONEBOT_HUB.idFromName("default"));
+      return stub.fetch(request);
+    }
     if (upgradeHeader && upgradeHeader.toLowerCase() === "websocket" && ["/onebot", "/ws", "/ws/onebot"].includes(url.pathname)) {
       if (!verifyOneBotAccess(request, env)) return new Response("Unauthorized", { status: 401 });
       return getOneBotHub(env).fetch(request);
@@ -3636,6 +3643,11 @@ export class OneBotHub {
     this.lastHeartbeatAt = null;
     this.socketDiagnostics = { reconnectCount: 0, closeCount: 0, errorCount: 0, history: [] };
     this.pending = new Map();
+    this.codexPending = new Map();
+    this.codexSocket = null;
+    this.codexConnectionId = "";
+    this.codexConnectedAt = null;
+    this.codexLastEventAt = null;
     this.eventTasks = new Set();
     this.toolInFlight = new Map();
     this.toolCounts = new Map();
@@ -3648,6 +3660,7 @@ export class OneBotHub {
     // 使用 Durable Objects WebSocket Hibernation API 后，Object 可被回收并重建，
     // 但 NapCat 的 WebSocket 仍保持连接。构造时必须从 state 重新取得现有连接。
     this.restoreActiveSocket();
+    this.restoreCodexSocket();
 
     this.queueReady = Promise.resolve();
     if (state?.storage && typeof state.blockConcurrencyWhile === "function") {
@@ -3691,6 +3704,7 @@ export class OneBotHub {
           await state.storage.delete(storageKey);
         }
         this.restoreActiveSocket();
+        this.restoreCodexSocket();
       });
     }
   }
@@ -3714,6 +3728,23 @@ export class OneBotHub {
       this.lastHeartbeatAt = Number(meta.lastHeartbeatAt || meta.lastEventAt || this.lastHeartbeatAt || this.connectedAt);
     }
     return this.activeSocket;
+  }
+
+  restoreCodexSocket() {
+    if (this.codexSocket?.readyState === WebSocket.OPEN) return this.codexSocket;
+    if (!this.state || typeof this.state.getWebSockets !== "function") return null;
+    let sockets = [];
+    try { sockets = this.state.getWebSockets("codex") || []; } catch { sockets = []; }
+    const openSockets = sockets.filter(ws => ws?.readyState === WebSocket.OPEN);
+    openSockets.sort((a, b) => Number(this.socketAttachment(b).connectedAt || 0) - Number(this.socketAttachment(a).connectedAt || 0));
+    this.codexSocket = openSockets[0] || null;
+    if (this.codexSocket) {
+      const meta = this.socketAttachment(this.codexSocket);
+      this.codexConnectionId = String(meta.connectionId || "");
+      this.codexConnectedAt = Number(meta.connectedAt || this.codexConnectedAt || Date.now());
+      this.codexLastEventAt = Number(meta.lastEventAt || this.codexLastEventAt || this.codexConnectedAt);
+    }
+    return this.codexSocket;
   }
 
   async isIgnoredRobotSender(body, { probe = false } = {}) {
@@ -3776,6 +3807,37 @@ export class OneBotHub {
     const url = new URL(request.url);
     const upgrade = request.headers.get("Upgrade");
     if (upgrade && upgrade.toLowerCase() === "websocket") {
+      if (url.pathname === CODEX_BRIDGE_PATH) {
+        if (!verifyCodexBridgeAccess(request, this.env)) return new Response("Unauthorized", { status: 401 });
+        const pair = new WebSocketPair();
+        const [client, server] = Object.values(pair);
+        const now = Date.now();
+        const connectionId = crypto.randomUUID();
+        const previousSockets = typeof this.state?.getWebSockets === "function"
+          ? (this.state.getWebSockets("codex") || []).filter(ws => ws?.readyState === WebSocket.OPEN)
+          : (this.codexSocket?.readyState === WebSocket.OPEN ? [this.codexSocket] : []);
+        this.state.acceptWebSocket(server, ["codex"]);
+        server.serializeAttachment({
+          type: "codex",
+          connectionId,
+          connectedAt: now,
+          lastEventAt: now,
+          requestUrl: request.url
+        });
+        this.codexSocket = server;
+        this.codexConnectionId = connectionId;
+        this.codexConnectedAt = now;
+        this.codexLastEventAt = now;
+        for (const oldSocket of previousSockets) {
+          if (oldSocket === server) continue;
+          try { oldSocket.close(4001, "replaced by newer Codex bridge connection"); } catch {}
+        }
+        try {
+          server.send(JSON.stringify({ type: "hello", protocol: CODEX_BRIDGE_PROTOCOL, role: "worker", connectedAt: now }));
+        } catch {}
+        return new Response(null, { status: 101, webSocket: client });
+      }
+
       const pair = new WebSocketPair();
       const [client, server] = Object.values(pair);
       const now = Date.now();
@@ -3808,6 +3870,20 @@ export class OneBotHub {
 
       this.trackEventTask(this.kickQueueScheduler().catch(error => console.error("restore queued questions failed", error)));
       return new Response(null, { status: 101, webSocket: client });
+    }
+
+    if (request.method === "POST" && url.pathname === CODEX_BRIDGE_INTERNAL_CHAT_PATH) {
+      const payload = await request.json().catch(() => null);
+      if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
+        return Response.json({ ok: false, error: "CODEX_BRIDGE_INVALID_REQUEST" }, { status: 400 });
+      }
+      try {
+        const requestPayload = normalizeCodexBridgeRequest({ model: payload.model || "" }, payload);
+        const result = await this.sendCodexBridgeRequest(requestPayload, requestPayload.timeoutMs);
+        return Response.json({ ok: true, result });
+      } catch (error) {
+        return Response.json({ ok: false, error: String(error?.message || error).slice(0, 500) }, { status: 503 });
+      }
     }
 
     if (request.method === "POST" && ["/rpc", "/send"].includes(url.pathname)) {
@@ -3849,11 +3925,19 @@ export class OneBotHub {
         lastHeartbeatAt: this.lastHeartbeatAt,
         heartbeatAgeMs,
         pendingRpc: this.pending.size,
+        codexBridge: {
+          connected: this.restoreCodexSocket()?.readyState === WebSocket.OPEN,
+          connectionId: this.codexConnectionId || null,
+          connectedAt: this.codexConnectedAt,
+          lastEventAt: this.codexLastEventAt,
+          pending: this.codexPending.size,
+          protocol: CODEX_BRIDGE_PROTOCOL
+        },
         inFlightQuestions: this.userInFlight.size,
         queuedQuestions: [...this.userQueues.values()].reduce((sum, list) => sum + list.length, 0),
         bufferedQuestions: this.inputBuffers.size,
         inputDebounceMs: DEFAULTS.inputDebounceMs,
-        queuePolicy: "per_user_single_inflight_group_unlimited_cancel_and_merge",
+        queuePolicy: "per_user_single_inflight_completion_cooldown",
         schedulerRunning: this.queueSchedulerRunning,
         reconnectCount: Number(this.socketDiagnostics?.reconnectCount || 0),
         closeCount: Number(this.socketDiagnostics?.closeCount || 0),
@@ -3903,6 +3987,18 @@ export class OneBotHub {
   async webSocketMessage(socket, message) {
     const now = Date.now();
     const meta = this.socketAttachment(socket);
+    if (meta.type === "codex") {
+      meta.connectionId = String(meta.connectionId || this.codexConnectionId || crypto.randomUUID());
+      meta.connectedAt = Number(meta.connectedAt || this.codexConnectedAt || now);
+      meta.lastEventAt = now;
+      try { socket.serializeAttachment(meta); } catch {}
+      this.codexSocket = socket;
+      this.codexConnectionId = meta.connectionId;
+      this.codexConnectedAt = meta.connectedAt;
+      this.codexLastEventAt = now;
+      await this.handleCodexSocketMessage(socket, message);
+      return;
+    }
     meta.connectionId = String(meta.connectionId || this.connectionId || crypto.randomUUID());
     meta.connectedAt = Number(meta.connectedAt || this.connectedAt || now);
     meta.lastHeartbeatAt = now;
@@ -3924,6 +4020,16 @@ export class OneBotHub {
   async webSocketClose(socket, code, reason, wasClean) {
     const meta = this.socketAttachment(socket);
     const connectionId = String(meta.connectionId || "");
+    if (meta.type === "codex") {
+      const isActiveCodex = this.codexSocket === socket || (connectionId && connectionId === this.codexConnectionId);
+      if (isActiveCodex) {
+        this.codexSocket = null;
+        this.codexConnectionId = "";
+        this.rejectCodexPending(`Codex bridge disconnected (${code || 1006})`);
+      }
+      try { if (socket.readyState !== WebSocket.CLOSED) socket.close(code || 1000, String(reason || "closed").slice(0, 120)); } catch {}
+      return;
+    }
     const isActive = this.activeSocket === socket || (connectionId && connectionId === this.connectionId);
     if (isActive) {
       this.activeSocket = null;
@@ -3943,6 +4049,15 @@ export class OneBotHub {
   async webSocketError(socket, error) {
     const meta = this.socketAttachment(socket);
     const connectionId = String(meta.connectionId || "");
+    if (meta.type === "codex") {
+      const isActiveCodex = this.codexSocket === socket || (connectionId && connectionId === this.codexConnectionId);
+      if (isActiveCodex) {
+        this.codexSocket = null;
+        this.codexConnectionId = "";
+        this.rejectCodexPending("Codex bridge socket error");
+      }
+      return;
+    }
     const isActive = this.activeSocket === socket || (connectionId && connectionId === this.connectionId);
     if (isActive) {
       this.activeSocket = null;
@@ -3991,6 +4106,87 @@ export class OneBotHub {
     const queueAlarm = hasQueued ? Date.now() + DEFAULTS.queueRecoveryAlarmMs : 0;
     const targetAlarm = nextAlarm && queueAlarm ? Math.min(nextAlarm, queueAlarm) : (nextAlarm || queueAlarm);
     if (targetAlarm) await this.state.storage.setAlarm(targetAlarm);
+  }
+
+  rejectCodexPending(reason) {
+    for (const [, pending] of this.codexPending) {
+      clearTimeout(pending.timer);
+      pending.reject(new Error(reason));
+    }
+    this.codexPending.clear();
+  }
+
+  async handleCodexSocketMessage(socket, message) {
+    let text;
+    try {
+      text = typeof message === "string" ? message : new TextDecoder().decode(message);
+    } catch {
+      return;
+    }
+    if (!text || text.length > 2 * 1024 * 1024) {
+      try { socket.close(1009, "Codex bridge message too large"); } catch {}
+      return;
+    }
+    let payload;
+    try { payload = JSON.parse(text); } catch { return; }
+    if (!payload || typeof payload !== "object" || Array.isArray(payload)) return;
+
+    if (payload.type === "ping") {
+      try { socket.send(JSON.stringify({ type: "pong", protocol: CODEX_BRIDGE_PROTOCOL, at: Date.now() })); } catch {}
+      return;
+    }
+    if (payload.type === "hello") {
+      if (payload.protocol && payload.protocol !== CODEX_BRIDGE_PROTOCOL) {
+        try { socket.close(1002, "unsupported Codex bridge protocol"); } catch {}
+        return;
+      }
+      this.codexLastEventAt = Date.now();
+      return;
+    }
+
+    const id = String(payload.id || payload.requestId || payload.echo || "").slice(0, 160);
+    if (!id) return;
+    const pending = this.codexPending.get(id);
+    if (!pending) return;
+    clearTimeout(pending.timer);
+    this.codexPending.delete(id);
+    try {
+      const result = normalizeCodexBridgeResponse(payload, pending.model);
+      pending.resolve(result);
+    } catch (error) {
+      pending.reject(error);
+    }
+  }
+
+  async sendCodexBridgeRequest(payload, timeoutMs = 45000) {
+    const socket = this.restoreCodexSocket();
+    if (!socket || socket.readyState !== WebSocket.OPEN) throw new Error("CODEX_BRIDGE_NOT_CONNECTED");
+    if (this.codexPending.size >= 8) throw new Error("CODEX_BRIDGE_BUSY");
+    const id = crypto.randomUUID();
+    const requestPayload = {
+      ...payload,
+      protocol: CODEX_BRIDGE_PROTOCOL,
+      type: "request",
+      id
+    };
+    const serialized = JSON.stringify(requestPayload);
+    if (serialized.length > 512 * 1024) throw new Error("CODEX_BRIDGE_REQUEST_TOO_LARGE");
+    const waitMs = Math.max(1000, Math.min(Number(timeoutMs || 45000), 120000));
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => {
+        this.codexPending.delete(id);
+        reject(new Error("CODEX_BRIDGE_TIMEOUT"));
+      }, waitMs);
+      this.codexPending.set(id, { resolve, reject, timer, model: String(payload?.model || "codex") });
+      try {
+        socket.send(serialized);
+      } catch (error) {
+        clearTimeout(timer);
+        this.codexPending.delete(id);
+        if (this.codexSocket === socket) this.codexSocket = null;
+        reject(error);
+      }
+    });
   }
 
   rejectAll(reason) {
@@ -4497,10 +4693,21 @@ export class OneBotHub {
     }
     const key = this.userQueueKey(body);
     const bufferedContinuation = this.inputBuffers.has(key);
+    const active = this.userInFlight.get(key);
+    if (active && !bufferedContinuation) {
+      await this.recordIngress(body, "generation_in_progress", { explicit: true, activeStartedAt: active.startedAt }).catch(() => {});
+      if (!active.busyNoticeSent && body?.message_type === "group") {
+        active.busyNoticeSent = true;
+        this.userInFlight.set(key, active);
+        await this.sendQueueNotice(body, "上一个问题还在生成中；生成完成后才会开始计算聊天冷却，请稍后再问。")
+          .catch(error => console.error("generation in progress notice failed", error));
+      }
+      return;
+    }
     if (body?.message_type === "group" && body?.__qqai_rate_limit_prechecked !== true && !bufferedContinuation) {
       const rate = await checkRuntimeRateLimit(this.env, { groupId: String(body.group_id || ""), userId: String(body.user_id || ""), isPrivate: false });
       if (!rate.allowed) {
-        await this.recordIngress(body, "rate_limited", { explicit: true, remainingSeconds: rate.remaining }).catch(() => {});
+        await this.recordIngress(body, "rate_limited", { explicit: true, remainingSeconds: rate.remaining, completedAt: rate.completedAt }).catch(() => {});
         if (rate.notify) {
           await this.sendQueueNotice(body, `请求过于频繁，请等待约 ${rate.remaining} 秒后再试。`)
             .catch(error => console.error("rate limit notice failed", error));
@@ -4509,14 +4716,13 @@ export class OneBotHub {
       }
       body = { ...body, __qqai_rate_limit_prechecked: true };
     } else if (bufferedContinuation && body?.__qqai_rate_limit_prechecked !== true) {
-      // 同一 debounce 批次的补充消息属于同一个问题，不重复消耗冷却额度。
+      // 同一 debounce 批次的补充消息属于同一个问题；生成尚未开始，因此仍视为同一题。
       body = { ...body, __qqai_rate_limit_prechecked: true };
     }
     const incoming = this.questionBodies(body);
-    const activeParts = this.userInFlight.has(key) ? await this.cancelActiveQuestion(key, "cancelled_by_new_input") : [];
     const existingCount = Number(this.inputBuffers.get(key)?.parts?.length || 0);
-    await this.bufferQuestionParts(key, [...activeParts, ...incoming], requestUrl, { notify: Boolean(activeParts.length || existingCount || incoming.length > 1) });
-    await this.recordIngress(body, activeParts.length ? "restarted_after_new_input" : "buffered", { explicit: true, debounceMs: DEFAULTS.inputDebounceMs }).catch(() => {});
+    await this.bufferQuestionParts(key, incoming, requestUrl, { notify: Boolean(existingCount || incoming.length > 1) });
+    await this.recordIngress(body, "buffered", { explicit: true, debounceMs: DEFAULTS.inputDebounceMs }).catch(() => {});
   }
 
   async flushBufferedQuestion(key, reason = "manual") {
@@ -4674,6 +4880,7 @@ export class OneBotHub {
     await this.persistQuestionInFlight(key, active);
     await this.recordIngress(body, "processing", { explicit: true, fromQueue }).catch(() => {});
     let processingFinished = false;
+    let processingCompleted = false;
     const semanticQuestion = !oneBotEventIsPunctuationOnly(body);
     if (body?.message_type === "group" && semanticQuestion) {
       this.trackEventTask((async () => {
@@ -4697,6 +4904,7 @@ export class OneBotHub {
         ...(fromQueue ? { __qqai_queued: true } : {})
       };
       await this.processInboundEvent(processingBody, requestUrl, { signal: controller.signal, key, token });
+      processingCompleted = true;
     } catch (error) {
       if (!controller.signal.aborted) {
         console.error("user question failed", error);
@@ -4705,6 +4913,13 @@ export class OneBotHub {
       }
     } finally {
       processingFinished = true;
+      if (processingCompleted && !controller.signal.aborted) {
+        await markRuntimeRateLimitCompletion(this.env, {
+          groupId: String(body.group_id || ""),
+          userId: String(body.user_id || body.self_id || ""),
+          isPrivate: body.message_type === "private"
+        }).catch(error => console.error("completion cooldown mark failed", error));
+      }
       if (immediateThinkingMessageId) {
         await this.retractThinkingIndicator(body, immediateThinkingMessageId)
           .catch(error => console.error("immediate thinking cleanup failed", error));

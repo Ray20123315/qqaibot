@@ -70,6 +70,16 @@ function verifyOneBotAccess(request, env) {
 
 
 
+function verifyCodexBridgeAccess(request, env) {
+  const expected = String(env.CODEX_BRIDGE_ACCESS_TOKEN || "").trim();
+  if (!expected) return false;
+  const auth = request.headers.get("Authorization") || "";
+  const bearer = auth.replace(/^Bearer\s+/i, "").trim();
+  return bearer === expected;
+}
+
+
+
 async function getFeatureFlag(env, name, fallback = false) {
   const raw = await dbGet(env, `feature:${name}`);
   if (raw === null || raw === undefined || raw === "") return fallback;
@@ -105,4 +115,4 @@ async function getPrivateAccessMode(env, userId) {
   return "none";
 }
 
-export { assertSafePublicUrl, envFlag, fetchMediaAsBase64, fetchPublicUrl, getFeatureFlag, getPrivateAccessMode, isGroupWhitelisted, isPrivateHost, numericId, setFeatureFlag, verifyOneBotAccess };
+export { assertSafePublicUrl, envFlag, fetchMediaAsBase64, fetchPublicUrl, getFeatureFlag, getPrivateAccessMode, isGroupWhitelisted, isPrivateHost, numericId, setFeatureFlag, verifyCodexBridgeAccess, verifyOneBotAccess };
