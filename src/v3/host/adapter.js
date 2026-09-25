@@ -27,7 +27,14 @@ const DEFAULT_PLUGIN_ONEBOT_ACTIONS = Object.freeze([
   "get_group_list",
   "get_group_member_info",
   "get_group_member_list",
-  "ocr_image"
+  "ocr_image",
+  "send_poke",
+  "set_msg_emoji_like",
+  "fetch_custom_face",
+  "get_ai_characters",
+  "send_group_ai_record",
+  "set_group_sign",
+  "send_group_sign"
 ]);
 
 function clampNumber(value, fallback, min, max) {
