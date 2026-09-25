@@ -26,9 +26,11 @@ assert(cleanupSource.includes('deepSyncAll'), 'Portal must support all-member ba
 assert(cleanupSource.includes('平台未提供'), 'Missing fields must be labeled honestly');
 const base = '<!doctype html><html><head></head><body><nav><button data-view="logs">操作日志</button></nav><main><section id="v-logs"></section></main></body></html>';
 const html = injectPortalMembersClient(base);
-for (const id of ['v-members','v-member-actions','v-relationships','v-member-data','v-member-cleanup']) assert(html.includes('id="'+id+'"'), 'Missing split view '+id);
-for (const glyph of ['友','禁','关','资','清']) assert(html.includes('qqai-nav-glyph') && html.includes('>'+glyph+'<'), 'Missing nav glyph '+glyph);
-assert(html.includes('memberDataRoot') === false && html.includes('memberDataList'), 'Member data root must be populated');
+for (const id of ['v-member-data','v-member-actions']) assert(html.includes('id="'+id+'"'), 'Missing consolidated member view '+id);
+assert(!html.includes('id="v-relationships"'), 'Relationship management view must be removed');
+assert(!html.includes('id="v-member-cleanup"'), 'Standalone cleanup-analysis view must be removed');
+for (const glyph of ['资','禁']) assert(html.includes('qqai-nav-glyph') && html.includes('>'+glyph+'<'), 'Missing nav glyph '+glyph);
+assert(html.includes('memberDataList') && html.includes('cleanupList'), 'Member data must contain detailed profiles and cleanup suggestions');
 for (const match of html.matchAll(/<script[^>]*>([\s\S]*?)<\/script>/g)) new Function(match[1]);
 assert(!html.includes('>狼<'), 'Retired werewolf navigation must not be rendered');
 const pkg = JSON.parse(fs.readFileSync('package.json','utf8'));

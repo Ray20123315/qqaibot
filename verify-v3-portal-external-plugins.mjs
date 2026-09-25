@@ -133,14 +133,15 @@ assert.equal(persisted.includes("portal-self-made-plugin-v1"),false,"Portal quar
 
 const html='<html><head></head><body><div id="v3PluginManagerNav"></div><div id="v3PluginList" class="v3-plugin-grid"></div></body></html>';
 const injected=injectV3PackageManagerClient(html);
-assert.match(injected,/Self-made \/ External Plugins/);
+assert.match(injected,/自制／外部插件/);
 assert.match(injected,/v3AuthorPublicJwk/);
 assert.match(injected,/v3ExternalDistribution/);
 assert.match(injected,/qqai-v3-external-plugin-client/);
-assert.match(injected,/加入 Trust Store/);
-assert.match(injected,/Quarantine/);
+assert.match(injected,/加入信任库/);
+assert.match(injected,/外部插件隔离区/);
 assert.match(injected,/data-q-accept-risk/);
-assert.match(injected,/不可強制載入|不可自行承擔|系統性/);
+assert.match(injected,/不可强制加载|不可自行承担|系统性/);
+assert.doesNotMatch(injected,/Self-made \/ External Plugins|加入 Trust Store|>Quarantine<|不可強制載入|不可自行承擔|系統性/);
 assert.equal(injectV3PackageManagerClient(injected),injected);
 
 console.log("verify-v3-portal-external-plugins: ok");

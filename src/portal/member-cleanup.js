@@ -753,7 +753,7 @@ function injectMemberCleanupClient(html) {
   let source = String(html || "");
   if (!source || source.includes("qqai-member-cleanup-client")) return source;
   const dataRoot = '<div id="memberDataRoot"><div class="empty">尚未读取成员详细资料</div></div>';
-  const cleanupRoot = '<div id="memberCleanupRoot"><div class="empty">尚未读取清人分析</div></div>';
+  const cleanupRoot = '<div id="memberCleanupRoot"><div class="empty">尚未读取清人建议</div></div>';
   const legacyAnchor = '<div id="memberList" class="list"><div class="empty">尚未读取群友列表</div></div>';
   const dataPanel = `
   <div class="card member-data-console">
@@ -764,8 +764,8 @@ function injectMemberCleanupClient(html) {
   </div>`;
   const cleanupPanel = `
   <div class="card cleanup-console">
-    <div class="section-head compact"><div><h3>清人分析</h3><p>这里只显示分类、分数与清理理由；完整个人字段已移至“成员资料”。所选清理人数不设上限，执行前仍需预览、即时复核及确认文字。</p></div></div>
-    <div class="cleanup-summary" id="cleanupSummary"><div class="empty">尚未同步清人资料</div></div>
+    <div class="section-head compact"><div><h3>清人建议</h3><p>这里只显示分类、分数与清理理由；完整个人字段已移至“成员资料”。所选清理人数不设上限，执行前仍需预览、即时复核及确认文字。</p></div></div>
+    <div class="cleanup-summary" id="cleanupSummary"><div class="empty">尚未同步清人建议资料</div></div>
     <div class="cleanup-policy">
       <div class="field"><label>活跃天数</label><input id="cleanupActiveDays" type="number" min="1" max="180" value="30"></div>
       <div class="field"><label>轻度潜水上限</label><input id="cleanupCoolingDays" type="number" min="7" max="365" value="90"></div>
@@ -776,8 +776,8 @@ function injectMemberCleanupClient(html) {
       <button id="cleanupSavePolicy" class="btn ghost">保存阈值</button>
     </div>
     <div class="cleanup-filters"><div class="field"><label>分类</label><select id="cleanupCategory"><option value="">全部</option><option value="cleanup_candidate">清理候选</option><option value="review">人工复核</option><option value="watch">观察</option><option value="keep">保留</option><option value="protected">受保护</option><option value="sync_first">资料不足</option></select></div><div class="field"><label>搜索</label><input id="cleanupSearch" placeholder="昵称、群名片或 QQ"></div><label class="member-toggle"><input id="cleanupHideProtected" type="checkbox" checked>隐藏受保护成员</label><button id="cleanupSelectCandidates" class="btn ghost">选择全部候选</button><button id="cleanupPreview" class="btn danger">建立清理预览</button></div>
-    <div class="notice" id="cleanupStatus">尚未读取分析。</div>
-    <div id="cleanupList" class="list"><div class="empty">尚无分析资料</div></div>
+    <div class="notice" id="cleanupStatus">尚未读取清人建议。</div>
+    <div id="cleanupList" class="list"><div class="empty">尚无清人建议资料</div></div>
     <div id="cleanupExecutePanel" class="cleanup-execute hidden"><div id="cleanupPreviewText" class="notice"></div><div class="field"><label>输入确认文字</label><input id="cleanupConfirmationText" placeholder="例如：确认清理 3 人"></div><button id="cleanupExecute" class="btn danger">执行已复核清理</button></div>
   </div>`;
   if (source.includes(dataRoot)) source = source.replace(dataRoot, dataPanel);
@@ -818,9 +818,9 @@ function injectMemberCleanupClient(html) {
   function exportCleanup(){var rows=[['QQ','名称','身份','分类','建议','分数','入群时间','最后发言时间','群等级','QQ等级','专属头衔','头衔到期','地区','年龄','性别','群荣誉','分类理由','抓取模式','资料来源','平台未提供字段','原始字段']];cleanupRecords.forEach(function(r){var m=r.member||{},c=r.classification||{};rows.push([m.qq,m.name,m.role,c.label,c.recommendation,c.score,cd(m.joinTime),cd(m.lastSentTime),m.level,m.qqLevel,m.title,m.titleExpireTime?cd(m.titleExpireTime):(m.title?'永久或平台未提供':'无专属头衔'),m.area,m.age,m.sex,(m.honors||[]).map(function(x){return x.type}).join('|'),(c.reasons||[]).join('|'),m.syncMode,(m.dataSources||[]).join('|'),(m.missingFields||[]).join('|'),(m.rawFields||[]).join('|')])});function cell(v){return'"'+String(v==null?'':v).replace(/"/g,'""')+'"'}var csv='\\ufeff'+rows.map(function(row){return row.map(cell).join(',')}).join('\\r\\n'),blob=new Blob([csv],{type:'text/csv;charset=utf-8'}),url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download='群成员完整资料-'+new Date().toISOString().slice(0,10)+'.csv';document.body.appendChild(a);a.click();a.remove();setTimeout(function(){URL.revokeObjectURL(url)},1000)}
   async function previewCleanup(){var ids=cselected();if(!ids.length){cn('请先选择候选成员');return}var r=await cc('/members/cleanup/preview','POST',{userIds:ids});cn(r.message||'预览完成');if(!r.ok)return;cleanupPreviewToken=r.preview.token;cleanupConfirmText=r.confirmText;var panel=ce('cleanupExecutePanel'),text=ce('cleanupPreviewText'),input=ce('cleanupConfirmationText');if(panel)panel.classList.remove('hidden');if(text)text.textContent='可清理 '+r.preview.eligible.length+' 人；排除 '+r.preview.excluded.length+' 人。请输入：'+r.confirmText;if(input){input.value='';input.placeholder=r.confirmText}}
   async function executeCleanup(){if(!cleanupPreviewToken){cn('请先建立清理预览');return}var text=String(ce('cleanupConfirmationText')&&ce('cleanupConfirmationText').value||'');if(text!==cleanupConfirmText){cn('确认文字不正确，应为：'+cleanupConfirmText);return}var button=ce('cleanupExecute'),status=ce('cleanupPreviewText'),token=cleanupPreviewToken,previousToken='',last=null;if(button)button.disabled=true;while(token){if(token===previousToken){cn('服务器返回重复续传凭证，已停止以避免重复操作');break}previousToken=token;var r=await cc('/members/cleanup/execute','POST',{token:token,confirmationText:text});last=r;if(!r.ok){cn(r.message||'执行失败');break}token=String(r.continuationToken||'');cleanupPreviewToken=token;if(status)status.textContent=r.message||('已处理 '+String(r.processed||0)+'/'+String(r.total||0)+' 人')}if(button)button.disabled=false;if(last&&last.completed){cn(last.message||'执行完成');cleanupPreviewToken='';cleanupConfirmText='';ce('cleanupExecutePanel')&&ce('cleanupExecutePanel').classList.add('hidden');if(typeof window.qqaiLoadMembers==='function')window.qqaiLoadMembers();loadCleanup()}else if(token){cn('清理尚未完成，可再次点击继续处理剩余成员。')}}
-  document.addEventListener('click',function(e){var t=e.target&&e.target.closest?e.target.closest('button'):e.target;if(!t)return;if(t.id==='cleanupRefresh'||t.id==='memberDataNav'||t.id==='memberCleanupNav')setTimeout(loadCleanup,0);else if(t.id==='cleanupFastSync')fastSync();else if(t.id==='cleanupDeepAll')deepSyncAll();else if(t.id==='cleanupDeepSync')deepSyncSelected();else if(t.id==='memberDataSelectAll')selectData();else if(t.id==='cleanupSavePolicy')savePolicy();else if(t.id==='cleanupSelectCandidates')selectCandidates();else if(t.id==='cleanupExport')exportCleanup();else if(t.id==='cleanupPreview')previewCleanup();else if(t.id==='cleanupExecute')executeCleanup()});
+  document.addEventListener('click',function(e){var t=e.target&&e.target.closest?e.target.closest('button'):e.target;if(!t)return;if(t.id==='cleanupRefresh'||t.id==='memberDataNav')setTimeout(loadCleanup,0);else if(t.id==='cleanupFastSync')fastSync();else if(t.id==='cleanupDeepAll')deepSyncAll();else if(t.id==='cleanupDeepSync')deepSyncSelected();else if(t.id==='memberDataSelectAll')selectData();else if(t.id==='cleanupSavePolicy')savePolicy();else if(t.id==='cleanupSelectCandidates')selectCandidates();else if(t.id==='cleanupExport')exportCleanup();else if(t.id==='cleanupPreview')previewCleanup();else if(t.id==='cleanupExecute')executeCleanup()});
   document.addEventListener('input',function(e){if(e.target&&e.target.id==='cleanupSearch')renderCleanup();if(e.target&&e.target.id==='memberDataSearch')renderMemberData()});document.addEventListener('change',function(e){if(e.target&&['cleanupCategory','cleanupHideProtected'].indexOf(e.target.id)>=0)renderCleanup();if(e.target&&e.target.id==='memberDataMissingOnly')renderMemberData()});
-  window.qqaiLoadCleanup=loadCleanup;var oldLoad=window.qqaiLoadMembers;window.qqaiLoadMembers=async function(){if(typeof oldLoad==='function')await oldLoad();setTimeout(loadCleanup,0)};if(['v-member-data','v-member-cleanup'].some(function(id){var v=ce(id);return v&&v.classList.contains('active')}))setTimeout(loadCleanup,0)
+  window.qqaiLoadCleanup=loadCleanup;var oldLoad=window.qqaiLoadMembers;window.qqaiLoadMembers=async function(){if(typeof oldLoad==='function')await oldLoad();setTimeout(loadCleanup,0)};if(['v-member-data'].some(function(id){var v=ce(id);return v&&v.classList.contains('active')}))setTimeout(loadCleanup,0)
 })();
 </script>`;
   return source.includes("</body>") ? source.replace("</body>", script + "\n</body>") : source + script;
