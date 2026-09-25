@@ -79,6 +79,10 @@ function makeCtx(userId = "") {
         assert(url.startsWith(BILIBILI_LIVE_API));
         assert(url.includes("uids%5B%5D=123"));
         assert(url.includes("uids%5B%5D=456"));
+        const headers = new Headers(input?.init?.headers || {});
+        assert.equal(headers.get("referer"), "https://www.bilibili.com/");
+        assert.match(headers.get("user-agent") || "", /Mozilla\/5\.0/);
+        assert.match(headers.get("accept") || "", /application\/json/);
         return new Response(JSON.stringify({
           code: 0,
           data: {
