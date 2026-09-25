@@ -1182,8 +1182,17 @@ ${summary}`.slice(0, 4000),
     const connectors = await listBilibiliConnectors(env, groupId);
     return jsonResponse({
       ok: true,
-      connectors: connectors.map(item => { const { webhookSecret, ...safe } = item; return { ...safe, mode: item.mode === "generic_webhook" ? "official_webhook" : "automatic_polling", webhookUrl: item.webhookSecret ? `${url.origin}/api/integrations/bilibili/webhook/${item.webhookSecret}` : "" }; }),
-      note: "推荐使用哔哩哔哩开放平台 Webhook 或经过合法授权的中继。412／429 属于平台风控，系统不会伪造身份、代理轮换或提高频率绕过；兼容轮询最低 30 分钟一次并自动退避。"
+      connectors: connectors.map(item => {
+        const { webhookSecret, bridgeSecret, ...safe } = item;
+        const portalMode = item.mode === "open_live_bridge" ? "open_live_bridge" : item.mode === "generic_webhook" ? "official_webhook" : "automatic_polling";
+        return {
+          ...safe,
+          mode: portalMode,
+          webhookUrl: item.webhookSecret ? `${url.origin}/api/integrations/bilibili/webhook/${item.webhookSecret}` : "",
+          bridgeUrl: item.bridgeSecret ? `${url.origin}/api/integrations/bilibili/open-live/${item.bridgeSecret}` : ""
+        };
+      }),
+      note: "推荐 Open Live 官方长连接：不需要在 B站设置 Webhook，也不依赖容易触发 412／429 的公开网页接口。Webhook 保留为相容模式；公开 UID 轮询只作为低频备援。"
     });
   }
   if (request.method === "POST" && path === "/integrations/bilibili") {
