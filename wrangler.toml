@@ -1,0 +1,49 @@
+"$schema" = "./node_modules/wrangler/config-schema.json"
+name = "qqai"
+main = "worker.js"
+compatibility_date = "2026-07-21"
+compatibility_flags = ["nodejs_compat"]
+workers_dev = true
+
+[exports.OneBotHub]
+type = "durable-object"
+storage = "sqlite"
+
+[previews.ai]
+binding = "AI"
+
+[[previews.durable_objects.bindings]]
+name = "ONEBOT_HUB"
+class_name = "OneBotHub"
+
+[[previews.d1_databases]]
+binding = "DB"
+database_name = "qqaibot"
+database_id = "569a01fe-3297-40e1-832f-09c3793056ed"
+
+[[previews.ratelimits]]
+name = "MY_RATE_LIMITER"
+namespace_id = "20260925"
+
+[previews.ratelimits.simple]
+limit = 1
+period = 10
+
+[previews.vars]
+PUBLIC_BASE_URL = "https://chatgpt-test-20260925-qqai.ray20123315.workers.dev"
+BOT_DISPLAY_NAME = "QQAI Preview"
+DEVELOPER_ID = ""
+DEVELOPER_IDS = ""
+ROOT_QQ_IDS = ""
+ENABLE_ONEBOT_HTTP_EVENTS = "false"
+ONEBOT_READ_ONLY = "true"
+V3_RUNTIME_ENABLED = "true"
+V3_BILIBILI_ENABLED = "false"
+V3_BILIBILI_CREATORS_JSON = "[]"
+AUTO_CHECKIN_ENABLED = "false"
+PLUGIN_SECURITY_GPT_ENABLED = "false"
+PLUGIN_SECURITY_GPT_MODEL = ""
+PLUGIN_SECURITY_GPT_WEB_SEARCH_ENABLED = "false"
+V3_PLUGIN_ADMIN_IDS = ""
+V3_TEST_DB_TABLE = "kv_store_preview_20260925"
+PORTAL_ADMIN_USERNAME = "admin"
