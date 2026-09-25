@@ -1305,6 +1305,7 @@ ${summary}`.slice(0, 4000),
       const item = await readJson(env, `bili:connector:${body.id}`, null);
       if (!item || item.groupId !== groupId) return jsonResponse({ ok: false, message: "找不到监控项目。" }, 404);
       if (item.mode === "generic_webhook") return jsonResponse({ ok: false, message: "Webhook 模式不执行主动抓取；请从开放平台或授权中继发送测试事件。" }, 400);
+      if (item.mode === "open_live_bridge") return jsonResponse({ ok: false, message: "Open Live 长连接模式由 bridge 持续接收官方事件，不执行公开 UID 抓取。" }, 400);
       const result = await pollOneAutomaticBilibiliConnector(env, item, Date.now(), { force: true });
       const { webhookSecret, ...safeConnector } = result.connector || item;
       return jsonResponse({ ok: result.ok, message: result.ok ? (result.baseline ? "检查成功，已建立当前状态基准。" : `检查成功，发现 ${result.events?.length || 0} 个新事件。`) : `检查失败：${result.message}`, connector: safeConnector }, result.ok ? 200 : 502);
@@ -1312,7 +1313,7 @@ ${summary}`.slice(0, 4000),
     if (action === "update_interval") {
       const item = await readJson(env, `bili:connector:${body.id}`, null);
       if (!item || item.groupId !== groupId) return jsonResponse({ ok: false, message: "找不到监控项目。" }, 404);
-      if (item.mode === "generic_webhook") return jsonResponse({ ok: false, message: "Webhook 模式没有轮询频率。" }, 400);
+      if (item.mode !== "automatic_polling") return jsonResponse({ ok: false, message: "只有兼容低频轮询模式可以设置检查频率。" }, 400);
       item.pollIntervalSeconds = bilibiliPollIntervalSeconds(body.pollIntervalSeconds || item.pollIntervalSeconds);
       item.nextPollAt = Date.now() + item.pollIntervalSeconds * 1000;
       item.updatedAt = Date.now();
