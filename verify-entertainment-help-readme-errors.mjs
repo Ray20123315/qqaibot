@@ -19,7 +19,7 @@ assert.match(dice.text, /1、6/);
 assert.match(dice.text, /合计：7/);
 
 const invalidDice = handleEntertainmentCommand({ text: "!骰子 99d6" });
-assert.match(invalidDice.text, /数量 1～20/);
+assert.match(invalidDice.text, /骰子數量 1～20/);
 
 const number = handleEntertainmentCommand({ text: "!随机数 10 20", randomUint32: () => 0 });
 assert.match(number.text, /10（范围 10～20）/);
@@ -56,7 +56,8 @@ const adminHelp = buildHelpText({ roleLabel: "QQ管理员", permissionSet: { aiA
 assert.match(adminHelp, /【AI 管理】/);
 assert.match(adminHelp, /【群操作】/);
 assert.match(adminHelp, /!确认op/);
-assert.match(adminHelp, /!自动打卡/);
+assert.match(adminHelp, /自动群打卡：由排程自动执行；不提供手动执行指令/);
+assert.doesNotMatch(adminHelp, /!群打卡|!自动打卡|!自動打卡/);
 
 const developerHelp = buildHelpText({ roleLabel: "开发者", permissionSet: { aiAdmin: true, groupOps: true }, isDeveloper: true });
 assert.match(developerHelp, /【开发者】/);
@@ -94,6 +95,8 @@ assert.match(readme, /目前版本：\*\*2\.7\.12\*\*/);
 assert.match(readme, /OneBotHub Durable Object/);
 assert.match(readme, /群組人格最多(?:保存)? 12,000 字元/);
 assert.match(readme, /本地娛樂指令/);
+assert.match(readme, /2d6` 代表 2 顆 6 面骰/);
+assert.doesNotMatch(readme, /NdM/);
 assert.match(readme, /Portal／群組動態設定/);
 assert.doesNotMatch(readme, /!画图|!畫圖/);
 assert.doesNotMatch(readme, /6 條上下文|快捷登入 API 預留|尚未接入 QQ 私訊/);
