@@ -4509,7 +4509,12 @@ export class OneBotHub {
         writable: false
       });
     }
+    const memberSpeechAnalysisCommand = body?.post_type === "message"
+      && body?.message_type === "group"
+      && /^[!！](?:成員發言分析|成员发言分析|發言分析|发言分析)(?:\\s|$)/i.test(eventPlainText(body).trim());
+    let v3PluginFailure = "";
     const v3PluginEvent = await dispatchV3RuntimeEvent(this.env, v3PluginBody).catch(async error => {
+      v3PluginFailure = String(error?.message || error).slice(0, 240);
       await writeSystemAudit(this.env, {
         type: "v3_plugin_event_failed",
         groupId: String(body?.group_id || ""),
@@ -4524,6 +4529,35 @@ export class OneBotHub {
         explicit: eventHasBotMention(body),
         force: true,
         postType: inboundPostType
+      }).catch(() => {});
+      return;
+    }
+    if (memberSpeechAnalysisCommand) {
+      const developer = isDeveloperId(this.env, String(body?.user_id || ""));
+      const detail = developer && v3PluginFailure ? `\n错误：${v3PluginFailure}` : "";
+      const message = [];
+      if (body.message_id !== undefined && body.message_id !== null) {
+        message.push({ type: "reply", data: { id: String(body.message_id) } });
+      }
+      if (body.user_id !== undefined && body.user_id !== null) {
+        message.push({ type: "at", data: { qq: String(body.user_id) } });
+        message.push({ type: "text", data: { text: " " } });
+      }
+      message.push({
+        type: "text",
+        data: {
+          text: `成员发言分析插件当前没有成功处理该指令。请检查插件是否启用、是否为 blocked，以及 message.read / message.send / member.read / ai.chat 权限是否完整。${detail}`
+        }
+      });
+      await this.sendAction({
+        action: "send_group_msg",
+        params: { group_id: body.group_id, message, auto_escape: false }
+      }, 10000).catch(() => null);
+      await this.recordIngress(body, "member_speech_analysis_unhandled", {
+        explicit: true,
+        force: true,
+        postType: inboundPostType,
+        pluginFailure: Boolean(v3PluginFailure)
       }).catch(() => {});
       return;
     }
