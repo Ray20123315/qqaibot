@@ -125,6 +125,8 @@ assert.match(worker, /url\.pathname === "\/v3\/codex\/quota"/);
 assert.match(worker, /type: "quota\.request"/);
 assert.match(worker, /kind: "quota"/);
 assert.match(worker, /requestCodexQuota\(18000\)/);
+assert.match(worker, /Object\.defineProperty\(v3PluginBody, "__qqai_codex_executor"/);
+assert.match(worker, /this\.sendCodexBridgeRequest\(payload, timeoutMs\)/);
 assert.match(worker, /state\.storage\.put\("codex:quota"/);
 assert.match(worker, /state\.storage\.get\("codex:quota"/);
 assert.match(worker, /quota: this\.codexQuota/);
@@ -142,6 +144,13 @@ assert.doesNotMatch(statusBlock, /this\.codexQuota/, "!status runs in QQAIWorker
 assert.doesNotMatch(statusBlock, /this\.restoreCodexSocket/, "!status must not call OneBotHub instance methods from QQAIWorker scope");
 
 assert.doesNotMatch(worker, /CODEX_BRIDGE.*(?:shell|filesystem|file_read|exec_command)/i);
+
+const hostAdapter = fs.readFileSync("src/v3/host/adapter.js", "utf8");
+assert.match(hostAdapter, /parseAiCommandCodexOverride\(message\.text\)/);
+assert.match(hostAdapter, /PLUGIN_CODEX_DEVELOPER_REQUIRED/);
+assert.match(hostAdapter, /eventContext\?\.codexExecutor/);
+assert.match(hostAdapter, /deps\.aiChat\(input, \{ plugin, eventContext, aiProviderOverride:/);
+assert.doesNotMatch(hostAdapter, /callCodexBridgeWebSocket/, "V3 plugin Codex override must not call the same OneBotHub through its binding");
 
 const portal = fs.readFileSync("src/portal/runtime.js", "utf8");
 assert.match(portal, /id="codexQuotaStatus"/);
