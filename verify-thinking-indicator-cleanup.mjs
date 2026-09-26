@@ -82,4 +82,22 @@ assert.doesNotMatch(block, /dbPut\(this\.env, key, JSON\.stringify\(failed/, "fa
 assert.equal((block.match(/action: "delete_msg"/g) || []).length, 1, "Durable Object must have only one delete_msg attempt path for a thinking id");
 assert.match(block, /recall_failed_not_retried/, "failed recalls must stay auditable as best-effort failures");
 
+const phaseStart = worker.indexOf("const replaceThinkingStatus = async phase =>");
+const phaseEnd = worker.indexOf("let finalReply =", phaseStart);
+assert(phaseStart >= 0 && phaseEnd > phaseStart, "search thinking phase block missing");
+const phaseBlock = worker.slice(phaseStart, phaseEnd);
+assert.match(phaseBlock, /thinkingPhase = \["searching", "organizing", "thinking"\]/, "search phase should remain observable internally");
+assert.doesNotMatch(phaseBlock, /sendThinkingIndicator\(/, "search phase changes must not send a new QQ status message");
+assert.doesNotMatch(phaseBlock, /clearRegisteredThinkingIndicators\(/, "search phase changes must not recall the current status message");
+
+assert.match(worker, /const searchLikeQuestion = explicitQuestion && semanticQuestion && searchRequirement\(eventPlainText\(body\)\)\.needed;/, "explicit search questions must be detected at the transport deadline");
+assert.match(worker, /const internalTimeoutMs = toolTask \|\| searchLikeQuestion \? 60000 : 32000;/, "explicit search questions must receive the longer internal deadline");
+assert.match(worker, /remainingBeforeExplicitRetry >= 8000/, "explicit 204 retry must not restart when the deadline is nearly exhausted");
+
+const aiRuntime = fs.readFileSync("src/ai/runtime.js", "utf8");
+assert.match(aiRuntime, /sharedSearchResult = result;/, "successful shared search state must be retained");
+assert.match(aiRuntime, /sharedSearchResult\?\.performed/, "search fallback must require an actually performed grounded search");
+assert.match(aiRuntime, /finish\("search_fallback"/, "grounded search context must be sendable if synthesis providers fail");
+assert.match(aiRuntime, /SEARCH_CONTEXT_FALLBACK/, "search fallback must be explicitly tagged");
+
 console.log("verify-thinking-indicator-cleanup: ok");
