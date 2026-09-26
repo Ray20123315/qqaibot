@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { definePlugin } from "./src/plugins/api.js";
 import { createPluginHost } from "./src/plugins/runtime.js";
 import { createV3HostAdapter, defaultAiChat } from "./src/v3/host/adapter.js";
+import { memberSpeechAnalysisPlugin } from "./src/plugins/official/member-speech-analysis.js";
 
 let directCodexPayload = null;
 const directCodexResult = await defaultAiChat({ DEVELOPER_IDS: "90000" }, {
@@ -227,6 +228,40 @@ failClosed.register(definePlugin({
 await failClosed.start();
 await failClosed.dispatch("group_message", { group_id: 1, user_id: 2, message: { raw: "secret" } });
 assert.equal(leaked, null);
+
+const memberReplies = [];
+const memberLogs = [];
+const memberBaseMessage = Object.freeze({
+  scope: "group",
+  groupId: "800",
+  userId: "90000",
+  selfId: "1000",
+  text: "!成员发言分析 @12345",
+  parts: Object.freeze([{ kind: "mention", userId: "12345", all: false }])
+});
+
+let memberResult = await memberSpeechAnalysisPlugin.onMessage({
+  member: { recentMessages: async () => { throw new Error("D1_STORAGE_UNAVAILABLE"); } },
+  ai: { chat: async () => ({ text: "unexpected" }) },
+  reply: async text => { memberReplies.push(String(text)); },
+  logger: { warn: (...args) => memberLogs.push(args.join(" ")) }
+}, memberBaseMessage);
+assert.equal(memberResult.consume, true);
+assert.equal(memberResult.action, "member_speech_analysis_sample_read_failed");
+assert.match(memberReplies.at(-1), /无法读取近期公开群聊样本/);
+
+memberResult = await memberSpeechAnalysisPlugin.onMessage({
+  member: { recentMessages: async () => Array.from({ length: 5 }, (_, i) => ({ text: `第${i + 1}条普通发言` })) },
+  ai: { chat: async () => { throw new Error("ALL_PROVIDERS_FAILED"); } },
+  reply: async text => { memberReplies.push(String(text)); },
+  logger: { warn: (...args) => memberLogs.push(args.join(" ")) }
+}, memberBaseMessage);
+assert.equal(memberResult.consume, true);
+assert.equal(memberResult.action, "member_speech_analysis_ai_failed");
+assert.equal(memberResult.samples, 5);
+assert.match(memberReplies.at(-1), /AI 服务暂时不可用/);
+assert(memberLogs.some(row => row.includes("D1_STORAGE_UNAVAILABLE")));
+assert(memberLogs.some(row => row.includes("ALL_PROVIDERS_FAILED")));
 
 await adapter.stop();
 await rawAdapter.stop();
