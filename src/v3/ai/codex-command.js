@@ -62,6 +62,59 @@ function consumeBoolean(source) {
   return { value: BOOLEAN_ALIASES.get(key) ?? BOOLEAN_ALIASES.get(word.token), rest: word.rest };
 }
 
+function aiCommandCodexUsage() {
+  return [
+    "AI 指令 Codex 格式：",
+    "!指令 <參數> --codex",
+    "!指令 <參數> --codex <模型>",
+    "!指令 <參數> --codex <模型> <思考等級>",
+    "思考等級：無 / 低 / 中 / 高 / 超高 / 最大",
+    "未指定模型時預設 GPT-6 Luna；未指定思考等級時預設無思考。"
+  ].join("\n");
+}
+
+function parseAiCommandCodexOverride(value) {
+  const raw = String(value || "").trim();
+  if (!/^[!！]/.test(raw)) return Object.freeze({ matched: false, text: raw });
+  const marker = raw.match(/^(.*?)(?:\s+--codex)(?:\s+([\s\S]*))?$/i);
+  if (!marker) return Object.freeze({ matched: false, text: raw });
+
+  const text = String(marker[1] || "").trim();
+  let rest = String(marker[2] || "").trim();
+  if (!text) {
+    return Object.freeze({ matched: true, ok: false, text: raw, message: aiCommandCodexUsage() });
+  }
+
+  let model = CODEX_COMMAND_DEFAULT_MODEL;
+  let reasoningEffort = CODEX_COMMAND_DEFAULT_REASONING;
+
+  if (rest) {
+    const modelPart = consumeModel(rest);
+    if (!modelPart) {
+      return Object.freeze({ matched: true, ok: false, text, message: aiCommandCodexUsage() });
+    }
+    model = modelPart.value;
+    rest = modelPart.rest;
+
+    if (rest) {
+      const reasoningPart = consumeReasoning(rest);
+      if (!reasoningPart || reasoningPart.rest) {
+        return Object.freeze({ matched: true, ok: false, text, message: aiCommandCodexUsage() });
+      }
+      reasoningEffort = reasoningPart.value;
+    }
+  }
+
+  return Object.freeze({
+    matched: true,
+    ok: true,
+    text,
+    provider: "codex",
+    model,
+    reasoningEffort
+  });
+}
+
 function codexCommandUsage() {
   return [
     "格式：!codex <模型> <思考等級> <忽略程式碼及其他提示詞（原版輸入）:是否> <問題>",
@@ -116,6 +169,8 @@ export {
   CODEX_COMMAND_DEFAULT_MODEL,
   CODEX_COMMAND_DEFAULT_REASONING,
   CODEX_COMMAND_REASONING_LEVELS,
+  aiCommandCodexUsage,
   codexCommandUsage,
+  parseAiCommandCodexOverride,
   parseCodexCommand
 };
