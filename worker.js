@@ -4500,7 +4500,16 @@ export class OneBotHub {
       }
     }
 
-    const v3PluginEvent = await dispatchV3RuntimeEvent(this.env, body).catch(async error => {
+    const v3PluginBody = body && typeof body === "object" ? { ...body } : body;
+    if (v3PluginBody && ["message", "message_sent"].includes(String(v3PluginBody.post_type || ""))) {
+      Object.defineProperty(v3PluginBody, "__qqai_codex_executor", {
+        value: (payload, timeoutMs) => this.sendCodexBridgeRequest(payload, timeoutMs),
+        enumerable: false,
+        configurable: false,
+        writable: false
+      });
+    }
+    const v3PluginEvent = await dispatchV3RuntimeEvent(this.env, v3PluginBody).catch(async error => {
       await writeSystemAudit(this.env, {
         type: "v3_plugin_event_failed",
         groupId: String(body?.group_id || ""),
