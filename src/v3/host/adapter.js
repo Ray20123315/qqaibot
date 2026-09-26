@@ -8,7 +8,6 @@ import { dbDel, dbGet, dbPut } from "../../data/store.js";
 import { createPluginHost } from "../../plugins/runtime.js";
 import { fetchPublicUrl } from "../../security/network.js";
 import { parseAiCommandCodexOverride } from "../ai/codex-command.js";
-import { callCodexBridgeWebSocket } from "../ai/codex-bridge.js";
 import { runV3MultimodalAi } from "../ai/runtime.js";
 import { synthesizeGeminiTts } from "../ai/tts.js";
 import { fromOneBotEvent, toOneBotSegments } from "../message/onebot.js";
@@ -155,7 +154,9 @@ async function defaultAiChat(env, input, context = {}) {
     const peer = scope === "group" ? String(message.groupId || "") : String(message.userId || actorId);
     const sessionKey = `qqaibot:plugin:${pluginId}:${scope}:${peer}:developer:${actorId}`;
     const systemText = messages.filter(item => item.role === "system").map(item => item.content).join("\n\n");
-    const result = await callCodexBridgeWebSocket(env, { model: override.model || "gpt-6-luna" }, {
+    const codexExecutor = context?.eventContext?.codexExecutor;
+    if (typeof codexExecutor !== "function") throw new Error("PLUGIN_CODEX_BRIDGE_UNAVAILABLE");
+    const requestPayload = {
       task: "chat",
       model: String(override.model || "gpt-6-luna"),
       messages,
@@ -165,7 +166,8 @@ async function defaultAiChat(env, input, context = {}) {
       contextHash: await promptContextHash(systemText),
       maxOutputTokens: clampNumber(source.maxOutputTokens, 1000, 1, 4096),
       timeoutMs: clampNumber(source.timeoutMs, 45000, 3000, 120000)
-    });
+    };
+    const result = await codexExecutor(requestPayload, requestPayload.timeoutMs);
     return safeAiResult(result);
   }
 
@@ -479,7 +481,8 @@ function createV3HostAdapter(env, {
         message = Object.freeze({ ...message, text: codexOverride.text });
       }
       const eventName = message.scope === "group" ? "group_message" : message.scope === "private" ? "private_message" : "message";
-      const results = await host.dispatch(eventName, message, { message, groupId: message.groupId, userId: message.userId, aiProviderOverride });
+      const codexExecutor = typeof body?.__qqai_codex_executor === "function" ? body.__qqai_codex_executor : null;
+      const results = await host.dispatch(eventName, message, { message, groupId: message.groupId, userId: message.userId, aiProviderOverride, codexExecutor });
       return { handled: true, eventName, message, results };
     }
     if (postType === "notice") return { handled: true, eventName: "notice", message: null, results: await host.dispatch("notice", body) };
