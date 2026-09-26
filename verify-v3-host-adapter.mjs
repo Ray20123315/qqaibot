@@ -96,6 +96,68 @@ assert.deepEqual(await adapter.host.runCommand("missing"), { handled: false });
 const storedKey = [...db.keys()].find(key => key.includes("plugin:test.rich:data:last"));
 assert(storedKey, "plugin storage must stay namespaced");
 
+let codexCommandSeen = null;
+let codexAiContext = null;
+let codexAiCalls = 0;
+const codexNotices = [];
+const codexCommandPlugin = definePlugin({
+  manifest: {
+    id: "test.codex-command",
+    name: "CodexCommand",
+    version: "1.0.0",
+    apiVersion: "1",
+    capabilities: ["message.read", "ai.chat"],
+    requiredCapabilities: ["message.read", "ai.chat"]
+  },
+  async onGroupMessage(ctx, message) {
+    if (!String(message?.text || "").startsWith("!分析")) return null;
+    codexCommandSeen = message.text;
+    codexAiCalls += 1;
+    await ctx.ai.chat({ text: "分析資料", system: "測試系統提示", maxOutputTokens: 200 });
+    return { consume: true, action: "test_codex_override" };
+  }
+});
+const codexCommandAdapter = createV3HostAdapter({ DEVELOPER_IDS: "90000" }, {
+  plugins: [codexCommandPlugin],
+  dependencies: {
+    onebotCall: async (action, params) => { codexNotices.push({ action, params }); return { message_id: 1 }; },
+    aiChat: async (_input, context) => {
+      codexAiContext = context;
+      return { text: "ok", model: "test-codex" };
+    }
+  }
+});
+await codexCommandAdapter.start();
+const codexCommandResult = await codexCommandAdapter.dispatchOneBotEvent({
+  post_type: "message",
+  message_type: "group",
+  message_id: 701,
+  group_id: 800,
+  user_id: 90000,
+  self_id: 1000,
+  message: [{ type: "text", data: { text: "!分析 @12345 --codex GPT-6 Luna 高" } }]
+});
+assert.equal(codexCommandSeen, "!分析 @12345", "plugin must receive the command with --codex suffix removed");
+assert.equal(codexAiCalls, 1);
+assert.equal(codexAiContext.aiProviderOverride.provider, "codex");
+assert.equal(codexAiContext.aiProviderOverride.model, "gpt-6-luna");
+assert.equal(codexAiContext.aiProviderOverride.reasoningEffort, "high");
+assert.equal(codexCommandResult.results[0].consume, true);
+
+const deniedResult = await codexCommandAdapter.dispatchOneBotEvent({
+  post_type: "message",
+  message_type: "group",
+  message_id: 702,
+  group_id: 800,
+  user_id: 90001,
+  self_id: 1000,
+  message: [{ type: "text", data: { text: "!分析 @12345 --codex" } }]
+});
+assert.equal(codexAiCalls, 1, "non-developer --codex must not reach plugin AI");
+assert.equal(deniedResult.results[0].consume, true);
+assert.equal(deniedResult.results[0].action, "codex_override_denied");
+assert(codexNotices.some(item => item.action === "send_group_msg"), "non-developer denial must be visible");
+
 const rawPlugin = definePlugin({
   manifest: { id: "test.raw", name: "Raw", version: "1.0.0", apiVersion: "1", capabilities: ["onebot.call"] },
   commands: [{ name: "raw", async run(ctx) { return ctx.onebot.call("set_group_kick", { group_id: 1, user_id: 2 }); } }]
@@ -135,5 +197,6 @@ await adapter.stop();
 await rawAdapter.stop();
 await bypassAdapter.stop();
 await mediaReadDeniedAdapter.stop();
+await codexCommandAdapter.stop();
 await failClosed.stop();
 console.log("verify-v3-host-adapter: ok");
