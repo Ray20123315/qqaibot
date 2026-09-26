@@ -120,7 +120,11 @@ assert.match(worker, /group_persona:\$\{currentGroupId\}/);
 assert.match(worker, /group_rules:\$\{currentGroupId\}/);
 assert.match(worker, /qqaibot:\$\{codexSessionScope\}:developer:\$\{userId\}:\$\{codexSessionMode\}/);
 assert.match(worker, /sessionKey: codexSessionKey/);
-assert.match(worker, /payload\.type === "quota"/);
+assert.match(worker, /payload\.type === "quota" \|\| payload\.type === "quota\.response"/);
+assert.match(worker, /url\.pathname === "\/v3\/codex\/quota"/);
+assert.match(worker, /type: "quota\.request"/);
+assert.match(worker, /kind: "quota"/);
+assert.match(worker, /requestCodexQuota\(18000\)/);
 assert.match(worker, /state\.storage\.put\("codex:quota"/);
 assert.match(worker, /state\.storage\.get\("codex:quota"/);
 assert.match(worker, /quota: this\.codexQuota/);
@@ -132,7 +136,8 @@ const statusStart = worker.indexOf("if (['!status', '!配额', '!配額'");
 const statusEnd = worker.indexOf("// 第二段到此結束", statusStart);
 assert(statusStart >= 0 && statusEnd > statusStart, "!status command block missing");
 const statusBlock = worker.slice(statusStart, statusEnd);
-assert.match(statusBlock, /getOneBotHub\(env\)\.fetch\("https:\/\/onebot-hub\/status"\)/, "!status must read Codex quota through OneBotHub status");
+assert.match(statusBlock, /getOneBotHub\(env\)\.fetch\("https:\/\/onebot-hub\/v3\/codex\/quota", \{ method: "POST" \}\)/, "!status must trigger exactly one on-demand Codex quota read");
+assert.match(statusBlock, /getOneBotHub\(env\)\.fetch\("https:\/\/onebot-hub\/status"\)/, "!status must read the persisted Codex quota through OneBotHub status");
 assert.doesNotMatch(statusBlock, /this\.codexQuota/, "!status runs in QQAIWorker scope and must not access OneBotHub instance fields");
 assert.doesNotMatch(statusBlock, /this\.restoreCodexSocket/, "!status must not call OneBotHub instance methods from QQAIWorker scope");
 
@@ -146,5 +151,7 @@ assert.match(portal, /getOneBotHub\(env\)\.fetch\("https:\/\/onebot-hub\/status"
 assert.match(portal, /codexBridge,/);
 assert.match(portal, /5 小時額度/);
 assert.match(portal, /每週額度/);
+assert.match(portal, /Developer 執行 !配額 \/ !status 後才會查詢/);
+assert.doesNotMatch(portal, /onebot-hub\/v3\/codex\/quota/, "opening Portal must not trigger a Codex quota read");
 
 console.log("V3 local Codex WebSocket bridge checks passed.");
