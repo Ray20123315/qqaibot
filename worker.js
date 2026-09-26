@@ -1,4 +1,4 @@
-import { aiReplyPromisesFutureSearch, aiReplySignalsUncertainty, appendSearchSources, buildDeepSeekContextSummary, callDeepSeekSummaryTask, callGoogleDecision, decideReplyMentionRouting, deepSeekApiKeys, effectiveRuntimeModels, enforceExecutedSearchForReply, generateHybridReply, googleApiKeysFor, imageInspectionEnabled, isLightweightAcknowledgement, isLowContextInterjectionFragment, mergeAbortSignal, notifyDeveloper, roundRobinKeys, stripBotMentionFromConversation } from "./src/ai/runtime.js";
+import { aiReplyPromisesFutureSearch, aiReplySignalsUncertainty, appendSearchSources, buildDeepSeekContextSummary, callDeepSeekSummaryTask, callGoogleDecision, decideReplyMentionRouting, deepSeekApiKeys, effectiveRuntimeModels, enforceExecutedSearchForReply, generateHybridReply, googleApiKeysFor, imageInspectionEnabled, isLightweightAcknowledgement, isLowContextInterjectionFragment, mergeAbortSignal, notifyDeveloper, roundRobinKeys, searchRequirement, stripBotMentionFromConversation } from "./src/ai/runtime.js";
 import { providerRegistryState } from "./src/ai/provider-registry.js";
 import { buildImmediateConversationContext, splitOutboundText } from "./src/ai/conversation-quality.js";
 import { AI_MEDIA_LIMITS, DEFAULTS, VERSION, classifyOperationalFailure } from "./src/config/runtime.js";
@@ -3455,12 +3455,12 @@ ${deepseekContextSummary}`;
       // ==========================================
       // 🔄 Gemini / DeepSeek 混合路由
       // ==========================================
+      // 搜索阶段只更新内部进度，不再用“撤回旧状态 + 重发新状态”做动画。
+      // NapCat recallMsg 的事件确认可能超时；如果每个 phase 都换一条消息，会把一次搜索放大成多条残留状态。
+      // OneBotHub 已负责每题最多一条延迟 thinking indicator，最终再做一次 best-effort 撤回。
+      let thinkingPhase = "thinking";
       const replaceThinkingStatus = async phase => {
-        if (!botMentioned || isAutoInterject) return;
-        const labels = { searching: "正在搜索...", organizing: "正在整理...", thinking: "正在思考..." };
-        const text = labels[String(phase || "")] || "正在思考...";
-        await clearRegisteredThinkingIndicators(env, { isGroup, groupId: currentGroupId, userId }, activeThinkingMessageId ? [activeThinkingMessageId] : []).catch(() => null);
-        activeThinkingMessageId = await sendThinkingIndicator(env, { isGroup, groupId: currentGroupId, userId, text }).catch(() => null);
+        thinkingPhase = ["searching", "organizing", "thinking"].includes(String(phase || "")) ? String(phase) : "thinking";
       };
       let finalReply = "";
       let success = false;
@@ -5179,10 +5179,13 @@ export class OneBotHub {
     let action = body.message_type === "private" ? "send_private_msg" : "send_group_msg";
     try {
       const sourceUrl = new URL(requestUrl);
-      const internalTimeoutMs = toolTask ? 60000 : 32000;
-      const internalStartedAt = Date.now();
       const explicitQuestion = body?.__qqai_explicit_question === true || eventHasBotMention(body);
       const semanticQuestion = body?.__qqai_semantic_question !== false && !oneBotEventIsPunctuationOnly(body);
+      const searchLikeQuestion = explicitQuestion && semanticQuestion && searchRequirement(eventPlainText(body)).needed;
+      // 明确联网题前面还可能包含长上下文和摘要；32 秒会在真正搜索/合成完成前把内部 request abort。
+      // 搜索型显式提问与工具任务都给 60 秒，其余聊天维持 32 秒。
+      const internalTimeoutMs = toolTask || searchLikeQuestion ? 60000 : 32000;
+      const internalStartedAt = Date.now();
       // v1.4.5：Durable Object 与同一份 Worker 逻辑在同一模块内直接调用。
       // 不再通过公开域名重新 fetch 自己，避免同区路由、边缘部署切换与公网子请求产生的偶发 502/503/504。
       const internalFetch = async (eventBody, timeoutMs) => {
@@ -5297,7 +5300,8 @@ export class OneBotHub {
         }
       }
 
-      if (internalResponse.status === 204 && explicitQuestion && semanticQuestion && safeRetry && !options.signal?.aborted && body?.__qqai_force_explicit_reply !== true) {
+      const remainingBeforeExplicitRetry = internalTimeoutMs - (Date.now() - internalStartedAt);
+      if (internalResponse.status === 204 && explicitQuestion && semanticQuestion && safeRetry && !options.signal?.aborted && body?.__qqai_force_explicit_reply !== true && remainingBeforeExplicitRetry >= 8000) {
         retryAttempted = true;
         firstFailure = { type: "explicit_204", httpStatus: 204, elapsedMs: Date.now() - internalStartedAt };
         await this.recordIngress(body, "worker_explicit_retry", { explicit: true, force: true, retryAttempted: true, firstFailure }).catch(() => {});
