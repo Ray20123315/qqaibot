@@ -127,6 +127,15 @@ assert.match(worker, /quota: this\.codexQuota/);
 assert.match(worker, /5 小时额度/);
 assert.match(worker, /每周额度/);
 assert.match(worker, /if \(isDeveloper\)/);
+
+const statusStart = worker.indexOf("if (['!status', '!配额', '!配額'");
+const statusEnd = worker.indexOf("// 第二段到此結束", statusStart);
+assert(statusStart >= 0 && statusEnd > statusStart, "!status command block missing");
+const statusBlock = worker.slice(statusStart, statusEnd);
+assert.match(statusBlock, /getOneBotHub\(env\)\.fetch\("https:\/\/onebot-hub\/status"\)/, "!status must read Codex quota through OneBotHub status");
+assert.doesNotMatch(statusBlock, /this\.codexQuota/, "!status runs in QQAIWorker scope and must not access OneBotHub instance fields");
+assert.doesNotMatch(statusBlock, /this\.restoreCodexSocket/, "!status must not call OneBotHub instance methods from QQAIWorker scope");
+
 assert.doesNotMatch(worker, /CODEX_BRIDGE.*(?:shell|filesystem|file_read|exec_command)/i);
 
 const portal = fs.readFileSync("src/portal/runtime.js", "utf8");
