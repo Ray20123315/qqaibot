@@ -1,7 +1,42 @@
 import assert from "node:assert/strict";
 import { definePlugin } from "./src/plugins/api.js";
 import { createPluginHost } from "./src/plugins/runtime.js";
-import { createV3HostAdapter } from "./src/v3/host/adapter.js";
+import { createV3HostAdapter, defaultAiChat } from "./src/v3/host/adapter.js";
+
+let directCodexPayload = null;
+const directCodexResult = await defaultAiChat({ DEVELOPER_IDS: "90000" }, {
+  system: "分析群聊資料",
+  text: "樣本內容",
+  maxOutputTokens: 321,
+  timeoutMs: 5000
+}, {
+  plugin: { id: "official.member-speech-analysis" },
+  aiProviderOverride: { provider: "codex", model: "gpt-6-sol", reasoningEffort: "xhigh" },
+  eventContext: {
+    userId: "90000",
+    message: { scope: "group", groupId: "800", userId: "90000" },
+    codexExecutor: async (payload, timeoutMs) => {
+      directCodexPayload = { payload, timeoutMs };
+      return { text: "Codex 分析結果", model: payload.model, usage: { inputTokens: 10, outputTokens: 5 } };
+    }
+  }
+});
+assert.equal(directCodexResult.text, "Codex 分析結果");
+assert.equal(directCodexPayload.payload.model, "gpt-6-sol");
+assert.equal(directCodexPayload.payload.reasoningEffort, "xhigh");
+assert.equal(directCodexPayload.payload.originalPromptOnly, false);
+assert.equal(directCodexPayload.payload.sessionKey, "qqaibot:plugin:official.member-speech-analysis:group:800:developer:90000");
+assert.match(directCodexPayload.payload.contextHash, /^[a-f0-9]{64}$/);
+assert.equal(directCodexPayload.payload.messages[0].role, "system");
+assert.equal(directCodexPayload.payload.messages.at(-1).content, "樣本內容");
+await assert.rejects(
+  () => defaultAiChat({ DEVELOPER_IDS: "90000" }, { text: "x" }, {
+    plugin: { id: "test" },
+    aiProviderOverride: { provider: "codex", model: "gpt-6-luna", reasoningEffort: "none" },
+    eventContext: { userId: "90001", message: { scope: "group", groupId: "800", userId: "90001" }, codexExecutor: async () => ({ text: "no" }) }
+  }),
+  /PLUGIN_CODEX_DEVELOPER_REQUIRED/
+);
 
 const db = new Map();
 const onebotCalls = [];
