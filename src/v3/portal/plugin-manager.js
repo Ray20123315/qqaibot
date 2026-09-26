@@ -4,7 +4,7 @@ import { getPortalSession, jsonResponse, readCookie } from "../../portal/auth.js
 import { toSimplifiedChinese } from "../../i18n/commands.js";
 import { pluginPermissionDisclosures, pluginTrustLabelZh, releaseChannelLabelZh } from "../../plugins/governance.js";
 import { getV3Runtime } from "../runtime/runtime.js";
-import { v3BilibiliEnabled, v3RuntimeEnabled, v3RuntimeOptionsFromEnv } from "../runtime/bridge.js";
+import { v3BilibiliEnabled, v3RuntimeEnabled, v3RuntimeOptionsFromEnv, v3RuntimeStorageUnavailable, withV3StorageDegradedRuntime } from "../runtime/bridge.js";
 
 const V3_PLUGIN_MANAGER_BASE = "/api/portal/v3/plugins";
 const V3_PLUGIN_MANAGER_MAX_PLUGIN_ID = 128;
@@ -198,19 +198,43 @@ async function runtimeForPluginManager(env, overrides = {}) {
   return getV3Runtime(env, v3RuntimeOptionsFromEnv(env, runtimeOverrides));
 }
 
-async function listPluginManagerState(env, session, overrides = {}) {
-  const runtimeState = pluginManagerRuntimeState(env);
-  if (!runtimeState.runtimeEnabled) {
-    return Object.freeze({ ...runtimeState, pluginCount: 0, plugins: Object.freeze([]) });
-  }
-  const runtime = await runtimeForPluginManager(env, overrides);
+async function pluginManagerRuntimeRows(runtime, session) {
   const plugins = [];
   for (const plugin of runtime.listPlugins()) {
     let surface = null;
     try { surface = await runtime.getPluginSurface(plugin.id, { userId: session.qq }); } catch {}
     plugins.push(pluginSummary(plugin, surface));
   }
-  return Object.freeze({ ...runtimeState, pluginCount: plugins.length, plugins: Object.freeze(plugins) });
+  return Object.freeze(plugins);
+}
+
+async function listPluginManagerState(env, session, overrides = {}) {
+  const runtimeState = pluginManagerRuntimeState(env);
+  if (!runtimeState.runtimeEnabled) {
+    return Object.freeze({ ...runtimeState, pluginCount: 0, plugins: Object.freeze([]) });
+  }
+  try {
+    const runtime = await runtimeForPluginManager(env, overrides);
+    const plugins = await pluginManagerRuntimeRows(runtime, session);
+    return Object.freeze({ ...runtimeState, pluginCount: plugins.length, plugins });
+  } catch (error) {
+    if (!v3RuntimeStorageUnavailable(error)) throw error;
+    const runtimeOverrides = overrides.runtimeOverrides && typeof overrides.runtimeOverrides === "object" ? overrides.runtimeOverrides : {};
+    return withV3StorageDegradedRuntime(env, runtimeOverrides, async runtime => {
+      const plugins = await pluginManagerRuntimeRows(runtime, session);
+      return Object.freeze({
+        ...runtimeState,
+        degraded: Object.freeze({
+          storageUnavailable: true,
+          code: "D1_STORAGE_UNAVAILABLE",
+          lifecycleStorage: "volatile",
+          managementReadOnly: true
+        }),
+        pluginCount: plugins.length,
+        plugins
+      });
+    });
+  }
 }
 
 async function handleV3PluginManagerAuthed(request, env, url, body, session, overrides = {}) {
@@ -504,8 +528,8 @@ function injectV3PluginManagerClient(html) {
     + "  state.textContent='正在读取 V3 运行环境与插件状态…';var r=await req('');\n"
     + "  if(r.status===401||r.status===403){nav.hidden=true;if(typeof refreshSidebarGroupVisibility==='function')refreshSidebarGroupVisibility();return}nav.hidden=false;if(typeof refreshSidebarGroupVisibility==='function')refreshSidebarGroupVisibility();\n"
     + "  if(!r.data.ok){state.textContent=r.data.message||'插件状态读取失败。';list.innerHTML='<div class=\\\"empty\\\">'+esc(r.data.message||'加载失败')+'</div>';return}\n"
-    + "  var enabled=!!r.data.runtimeEnabled;state.className='notice '+(enabled?'v3-plugin-runtime-on':'v3-plugin-runtime-off');\n"
-    + "  state.textContent=enabled?'V3 运行环境已启用｜候选插件 '+Number(r.data.pluginCount||0)+' 个'+(r.data.bilibiliEnabled?'｜Bilibili 内置候选插件已配置':''):'V3 运行环境目前关闭（V3_RUNTIME_ENABLED=false）。此页面只显示安全状态，不会因为打开控制台而启动 V3 或扫描 D1。';\n"
+    + "  var enabled=!!r.data.runtimeEnabled,degraded=!!(r.data.degraded&&r.data.degraded.storageUnavailable);state.className='notice '+(enabled?'v3-plugin-runtime-on':'v3-plugin-runtime-off');\n"
+    + "  state.textContent=enabled?'V3 运行环境已启用｜候选插件 '+Number(r.data.pluginCount||0)+' 个'+(r.data.bilibiliEnabled?'｜Bilibili 内置候选插件已配置':'')+(degraded?'｜生命周期资料库暂时不可用：当前以临时只读状态显示，依赖存储的插件可能不可用。':''):'V3 运行环境目前关闭（V3_RUNTIME_ENABLED=false）。此页面只显示安全状态，不会因为打开控制台而启动 V3 或扫描 D1。';\n"
     + "  pluginCache={};(r.data.plugins||[]).forEach(function(p){pluginCache[p.id]=p});\n"
     + "  list.innerHTML=(r.data.plugins||[]).map(renderPlugin).join('')||(enabled?'<div class=\\\"empty\\\">运行环境已启用，但目前没有插件候选。</div>':'<div class=\\\"empty\\\">V3 尚未启用，因此没有运行中的插件。</div>');bindCards();\n"
     + "  if(activeDetailId&&pluginCache[activeDetailId])showDetail(pluginCache[activeDetailId]);\n"

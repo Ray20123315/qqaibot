@@ -1,5 +1,7 @@
 import { developerIds, envBoolean, envInteger, envList } from "../../config/deployment.js";
-import { getV3Runtime } from "./runtime.js";
+import { VERSION } from "../../config/runtime.js";
+import { createPluginLifecycleRegistry } from "../../plugins/lifecycle.js";
+import { createV3Runtime, getV3Runtime } from "./runtime.js";
 
 const V3_PUBLIC_STATUS_PATH = "/api/v3/status";
 const V3_BILIBILI_MIN_POLL_MS = 30 * 60_000;
@@ -44,6 +46,44 @@ function v3RuntimeOptionsFromEnv(env = {}, overrides = {}) {
     ...source,
     official: source.official === undefined ? official : source.official
   };
+}
+
+function createV3VolatileLifecycleRegistry() {
+  const values = new Map();
+  const storage = Object.freeze({
+    get: async key => values.has(key) ? values.get(key) : null,
+    put: async (key, value) => { values.set(key, value); },
+    del: async key => { values.delete(key); }
+  });
+  return createPluginLifecycleRegistry(storage, { qqaiVersion: VERSION, persist: false });
+}
+
+function v3StorageDegradedRuntimeOptions(env = {}, runtimeOverrides = {}) {
+  const options = v3RuntimeOptionsFromEnv(env, runtimeOverrides);
+  return {
+    ...options,
+    dependencies: {
+      ...(options.dependencies || {}),
+      pluginLifecycle: createV3VolatileLifecycleRegistry()
+    }
+  };
+}
+
+async function withV3StorageDegradedRuntime(env, runtimeOverrides = {}, callback) {
+  const runtime = createV3Runtime(env, v3StorageDegradedRuntimeOptions(env, runtimeOverrides));
+  try {
+    await runtime.start();
+    return await callback(runtime);
+  } finally {
+    await runtime.stop().catch(() => {});
+  }
+}
+
+async function dispatchV3RuntimeResult(runtime, body = {}, extra = {}) {
+  const result = await runtime.dispatchOneBotEvent(body || {});
+  const results = Array.isArray(result?.results) ? result.results : [];
+  const consumed = results.some(item => item && typeof item === "object" && item.consume === true);
+  return Object.freeze({ enabled: true, ...result, results: Object.freeze(results), consumed, ...extra });
 }
 
 function disabledResponse() {
@@ -94,13 +134,27 @@ async function dispatchV3RuntimeEvent(env, body = {}, runtimeOverrides = {}) {
   if (!v3RuntimeEnabled(env)) return Object.freeze({ enabled: false, handled: false, consumed: false, results: Object.freeze([]) });
   try {
     const runtime = await getV3Runtime(env, v3RuntimeOptionsFromEnv(env, runtimeOverrides));
-    const result = await runtime.dispatchOneBotEvent(body || {});
-    const results = Array.isArray(result?.results) ? result.results : [];
-    const consumed = results.some(item => item && typeof item === "object" && item.consume === true);
-    return Object.freeze({ enabled: true, ...result, results: Object.freeze(results), consumed });
+    return await dispatchV3RuntimeResult(runtime, body);
   } catch (error) {
     if (v3RuntimeStorageUnavailable(error)) {
-      return Object.freeze({ enabled: true, handled: false, consumed: false, degraded: true, code: "D1_STORAGE_UNAVAILABLE", results: Object.freeze([]) });
+      try {
+        return await withV3StorageDegradedRuntime(env, runtimeOverrides, runtime => dispatchV3RuntimeResult(runtime, body, {
+          degraded: true,
+          code: "D1_STORAGE_UNAVAILABLE",
+          lifecycleStorage: "volatile"
+        }));
+      } catch (fallbackError) {
+        if (!v3RuntimeStorageUnavailable(fallbackError)) throw fallbackError;
+        return Object.freeze({
+          enabled: true,
+          handled: false,
+          consumed: false,
+          degraded: true,
+          code: "D1_STORAGE_UNAVAILABLE",
+          lifecycleStorage: "volatile",
+          results: Object.freeze([])
+        });
+      }
     }
     throw error;
   }
@@ -122,6 +176,8 @@ export {
   handleV3RuntimeFetch,
   parseCreatorJson,
   runV3RuntimeScheduled,
+  v3StorageDegradedRuntimeOptions,
+  withV3StorageDegradedRuntime,
   v3BilibiliCreators,
   v3BilibiliEnabled,
   v3RuntimeEnabled,

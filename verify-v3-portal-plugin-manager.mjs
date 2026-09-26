@@ -80,6 +80,43 @@ assert.equal(biliPlugin.releaseChannelLabelZh, "抢先体验版");
 assert.equal(biliPlugin.channelPreference, "stable");
 assert.equal(biliPlugin.permissionDisclosures.find(row => row.capability === "network").externalDestinations[0], "api.live.bilibili.com");
 
+const d1Failure = () => Object.assign(new Error("D1 quota exhausted"), { code: "D1_STORAGE_UNAVAILABLE" });
+const degradedEnv = { V3_RUNTIME_ENABLED: "true" };
+response = await handleV3PluginManagerApi(
+  new Request("https://example.com/api/portal/v3/plugins"),
+  degradedEnv,
+  null,
+  {
+    ...auth,
+    runtimeOverrides: {
+      official: {
+        entertainment: true,
+        activity: false,
+        poll: false,
+        memberSpeechAnalysis: false,
+        qqInteractions: false,
+        autoCheckin: false
+      },
+      dependencies: {
+        dbGet: async () => { throw d1Failure(); },
+        dbPut: async () => { throw d1Failure(); },
+        dbDel: async () => { throw d1Failure(); },
+        onebotCall: async () => ({ ok: true })
+      },
+      logger: { info(){}, warn(){}, error(){}, debug(){} }
+    }
+  }
+);
+assert.equal(response.status, 200, "Plugin Manager must remain readable when lifecycle D1 storage is unavailable");
+const degradedState = await response.json();
+assert.equal(degradedState.ok, true);
+assert.equal(degradedState.degraded?.storageUnavailable, true);
+assert.equal(degradedState.degraded?.managementReadOnly, true);
+assert.equal(degradedState.pluginCount, 1);
+assert.equal(degradedState.plugins[0].id, "official.entertainment");
+assert.equal(degradedState.plugins[0].active, true);
+await releaseV3Runtime(degradedEnv);
+
 response = await handleV3PluginManagerApi(
   new Request("https://example.com/api/portal/v3/plugins/official.bilibili-live/state", {
     method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ enabled: false })
@@ -213,6 +250,7 @@ assert.match(injected, /BLOCKED:'已阻止'/);
 assert.match(injected, /插件 API/);
 assert.doesNotMatch(injected, /生命週期與權限|外部傳輸|設定唯讀/);
 assert.doesNotMatch(injected, /必要權限|被阻擋|未授權|啟用|切換|優先|保存設定|正在读取 V3 Runtime/);
+assert.match(injected, /生命周期资料库暂时不可用/);
 assert.match(injected, /保存版本偏好/);
 assert.match(injected, /data-v3-save-channel/);
 assert.equal(injectV3PluginManagerClient(injected), injected, "Portal injection must be idempotent");

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import { releaseV3Runtime } from "./src/v3/runtime/runtime.js";
-import { handleV3RuntimeFetch, parseCreatorJson, runV3RuntimeScheduled, v3BilibiliCreators, v3RuntimeEnabled, v3RuntimeOptionsFromEnv } from "./src/v3/runtime/bridge.js";
+import { dispatchV3RuntimeEvent, handleV3RuntimeFetch, parseCreatorJson, runV3RuntimeScheduled, v3BilibiliCreators, v3RuntimeEnabled, v3RuntimeOptionsFromEnv } from "./src/v3/runtime/bridge.js";
 
 assert.equal(v3RuntimeEnabled({}), true, "V3 runtime defaults on unless explicitly disabled");
 assert.equal(v3RuntimeEnabled({ V3_RUNTIME_ENABLED: "true" }), true);
@@ -87,6 +87,38 @@ assert.equal(degradedPayload.degraded?.storageUnavailable, true);
 assert.equal(degradedPayload.degraded?.code, "D1_STORAGE_UNAVAILABLE");
 assert.equal(degradedPayload.live?.stale, true);
 assert.equal(JSON.stringify(degradedPayload).includes("D1 quota exhausted"), false, "public degraded payload must not expose storage error text");
+
+const degradedSends = [];
+const degradedDispatch = await dispatchV3RuntimeEvent(
+  {},
+  {
+    post_type: "message",
+    message_type: "group",
+    group_id: 800,
+    user_id: 42,
+    self_id: 1000,
+    message_id: 123,
+    time: 1700000000,
+    raw_message: "!骰子",
+    message: [{ type: "text", data: { text: "!骰子" } }],
+    sender: { role: "member", nickname: "tester" }
+  },
+  {
+    official: { ...disabledOfficial, entertainment: true },
+    dependencies: {
+      ...degradedDeps,
+      onebotCall: async (action, params) => {
+        degradedSends.push({ action, params });
+        return { ok: true };
+      }
+    },
+    logger: { info(){}, warn(){}, error(){}, debug(){} }
+  }
+);
+assert.equal(degradedDispatch.degraded, true);
+assert.equal(degradedDispatch.lifecycleStorage, "volatile");
+assert.equal(degradedDispatch.consumed, true, "storage-independent bundled plugins must remain usable during lifecycle D1 failure");
+assert.equal(degradedSends.some(item => item.action === "send_group_msg"), true);
 
 const recoveredDb = new Map();
 const recoveredDeps = {
