@@ -28,7 +28,14 @@ const memberSpeechAnalysisPlugin = definePlugin({
     if (!match) return null;
 
     const userId = targetUserId(message, match[1] || "");
-    const rows = await ctx.member.recentMessages({ groupId: message.groupId, userId, limit: 30 });
+    let rows;
+    try {
+      rows = await ctx.member.recentMessages({ groupId: message.groupId, userId, limit: 30 });
+    } catch (error) {
+      ctx.logger?.warn?.("member recentMessages failed", String(error?.message || error).slice(0, 240));
+      await ctx.reply("成员发言分析暂时无法读取近期公开群聊样本，请稍后再试。");
+      return { consume: true, action: "member_speech_analysis_sample_read_failed", userId };
+    }
     const usable = (Array.isArray(rows) ? rows : [])
       .map(row => String(row?.text || "").trim())
       .filter(row => row && !/^[!！]/.test(row))
@@ -38,12 +45,19 @@ const memberSpeechAnalysisPlugin = definePlugin({
       return { consume: true, action: "insufficient_samples", userId, samples: usable.length };
     }
 
-    const result = await ctx.ai.chat({
-      system: "你是群聊發言分析器。只分析提供的公開群聊樣本，不推測敏感屬性、現實身分、心理疾病、政治立場或私人資訊。不要評分人格好壞，也不要建立任何人物分數。用繁體中文，輸出：常聊主題、表達方式、互動特徵、可直接觀察到的習慣、樣本限制。每項都必須能由樣本文字支持。",
-      text: `目標 QQ：${userId}\n樣本數：${usable.length}\n\n${usable.map((row, i) => `${i + 1}. ${row}`).join("\n")}`,
-      maxOutputTokens: 900,
-      temperature: 0.2
-    });
+    let result;
+    try {
+      result = await ctx.ai.chat({
+        system: "你是群聊發言分析器。只分析提供的公開群聊樣本，不推測敏感屬性、現實身分、心理疾病、政治立場或私人資訊。不要評分人格好壞，也不要建立任何人物分數。用繁體中文，輸出：常聊主題、表達方式、互動特徵、可直接觀察到的習慣、樣本限制。每項都必須能由樣本文字支持。",
+        text: `目標 QQ：${userId}\n樣本數：${usable.length}\n\n${usable.map((row, i) => `${i + 1}. ${row}`).join("\n")}`,
+        maxOutputTokens: 900,
+        temperature: 0.2
+      });
+    } catch (error) {
+      ctx.logger?.warn?.("member speech AI failed", String(error?.message || error).slice(0, 240));
+      await ctx.reply("成员发言分析的 AI 服务暂时不可用，请稍后再试。");
+      return { consume: true, action: "member_speech_analysis_ai_failed", userId, samples: usable.length };
+    }
     const answer = String(result?.text || "").trim();
     await ctx.reply(answer || "分析服務暫時沒有產生可用結果。");
     return { consume: true, action: "member_speech_analysis", userId, samples: usable.length, model: String(result?.model || "") };
