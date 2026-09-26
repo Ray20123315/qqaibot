@@ -2493,8 +2493,16 @@ const QQAIWorker = {
         const providerLine = providerState ? `${enabledProviderAccounts.length}/${providerAccounts.length} 启用` : "暂不可读取（沿用现有模型路由）";
         let codexStatusBlock = "";
         if (isDeveloper) {
-          const quota = this.codexQuota;
-          const codexConnected = this.restoreCodexSocket()?.readyState === WebSocket.OPEN;
+          let codexBridge = { connected: false, quota: null };
+          try {
+            const statusResponse = await getOneBotHub(env).fetch("https://onebot-hub/status");
+            const status = await statusResponse.json().catch(() => ({}));
+            if (status?.codexBridge && typeof status.codexBridge === "object") codexBridge = status.codexBridge;
+          } catch (error) {
+            console.warn("Codex status unavailable for !status:", error?.message || error);
+          }
+          const quota = codexBridge?.quota || null;
+          const codexConnected = Boolean(codexBridge?.connected);
           const quotaWindowText = (label, window) => {
             if (!window) return `${label}：暂时无资料`;
             const remaining = Math.round(Math.max(0, Math.min(100, Number(window.remainingPercent || 0))));
