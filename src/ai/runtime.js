@@ -1028,6 +1028,7 @@ async function generateHybridReply(env, args) {
   const allowPaidEmergencyFallback = envFlag(env.DEEPSEEK_EMERGENCY_FALLBACK, true);
   const searchState = searchRequirement(args.cleanText);
   let sharedSearchPromise = null;
+  let sharedSearchResult = null;
   let searchStatusStarted = false;
   let searchStatusFinished = false;
   const reportSearchStatus = async phase => {
@@ -1041,6 +1042,7 @@ async function generateHybridReply(env, args) {
       sharedSearchPromise = buildSharedSearchContext(env, { query: args.cleanText, models: args.chatModels, signal: args.signal });
     }
     const result = await sharedSearchPromise;
+    sharedSearchResult = result;
     if (searchState.needed && !searchStatusFinished) { searchStatusFinished = true; await reportSearchStatus("organizing"); }
     return result;
   };
@@ -1189,6 +1191,15 @@ async function generateHybridReply(env, args) {
       }
       console.warn(`Model fallback (${attempt.label}):`, error?.message || error);
     }
+  }
+  // 联网检索已经成功时，不允许后续聊天模型全部失败把整题降成 NO_SENDABLE_REPLY。
+  // 搜索摘要本身就是由强制 Google Search grounded 调用产生，可作为最后可发送的事实摘要。
+  if (searchState.needed && sharedSearchResult?.performed && String(sharedSearchResult.context || "").trim()) {
+    return finish("search_fallback", {
+      text: String(sharedSearchResult.context || "").trim(),
+      model: String(sharedSearchResult.model || "gemini-search"),
+      finishReason: "SEARCH_CONTEXT_FALLBACK"
+    }, sharedSearchResult);
   }
   throw lastError || new Error("ALL_MODELS_FAILED");
 }
