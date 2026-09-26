@@ -2,11 +2,12 @@ import { VERSION } from "../../config/runtime.js";
 import { createPluginLifecycleRegistry } from "../../plugins/lifecycle.js";
 import { callGeminiGenerate, effectiveRuntimeModels, geminiVisionApiKeys, googleApiKeysFor, parseList } from "../../ai/runtime.js";
 import { callProviderRoute } from "../../ai/provider-client.js";
-import { recentConversationMessagesForUser } from "../../core/identity.js";
+import { isDeveloperId, recentConversationMessagesForUser } from "../../core/identity.js";
 import { callOneBotAction } from "../../core/permissions.js";
 import { dbDel, dbGet, dbPut } from "../../data/store.js";
 import { createPluginHost } from "../../plugins/runtime.js";
 import { fetchPublicUrl } from "../../security/network.js";
+import { parseAiCommandCodexOverride } from "../ai/codex-command.js";
 import { runV3MultimodalAi } from "../ai/runtime.js";
 import { synthesizeGeminiTts } from "../ai/tts.js";
 import { fromOneBotEvent, toOneBotSegments } from "../message/onebot.js";
@@ -50,6 +51,42 @@ function safeAiResult(result) {
     finishReason: String(result?.finishReason || result?.finish_reason || ""),
     usage: result?.usage || result?.usageMetadata || null
   });
+}
+
+function codexContentText(value) {
+  if (typeof value === "string") return value;
+  if (!value || typeof value !== "object") return "";
+  if (typeof value.text === "string") return value.text;
+  if (Array.isArray(value.parts)) {
+    return value.parts.map(part => typeof part === "string" ? part : String(part?.text || "")).filter(Boolean).join("\n");
+  }
+  return "";
+}
+
+function pluginCodexMessages(source = {}) {
+  const messages = [];
+  const system = String(source.system || "").trim();
+  if (system) messages.push({ role: "system", content: system.slice(0, 12000) });
+
+  if (Array.isArray(source.contents) && source.contents.length) {
+    for (const item of source.contents.slice(-40)) {
+      const content = codexContentText(item).trim();
+      if (!content) continue;
+      const rawRole = String(item?.role || "user").toLowerCase();
+      const role = rawRole === "assistant" || rawRole === "model" ? "assistant" : rawRole === "system" ? "system" : "user";
+      messages.push({ role, content: content.slice(0, 50000) });
+    }
+  } else {
+    const text = String(source.text || "").trim();
+    if (text) messages.push({ role: "user", content: text.slice(0, 50000) });
+  }
+  return messages;
+}
+
+async function promptContextHash(value) {
+  const bytes = new TextEncoder().encode(String(value || ""));
+  const digest = await crypto.subtle.digest("SHA-256", bytes);
+  return [...new Uint8Array(digest)].map(byte => byte.toString(16).padStart(2, "0")).join("");
 }
 
 function normalizePluginMessage(value) {
@@ -103,8 +140,37 @@ function oneBotCapabilityValue(value) {
   return null;
 }
 
-async function defaultAiChat(env, input) {
+async function defaultAiChat(env, input, context = {}) {
   const source = typeof input === "string" ? { text: input } : (input && typeof input === "object" ? input : {});
+  const override = context?.aiProviderOverride && typeof context.aiProviderOverride === "object" ? context.aiProviderOverride : null;
+  if (override?.provider === "codex") {
+    const actorId = String(context?.eventContext?.message?.userId || context?.eventContext?.userId || "");
+    if (!actorId || !isDeveloperId(env, actorId)) throw new Error("PLUGIN_CODEX_DEVELOPER_REQUIRED");
+    const messages = pluginCodexMessages(source);
+    if (!messages.length) throw new Error("PLUGIN_AI_CHAT_INPUT_REQUIRED");
+    const pluginId = String(context?.plugin?.id || "plugin").slice(0, 96);
+    const message = context?.eventContext?.message || {};
+    const scope = String(message.scope || "private");
+    const peer = scope === "group" ? String(message.groupId || "") : String(message.userId || actorId);
+    const sessionKey = `qqaibot:plugin:${pluginId}:${scope}:${peer}:developer:${actorId}`;
+    const systemText = messages.filter(item => item.role === "system").map(item => item.content).join("\n\n");
+    const codexExecutor = context?.eventContext?.codexExecutor;
+    if (typeof codexExecutor !== "function") throw new Error("PLUGIN_CODEX_BRIDGE_UNAVAILABLE");
+    const requestPayload = {
+      task: "chat",
+      model: String(override.model || "gpt-6-luna"),
+      messages,
+      reasoningEffort: String(override.reasoningEffort || "none"),
+      originalPromptOnly: false,
+      sessionKey,
+      contextHash: await promptContextHash(systemText),
+      maxOutputTokens: clampNumber(source.maxOutputTokens, 1000, 1, 4096),
+      timeoutMs: clampNumber(source.timeoutMs, 45000, 3000, 120000)
+    };
+    const result = await codexExecutor(requestPayload, requestPayload.timeoutMs);
+    return safeAiResult(result);
+  }
+
   try {
     const routed = await callProviderRoute(env, "chat", source);
     if (routed?.text) return safeAiResult(routed);
@@ -194,7 +260,7 @@ function createV3HostAdapter(env, {
     dbDel: dependencies.dbDel || (key => dbDel(env, key)),
     onebotCall,
     safeFetch,
-    aiChat: dependencies.aiChat || (input => defaultAiChat(env, input)),
+    aiChat: dependencies.aiChat || ((input, context) => defaultAiChat(env, input, context)),
     aiVision: dependencies.aiVision || (input => defaultAiVision(env, input)),
     aiMultimodal: dependencies.aiMultimodal || ((message, input) => runV3MultimodalAi(env, message, input, { onebotCall, safeFetch })),
     aiTts: dependencies.aiTts || (input => defaultAiTts(env, input)),
@@ -267,7 +333,7 @@ function createV3HostAdapter(env, {
       if (!onebotAllowlist.has(name)) throw new Error(`PLUGIN_ONEBOT_ACTION_DENIED:${name || "missing"}`);
       return deps.onebotCall(name, params && typeof params === "object" ? params : {}, clampNumber(timeoutMs, 15000, 1000, 30000));
     },
-    "ai.chat": async ({ input }) => deps.aiChat(input),
+    "ai.chat": async ({ input, plugin, eventContext }) => deps.aiChat(input, { plugin, eventContext, aiProviderOverride: eventContext?.aiProviderOverride || null }),
     "ai.vision": async ({ input }) => deps.aiVision(input),
     "ai.multimodal": async ({ input, eventContext }) => {
       const message = eventContext?.message;
@@ -385,9 +451,38 @@ function createV3HostAdapter(env, {
   async function dispatchOneBotEvent(body = {}) {
     const postType = String(body?.post_type || "");
     if (postType === "message" || postType === "message_sent") {
-      const message = fromOneBotEvent(body);
+      let message = fromOneBotEvent(body);
+      let aiProviderOverride = null;
+      const codexOverride = parseAiCommandCodexOverride(message.text);
+      if (codexOverride.matched) {
+        const notice = async text => {
+          const parts = message.scope === "group"
+            ? [{ type: "at", data: { qq: String(message.userId || "") } }, { type: "text", data: { text: ` ${text}` } }]
+            : [{ type: "text", data: { text } }];
+          const action = message.scope === "group" ? "send_group_msg" : "send_private_msg";
+          const params = message.scope === "group"
+            ? { group_id: message.groupId, message: parts, auto_escape: false }
+            : { user_id: message.userId, message: parts, auto_escape: false };
+          await deps.onebotCall(action, params, 15000);
+        };
+        if (!isDeveloperId(env, message.userId)) {
+          await notice("只有开发者可以使用 --codex 强制模型。");
+          return { handled: true, eventName: message.scope === "group" ? "group_message" : "private_message", message, results: [{ consume: true, action: "codex_override_denied" }] };
+        }
+        if (!codexOverride.ok) {
+          await notice(codexOverride.message || "Codex 参数格式无效。");
+          return { handled: true, eventName: message.scope === "group" ? "group_message" : "private_message", message, results: [{ consume: true, action: "codex_override_invalid" }] };
+        }
+        aiProviderOverride = Object.freeze({
+          provider: "codex",
+          model: codexOverride.model,
+          reasoningEffort: codexOverride.reasoningEffort
+        });
+        message = Object.freeze({ ...message, text: codexOverride.text });
+      }
       const eventName = message.scope === "group" ? "group_message" : message.scope === "private" ? "private_message" : "message";
-      const results = await host.dispatch(eventName, message, { message, groupId: message.groupId, userId: message.userId });
+      const codexExecutor = typeof body?.__qqai_codex_executor === "function" ? body.__qqai_codex_executor : null;
+      const results = await host.dispatch(eventName, message, { message, groupId: message.groupId, userId: message.userId, aiProviderOverride, codexExecutor });
       return { handled: true, eventName, message, results };
     }
     if (postType === "notice") return { handled: true, eventName: "notice", message: null, results: await host.dispatch("notice", body) };
