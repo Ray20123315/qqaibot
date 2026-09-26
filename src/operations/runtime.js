@@ -1738,6 +1738,84 @@ function qqaiNaturalScheduleCommand(text, now = Date.now()) {
 
 
 
+const AI_COMMAND_TOOL_COMMANDS = Object.freeze({
+  status: { command: "!status" },
+  help: { command: "!帮助" },
+  group_status: { command: "!群状态" },
+  rules_view: { command: "!群规" },
+  schedule_list: { command: "!排程 列表" },
+  ai_on: { command: "!开启ai" },
+  ai_off: { command: "!关闭ai" },
+  memory_on: { command: "!记忆开" },
+  memory_off: { command: "!记忆关" },
+  memory_list: { command: "!你记住了什么" },
+  rule_monitor_on: { command: "!群规监控 开" },
+  rule_monitor_off: { command: "!群规监控 关" },
+  rule_monitor_status: { command: "!群规监控 状态" },
+  join_assist_on: { command: "!入群辅助 开" },
+  join_assist_off: { command: "!入群辅助 关" },
+  join_assist_status: { command: "!入群辅助 状态" },
+  welcome_on: { command: "!自动欢迎 开" },
+  welcome_off: { command: "!自动欢迎 关" },
+  mute_guard_on: { command: "!违规禁言保护 开" },
+  mute_guard_off: { command: "!违规禁言保护 关" },
+  mute_guard_status: { command: "!违规禁言保护 状态" },
+  command_on: { command: "!指令开" },
+  command_off: { command: "!指令关" },
+  clear_group_context: { command: "!清空群上下文" },
+  dnd_on: { command: "!免打扰" },
+  dnd_off: { command: "!取消免打扰" },
+  persona_delete: { command: "!del人格" },
+  rule_strictness: { prefix: "!群规严格度", valueRequired: true },
+  welcome_text: { prefix: "!欢迎词", valueRequired: true },
+  model_set: { prefix: "!模型", valueRequired: true },
+  memory_remember: { prefix: "!记住", valueRequired: true },
+  memory_forget: { prefix: "!忘记", valueRequired: true },
+  persona_set: { prefix: "!set人格", valueRequired: true },
+  schedule_create: { prefix: "!排程", valueRequired: true },
+  schedule_cancel: { prefix: "!排程 取消", valueRequired: true },
+  appeal_create: { prefix: "!申诉", valueRequired: true },
+  appeal_status: { prefix: "!申诉状态", valueRequired: true },
+  manual_rule_check: { prefix: "!检查", valueRequired: true, requiresTargetContext: true },
+  member_details: { command: "!详细资料", memberTarget: true },
+  read_web: { prefix: "!读网页", valueRequired: true, urlValue: true },
+  translate: { prefix: "!翻译", valueRequired: true },
+  recall_message: { recallByRole: true, requiresQuote: true }
+});
+
+function normalizeAiCommandToolValue(value) {
+  return String(value || "").replace(/\u0000/g, "").trim().slice(0, 2000);
+}
+
+function buildAiCommandToolCommand(intent, value = "", context = {}) {
+  const def = AI_COMMAND_TOOL_COMMANDS[String(intent || "")];
+  if (!def) return "";
+  const arg = normalizeAiCommandToolValue(value);
+  const hasQuote = Boolean(context?.hasQuote);
+  const targetQqs = [...new Set((Array.isArray(context?.targetQqs) ? context.targetQqs : []).map(v => String(v || "").replace(/\D/g, "")).filter(Boolean))];
+  if (def.requiresQuote && !hasQuote) return "";
+  if (def.requiresTargetContext && !hasQuote && !targetQqs.length) return "";
+  if (def.recallByRole) {
+    const privileged = Boolean(context?.isDeveloper) || ["owner", "admin", "developer"].includes(String(context?.actorRole || ""));
+    return privileged ? "!撤回" : "!协助撤回";
+  }
+  if (def.memberTarget) {
+    const requested = String(arg.match(/\b\d{5,12}\b/)?.[0] || "");
+    const target = requested && targetQqs.includes(requested) ? requested : (!requested ? (targetQqs[0] || "") : "");
+    if (requested && !target) return "";
+    return `${def.command}${target ? ` @${target}` : ""}`;
+  }
+  if (def.valueRequired && !arg) return "";
+  if (def.urlValue) {
+    const url = arg.match(/https?:\/\/[^\s]+/i)?.[0] || "";
+    const sourceText = String(context?.sourceText || "");
+    if (!url || (sourceText && !sourceText.includes(url))) return "";
+    return `${def.prefix} ${url}`;
+  }
+  if (def.command) return def.command;
+  return def.prefix ? `${def.prefix}${arg ? ` ${arg}` : ""}` : "";
+}
+
 function normalizeNaturalLanguageCommandText(text, now = Date.now()) {
   const source = String(text || "").trim();
   if (!source || /^[!！/]/.test(source)) return null;
@@ -1792,48 +1870,37 @@ function normalizeNaturalLanguageCommandText(text, now = Date.now()) {
 
 function shouldClassifyNaturalLanguageCommand(text) {
   const source = String(text || "").trim();
-  if (!/^(?:请|請|帮我|幫我|麻烦|麻煩|把|将|將|设置|設定|开启|開啟|打开|打開|关闭|關閉|查看|查询|查詢|显示|顯示|看看|告诉我|告訴我|检查|檢查|复核|復核|切换|切換|调整|調整|取消|暂停|暫停|记住|記住|忘记|忘記|申请|申請)/i.test(source)) return false;
-  return /(?:本群\s*AI|群规|群規|排程|定时|定時|提醒|欢迎|歡迎|记忆|記憶|模型|入群辅助|入群輔助|违规禁言保护|違規禁言保護|违规检查|違規檢查|检查这条|檢查這條|复核这条|復核這條|申诉|申訴|系统状态|系統狀態|配额|配額)/i.test(source);
+  if (!source || /^[!！/]/.test(source)) return false;
+  if (!/^(?:请|請|帮我|幫我|麻烦|麻煩|把|将|將|设置|設定|开启|開啟|打开|打開|关闭|關閉|查看|查询|查詢|显示|顯示|看看|告诉我|告訴我|检查|檢查|复核|復核|切换|切換|调整|調整|取消|暂停|暫停|记住|記住|忘记|忘記|申请|申請|撤回|翻译|翻譯|读取|讀取|分析|查一下|查查)/i.test(source)) return false;
+  return /(?:本群\s*AI|群规|群規|排程|定时|定時|提醒|欢迎|歡迎|记忆|記憶|模型|入群辅助|入群輔助|违规禁言保护|違規禁言保護|违规检查|違規檢查|检查这条|檢查這條|复核这条|復核這條|申诉|申訴|系统状态|系統狀態|配额|配額|群状态|群狀態|详细资料|詳細資料|成员资料|成員資料|人格|免打扰|免打擾|撤回|网页|網頁|翻译|翻譯|指令|上下文)/i.test(source);
 }
 
 
-
-async function classifyNaturalLanguageCommandIntent(env, text) {
+async function classifyNaturalLanguageCommandIntent(env, text, context = {}) {
   if (!shouldClassifyNaturalLanguageCommand(text)) return null;
   try {
+    const allowedIntents = Object.keys(AI_COMMAND_TOOL_COMMANDS).join("|");
+    const routingContext = {
+      scope: String(context?.scope || ""),
+      actorRole: String(context?.actorRole || "member"),
+      isDeveloper: Boolean(context?.isDeveloper),
+      hasQuote: Boolean(context?.hasQuote),
+      targetQqs: Array.isArray(context?.targetQqs) ? context.targetQqs.map(String).slice(0, 8) : []
+    };
     const result = await callGoogleDecision(env, {
-      system: `你是 QQAI 的 Gemma 服务路由器。只负责把自然语言转成白名单服务意图与参数，只输出 JSON，不回答用户问题。格式：{"intent":"none|ai_on|ai_off|status|help|schedule_list|rule_monitor_on|rule_monitor_off|rule_monitor_status|rule_strictness|join_assist_on|join_assist_off|welcome_on|welcome_off|welcome_text|memory_on|memory_off|memory_list|memory_remember|memory_forget|model_set|mute_guard_on|mute_guard_off|mute_guard_status|manual_rule_check|appeal_create|appeal_status","confidence":0到1,"value":"参数"}。只有明确要求执行操作时才识别；讨论、假设、引用、抱怨、询问功能原理一律 none。manual_rule_check 的 value 必须保留用户解释的具体违规原因；没有原因时输出 none。不要输出 ! 指令。`,
+      system: `你是 QQAI 的 AI Command Tool Router。你只能从已注册白名单工具中选择一个意图，不得生成任意 ! 指令、OneBot action、权限判断或绕过确认流程。只在用户明确要求“执行”操作时选择工具；讨论、假设、教学、引用别人的命令、抱怨、询问功能原理、无法确定参数时一律输出 none。最终执行会回到原始命令 handler，权限、群主／管理员／开发者资格、Portal 开关与二次确认仍由 handler 重新检查。输出严格 JSON：{"intent":"none|${allowedIntents}","confidence":0到1,"value":"仅参数，不含 ! 指令"}。member_details 只可使用用户消息中实际出现的 QQ／@目标；recall_message 必须有引用消息；manual_rule_check 必须有引用或 @目标且 value 保留用户说明的具体原因；read_web 的 value 必须是用户原文里的 http/https URL；translate 的 value 格式为“目标语言 原文”；schedule_create 的 value 只保留排程参数。当前调用上下文：${JSON.stringify(routingContext)}`,
       prompt: String(text || "").slice(0, 2000),
-      maxOutputTokens: 180
+      maxOutputTokens: 220
     });
     const parsed = JSON.parse(String(result.text || "").match(/\{[\s\S]*\}/)?.[0] || "{}");
     if (Number(parsed.confidence || 0) < 0.9 || !parsed.intent || parsed.intent === "none") return null;
-    const value = String(parsed.value || "").trim();
-    const commandByIntent = {
-      ai_on: "!开启ai", ai_off: "!关闭ai", status: "!status", help: "!帮助",
-      schedule_list: "!排程 列表",
-      rule_monitor_on: "!群规监控 开", rule_monitor_off: "!群规监控 关", rule_monitor_status: "!群规监控 状态",
-      join_assist_on: "!入群辅助 开", join_assist_off: "!入群辅助 关",
-      welcome_on: "!自动欢迎 开", welcome_off: "!自动欢迎 关",
-      memory_on: "!记忆开", memory_off: "!记忆关", memory_list: "!你记住了什么",
-      mute_guard_on: "!违规禁言保护 开", mute_guard_off: "!违规禁言保护 关", mute_guard_status: "!违规禁言保护 状态"
-    };
-    let commandText = commandByIntent[parsed.intent] || "";
-    if (parsed.intent === "rule_strictness" && value) commandText = `!群规严格度 ${value}`;
-    if (parsed.intent === "welcome_text" && value) commandText = `!欢迎词 ${value}`;
-    if (parsed.intent === "memory_remember" && value) commandText = `!记住 ${value}`;
-    if (parsed.intent === "memory_forget" && value) commandText = `!忘记 ${value}`;
-    if (parsed.intent === "model_set" && value) commandText = `!模型 ${value}`;
-    if (parsed.intent === "appeal_create" && value) commandText = `!申诉 ${value}`;
-    if (parsed.intent === "appeal_status" && value) commandText = `!申诉状态 ${value}`;
-    if (parsed.intent === "manual_rule_check" && value) commandText = `!检查 ${value}`;
-    return commandText ? { commandText, intent: parsed.intent, confidence: Number(parsed.confidence || 0), parser: "gemma_service_router" } : null;
+    const commandText = buildAiCommandToolCommand(parsed.intent, parsed.value, { ...context, sourceText: text });
+    return commandText ? { commandText, intent: parsed.intent, confidence: Number(parsed.confidence || 0), parser: "ai_command_tool_router" } : null;
   } catch (error) {
-    console.warn("Natural language command classifier unavailable:", error?.message || error);
+    console.warn("AI command tool router unavailable:", error?.message || error);
     return null;
   }
 }
-
 
 
 
