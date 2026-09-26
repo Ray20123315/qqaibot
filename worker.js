@@ -1024,6 +1024,21 @@ const QQAIWorker = {
       let naturalLanguageIntent = null;
       let privateAccessMode = "";
       let privateAccessChecked = false;
+      const applyNaturalLanguageCommand = normalized => {
+        if (!normalized?.commandText) return false;
+        naturalLanguageIntent = normalized;
+        cleanMessage = String(normalized.commandText || "").trim();
+        // 参数型智能指令必须同步回原始命令视图，避免 parseArgs 仍读取旧自然语言。
+        // 只把明确的 @QQ 还原为 CQ mention；引用消息 ID 继续使用原事件上下文，不由模型伪造。
+        userMessage = cleanMessage.replace(/(^|\s)@(\d{5,12})(?=\s|$)/g, "$1[CQ:at,qq=$2]");
+        msgLower = cleanMessage.toLowerCase();
+        isCommandMessage = true;
+        commandBody = cleanMessage.replace(/^[!！]+/, "").trim();
+        isAppealCommand = /^(申诉|申訴|appeal)(?:\s|$)/i.test(commandBody);
+        isScheduleCommand = /^(排程|定时|定時|schedule)(?:\s|$)/i.test(commandBody);
+        isActivityInteraction = /(?:活动|活動|报名|報名|候补|候補|参加|參加)/i.test(cleanMessage);
+        return true;
+      };
 
       // 政治相关普通聊天在进入任何意图分类器或聊天模型前静默丢弃；明确 ! 指令仍可用于管理设置。
       if (!isCommandMessage && isPoliticalTopicText(cleanMessage)) {
@@ -1104,14 +1119,8 @@ const QQAIWorker = {
           const privateNaturalSource = stripBotMentionFromConversation(cleanMessage, botId) || cleanMessage;
           const localPrivateNatural = normalizeNaturalLanguageCommandText(privateNaturalSource, Date.now());
           if (localPrivateNatural?.commandText) {
-            naturalLanguageIntent = { ...localPrivateNatural, parser: localPrivateNatural.parser || 'local_private_gate' };
-            cleanMessage = localPrivateNatural.commandText;
-            msgLower = cleanMessage.toLowerCase();
-            isCommandMessage = true;
-            commandBody = cleanMessage.replace(/^[!！]+/, '').trim();
-            isAppealCommand = /^(申诉|申訴|appeal)(?:\s|$)/i.test(commandBody);
-            isScheduleCommand = /^(排程|定时|定時|schedule)(?:\s|$)/i.test(commandBody);
-            isActivityInteraction = /(?:活动|活動|报名|報名|候补|候補|参加|參加)/i.test(cleanMessage);
+            const normalizedPrivate = { ...localPrivateNatural, parser: localPrivateNatural.parser || 'local_private_gate' };
+            applyNaturalLanguageCommand(normalizedPrivate);
             ctx.waitUntil(writeSystemAudit(env, {
               type: 'natural_language_command', groupId: '', actorId: userId,
               action: String(localPrivateNatural.intent || commandBody).slice(0, 120),
@@ -1140,16 +1149,15 @@ const QQAIWorker = {
       const naturalLanguageTrigger = !aiReplyOptOut && !isCommandMessage && (isPrivate || botMentioned || repliedToBot || sameQqSelfAsk);
       if (naturalLanguageTrigger) {
         const naturalSourceText = stripBotMentionFromConversation(cleanMessage, botId) || cleanMessage;
-        const normalizedNatural = normalizeNaturalLanguageCommandText(naturalSourceText, Date.now()) || await classifyNaturalLanguageCommandIntent(env, naturalSourceText);
+        const normalizedNatural = normalizeNaturalLanguageCommandText(naturalSourceText, Date.now()) || await classifyNaturalLanguageCommandIntent(env, naturalSourceText, {
+          scope: isGroup ? "group" : "private",
+          actorRole: senderRole,
+          isDeveloper,
+          hasQuote: Boolean(quotedMessageId),
+          targetQqs: mentionedQqs.filter(q => q !== botId && q !== "all")
+        });
         if (normalizedNatural?.commandText) {
-          naturalLanguageIntent = normalizedNatural;
-          cleanMessage = normalizedNatural.commandText;
-          msgLower = cleanMessage.toLowerCase();
-          isCommandMessage = true;
-          commandBody = cleanMessage.replace(/^[!！]+/, '').trim();
-          isAppealCommand = /^(申诉|申訴|appeal)(?:\s|$)/i.test(commandBody);
-          isScheduleCommand = /^(排程|定时|定時|schedule)(?:\s|$)/i.test(commandBody);
-          isActivityInteraction = /(?:活动|活動|报名|報名|候补|候補|参加|參加)/i.test(cleanMessage);
+          applyNaturalLanguageCommand(normalizedNatural);
           ctx.waitUntil(writeSystemAudit(env, { type: "natural_language_command", groupId: currentGroupId, actorId: userId, action: String(normalizedNatural.intent || commandBody).slice(0, 120), parser: normalizedNatural.parser || "local", confidence: Number(normalizedNatural.confidence || 0), originalText: naturalSourceText.slice(0, 1000) }).catch(() => {}));
         }
       }
@@ -2409,7 +2417,8 @@ const QQAIWorker = {
         if (!hasGroupOpsAuth) return jsonReply(`${atSender}${formatModerationPermissionDenied(senderRole, isDeveloper)}`);
         if (!quotedMessageId) return jsonReply(`${atSender}请先回复需要撤回的消息，再发送 !撤回`);
         const result = await runOneBotGroupOperation(env, 'delete_msg', { message_id: numericId(quotedMessageId) }, { actorId: userId, groupId: currentGroupId, targetId: quotedMessageId, action: '撤回' });
-        return jsonReply(`${atSender}${result.ok ? '已尝试撤回该消息。' : `操作失败：${result.error}`}`);
+        if (result.ok) return new Response(null, { status: 204 });
+        return jsonReply(`${atSender}操作失败：${result.error}`);
       }
 
       if (/^[!！](?:全员禁言|全員禁言)$/i.test(cleanMessage)) {
