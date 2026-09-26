@@ -112,5 +112,10 @@ assert.match(worker, /handleV3RuntimeFetch/);
 assert.match(worker, /runV3RuntimeScheduled/);
 assert.match(worker, /const v3RuntimeResponse = await handleV3RuntimeFetch\(request, env, url\)/);
 assert.match(worker, /ctx\.waitUntil\(runV3RuntimeScheduled\(env, scheduledTime\)/);
+assert.match(worker, /const memberSpeechAnalysisCommand = body\?\.post_type === "message"/);
+assert.match(worker, /member_speech_analysis_unhandled/);
+assert.match(worker, /成员发言分析插件当前没有成功处理该指令/);
+assert.match(worker, /message\.read \/ message\.send \/ member\.read \/ ai\.chat/);
+assert.match(worker, /developer && v3PluginFailure/);
 
 console.log("verify-v3-worker-bridge: ok");
