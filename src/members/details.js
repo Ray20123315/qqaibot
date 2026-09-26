@@ -187,9 +187,10 @@ async function collectFullMemberDetails(env, { groupId, targetId, actorId, actor
       messageStats: buildMessageStats(records)
     },
     disclosure: {
-      includes: "OneBot 即时成员资料、陌生人补充资料、群荣誉、D1 成员快照、管理备注、关系、禁言锁与留存消息统计。",
-      excludes: "密码、Token、Cookie、API Key、授权标头、Session、私钥等秘密字段会被遮罩；平台未返回的资料不会推测。",
-      rawMessageBodiesIncluded: false
+      includes: "QQ 仅显示整理后的成员资料、资料来源状态、管理／关系状态与留存消息统计。",
+      excludes: "原始 OneBot／D1 结构化资料、密码、Token、Cookie、API Key、授权标头、Session、私钥不会在 QQ 回传；平台未返回的资料不会推测。",
+      rawMessageBodiesIncluded: false,
+      rawStructuredDataIncluded: false
     }
   };
   await writeSystemAudit(env, {
@@ -219,9 +220,36 @@ function dateText(value) {
   try { return new Date(time).toLocaleString("zh-CN", { timeZone: "Asia/Taipei", hour12: false }); } catch { return new Date(time).toISOString(); }
 }
 
+function sourceStatus(source) {
+  if (!source || typeof source !== "object") return "未取得";
+  if (source.ok === true) return "已取得";
+  if (source.ok === false) return "取得失败";
+  return "未取得";
+}
+
+function storedStatus(value) {
+  if (value == null) return "未保存";
+  if (typeof value === "object" && value?.readError) return "读取失败";
+  if (Array.isArray(value)) return value.length ? "已保存" : "未保存";
+  if (typeof value === "object") return Object.keys(value).length ? "已保存" : "未保存";
+  return value === "" ? "未保存" : "已保存";
+}
+
+function stateStatus(value) {
+  if (!value || typeof value !== "object") return "无";
+  if (value?.readError) return "读取失败";
+  if (value.active === false) return "无";
+  if (value.active === true) return "有";
+  return Object.keys(value).length ? "有记录" : "无";
+}
+
 function formatFullMemberDetailsReport(details) {
   const summary = details?.identitySummary || {};
   const stats = details?.operationalState?.messageStats || {};
+  const live = details?.liveSources || {};
+  const stored = details?.storedSources || {};
+  const state = details?.operationalState || {};
+  const honorCount = Array.isArray(live?.honors?.rows) ? live.honors.rows.length : 0;
   const lines = [
     `【成员完整资料】`,
     `群号：${details?.groupId || ""}`,
@@ -240,13 +268,11 @@ function formatFullMemberDetailsReport(details) {
     `统计范围：${dateText(stats.firstRetainedAt)} ～ ${dateText(stats.lastRetainedAt)}`,
     ``,
     `【管理与关系状态】`,
-    valueText(details?.operationalState || {}),
+    `禁言锁：${stateStatus(state.muteLock)}｜关系记录：${stateStatus(state.relationship)}`,
     ``,
-    `【OneBot 即时原始资料】`,
-    valueText(details?.liveSources || {}),
-    ``,
-    `【D1 已保存完整资料】`,
-    valueText(details?.storedSources || {}),
+    `【资料来源状态】`,
+    `OneBot 群成员：${sourceStatus(live.groupMemberInfo)}｜陌生人资料：${sourceStatus(live.strangerInfo)}｜群荣誉：${sourceStatus(live.honors)}（${honorCount} 条）`,
+    `D1 成员快照：${storedStatus(stored.snapshot)}｜成员档案：${storedStatus(stored.profile)}｜成员缓存：${storedStatus(stored.cachedMember)}`,
     ``,
     `【资料边界】`,
     details?.disclosure?.includes || "",
