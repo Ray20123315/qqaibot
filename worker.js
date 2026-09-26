@@ -2494,6 +2494,16 @@ const QQAIWorker = {
         let codexStatusBlock = "";
         if (isDeveloper) {
           let codexBridge = { connected: false, quota: null };
+          let quotaRequestError = "";
+          try {
+            const quotaResponse = await getOneBotHub(env).fetch("https://onebot-hub/v3/codex/quota", { method: "POST" });
+            const quotaPayload = await quotaResponse.json().catch(() => ({}));
+            if (!quotaResponse.ok || quotaPayload?.ok !== true) {
+              quotaRequestError = String(quotaPayload?.error || `HTTP_${quotaResponse.status}`).slice(0, 120);
+            }
+          } catch (error) {
+            quotaRequestError = String(error?.message || error || "CODEX_QUOTA_REQUEST_FAILED").slice(0, 120);
+          }
           try {
             const statusResponse = await getOneBotHub(env).fetch("https://onebot-hub/status");
             const status = await statusResponse.json().catch(() => ({}));
@@ -2515,7 +2525,8 @@ const QQAIWorker = {
             `\n⏱️ ${quotaWindowText("5 小时额度", quota?.fiveHour)}` +
             `\n📅 ${quotaWindowText("每周额度", quota?.weekly)}` +
             (quota?.planType ? `\n💳 Codex 方案：${quota.planType}` : "") +
-            (quota?.sampledAt ? `\n🕒 额度快照：${new Date(Number(quota.sampledAt)).toLocaleString("zh-CN", { timeZone: "Asia/Taipei", hour12: false })}` : "");
+            (quota?.sampledAt ? `\n🕒 额度快照：${new Date(Number(quota.sampledAt)).toLocaleString("zh-CN", { timeZone: "Asia/Taipei", hour12: false })}` : "") +
+            (!quota?.sampledAt && quotaRequestError ? `\n⚠️ 本次额度读取：${quotaRequestError}` : "");
         }
         const statusMsg = `📊 【系统运行状态报告】\n` +
                           `--------------------\n` +
@@ -4020,6 +4031,15 @@ export class OneBotHub {
       return new Response(null, { status: 101, webSocket: client });
     }
 
+    if (request.method === "POST" && url.pathname === "/v3/codex/quota") {
+      try {
+        const quota = await this.requestCodexQuota(18000);
+        return Response.json({ ok: true, quota });
+      } catch (error) {
+        return Response.json({ ok: false, error: String(error?.message || error).slice(0, 500) }, { status: 503 });
+      }
+    }
+
     if (request.method === "POST" && url.pathname === CODEX_BRIDGE_INTERNAL_CHAT_PATH) {
       const payload = await request.json().catch(() => null);
       if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
@@ -4293,7 +4313,8 @@ export class OneBotHub {
       return;
     }
 
-    if (payload.type === "quota") {
+    const id = String(payload.id || payload.requestId || payload.echo || "").slice(0, 160);
+    if (payload.type === "quota" || payload.type === "quota.response") {
       const source = payload.quota && typeof payload.quota === "object" && !Array.isArray(payload.quota) ? payload.quota : {};
       const normalizeWindow = value => {
         if (!value || typeof value !== "object" || Array.isArray(value)) return null;
@@ -4317,15 +4338,26 @@ export class OneBotHub {
       };
       this.codexLastEventAt = Date.now();
       if (this.state?.storage) await this.state.storage.put("codex:quota", this.codexQuota);
+      if (payload.type === "quota.response" && id) {
+        const pending = this.codexPending.get(id);
+        if (pending?.kind === "quota") {
+          clearTimeout(pending.timer);
+          this.codexPending.delete(id);
+          pending.resolve(this.codexQuota);
+        }
+      }
       return;
     }
 
-    const id = String(payload.id || payload.requestId || payload.echo || "").slice(0, 160);
     if (!id) return;
     const pending = this.codexPending.get(id);
     if (!pending) return;
     clearTimeout(pending.timer);
     this.codexPending.delete(id);
+    if (pending.kind === "quota") {
+      pending.reject(new Error("CODEX_QUOTA_INVALID_RESPONSE"));
+      return;
+    }
     try {
       const result = normalizeCodexBridgeResponse(payload, pending.model);
       pending.resolve(result);
@@ -4353,9 +4385,37 @@ export class OneBotHub {
         this.codexPending.delete(id);
         reject(new Error("CODEX_BRIDGE_TIMEOUT"));
       }, waitMs);
-      this.codexPending.set(id, { resolve, reject, timer, model: String(payload?.model || "codex") });
+      this.codexPending.set(id, { kind: "ai", resolve, reject, timer, model: String(payload?.model || "codex") });
       try {
         socket.send(serialized);
+      } catch (error) {
+        clearTimeout(timer);
+        this.codexPending.delete(id);
+        if (this.codexSocket === socket) this.codexSocket = null;
+        reject(error);
+      }
+    });
+  }
+
+  async requestCodexQuota(timeoutMs = 18000) {
+    const socket = this.restoreCodexSocket();
+    if (!socket || socket.readyState !== WebSocket.OPEN) throw new Error("CODEX_BRIDGE_NOT_CONNECTED");
+    if (this.codexPending.size >= 8) throw new Error("CODEX_BRIDGE_BUSY");
+    const id = crypto.randomUUID();
+    const requestPayload = {
+      type: "quota.request",
+      protocol: CODEX_BRIDGE_PROTOCOL,
+      id
+    };
+    const waitMs = Math.max(3000, Math.min(Number(timeoutMs || 18000), 30000));
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => {
+        this.codexPending.delete(id);
+        reject(new Error("CODEX_QUOTA_TIMEOUT"));
+      }, waitMs);
+      this.codexPending.set(id, { kind: "quota", resolve, reject, timer, model: "" });
+      try {
+        socket.send(JSON.stringify(requestPayload));
       } catch (error) {
         clearTimeout(timer);
         this.codexPending.delete(id);
