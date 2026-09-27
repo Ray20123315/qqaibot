@@ -48,18 +48,31 @@ function attachmentKind(attachment = {}) {
   if (contentType.startsWith("video/") || contentType === "video") return "video";
   return "file";
 }
-function normalizeAttachments(data) {
-  const rows = Array.isArray(data?.attachments) ? data.attachments : [];
-  return rows.map(attachment => ({
-    kind: attachmentKind(attachment),
+function attachmentPart(attachment = {}) {
+  const kind = attachmentKind(attachment);
+  const url = kind === "audio"
+    ? cleanString(attachment.voice_wav_url || attachment.voiceWavUrl || attachment.url)
+    : cleanString(attachment.url);
+  return {
+    kind,
     media: {
       fileId: cleanString(attachment.file_id || attachment.fileId || attachment.id),
-      url: cleanString(attachment.url),
+      url,
       name: cleanString(attachment.filename || attachment.name),
-      mimeType: cleanString(attachment.content_type || attachment.contentType),
+      mimeType: cleanString(attachment.content_type || attachment.contentType || attachment.type),
       size: attachment.size ?? attachment.file_size ?? null
     }
-  }));
+  };
+}
+function normalizeAttachments(data) {
+  const rows = Array.isArray(data?.attachments) ? data.attachments : [];
+  const parts = [];
+  for (const attachment of rows) {
+    parts.push(attachmentPart(attachment));
+    const asr = cleanString(attachment?.asr_refer_text || attachment?.asrReferText);
+    if (asr) parts.push({ kind: "text", text: `【语音转写参考】${asr}` });
+  }
+  return parts;
 }
 function normalizeMentions(data) {
   const rows = Array.isArray(data?.mentions) ? data.mentions : [];
@@ -78,12 +91,44 @@ function normalizeReference(data) {
   const id = cleanString(ref?.message_id || ref?.messageId || ref?.id);
   return id ? [{ kind: "reply", messageId: id }] : [];
 }
+function arkSummary(data) {
+  const ark = data?.ark_data && typeof data.ark_data === "object" ? data.ark_data : null;
+  if (!ark) return "";
+  const fields = ark.fields && typeof ark.fields === "object" ? ark.fields : {};
+  return [
+    cleanString(ark.ark_name || ark.ark_type) ? `【卡片：${cleanString(ark.ark_name || ark.ark_type)}】` : "【卡片】",
+    cleanString(ark.prompt),
+    cleanString(fields.title),
+    cleanString(fields.desc),
+    cleanString(fields.address)
+  ].filter(Boolean).join(" ");
+}
+function quotedElementParts(data) {
+  const rows = Array.isArray(data?.msg_elements) ? data.msg_elements : [];
+  const parts = [];
+  let count = 0;
+  for (const row of rows) {
+    if (!row || typeof row !== "object" || count >= 8) continue;
+    count += 1;
+    const author = senderName(row) || authorId(row) || "未知成员";
+    const body = cleanString(row.content) || arkSummary(row);
+    if (body) parts.push({ kind: "text", text: `\n【引用 ${author}】${body}` });
+    const attachments = Array.isArray(row.attachments) ? row.attachments : [];
+    for (const attachment of attachments.slice(0, 8)) parts.push(attachmentPart(attachment));
+  }
+  return parts;
+}
 function normalizeQqOpenMessageParts(data) {
   const parts = [];
   parts.push(...normalizeReference(data));
   parts.push(...normalizeMentions(data));
   const content = String(data?.content ?? "");
   if (content) parts.push({ kind: "text", text: content });
+  else {
+    const card = arkSummary(data);
+    if (card) parts.push({ kind: "text", text: card });
+  }
+  parts.push(...quotedElementParts(data));
   parts.push(...normalizeAttachments(data));
   return parts;
 }

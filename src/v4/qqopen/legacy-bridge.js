@@ -144,6 +144,20 @@ function uploadSource(data) {
   return null;
 }
 
+function countQqOpenLegacyMessages(value) {
+  const parts = legacyMessageParts(value);
+  let text = "";
+  let media = 0;
+  for (const part of parts) {
+    const type = String(part.type || "").toLowerCase();
+    const data = part.data || {};
+    if (type === "text") text += String(data.text || "");
+    else if (type === "at") text += clean(data.qq) === "all" ? "@全体成员" : "<@" + clean(data.qq) + ">";
+    else if (["image", "record", "audio", "video", "file"].includes(type)) media += 1;
+  }
+  return (text.trim() ? 1 : 0) + media;
+}
+
 async function sendQqOpenLegacyMessage(api, target, value, options) {
   const parts = legacyMessageParts(value);
   const text = [];
@@ -185,7 +199,7 @@ async function sendQqOpenLegacyMessage(api, target, value, options) {
   }
   const sentRows = results.filter(function(item) { return item.result; });
   const last = sentRows.length ? sentRows[sentRows.length - 1].result : null;
-  return { ok: true, results: results, data: last, messageId: clean(last && (last.id || last.message_id)) };
+  return { ok: true, results: results, data: last, messageId: clean(last && (last.id || last.message_id)), nextMsgSeq: seq };
 }
 
 function normalizeMember(member, fallbackId) {
@@ -210,13 +224,22 @@ async function qqOpenLegacyAction(api, action, params, context, helpers) {
     const target = { scope: scope, groupId: groupId, userId: userId, messageId: messageId };
     if (name === "send_group_msg") target.scope = "group";
     if (name === "send_private_msg") target.scope = "private";
-    return (await sendQqOpenLegacyMessage(api, target, params.message, { replyMessageId: clean(params.reply_to_message_id) })).data;
+    const replyMessageId = clean(params.reply_to_message_id || target.messageId);
+    let msgSeq = Math.max(1, Number(params.msg_seq || 1) || 1);
+    if (replyMessageId && typeof helpers.reserveReplySequences === "function") {
+      const needed = Math.max(1, countQqOpenLegacyMessages(params.message));
+      const reservation = await helpers.reserveReplySequences(replyMessageId, target.scope, needed);
+      msgSeq = Number(reservation?.start || msgSeq);
+    }
+    return (await sendQqOpenLegacyMessage(api, target, params.message, { replyMessageId, msgSeq })).data;
   }
   if (name === "delete_msg") {
     const cached = helpers.getCachedMessage && helpers.getCachedMessage(messageId);
     const g = clean(cached && cached.group_id || groupId);
-    if (!g) throw new Error("QQ_OPEN_DELETE_GROUP_MESSAGE_ONLY");
-    return api.deleteGroupMessage(g, messageId, { hideTip: false });
+    if (g) return api.deleteGroupMessage(g, messageId, { hideTip: false });
+    const peer = clean(context.userId || userId);
+    if (!peer || typeof api.deleteC2CMessage !== "function") throw new Error("QQ_OPEN_DELETE_MESSAGE_CONTEXT_MISSING");
+    return api.deleteC2CMessage(peer, messageId);
   }
   if (name === "get_msg") {
     const cached = helpers.getCachedMessage && helpers.getCachedMessage(messageId);
