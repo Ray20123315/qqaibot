@@ -48,3 +48,7 @@ QQ_OPEN_APP_ID=
 QQ_OPEN_CLIENT_SECRET=
 QQ_OPEN_TRANSPORT=websocket
 QQ_OPEN_INTENTS=33554432
+
+# Exact QQ Open user/member OpenIDs allowed to use developer-only commands.
+# This is an authority allowlist, not a numeric QQ mapping.
+QQ_OPEN_DEVELOPER_OPENIDS=
