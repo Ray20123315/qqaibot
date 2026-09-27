@@ -7,7 +7,8 @@ const wrapper = fs.readFileSync("tools/codex-bridge-windows.mjs", "utf8");
 const workflow = fs.readFileSync(".github/workflows/build-codex-bridge-exe.yml", "utf8");
 const pkg = JSON.parse(fs.readFileSync("package.json", "utf8"));
 
-assert.match(runtime, /sessionKey = `qqaibot:\$\{scope\}:user:\$\{context\.userId\}:codex`/);
+assert.match(runtime, /sessionKey = `qqaibot:principal:\$\{principalId\}:codex`/);
+assert.match(runtime, /context\.principalId \|\| context\.userId/);
 assert.doesNotMatch(runtime, /sessionKey = mode === "public"/);
 assert.match(adapter, /sessionKey = `qqaibot:plugin:\$\{pluginId\}:\$\{scope\}:\$\{peer\}:user:\$\{actorId\}:codex`/);
 assert.doesNotMatch(adapter, /sessionKey = mode === "public"/);
