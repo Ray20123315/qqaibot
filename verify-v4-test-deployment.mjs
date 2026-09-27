@@ -21,11 +21,12 @@ for (const forbidden of [
   "569a01fe-3297-40e1-832f-09c3793056ed",
   "[[d1_databases]]",
   "[[routes]]",
+  "[triggers]",
   "ONEBOT_HUB",
   "Vectorize",
   "VECTORIZE"
 ]) {
-  assert(!config.includes(forbidden), `V4 test config must not include production resource: ${forbidden}`);
+  assert(!config.includes(forbidden), `V4 test config must not include production or quota-consuming resource: ${forbidden}`);
 }
 
 assert(!config.includes("QQ_OPEN_CLIENT_SECRET"), "QQ_OPEN_CLIENT_SECRET must stay a Worker Secret");
@@ -33,11 +34,13 @@ assert.match(worker, /productionResources:false/);
 assert.match(worker, /worker:"qqai-v4test"/);
 assert.match(worker, /\/api\/status/);
 assert.match(worker, /\/api\/ensure/);
+assert.match(worker, /連接 \/ 重試/);
 assert.match(worker, /QQ_OPEN_CLIENT_SECRET/);
 assert.match(worker, /!qqping/);
 assert.match(worker, /!qqecho hello/);
 assert.doesNotMatch(worker, /src\/portal\//);
 assert.doesNotMatch(worker, /ONEBOT_HUB/);
 assert.doesNotMatch(worker, /env\.DB/);
+assert.doesNotMatch(worker, /async scheduled/);
 
 console.log("verify-v4-test-deployment: ok");

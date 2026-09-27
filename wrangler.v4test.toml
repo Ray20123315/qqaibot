@@ -16,10 +16,6 @@ class_name = "QqOpenGateway"
 tag = "v4test_qqopen_gateway_v1"
 new_sqlite_classes = ["QqOpenGateway"]
 
-# Test-only watchdog. No production route/domain is attached.
-[triggers]
-crons = ["* * * * *"]
-
 [vars]
 BOT_DISPLAY_NAME = "QQAI V4 Test"
 QQ_OPEN_ENABLED = "true"

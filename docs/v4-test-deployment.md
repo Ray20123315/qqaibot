@@ -10,11 +10,13 @@ The `qqai-v4test` Worker exists only to prove QQ Open Gateway connectivity and n
 - no D1 binding;
 - no Vectorize binding;
 - no OneBot Durable Object;
+- no Cron trigger;
 - its own `QqOpenGateway` Durable Object namespace/migration;
-- a workers.dev/preview URL only;
-- a one-minute test-only watchdog.
+- a workers.dev/preview URL only.
 
 The test entrypoint is `worker.v4test.js`, not `worker.js`.
+
+Cloudflare Connected Builds for the production `qqai` Worker explicitly excludes the `v4-qqopen-native` branch. A separate Cloudflare Build trigger attached to `qqai-v4test` deploys this branch.
 
 ## Credentials
 
@@ -31,6 +33,8 @@ Never place the AppSecret in GitHub, Wrangler vars, Ray_Chen memory, or deployme
 ## Smoke test
 
 Open the `qqai-v4test` workers.dev URL. It reports `OFFLINE / CONNECTING / CONNECTED / READY`.
+
+After setting the Secret, press **連接 / 重試**. There is deliberately no Cron watchdog in the isolated test Worker because this account is already at the Free-plan Cron trigger limit.
 
 When READY:
 
