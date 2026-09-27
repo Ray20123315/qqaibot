@@ -80,25 +80,23 @@ namespace_id = "999"
 PUBLIC_BASE_URL = "https://aibot.ray2025.com"
 BOT_DISPLAY_NAME = "QQAI"
 
+# QQ Open Native V4. Keep QQ_OPEN_CLIENT_SECRET as a Cloudflare Secret.
+QQ_OPEN_ENABLED = "true"
+QQ_OPEN_APP_ID = "1905687174"
+QQ_OPEN_INTENTS = "33554432"
+QQ_OPEN_TRANSPORT = "websocket"
+
 # Deployment notification scope and timing.
 DEPLOY_NOTIFY_WORKER_NAME = "qqai"
 DEPLOY_NOTIFY_BRANCH = "main"
-DEPLOY_NOTIFY_DEVELOPER_IDS = ""
-DEPLOY_NOTIFY_START_COOLDOWN_SECONDS = "600"
 DEPLOY_NOTIFY_SELF_GRACE_SECONDS = "90"
-
-# OneBot HTTP event fallback.
-ENABLE_ONEBOT_HTTP_EVENTS = "false"
 
 # Manual all-group check-in batch concurrency. Automatic midnight check-in is disabled in the lean v2 runtime.
 # Paid-model policy and model lists.
 DEEPSEEK_FLASH_MODEL = "deepseek-v4-flash"
-DEEPSEEK_PRO_MODEL = "deepseek-v4-pro"
 DEEPSEEK_DAILY_BUDGET_CNY = "0.35"
 GEMINI_CHAT_MODELS = "gemini-3.5-flash,gemini-3.1-flash-lite,gemini-3-flash-preview,gemini-2.5-flash,gemini-2.5-flash-lite,gemma-4-26b-a4b-it,gemma-4-31b-it"
 GEMMA_DECISION_MODELS = "gemma-4-26b-a4b-it,gemma-4-31b-it"
-GEMINI_IMAGE_MODELS = ""
-IMAGEN_MODELS = "imagen-4.0-fast-generate-001,imagen-4.0-generate-001,imagen-4.0-ultra-generate-001"
 GEMINI_TTS_MODELS = "gemini-3.1-flash-tts-preview,gemini-2.5-flash-preview-tts"
 GEMINI_LIVE_MODEL = "models/gemini-3.1-flash-live-preview"
 

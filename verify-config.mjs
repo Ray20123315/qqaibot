@@ -39,3 +39,24 @@ assert(!readme.includes('!截图') && !readme.includes('!截圖'), 'Screenshot c
 assert(worker.includes("cleanMessage.startsWith('//')"), 'Same-account // chat trigger must remain');
 assert(worker.includes('isKnownOutboundMessage'), 'Same-account outbound loop protection must remain');
 console.log(`verify-config: ok (${moduleFiles.length} modules, single worker.js entry)`);
+
+const retiredProdVars = [
+  "AUTO_CHECKIN_CONCURRENCY",
+  "AUTO_CHECKIN_ENABLED",
+  "AUTO_CHECKIN_RETRY_INTERVAL_MS",
+  "DEEPSEEK_PRO_MODEL",
+  "DEPLOY_NOTIFY_DEVELOPER_IDS",
+  "DEPLOY_NOTIFY_START_COOLDOWN_SECONDS",
+  "DEVELOPER_ID",
+  "ENABLE_ONEBOT_HTTP_EVENTS",
+  "GEMINI_IMAGE_MODELS",
+  "IMAGEN_MODELS",
+  "PLUGIN_SECURITY_GPT_MODEL"
+];
+for (const name of retiredProdVars) {
+  assert(!wrangler.includes(name + " ="), "retired production var still declared: " + name);
+}
+assert(wrangler.includes('QQ_OPEN_ENABLED = "true"'), "QQ Open production vars missing: QQ_OPEN_ENABLED");
+assert(wrangler.includes('QQ_OPEN_APP_ID = "1905687174"'), "QQ Open production vars missing: QQ_OPEN_APP_ID");
+assert(wrangler.includes('QQ_OPEN_INTENTS = "33554432"'), "QQ Open production vars missing: QQ_OPEN_INTENTS");
+assert(wrangler.includes('QQ_OPEN_TRANSPORT = "websocket"'), "QQ Open production vars missing: QQ_OPEN_TRANSPORT");

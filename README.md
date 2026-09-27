@@ -168,16 +168,13 @@ npx wrangler secret put PORTAL_ADMIN_PASSWORD
 | --- | --- | --- |
 | `DEPLOY_NOTIFY_WORKER_NAME` | `qqai` | 只接受此 Worker 的 Build 事件。 |
 | `DEPLOY_NOTIFY_BRANCH` | `main` | 只接受此分支的部署事件。 |
-| `DEPLOY_NOTIFY_DEVELOPER_IDS` | 空 | 部署失敗通知收件人；空白時使用第一個開發者 QQ。 |
 | `DEPLOY_NOTIFY_DEVELOPER_ID` | 空 | 舊版單一收件人相容欄位。 |
-| `DEPLOY_NOTIFY_START_COOLDOWN_SECONDS` | `600` | 部署開始事件冷卻。 |
 | `DEPLOY_NOTIFY_SELF_GRACE_SECONDS` | `90` | Worker 自我版本確認等待時間，範圍由程式限制。 |
 
 ### OneBot 與自動群打卡
 
 | 變數 | 預設／範圍 | 說明 |
 | --- | --- | --- |
-| `ENABLE_ONEBOT_HTTP_EVENTS` | `false` | 是否允許 OneBot HTTP 事件入口。 |
 
 群打卡由 `qqai.auto-checkin` 官方插件每日自動執行，不提供 QQ 手動執行指令。每批最多 20 群，後續批次延後執行，避免單次 Worker subrequest 過量。
 
@@ -187,12 +184,9 @@ npx wrangler secret put PORTAL_ADMIN_PASSWORD
 | --- | --- |
 | `GEMINI_CHAT_MODELS` | Gemini／Gemma 聊天模型優先序，逗號分隔。 |
 | `GEMMA_DECISION_MODELS` | 分類、審查與低成本決策模型清單。 |
-| `GEMINI_IMAGE_MODELS` | 圖片相關模型清單；空白代表不啟用該路由。 |
-| `IMAGEN_MODELS` | Imagen 模型清單；目前 QQ 指令式生圖未開放。 |
 | `GEMINI_TTS_MODELS` | TTS 模型優先序。 |
 | `GEMINI_LIVE_MODEL` | Gemini Live 模型。 |
 | `DEEPSEEK_FLASH_MODEL` | DeepSeek 低成本模型名稱。 |
-| `DEEPSEEK_PRO_MODEL` | DeepSeek 高能力模型名稱。 |
 | `DEEPSEEK_DAILY_BUDGET_CNY` | 每日 DeepSeek 預算上限；請依帳務需求設定。 |
 
 模型名稱會隨供應商變動。不存在或無權限的模型會造成 fallback 或錯誤，更新前應先在供應商控制台確認。
@@ -228,6 +222,7 @@ Secrets 不可放在 `[vars]`、README 範例值、Portal 回應、Git log 或�
 | `DEEPSEEK_API_KEYS` | DeepSeek Key 池。 |
 | `ONEBOT_ACCESS_TOKEN` | NapCat WebSocket 驗證 Token。 |
 | `CODEX_BRIDGE_ACCESS_TOKEN` | 本地 Codex bridge 專用 WebSocket Bearer Token；不可與 OneBot Token 共用。 |
+| `QQ_OPEN_CLIENT_SECRET` | QQ Open Platform AppSecret；正式 V4 Gateway 必要。 |
 | `ONEBOT_HTTP_URL` | 可選 OneBot HTTP 備援網址。若含憑證資訊仍應視為 Secret。 |
 | `ONEBOT_HTTP_ACCESS_TOKEN` | HTTP 備援 Token。 |
 | `PORTAL_AUTH_SECRET` | Portal 敏感資料與登入相關加密。 |
