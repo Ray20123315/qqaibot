@@ -26,7 +26,7 @@ assert.equal(directCodexResult.text, "Codex 分析結果");
 assert.equal(directCodexPayload.payload.model, "gpt-6-sol");
 assert.equal(directCodexPayload.payload.reasoningEffort, "xhigh");
 assert.equal(directCodexPayload.payload.originalPromptOnly, false);
-assert.equal(directCodexPayload.payload.sessionKey, "qqaibot:plugin:official.member-speech-analysis:group:800:developer:90000:chat");
+assert.equal(directCodexPayload.payload.sessionKey, "qqaibot:plugin:official.member-speech-analysis:group:800:user:90000:codex");
 assert.match(directCodexPayload.payload.contextHash, /^[a-f0-9]{64}$/);
 assert.equal(directCodexPayload.payload.messages[0].role, "system");
 assert.equal(directCodexPayload.payload.messages.at(-1).content, "樣本內容");
