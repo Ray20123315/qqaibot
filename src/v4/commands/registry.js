@@ -21,10 +21,28 @@ function createCommandRegistry(definitions = []) {
     const items = list({ scope }).filter(command => command.panel.enabled).slice(0, Math.max(1, Math.min(20, Number(maxItems) || 20))).map(command => ({ type: "command", name: command.panel.command.slice(0, 14), desc: command.panel.desc.slice(0, 30), ...(command.panel.onlyAdmin ? { only_admin: true } : {}) }));
     return Object.freeze({ scope, target_type: "all", panel: Object.freeze({ items: Object.freeze(items), remark: text(remark).slice(0, 255) }) });
   }
+  function buildPanels(scope, { remarkPrefix = "QQAIBOT V4", maxItemsPerPanel = 20 } = {}) {
+    if (!COMMAND_SCOPES.includes(scope)) throw new Error("V4_COMMAND_INVALID_SCOPE");
+    const limit = Math.max(1, Math.min(20, Number(maxItemsPerPanel) || 20));
+    const rows = list({ scope }).filter(command => command.panel.enabled);
+    const panels = [];
+    for (let offset = 0; offset < rows.length; offset += limit) {
+      const page = rows.slice(offset, offset + limit);
+      panels.push(Object.freeze({
+        scope,
+        target_type: "all",
+        panel: Object.freeze({
+          items: Object.freeze(page.map(command => ({ type: "command", name: command.panel.command.slice(0, 14), desc: command.panel.desc.slice(0, 30), ...(command.panel.onlyAdmin ? { only_admin: true } : {}) }))),
+          remark: `${text(remarkPrefix).slice(0, 220)} ${panels.length + 1}`.trim()
+        })
+      }));
+    }
+    return Object.freeze(panels);
+  }
   function buildMenu({ maxItems = 10 } = {}) {
     const items = [...commands.values()].filter(command => command.menu.enabled).slice(0, Math.max(1, Math.min(10, Number(maxItems) || 10))).map(command => ({ name: (command.menu.name || command.aliases[0]).slice(0, 10), type: command.menu.type, ...(command.menu.type === "link" ? { link: command.menu.value } : { send_message: command.menu.value }) }));
     return Object.freeze({ items: Object.freeze(items) });
   }
-  return Object.freeze({ get, resolve, list, buildPanel, buildMenu, size: commands.size });
+  return Object.freeze({ get, resolve, list, buildPanel, buildPanels, buildMenu, size: commands.size });
 }
 export { COMMAND_SCOPES, createCommandRegistry, defineCommand };
