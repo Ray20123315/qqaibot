@@ -5,6 +5,7 @@ import { fromQqOpenEvent } from "./events.js";
 import { qqOpenJoinRequestToLegacyBody, qqOpenLegacyAction, qqOpenMessageToLegacyBody, sendQqOpenLegacyMessage } from "./legacy-bridge.js";
 import { syncQqOpenDiscovery } from "./discovery.js";
 import { qqOpenClosePolicy, qqOpenDeliveryKey, qqOpenPassiveReplyPolicy, qqOpenShard } from "./protocol.js";
+import { interactionControlAction, interactionDeliveryKey, normalizeInteractionEvent, normalizePushPermissionEvent, parseFeatureCommandMap } from "./official-events.js";
 import {
   QQ_OPEN_OPCODE,
   createGatewayState,
@@ -100,6 +101,11 @@ function defaultPersistedState() {
     lastApplicationKind: "",
     messageCache: [],
     joinRequestCache: [],
+    pushPermissions: [],
+    interactionCount: 0,
+    interactionAckCount: 0,
+    lastInteraction: null,
+    lastOfficialStateEvent: null,
     recentDeliveries: [],
     replyUsage: [],
     duplicateDropCount: 0,
@@ -208,6 +214,13 @@ export class QqOpenGateway {
       heartbeatHealthy: !this.persisted.lastHeartbeatSentAt || Number(this.persisted.gateway?.lastAckAt || 0) >= Number(this.persisted.lastHeartbeatSentAt || 0),
       duplicateDropCount: Number(this.persisted.duplicateDropCount || 0),
       passiveReplyOrigins: Array.isArray(this.persisted.replyUsage) ? this.persisted.replyUsage.length : 0,
+      pushPermissions: Array.isArray(this.persisted.pushPermissions) ? this.persisted.pushPermissions.slice(0, 50) : [],
+      interaction: {
+        count: Number(this.persisted.interactionCount || 0),
+        ackCount: Number(this.persisted.interactionAckCount || 0),
+        last: this.persisted.lastInteraction || null
+      },
+      lastOfficialStateEvent: this.persisted.lastOfficialStateEvent || null,
       gatewayMeta: this.persisted.gatewayMeta || {},
       discovery: {
         enabled: truthy(this.env.QQ_OPEN_DISCOVERY_SYNC),
@@ -517,6 +530,216 @@ export class QqOpenGateway {
     }
   }
 
+  featureCommandMap() {
+    return parseFeatureCommandMap(this.env.QQ_OPEN_FEATURE_COMMAND_MAP || "");
+  }
+
+  upsertPushPermission(record) {
+    if (!record?.targetId) return;
+    const key = String(record.scope || "") + ":" + String(record.targetId || "");
+    const rows = Array.isArray(this.persisted.pushPermissions) ? this.persisted.pushPermissions : [];
+    this.persisted.pushPermissions = [
+      { ...record, key },
+      ...rows.filter(item => String(item?.key || "") !== key)
+    ].slice(0, 200);
+    this.persisted.lastOfficialStateEvent = {
+      kind: "push_permission",
+      eventType: String(record.eventType || ""),
+      scope: String(record.scope || ""),
+      targetId: String(record.targetId || ""),
+      allowed: Boolean(record.allowed),
+      at: Number(record.updatedAt || Date.now())
+    };
+  }
+
+  async forwardControl(payload) {
+    const response = await this.oneBotHub().fetch("https://onebot-hub/v4/qqopen/control", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload || {})
+    });
+    const text = await response.text();
+    let data = null;
+    try { data = text ? JSON.parse(text) : null; } catch {}
+    if (!response.ok || data?.ok === false) throw new Error(String(data?.error || text || "QQ_OPEN_CONTROL_FAILED").slice(0, 500));
+    return data || { ok: true };
+  }
+
+  async sendInteractionEventReply(interaction, value) {
+    const content = String(value || "").trim();
+    if (!content || !interaction?.id) return null;
+    const body = { content, msg_type: 0, event_id: String(interaction.id) };
+    if (interaction.scene === "group" && interaction.groupId) {
+      return this.api().sendGroupMessage(interaction.groupId, body);
+    }
+    if (interaction.scene === "c2c" && interaction.userId) {
+      return this.api().sendC2CMessage(interaction.userId, body);
+    }
+    return null;
+  }
+
+  interactionLegacyBody(interaction) {
+    const command = String(interaction?.command || "").trim();
+    if (!command || !interaction?.userId) return null;
+    const group = interaction.scene === "group";
+    return {
+      time: Math.floor(Number(interaction.timestamp || Date.now()) / 1000),
+      self_id: String(this.persisted.botUserId || ""),
+      post_type: "message",
+      message_type: group ? "group" : "private",
+      sub_type: group ? "normal" : "friend",
+      message_id: "",
+      user_id: String(interaction.userId || ""),
+      group_id: group ? String(interaction.groupId || "") : "",
+      raw_message: command,
+      message: [{ type: "text", data: { text: command } }],
+      sender: { user_id: String(interaction.userId || ""), nickname: String(interaction.userId || ""), role: "member" },
+      __qqai_platform: "qq-open",
+      __qqai_explicit_question: true,
+      __qqai_qqopen_event_type: "INTERACTION_CREATE",
+      __qqai_qqopen_event_id: String(interaction.id || ""),
+      __qqai_principal_id: String(interaction.userId || ""),
+      __qqai_skip_plugins: true,
+      __qqai_capture_message_sends: true
+    };
+  }
+
+  async handlePushPermissionEvent(payload) {
+    const record = normalizePushPermissionEvent(payload);
+    if (!record) return false;
+    const key = ["PUSH", record.eventType, record.targetId, record.updatedAt].join("|");
+    if (this.deliverySeen(key)) {
+      this.persisted.duplicateDropCount = Number(this.persisted.duplicateDropCount || 0) + 1;
+      await this.persist();
+      return true;
+    }
+    this.upsertPushPermission(record);
+    await this.rememberDelivery(key);
+    await this.forwardControl({
+      action: "push_permission",
+      scope: record.scope,
+      targetId: record.targetId,
+      allowed: record.allowed,
+      operatorId: record.operatorId,
+      eventType: record.eventType,
+      updatedAt: record.updatedAt
+    }).catch(error => this.recordError(error));
+    await this.persist();
+    return true;
+  }
+
+  async handleInteractionEvent(payload) {
+    const interaction = normalizeInteractionEvent(payload, { featureMap: this.featureCommandMap() });
+    if (!interaction) return false;
+    const key = interactionDeliveryKey(interaction);
+    if (key && this.deliverySeen(key)) {
+      this.persisted.duplicateDropCount = Number(this.persisted.duplicateDropCount || 0) + 1;
+      await this.persist();
+      return true;
+    }
+
+    this.persisted.interactionCount = Number(this.persisted.interactionCount || 0) + 1;
+    this.persisted.lastInteraction = {
+      id: String(interaction.id || ""),
+      type: Number(interaction.type || 0),
+      scene: String(interaction.scene || ""),
+      userId: String(interaction.userId || ""),
+      groupId: String(interaction.groupId || ""),
+      command: String(interaction.command || ""),
+      at: Number(interaction.timestamp || Date.now())
+    };
+
+    if (interaction.requiresAck && interaction.id) {
+      await this.api().respondInteraction(interaction.id, 0);
+      this.persisted.interactionAckCount = Number(this.persisted.interactionAckCount || 0) + 1;
+    }
+
+    const action = interactionControlAction(interaction);
+    if (action === "command") {
+      const body = this.interactionLegacyBody(interaction);
+      const result = body ? await this.forwardLegacyBody(body) : null;
+      const chunks = Array.isArray(result?.reply_chunks) && result.reply_chunks.length
+        ? result.reply_chunks
+        : result?.reply ? [result.reply] : [];
+      const reply = chunks.map(value => String(value || "").trim()).filter(Boolean).join("\n\n").slice(0, 3800);
+      if (reply) await this.sendInteractionEventReply(interaction, reply);
+      this.persisted.lastApplicationAt = Date.now();
+      this.persisted.lastApplicationKind = "interaction_command";
+    } else if (action === "feedback") {
+      await this.forwardControl({
+        action,
+        scene: interaction.scene,
+        userId: interaction.userId,
+        groupId: interaction.groupId,
+        interactionId: interaction.id,
+        messageId: interaction.resolved.messageId,
+        feedback: interaction.resolved.feedbackOpt,
+        checked: interaction.resolved.checked,
+        updatedAt: interaction.timestamp
+      });
+    } else if (action === "clear_session") {
+      await this.forwardControl({
+        action,
+        scene: interaction.scene,
+        userId: interaction.userId,
+        groupId: interaction.groupId,
+        interactionId: interaction.id,
+        updatedAt: interaction.timestamp
+      });
+    } else if (action === "switch_model") {
+      await this.forwardControl({
+        action,
+        scene: interaction.scene,
+        userId: interaction.userId,
+        groupId: interaction.groupId,
+        interactionId: interaction.id,
+        model: interaction.resolved.action,
+        updatedAt: interaction.timestamp
+      });
+    } else if (action === "authorization") {
+      const scope = interaction.resolved.authorizeScope;
+      if ((interaction.type === 18 || interaction.type === 19) && scope) {
+        const targetId = scope === "group_push" ? interaction.groupId : interaction.userId;
+        if (targetId) {
+          const record = {
+            kind: "push_permission",
+            eventType: "INTERACTION_AUTHORIZE",
+            scope: scope === "group_push" ? "group" : "c2c",
+            targetId,
+            operatorId: interaction.userId,
+            allowed: true,
+            updatedAt: interaction.timestamp
+          };
+          this.upsertPushPermission(record);
+          await this.forwardControl({ action: "push_permission", ...record }).catch(error => this.recordError(error));
+        }
+      }
+      await this.forwardControl({
+        action: "authorization",
+        scene: interaction.scene,
+        userId: interaction.userId,
+        groupId: interaction.groupId,
+        targetId: interaction.groupId || interaction.userId,
+        detail: interaction.resolved,
+        updatedAt: interaction.timestamp
+      }).catch(error => this.recordError(error));
+    } else {
+      await this.forwardControl({
+        action,
+        scene: interaction.scene,
+        userId: interaction.userId,
+        groupId: interaction.groupId,
+        targetId: interaction.groupId || interaction.userId,
+        detail: interaction.resolved,
+        updatedAt: interaction.timestamp
+      }).catch(error => this.recordError(error));
+    }
+
+    if (key) await this.rememberDelivery(key);
+    await this.persist();
+    return true;
+  }
+
   cachedMessage(id) {
     const key = String(id || "");
     return (Array.isArray(this.persisted.messageCache) ? this.persisted.messageCache : []).find(item => String(item?.message_id || "") === key) || null;
@@ -638,6 +861,9 @@ export class QqOpenGateway {
   }
 
   async handleDispatch(payload) {
+    if (await this.handlePushPermissionEvent(payload)) return;
+    if (await this.handleInteractionEvent(payload)) return;
+
     const message = fromQqOpenEvent(payload);
     if (message) {
       const deliveryKey = qqOpenDeliveryKey(payload, message);
