@@ -5,7 +5,7 @@ import { AI_MEDIA_LIMITS, DEFAULTS, VERSION, classifyOperationalFailure } from "
 import { publicBaseUrl } from "./src/config/deployment.js";
 import { consumeManualRuleCheckRate, developerIds, isDeveloperId, latestConversationMessageForUser, recentConversationMessagesForUser, stripGroupAiOptOutPrefix } from "./src/core/identity.js";
 import { appendIndex, buildLongGroupConversationContext, callOneBotAction, checkRuntimeRateLimit, getEffectivePermissions, isKnownOutboundMessage, markOutboundPending, markRuntimeRateLimitCompletion, modelPreferenceLabel, normalizeMemoryItems, normalizeModelPreference, normalizePermissionName, permissionLabel, removeFromIndex, setExplicitPermission, updateAiDecisionLog, writeAiDecisionLog, writeSystemAudit } from "./src/core/permissions.js";
-import { appendChatHistoryTurn, clearChatSessionHistory, dbDel, dbGet, dbPut, readChatHistory, withTimeout } from "./src/data/store.js";
+import { appendChatHistoryTurn, clearChatSessionHistory, dbAppendJsonArrayCapped, dbDel, dbGet, dbPut, readChatHistory, withTimeout } from "./src/data/store.js";
 import { getDeploymentStatusForViewer, handleDeploymentBuildQueue, injectDeploymentPortalClient } from "./src/deployment/notifications.js";
 import { botCanRunRuleMonitor, getBotGroupRole, getGroupFamilyForGroup, getGroupJoinPage, isVerifiedGroupOwner } from "./src/group/runtime.js";
 import { buildHealthState } from "./src/health/runtime.js";
@@ -34,6 +34,7 @@ import { executeCodexUserCommand } from "./src/v3/ai/codex-command-runtime.js";
 import { readPublicCodexQuota } from "./src/v3/ai/codex-policy.js";
 import { dispatchV3RuntimeEvent, handleV3RuntimeFetch, runV3RuntimeScheduled } from "./src/v3/runtime/bridge.js";
 import { getQqOpenGateway, qqOpenConfigured, qqOpenEnabled } from "./src/v4/qqopen/runtime.js";
+import { hybridObservationRow, hybridStatus, isAuxiliaryOneBotMessage, qqOpenGroupForOneBot } from "./src/v4/hybrid/ownership.js";
 import { handleV4QqOpenPortalApi } from "./src/v4/portal/api.js";
 import { injectV4LeanPortalClient } from "./src/v4/portal/lean-dashboard.js";
 import { handleV3PluginManagerApi, injectV3PluginManagerClient } from "./src/v3/portal/plugin-manager.js";
@@ -3934,6 +3935,64 @@ export class OneBotHub {
     return overlay;
   }
 
+  async recordAuxiliaryOneBotObservation(body) {
+    const isGroup = String(body?.message_type || "") === "group";
+    const oneBotGroupId = isGroup ? String(body?.group_id || "") : "";
+    const mappedQqOpenGroupId = isGroup ? qqOpenGroupForOneBot(this.env, oneBotGroupId) : "";
+    const text = eventPlainText(body).trim() || extractMessageText(body?.message || body?.raw_message || "");
+    const mentions = eventMentionedQqs(body);
+    const mediaTypes = extractOutboundMediaTypes(body?.message || body?.raw_message || "");
+    const row = hybridObservationRow(body, { mappedQqOpenGroupId, text, mentions, mediaTypes });
+
+    const tasks = [];
+    if (isGroup && oneBotGroupId) {
+      tasks.push(recordStructuredMessage(this.env, {
+        messageId: row.messageId,
+        groupId: oneBotGroupId,
+        senderId: row.userId,
+        senderName: row.senderName,
+        text: row.text,
+        mentions: row.mentions,
+        source: "onebot_auxiliary",
+        createdAt: row.observedAt
+      }));
+      if (mappedQqOpenGroupId) {
+        tasks.push(recordStructuredMessage(this.env, {
+          messageId: row.messageId ? "onebot:" + row.messageId : "",
+          groupId: mappedQqOpenGroupId,
+          senderId: row.userId,
+          senderName: row.senderName,
+          text: row.text,
+          mentions: row.mentions,
+          source: "onebot_auxiliary_mirror",
+          createdAt: row.observedAt
+        }));
+      }
+      if (row.userId) {
+        tasks.push(upsertGroupMember(this.env, oneBotGroupId, {
+          qq: row.userId,
+          name: row.senderName || row.userId,
+          role: row.senderRole || "member",
+          groupName: String(body?.group_name || oneBotGroupId)
+        }));
+      }
+    }
+
+    const auxKey = isGroup ? `hybrid_aux_events:group:${oneBotGroupId || "unknown"}` : `hybrid_aux_events:private:${row.userId || "unknown"}`;
+    tasks.push(dbAppendJsonArrayCapped(this.env, auxKey, row, 240));
+    if (mappedQqOpenGroupId) {
+      tasks.push(dbAppendJsonArrayCapped(this.env, `hybrid_aux_events:qqopen-group:${mappedQqOpenGroupId}`, row, 240));
+    }
+    await Promise.all(tasks.map(task => Promise.resolve(task).catch(() => null)));
+    await this.recordIngress(body, "hybrid_auxiliary_observed", {
+      explicit: eventHasBotMention(body),
+      force: true,
+      mappedQqOpenGroupId,
+      primary: "qq-open"
+    }).catch(() => {});
+    return row;
+  }
+
   socketAttachment(socket) {
     try { return socket?.deserializeAttachment?.() || {}; } catch { return {}; }
   }
@@ -4275,6 +4334,7 @@ export class OneBotHub {
         lastSocketError: this.socketDiagnostics?.lastError || null,
         recentSocketEvents: Array.isArray(this.socketDiagnostics?.history) ? this.socketDiagnostics.history.slice(-8) : [],
         recentGroupIngress,
+        hybrid: hybridStatus(this.env),
         queues: this.queueSnapshot()
       });
     }
@@ -4658,6 +4718,11 @@ export class OneBotHub {
         }).catch(() => {});
         return;
       }
+    }
+
+    if (isAuxiliaryOneBotMessage(this.env, body)) {
+      await this.recordAuxiliaryOneBotObservation(body);
+      return;
     }
 
     const v3PluginBody = body && typeof body === "object" ? { ...body } : body;
