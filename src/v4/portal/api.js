@@ -101,6 +101,20 @@ async function handleV4QqOpenPortalApi(request, env, url = null) {
     });
   }
 
+  if (request.method === "POST" && path === "/gateway/connect") {
+    if (!env.QQ_OPEN_GATEWAY) return jsonResponse({ ok: false, message: "QQ Open Gateway 尚未绑定。" }, 503);
+    const response = await getQqOpenGateway(env).fetch("https://qq-open-gateway/api/v4/qqopen/connect", { method: "POST" });
+    const data = await response.json().catch(() => ({}));
+    return jsonResponse(data, response.status);
+  }
+
+  if (request.method === "POST" && path === "/gateway/disconnect") {
+    if (!env.QQ_OPEN_GATEWAY) return jsonResponse({ ok: false, message: "QQ Open Gateway 尚未绑定。" }, 503);
+    const response = await getQqOpenGateway(env).fetch("https://qq-open-gateway/api/v4/qqopen/disconnect", { method: "POST" });
+    const data = await response.json().catch(() => ({}));
+    return jsonResponse(data, response.status);
+  }
+
   if (!qqOpenConfigured(env)) return jsonResponse({ ok: false, message: "QQ Open AppID/AppSecret 尚未配置。" }, 409);
   const api = apiFor(env);
 
