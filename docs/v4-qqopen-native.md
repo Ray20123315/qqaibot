@@ -74,3 +74,43 @@ The production V4 runtime now treats QQ Open delivery semantics as authoritative
 - Optional `QQ_OPEN_DISCOVERY_SYNC=true` synchronizes the V4 global menu and C2C/group command panels after READY/RESUMED.
 
 The production baseline remains `QQ_OPEN_INTENTS=33554432`. Additional event intents are only enabled after the QQ application is confirmed to have those permissions.
+
+
+## Hybrid ownership
+
+The production design intentionally keeps OneBot/NapCat.
+
+QQ Open owns official interactive side effects. OneBot remains an auxiliary observation/capability source. Ownership is conservative:
+
+- C2C OneBot messages are auxiliary when QQ Open is primary.
+- Group messages that explicitly mention the bot are auxiliary because QQ Open receives the corresponding group-at event.
+- Ordinary OneBot group messages remain on the legacy path until the mapped QQ Open group has actually emitted `GROUP_MESSAGE_CREATE`.
+- Receipt of `GROUP_MESSAGE_CREATE` writes an official-full-group evidence key. After that, mapped OneBot group message events are observation-only.
+- `QQ_HYBRID_GROUP_MAP` is the only accepted mapping from numeric OneBot group ids to QQ `group_openid`; no inference is performed.
+
+Auxiliary OneBot events continue to update structured observation/history data but stop before V3 plugin dispatch and the AI/application side-effect path.
+
+## Active push ownership
+
+`C2C_MSG_RECEIVE/REJECT` and `GROUP_MSG_RECEIVE/REJECT` update persistent active-push permission records.
+
+Informational group schedules and active-speaking messages prefer QQ Open only when:
+1. QQ Open is the hybrid primary;
+2. the numeric group has an explicit `group_openid` mapping;
+3. the mapped group currently has official active-push permission;
+4. the outgoing legacy message does not contain numeric QQ mentions.
+
+Otherwise the existing OneBot send path remains the fallback.
+
+## Interaction
+
+`INTERACTION_CREATE` support is implemented but permission-gated.
+
+- types 11/12: ACK once, then decode known callback command and run the existing shared application runtime;
+- type 13: record feedback;
+- type 14: clear private session history; shared group history is not blindly deleted;
+- type 16: map the model action through the existing model-preference logic;
+- types 18/19/20: record authorization state/events;
+- unknown/unmapped callbacks are acknowledged/recorded but are never guessed into commands.
+
+The current default Intent remains `33554432`. Only after the QQ application is granted INTERACTION permission should it be changed to `100663296`.

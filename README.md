@@ -488,3 +488,36 @@ QQ_OPEN_DISCOVERY_SYNC = "true"
 `QQ_OPEN_DISCOVERY_SYNC=true` 時，Gateway 在 READY／RESUMED 後以 V4 Command Registry 同步全域自訂選單與 C2C／群聊指令面板。同步有 fingerprint 去重，且只清理由 QQAIBOT V4 自己建立、remark 以 `QQAIBOT V4` 開頭的面板，不會刪除其他應用面板。測試 Worker 預設不開此功能，避免和正式環境同時修改同一個 QQ Bot UI。
 
 目前 `QQ_OPEN_INTENTS=33554432` 保留已驗證的 C2C／群聊訊息基線。其他事件 Intent 必須先確認 QQ 開放平台已授權，再擴大 bitmask；避免因未授權 Intent 造成 Gateway 4014。
+
+
+### Hybrid QQ Open + OneBot
+
+QQAIBOT V4 不会直接删除 NapCat/OneBot。生产目标是混合模式：
+
+- QQ Open 是官方主通道，负责官方支持的消息、AI/Codex 回答、富媒体、Interaction、群管理与主动推送。
+- NapCat/OneBot 保留为辅助观测与旧能力通道，补官方暂时无法提供的客户端级事件/资料。
+- 私聊和明确 @ 机器人消息由 QQ Open 拥有；OneBot 对应消息只入库观察，不重复执行插件/AI/群管。
+- 普通群消息不会因为“计划使用官方全量”就直接禁用 OneBot。只有某个 `group_openid` 实际收到过 `GROUP_MESSAGE_CREATE` 后，才动态标记该群的官方全量已生效，并让映射群的 OneBot 普通消息降级为辅助观测。
+- 数字 QQ 群号和 `group_openid` 绝不猜测对应关系，需显式设置 `QQ_HYBRID_GROUP_MAP`。
+- 排程/主动插话：只有存在群映射且官方 `GROUP_MSG_RECEIVE` / 授权状态允许时走 QQ Open；否则保留 OneBot fallback。含数字 QQ @mention 的旧排程仍走 OneBot，避免把数字 QQ 当成 OpenID。
+
+示例：
+
+```text
+QQ_HYBRID_PRIMARY=qq-open
+QQ_HYBRID_GROUP_MAP={"808882936":"你的_group_openid"}
+```
+
+Interaction 支持已经实现，但 Intent 不会自动打开。当前生产基线仍为：
+
+```text
+QQ_OPEN_INTENTS=33554432
+```
+
+只有 QQ 开放平台确认应用具有 `INTERACTION (1<<26)` 权限时，才改成：
+
+```text
+QQ_OPEN_INTENTS=100663296
+```
+
+按钮/快捷菜单 callback 可以直接使用 `!指令`、JSON/Base64 JSON 内的 `command`，或通过 `QQ_OPEN_FEATURE_COMMAND_MAP` 显式将 `feature_id` 映射到现有命令。未知 callback 只 ACK/记录，不猜测执行内容。
