@@ -1,7 +1,10 @@
-import { createQqOpenActionDispatcher } from "../platform/actions.js";\nimport { createInitialCommandRegistry } from "../commands/catalog.js";
+import { createQqOpenActionDispatcher } from "../platform/actions.js";
+import { createInitialCommandRegistry } from "../commands/catalog.js";
 import { createQqOpenApiClient } from "./api.js";
 import { fromQqOpenEvent } from "./events.js";
-import { qqOpenJoinRequestToLegacyBody, qqOpenLegacyAction, qqOpenMessageToLegacyBody, sendQqOpenLegacyMessage } from "./legacy-bridge.js";\nimport { syncQqOpenDiscovery } from "./discovery.js";\nimport { qqOpenClosePolicy, qqOpenDeliveryKey, qqOpenPassiveReplyPolicy, qqOpenShard } from "./protocol.js";
+import { qqOpenJoinRequestToLegacyBody, qqOpenLegacyAction, qqOpenMessageToLegacyBody, sendQqOpenLegacyMessage } from "./legacy-bridge.js";
+import { syncQqOpenDiscovery } from "./discovery.js";
+import { qqOpenClosePolicy, qqOpenDeliveryKey, qqOpenPassiveReplyPolicy, qqOpenShard } from "./protocol.js";
 import {
   QQ_OPEN_OPCODE,
   createGatewayState,
@@ -14,7 +17,8 @@ import {
 const QQ_OPEN_GATEWAY_STORAGE_KEY = "v4:qqopen:gateway";
 const DEFAULT_QQ_OPEN_INTENTS = 1 << 25;
 const DEFAULT_RECONNECT_MS = 5000;
-const CONNECT_TIMEOUT_MS = 20000;\nconst QQ_OPEN_COMMAND_REGISTRY = createInitialCommandRegistry();
+const CONNECT_TIMEOUT_MS = 20000;
+const QQ_OPEN_COMMAND_REGISTRY = createInitialCommandRegistry();
 
 function truthy(value) {
   return /^(?:1|true|yes|on|enabled)$/i.test(String(value ?? "").trim());
@@ -48,6 +52,10 @@ function stripBotMention(value) {
 function buildConnectivityReply(message) {
   const input = stripBotMention(message?.text || "");
   if (/^!qqping$/i.test(input)) return "QQ Open V4 已连接并可回话。";
+  if (/^!qqid$/i.test(input)) {
+    if (message?.scope !== "private") return "为了避免在群聊公开 OpenID，请私聊机器人发送 !qqid。";
+    return `你的 QQ OpenID：${String(message?.userId || "").trim() || "未知"}`;
+  }
   const echo = input.match(/^!qqecho(?:\s+([\s\S]*))?$/i);
   if (echo) {
     const value = String(echo[1] || "").trim();
@@ -92,6 +100,13 @@ function defaultPersistedState() {
     lastApplicationKind: "",
     messageCache: [],
     joinRequestCache: [],
+    recentDeliveries: [],
+    replyUsage: [],
+    duplicateDropCount: 0,
+    gatewayMeta: {},
+    lastDiscoverySyncAt: 0,
+    lastDiscoverySyncFingerprint: "",
+    lastDiscoverySyncError: "",
     lastReplyAt: 0,
     lastReplyId: "",
     lastHeartbeatSentAt: 0,
@@ -117,6 +132,7 @@ export class QqOpenGateway {
     this.connectTimeoutTimer = null;
     this.connectPromise = null;
     this.eventTasks = new Set();
+    this.inflightDeliveries = new Set();
     this.persisted = defaultPersistedState();
 
     this.ready = Promise.resolve();
@@ -187,7 +203,18 @@ export class QqOpenGateway {
       lastError: String(this.persisted.lastError || ""),
       reconnectCount: Number(this.persisted.reconnectCount || 0),
       connectCount: Number(this.persisted.connectCount || 0),
-      failureStreak: Number(this.persisted.failureStreak || 0)
+      failureStreak: Number(this.persisted.failureStreak || 0),
+      lastHeartbeatAckAt: Number(this.persisted.gateway?.lastAckAt || 0),
+      heartbeatHealthy: !this.persisted.lastHeartbeatSentAt || Number(this.persisted.gateway?.lastAckAt || 0) >= Number(this.persisted.lastHeartbeatSentAt || 0),
+      duplicateDropCount: Number(this.persisted.duplicateDropCount || 0),
+      passiveReplyOrigins: Array.isArray(this.persisted.replyUsage) ? this.persisted.replyUsage.length : 0,
+      gatewayMeta: this.persisted.gatewayMeta || {},
+      discovery: {
+        enabled: truthy(this.env.QQ_OPEN_DISCOVERY_SYNC),
+        lastSyncAt: Number(this.persisted.lastDiscoverySyncAt || 0),
+        fingerprint: String(this.persisted.lastDiscoverySyncFingerprint || ""),
+        lastError: String(this.persisted.lastDiscoverySyncError || "")
+      }
     });
   }
 
@@ -233,7 +260,8 @@ export class QqOpenGateway {
       try {
         const data = await qqOpenLegacyAction(this.api(), payload.action, payload.params || {}, payload.context || {}, {
           getCachedMessage: id => this.cachedMessage(id),
-          getCachedJoinRequest: id => this.cachedJoinRequest(id)
+          getCachedJoinRequest: id => this.cachedJoinRequest(id),
+          reserveReplySequences: (messageId, scope, count) => this.reserveReplySequences(messageId, scope, count)
         });
         return Response.json({ ok: true, data });
       } catch (error) {
@@ -288,7 +316,9 @@ export class QqOpenGateway {
 
     const api = this.api();
     this.accessToken = await api.getAccessToken();
-    const gatewayInfo = await api.getGateway();
+    let gatewayInfo;
+    try { gatewayInfo = await api.getGatewayBot(); }
+    catch { gatewayInfo = await api.getGateway(); }
     const gatewayUrl = String(gatewayInfo?.url || "").trim();
     if (!/^wss:\/\//i.test(gatewayUrl)) throw new Error("QQ_OPEN_GATEWAY_URL_INVALID");
 
@@ -296,6 +326,11 @@ export class QqOpenGateway {
     const generation = ++this.socketGeneration;
     this.socket = socket;
     this.persisted.gatewayUrl = gatewayUrl;
+    this.persisted.gatewayMeta = {
+      recommendedShards: Math.max(1, Number(gatewayInfo?.shards || 1) || 1),
+      configuredShard: qqOpenShard(this.env),
+      sessionStartLimit: gatewayInfo?.session_start_limit || null
+    };
     this.persisted.connectCount = Number(this.persisted.connectCount || 0) + 1;
     await this.persist();
 
@@ -387,12 +422,14 @@ export class QqOpenGateway {
       this.persisted.failureStreak = 0;
       this.persisted.lastError = "";
       await this.persist();
+      this.track(this.syncDiscoveryIfNeeded());
       return;
     }
 
     if (eventType === "RESUMED") {
       this.persisted.gateway = reduceGatewayPayload(this.persisted.gateway, payload);
       await this.persist();
+      this.track(this.syncDiscoveryIfNeeded());
       return;
     }
 
