@@ -34,5 +34,7 @@ jobs:
         run: npm run check:v3
       - name: Run V4 QQ Open regression checks
         run: npm run check:v4
+      - name: Run isolated V4 test deployment checks
+        run: npm run check:v4test
       - name: Build the single Worker bundle
         run: npm run check:bundle
