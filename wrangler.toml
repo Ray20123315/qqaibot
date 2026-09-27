@@ -88,6 +88,10 @@ QQ_OPEN_TRANSPORT = "websocket"
 QQ_OPEN_SHARD_ID = "0"
 QQ_OPEN_SHARD_TOTAL = "1"
 QQ_OPEN_DISCOVERY_SYNC = "true"
+# QQ Open owns interactive side effects; OneBot/NapCat remains auxiliary observation.
+QQ_HYBRID_PRIMARY = "qq-open"
+# Explicit numeric OneBot group id -> QQ group_openid mapping. Never infer it.
+QQ_HYBRID_GROUP_MAP = "{}"
 
 # Deployment notification scope and timing.
 DEPLOY_NOTIFY_WORKER_NAME = "qqai"

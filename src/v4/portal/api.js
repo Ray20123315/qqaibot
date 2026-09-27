@@ -1,6 +1,7 @@
 import { isDeveloperId } from "../../core/identity.js";
 import { getPortalSession, jsonResponse, readCookie } from "../../portal/auth.js";
 import { createQqOpenApiClient } from "../qqopen/api.js";
+import { hybridStatus } from "../hybrid/ownership.js";
 import { getQqOpenGateway, qqOpenConfigured, qqOpenEnabled } from "../qqopen/runtime.js";
 
 const BASE = "/api/portal/v4/qqopen";
@@ -84,6 +85,7 @@ async function handleV4QqOpenPortalApi(request, env, url = null) {
       enabled: qqOpenEnabled(env),
       configured: qqOpenConfigured(env),
       gateway,
+      hybrid: hybridStatus(env),
       media: {
         receive: ["text", "image", "video", "audio", "file", "emoji"],
         send: ["text", "markdown", "image", "video", "audio", "file"],
