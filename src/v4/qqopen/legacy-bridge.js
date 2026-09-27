@@ -224,6 +224,13 @@ async function qqOpenLegacyAction(api, action, params, context, helpers) {
     const target = { scope: scope, groupId: groupId, userId: userId, messageId: messageId };
     if (name === "send_group_msg") target.scope = "group";
     if (name === "send_private_msg") target.scope = "private";
+    if (context.captureMessageSends === true && clean(context.eventId)) {
+      return {
+        message_id: "captured:" + clean(context.eventId),
+        captured: true,
+        event_id: clean(context.eventId)
+      };
+    }
     const replyMessageId = clean(params.reply_to_message_id || target.messageId);
     let msgSeq = Math.max(1, Number(params.msg_seq || 1) || 1);
     if (replyMessageId && typeof helpers.reserveReplySequences === "function") {

@@ -622,6 +622,8 @@ async function callOneBotAction(env, actionPayload, timeoutMs = 15000) {
           groupId: String(env.QQAI_QQOPEN_GROUP_ID || ""),
           userId: String(env.QQAI_QQOPEN_USER_ID || ""),
           messageId: String(env.QQAI_QQOPEN_MESSAGE_ID || ""),
+          eventId: String(env.QQAI_QQOPEN_EVENT_ID || ""),
+          captureMessageSends: String(env.QQAI_QQOPEN_CAPTURE_SENDS || "") === "true",
           botUserId: String(env.QQAI_QQOPEN_BOT_USER_ID || "")
         }
       })

@@ -4156,6 +4156,78 @@ export class OneBotHub {
       return new Response(null, { status: 101, webSocket: client });
     }
 
+    if (request.method === "POST" && url.pathname === "/v4/qqopen/control") {
+      const payload = await request.json().catch(() => null);
+      if (!payload || typeof payload !== "object") return Response.json({ ok: false, error: "QQ_OPEN_CONTROL_INVALID" }, { status: 400 });
+      const action = String(payload.action || "").trim();
+      const scene = String(payload.scene || "").trim();
+      const userId = String(payload.userId || "").trim();
+      const groupId = String(payload.groupId || "").trim();
+      const targetId = String(payload.targetId || (scene === "group" ? groupId : userId)).trim();
+      const at = Number(payload.updatedAt || Date.now());
+
+      if (action === "push_permission") {
+        const scope = String(payload.scope || scene || "").trim();
+        if (!scope || !targetId) return Response.json({ ok: false, error: "QQ_OPEN_PUSH_PERMISSION_TARGET_REQUIRED" }, { status: 400 });
+        const record = {
+          scope,
+          targetId,
+          allowed: Boolean(payload.allowed),
+          operatorId: String(payload.operatorId || ""),
+          eventType: String(payload.eventType || ""),
+          updatedAt: at
+        };
+        await dbPut(this.env, `qqopen_push_permission:${scope}:${targetId}`, JSON.stringify(record));
+        await dbAppendJsonArrayCapped(this.env, "qqopen_push_permission_events", record, 500);
+        return Response.json({ ok: true, record });
+      }
+
+      if (action === "feedback") {
+        const record = {
+          scene, userId, groupId,
+          interactionId: String(payload.interactionId || ""),
+          messageId: String(payload.messageId || ""),
+          feedback: String(payload.feedback || ""),
+          checked: Number(payload.checked || 0),
+          at
+        };
+        await dbAppendJsonArrayCapped(this.env, "qqopen_interaction_feedback", record, 1000);
+        return Response.json({ ok: true, record });
+      }
+
+      if (action === "clear_session") {
+        if (scene !== "c2c" || !userId) {
+          const record = { scene, userId, groupId, at, skipped: true, reason: "GROUP_SHARED_HISTORY_NOT_CLEARED" };
+          await dbAppendJsonArrayCapped(this.env, "qqopen_clear_session_events", record, 200);
+          return Response.json({ ok: true, cleared: false, reason: record.reason });
+        }
+        await clearChatSessionHistory(this.env, `chat:private:${userId}`);
+        await dbAppendJsonArrayCapped(this.env, "qqopen_clear_session_events", { scene, userId, at, cleared: true }, 200);
+        return Response.json({ ok: true, cleared: true });
+      }
+
+      if (action === "switch_model") {
+        if (!userId) return Response.json({ ok: false, error: "QQ_OPEN_MODEL_USER_REQUIRED" }, { status: 400 });
+        const preference = normalizeModelPreference(String(payload.model || ""));
+        if (!preference) return Response.json({ ok: true, changed: false, reason: "MODEL_ACTION_UNMAPPED" });
+        const qqOpenEnv = Object.create(this.env);
+        qqOpenEnv.QQAI_EVENT_PLATFORM = "qq-open";
+        if (!isDeveloperId(qqOpenEnv, userId) && String(preference).startsWith("deepseek")) {
+          return Response.json({ ok: true, changed: false, reason: "MODEL_NOT_AVAILABLE_FOR_MEMBER" });
+        }
+        await dbPut(this.env, `model_pref:${groupId || "private"}:${userId}`, preference);
+        return Response.json({ ok: true, changed: true, preference });
+      }
+
+      if (action === "story" || action === "authorization" || action === "observe") {
+        const record = { action, scene, userId, groupId, targetId, detail: payload.detail || {}, at };
+        await dbAppendJsonArrayCapped(this.env, "qqopen_interaction_events", record, 500);
+        return Response.json({ ok: true, recorded: true });
+      }
+
+      return Response.json({ ok: false, error: "QQ_OPEN_CONTROL_ACTION_UNSUPPORTED" }, { status: 400 });
+    }
+
     if (request.method === "POST" && url.pathname === "/v4/qqopen/process") {
       const payload = await request.json().catch(() => null);
       const body = payload?.body;
@@ -4173,7 +4245,7 @@ export class OneBotHub {
           writable: false
         });
       }
-      const pluginEvent = await dispatchV3RuntimeEvent(pluginEnv, pluginBody).catch(async error => {
+      const pluginEvent = body.__qqai_skip_plugins === true ? null : await dispatchV3RuntimeEvent(pluginEnv, pluginBody).catch(async error => {
         await writeSystemAudit(this.env, {
           type: "v3_plugin_qqopen_event_failed",
           groupId: String(body?.group_id || ""),
@@ -4203,6 +4275,8 @@ export class OneBotHub {
       platformEnv.QQAI_QQOPEN_GROUP_ID = String(body.group_id || "");
       platformEnv.QQAI_QQOPEN_USER_ID = String(body.user_id || "");
       platformEnv.QQAI_QQOPEN_MESSAGE_ID = String(body.message_id || body.flag || "");
+      platformEnv.QQAI_QQOPEN_EVENT_ID = String(body.__qqai_qqopen_event_id || "");
+      platformEnv.QQAI_QQOPEN_CAPTURE_SENDS = body.__qqai_capture_message_sends === true ? "true" : "false";
       platformEnv.QQAI_QQOPEN_BOT_USER_ID = String(body.self_id || "");
 
       const token = String(this.env.ONEBOT_ACCESS_TOKEN || "").trim();
