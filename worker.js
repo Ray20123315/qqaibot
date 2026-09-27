@@ -2536,7 +2536,7 @@ const QQAIWorker = {
             (quota?.sampledAt ? `\n🕒 额度快照：${new Date(Number(quota.sampledAt)).toLocaleString("zh-CN", { timeZone: "Asia/Taipei", hour12: false })}` : "") +
             (!quota?.sampledAt && quotaRequestError ? `\n⚠️ 本次额度读取：${quotaRequestError}` : "");
         }
-        const statusMsg =         const statusMsg = `📊 【系统运行状态报告】\n` +
+        const statusMsg = `📊 【系统运行状态报告】\n` +
                           `--------------------\n` +
                           `🔌 Provider 帐号: ${providerLine}\n` +
                           `📦 Provider 类型: ${providerKinds.length ? providerKinds.join("、") : "旧模型路由"}\n` +
