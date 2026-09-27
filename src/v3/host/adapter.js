@@ -326,7 +326,7 @@ function createV3HostAdapter(env, {
     }
   }
 
-  async function sendParts(plugin, value, fallbackMessage, explicitTarget = null) {
+  async function sendParts(plugin, value, fallbackMessage, explicitTarget = null, options = {}) {
     const targetEnvelope = explicitTarget && typeof explicitTarget === "object" && !Array.isArray(explicitTarget) ? explicitTarget : {};
     const messageValue = Object.prototype.hasOwnProperty.call(targetEnvelope, "message") ? targetEnvelope.message : value;
     const parts = normalizePluginMessage(messageValue);
@@ -336,12 +336,14 @@ function createV3HostAdapter(env, {
     await ensureRecordCapability(parts);
     const target = resolveTarget(targetEnvelope, fallbackMessage);
     const message = toOneBotSegments(parts);
-    if (target.scope === "group") return deps.onebotCall("send_group_msg", { group_id: target.groupId, message, auto_escape: false }, 15000);
-    return deps.onebotCall("send_private_msg", { user_id: target.userId, message, auto_escape: false }, 15000);
+    const replyToMessageId = options.replyToSource === true ? String(fallbackMessage?.messageId || "") : "";
+    const passive = replyToMessageId ? { reply_to_message_id: replyToMessageId } : {};
+    if (target.scope === "group") return deps.onebotCall("send_group_msg", { group_id: target.groupId, message, auto_escape: false, ...passive }, 15000);
+    return deps.onebotCall("send_private_msg", { user_id: target.userId, message, auto_escape: false, ...passive }, 15000);
   }
 
   const services = {
-    "message.reply": async ({ plugin, message, eventContext }) => sendParts(plugin, message, eventContext?.message || null),
+    "message.reply": async ({ plugin, message, eventContext }) => sendParts(plugin, message, eventContext?.message || null, null, { replyToSource: true }),
     "message.send": async ({ plugin, target, eventContext }) => sendParts(plugin, target, eventContext?.message || null, target),
     "media.send": async ({ plugin, target, eventContext }) => {
       const envelope = target && typeof target === "object" && !Array.isArray(target) && Object.prototype.hasOwnProperty.call(target, "message")

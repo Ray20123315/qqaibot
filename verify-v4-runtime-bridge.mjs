@@ -110,6 +110,10 @@ await assert.rejects(
 
 const worker = fs.readFileSync("worker.js", "utf8");
 const runtime = fs.readFileSync("src/v4/qqopen/runtime.js", "utf8");
+const hostAdapter = fs.readFileSync("src/v3/host/adapter.js", "utf8");
+assert.match(hostAdapter, /reply_to_message_id/);
+assert.match(hostAdapter, /replyToSource: true/);
+
 const permissions = fs.readFileSync("src/core/permissions.js", "utf8");
 const deployment = fs.readFileSync("src/config/deployment.js", "utf8");
 const network = fs.readFileSync("src/security/network.js", "utf8");
@@ -117,6 +121,9 @@ const network = fs.readFileSync("src/security/network.js", "utf8");
 assert.match(worker, /qqopen-do/);
 assert.match(worker, /\/v4\/qqopen\/process/);
 assert.match(worker, /QQAI_EVENT_PLATFORM = "qq-open"/);
+assert.match(worker, /qqOpenPluginEnvironment\(\)/);
+assert.match(worker, /v3_plugin_qqopen_event_failed/);
+assert.match(worker, /dispatchV3RuntimeEvent\(pluginEnv, pluginBody\)/);
 assert.match(worker, /body\.__qqai_principal_id \|\| userId/);
 assert.match(worker, /qqOpenIngress \? true : await getFeatureFlag\(env, 'private_chat_enabled'/);
 assert.match(runtime, /sendApplicationReplies/);

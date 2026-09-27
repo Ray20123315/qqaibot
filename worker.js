@@ -3863,6 +3863,7 @@ export class OneBotHub {
     this.codexLastEventAt = null;
     this.codexQuota = null;
     this.eventTasks = new Set();
+    this.qqOpenPluginEnv = null;
     this.toolInFlight = new Map();
     this.toolCounts = new Map();
     this.userInFlight = new Map();
@@ -3923,6 +3924,14 @@ export class OneBotHub {
         this.restoreCodexSocket();
       });
     }
+  }
+
+  qqOpenPluginEnvironment() {
+    if (this.qqOpenPluginEnv) return this.qqOpenPluginEnv;
+    const overlay = Object.create(this.env);
+    overlay.QQAI_EVENT_PLATFORM = "qq-open";
+    this.qqOpenPluginEnv = overlay;
+    return overlay;
   }
 
   socketAttachment(socket) {
@@ -4094,6 +4103,28 @@ export class OneBotHub {
       if (!body || body.__qqai_platform !== "qq-open") {
         return Response.json({ ok: false, error: "QQ_OPEN_INTERNAL_EVENT_INVALID" }, { status: 400 });
       }
+
+      const pluginEnv = this.qqOpenPluginEnvironment();
+      const pluginBody = body && typeof body === "object" ? { ...body } : body;
+      if (pluginBody && ["message", "message_sent"].includes(String(pluginBody.post_type || ""))) {
+        Object.defineProperty(pluginBody, "__qqai_codex_executor", {
+          value: (codexPayload, timeoutMs) => this.sendCodexBridgeRequest(codexPayload, timeoutMs),
+          enumerable: false,
+          configurable: false,
+          writable: false
+        });
+      }
+      const pluginEvent = await dispatchV3RuntimeEvent(pluginEnv, pluginBody).catch(async error => {
+        await writeSystemAudit(this.env, {
+          type: "v3_plugin_qqopen_event_failed",
+          groupId: String(body?.group_id || ""),
+          actorId: String(body?.user_id || ""),
+          action: String(body?.post_type || "event"),
+          error: String(error?.message || error).slice(0, 500)
+        }).catch(() => {});
+        return null;
+      });
+      if (pluginEvent?.consumed) return new Response(null, { status: 204 });
 
       const hub = this;
       const localOneBotBinding = {
