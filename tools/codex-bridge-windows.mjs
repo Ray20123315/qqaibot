@@ -2,7 +2,6 @@ import { spawn, spawnSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
 import { main as runBridge } from "./codex-work-bridge.mjs";
 
 const TASK_NAME = "QQAIBOT Codex Bridge";
@@ -153,9 +152,8 @@ async function cli(argv = process.argv.slice(2)) {
 
 export { DEFAULT_CONFIG, TASK_NAME, argsMap, cli, configToEnv, initConfig, loadConfig, resolveConfigPath, rootSpec, templateConfig };
 
-const invoked = process.argv[1] ? path.resolve(process.argv[1]) : "";
-const self = fileURLToPath(import.meta.url);
-if (process.pkg || invoked === self) {
+const invoked = process.argv[1] ? path.basename(path.resolve(process.argv[1])).toLowerCase() : "";
+if (process.pkg || invoked === "codex-bridge-windows.mjs") {
   cli().catch(error => {
     console.error("[qqaibot-codex-bridge-exe]", error?.stack || error);
     process.exitCode = 1;
