@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import { createCanonicalMessage } from "./src/v3/message/core.js";
 import {
-  legacyMessageParts,
+  countQqOpenLegacyMessages,\n  legacyMessageParts,
   qqOpenJoinRequestToLegacyBody,
   qqOpenLegacyAction,
   qqOpenMessageToLegacyBody,
@@ -47,7 +47,7 @@ const api = {
   sendC2CMessage: async (id, payload) => { calls.push(["sendC2CMessage", id, payload]); return { id: "sent-c" }; },
   uploadGroupFile: async (id, payload) => { calls.push(["uploadGroupFile", id, payload]); return { file_info: "fi-g" }; },
   uploadC2CFile: async (id, payload) => { calls.push(["uploadC2CFile", id, payload]); return { file_info: "fi-c" }; },
-  deleteGroupMessage: async (groupId, messageId) => { calls.push(["deleteGroupMessage", groupId, messageId]); return { ok: true }; },
+  deleteGroupMessage: async (groupId, messageId) => { calls.push(["deleteGroupMessage", groupId, messageId]); return { ok: true }; },\n  deleteC2CMessage: async (userId, messageId) => { calls.push(["deleteC2CMessage", userId, messageId]); return { ok: true }; },
   getGroupInfo: async id => ({ group_openid: id, name: "G" }),
   getGroupMember: async (groupId, userId) => ({ member_openid: userId, member_name: "M", role: "admin" }),
   getGroupMembers: async () => ({ members: [{ member_openid: "u1", member_name: "M1", role: "member" }] }),
@@ -78,6 +78,28 @@ await qqOpenLegacyAction(api, "set_group_add_request", { flag: "jr1", approve: f
 });
 assert(calls.some(row => row[0] === "join" && row[3].op === "decline"));
 
+
+assert.equal(countQqOpenLegacyMessages("hello"), 1);
+assert.equal(countQqOpenLegacyMessages("hello[CQ:image,url=https://example.com/x.png]"), 2);
+
+const reservations = [];
+await qqOpenLegacyAction(api, "send_private_msg", { user_id:"u-private", message:"one[CQ:image,url=https://example.com/x.png]" }, {
+  scope:"private", userId:"u-private", messageId:"origin-private"
+}, {
+  reserveReplySequences: async (messageId, scope, count) => {
+    reservations.push({ messageId, scope, count });
+    return { start:3, count };
+  }
+});
+assert.deepEqual(reservations[0], { messageId:"origin-private", scope:"private", count:2 });
+assert(calls.some(row => row[0] === "sendC2CMessage" && row[2].msg_seq === 3));
+assert(calls.some(row => row[0] === "sendC2CMessage" && row[2].msg_type === 7 && row[2].msg_seq === 4));
+
+await qqOpenLegacyAction(api, "delete_msg", { message_id:"private-sent" }, {
+  scope:"private", userId:"u-private", messageId:"origin-private"
+}, { getCachedMessage: () => null });
+assert(calls.some(row => row[0] === "deleteC2CMessage" && row[1] === "u-private" && row[2] === "private-sent"));
+
 assert.deepEqual(legacyMessageParts("a[CQ:at,qq=u2]b").map(item => item.type), ["text", "at", "text"]);
 await assert.rejects(
   () => qqOpenLegacyAction(api, "set_group_name", { group_id: "g1", group_name: "x" }, {}),
@@ -99,6 +121,13 @@ assert.match(runtime, /sendApplicationReplies/);
 assert.match(runtime, /qqOpenLegacyAction/);
 assert.match(runtime, /lastInboundUserId/);
 assert.match(runtime, /group_join_request/);
+assert.match(runtime, /qqOpenDeliveryKey/);
+assert.match(runtime, /reserveReplySequences/);
+assert.match(runtime, /QQ_OPEN_PASSIVE_REPLY_LIMIT/);
+assert.match(runtime, /qqOpenClosePolicy/);
+assert.match(runtime, /syncQqOpenDiscovery/);
+assert.match(runtime, /api\.getGatewayBot/);
+assert.match(runtime, /QQ_OPEN_DISCOVERY_SYNC/);
 assert.match(permissions, /QQ_OPEN_GATEWAY_NOT_BOUND/);
 assert.match(permissions, /api\/v4\/qqopen\/legacy-action/);
 assert.match(deployment, /QQ_OPEN_DEVELOPER_OPENIDS/);
