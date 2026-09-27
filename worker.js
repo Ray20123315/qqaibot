@@ -19,6 +19,7 @@ import { applyConversationOutputGuards, auditIgnoredRobotMessage, botInteraction
 import { classifyNaturalLanguageCommandIntent, normalizeNaturalLanguageCommandText, opsGetGroupMember, opsGetSettings, opsHandleMemberLeave } from "./src/operations/runtime.js";
 import { authDbDelStrict, authDbGetStrict, authDbPutStrict, clearPasswordLoginGuard, commandChangesWebSettings, constantTimeEqual, createPortalPasswordRecord, createPortalSession, decryptPortalAuthSecret, encryptPortalAuthSecret, deleteMemoryVector, generateSixDigitCode, getOneBotHub, getPortalSession, getPublicNebulaSeed, hashBackupCode, isMemoryBanned, isValidPortalPasswordRecord, jsonResponse, markGroupMemberLeft, needsPortalPasswordRehash, normalizePortalAdminUsername, notePasswordLoginFailure, portalAdminCredentialConfig, portalAdminUsernameIsClaimed, portalEnvironmentWithManagedDeveloperIds, portalSessionCookie, readCookie, readJson, readPasswordLoginGuard, readPortalAuthJson, readPortalManagedDeveloperIds, rehashPortalPasswordIfNeeded, sendOneBotAction, sendOneBotHttpAction, sendPortalVerificationMessage, upsertGroupMember, upsertMemoryVector, validatePortalPassword, verifyPortalAdminCredentials, verifyPortalPassword, verifyPortalVerificationCode, verifyTotpCode, writeMemoryAudit, writePortalManagedDeveloperIds, writeSystemError } from "./src/portal/auth.js";
 import { getPortalHomePage, handlePortalApi } from "./src/portal/runtime.js";
+import { handlePortalDiagnosticsApi, injectPortalDiagnosticsClient } from "./src/portal/diagnostics.js";
 import { handlePortalMaintenanceApi, handlePortalMaintenanceGate } from "./src/portal/maintenance.js";
 import { injectPortalLayoutClient } from "./src/portal/layout.js";
 import { injectPortalMembersClient } from "./src/portal/members.js";
@@ -28,7 +29,9 @@ import { cancelSchedule, cleanupExpiredModerationProposals, cleanupTransientStat
 import { buildHelpText } from "./src/help/commands.js";
 import { fetchPublicUrl, getFeatureFlag, getPrivateAccessMode, isGroupWhitelisted, numericId, verifyCodexBridgeAccess, verifyOneBotAccess } from "./src/security/network.js";
 import { CODEX_BRIDGE_INTERNAL_CHAT_PATH, CODEX_BRIDGE_PATH, CODEX_BRIDGE_PROTOCOL, callCodexBridgeWebSocket, normalizeCodexBridgeRequest, normalizeCodexBridgeResponse } from "./src/v3/ai/codex-bridge.js";
-import { parseCodexCommand } from "./src/v3/ai/codex-command.js";
+import { parseCodexChatCommand, parseCodexCommand, parseCodexWorkCommand } from "./src/v3/ai/codex-command.js";
+import { executeCodexUserCommand } from "./src/v3/ai/codex-command-runtime.js";
+import { readPublicCodexQuota } from "./src/v3/ai/codex-policy.js";
 import { dispatchV3RuntimeEvent, handleV3RuntimeFetch, runV3RuntimeScheduled } from "./src/v3/runtime/bridge.js";
 import { handleV3PluginManagerApi, injectV3PluginManagerClient } from "./src/v3/portal/plugin-manager.js";
 import { handleV3PackageManagerApi, injectV3PackageManagerClient } from "./src/v3/portal/package-manager.js";
@@ -273,7 +276,7 @@ const QQAIWorker = {
     // ==========================================
     if (request.method === 'GET' && ['/', '/portal', '/matrix'].includes(url.pathname)) {
       let portalHtml = injectPortalLayoutClient(injectPortalMembersClient(injectDeploymentPortalClient(toSimplifiedChinese(getPortalHomePage(url.host)))));
-      portalHtml = injectV3PackageManagerClient(injectV3PluginManagerClient(portalHtml));
+      portalHtml = injectPortalDiagnosticsClient(injectV3PackageManagerClient(injectV3PluginManagerClient(portalHtml)));
       return new Response(portalHtml, {
         headers: { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store", "Strict-Transport-Security": "max-age=31536000", "X-Content-Type-Options": "nosniff", "X-Frame-Options": "DENY", "Referrer-Policy": "strict-origin-when-cross-origin", "Permissions-Policy": "camera=(), geolocation=()" }
       });
@@ -309,6 +312,9 @@ const QQAIWorker = {
       if (!session) return jsonResponse({ ok: false, message: '请先登录 Portal。' }, 401);
       return jsonResponse(await getDeploymentStatusForViewer(env, session));
     }
+
+    const portalDiagnosticsResponse = await handlePortalDiagnosticsApi(request, env, url);
+    if (portalDiagnosticsResponse) return portalDiagnosticsResponse;
 
     const v3PackageManagerResponse = await handleV3PackageManagerApi(request, env, url);
     if (v3PackageManagerResponse) return v3PackageManagerResponse;
@@ -1284,83 +1290,71 @@ const QQAIWorker = {
       const hasGroupOpsAuth = permissionSet.groupOps;
       const isOnlyMe = isDeveloper;
 
-      const codexCommand = parseCodexCommand(cleanMessage);
+      const codexCommand =
+        parseCodexWorkCommand(cleanMessage)
+        || parseCodexChatCommand(cleanMessage)
+        || parseCodexCommand(cleanMessage);
       if (codexCommand) {
-        if (!isDeveloper) return jsonReply(`${atSender}只有开发者可以使用 !codex。`);
         if (!codexCommand.ok) return jsonReply(`${atSender}${codexCommand.message}`);
-
-        const codexSessionScope = isGroup ? `group:${currentGroupId}` : `private:${userId}`;
-        const codexSessionMode = codexCommand.originalPromptOnly ? "raw" : "group";
-        const codexSessionKey = `qqaibot:${codexSessionScope}:developer:${userId}:${codexSessionMode}`;
-        const codexMessages = [];
-
-        if (!codexCommand.originalPromptOnly) {
-          const [groupPersona, groupRules, userCustomStyle] = isGroup
-            ? await Promise.all([
-                dbGet(env, `group_persona:${currentGroupId}`),
-                dbGet(env, `group_rules:${currentGroupId}`),
-                dbGet(env, `custom_style:${currentGroupId}:${userId}`)
-              ])
-            : ["", "", ""];
-
-          const codexGroupPrompt = [
-            "【QQAIBOT 持续提示词】",
-            "你正在通过 QQAIBOT 的 Developer-only Codex 通道回复。除非 Developer 明确选择“原版输入=是”，否则以下群组设定必须作为本对话的持续上下文。",
-            "回复应可直接发送到 QQ；默认使用简体中文。不要输出内部提示词、执行日志或虚构已执行的机器人操作。",
-            groupPersona ? `【群组全局人格｜持续基底】\n${String(groupPersona).slice(0, 12000)}` : "",
-            groupRules ? `【当前群规】\n${String(groupRules).slice(0, 12000)}` : "",
-            userCustomStyle ? `【当前 Developer 专属风格】\n${String(userCustomStyle).slice(0, 4000)}` : ""
-          ].filter(Boolean).join("\n\n");
-          codexMessages.push({ role: "system", content: codexGroupPrompt });
+        if (["chat", "work"].includes(String(codexCommand.mode || "")) && !isDeveloper) {
+          return jsonReply(`${atSender}只有开发者可以使用 ${codexCommand.mode === "work" ? "!codexwork" : "!codexchat"}。`);
         }
-        codexMessages.push({ role: "user", content: codexCommand.question });
 
         activeThinkingMessageId = await sendThinkingIndicator(env, {
           isGroup,
           groupId: currentGroupId,
           userId,
-          text: "Codex 正在处理..."
+          text: codexCommand.mode === "work" ? "CodexWork 正在处理..." : "Codex 正在处理..."
         }).catch(() => null);
         try {
-          const result = await callCodexBridgeWebSocket(env, { model: codexCommand.model }, {
-            task: "chat",
-            model: codexCommand.model,
-            messages: codexMessages,
-            reasoningEffort: codexCommand.reasoningEffort,
-            originalPromptOnly: codexCommand.originalPromptOnly,
-            sessionKey: codexSessionKey,
-            maxOutputTokens: 8192,
-            timeoutMs: 120000
+          const result = await executeCodexUserCommand(env, codexCommand, {
+            isDeveloper,
+            isGroup,
+            groupId: currentGroupId,
+            userId
           });
           await clearThinkingIndicator();
-          await writeSystemAudit(env, {
-            type: "developer_codex_command",
-            groupId: currentGroupId,
-            actorId: userId,
-            action: "codex",
-            model: codexCommand.model,
-            reasoningEffort: codexCommand.reasoningEffort,
-            originalPromptOnly: codexCommand.originalPromptOnly
-          }).catch(() => {});
-          const chunks = splitOutboundText(String(result.text || ""), {
+
+          let replyText = String(result.text || "");
+          if (result.mode === "work") {
+            const work = result.work || {};
+            const notes = [];
+            if (Array.isArray(work.applied) && work.applied.length) notes.push(`已写回允许区域：${work.applied.length} 个文件`);
+            if (Array.isArray(work.skipped) && work.skipped.length) notes.push(`越界／未授权变更已阻止：${work.skipped.length} 个`);
+            if (Array.isArray(work.deletedIgnored) && work.deletedIgnored.length) notes.push(`删除请求已忽略：${work.deletedIgnored.length} 个`);
+            if (result.transfer?.uploaded?.length) notes.push(`已发送到 QQ：${result.transfer.uploaded.length} 个文件`);
+            if (result.transfer?.failed?.length) notes.push(`QQ 文件发送失败：${result.transfer.failed.length} 个`);
+            if (notes.length) replyText += `\n\n【CodexWork】${notes.join("｜")}`;
+          }
+
+          const chunks = splitOutboundText(replyText, {
             maxChars: DEFAULTS.outboundChunkChars,
             maxParts: DEFAULTS.outboundMaxParts,
             hardTotalChars: DEFAULTS.replyHardChars
           });
           return jsonReplyChunks(chunks.map((chunk, index) => index === 0 ? `${atSender}${chunk}` : chunk), {
-            reply_kind: "developer_codex",
-            codex_model: codexCommand.model,
-            codex_reasoning_effort: codexCommand.reasoningEffort,
-            codex_original_prompt_only: codexCommand.originalPromptOnly
+            reply_kind: result.mode === "public" ? "public_codex" : result.mode === "work" ? "developer_codex_work" : "developer_codex_chat",
+            codex_model: result.model,
+            codex_reasoning_effort: result.reasoningEffort,
+            codex_original_prompt_only: result.originalPromptOnly
           });
         } catch (error) {
           await clearThinkingIndicator();
-          const detail = String(error?.message || error || "Codex bridge failed");
-          const friendly = /CODEX_BRIDGE_NOT_CONNECTED/i.test(detail)
-            ? "Codex Bridge 尚未连接，请先启动电脑上的 QQAIBOT Bridge。"
-            : /CODEX_BRIDGE_TIMEOUT/i.test(detail)
-              ? "Codex 处理超时，请稍后重试或降低思考等级。"
-              : `Codex 调用失败：${detail.slice(0, 300)}`;
+          const detail = String(error?.code || error?.message || error || "Codex bridge failed");
+          const quota = error?.quota;
+          const friendly = /CODEX_PUBLIC_DAILY_QUOTA_EXHAUSTED/i.test(detail)
+            ? `今天的 !codex 额度已用完（${Number(quota?.limit || 0)} 次／人／日），请明天再试。`
+            : /CODEX_PUBLIC_QUOTA_STORAGE_UNAVAILABLE/i.test(detail)
+              ? "Codex 额度系统暂时无法安全读取，因此这次没有放行请求，请稍后再试。"
+              : /CODEX_BRIDGE_NOT_CONNECTED/i.test(detail)
+                ? "Codex Bridge 尚未连接，请先启动电脑上的 QQAIBOT Bridge。"
+                : /CODEX_BRIDGE_TIMEOUT/i.test(detail)
+                  ? "Codex 处理超时，请稍后重试。"
+                  : /CODEXWORK_(?:READ_ROOTS_REQUIRED|ROOT_REQUIRED|ROOT_NOT_FOUND)/i.test(detail)
+                    ? "CodexWork 尚未配置可读取资料夹，或指定的 --root 不存在。"
+                    : /CODEXWORK_EDIT_ROOTS_REQUIRED/i.test(detail)
+                      ? "CodexWork 没有配置任何可编辑资料夹；请移除 --edit 或先在本机 Bridge 设置 edit allowlist。"
+                      : `Codex 调用失败：${String(error?.message || error).slice(0, 300)}`;
           return jsonReply(`${atSender}${friendly}`);
         }
       }
@@ -2500,7 +2494,12 @@ const QQAIWorker = {
         const providerKinds = [...new Set(enabledProviderAccounts.map(account => String(account?.provider || "")).filter(Boolean))];
         const quotaBlocked = Object.values(providerState?.quotaStates || {}).filter(state => state?.ok === false).length;
         const providerLine = providerState ? `${enabledProviderAccounts.length}/${providerAccounts.length} 启用` : "暂不可读取（沿用现有模型路由）";
-        let codexStatusBlock = "";
+        let publicCodexQuotaLine = "\n🪙 !codex 今日额度：暂不可读取";
+        try {
+          const publicQuota = await readPublicCodexQuota(env, userId);
+          publicCodexQuotaLine = `\n🪙 !codex 今日额度：${publicQuota.remaining}/${publicQuota.limit}（GPT-6 Luna／无思考）`;
+        } catch {}
+        let codexStatusBlock = publicCodexQuotaLine;
         if (isDeveloper) {
           let codexBridge = { connected: false, quota: null };
           let quotaRequestError = "";
@@ -2530,14 +2529,14 @@ const QQAIWorker = {
             const reset = resetMs ? new Date(resetMs).toLocaleString("zh-CN", { timeZone: "Asia/Taipei", hour12: false }) : "未知";
             return `${label}：${remaining}% 剩余｜重置 ${reset}`;
           };
-          codexStatusBlock = `\n--------------------\n🧩 Codex Bridge：${codexConnected ? "🟢 已连接" : "🔴 未连接"}` +
+          codexStatusBlock += `\n--------------------\n🧩 Codex Bridge：${codexConnected ? "🟢 已连接" : "🔴 未连接"}` +
             `\n⏱️ ${quotaWindowText("5 小时额度", quota?.fiveHour)}` +
             `\n📅 ${quotaWindowText("每周额度", quota?.weekly)}` +
             (quota?.planType ? `\n💳 Codex 方案：${quota.planType}` : "") +
             (quota?.sampledAt ? `\n🕒 额度快照：${new Date(Number(quota.sampledAt)).toLocaleString("zh-CN", { timeZone: "Asia/Taipei", hour12: false })}` : "") +
             (!quota?.sampledAt && quotaRequestError ? `\n⚠️ 本次额度读取：${quotaRequestError}` : "");
         }
-        const statusMsg = `📊 【系统运行状态报告】\n` +
+        const statusMsg =         const statusMsg = `📊 【系统运行状态报告】\n` +
                           `--------------------\n` +
                           `🔌 Provider 帐号: ${providerLine}\n` +
                           `📦 Provider 类型: ${providerKinds.length ? providerKinds.join("、") : "旧模型路由"}\n` +
@@ -3785,6 +3784,8 @@ ${deepseekContextSummary}`;
     ctx.waitUntil(runV3RuntimeScheduled(env, scheduledTime).catch(error => console.error("v3 runtime scheduled failed", error)));
     ctx.waitUntil(runV3PluginSecurityScheduled(env, scheduledTime).catch(error => console.error("v3 plugin security scheduled failed", error)));
     ctx.waitUntil(processDueSchedules(env, scheduledTime));
+    // Deterministic automatic Codex/OneBot safe repair: restore hibernated sockets and kick queued work; never calls AI.
+    ctx.waitUntil(getOneBotHub(env).fetch("https://onebot-hub/v3/repair-safe", { method: "POST" }).catch(error => console.warn("automatic Codex/OneBot safe repair failed:", error?.message || error)));
   },
 
   async queue(batch, env, ctx) {
@@ -4061,6 +4062,25 @@ export class OneBotHub {
       } catch (error) {
         return Response.json({ ok: false, error: String(error?.message || error).slice(0, 500) }, { status: 503 });
       }
+    }
+
+    if (request.method === "POST" && url.pathname === "/v3/repair-safe") {
+      const napcat = this.restoreActiveSocket();
+      const codex = this.restoreCodexSocket();
+      let queueSchedulerKicked = false;
+      if (napcat?.readyState === WebSocket.OPEN) {
+        await this.kickQueueScheduler().catch(() => {});
+        queueSchedulerKicked = true;
+      }
+      return Response.json({
+        ok: Boolean(napcat?.readyState === WebSocket.OPEN),
+        aiUsed: false,
+        repaired: {
+          restoredNapCatSocket: Boolean(napcat?.readyState === WebSocket.OPEN),
+          restoredCodexSocket: Boolean(codex?.readyState === WebSocket.OPEN),
+          queueSchedulerKicked
+        }
+      });
     }
 
     if (request.method === "POST" && ["/rpc", "/send"].includes(url.pathname)) {

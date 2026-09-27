@@ -63,6 +63,10 @@ DEVELOPER_ID = ""
 PUBLIC_BASE_URL = "https://bot.example.com"
 BOT_DISPLAY_NAME = "QQAI"
 
+# Public !codex: per-user daily request cap; model/reasoning are hard-pinned in code.
+CODEX_PUBLIC_DAILY_REQUESTS = "5"
+CODEX_PUBLIC_MAX_OUTPUT_TOKENS = "1536"
+
 # Deployment notifications.
 DEPLOY_NOTIFY_WORKER_NAME = "replace-with-worker-name"
 DEPLOY_NOTIFY_BRANCH = "main"

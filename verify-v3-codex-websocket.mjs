@@ -6,6 +6,7 @@ import {
   CODEX_BRIDGE_PATH,
   CODEX_BRIDGE_PROTOCOL,
   normalizeCodexBridgeRequest,
+  normalizeCodexBridgeResponse,
   usesWorkerCodexWebSocket
 } from "./src/v3/ai/codex-bridge.js";
 import { verifyCodexBridgeAccess } from "./src/security/network.js";
@@ -34,6 +35,16 @@ assert.equal(normalized.reasoningEffort, "high");
 assert.equal(normalized.originalPromptOnly, true);
 assert.equal(normalized.sessionKey, "qqaibot:group:123:developer:456:group");
 assert.equal(normalized.contextHash, "ctx-123");
+const normalizedWork = normalizeCodexBridgeRequest({ model: "gpt-6-luna" }, {
+  task: "work",
+  messages: [{ role: "user", content: "read project" }],
+  work: { rootAlias: "project", edit: true, exportFiles: true }
+});
+assert.equal(normalizedWork.task, "work");
+assert.equal(normalizedWork.work.rootAlias, "project");
+assert.equal(normalizedWork.work.edit, true);
+assert.equal(normalizedWork.work.exportFiles, true);
+assert.equal(normalizedWork.work.delete, false);
 
 assert.equal(verifyCodexBridgeAccess(new Request("https://qqai.test/v3/codex-bridge", {
   headers: { Authorization: "Bearer bridge-test-token" }
@@ -85,6 +96,15 @@ assert.equal(wsResult.text, "local codex reply");
 assert.equal(wsResult.model, "codex-local");
 assert.equal(wsResult.usage.inputTokens, 12);
 assert.equal(wsResult.usage.outputTokens, 7);
+const workResponse = normalizeCodexBridgeResponse({
+  text: "done",
+  model: "gpt-6-luna",
+  attachments: [{ name: "report.txt", path: "C:/QQAI/report.txt", size: 12 }],
+  work: { mode: "read_only", rootAlias: "project", deletedIgnored: ["x.txt"], deletionApplied: true }
+}, "gpt-6-luna");
+assert.equal(workResponse.attachments.length, 1);
+assert.equal(workResponse.work.deletedIgnored[0], "x.txt");
+assert.equal(workResponse.work.deletionApplied, false);
 
 let httpUrl = "";
 let httpPayload = null;
@@ -113,13 +133,10 @@ assert.match(worker, /sendCodexBridgeRequest/);
 assert.match(worker, /CODEX_BRIDGE_INTERNAL_CHAT_PATH/);
 assert.match(worker, /CODEX_BRIDGE_NOT_CONNECTED/);
 assert.match(worker, /parseCodexCommand\(cleanMessage\)/);
-assert.match(worker, /只有开发者可以使用 !codex/);
-assert.match(worker, /reasoningEffort: codexCommand\.reasoningEffort/);
-assert.match(worker, /originalPromptOnly: codexCommand\.originalPromptOnly/);
-assert.match(worker, /group_persona:\$\{currentGroupId\}/);
-assert.match(worker, /group_rules:\$\{currentGroupId\}/);
-assert.match(worker, /qqaibot:\$\{codexSessionScope\}:developer:\$\{userId\}:\$\{codexSessionMode\}/);
-assert.match(worker, /sessionKey: codexSessionKey/);
+assert.match(worker, /parseCodexChatCommand\(cleanMessage\)/);
+assert.match(worker, /parseCodexWorkCommand\(cleanMessage\)/);
+assert.match(worker, /executeCodexUserCommand\(env, codexCommand/);
+assert.match(worker, /readPublicCodexQuota\(env, userId\)/);
 assert.match(worker, /payload\.type === "quota" \|\| payload\.type === "quota\.response"/);
 assert.match(worker, /url\.pathname === "\/v3\/codex\/quota"/);
 assert.match(worker, /type: "quota\.request"/);
@@ -132,9 +149,17 @@ assert.match(worker, /state\.storage\.get\("codex:quota"/);
 assert.match(worker, /quota: this\.codexQuota/);
 assert.match(worker, /5 小时额度/);
 assert.match(worker, /每周额度/);
+assert.match(worker, /!codex 今日额度/);
 assert.match(worker, /if \(isDeveloper\)/);
 
-const statusStart = worker.indexOf("if (['!status', '!配额', '!配額'");
+const commandRuntime = fs.readFileSync("src/v3/ai/codex-command-runtime.js", "utf8");
+assert.match(commandRuntime, /qqaibot:\$\{scope\}:user:\$\{context\.userId\}:public/);
+assert.match(commandRuntime, /consumePublicCodexQuota/);
+assert.match(commandRuntime, /refundPublicCodexQuota/);
+assert.match(commandRuntime, /upload_private_file/);
+assert.match(commandRuntime, /task: mode === "work" \? "work" : "chat"/);
+
+const statusStart = worker.indexOf("if (['!status', '!配额', '!配額'");const statusStart = worker.indexOf("if (['!status', '!配额', '!配額'");
 const statusEnd = worker.indexOf("// 第二段到此結束", statusStart);
 assert(statusStart >= 0 && statusEnd > statusStart, "!status command block missing");
 const statusBlock = worker.slice(statusStart, statusEnd);
@@ -143,7 +168,7 @@ assert.match(statusBlock, /getOneBotHub\(env\)\.fetch\("https:\/\/onebot-hub\/st
 assert.doesNotMatch(statusBlock, /this\.codexQuota/, "!status runs in QQAIWorker scope and must not access OneBotHub instance fields");
 assert.doesNotMatch(statusBlock, /this\.restoreCodexSocket/, "!status must not call OneBotHub instance methods from QQAIWorker scope");
 
-assert.doesNotMatch(worker, /CODEX_BRIDGE.*(?:shell|filesystem|file_read|exec_command)/i);
+assert.doesNotMatch(worker, /CODEX_BRIDGE.*(?:exec_command|arbitrary_shell)/i);
 
 const hostAdapter = fs.readFileSync("src/v3/host/adapter.js", "utf8");
 assert.match(hostAdapter, /parseAiCommandCodexOverride\(message\.text\)/);

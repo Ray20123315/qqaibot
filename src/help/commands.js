@@ -8,6 +8,7 @@ const COMMON_SECTIONS = Object.freeze([
     items: [
       "!help／!帮助：查看当前权限可用的指令",
       "!status／!配额：查看模型、AI、记忆与调用状态",
+      "!codex 问题：所有人可用，固定 GPT-6 Luna／无思考，并使用个人每日额度；同一范围沿用对话",
       "智能指令调用：@机器人／回复机器人直接描述要执行的操作；AI 只选择已注册 ! 指令，实际执行仍经过原指令权限、Portal 开关与确认流程",
       "!模型 自动／Gemma 26B／Gemma 31B／Gemini：切换个人模型偏好",
       "QQ 语音回复 Beta：默认关闭；在 QQ Interactions 插件启用后使用 !QQ语音角色／!QQ语音 角色 内容",
@@ -111,8 +112,9 @@ const DEVELOPER_SECTION = Object.freeze({
     "!禁记忆 @成员／!解禁记忆 @成员",
     "!重置／!clear",
     "!自我调整／!自我修正",
-    "AI 指令可用：!指令 <参数> --codex [模型] [思考等级]；默认 GPT-6 Luna／无思考",
-    "!codex [模型] [思考等级] [原版输入:是否] 问题：自由调用本机 Codex Bridge；默认 GPT-6 Luna／无思考",
+    "AI 指令可用：--codex 为所有人固定 GPT-6 Luna／无思考；开发者进阶使用 --codexchat 或 --codexwork",
+    "!codexchat [模型] [思考等级] [原版输入:是否] 问题：开发者进阶 Codex 对话",
+    "!codexwork [--root 名称] [--edit] [--export] 工作：开发者受限本机资料工作区；默认唯读、永不删除",
     "Root 与 Portal 可管理模型、通知、权限、资料与系统维护"
   ]
 });

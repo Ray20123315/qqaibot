@@ -8,6 +8,7 @@ import { dbDel, dbGet, dbPut } from "../../data/store.js";
 import { createPluginHost } from "../../plugins/runtime.js";
 import { fetchPublicUrl } from "../../security/network.js";
 import { parseAiCommandCodexOverride } from "../ai/codex-command.js";
+import { consumePublicCodexQuota, publicCodexQuotaConfig, refundPublicCodexQuota } from "../ai/codex-policy.js";
 import { runV3MultimodalAi } from "../ai/runtime.js";
 import { synthesizeGeminiTts } from "../ai/tts.js";
 import { fromOneBotEvent, toOneBotSegments } from "../message/onebot.js";
@@ -145,30 +146,61 @@ async function defaultAiChat(env, input, context = {}) {
   const override = context?.aiProviderOverride && typeof context.aiProviderOverride === "object" ? context.aiProviderOverride : null;
   if (override?.provider === "codex") {
     const actorId = String(context?.eventContext?.message?.userId || context?.eventContext?.userId || "");
-    if (!actorId || !isDeveloperId(env, actorId)) throw new Error("PLUGIN_CODEX_DEVELOPER_REQUIRED");
+    const mode = String(override.mode || "chat");
+    const developer = Boolean(actorId && isDeveloperId(env, actorId));
+    if ((override.requiresDeveloper === true || ["chat", "work"].includes(mode)) && !developer) {
+      throw new Error("PLUGIN_CODEX_DEVELOPER_REQUIRED");
+    }
     const messages = pluginCodexMessages(source);
     if (!messages.length) throw new Error("PLUGIN_AI_CHAT_INPUT_REQUIRED");
     const pluginId = String(context?.plugin?.id || "plugin").slice(0, 96);
     const message = context?.eventContext?.message || {};
     const scope = String(message.scope || "private");
     const peer = scope === "group" ? String(message.groupId || "") : String(message.userId || actorId);
-    const sessionKey = `qqaibot:plugin:${pluginId}:${scope}:${peer}:developer:${actorId}`;
+    const rootAlias = String(override?.work?.rootAlias || "");
+    const sessionKey = mode === "public"
+      ? `qqaibot:plugin:${pluginId}:${scope}:${peer}:user:${actorId}:public`
+      : mode === "work"
+        ? `qqaibot:plugin:${pluginId}:${scope}:${peer}:developer:${actorId}:work:${rootAlias || "default"}:${override?.work?.edit ? "edit" : "read"}`
+        : `qqaibot:plugin:${pluginId}:${scope}:${peer}:developer:${actorId}:chat`;
     const systemText = messages.filter(item => item.role === "system").map(item => item.content).join("\n\n");
     const codexExecutor = context?.eventContext?.codexExecutor;
     if (typeof codexExecutor !== "function") throw new Error("PLUGIN_CODEX_BRIDGE_UNAVAILABLE");
+
+    let quota = null;
+    if (mode === "public") {
+      quota = await consumePublicCodexQuota(env, actorId);
+      if (!quota.ok) {
+        const error = new Error("CODEX_PUBLIC_DAILY_QUOTA_EXHAUSTED");
+        error.code = "CODEX_PUBLIC_DAILY_QUOTA_EXHAUSTED";
+        error.quota = quota;
+        throw error;
+      }
+    }
+    const publicConfig = publicCodexQuotaConfig(env);
     const requestPayload = {
-      task: "chat",
-      model: String(override.model || "gpt-6-luna"),
+      task: mode === "work" ? "work" : "chat",
+      model: mode === "public" ? "gpt-6-luna" : String(override.model || "gpt-6-luna"),
       messages,
-      reasoningEffort: String(override.reasoningEffort || "none"),
+      reasoningEffort: mode === "public" ? "none" : String(override.reasoningEffort || "none"),
       originalPromptOnly: false,
       sessionKey,
       contextHash: await promptContextHash(systemText),
-      maxOutputTokens: clampNumber(source.maxOutputTokens, 1000, 1, 4096),
-      timeoutMs: clampNumber(source.timeoutMs, 45000, 3000, 120000)
+      maxOutputTokens: mode === "public" ? publicConfig.maxOutputTokens : clampNumber(source.maxOutputTokens, 1000, 1, 4096),
+      timeoutMs: clampNumber(source.timeoutMs, 45000, 3000, 120000),
+      work: mode === "work" ? {
+        rootAlias,
+        edit: override?.work?.edit === true,
+        exportFiles: override?.work?.exportFiles === true
+      } : undefined
     };
-    const result = await codexExecutor(requestPayload, requestPayload.timeoutMs);
-    return safeAiResult(result);
+    try {
+      const result = await codexExecutor(requestPayload, requestPayload.timeoutMs);
+      return safeAiResult(result);
+    } catch (error) {
+      if (mode === "public") await refundPublicCodexQuota(env, actorId).catch(() => false);
+      throw error;
+    }
   }
 
   try {
@@ -465,22 +497,25 @@ function createV3HostAdapter(env, {
             : { user_id: message.userId, message: parts, auto_escape: false };
           await deps.onebotCall(action, params, 15000);
         };
-        if (!isDeveloperId(env, message.userId)) {
-          await notice("只有开发者可以使用 --codex 强制模型。");
-          return { handled: true, eventName: message.scope === "group" ? "group_message" : "private_message", message, results: [{ consume: true, action: "codex_override_denied" }] };
-        }
         if (!codexOverride.ok) {
           await notice(codexOverride.message || "Codex 参数格式无效。");
           return { handled: true, eventName: message.scope === "group" ? "group_message" : "private_message", message, results: [{ consume: true, action: "codex_override_invalid" }] };
         }
+        if (codexOverride.requiresDeveloper === true && !isDeveloperId(env, message.userId)) {
+          await notice(`只有开发者可以使用 --${codexOverride.mode === "work" ? "codexwork" : "codexchat"}。`);
+          return { handled: true, eventName: message.scope === "group" ? "group_message" : "private_message", message, results: [{ consume: true, action: "codex_override_denied" }] };
+        }
         aiProviderOverride = Object.freeze({
           provider: "codex",
+          mode: codexOverride.mode,
+          requiresDeveloper: codexOverride.requiresDeveloper === true,
           model: codexOverride.model,
-          reasoningEffort: codexOverride.reasoningEffort
+          reasoningEffort: codexOverride.reasoningEffort,
+          work: codexOverride.work || null
         });
         message = Object.freeze({ ...message, text: codexOverride.text });
       }
-      const eventName = message.scope === "group" ? "group_message" : message.scope === "private" ? "private_message" : "message";
+      const eventName = message.scope === "group"      const eventName = message.scope === "group" ? "group_message" : message.scope === "private" ? "private_message" : "message";
       const codexExecutor = typeof body?.__qqai_codex_executor === "function" ? body.__qqai_codex_executor : null;
       const results = await host.dispatch(eventName, message, { message, groupId: message.groupId, userId: message.userId, aiProviderOverride, codexExecutor });
       return { handled: true, eventName, message, results };

@@ -7,6 +7,7 @@ const CODEX_BRIDGE_MAX_TOTAL_CHARS = 120000;
 const CODEX_BRIDGE_MAX_OUTPUT_TOKENS = 8192;
 const CODEX_BRIDGE_DEFAULT_TIMEOUT_MS = 45000;
 const CODEX_BRIDGE_MAX_TIMEOUT_MS = 120000;
+const CODEX_BRIDGE_MAX_ATTACHMENTS = 10;
 
 function clampInteger(value, fallback, min, max) {
   const number = Number(value);
@@ -29,6 +30,17 @@ function cleanMessages(value) {
   return output;
 }
 
+function normalizeWorkRequest(value) {
+  const input = value && typeof value === "object" && !Array.isArray(value) ? value : {};
+  return Object.freeze({
+    rootAlias: String(input.rootAlias || input.root_alias || "").trim().slice(0, 80),
+    edit: input.edit === true,
+    exportFiles: input.exportFiles === true || input.export_files === true,
+    loadPolicy: "on_demand",
+    delete: false
+  });
+}
+
 function normalizeCodexBridgeRequest(account = {}, input = {}) {
   const messages = cleanMessages(input.messages);
   if (!messages.length) {
@@ -38,10 +50,11 @@ function normalizeCodexBridgeRequest(account = {}, input = {}) {
     if (user) messages.push({ role: "user", content: user });
   }
   if (!messages.length) throw new Error("AI_PROVIDER_INPUT_REQUIRED");
+  const task = String(input.task || "chat").trim().slice(0, 40).toLowerCase() || "chat";
   return Object.freeze({
     protocol: CODEX_BRIDGE_PROTOCOL,
     type: "request",
-    task: String(input.task || "chat").trim().slice(0, 40) || "chat",
+    task: ["chat", "work"].includes(task) ? task : "chat",
     model: String(account.model || input.model || "").trim().slice(0, 180),
     messages: Object.freeze(messages.map(row => Object.freeze(row))),
     maxOutputTokens: clampInteger(input.maxOutputTokens, 1000, 1, CODEX_BRIDGE_MAX_OUTPUT_TOKENS),
@@ -51,7 +64,36 @@ function normalizeCodexBridgeRequest(account = {}, input = {}) {
       : "",
     originalPromptOnly: input.originalPromptOnly === true || input.original_prompt_only === true,
     sessionKey: String(input.sessionKey || input.session_key || "").trim().slice(0, 240),
-    contextHash: String(input.contextHash || input.context_hash || "").trim().slice(0, 128)
+    contextHash: String(input.contextHash || input.context_hash || "").trim().slice(0, 128),
+    work: normalizeWorkRequest(input.work)
+  });
+}
+
+function normalizeAttachments(value) {
+  const rows = Array.isArray(value) ? value.slice(0, CODEX_BRIDGE_MAX_ATTACHMENTS) : [];
+  return Object.freeze(rows.map(row => Object.freeze({
+    name: String(row?.name || "codexwork-output").replace(/[\r\n]/g, " ").slice(0, 180),
+    path: String(row?.path || "").replace(/[\r\n]/g, "").slice(0, 2048),
+    size: clampInteger(row?.size, 0, 0, 512 * 1024 * 1024)
+  })).filter(row => row.path));
+}
+
+function normalizeWorkResult(value) {
+  const source = value && typeof value === "object" && !Array.isArray(value) ? value : {};
+  return Object.freeze({
+    mode: String(source.mode || "").slice(0, 40),
+    rootAlias: String(source.rootAlias || "").slice(0, 80),
+    snapshottedFiles: clampInteger(source.snapshottedFiles, 0, 0, 50000),
+    snapshottedBytes: clampInteger(source.snapshottedBytes, 0, 0, 1024 * 1024 * 1024),
+    applied: Object.freeze((Array.isArray(source.applied) ? source.applied : []).slice(0, 500).map(v => String(v).slice(0, 500))),
+    skipped: Object.freeze((Array.isArray(source.skipped) ? source.skipped : []).slice(0, 500).map(v => Object.freeze({
+      path: String(v?.path || "").slice(0, 500),
+      reason: String(v?.reason || "").slice(0, 240)
+    }))),
+    deletedIgnored: Object.freeze((Array.isArray(source.deletedIgnored) ? source.deletedIgnored : []).slice(0, 500).map(v => String(v).slice(0, 500))),
+    deletionApplied: false,
+    exportCount: clampInteger(source.exportCount, 0, 0, CODEX_BRIDGE_MAX_ATTACHMENTS),
+    contextPolicy: String(source.contextPolicy || "").slice(0, 80)
   });
 }
 
@@ -67,7 +109,9 @@ function normalizeCodexBridgeResponse(payload = {}, fallbackModel = "") {
     text,
     model: String(payload.model || payload.result?.model || fallbackModel || "codex").slice(0, 180),
     usage: payload.usage || payload.result?.usage || null,
-    allowance: payload.allowance || payload.result?.allowance || null
+    allowance: payload.allowance || payload.result?.allowance || null,
+    attachments: normalizeAttachments(payload.attachments || payload.result?.attachments),
+    work: normalizeWorkResult(payload.work || payload.result?.work)
   });
 }
 
@@ -108,6 +152,7 @@ async function callCodexBridgeWebSocket(env, account, input = {}) {
 export {
   CODEX_BRIDGE_DEFAULT_TIMEOUT_MS,
   CODEX_BRIDGE_INTERNAL_CHAT_PATH,
+  CODEX_BRIDGE_MAX_ATTACHMENTS,
   CODEX_BRIDGE_MAX_MESSAGE_CHARS,
   CODEX_BRIDGE_MAX_MESSAGES,
   CODEX_BRIDGE_MAX_OUTPUT_TOKENS,
@@ -119,5 +164,6 @@ export {
   cleanMessages,
   normalizeCodexBridgeRequest,
   normalizeCodexBridgeResponse,
+  normalizeWorkRequest,
   usesWorkerCodexWebSocket
 };

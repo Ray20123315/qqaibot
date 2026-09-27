@@ -12,7 +12,7 @@ const directCodexResult = await defaultAiChat({ DEVELOPER_IDS: "90000" }, {
   timeoutMs: 5000
 }, {
   plugin: { id: "official.member-speech-analysis" },
-  aiProviderOverride: { provider: "codex", model: "gpt-6-sol", reasoningEffort: "xhigh" },
+  aiProviderOverride: { provider: "codex", mode: "chat", requiresDeveloper: true, model: "gpt-6-sol", reasoningEffort: "xhigh" },
   eventContext: {
     userId: "90000",
     message: { scope: "group", groupId: "800", userId: "90000" },
@@ -26,14 +26,14 @@ assert.equal(directCodexResult.text, "Codex 分析結果");
 assert.equal(directCodexPayload.payload.model, "gpt-6-sol");
 assert.equal(directCodexPayload.payload.reasoningEffort, "xhigh");
 assert.equal(directCodexPayload.payload.originalPromptOnly, false);
-assert.equal(directCodexPayload.payload.sessionKey, "qqaibot:plugin:official.member-speech-analysis:group:800:developer:90000");
+assert.equal(directCodexPayload.payload.sessionKey, "qqaibot:plugin:official.member-speech-analysis:group:800:developer:90000:chat");
 assert.match(directCodexPayload.payload.contextHash, /^[a-f0-9]{64}$/);
 assert.equal(directCodexPayload.payload.messages[0].role, "system");
 assert.equal(directCodexPayload.payload.messages.at(-1).content, "樣本內容");
 await assert.rejects(
   () => defaultAiChat({ DEVELOPER_IDS: "90000" }, { text: "x" }, {
     plugin: { id: "test" },
-    aiProviderOverride: { provider: "codex", model: "gpt-6-luna", reasoningEffort: "none" },
+    aiProviderOverride: { provider: "codex", mode: "chat", requiresDeveloper: true, model: "gpt-6-luna", reasoningEffort: "none" },
     eventContext: { userId: "90001", message: { scope: "group", groupId: "800", userId: "90001" }, codexExecutor: async () => ({ text: "no" }) }
   }),
   /PLUGIN_CODEX_DEVELOPER_REQUIRED/
@@ -171,16 +171,18 @@ const codexCommandResult = await codexCommandAdapter.dispatchOneBotEvent({
   group_id: 800,
   user_id: 90000,
   self_id: 1000,
-  message: [{ type: "text", data: { text: "!分析 @12345 --codex GPT-6 Luna 高" } }]
+  message: [{ type: "text", data: { text: "!分析 @12345 --codexchat GPT-6 Luna 高" } }]
 });
 assert.equal(codexCommandSeen, "!分析 @12345", "plugin must receive the command with --codex suffix removed");
 assert.equal(codexAiCalls, 1);
 assert.equal(codexAiContext.aiProviderOverride.provider, "codex");
+assert.equal(codexAiContext.aiProviderOverride.mode, "chat");
+assert.equal(codexAiContext.aiProviderOverride.requiresDeveloper, true);
 assert.equal(codexAiContext.aiProviderOverride.model, "gpt-6-luna");
 assert.equal(codexAiContext.aiProviderOverride.reasoningEffort, "high");
 assert.equal(codexCommandResult.results[0].consume, true);
 
-const deniedResult = await codexCommandAdapter.dispatchOneBotEvent({
+const publicResult = await codexCommandAdapter.dispatchOneBotEvent({
   post_type: "message",
   message_type: "group",
   message_id: 702,
@@ -189,12 +191,27 @@ const deniedResult = await codexCommandAdapter.dispatchOneBotEvent({
   self_id: 1000,
   message: [{ type: "text", data: { text: "!分析 @12345 --codex" } }]
 });
-assert.equal(codexAiCalls, 1, "non-developer --codex must not reach plugin AI");
+assert.equal(codexAiCalls, 2, "public --codex must be available to non-developers");
+assert.equal(publicResult.results[0].consume, true);
+assert.equal(codexAiContext.aiProviderOverride.mode, "public");
+assert.equal(codexAiContext.aiProviderOverride.model, "gpt-6-luna");
+assert.equal(codexAiContext.aiProviderOverride.reasoningEffort, "none");
+
+const deniedResult = await codexCommandAdapter.dispatchOneBotEvent({
+  post_type: "message",
+  message_type: "group",
+  message_id: 703,
+  group_id: 800,
+  user_id: 90001,
+  self_id: 1000,
+  message: [{ type: "text", data: { text: "!分析 @12345 --codexchat" } }]
+});
+assert.equal(codexAiCalls, 2, "non-developer --codexchat must not reach plugin AI");
 assert.equal(deniedResult.results[0].consume, true);
 assert.equal(deniedResult.results[0].action, "codex_override_denied");
 assert(codexNotices.some(item => item.action === "send_group_msg"), "non-developer denial must be visible");
 
-const rawPlugin = definePlugin({
+const rawPlugin = definePlugin({const rawPlugin = definePlugin({
   manifest: { id: "test.raw", name: "Raw", version: "1.0.0", apiVersion: "1", capabilities: ["onebot.call"] },
   commands: [{ name: "raw", async run(ctx) { return ctx.onebot.call("set_group_kick", { group_id: 1, user_id: 2 }); } }]
 });

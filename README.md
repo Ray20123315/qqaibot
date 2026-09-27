@@ -292,7 +292,7 @@ npx wrangler secret put SECRET_NAME
 
 ### 本地 Codex WebSocket bridge
 
-V3 可以把 `codex_bridge` provider 路由到本機 Codex connector。這條路徑採「本機主動連出去」：本機程式不需要開放入站連接埠，也不會把檔案系統、Shell、桌面控制或瀏覽器代理暴露給 Worker。
+V3 可以把 `codex_bridge` provider 路由到本機 Codex connector。這條路徑採「本機主動連出去」：本機程式不需要開放入站連接埠，也不會把任意檔案系統、Shell、桌面控制或瀏覽器代理暴露給 Worker；CodexWork 只接受本機 allowlist 內的暫存工作區。
 
 本機 connector 連線：
 
@@ -302,9 +302,59 @@ Authorization: Bearer <CODEX_BRIDGE_ACCESS_TOKEN>
 Protocol: qqai-codex-bridge-v1
 ```
 
-Worker 只會送出有界限的 AI inference RPC：`id`、`task`、`model`、`messages`、`maxOutputTokens`、`timeoutMs`。本機回覆使用相同 `id`，並回傳 `text`、可選 `model`／`usage`／`allowance`。單一 Worker 同時只採用最新一條 Codex connector 連線，並限制並行請求與訊息大小。
+一般聊天只送出有界限的 AI inference RPC；CodexWork 另外送出受限的 `work` 選項（root alias／是否允許 edit／是否匯出），真正的檔案 allowlist、敏感檔排除、禁止刪除與寫回檢查全部由本機 bridge 再驗證。單一 Worker 同時只採用最新一條 Codex connector 連線，並限制並行請求與訊息大小。
 
 `codex_bridge` provider 的 `endpoint` 留空、設為 `worker://codex`，或在 provider metadata 設定 `transport=worker_ws` 時，V3 會走本機 WebSocket connector；既有 `https://...` endpoint 仍維持原本的 `POST /v1/qqai/chat` HTTP 相容模式。
+
+
+### Codex Bridge、公開額度與 CodexWork
+
+`!codex` 現在提供給所有 QQ 使用者，固定使用 `GPT-6 Luna`、`none` reasoning；預設每位使用者每日 5 次，並沿用同一個 user/group session，而不是每次建立新對話。可用 Worker vars 調整：
+
+```toml
+CODEX_PUBLIC_DAILY_REQUESTS = "5"
+CODEX_PUBLIC_MAX_OUTPUT_TOKENS = "1536"
+```
+
+開發者原本的進階能力改為 `!codexchat`／`--codexchat`；可自行選模型與 reasoning。`!codexwork`／`--codexwork` 只限開發者，用來透過本機 bridge 處理允許的電腦資料。
+
+本機 bridge 安全模型：
+
+- `QQAI_CODEXWORK_READ_ROOTS` 是唯一可讀 allowlist，例如 `docs=C:\Data\Docs;project=D:\QQAIBOT`。
+- `QQAI_CODEXWORK_EDIT_ROOTS` 是可選的寫入 allowlist，必須位於 read root 內；未設定時 `--edit` 一律拒絕。
+- 刪除永遠不會套用到原始資料。Codex 實際只操作暫存副本，bridge 比對後只把允許的新增／修改原子寫回。
+- `.env`、`.git`、`.codex`、`.agents`、credentials、private key 等敏感內容不會複製進工作區。
+- `--export` 只會輸出暫存工作區內、經 bridge 再驗證的檔案。NapCat 必須與 bridge 位於可存取同一路徑的電腦，才能用 `upload_group_file`／`upload_private_file` 發送到 QQ。
+- bridge 使用獨立 `CODEX_HOME` 並覆寫成最小設定，不載入一般使用者 Codex Home 中的插件／技能；工作資料夾內的 `.codex`、`.agents` 也不會被帶入。
+- bridge 是 outbound-only WebSocket；Worker 不會取得任意 shell 或任意電腦檔案 API。
+
+本機先安裝 WebSocket client 套件（不需要加入 Worker bundle）：
+
+```bash
+npm install --no-save ws@8.21.3
+```
+
+設定環境變數後啟動：
+
+```text
+QQAI_CODEX_BRIDGE_URL=wss://你的網域/v3/codex-bridge
+QQAI_CODEX_BRIDGE_TOKEN=<CODEX_BRIDGE_ACCESS_TOKEN>
+QQAI_CODEXWORK_READ_ROOTS=docs=C:\Data\Docs;project=D:\QQAIBOT
+QQAI_CODEXWORK_EDIT_ROOTS=project-src=D:\QQAIBOT\src
+QQAI_CODEXWORK_EXPORT_DIR=C:\QQAIBOT-exports
+```
+
+Windows PowerShell 若要使用獨立 ChatGPT/Codex 登入狀態，可先：
+
+```powershell
+$env:CODEX_HOME="$HOME\.qqaibot-codex"
+codex login
+node tools/codex-work-bridge.mjs
+```
+
+`!codexwork --root docs 查找某份資料` 預設唯讀；只有明確加上 `--edit` 才會嘗試把變更寫回 edit allowlist。要把產物送回 QQ，再加 `--export`。
+
+Portal 的「系统日志」頁提供已脫敏 terminal-style logs、`.log` 下載、非 AI 自我檢測與安全修復。安全修復只會重新取得 Durable Object 的既有 WebSocket、喚醒待處理佇列並重新檢查，不會用 AI 修改程式碼或資料。
 
 ### AI 聊天冷卻
 
