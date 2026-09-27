@@ -1,41 +1,37 @@
 # VERIFY
 
-## V4 Phase 1 Verification
+## V4 Phase 2 Verification
 
 - branch: `v4-qqopen-native`
-- base main at task start: `523d2138ae413206eb8fe7aa85d45c5b8d7404c9`
-- latest Phase 1 product commit: `685f6923bec7a010af8802ccd6e8ada3adc7242f`
-- isolated command: `npm run check:v4`
-- isolated result: success (`verify-v4-qqopen: ok`)
-- remote read-back of all Phase 1 product/config/doc files: success
-- CI workflow now includes `npm run check:v4`
-- CI run `36309168038`: success
-- latest product CI run `36309169883`: success
+- latest verified product commit: `1f12968a00db01518ef33abd7b7df4977b43e676`
+- GitHub Actions run: `36310767685`
+- repository regression: success
+- V3 regression: success
+- V4 QQ Open regression: success
+- Worker dry-run bundle: success
+- remote read-back of runtime/action/worker/wrangler/test blobs: success
 
-## V4 Test Coverage Present
+## Connectivity Test Coverage
 
-- GROUP message event -> canonical message with `platform=qq-open` and OpenID identity.
-- C2C event -> private canonical message.
-- non-message event rejection.
-- Identify / Heartbeat / Resume payloads.
-- Gateway Hello/READY/ACK state transitions.
-- AccessToken caching and `QQBot` authorization header.
-- URL path encoding and group-message recall route.
-- command alias resolution.
-- `only_admin` panel metadata for moderation.
-- multi-panel paging and custom menu generation.
+- Gateway Identify, Heartbeat and Resume payload/state helpers.
+- canonical GROUP/C2C event normalization with OpenID identities.
+- native group/C2C passive reply Action Dispatcher with triggering `msg_id`.
+- `!qqping` and group-at `!qqecho` parsing.
+- default `GROUP_AND_C2C_EVENT` intent value `33554432`.
+- connection timeout helper wiring.
+- reconnect backoff sequence 5/5/10/20/40/60 seconds.
+- Wrangler `QQ_OPEN_GATEWAY` binding and `v4_qqopen_gateway` migration.
+- worker bundle includes QqOpenGateway export.
 
-## Existing Security Invariants Retained
+## Repaired Intermediate Failures
 
-- Backend permission/confirmation logic remains authoritative.
-- CodexWork read/edit allowlists, staging, sensitive/symlink exclusions, no-delete, writeback validation and explicit export remain authoritative on the local bridge.
-- No AppSecret/access token is stored in repository memory.
+Runs associated with commits before `090db336...` failed because a newly added test assertion used invalid RegExp escaping and because the following migration assertion had not yet been updated. These were test-code defects; the final product runs `36310584966`, `36310710245`, `36310756139`, and `36310767685` are successful.
 
-## Live Verification Still Needed
+## Live Verification Still Required
 
-- persistent QQ Gateway connection from the chosen Cloudflare runtime.
-- authorized intents against the actual QQ application.
-- real group/C2C receive and reply.
-- group admin recall of a member message within the official time window.
-- media upload/send, member management, mute/kick, join-request operations.
-- full legacy-command compatibility and final production cutover.
+- configure Cloudflare AppID/Secret/enabled/intents without committing the Secret.
+- deploy a V4 test/cutover build.
+- confirm `!status` reports QQ Open READY.
+- C2C `!qqping` returns `QQ Open V4 已连接并可回话。`.
+- group `@机器人 !qqping` and `!qqecho hello` return via native QQ OpenAPI.
+- after connectivity success, migrate normal AI/command replies.

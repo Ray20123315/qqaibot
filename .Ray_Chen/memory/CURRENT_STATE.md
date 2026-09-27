@@ -3,35 +3,36 @@
 ## Repository State
 
 - production branch: `main`
-- production base observed at migration start: `523d2138ae413206eb8fe7aa85d45c5b8d7404c9`
-- V4 development branch: `v4-qqopen-native`
-- latest Phase 1 product commit: `685f6923bec7a010af8802ccd6e8ada3adc7242f`
-- latest Phase 1 CI run: `36309169883` — success
-- production runtime switch: not performed
-- Cloudflare deployment: not changed
+- V4 branch: `v4-qqopen-native`
+- latest verified V4 product commit: `1f12968a00db01518ef33abd7b7df4977b43e676`
+- latest verified CI run: `36310767685` — success
+- production main switch: not performed
+- Cloudflare deployment/config: not changed
 - QQ Open console configuration: not changed
 
-## V4 Phase 1
+## Phase 2 Connectivity State
 
 Implemented:
-- QQ Open WebSocket protocol payload/state helpers.
-- QQ Open message-event to canonical-message normalization using OpenID values.
-- QQ OpenAPI access-token caching and initial API wrappers.
-- Command Registry with aliases, scopes, permissions, menu metadata, panel metadata, and automatic multi-panel paging.
-- Initial 24-command compatibility catalog.
-- V4 isolated verification and CI hook.
+- persistent QQ Open Gateway Durable Object with AccessToken + outbound WebSocket.
+- Identify/Heartbeat/ACK/READY/Resume/Reconnect/Invalid Session handling.
+- persisted `session_id` / `seq`.
+- connection timeout and exponential-ish reconnect backoff capped at 60s.
+- native group/C2C passive message reply Action Dispatcher.
+- `!qqping` and `!qqecho` E2E probes.
+- System Admin status/connect/disconnect endpoints.
+- developer `!status` QQ Open diagnostics.
+- Wrangler binding/migration and CI coverage.
 
-Not yet implemented:
-- live persistent QQ Gateway client in Worker/Durable Object.
-- platform action dispatcher replacing OneBot RPC calls.
-- full legacy-command catalog migration.
-- full moderation/member/media/join-request API coverage.
-- live QQ Open end-to-end verification.
+Not yet verified live:
+- actual Gateway READY against the user's QQ application.
+- real C2C/group receive and native reply.
+- full command/AI routing through QQ Open.
+- moderation/member/media/join request actions.
 
 ## Preserved Systems
 
-Existing Codex Bridge EXE/security model, shared Codex conversation design, AI providers, plugin runtime, D1 data, Portal, quota/cooldown logic and current OneBot production path remain intact.
+Codex Bridge EXE/security model, shared Codex conversations, AI providers, plugins, D1/Portal data, quotas/cooldowns, and OneBot production path remain intact.
 
 ## Credential State
 
-No QQ AppSecret or live access token is present in the repository or Ray_Chen memory. `.dev.vars.example` contains placeholders only.
+No QQ AppSecret or live access token is stored in GitHub or Ray_Chen memory. Production should use Cloudflare Secrets for `QQ_OPEN_CLIENT_SECRET`.

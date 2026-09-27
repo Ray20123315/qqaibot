@@ -2,21 +2,20 @@
 
 ## Active V4 Requirements
 
-- Rebuild QQAIBOT toward QQ Open Platform native integration rather than maintaining a permanent OneBot compatibility illusion.
-- All existing commands should become compatible with the new architecture.
-- Use QQ custom menus and command panels where useful, while keeping text-command compatibility.
-- Command definitions should be single-source so text commands, AI routing, help, menus and panels do not drift apart.
-- If the bot is a QQ group administrator and the official API permits it, member-message recall should remain available under QQAIBOT authorization rules.
-- Preserve valuable mature systems: Codex Bridge, AI providers, plugins, D1/Portal data, quota/cooldown and security controls.
-- Do not expose or commit AppSecret.
-- Migration should be recoverable; keep the current OneBot production path until QQ Open passes verification.
+- Prioritize proving QQ Open connection and native reply before broader migration.
+- Rebuild toward QQ Open Native instead of permanently emulating OneBot.
+- Keep existing text commands compatible and converge commands into the Command Registry.
+- Use QQ custom menus/panels where useful, with backend permissions remaining authoritative.
+- If the bot is a QQ group administrator and official APIs permit it, member-message recall should remain available under QQAIBOT authorization rules.
+- Preserve mature systems: Codex Bridge, AI providers, plugins, D1/Portal data, quota/cooldown and security controls.
+- Do not commit or record AppSecret.
+- Keep OneBot production usable until QQ Open is verified.
 
 ## Existing Codex / Local Work Requirements Still in Force
 
-- `!codex`, `!codexchat`, and `!codexwork` share one conversation for the same user/chat scope; plugin suffix variants keep plugin-scoped continuity.
-- Public `!codex` is quota-bound and fixed to GPT-6 Luna with no reasoning; advanced CodexChat/CodexWork remain developer-only.
-- CodexWork local files are read-only by default, editing is restricted to explicit local allowlists, and deletion is never allowed.
-- CodexWork may export selected allowed files back to QQ.
-- Avoid loading unrelated plugins/skills/integrations unless necessary.
+- `!codex`, `!codexchat`, and `!codexwork` share a conversation for the same user/chat scope; plugin suffix variants retain plugin-scoped continuity.
+- Public `!codex` stays quota-bound and fixed to GPT-6 Luna/no reasoning; advanced modes remain developer-only.
+- CodexWork is read-only by default, edit roots are explicit allowlists, and deletion is never allowed.
+- Avoid unnecessary plugin/skill/context loading.
 - Existing permission/confirmation gates remain authoritative.
 - Successful administrator recall remains silent while failures remain visible.

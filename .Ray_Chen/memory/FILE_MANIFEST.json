@@ -1,36 +1,37 @@
 {
   "schema_version": 1,
-  "memory_version": "v0.0.6",
+  "memory_version": "v0.0.7",
   "task_id": "qqaibot-20260927-qqopen-v4-native",
-  "transaction": "file_change_transaction_20260927_qqopen_v4_phase1_001",
+  "transaction": "file_change_transaction_20260927_qqopen_v4_phase2_connectivity_001",
   "repository": "Ray20123315/qqaibot",
   "branch": "v4-qqopen-native",
-  "product_before_revision": "523d2138ae413206eb8fe7aa85d45c5b8d7404c9",
-  "product_after_revision": "685f6923bec7a010af8802ccd6e8ada3adc7242f",
+  "product_before_revision": "d453df5ffd4e37f55780f66294871d8fbd33e3c8",
+  "product_after_revision": "1f12968a00db01518ef33abd7b7df4977b43e676",
   "verification": {
-    "isolated_check_v4": "success",
-    "remote_blob_readback": "success",
-    "github_actions_runs": [36309168038, 36309169883],
-    "github_actions_status_at_checkpoint": "success",
+    "github_actions_run_id": 36310767685,
+    "regression": "success",
+    "v3_regression": "success",
+    "v4_regression": "success",
+    "worker_bundle_dry_run": "success",
+    "remote_readback": "success",
     "production_cutover": "not_performed",
     "live_qqopen_e2e": "not_run"
   },
   "changes": [
-    {"location_type":"github","provider":"GitHub","resource_id_or_path":"src/v4/qqopen/gateway.js","action":"created","branch_or_container":"v4-qqopen-native","verification":"read-back + isolated V4 tests","changed_at":"2026-09-27T17:25:00+08:00"},
-    {"location_type":"github","provider":"GitHub","resource_id_or_path":"src/v4/qqopen/events.js","action":"created","branch_or_container":"v4-qqopen-native","verification":"read-back + isolated V4 tests","changed_at":"2026-09-27T17:25:00+08:00"},
-    {"location_type":"github","provider":"GitHub","resource_id_or_path":"src/v4/qqopen/api.js","action":"created","branch_or_container":"v4-qqopen-native","verification":"read-back + isolated V4 tests","changed_at":"2026-09-27T17:25:00+08:00"},
-    {"location_type":"github","provider":"GitHub","resource_id_or_path":"src/v4/commands/registry.js","action":"created","branch_or_container":"v4-qqopen-native","verification":"read-back + isolated V4 tests","changed_at":"2026-09-27T17:25:00+08:00"},
-    {"location_type":"github","provider":"GitHub","resource_id_or_path":"src/v4/commands/catalog.js","action":"created","branch_or_container":"v4-qqopen-native","verification":"read-back + isolated V4 tests","changed_at":"2026-09-27T17:25:00+08:00"},
-    {"location_type":"github","provider":"GitHub","resource_id_or_path":"src/v4/index.js","action":"created","branch_or_container":"v4-qqopen-native","verification":"read-back","changed_at":"2026-09-27T17:25:00+08:00"},
-    {"location_type":"github","provider":"GitHub","resource_id_or_path":"verify-v4-qqopen.mjs","action":"created","branch_or_container":"v4-qqopen-native","verification":"verify-v4-qqopen: ok","changed_at":"2026-09-27T17:25:00+08:00"},
-    {"location_type":"github","provider":"GitHub","resource_id_or_path":"docs/v4-qqopen-native.md","action":"created","branch_or_container":"v4-qqopen-native","verification":"read-back","changed_at":"2026-09-27T17:25:00+08:00"},
-    {"location_type":"github","provider":"GitHub","resource_id_or_path":"src/v3/message/core.js","action":"modified","branch_or_container":"v4-qqopen-native","verification":"read-back + isolated V4 tests","changed_at":"2026-09-27T17:25:00+08:00"},
-    {"location_type":"github","provider":"GitHub","resource_id_or_path":"package.json","action":"modified","branch_or_container":"v4-qqopen-native","verification":"read-back","changed_at":"2026-09-27T17:25:00+08:00"},
-    {"location_type":"github","provider":"GitHub","resource_id_or_path":".dev.vars.example","action":"modified","branch_or_container":"v4-qqopen-native","verification":"placeholders only; no secret","changed_at":"2026-09-27T17:25:00+08:00"},
-    {"location_type":"github","provider":"GitHub","resource_id_or_path":".github/workflows/validate.yml","action":"modified","branch_or_container":"v4-qqopen-native","verification":"CI success","changed_at":"2026-09-27T17:25:00+08:00"}
+    {"location_type":"github","provider":"GitHub","resource_id_or_path":"src/v4/platform/actions.js","action":"created","branch_or_container":"v4-qqopen-native","verification":"CI + read-back","changed_at":"2026-09-27T17:58:00+08:00"},
+    {"location_type":"github","provider":"GitHub","resource_id_or_path":"src/v4/qqopen/runtime.js","action":"created","branch_or_container":"v4-qqopen-native","verification":"CI + read-back","changed_at":"2026-09-27T17:58:00+08:00"},
+    {"location_type":"github","provider":"GitHub","resource_id_or_path":"src/v4/index.js","action":"modified","branch_or_container":"v4-qqopen-native","verification":"CI","changed_at":"2026-09-27T17:58:00+08:00"},
+    {"location_type":"github","provider":"GitHub","resource_id_or_path":"worker.js","action":"modified","branch_or_container":"v4-qqopen-native","verification":"CI + read-back","changed_at":"2026-09-27T17:58:00+08:00"},
+    {"location_type":"github","provider":"GitHub","resource_id_or_path":"wrangler.toml","action":"modified","branch_or_container":"v4-qqopen-native","verification":"CI + read-back","changed_at":"2026-09-27T17:58:00+08:00"},
+    {"location_type":"github","provider":"GitHub","resource_id_or_path":"wrangler.example.toml","action":"modified","branch_or_container":"v4-qqopen-native","verification":"CI","changed_at":"2026-09-27T17:58:00+08:00"},
+    {"location_type":"github","provider":"GitHub","resource_id_or_path":".dev.vars.example","action":"modified","branch_or_container":"v4-qqopen-native","verification":"placeholders only; no secret","changed_at":"2026-09-27T17:58:00+08:00"},
+    {"location_type":"github","provider":"GitHub","resource_id_or_path":"verify-v4-qqopen.mjs","action":"modified","branch_or_container":"v4-qqopen-native","verification":"V4 regression success","changed_at":"2026-09-27T17:58:00+08:00"},
+    {"location_type":"github","provider":"GitHub","resource_id_or_path":"verify-config.mjs","action":"modified","branch_or_container":"v4-qqopen-native","verification":"regression success","changed_at":"2026-09-27T17:58:00+08:00"},
+    {"location_type":"github","provider":"GitHub","resource_id_or_path":"verify-migration.mjs","action":"modified","branch_or_container":"v4-qqopen-native","verification":"regression success","changed_at":"2026-09-27T17:58:00+08:00"},
+    {"location_type":"github","provider":"GitHub","resource_id_or_path":"docs/v4-qqopen-native.md","action":"modified","branch_or_container":"v4-qqopen-native","verification":"read-back","changed_at":"2026-09-27T17:58:00+08:00"}
   ],
   "internal_memory_transaction": {
-    "action": "update .Ray_Chen/memory to v0.0.6",
-    "note": "Memory files, archive, hash manifest, and notification evidence do not recursively trigger another memory transaction."
+    "action": "update .Ray_Chen/memory to v0.0.7",
+    "note": "Memory files, archive, hash manifest, and Gmail evidence do not recursively trigger another memory transaction."
   }
 }

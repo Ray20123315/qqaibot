@@ -6,72 +6,60 @@ goal_revision: 1
 
 ## Goal
 
-Build QQAIBOT V4 as a QQ Open Native architecture while preserving mature non-transport functionality. Replace transport, identity, message/action integration, and command presentation incrementally instead of emulating QQ Open as OneBot.
+Build QQAIBOT V4 as a QQ Open Native architecture while preserving mature non-transport functionality. Current priority is proving real Gateway connectivity and native receive/reply before migrating the rest of the command surface.
 
 ## Acceptance Criteria
 
-- QQ Open WebSocket lifecycle supports Identify, Heartbeat, Resume, reconnect and persisted session/sequence state.
-- QQ Open events normalize into the canonical message model using OpenID identities.
-- QQ OpenAPI actions cover messaging, media, member operations, moderation, join approval, menus and panels needed by existing features.
-- A single Command Registry becomes the source for text commands, AI routing, help, QQ custom menu and QQ command panels.
-- Existing command aliases remain compatible unless explicitly retired.
-- Backend permissions remain authoritative even when QQ panels use `only_admin`.
-- Codex Bridge, AI providers, plugin runtime, D1/Portal data, quotas and cooldowns remain preserved unless migration requires an adapter.
-- Production does not switch until regression, Worker bundle, and live QQ Open end-to-end tests pass.
+- QQ Open WebSocket supports Identify, Heartbeat, Resume, reconnect and persisted session/sequence state.
+- Group/C2C events normalize into canonical messages using OpenID identities.
+- Native QQ OpenAPI can passively reply to the triggering group/C2C message.
+- Reconnect failures use timeout/backoff instead of hammering session creation.
+- Developer diagnostics expose Gateway enabled/configured/connected/READY/error state.
+- Production remains on OneBot until live QQ Open E2E succeeds.
+- No real AppSecret is committed or recorded in Ray_Chen memory.
 
 ## Current Phase
 
-phase: 1 — foundation
-current_step: Phase 1 foundation written, remotely read back, and CI-verified.
+phase: 2 — connectivity and native reply
+current_step: deployable connectivity implementation complete; live QQ Open E2E awaits Cloudflare credential/config setup.
 
 ## Completed Steps
 
-- Created branch `v4-qqopen-native` from `main` commit `523d2138ae413206eb8fe7aa85d45c5b8d7404c9`.
-- Added QQ Open gateway protocol helpers for opcodes, Identify, Heartbeat, Resume and session state.
-- Added QQ Open message-event normalization for C2C/group/channel/direct-message event shapes.
-- Added QQ OpenAPI client with access-token caching, one-time 401 refresh, menu/panel/message/recall methods.
-- Made canonical messages accept an explicit platform while preserving OneBot as the default.
-- Added Command Registry and initial 24-command compatibility catalog.
-- Added automatic multi-panel paging so commands are not silently truncated at QQ's per-panel item limit.
-- Added `npm run check:v4` and wired V4 validation into branch CI.
-- Added `docs/v4-qqopen-native.md`.
-- No AppSecret or real credential was committed.
-
-## Files Created
-
-- `src/v4/qqopen/gateway.js`
-- `src/v4/qqopen/events.js`
-- `src/v4/qqopen/api.js`
-- `src/v4/commands/registry.js`
-- `src/v4/commands/catalog.js`
-- `src/v4/index.js`
-- `verify-v4-qqopen.mjs`
-- `docs/v4-qqopen-native.md`
-
-## Files Modified
-
-- `src/v3/message/core.js`
-- `package.json`
-- `.dev.vars.example`
-- `.github/workflows/validate.yml`
+- Added `src/v4/qqopen/runtime.js` with persistent `QqOpenGateway` Durable Object.
+- Gateway obtains AccessToken, fetches `/gateway`, opens outbound WebSocket, handles Hello/Identify/Heartbeat/ACK/READY/Resume/Reconnect/Invalid Session.
+- Persists QQ Gateway `session_id` and `seq` in Durable Object storage.
+- Added 20-second connection timeout and reconnect backoff 5s → 10s → 20s → 40s → 60s cap.
+- Added `src/v4/platform/actions.js` with native canonical `message.reply` / `message.send`.
+- Added passive probe replies: C2C `!qqping`, group `@机器人 !qqping`, and `!qqecho 内容`.
+- Added `QQ_OPEN_GATEWAY` binding and `v4_qqopen_gateway` Durable Object migration.
+- Existing minute cron calls Gateway `ensure` only when QQ Open is enabled/configured.
+- Added System Admin-only status/connect/disconnect HTTP endpoints.
+- Developer `!status` now reports QQ Open READY/connected/configured/last event/error.
+- Added config examples; AppSecret remains a secret-only value.
+- Updated V4/migration/config regression tests.
+- Final product CI run `36310767685`: success for regression, V3, V4 and Worker bundle.
+- Intermediate CI failures were test-assertion escaping mistakes and were repaired; they did not represent Gateway runtime failures.
 
 ## Verification Results
 
-- isolated `npm run check:v4`: success (`verify-v4-qqopen: ok`) before remote publication.
-- remote branch read-back of all Phase 1 product files: success.
-- branch CI: success; latest product run `36309169883` passed regression, V3, V4 and Worker bundle.
-- production/live QQ Open end-to-end: not run.
+- latest product commit: `1f12968a00db01518ef33abd7b7df4977b43e676`
+- latest CI run: `36310767685` — success
+- repository regression: success
+- V3 regression: success
+- V4 QQ Open regression: success
+- Worker dry-run bundle: success
+- remote read-back of core connectivity files: success
+- live QQ Open E2E: not run because production credentials/config were not changed in this task
 
-## Known Limitations / Blockers
+## Known Limitations
 
-- No persistent Gateway runtime is connected to Worker/Durable Object yet.
-- No production QQ Open credential has been configured or used.
-- Action coverage is intentionally incomplete; current client is Phase 1 only.
-- Initial registry covers 24 key commands, not the complete legacy command surface yet.
-- `main` remains OneBot/NapCat and has not been changed by this migration phase.
+- No real QQ Gateway connection has been attempted from deployed Cloudflare yet.
+- Only connectivity probe replies use the new Action Dispatcher; normal AI and legacy commands still use existing paths.
+- Moderation/member/media/join-request action coverage remains Phase 3+.
+- Outbound WebSocket lifetime cannot be assumed permanent; persisted Resume state plus cron/watchdog reconnect is required.
 
 ## next_exact_action
 
-Implement a persistent QQ Gateway runtime with Durable Object lifecycle/session persistence, then add a platform action dispatcher so existing handlers can migrate from OneBot actions to native QQ OpenAPI one capability at a time.
+Set Cloudflare `QQ_OPEN_APP_ID` as a variable, `QQ_OPEN_CLIENT_SECRET` as a Secret, `QQ_OPEN_ENABLED=true`, and baseline `QQ_OPEN_INTENTS=33554432`; deploy the V4 build in a safe test/cutover context; confirm developer `!status` shows QQ Open READY; then send C2C `!qqping` and group `@机器人 !qqping` / `!qqecho hello`. Only after these pass, route normal AI/command replies through the Action Dispatcher.
 
-last_checkpoint_at: 2026-09-27T17:25:00+08:00
+last_checkpoint_at: 2026-09-27T17:58:00+08:00
