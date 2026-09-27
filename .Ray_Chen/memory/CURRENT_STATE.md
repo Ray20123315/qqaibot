@@ -1,67 +1,44 @@
 # CURRENT_STATE
 
-## Repository State
+## Production
 
-- production branch: `main`
-- V4 branch: `v4-qqopen-native`
-- latest verified V4 product commit: `75483f71fb0707043082f891851581f03ac2c15c`
-- latest verified product CI run: `36327804832` — success
-- production main switch: not performed
-- Cloudflare deployment/config: not changed
-- QQ Open console configuration: not changed
+- Worker: `qqai`
+- branch: `main`
+- migration tag: `v3_remove_budget_guard`
+- Durable Object class: `OneBotHub`
+- production deploy command: `npx wrangler deploy worker.js --no-assets`
+- production Worker modified time remained unchanged during test-environment work
+- `v4-qqopen-native` is explicitly excluded from the production Worker's non-production trigger
 
-## V4 Portal
+## Isolated V4 Test
 
-Visible primary areas are now:
-1. Overview
-2. QQ Open
-3. Group Management
-4. AI / Codex
-5. Plugins
-6. System
+- Worker: `qqai-v4test`
+- Worker tag: `95d30a6cea594b5f8d9a7ac7183c7712`
+- URL: `https://qqai-v4test.ray20123315.workers.dev`
+- migration: `v4test_qqopen_gateway_v1`
+- Durable Object: `QqOpenGateway`
+- dedicated build trigger: `522507cc-658f-4361-8e90-9a98e65b92d7`
+- source branch: `v4-qqopen-native`
+- build command: none
+- deploy command: `npx wrangler deploy --config wrangler.v4test.toml --no-assets`
+- path exclude: `.Ray_Chen/**`
+- latest successful Cloudflare build: `d92e427e-ee8c-48b8-92a7-0773cdc870c0`
 
-The final V4 Portal layer hides the legacy navigation, forces Overview as the initial lean view, polls QQ Open status, and keeps system diagnostics accessible through the System section. Motion-heavy effects automatically disable for reduced-motion users.
+The test Worker has:
+- no D1
+- no production domain/routes
+- no Vectorize
+- no OneBotHub
+- no Cron
+- no QQ AppSecret yet
 
-## QQ Open Capability State
+Non-secret test vars include QQ Open AppID and `GROUP_AND_C2C_EVENT` intent baseline.
 
-Implemented in code:
-- Gateway online/READY/status controls.
-- group info and bot state.
-- member list and member detail API wrappers.
-- batch member removal.
-- blacklist read/update.
-- join request list and approve/decline/decline+blacklist.
-- mute state and member mute operations.
-- group/C2C rich-media upload wrappers.
+## Verification
 
-Officially confirmed:
-- text send/receive.
-- Markdown send.
-- rich-media send/receive.
-- image, video, audio/voice, and file rich-media flow via `file_info`.
-- 2026-09 group member/blacklist APIs.
-- 2026-08 mute and join-request APIs.
-
-## Pruning State
-
-Retired from the V4 main Portal/product surface:
-- activity / poll
-- schedule
-- standalone appeals/history pages
-- Bilibili monitor
-- relationship management
-- platform feature catalog
-- event simulator / legacy OneBot-oriented tools
-
-Activity/vote/schedule entries are also removed from the V4 Command Registry. The underlying historical data/code is intentionally retained for rollback until live QQ Open verification.
-
-## Codex State
-
-Direct `!codex`, `!codexchat`, and `!codexwork` now use one principal-scoped session key:
-`qqaibot:principal:<principalId>:codex`.
-
-Plugin-internal Codex calls remain plugin/scope isolated. If no internal principal mapping exists, the current platform user identifier is used as fallback.
-
-## Credential State
-
-No real QQ AppSecret or live token is stored in the repository or Ray_Chen memory.
+- GitHub CI `36330424094`: success
+- isolated V4 config dry-run: success
+- Cloudflare deployment: success
+- QqOpenGateway migration on test Worker: success
+- external public HTTP smoke from this assistant environment: unavailable due tool/network resolution limitation
+- live QQ Gateway: pending Secret

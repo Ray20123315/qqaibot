@@ -1,31 +1,21 @@
 # GOTCHAS
 
-## Retained risks
+## Retained
 
-- OpenID is not a numeric QQ ID.
-- Model output never bypasses registered handlers/authorization.
-- Filesystem safety remains local to CodexWork enforcement.
-- Gateway intents/session state are strict and must be persisted.
-- Outbound WebSocket lifetime is not permanent.
-- Reconnect storms must be bounded.
-- QQ UI/connection status alone is not E2E proof.
+Previous QQ Open, OpenID, gateway lifecycle, reconnect, Portal animation, pruning, permission, and principal-identity risks remain in force.
 
-## G-015 Portal animation versus accessibility/performance
-Risk: deliberately heavy animations can make low-power devices unpleasant or inaccessible.
-Avoidance: motion uses CSS transforms/opacity where possible and all decorative animation/tilt is disabled under `prefers-reduced-motion: reduce`.
+## G-020 Cloudflare Connected Builds overrides Worker name
+Risk: a non-production trigger attached to `qqai` overrides a different `name` from Wrangler config back to `qqai`, which could target the production Worker.
+Avoidance: exclude `v4-qqopen-native` from the production trigger and attach the branch to a distinct `qqai-v4test` Worker trigger.
 
-## G-016 Legacy light-theme variables can break V4 contrast
-Risk: the old Portal theme can leave dark V4 surfaces with dark text.
-Avoidance: the V4 lean body defines its own high-contrast dark design tokens.
+## G-021 Account D1 limit
+Risk: account currently has 10 D1 databases; creating another returns error 7406.
+Avoidance: do not delete unrelated databases. The isolated QQ connectivity Worker has no D1 binding.
 
-## G-017 Portal pruning can hide data still needed for migration
-Risk: deleting legacy modules or D1 data too early can remove configuration/history before QQ Open replacements are verified.
-Avoidance: first prune navigation and V4 registry; retain rollback code/data until live verification, then physically delete dead modules.
+## G-022 Account Cron limit
+Risk: account currently has all 5 Free-plan Cron triggers allocated; adding a test Cron returns error 10072.
+Avoidance: no Cron in `wrangler.v4test.toml`; use the manual connection endpoint/button.
 
-## G-018 QQ management permission availability is app-specific
-Risk: documented group management APIs may return permission/admin errors for a specific bot.
-Avoidance: Portal handles permission failures visibly and live verification is required before declaring a management capability production-ready.
-
-## G-019 Principal identity is not automatically cross-context identity
-Risk: QQ Open may expose different opaque identifiers in C2C and group contexts.
-Avoidance: Codex accepts a stable `principalId` when identity mapping exists; otherwise it falls back to platform user ID and does not invent cross-ID equivalence.
+## G-023 GitHub deploy credentials are not configured
+Risk: the repo does not currently expose `CLOUDFLARE_API_TOKEN` / `CLOUDFLARE_ACCOUNT_ID` to GitHub Actions.
+Avoidance: deployment is owned by the isolated Cloudflare Builds trigger, not GitHub Actions.

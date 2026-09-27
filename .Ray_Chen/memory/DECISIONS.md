@@ -1,25 +1,25 @@
 # DECISIONS
 
-## Retained decisions
+## Retained
 
-D-001 through D-018 remain accepted, including execution/permission safety, Codex bridge restrictions, QQ Open Native V4, Command Registry as the source of truth, preservation of mature systems, feature-branch-first migration, conservative intents, and persistent Gateway resume state.
+D-001 through D-022 remain in force.
 
-## D-019 Lean Portal becomes the V4 control surface
+## D-023 Fully isolated V4 connectivity Worker
 status: accepted
 date: 2026-09-27
-Decision: the primary Portal is reduced to six areas — Overview, QQ Open, Group Management, AI/Codex, Plugins, System — with legacy surfaces hidden from normal navigation.
+Decision: perform QQ Open connectivity testing on a separate `qqai-v4test` Worker with its own QqOpenGateway Durable Object and no production data bindings.
 
-## D-020 Prune product surface before physical data deletion
+## D-024 Production Connected Builds must exclude the V4 branch
 status: accepted
 date: 2026-09-27
-Decision: retire nonessential V4 features from navigation/registry immediately, but keep historical data/code as rollback material until live QQ Open verification proves replacements. A later second pruning pass may physically remove dead modules.
+Decision: the production `qqai` non-production trigger excludes `v4-qqopen-native`. A dedicated Cloudflare Builds trigger attached to `qqai-v4test` owns V4 test deployments.
 
-## D-021 Direct Codex is principal-scoped
+## D-025 No test Cron
 status: accepted
 date: 2026-09-27
-Decision: direct `!codex`, `!codexchat`, and `!codexwork` share one session per stable principal instead of splitting by group/private scope. Plugin-internal Codex remains isolated.
+Decision: because the account is already at the Workers Free 5-Cron limit, the isolated test Worker uses an explicit “連接 / 重試” action instead of a watchdog Cron.
 
-## D-022 Rich media is a native QQ Open capability
+## D-026 No test D1
 status: accepted
 date: 2026-09-27
-Decision: V4 treats image/video/audio/file as supported native rich media. Sending uses the QQ upload flow to obtain `file_info`, then sends a `msg_type=7` message.
+Decision: because the account is at the 10-D1 limit and production data must remain isolated, the QQ connectivity test Worker does not bind any D1. No database is deleted to create capacity.

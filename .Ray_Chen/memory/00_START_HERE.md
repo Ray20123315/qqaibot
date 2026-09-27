@@ -1,6 +1,6 @@
 # Ray_Chen Memory Entry
 
-- memory_version: v0.0.8
+- memory_version: v0.0.9
 - project: QQAIBOT
 - repository: Ray20123315/qqaibot
 - canonical_branch: main
@@ -8,18 +8,19 @@
 - task_id: qqaibot-20260927-qqopen-v4-native
 - task_status: active
 - goal_revision: 2
-- latest_verified_product_commit: 75483f71fb0707043082f891851581f03ac2c15c
-- latest_verified_ci_run: 36327804832
-- updated_at: 2026-09-27T23:01:00+08:00
+- latest_verified_product_commit: 7ddfc56495d58a101626ad6911ac0c673c433a1f
+- latest_verified_ci_run: 36330424094
+- isolated_test_worker: qqai-v4test
+- isolated_test_build: d92e427e-ee8c-48b8-92a7-0773cdc870c0
+- updated_at: 2026-09-27T23:43:00+08:00
 
 ## Recovery Route
 
 1. Read `ACTIVE_TASK.md` and `CURRENT_STATE.md`.
-2. Verify `v4-qqopen-native` head and the latest CI before further writes.
-3. Read `USER_REQUIREMENTS.md`, `DECISIONS.md`, `GOTCHAS.md`, and `VERIFY.md` as needed.
-4. Treat `FILE_MANIFEST.json` as the current file-change ledger.
-5. Keep `main` and production Cloudflare deployment unchanged until the user explicitly requests cutover.
+2. Verify `v4-qqopen-native`, GitHub CI, and Cloudflare `qqai-v4test` before writes.
+3. Keep production `qqai` / `main` untouched unless the user explicitly authorizes cutover.
+4. Read `FILE_MANIFEST.json` for GitHub and Cloudflare resource changes.
 
 ## Quick Recovery Summary
 
-Goal revision 2 prioritizes a lean, animated V4 Portal and aggressive product-surface pruning before live QQ Open cutover. The V4 Portal now exposes six primary areas: Overview, QQ Open, Group Management, AI/Codex, Plugins, and System. It shows Gateway online/READY/error state, adds QQ-native group member/blacklist/join-request/mute management APIs, records official image/video/audio/file send/receive capability, and collapses direct !codex / !codexchat / !codexwork into one principal-scoped conversation. Legacy activity/vote/schedule surfaces are retired from the V4 navigation and Command Registry; old data/code is retained only as rollback material until QQ Open E2E proves the new path.
+An isolated Cloudflare Worker named `qqai-v4test` now exists and is connected to the `v4-qqopen-native` branch through its own Cloudflare Builds trigger. It has only `QqOpenGateway`, workers.dev access, and the minimal QQ Open test dashboard; it has no D1, Vectorize, OneBot binding, production routes, or Cron trigger. Production `qqai` remains unchanged at migration tag `v3_remove_budget_guard` with only `OneBotHub`. The test Worker deployment succeeded; the only remaining manual prerequisite for live QQ connection is adding `QQ_OPEN_CLIENT_SECRET` as a Secret on `qqai-v4test`, then pressing “連接 / 重試”.

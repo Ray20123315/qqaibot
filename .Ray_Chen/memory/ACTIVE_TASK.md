@@ -6,65 +6,52 @@ goal_revision: 2
 
 ## Goal
 
-Rebuild the QQAIBOT backend/control surface around a visually strong but lean QQ Open Native V4. Prioritize online-state visibility, QQ-native group administration, useful media capabilities, and fewer Codex conversations while aggressively retiring nonessential legacy product surfaces.
+Build and verify QQ Open V4 in a fully isolated test Worker before any production cutover.
 
 ## Acceptance Criteria
 
-- Portal main navigation is reduced to six V4 areas.
-- Portal visibly reports QQ Open enabled/configured/connected/READY, last event, reconnect count, and last error.
-- Animation is intentionally rich but respects `prefers-reduced-motion`.
-- QQ Open group management surfaces cover member listing/info, remove, blacklist, mute state/actions, and join request approval/decline/decline+blacklist subject to granted QQ permissions.
-- QQ image/video/audio/file receive/send capability is represented using the official rich-media flow.
-- Direct `!codex`, `!codexchat`, and `!codexwork` use one principal-scoped conversation by default.
-- Nonessential V4 activity/vote/schedule command surfaces are retired.
-- Old D1 data is not destructively deleted during this first pruning pass.
-- Regression, V3, V4, and Worker bundle validation all pass.
-- `main` is not modified or deployed without explicit user instruction.
+- V4 test Worker must be distinct from production `qqai`.
+- No production D1/custom domain/Vectorize/OneBot binding in test config.
+- New QqOpenGateway migration must apply only to `qqai-v4test`.
+- Cloudflare production trigger must not deploy `v4-qqopen-native`.
+- V4 branch CI and isolated test bundle checks must pass.
+- Test Worker must deploy successfully on workers.dev.
+- Live QQ connection requires only the AppSecret to be added to the test Worker Secret store.
 
-## Current Phase
+## Completed
 
-phase: 2.5 — lean Portal and capability pruning
-current_step: product implementation and CI verification complete; live Portal/QQ Open deployment remains pending.
+- Created `worker.v4test.js` minimal isolated test entrypoint.
+- Created `wrangler.v4test.toml` with `qqai-v4test`, workers.dev, and QqOpenGateway only.
+- Added `verify-v4-test-deployment.mjs` and `npm run check:v4test`.
+- Added V4 test validation to the normal GitHub CI workflow.
+- Attempt to create a separate V4 D1 was blocked by the account limit of 10 databases; no database was deleted or modified.
+- Switched design to no-D1 test Worker.
+- Cloudflare production preview trigger now excludes `v4-qqopen-native` and retains `npx wrangler versions upload`.
+- Production main trigger remains `npx wrangler deploy worker.js --no-assets` on branch `main`.
+- Created Cloudflare Worker `qqai-v4test`.
+- Created dedicated Cloudflare Builds trigger `522507cc-658f-4361-8e90-9a98e65b92d7` for branch `v4-qqopen-native`.
+- Initial test deploy proved code/DO upload but failed only while adding a Cron because the Free account already uses 5 Cron triggers.
+- Removed the test Cron and added a manual “連接 / 重試” button.
+- Removed the temporary GitHub Actions deployment workflow because repository Cloudflare credentials were not configured.
+- Final Cloudflare test build `d92e427e-ee8c-48b8-92a7-0773cdc870c0`: success.
+- Final GitHub CI `36330424094`: success for regression, V3, V4, V4-test dry-run and Worker bundle.
+- Test trigger excludes `.Ray_Chen/**` to avoid redeploying on memory-only commits.
 
-## Completed Steps
+## Production Verification
 
-- Added `src/v4/portal/lean-dashboard.js` final Portal layer.
-- Reduced visible primary navigation to Overview / QQ Open / Group Management / AI-Codex / Plugins / System.
-- Added cosmic gradients, star motion, orb animation, glowing online state, animated navigation/cards, pointer tilt, and view transitions.
-- Added a stable high-contrast V4 color token set so legacy light mode cannot make the new dark Portal unreadable.
-- Added `prefers-reduced-motion` fallback.
-- Added `src/v4/portal/api.js` with developer/system-admin authentication, same-origin mutation checks, Gateway controls, and QQ Open group management endpoints.
-- Expanded `src/v4/qqopen/api.js` for media upload, group info/bot state, members, blacklist, join requests, mute state/actions.
-- Wired lean Portal/API into `worker.js`.
-- Confirmed official QQ docs support rich-media send/receive; rich media uses upload → `file_info` → `msg_type=7`.
-- Confirmed current QQ changelog includes member management, blacklist, mute and join-request APIs.
-- Collapsed direct Codex commands to `qqaibot:principal:<principalId>:codex`; plugin-internal Codex remains isolated.
-- Retired activity/vote/schedule from the V4 Command Registry.
-- Added/updated V4 Portal, media/group route, Codex session, and bridge packaging tests.
-- Final product commit `75483f71fb0707043082f891851581f03ac2c15c` passed CI run `36327804832`.
+Production `qqai` after test setup:
+- migration tag: `v3_remove_budget_guard`
+- named Durable Object: `OneBotHub`
+- modified_on remained `2026-09-27T09:46:34.642897Z`
 
-## Verification Results
+No production code/deployment migration occurred.
 
-- repository regression: success
-- V3 regression: success
-- V4 QQ Open + lean Portal regression: success
-- Worker bundle dry-run: success
-- core changed files remote read-back: success
-- live browser visual check: not run
-- live QQ Open API E2E: not run
-- production deployment: not performed
+## Current Blocker
 
-## Known Limitations / Risks
-
-- This is the first pruning pass: retired legacy code/data remains available for rollback, even though the V4 Portal/Registry no longer exposes it.
-- The old OneBot path still exists on the feature branch until QQ Open migration is proven.
-- QQ group management endpoints can return permission errors if the actual application lacks the necessary QQ platform permissions.
-- Rich-media transport is API-wired but not yet live-tested with the user's QQ app.
-- Direct Codex uses `principalId` when available; QQ Open C2C/member OpenIDs cannot be assumed to be the same human without a future explicit identity mapping.
-- The animated Portal has CI/HTML injection coverage but has not yet been visually inspected in a deployed browser.
+`qqai-v4test` has no `QQ_OPEN_CLIENT_SECRET` Secret yet. This is intentionally not copied from production or stored in GitHub.
 
 ## next_exact_action
 
-Deploy/test the V4 branch in a safe QQ Open environment with AppID and AppSecret stored in Cloudflare variables/secrets, visually inspect the lean Portal, verify Gateway READY, exercise group member/join/blacklist/mute operations and image/video send/receive, then use those live results to perform the second pruning pass that physically deletes dead legacy modules.
+In Cloudflare, open Worker `qqai-v4test` only and add `QQ_OPEN_CLIENT_SECRET` as a Secret. Then open `https://qqai-v4test.ray20123315.workers.dev`, press “連接 / 重試”, confirm READY, and test `!qqping` / `!qqecho hello`.
 
-last_checkpoint_at: 2026-09-27T23:01:00+08:00
+last_checkpoint_at: 2026-09-27T23:43:00+08:00

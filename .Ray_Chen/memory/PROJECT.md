@@ -2,31 +2,24 @@
 
 ## Purpose
 
-QQAIBOT is migrating from a large OneBot/NapCat-oriented surface to a lean QQ Open Platform native V4 while preserving mature AI, Codex, plugin, security, data, and system-management foundations that remain useful.
+QQAIBOT is migrating from OneBot/NapCat-oriented infrastructure to a lean QQ Open Platform native V4 while preserving mature AI, Codex, plugin, security, and data systems until replacements are verified.
 
-## Canonical Repository
+## Repository / Environments
 
-- GitHub: `Ray20123315/qqaibot`
-- production branch: `main`
-- active V4 branch: `v4-qqopen-native`
+- production repository branch: `main`
+- V4 development branch: `v4-qqopen-native`
+- production Worker: `qqai`
+- isolated test Worker: `qqai-v4test`
+- test URL: `https://qqai-v4test.ray20123315.workers.dev`
 
-## V4 Product Principle
+## Isolation Rule
 
-The visible/control-plane product should contain only functionality that is useful, necessary, or supported by the QQ Open Platform path. Optional historical systems must not dominate the main Portal.
+The isolated V4 test environment must not bind production D1, production custom domains, Vectorize, OneBotHub, or production routes. Its purpose is QQ Gateway connectivity and passive reply verification only.
 
-Primary Portal areas:
-- Overview
-- QQ Open
-- Group Management
-- AI / Codex
-- Plugins
-- System
+## Safety Constraints
 
-## Long-term Safety Constraints
-
-- Existing authorization/confirmation checks remain authoritative.
-- QQ Open `openid`, `member_openid`, and `group_openid` stay opaque strings.
-- Bot capability and caller authorization are separate checks.
-- AppSecret/access tokens and other credentials must never be committed or copied into memory.
-- CodexWork filesystem authorization remains enforced locally with explicit roots and no deletion.
-- Legacy data must not be destructively deleted merely to simplify UI; physical code/data deletion happens only after migration evidence establishes that the replacement is safe.
+- Never store QQ AppSecret in GitHub, Ray_Chen memory, logs, or normal vars.
+- Production `qqai` / `main` stays unchanged until explicit cutover.
+- OpenID values remain opaque strings.
+- Existing permission gates stay authoritative.
+- CodexWork local filesystem restrictions remain unchanged.

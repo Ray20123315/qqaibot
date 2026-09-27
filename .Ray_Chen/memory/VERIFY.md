@@ -1,57 +1,45 @@
 # VERIFY
 
-## V4 Lean Portal / QQ Open Verification
+## Final Product / Test Environment
 
-- branch: `v4-qqopen-native`
-- latest verified product commit: `75483f71fb0707043082f891851581f03ac2c15c`
-- final product CI run: `36327804832`
-- repository regression: success
-- V3 regression: success
-- V4 regression: success
-- Worker bundle dry-run: success
-- changed-file remote read-back: success
+- V4 branch commit: `7ddfc56495d58a101626ad6911ac0c673c433a1f`
+- GitHub CI run: `36330424094` — success
+- regression: success
+- V3: success
+- V4: success
+- `check:v4test`: success
+- production Worker bundle dry-run: success
 
-## V4 Coverage Added
+## Cloudflare Test Deployment
 
-- lean Portal style/script injection.
-- six primary V4 navigation labels.
-- forced V4 Overview landing instead of legacy-hash landing.
-- reduced-motion CSS.
-- authenticated QQ Open Portal status/connect/disconnect wiring.
-- group members / blacklist / join request / mute Portal routes.
-- media upload routes for group and C2C.
-- QQ Open group-management API paths/methods.
-- Codex principal-scoped direct session source assertions.
-- Codex Bridge EXE test updated for the principal session model.
-- retired activity/vote/schedule V4 registry surface.
+- Worker: `qqai-v4test`
+- tag: `95d30a6cea594b5f8d9a7ac7183c7712`
+- migration: `v4test_qqopen_gateway_v1`
+- named handler: `QqOpenGateway`
+- build trigger: `522507cc-658f-4361-8e90-9a98e65b92d7`
+- build: `d92e427e-ee8c-48b8-92a7-0773cdc870c0`
+- build outcome: success
+- deployment URL reported by Wrangler: `https://qqai-v4test.ray20123315.workers.dev`
 
-## External Capability Verification
+## Production Isolation Verification
 
-QQ official message overview confirms:
-- C2C/group send and receive.
-- `msg_type=0` text.
-- `msg_type=2` Markdown send.
-- `msg_type=7` rich media send/receive.
-- images, video, voice/audio, files use upload → `file_info` → message.
+Production `qqai`:
+- migration tag remains `v3_remove_budget_guard`
+- named handler remains `OneBotHub`
+- main deploy command remains `npx wrangler deploy worker.js --no-assets`
+- `v4-qqopen-native` is excluded from production non-main trigger
+- production Worker modified time did not change during isolated test setup
 
-QQ official changelog confirms:
-- 2026-09-03 member list/info, batch removal, blacklist query/update.
-- 2026-08-10 mute management, join request list/review, join request event.
-- 2026-08-12 custom menus and command panels.
+## Expected Current Test Status
 
-## Verification Limitations
+The test Worker currently has no `QQ_OPEN_CLIENT_SECRET`; therefore live QQ Gateway READY is not expected yet.
 
-- No deployed-browser visual screenshot/interaction test was run.
-- No real QQ Open group/member/media request was sent with production credentials.
-- QQ permission-dependent endpoints remain unverified for the user's specific app.
-- Legacy rollback code/data is intentionally still present.
+## Next Live Verification
 
-## Live Verification Still Required
-
-1. Configure QQ Open credentials only in Cloudflare variable/secret storage.
-2. Deploy the V4 branch to a safe test/cutover context.
-3. Visually inspect desktop/mobile Portal and Gateway online state.
-4. Verify real member list, join approve/decline+blacklist, blacklist, mute/unmute.
-5. Send/receive image and video (plus file/audio as practical).
-6. Verify principal identity behavior across C2C/group.
-7. Only then perform physical legacy-code deletion.
+1. Add `QQ_OPEN_CLIENT_SECRET` Secret to `qqai-v4test` only.
+2. Open workers.dev test dashboard.
+3. Press “連接 / 重試”.
+4. Confirm Gateway transitions to READY.
+5. Test C2C `!qqping`.
+6. Test group `@机器人 !qqping`.
+7. Test `!qqecho hello`.
