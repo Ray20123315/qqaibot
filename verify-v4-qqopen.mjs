@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { buildConnectivityReply, createQqOpenActionDispatcher, createQqOpenApiClient, createGatewayState, createHeartbeatPayload, createIdentifyPayload, createResumePayload, fromQqOpenEvent, qqOpenIntents, reduceGatewayPayload } from "./src/v4/index.js";
+import { buildConnectivityReply, createQqOpenActionDispatcher, createQqOpenApiClient, createGatewayState, createHeartbeatPayload, createIdentifyPayload, createResumePayload, fromQqOpenEvent, qqOpenIntents, qqOpenReconnectDelay, reduceGatewayPayload } from "./src/v4/index.js";
 import { createInitialCommandRegistry } from "./src/v4/commands/catalog.js";
 
 const group = fromQqOpenEvent({ t:"GROUP_MESSAGE_CREATE", s:42, d:{ id:"msg-1", group_openid:"group-A", timestamp:"2026-09-27T08:00:00Z", content:" hello ", author:{ member_openid:"member-A", member_role:"admin", username:"Ray" }, attachments:[{content_type:"image/png",url:"https://example.com/a.png",filename:"a.png"}] } });
@@ -79,6 +79,12 @@ assert.equal(buildConnectivityReply(echoMessage), "QQ Open V4 echo：hello");
 assert.equal(qqOpenIntents({}), 1 << 25);
 assert.equal(qqOpenIntents({ QQ_OPEN_INTENTS:String(1 << 25) }), 1 << 25);
 assert.throws(() => qqOpenIntents({ QQ_OPEN_INTENTS:"bad" }), /QQ_OPEN_INVALID_INTENTS/);
+assert.equal(qqOpenReconnectDelay(0), 5000);
+assert.equal(qqOpenReconnectDelay(1), 5000);
+assert.equal(qqOpenReconnectDelay(2), 10000);
+assert.equal(qqOpenReconnectDelay(3), 20000);
+assert.equal(qqOpenReconnectDelay(4), 40000);
+assert.equal(qqOpenReconnectDelay(5), 60000);
 
 console.log("verify-v4-qqopen connectivity action dispatcher: ok");
 console.log("verify-v4-qqopen: ok");
