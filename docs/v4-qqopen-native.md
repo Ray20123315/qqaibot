@@ -31,4 +31,27 @@ Command Registry -> text commands / AI routing / QQ menu / QQ command panels
 
 ## Next phase
 
-Implement the persistent QQ Gateway runtime and its Worker/Durable Object lifecycle, then introduce a platform action dispatcher so existing handlers can migrate incrementally from OneBot actions to native QQ OpenAPI.
+Deploy the V4 branch with QQ Open credentials as Cloudflare variables/secrets and run the live `!qqping` / `!qqecho` connectivity probe. After that succeeds, migrate normal command/AI reply handlers onto the Action Dispatcher before expanding moderation/member/media actions.
+
+## Connectivity probe
+
+Phase 2 adds a persistent `QqOpenGateway` Durable Object and a minimal QQ Open Action Dispatcher.
+
+Configuration remains disabled by default:
+
+- `QQ_OPEN_ENABLED=true`
+- `QQ_OPEN_APP_ID=<app id>`
+- `QQ_OPEN_CLIENT_SECRET=<Cloudflare Secret>`
+- `QQ_OPEN_INTENTS=33554432` for the documented `GROUP_AND_C2C_EVENT (1 << 25)` baseline.
+
+The existing minute cron calls the gateway `ensure` endpoint when enabled and configured. Gateway `session_id` and `seq` are persisted in Durable Object storage so a recreated instance can attempt Resume.
+
+System-admin-only diagnostics:
+
+- `GET /api/v4/qqopen/status`
+- `POST /api/v4/qqopen/connect`
+- `POST /api/v4/qqopen/disconnect`
+
+For the first live end-to-end test, send `!qqping` in C2C or `@机器人 !qqping` in a group. A successful receive/send path replies `QQ Open V4 已连接并可回话。`. `!qqecho 内容` provides a second passive-reply test.
+
+These probe replies are deliberately isolated from legacy AI/command execution. Once the Gateway receive/reply path is proven against the real QQ application, normal commands and AI handlers can migrate behind the same Action Dispatcher.

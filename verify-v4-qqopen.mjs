@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { createQqOpenApiClient, createGatewayState, createHeartbeatPayload, createIdentifyPayload, createResumePayload, fromQqOpenEvent, reduceGatewayPayload } from "./src/v4/index.js";
+import { buildConnectivityReply, createQqOpenActionDispatcher, createQqOpenApiClient, createGatewayState, createHeartbeatPayload, createIdentifyPayload, createResumePayload, fromQqOpenEvent, qqOpenIntents, reduceGatewayPayload } from "./src/v4/index.js";
 import { createInitialCommandRegistry } from "./src/v4/commands/catalog.js";
 
 const group = fromQqOpenEvent({ t:"GROUP_MESSAGE_CREATE", s:42, d:{ id:"msg-1", group_openid:"group-A", timestamp:"2026-09-27T08:00:00Z", content:" hello ", author:{ member_openid:"member-A", member_role:"admin", username:"Ray" }, attachments:[{content_type:"image/png",url:"https://example.com/a.png",filename:"a.png"}] } });
@@ -60,4 +60,25 @@ const menu = registry.buildMenu();
 assert(menu.items.length <= 10);
 assert(menu.items.some(item => item.send_message === "!codex"));
 
+const replyCalls = [];
+const replyDispatcher = createQqOpenActionDispatcher({
+  api: {
+    sendGroupMessage: async (groupOpenid, body) => { replyCalls.push({ kind:"group", groupOpenid, body }); return { id:"reply-group" }; },
+    sendC2CMessage: async (openid, body) => { replyCalls.push({ kind:"c2c", openid, body }); return { id:"reply-c2c" }; }
+  }
+});
+await replyDispatcher.dispatch("message.reply", { message: group, content: "pong" });
+await replyDispatcher.dispatch("message.reply", { message: c2c, content: "pong2" });
+assert.deepEqual(replyCalls[0], { kind:"group", groupOpenid:"group-A", body:{ content:"pong", msg_type:0, msg_seq:1, msg_id:"msg-1" } });
+assert.deepEqual(replyCalls[1], { kind:"c2c", openid:"user-A", body:{ content:"pong2", msg_type:0, msg_seq:1, msg_id:"c2c-1" } });
+
+const pingMessage = fromQqOpenEvent({ t:"C2C_MESSAGE_CREATE", d:{ id:"p1", content:"!qqping", author:{ user_openid:"u1" } } });
+const echoMessage = fromQqOpenEvent({ t:"GROUP_AT_MESSAGE_CREATE", d:{ id:"p2", group_openid:"g1", content:"<@!123> !qqecho hello", author:{ member_openid:"u2" } } });
+assert.equal(buildConnectivityReply(pingMessage), "QQ Open V4 已连接并可回话。");
+assert.equal(buildConnectivityReply(echoMessage), "QQ Open V4 echo：hello");
+assert.equal(qqOpenIntents({}), 1 << 25);
+assert.equal(qqOpenIntents({ QQ_OPEN_INTENTS:String(1 << 25) }), 1 << 25);
+assert.throws(() => qqOpenIntents({ QQ_OPEN_INTENTS:"bad" }), /QQ_OPEN_INVALID_INTENTS/);
+
+console.log("verify-v4-qqopen connectivity action dispatcher: ok");
 console.log("verify-v4-qqopen: ok");
