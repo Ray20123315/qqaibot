@@ -84,7 +84,7 @@ const api=fs.readFileSync("src/v4/qqopen/api.js","utf8");
 const portal=fs.readFileSync("src/v4/portal/lean-dashboard.js","utf8");
 const config=fs.readFileSync("wrangler.toml","utf8");
 
-assert.match(worker,/isAuxiliaryOneBotMessage\(this\.env, body\)/);
+assert.match(worker,/isAuxiliaryOneBotMessage\(this\.env, body, \{/);
 assert.match(worker,/recordAuxiliaryOneBotObservation/);
 assert(worker.indexOf("isAuxiliaryOneBotMessage(this.env, body)") < worker.indexOf("const v3PluginBody = body"));
 assert.match(worker,/\/v4\/qqopen\/control/);
