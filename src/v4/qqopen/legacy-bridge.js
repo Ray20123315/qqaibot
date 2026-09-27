@@ -292,6 +292,7 @@ async function qqOpenLegacyAction(api, action, params, context, helpers) {
 
 export {
   cleanQqOpenText,
+  countQqOpenLegacyMessages,
   legacyMessageParts,
   qqOpenJoinRequestToLegacyBody,
   qqOpenLegacyAction,
