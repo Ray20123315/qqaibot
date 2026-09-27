@@ -15,8 +15,9 @@ assert(JSON.stringify(tags) === JSON.stringify([
   'v4_qqopen_gateway',
 ]), `Durable Object migration history changed: ${tags.join(', ')}`);
 assert(/name\s*=\s*"ONEBOT_HUB"[\s\S]*?class_name\s*=\s*"OneBotHub"/.test(wrangler), 'ONEBOT_HUB binding changed');
+assert(/name\s*=\s*"QQ_OPEN_GATEWAY"[\s\S]*?class_name\s*=\s*"QqOpenGateway"/.test(wrangler), 'QQ_OPEN_GATEWAY binding changed');
 assert((worker.match(/export class OneBotHub/g) || []).length === 1, 'OneBotHub must be exported exactly once');
-assert((worker.match(/export \\{ QqOpenGateway \\}/g) || []).length === 1, 'QqOpenGateway must be exported exactly once');
+assert(worker.includes('export { QqOpenGateway } from "./src/v4/qqopen/runtime.js";'), 'QqOpenGateway must be exported exactly once');
 assert(!/export class BudgetGuard/.test(worker), 'Deleted BudgetGuard class must not be reintroduced');
 assert(/CREATE TABLE IF NOT EXISTS kv_store/i.test(d1Bootstrap), 'Fresh D1 bootstrap must create kv_store without replacing existing data');
 assert(/CREATE INDEX IF NOT EXISTS idx_kv_store_key_nocase/i.test(d1Bootstrap), 'Fresh D1 bootstrap must create the required KV key index');
