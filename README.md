@@ -445,3 +445,17 @@ npm run check:bundle
 ## 授權與責任
 
 本專案採用儲存庫現有的自訂限制性授權條款。使用、修改或散布前請先閱讀授權文件。軟體按現狀提供，使用者自行承擔部署、帳號、第三方平台與資料風險。
+
+## QQ Open V4 full runtime bridge
+
+QQ Open messages now share the existing QQAIBOT AI, memory, cooldown, command and Codex runtime instead of maintaining a second AI stack. QQ Open user/member OpenIDs remain opaque strings and are never treated as numeric QQ numbers.
+
+Public `!codex` and ordinary AI chat use the same runtime path as OneBot. Developer-only commands such as `!codexchat` and `!codexwork` require an explicit QQ Open OpenID allowlist:
+
+```text
+QQ_OPEN_DEVELOPER_OPENIDS=<openid1>,<openid2>
+```
+
+When a QQ Open event reaches the shared runtime, OneBot-style side effects are redirected to official QQ Open APIs where an equivalent exists: text/rich-media send, member info/list, mute, remove, recall and join-request review. Operations without an official QQ Open equivalent fail explicitly instead of falling back to NapCat.
+
+QQ Open groups and C2C conversations do not reuse the old OneBot whitelist/private-access gate. Existing AI cooldown, short-term history, D1 settings, Vectorize memory, command parsing and public Codex quota still apply.
