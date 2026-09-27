@@ -7,7 +7,11 @@ function injectV4LeanPortalClient(html) {
   --v4-bg:#05070d;--v4-panel:rgba(12,16,28,.74);--v4-panel2:rgba(18,24,40,.74);
   --v4-line:rgba(155,168,255,.16);--v4-glow:rgba(113,93,255,.28);--v4-cyan:rgba(76,221,255,.24);
 }
-body.v4-lean-enabled{background:
+body.v4-lean-enabled{
+  --bg:#05070d;--panel:#0d1220;--panel2:#131a2a;--text:#f2f5ff;--muted:#98a5bb;
+  --line:#283149;--primary:#7b6cff;--primary2:#55cfff;--ok:#45e3aa;--warn:#ffc566;--bad:#ff657d;
+  --topbar-bg:rgba(5,8,15,.62);--shadow:0 20px 70px rgba(0,0,0,.3);
+  background:
   radial-gradient(circle at 18% 14%,rgba(108,82,255,.19),transparent 32%),
   radial-gradient(circle at 84% 18%,rgba(52,211,255,.13),transparent 28%),
   radial-gradient(circle at 72% 82%,rgba(180,68,255,.13),transparent 30%),
