@@ -159,7 +159,7 @@ assert.match(commandRuntime, /refundPublicCodexQuota/);
 assert.match(commandRuntime, /upload_private_file/);
 assert.match(commandRuntime, /task: mode === "work" \? "work" : "chat"/);
 
-const statusStart = worker.indexOf("if (['!status', '!配额', '!配額'");const statusStart = worker.indexOf("if (['!status', '!配额', '!配額'");
+const statusStart = worker.indexOf("if (['!status', '!配额', '!配額'");
 const statusEnd = worker.indexOf("// 第二段到此結束", statusStart);
 assert(statusStart >= 0 && statusEnd > statusStart, "!status command block missing");
 const statusBlock = worker.slice(statusStart, statusEnd);
