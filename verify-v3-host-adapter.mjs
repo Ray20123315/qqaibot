@@ -211,7 +211,7 @@ assert.equal(deniedResult.results[0].consume, true);
 assert.equal(deniedResult.results[0].action, "codex_override_denied");
 assert(codexNotices.some(item => item.action === "send_group_msg"), "non-developer denial must be visible");
 
-const rawPlugin = definePlugin({const rawPlugin = definePlugin({
+const rawPlugin = definePlugin({
   manifest: { id: "test.raw", name: "Raw", version: "1.0.0", apiVersion: "1", capabilities: ["onebot.call"] },
   commands: [{ name: "raw", async run(ctx) { return ctx.onebot.call("set_group_kick", { group_id: 1, user_id: 2 }); } }]
 });
