@@ -1,0 +1,115 @@
+{
+  "schema_version": 1,
+  "memory_version": "v0.0.1",
+  "task_id": "qqaibot-20260927-member-details-smart-command",
+  "transaction": "file_change_transaction_20260927_001",
+  "repository": "Ray20123315/qqaibot",
+  "branch": "main",
+  "product_before_revision": "1533b329442abffd668fe598db60b9bd9946124c",
+  "product_after_revision": "0d86baf190a02de5be3e9622ddceea248eb67e8a",
+  "verification": {
+    "github_actions_run_id": 36268773902,
+    "regression": "success",
+    "v3_regression": "success",
+    "worker_bundle_dry_run": "success",
+    "main_blob_readback": "success",
+    "live_napcat_e2e": "not_available"
+  },
+  "changes": [
+    {
+      "location_type": "github",
+      "provider": "GitHub",
+      "resource_id_or_path": "src/members/details.js",
+      "action": "modified",
+      "repository_or_drive": "Ray20123315/qqaibot",
+      "branch_or_container": "main",
+      "before_revision": "1533b329442abffd668fe598db60b9bd9946124c",
+      "after_revision": "0d86baf190a02de5be3e9622ddceea248eb67e8a",
+      "commit_or_hash": "256b9139c91ac0803bf2525d7ba2647b7c6fcd45",
+      "verification": "read-back + CI",
+      "changed_at": "2026-09-27T12:07:00+08:00"
+    },
+    {
+      "location_type": "github",
+      "provider": "GitHub",
+      "resource_id_or_path": "src/operations/runtime.js",
+      "action": "modified",
+      "repository_or_drive": "Ray20123315/qqaibot",
+      "branch_or_container": "main",
+      "before_revision": "1533b329442abffd668fe598db60b9bd9946124c",
+      "after_revision": "0d86baf190a02de5be3e9622ddceea248eb67e8a",
+      "commit_or_hash": "5abda40ba2343163728170142ca5c429d94f33e1",
+      "verification": "read-back + CI",
+      "changed_at": "2026-09-27T12:07:00+08:00"
+    },
+    {
+      "location_type": "github",
+      "provider": "GitHub",
+      "resource_id_or_path": "worker.js",
+      "action": "modified",
+      "repository_or_drive": "Ray20123315/qqaibot",
+      "branch_or_container": "main",
+      "before_revision": "1533b329442abffd668fe598db60b9bd9946124c",
+      "after_revision": "0d86baf190a02de5be3e9622ddceea248eb67e8a",
+      "commit_or_hash": "63b0a8844ebac4540d07ccde0d168cec1f6120d2",
+      "verification": "read-back + CI",
+      "changed_at": "2026-09-27T12:07:00+08:00"
+    },
+    {
+      "location_type": "github",
+      "provider": "GitHub",
+      "resource_id_or_path": "src/help/commands.js",
+      "action": "modified",
+      "repository_or_drive": "Ray20123315/qqaibot",
+      "branch_or_container": "main",
+      "before_revision": "1533b329442abffd668fe598db60b9bd9946124c",
+      "after_revision": "0d86baf190a02de5be3e9622ddceea248eb67e8a",
+      "commit_or_hash": "518fc7ade063340e3ae2f61b9382d9e3f9a8ea4c",
+      "verification": "read-back + CI",
+      "changed_at": "2026-09-27T12:07:00+08:00"
+    },
+    {
+      "location_type": "github",
+      "provider": "GitHub",
+      "resource_id_or_path": "verify-member-details.mjs",
+      "action": "modified",
+      "repository_or_drive": "Ray20123315/qqaibot",
+      "branch_or_container": "main",
+      "before_revision": "1533b329442abffd668fe598db60b9bd9946124c",
+      "after_revision": "0d86baf190a02de5be3e9622ddceea248eb67e8a",
+      "commit_or_hash": "ade8cdef41d0fc0e07d525b10a40b8b9a6df6021",
+      "verification": "read-back + CI",
+      "changed_at": "2026-09-27T12:07:00+08:00"
+    },
+    {
+      "location_type": "github",
+      "provider": "GitHub",
+      "resource_id_or_path": "verify-smart-command-routing.mjs",
+      "action": "created",
+      "repository_or_drive": "Ray20123315/qqaibot",
+      "branch_or_container": "main",
+      "before_revision": null,
+      "after_revision": "0d86baf190a02de5be3e9622ddceea248eb67e8a",
+      "commit_or_hash": "f3304d7b9601c82922db41d4cdd6de58fc1dec24",
+      "verification": "read-back + CI",
+      "changed_at": "2026-09-27T12:07:00+08:00"
+    },
+    {
+      "location_type": "github",
+      "provider": "GitHub",
+      "resource_id_or_path": "package.json",
+      "action": "modified",
+      "repository_or_drive": "Ray20123315/qqaibot",
+      "branch_or_container": "main",
+      "before_revision": "1533b329442abffd668fe598db60b9bd9946124c",
+      "after_revision": "0d86baf190a02de5be3e9622ddceea248eb67e8a",
+      "commit_or_hash": "e7f928fa60e32c20adb35c578cf55ff8ffe0f756",
+      "verification": "read-back + CI",
+      "changed_at": "2026-09-27T12:07:00+08:00"
+    }
+  ],
+  "internal_memory_transaction": {
+    "action": "initialize .Ray_Chen/memory",
+    "note": "Memory files are internal handoff state and do not recursively trigger another memory transaction."
+  }
+}
