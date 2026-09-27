@@ -1,24 +1,26 @@
 # VERIFY
 
-## Retained Production Verification
+## Pre-implementation Checkpoint
 
-- production V4 build and migration from v0.0.10 remain valid
-- OneBotHub and QqOpenGateway remain deployed
-- production bindings cleanup remains verified
+Verified production baseline:
+- QQ Open enabled/configured/connected/ready
+- user received `QQ Open V4 已连接并可回话。`
+- production has Workers AI, Gemini keys, Vision keys, D1, Vectorize and Codex Bridge-related bindings
+- current QQ Open runtime handles only `!qqping` / `!qqecho` before this task
 
-## Secret Verification
+## Required Verification Before Main Update
 
-Cloudflare secret-list read-back:
-- `qqai-v4test`: `QQ_OPEN_CLIENT_SECRET` present
-- `qqai`: `QQ_OPEN_CLIENT_SECRET` absent
+1. existing `npm run check`
+2. existing `npm run check:v3`
+3. expanded `npm run check:v4`
+4. `npm run check:bundle`
+5. test Worker deployment/build
+6. production Cloudflare build after main fast-forward
+7. Gateway returns READY after deployment
+8. live QQ Open ordinary AI test
+9. public `!codex` test if Codex Bridge is connected
+10. media/group operations only when granted by QQ permissions
 
-No secret value is stored in this repository or memory package.
+## Rollback
 
-## Next Verification
-
-After the user manually creates `QQ_OPEN_CLIENT_SECRET` on production `qqai`:
-1. re-read secret names;
-2. verify Gateway configured state;
-3. connect and confirm READY;
-4. test C2C/group `!qqping`;
-5. test `!qqecho hello`.
+If the full-runtime bridge fails verification, retain production at the last known-good product revision and keep OneBot operational. Do not delete either Durable Object.

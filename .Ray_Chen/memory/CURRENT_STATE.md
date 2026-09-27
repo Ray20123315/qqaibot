@@ -1,24 +1,34 @@
 # CURRENT_STATE
 
-## Production
+## Production Baseline Before Full Runtime Bridge
 
-- Worker: `qqai`
-- V4 deployed successfully
+- production Worker `qqai`: V4 deployed
 - migration: `v4_qqopen_gateway`
-- Durable Objects: `OneBotHub`, `QqOpenGateway`
-- dead production variables pruned previously
-- `QQ_OPEN_CLIENT_SECRET`: absent
+- Durable Objects: `OneBotHub` and `QqOpenGateway`
+- QQ Open Gateway: user confirmed READY and `!qqping` response
+- QQ Open credentials: configured in production
+- AI provider bindings: present
+- Gemini / Vision / DeepSeek / Workers AI / D1 / Vectorize: present
+- Codex Bridge binding/path: retained
 
-## Isolated Test
+## QQ Open Functional Boundary At Checkpoint
 
-- Worker: `qqai-v4test`
-- `QQ_OPEN_CLIENT_SECRET`: present as Cloudflare Secret
-- secret value: not retained in project memory
+Working:
+- Gateway connect/resume/heartbeat
+- message normalization
+- `!qqping`
+- `!qqecho`
+- Portal group management APIs
+- QQ Open media/group-management API wrappers
 
-## Verification
+Not yet bridged:
+- ordinary AI conversation
+- existing command monolith
+- public `!codex`
+- developer `!codexchat` / `!codexwork`
+- V3/plugin runtime through QQ Open
+- OneBot-style side effects redirected to QQ Open
 
-Cloudflare secret-name read-back:
-- production `qqai`: does not list `QQ_OPEN_CLIENT_SECRET`
-- test `qqai-v4test`: lists `QQ_OPEN_CLIENT_SECRET`
+## Identity Constraint
 
-The production secret write attempt was blocked by the platform safety layer before Cloudflare mutation.
+QQ Open member/user OpenIDs are opaque platform identifiers. They are not treated as numeric QQ IDs. Developer-only commands on QQ Open will require explicit `QQ_OPEN_DEVELOPER_OPENIDS` configuration or a later deliberate account-linking flow.
