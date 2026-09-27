@@ -34,6 +34,8 @@ import { executeCodexUserCommand } from "./src/v3/ai/codex-command-runtime.js";
 import { readPublicCodexQuota } from "./src/v3/ai/codex-policy.js";
 import { dispatchV3RuntimeEvent, handleV3RuntimeFetch, runV3RuntimeScheduled } from "./src/v3/runtime/bridge.js";
 import { getQqOpenGateway, qqOpenConfigured, qqOpenEnabled } from "./src/v4/qqopen/runtime.js";
+import { handleV4QqOpenPortalApi } from "./src/v4/portal/api.js";
+import { injectV4LeanPortalClient } from "./src/v4/portal/lean-dashboard.js";
 import { handleV3PluginManagerApi, injectV3PluginManagerClient } from "./src/v3/portal/plugin-manager.js";
 import { handleV3PackageManagerApi, injectV3PackageManagerClient } from "./src/v3/portal/package-manager.js";
 import { handleV3PluginSecurityPublic, runV3PluginSecurityScheduled } from "./src/v3/public/plugin-security.js";
@@ -286,6 +288,7 @@ const QQAIWorker = {
     if (request.method === 'GET' && ['/', '/portal', '/matrix'].includes(url.pathname)) {
       let portalHtml = injectPortalLayoutClient(injectPortalMembersClient(injectDeploymentPortalClient(toSimplifiedChinese(getPortalHomePage(url.host)))));
       portalHtml = injectPortalDiagnosticsClient(injectV3PackageManagerClient(injectV3PluginManagerClient(portalHtml)));
+      portalHtml = injectV4LeanPortalClient(portalHtml);
       return new Response(portalHtml, {
         headers: { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store", "Strict-Transport-Security": "max-age=31536000", "X-Content-Type-Options": "nosniff", "X-Frame-Options": "DENY", "Referrer-Policy": "strict-origin-when-cross-origin", "Permissions-Policy": "camera=(), geolocation=()" }
       });
@@ -321,6 +324,9 @@ const QQAIWorker = {
       if (!session) return jsonResponse({ ok: false, message: '请先登录 Portal。' }, 401);
       return jsonResponse(await getDeploymentStatusForViewer(env, session));
     }
+
+    const v4QqOpenPortalResponse = await handleV4QqOpenPortalApi(request, env, url);
+    if (v4QqOpenPortalResponse) return v4QqOpenPortalResponse;
 
     const portalDiagnosticsResponse = await handlePortalDiagnosticsApi(request, env, url);
     if (portalDiagnosticsResponse) return portalDiagnosticsResponse;
