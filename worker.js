@@ -4166,6 +4166,19 @@ export class OneBotHub {
       const targetId = String(payload.targetId || (scene === "group" ? groupId : userId)).trim();
       const at = Number(payload.updatedAt || Date.now());
 
+      if (action === "full_group_observed") {
+        const groupOpenid = String(payload.groupOpenid || "").trim();
+        if (!groupOpenid) return Response.json({ ok: false, error: "QQ_OPEN_FULL_GROUP_ID_REQUIRED" }, { status: 400 });
+        const record = {
+          groupOpenid,
+          eventType: "GROUP_MESSAGE_CREATE",
+          lastSeenAt: Number(payload.updatedAt || Date.now())
+        };
+        await dbPut(this.env, `qqopen_full_group_active:${groupOpenid}`, JSON.stringify(record));
+        await dbAppendJsonArrayCapped(this.env, "qqopen_full_group_events", record, 200);
+        return Response.json({ ok: true, record });
+      }
+
       if (action === "push_permission") {
         const scope = String(payload.scope || scene || "").trim();
         if (!scope || !targetId) return Response.json({ ok: false, error: "QQ_OPEN_PUSH_PERMISSION_TARGET_REQUIRED" }, { status: 400 });
@@ -4794,7 +4807,14 @@ export class OneBotHub {
       }
     }
 
-    if (isAuxiliaryOneBotMessage(this.env, body)) {
+    const hybridMappedGroup = body?.message_type === "group" ? qqOpenGroupForOneBot(this.env, String(body?.group_id || "")) : "";
+    const hybridFullGroupOwned = hybridMappedGroup
+      ? Boolean(await dbGet(this.env, `qqopen_full_group_active:${hybridMappedGroup}`))
+      : false;
+    if (isAuxiliaryOneBotMessage(this.env, body, {
+      explicit: eventHasBotMention(body),
+      fullGroupOwned: hybridFullGroupOwned
+    })) {
       await this.recordAuxiliaryOneBotObservation(body);
       return;
     }

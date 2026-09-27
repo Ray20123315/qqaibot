@@ -26,7 +26,9 @@ assert.equal(oneBotGroupForQqOpen(groupEnv,"GROUP_OPEN_A"),"808882936");
 assert.equal(parseGroupMap(groupEnv).oneBotToQqOpen["808882936"],"GROUP_OPEN_A");
 assert.throws(()=>parseGroupMap({QQ_HYBRID_GROUP_MAP:"not-json"}),/INVALID_JSON/);
 assert.equal(hybridStatus(groupEnv).mappedGroups,1);
-assert.equal(isAuxiliaryOneBotMessage({}, {post_type:"message",message_type:"group"}),true);
+assert.equal(isAuxiliaryOneBotMessage({}, {post_type:"message",message_type:"group"}),false);
+assert.equal(isAuxiliaryOneBotMessage({}, {post_type:"message",message_type:"group"},{explicit:true}),true);
+assert.equal(isAuxiliaryOneBotMessage({}, {post_type:"message",message_type:"group"},{fullGroupOwned:true}),true);
 assert.equal(isAuxiliaryOneBotMessage({}, {post_type:"notice",notice_type:"group_increase"}),false);
 assert.equal(isAuxiliaryOneBotMessage({}, {post_type:"message",message_type:"group",__qqai_platform:"qq-open"}),false);
 const observation=hybridObservationRow({
@@ -110,3 +112,8 @@ assert.match(scheduler,/NUMERIC_MENTION_REQUIRES_ONEBOT/);
 assert.match(scheduler,/hybrid_active_send_fallback/);
 assert.match(scheduler,/sendHybridGroupMessage\(env, item\.groupId, outboundMessage/);
 assert.match(scheduler,/sendHybridGroupMessage\(env, groupId, result\.text/);
+
+assert.match(worker,/qqopen_full_group_active:/);
+assert.match(worker,/hybridFullGroupOwned/);
+assert.match(runtime,/full_group_observed/);
+assert.match(runtime,/GROUP_MESSAGE_CREATE/);

@@ -866,6 +866,20 @@ export class QqOpenGateway {
 
     const message = fromQqOpenEvent(payload);
     if (message) {
+      const eventType = String(payload?.t || "").toUpperCase();
+      if (eventType === "GROUP_MESSAGE_CREATE" && message.groupId) {
+        await this.forwardControl({
+          action: "full_group_observed",
+          groupOpenid: message.groupId,
+          updatedAt: Date.now()
+        }).catch(error => this.recordError(error));
+        this.persisted.lastOfficialStateEvent = {
+          kind: "full_group_message",
+          eventType,
+          groupId: String(message.groupId || ""),
+          at: Date.now()
+        };
+      }
       const deliveryKey = qqOpenDeliveryKey(payload, message);
       if (deliveryKey && this.deliverySeen(deliveryKey)) {
         this.persisted.duplicateDropCount = Number(this.persisted.duplicateDropCount || 0) + 1;

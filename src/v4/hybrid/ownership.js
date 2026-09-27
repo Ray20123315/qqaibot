@@ -43,13 +43,15 @@ function oneBotGroupForQqOpen(env = {}, qqOpenGroupId) {
   return clean(parseGroupMap(env).qqOpenToOneBot[id]);
 }
 
-function isAuxiliaryOneBotMessage(env = {}, body = {}) {
+function isAuxiliaryOneBotMessage(env = {}, body = {}, { explicit = false, fullGroupOwned = false } = {}) {
   if (hybridPrimaryTransport(env) !== "qq-open") return false;
   if (clean(body.__qqai_platform).toLowerCase() === "qq-open") return false;
   const postType = clean(body.post_type).toLowerCase();
   if (!["message", "message_sent"].includes(postType)) return false;
   const messageType = clean(body.message_type).toLowerCase();
-  return ["group", "private"].includes(messageType);
+  if (messageType === "private") return true;
+  if (messageType !== "group") return false;
+  return explicit === true || fullGroupOwned === true;
 }
 
 function hybridObservationRow(body = {}, { mappedQqOpenGroupId = "", text = "", mentions = [], mediaTypes = [] } = {}) {
