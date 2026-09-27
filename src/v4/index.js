@@ -7,3 +7,6 @@ export * from "./qqopen/discovery.js";
 export * from "./commands/registry.js";
 export * from "./commands/catalog.js";
 export * from "./platform/actions.js";
+
+export * from "./qqopen/official-events.js";
+export * from "./hybrid/ownership.js";

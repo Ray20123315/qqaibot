@@ -39,6 +39,7 @@ function createQqOpenApiClient({ appId, clientSecret, fetchImpl = fetch, baseUrl
     sendC2CMessage: (openid, message) => request(`/v2/users/${encodePath(openid, "OPENID")}/messages`, { method: "POST", body: message }),
     deleteGroupMessage: (groupOpenid, messageId, { hideTip = false } = {}) => request(`/v2/groups/${encodePath(groupOpenid, "GROUP_OPENID")}/messages/${encodePath(messageId, "MESSAGE_ID")}${hideTip ? "?hidetip=true" : ""}`, { method: "DELETE" }),
     deleteC2CMessage: (openid, messageId) => request(`/v2/users/${encodePath(openid, "OPENID")}/messages/${encodePath(messageId, "MESSAGE_ID")}`, { method: "DELETE" }),
+    respondInteraction: (interactionId, code = 0) => request(`/interactions/${encodePath(interactionId, "INTERACTION_ID")}`, { method: "PUT", body: { code: Number(code || 0) } }),
     uploadGroupFile: (groupOpenid, payload) => request(`/v2/groups/${encodePath(groupOpenid, "GROUP_OPENID")}/files`, { method: "POST", body: payload }),
     uploadC2CFile: (openid, payload) => request(`/v2/users/${encodePath(openid, "OPENID")}/files`, { method: "POST", body: payload }),
     getGroupInfo: groupOpenid => request(`/v2/groups/${encodePath(groupOpenid, "GROUP_OPENID")}/info`),
