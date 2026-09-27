@@ -2545,6 +2545,28 @@ const QQAIWorker = {
             (quota?.sampledAt ? `\n🕒 额度快照：${new Date(Number(quota.sampledAt)).toLocaleString("zh-CN", { timeZone: "Asia/Taipei", hour12: false })}` : "") +
             (!quota?.sampledAt && quotaRequestError ? `\n⚠️ 本次额度读取：${quotaRequestError}` : "");
         }
+        let qqOpenStatusBlock = "";
+        if (isDeveloper) {
+          let qqOpenStatus = null;
+          try {
+            if (env.QQ_OPEN_GATEWAY) {
+              const response = await getQqOpenGateway(env).fetch("https://qq-open-gateway/api/v4/qqopen/status");
+              qqOpenStatus = await response.json().catch(() => null);
+            }
+          } catch (error) {
+            qqOpenStatus = { lastError: String(error?.message || error || "STATUS_FAILED").slice(0, 160) };
+          }
+          const enabled = Boolean(qqOpenStatus?.enabled);
+          const configured = Boolean(qqOpenStatus?.configured);
+          const connected = Boolean(qqOpenStatus?.connected);
+          const ready = Boolean(qqOpenStatus?.ready);
+          qqOpenStatusBlock =
+            `\n--------------------\n🌐 QQ Open Gateway：${ready ? "🟢 READY" : connected ? "🟡 已连接／等待 READY" : "🔴 未连接"}` +
+            `\n🔧 QQ Open：${enabled ? "已启用" : "未启用"}｜${configured ? "凭证已配置" : "凭证未配置"}` +
+            (Number.isSafeInteger(Number(qqOpenStatus?.seq)) ? `\n🔢 Gateway seq：${qqOpenStatus.seq}` : "") +
+            (qqOpenStatus?.lastEventType ? `\n📨 最近事件：${String(qqOpenStatus.lastEventType).slice(0, 80)}` : "") +
+            (qqOpenStatus?.lastError ? `\n⚠️ 最近错误：${String(qqOpenStatus.lastError).slice(0, 160)}` : "");
+        }
         const statusMsg = `📊 【系统运行状态报告】\n` +
                           `--------------------\n` +
                           `🔌 Provider 帐号: ${providerLine}\n` +
@@ -2557,7 +2579,8 @@ const QQAIWorker = {
                           `--------------------\n` +
                           `🔥 全局累计对话: ${totalCalls} 次\n` +
                           `⚙️ 最后响应模型:\n${lastModel}` +
-                          codexStatusBlock;
+                          codexStatusBlock +
+                          qqOpenStatusBlock;
         return jsonReply(`${atSender}${statusMsg}`);
       }
 
