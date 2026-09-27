@@ -85,6 +85,9 @@ QQ_OPEN_ENABLED = "true"
 QQ_OPEN_APP_ID = "1905687174"
 QQ_OPEN_INTENTS = "33554432"
 QQ_OPEN_TRANSPORT = "websocket"
+QQ_OPEN_SHARD_ID = "0"
+QQ_OPEN_SHARD_TOTAL = "1"
+QQ_OPEN_DISCOVERY_SYNC = "true"
 
 # Deployment notification scope and timing.
 DEPLOY_NOTIFY_WORKER_NAME = "qqai"

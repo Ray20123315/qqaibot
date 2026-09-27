@@ -48,6 +48,11 @@ QQ_OPEN_APP_ID=
 QQ_OPEN_CLIENT_SECRET=
 QQ_OPEN_TRANSPORT=websocket
 QQ_OPEN_INTENTS=33554432
+# No-sharding baseline. If /gateway/bot later recommends >1, deploy one connection per shard deliberately.
+QQ_OPEN_SHARD_ID=0
+QQ_OPEN_SHARD_TOTAL=1
+# Auto-sync the global custom menu and QQAIBOT V4 command panels after READY/RESUMED.
+QQ_OPEN_DISCOVERY_SYNC=false
 
 # Exact QQ Open user/member OpenIDs allowed to use developer-only commands.
 # This is an authority allowlist, not a numeric QQ mapping.

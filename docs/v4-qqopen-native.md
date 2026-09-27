@@ -55,3 +55,22 @@ System-admin-only diagnostics:
 For the first live end-to-end test, send `!qqping` in C2C or `@机器人 !qqping` in a group. A successful receive/send path replies `QQ Open V4 已连接并可回话。`. `!qqecho 内容` provides a second passive-reply test.
 
 These probe replies are deliberately isolated from legacy AI/command execution. Once the Gateway receive/reply path is proven against the real QQ application, normal commands and AI handlers can migrate behind the same Action Dispatcher.
+
+
+## Official protocol hardening
+
+The production V4 runtime now treats QQ Open delivery semantics as authoritative:
+
+- Prefer `/gateway/bot` metadata and keep the configured shard explicit.
+- Persist Session + seq for Resume; validate heartbeat ACK health.
+- Apply close-code-specific Identify/Resume/fatal behavior.
+- Deduplicate by event type + message id + message sequence/index.
+- Allocate passive reply `msg_seq` centrally, including intermediate/thinking messages.
+- Enforce passive reply budgets: group 5 replies within 5 minutes; C2C 4 replies within 60 minutes.
+- Upload rich media before sending `msg_type=7`; do not share upload handles across group/C2C.
+- Normalize WAV voice URLs, ASR hint text, ARK cards and quoted message elements.
+- Support both group and C2C recall for bot messages.
+- `!qqid` works only in C2C for OpenID diagnostics.
+- Optional `QQ_OPEN_DISCOVERY_SYNC=true` synchronizes the V4 global menu and C2C/group command panels after READY/RESUMED.
+
+The production baseline remains `QQ_OPEN_INTENTS=33554432`. Additional event intents are only enabled after the QQ application is confirmed to have those permissions.

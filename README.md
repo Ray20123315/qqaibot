@@ -459,3 +459,32 @@ QQ_OPEN_DEVELOPER_OPENIDS=<openid1>,<openid2>
 When a QQ Open event reaches the shared runtime, OneBot-style side effects are redirected to official QQ Open APIs where an equivalent exists: text/rich-media send, member info/list, mute, remove, recall and join-request review. Operations without an official QQ Open equivalent fail explicitly instead of falling back to NapCat.
 
 QQ Open groups and C2C conversations do not reuse the old OneBot whitelist/private-access gate. Existing AI cooldown, short-term history, D1 settings, Vectorize memory, command parsing and public Codex quota still apply.
+
+
+### QQ Open 官方協議保護
+
+正式 V4 Gateway 依 QQ Open WebSocket／消息規格處理以下項目：
+
+- Gateway 優先讀取 `/gateway/bot`，保存官方建議分片與 `session_start_limit`；預設仍使用 `[0,1]`。可用 `QQ_OPEN_SHARD_ID` / `QQ_OPEN_SHARD_TOTAL` 明確指定單一分片。
+- Heartbeat 會記錄 ACK；連續缺 ACK 會中止舊 socket 並重新連線。
+- 4006／4007 與 4900～4913 清除不可恢復 Session 後重新 Identify；4008／4009 優先保留 Session Resume；4010～4014、4914、4915 視為不可自動重試，避免無限重連。
+- 同一 QQ Open 事件使用 `event + msg_id + msg_seq/msg_idx` 去重，並保留 inflight 去重，避免重送造成重複 AI／管理副作用。
+- 被動回覆使用單一序號分配器；群聊每個來源訊息最多 5 次／5 分鐘，單聊最多 4 次／60 分鐘。Thinking indicator、工具通知與最終回答共用同一 `msg_seq` 配額。
+- 圖片／影片／語音／文件一律先走場景對應的上傳 API，再以 `msg_type=7` 和 `media.file_info` 發送；群聊與單聊不共用上傳結果。
+- QQ Open 語音優先使用 `voice_wav_url`，可把 `asr_refer_text` 當作不可信的語音轉寫參考；ARK 卡片與 `msg_elements` 引用內容會轉成 AI 可讀上下文。
+- QQ Open 自己發出的群聊與單聊消息都可走對應官方撤回 API；無官方等價能力的舊 NapCat action 會明確報 `QQ_OPEN_LEGACY_ACTION_UNSUPPORTED`，不會偷偷回到 OneBot。
+- 私聊可發 `!qqid` 查看自己的 OpenID；群聊使用會要求改到私聊，避免把 OpenID 公開在群內。開發者功能仍必須把該 OpenID 明確加入 `QQ_OPEN_DEVELOPER_OPENIDS`。
+
+正式環境設定：
+
+```toml
+QQ_OPEN_ENABLED = "true"
+QQ_OPEN_INTENTS = "33554432"
+QQ_OPEN_SHARD_ID = "0"
+QQ_OPEN_SHARD_TOTAL = "1"
+QQ_OPEN_DISCOVERY_SYNC = "true"
+```
+
+`QQ_OPEN_DISCOVERY_SYNC=true` 時，Gateway 在 READY／RESUMED 後以 V4 Command Registry 同步全域自訂選單與 C2C／群聊指令面板。同步有 fingerprint 去重，且只清理由 QQAIBOT V4 自己建立、remark 以 `QQAIBOT V4` 開頭的面板，不會刪除其他應用面板。測試 Worker 預設不開此功能，避免和正式環境同時修改同一個 QQ Bot UI。
+
+目前 `QQ_OPEN_INTENTS=33554432` 保留已驗證的 C2C／群聊訊息基線。其他事件 Intent 必須先確認 QQ 開放平台已授權，再擴大 bitmask；避免因未授權 Intent 造成 Gateway 4014。
