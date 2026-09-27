@@ -2,43 +2,43 @@
 
 task_id: qqaibot-20260927-qqopen-v4-native
 task_status: active
-goal_revision: 4
+goal_revision: 5
 
 ## Goal
 
-Make QQ Open V4 a full production ingress for the existing QQAIBOT capabilities instead of a connectivity-only path. Reuse the same AI, Codex, memory, cooldown, plugin, permission and command logic; adapt platform actions/media/group management to QQ Open APIs without pretending OpenIDs are numeric QQ IDs.
+Make QQ Open the primary official QQAIBOT transport while retaining NapCat/OneBot as an auxiliary visibility/capability source. Reuse the same AI, Codex, memory, cooldown, plugin and permission runtime, and prevent duplicate handling across transports.
 
-## Completed Steps
+## Current Phase
 
-1. Added `src/v4/qqopen/legacy-bridge.js` for canonical QQ Open → legacy-compatible event/action translation.
-2. Updated `src/v4/qqopen/runtime.js` so non-connectivity messages enter the shared Worker path and replies return through QQ Open.
-3. Added QQ Open action routing in `src/core/permissions.js`; no QQ Open side effect silently falls back to NapCat.
-4. Added explicit `QQ_OPEN_DEVELOPER_OPENIDS` support in deployment identity logic.
-5. Bypassed legacy OneBot whitelist/private-access gates only for the current authenticated QQ Open ingress context.
-6. Added Worker direct-loopback with a local OneBotHub facade to avoid Durable Object self-call deadlocks.
-7. Added rich-media, member, mute, remove, recall and join-request compatibility.
-8. Added `verify-v4-runtime-bridge.mjs` and included it in `npm run check:v4`.
-9. Updated README and `.dev.vars.example`.
+Phase 5 — hybrid transport ownership and official event expansion.
 
-## Verification
+## Execution Plan
 
-Feature head: `18160ef97f602a324d5c094b2f15ec2f6ca5a415`
+1. Add official full-group-message policy for GROUP_MESSAGE_CREATE.
+2. Add interaction event normalization/acknowledgement and internal handling for button/menu/feedback/clear-session/model/auth events.
+3. Track C2C/group active-message receive/reject state.
+4. Add hybrid event ownership/dedupe so QQ Open owns supported official message/action flows and OneBot supplements missing visibility without duplicate AI/plugin/moderation side effects.
+5. Add diagnostics/Portal visibility and regression coverage.
+6. Verify repository, V3, V4, isolated V4 test and Worker bundle before considering main.
 
-GitHub Actions run: `36335909533`
+## Hard Constraints
 
-All steps succeeded:
-- repository regression checks
-- V3 regression checks
-- V4 QQ Open regression checks
-- isolated V4 test deployment checks
-- single Worker bundle
+- Keep OneBot/NapCat.
+- Do not duplicate the AI stack.
+- QQ Open OpenID stays opaque.
+- Unsupported official actions must not silently fall back to NapCat for a QQ Open event.
+- Interaction intent is opt-in until permission is confirmed.
+- No secrets in Git/memory.
 
-## Remaining Authorization Gate
+## Checkpoint
 
-`main` and production are intentionally unchanged. Production cutover requires an explicit user instruction to merge/update `main` and deploy.
+- feature head before this phase: `e7292b6ba90c3e2228cbdec43cb8cf153e21224e`
+- safe production product revision: `5ff25e2f97926fd0bfa038b4006427a0fb7f2962`
+- latest verified prior CI: `36337247900` success
+- production QQ Open Gateway previously user-verified READY
 
 ## next_exact_action
 
-After explicit production authorization, fast-forward/update `main` to the verified feature head, let Cloudflare build/deploy, verify Gateway READY, then live-test ordinary AI, public Codex, developer Codex after OpenID allowlisting, media send/receive, member management and join-request review.
+Implement official event-state normalization plus hybrid ownership/dedupe primitives, then expand V4 regression tests before changing main.
 
-last_checkpoint_at: 2026-09-28T01:18:00+08:00
+last_checkpoint_at: 2026-09-28T01:48:00+08:00

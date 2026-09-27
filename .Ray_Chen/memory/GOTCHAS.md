@@ -5,22 +5,29 @@
 Previous QQ Open, OpenID, Gateway lifecycle, reconnect, Portal animation, pruning, permissions, principal identity, Connected Builds name override, D1 limit, Cron limit and GitHub credential risks remain in force.
 
 ## G-024 keep_vars preserves dead Dashboard variables
-Risk: `keep_vars=true` correctly preserves Dashboard-managed values, but it also preserves historical variables that were removed from Wrangler config.
-Avoidance: after verified deployment, remove only known dead bindings with Cloudflare settings PATCH while using `inherit` for every retained binding.
+Risk: `keep_vars=true` preserves Dashboard-managed values but can also preserve dead historical vars.
+Avoidance: prune only verified dead bindings.
 
-## G-025 enabled/configured/ready are distinct Gateway states
-Risk: configuration presence does not prove a live WebSocket, and READY does not prove the full AI application path.
-Current evidence: production is configured and READY, and `!qqping` works.
-Avoidance: separately verify ordinary AI/Codex/application routing after the full-runtime bridge deploys.
+## G-025 READY is not full app verification
+Risk: Gateway READY does not prove AI/plugin/management routing.
+Avoidance: live-test application paths separately.
 
-## G-026 Memory commits can trigger unnecessary production builds
-Risk: committing only Ray_Chen memory to `main` can cause a production deploy even though runtime code is unchanged.
-Avoidance: production trigger excludes `.Ray_Chen/**`.
+## G-026 Memory-only build churn
+Risk: memory commits can trigger unnecessary builds.
+Avoidance: keep build path exclusions explicit.
 
 ## G-027 OpenID is not numeric QQ
-Risk: QQ Open member/user identifiers cannot be treated as OneBot QQ numbers. Doing so would corrupt permissions, identity and group actions.
-Avoidance: preserve OpenIDs as opaque strings; only developer-specific elevation may use an explicit `QQ_OPEN_DEVELOPER_OPENIDS` allowlist or a deliberate future linking flow.
+Risk: identity corruption if OpenIDs are coerced to QQ numbers.
+Avoidance: preserve opaque OpenIDs and use explicit linking/allowlists.
 
 ## G-028 Platform action leakage
-Risk: routing a QQ Open inbound event through the legacy Worker can accidentally call NapCat for side effects.
-Avoidance: mark QQ Open internal requests and make `callOneBotAction` dispatch through the QQ Open compatibility adapter for that event.
+Risk: QQ Open events may accidentally execute NapCat side effects.
+Avoidance: use platform-marked action routing; unsupported official actions fail explicitly.
+
+## G-029 Dual-observation duplicates
+Risk: QQ Open full-group events and OneBot full-message events may represent the same human action and cause duplicate AI/plugin/moderation.
+Avoidance: hybrid ownership/dedupe must suppress secondary side effects while still allowing auxiliary observation/storage.
+
+## G-030 Interaction permission failure
+Risk: enabling INTERACTION intent without QQ authorization can fail Gateway authentication.
+Avoidance: implement support first; opt in only after permission is confirmed.

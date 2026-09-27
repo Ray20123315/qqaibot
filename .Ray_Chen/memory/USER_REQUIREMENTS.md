@@ -2,17 +2,14 @@
 
 ## Active Requirements
 
-- V4 runs in the formal production environment.
-- Do not delete legacy OneBot systems yet.
-- Add the existing bot functionality to QQ Open rather than keeping QQ Open as a ping-only path.
-- Reuse existing AI/Codex/memory/plugin/command logic rather than duplicating it.
-- Keep QQ Open practical features: member management, join approval/decline/blacklist, mute, image/video/audio/file receive and send.
-- Direct `!codex`, `!codexchat`, and `!codexwork` should normally share one principal conversation when identity is genuinely the same.
-- Do not pretend QQ Open OpenIDs are numeric QQ IDs.
+- QQ Open is the primary official bot transport/API surface.
+- Keep the old NapCat/OneBot bot and use it to supplement visibility/capabilities that QQ Open cannot expose.
+- Add official full-group-message support when the bot has the QQ "receive all messages" capability.
+- Add QQ interaction events and active-message permission state handling.
+- Prevent duplicate AI replies, plugin execution, moderation and notifications when both QQ Open and OneBot observe related activity.
+- Reuse existing AI/Codex/memory/plugin/command logic.
+- Preserve QQ Open member management, join review, mute and rich-media support where official permissions allow.
+- Keep `!codex`, `!codexchat`, `!codexwork` on one principal conversation only when identity is genuinely linked.
+- Never treat QQ Open OpenIDs as numeric QQ IDs.
+- Do not delete OneBot until hybrid live verification succeeds.
 - Secrets must never be committed or written into Ray_Chen memory.
-
-## Production Safety
-
-- Production resource removal must be evidence-based.
-- OneBotHub remains until QQ Open live AI and management verification succeeds.
-- QQ Open credentials are configured and Gateway READY has been user-verified.

@@ -1,47 +1,32 @@
 # CURRENT_STATE
 
-## Production
+## Production Baseline
 
-Production remains on the last known-good V4 baseline and has not been redeployed by this transaction.
+Production QQ Open Gateway is configured and previously user-verified READY. OneBotHub and QqOpenGateway both remain deployed. The latest hybrid/event-expansion work is not yet on main.
 
-Known live state before this implementation:
-- QQ Open Gateway configured, connected and READY
-- user verified `!qqping`
-- OneBotHub retained
-- QqOpenGateway retained
-- AI provider bindings, D1, Vectorize and Codex Bridge retained
-
-## Verified Feature Branch State
+## Feature Branch Baseline
 
 Branch: `v4-qqopen-native`
-Feature head: `18160ef97f602a324d5c094b2f15ec2f6ca5a415`
-CI: `36335909533` SUCCESS
+Head before this phase: `e7292b6ba90c3e2228cbdec43cb8cf153e21224e`
 
-The branch now includes a full shared-runtime bridge:
+Already implemented:
+- shared QQ Open application runtime
+- AI/Codex/D1/Vectorize/cooldown reuse
+- QQ Open-aware action translation
+- official passive-reply limits and msg_seq allocation
+- Gateway heartbeat/Resume/Identify hardening
+- rich-media normalization and official send/recall wrappers
+- V3 plugin dispatch through QQ Open
+- optional menu/panel synchronization
 
-- QQ Open group/private messages → existing `QQAIWorker.fetch` application path
-- existing AI conversation logic
-- D1 chat history
-- Vectorize long-term memory
-- AI cooldown/debounce
-- natural-language and explicit command parsing
-- public `!codex`
-- developer Codex via explicit OpenID allowlist
-- plugin/V3-compatible execution paths reached through the existing Worker
-- platform-aware QQ Open action translation
-- text and rich-media send
-- group member list/info
-- mute/unmute
-- remove/blacklist path
-- group message recall where QQ Open supports it
-- group join-request event/review bridge
+## New Hybrid Requirement
 
-## Compatibility Boundary
+QQ Open is primary where official capabilities exist. NapCat/OneBot remains an auxiliary source for full visibility and legacy-only data/capabilities. Hybrid ownership/dedupe is not yet fully implemented.
 
-Operations that have no official QQ Open equivalent fail explicitly with `QQ_OPEN_LEGACY_ACTION_UNSUPPORTED`; they are not sent to NapCat.
+## Official Event Expansion To Implement
 
-QQ Open OpenIDs remain opaque strings. Numeric QQ developer IDs are not reused as QQ Open identities.
-
-## Production Gap
-
-Live production has not yet received this feature head. No claim is made that ordinary production AI/Codex/media/group-management traffic has been live-tested through the new bridge yet.
+- GROUP_MESSAGE_CREATE full-group observation
+- INTERACTION_CREATE
+- C2C_MSG_RECEIVE / C2C_MSG_REJECT
+- GROUP_MSG_RECEIVE / GROUP_MSG_REJECT
+- transport ownership/dedupe diagnostics

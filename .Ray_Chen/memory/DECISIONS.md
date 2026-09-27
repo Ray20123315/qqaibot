@@ -2,19 +2,24 @@
 
 ## Retained
 
-D-001 through D-029 remain in force.
+D-001 through D-032 remain in force.
 
-## D-030 Shared runtime bridge for QQ Open
+## D-033 Hybrid QQ transport
 status: accepted
 date: 2026-09-28
-Decision: QQ Open inbound events will be normalized and forwarded through the existing Worker direct-loopback rather than implementing a separate AI/command stack.
+Decision: QQ Open is the primary official interaction/action transport; NapCat/OneBot remains an auxiliary full-visibility/capability transport for events or data unavailable from QQ Open. Explicit ownership and dedupe are required.
 
-## D-031 Platform-aware action compatibility
+## D-034 Full-group official observation
 status: accepted
 date: 2026-09-28
-Decision: while processing a QQ Open event, OneBot-style actions required by existing code are translated to QQ Open API calls where an official equivalent exists. Unsupported legacy-only actions fail explicitly instead of silently using NapCat.
+Decision: when QQ grants "receive all messages", GROUP_MESSAGE_CREATE is treated as the official group full-message source. OneBot must not separately trigger AI/plugin side effects for an event already owned by QQ Open.
 
-## D-032 Explicit OpenID developer elevation only
+## D-035 Interaction intent is permission-gated
 status: accepted
 date: 2026-09-28
-Decision: developer-only QQ Open commands may recognize a dedicated explicit OpenID allowlist. Numeric QQ developer configuration remains unchanged for OneBot.
+Decision: INTERACTION_CREATE support is implemented, but INTERACTION (1<<26) is not forced into production intents until the QQ application is confirmed to have that permission.
+
+## D-036 Active-push permission is explicit state
+status: accepted
+date: 2026-09-28
+Decision: C2C/GROUP MSG RECEIVE/REJECT events update push-permission state used by scheduled/active notifications instead of being treated as chat messages.
