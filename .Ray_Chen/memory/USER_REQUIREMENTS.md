@@ -2,17 +2,16 @@
 
 ## Active Requirements
 
-- Do not delete legacy systems yet.
-- Do not modify or migrate the production Worker/environment while preparing the test version.
-- Get the isolated test version correct first.
-- Test QQ Open connection/reply before broader cutover.
-- Keep the lean animated Portal direction.
-- Keep QQ-supported practical features, including member management, join approval/decline/blacklist, mute, and rich media.
+- V4 should now run in the formal production environment.
+- Do not delete legacy OneBot systems yet.
+- Remove useless production variables, but do not delete necessary secrets/resources.
+- Keep the redesigned lean animated Portal.
+- Keep QQ Open practical features: member management, join approval/decline/blacklist, mute, and rich media.
 - Direct `!codex`, `!codexchat`, and `!codexwork` should normally share one principal conversation.
-- Secrets must remain out of GitHub and memory.
+- Secrets must never be committed or written into Ray_Chen memory.
 
-## Safety Requirements
+## Production Safety
 
-- Production `qqai` / `main` requires explicit user authorization for cutover.
-- Test resources must not write production QQAIBOT data.
-- Do not delete Cloudflare resources to work around account limits without explicit authorization.
+- Production resource removal must be evidence-based.
+- OneBotHub remains until QQ Open live verification succeeds.
+- QQ AppSecret must be added manually/explicitly as a Secret; never infer or copy it.

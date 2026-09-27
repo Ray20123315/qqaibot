@@ -2,24 +2,19 @@
 
 ## Retained
 
-D-001 through D-022 remain in force.
+D-001 through D-026 remain in force.
 
-## D-023 Fully isolated V4 connectivity Worker
+## D-027 Production V4 cutover
 status: accepted
-date: 2026-09-27
-Decision: perform QQ Open connectivity testing on a separate `qqai-v4test` Worker with its own QqOpenGateway Durable Object and no production data bindings.
+date: 2026-09-28
+Decision: fast-forward production `main` to the verified V4 commit and deploy it to `qqai` while retaining OneBotHub for compatibility.
 
-## D-024 Production Connected Builds must exclude the V4 branch
+## D-028 Conservative variable pruning
 status: accepted
-date: 2026-09-27
-Decision: the production `qqai` non-production trigger excludes `v4-qqopen-native`. A dedicated Cloudflare Builds trigger attached to `qqai-v4test` owns V4 test deployments.
+date: 2026-09-28
+Decision: remove only variables proven dead, empty with an equivalent fallback, or redundant. Preserve all secrets and resource bindings unless separately verified for deletion.
 
-## D-025 No test Cron
+## D-029 Memory-only commits do not redeploy production
 status: accepted
-date: 2026-09-27
-Decision: because the account is already at the Workers Free 5-Cron limit, the isolated test Worker uses an explicit “連接 / 重試” action instead of a watchdog Cron.
-
-## D-026 No test D1
-status: accepted
-date: 2026-09-27
-Decision: because the account is at the 10-D1 limit and production data must remain isolated, the QQ connectivity test Worker does not bind any D1. No database is deleted to create capacity.
+date: 2026-09-28
+Decision: production Cloudflare Build trigger excludes `.Ray_Chen/**` to prevent memory checkpoint commits from causing needless production deployments.

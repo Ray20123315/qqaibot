@@ -1,45 +1,54 @@
 # VERIFY
 
-## Final Product / Test Environment
+## Production Code
 
-- V4 branch commit: `7ddfc56495d58a101626ad6911ac0c673c433a1f`
-- GitHub CI run: `36330424094` — success
+- production commit: `5ff25e2f97926fd0bfa038b4006427a0fb7f2962`
+- GitHub CI run: `36332485133`
 - regression: success
-- V3: success
-- V4: success
-- `check:v4test`: success
-- production Worker bundle dry-run: success
+- V3 regression: success
+- V4 regression: success
+- isolated V4 test checks: success
+- Worker bundle dry-run: success
 
-## Cloudflare Test Deployment
+## Production Cloudflare Deployment
 
-- Worker: `qqai-v4test`
-- tag: `95d30a6cea594b5f8d9a7ac7183c7712`
-- migration: `v4test_qqopen_gateway_v1`
-- named handler: `QqOpenGateway`
-- build trigger: `522507cc-658f-4361-8e90-9a98e65b92d7`
-- build: `d92e427e-ee8c-48b8-92a7-0773cdc870c0`
-- build outcome: success
-- deployment URL reported by Wrangler: `https://qqai-v4test.ray20123315.workers.dev`
+- Worker: `qqai`
+- Cloudflare build: `bb3b6a76-f7e1-4cdd-85c4-eec9fb089f2b`
+- outcome: success
+- migration tag: `v4_qqopen_gateway`
+- named Durable Object handlers: `OneBotHub`, `QqOpenGateway`
+- Wrangler current version: `dc1dff2f-a264-471f-a808-719dbad96c43`
+- custom domains: retained
+- Cron schedules: retained
 
-## Production Isolation Verification
+## Variable Cleanup Verification
 
-Production `qqai`:
-- migration tag remains `v3_remove_budget_guard`
-- named handler remains `OneBotHub`
-- main deploy command remains `npx wrangler deploy worker.js --no-assets`
-- `v4-qqopen-native` is excluded from production non-main trigger
-- production Worker modified time did not change during isolated test setup
+Removed 11 production bindings:
+- AUTO_CHECKIN_CONCURRENCY
+- AUTO_CHECKIN_ENABLED
+- AUTO_CHECKIN_RETRY_INTERVAL_MS
+- DEEPSEEK_PRO_MODEL
+- DEPLOY_NOTIFY_DEVELOPER_IDS
+- DEPLOY_NOTIFY_START_COOLDOWN_SECONDS
+- DEVELOPER_ID
+- ENABLE_ONEBOT_HTTP_EVENTS
+- GEMINI_IMAGE_MODELS
+- IMAGEN_MODELS
+- PLUGIN_SECURITY_GPT_MODEL
 
-## Expected Current Test Status
+Post-cleanup GET settings:
+- removed binding names present: none
+- retained binding count: 34
+- secret bindings: preserved
+- D1 / Vectorize / Rate Limiter: preserved
+- OneBotHub / QqOpenGateway: preserved
 
-The test Worker currently has no `QQ_OPEN_CLIENT_SECRET`; therefore live QQ Gateway READY is not expected yet.
+## Remaining Live Verification
 
-## Next Live Verification
-
-1. Add `QQ_OPEN_CLIENT_SECRET` Secret to `qqai-v4test` only.
-2. Open workers.dev test dashboard.
-3. Press “連接 / 重試”.
-4. Confirm Gateway transitions to READY.
-5. Test C2C `!qqping`.
-6. Test group `@机器人 !qqping`.
-7. Test `!qqecho hello`.
+`QQ_OPEN_CLIENT_SECRET` is absent from production. After the user adds it:
+1. confirm Gateway configured=true;
+2. confirm READY;
+3. test C2C `!qqping`;
+4. test group `@机器人 !qqping`;
+5. test `!qqecho hello`;
+6. then verify member-management/media APIs with the app's granted permissions.

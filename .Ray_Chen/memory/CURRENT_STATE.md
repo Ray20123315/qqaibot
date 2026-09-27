@@ -1,44 +1,63 @@
 # CURRENT_STATE
 
-## Production
+## GitHub
 
-- Worker: `qqai`
+- `main`: production V4 at `5ff25e2f97926fd0bfa038b4006427a0fb7f2962`
+- `v4-qqopen-native`: same product revision before this memory checkpoint
+- product CI: `36332485133` success
+
+## Production Cloudflare Worker
+
+Worker: `qqai`
+
+Verified:
+- migration tag: `v4_qqopen_gateway`
+- Durable Objects: `OneBotHub`, `QqOpenGateway`
+- D1: retained
+- Vectorize: retained
+- AI binding: retained
+- Rate Limiter: retained
+- production custom domains: retained
+- two existing Cron schedules: retained
+- production build: `bb3b6a76-f7e1-4cdd-85c4-eec9fb089f2b` success
+- current production version reported by Wrangler: `dc1dff2f-a264-471f-a808-719dbad96c43`
+
+## Production Variables
+
+Present QQ Open public vars:
+- `QQ_OPEN_ENABLED=true`
+- `QQ_OPEN_APP_ID=1905687174`
+- `QQ_OPEN_INTENTS=33554432`
+- `QQ_OPEN_TRANSPORT=websocket`
+
+Removed production variables:
+- AUTO_CHECKIN_CONCURRENCY
+- AUTO_CHECKIN_ENABLED
+- AUTO_CHECKIN_RETRY_INTERVAL_MS
+- DEEPSEEK_PRO_MODEL
+- DEPLOY_NOTIFY_DEVELOPER_IDS
+- DEPLOY_NOTIFY_START_COOLDOWN_SECONDS
+- DEVELOPER_ID
+- ENABLE_ONEBOT_HTTP_EVENTS
+- GEMINI_IMAGE_MODELS
+- IMAGEN_MODELS
+- PLUGIN_SECURITY_GPT_MODEL
+
+Production retained 34 bindings after cleanup.
+
+## Secrets
+
+Existing production secrets were preserved. `QQ_OPEN_CLIENT_SECRET` is not present yet, so QQ Open is enabled but not configured for live Gateway authentication.
+
+## Cloudflare Build Triggers
+
+Production main trigger:
 - branch: `main`
-- migration tag: `v3_remove_budget_guard`
-- Durable Object class: `OneBotHub`
-- production deploy command: `npx wrangler deploy worker.js --no-assets`
-- production Worker modified time remained unchanged during test-environment work
-- `v4-qqopen-native` is explicitly excluded from the production Worker's non-production trigger
+- deploy: `npx wrangler deploy worker.js --no-assets`
+- excludes: `.Ray_Chen/**`
 
-## Isolated V4 Test
+Production non-main trigger:
+- still uses `wrangler versions upload`
+- excludes both `main` and `v4-qqopen-native`
 
-- Worker: `qqai-v4test`
-- Worker tag: `95d30a6cea594b5f8d9a7ac7183c7712`
-- URL: `https://qqai-v4test.ray20123315.workers.dev`
-- migration: `v4test_qqopen_gateway_v1`
-- Durable Object: `QqOpenGateway`
-- dedicated build trigger: `522507cc-658f-4361-8e90-9a98e65b92d7`
-- source branch: `v4-qqopen-native`
-- build command: none
-- deploy command: `npx wrangler deploy --config wrangler.v4test.toml --no-assets`
-- path exclude: `.Ray_Chen/**`
-- latest successful Cloudflare build: `d92e427e-ee8c-48b8-92a7-0773cdc870c0`
-
-The test Worker has:
-- no D1
-- no production domain/routes
-- no Vectorize
-- no OneBotHub
-- no Cron
-- no QQ AppSecret yet
-
-Non-secret test vars include QQ Open AppID and `GROUP_AND_C2C_EVENT` intent baseline.
-
-## Verification
-
-- GitHub CI `36330424094`: success
-- isolated V4 config dry-run: success
-- Cloudflare deployment: success
-- QqOpenGateway migration on test Worker: success
-- external public HTTP smoke from this assistant environment: unavailable due tool/network resolution limitation
-- live QQ Gateway: pending Secret
+V4 isolated test trigger remains attached only to `qqai-v4test`.

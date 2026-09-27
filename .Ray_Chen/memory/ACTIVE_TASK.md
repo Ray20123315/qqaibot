@@ -2,56 +2,66 @@
 
 task_id: qqaibot-20260927-qqopen-v4-native
 task_status: active
-goal_revision: 2
+goal_revision: 3
 
 ## Goal
 
-Build and verify QQ Open V4 in a fully isolated test Worker before any production cutover.
+Operate QQ Open V4 from the formal production Worker while preserving rollback capability and minimizing dead configuration.
 
 ## Acceptance Criteria
 
-- V4 test Worker must be distinct from production `qqai`.
-- No production D1/custom domain/Vectorize/OneBot binding in test config.
-- New QqOpenGateway migration must apply only to `qqai-v4test`.
-- Cloudflare production trigger must not deploy `v4-qqopen-native`.
-- V4 branch CI and isolated test bundle checks must pass.
-- Test Worker must deploy successfully on workers.dev.
-- Live QQ connection requires only the AppSecret to be added to the test Worker Secret store.
+- `main` contains the verified V4 code.
+- Production `qqai` successfully deploys with both OneBotHub and QqOpenGateway.
+- `v4_qqopen_gateway` migration applies successfully.
+- QQ Open non-secret variables are present in production.
+- Dead/empty production variables are removed without deleting secrets or required resource bindings.
+- Production Cloudflare trigger ignores Ray_Chen memory-only commits.
+- QQ Open live connection is attempted only after `QQ_OPEN_CLIENT_SECRET` is explicitly added to production.
 
 ## Completed
 
-- Created `worker.v4test.js` minimal isolated test entrypoint.
-- Created `wrangler.v4test.toml` with `qqai-v4test`, workers.dev, and QqOpenGateway only.
-- Added `verify-v4-test-deployment.mjs` and `npm run check:v4test`.
-- Added V4 test validation to the normal GitHub CI workflow.
-- Attempt to create a separate V4 D1 was blocked by the account limit of 10 databases; no database was deleted or modified.
-- Switched design to no-D1 test Worker.
-- Cloudflare production preview trigger now excludes `v4-qqopen-native` and retains `npx wrangler versions upload`.
-- Production main trigger remains `npx wrangler deploy worker.js --no-assets` on branch `main`.
-- Created Cloudflare Worker `qqai-v4test`.
-- Created dedicated Cloudflare Builds trigger `522507cc-658f-4361-8e90-9a98e65b92d7` for branch `v4-qqopen-native`.
-- Initial test deploy proved code/DO upload but failed only while adding a Cron because the Free account already uses 5 Cron triggers.
-- Removed the test Cron and added a manual “連接 / 重試” button.
-- Removed the temporary GitHub Actions deployment workflow because repository Cloudflare credentials were not configured.
-- Final Cloudflare test build `d92e427e-ee8c-48b8-92a7-0773cdc870c0`: success.
-- Final GitHub CI `36330424094`: success for regression, V3, V4, V4-test dry-run and Worker bundle.
-- Test trigger excludes `.Ray_Chen/**` to avoid redeploying on memory-only commits.
+- Cleaned production config in commit `5ff25e2f97926fd0bfa038b4006427a0fb7f2962`.
+- Full CI run `36332485133`: success.
+- Fast-forwarded `main` to the V4 commit.
+- Cloudflare production build `bb3b6a76-f7e1-4cdd-85c4-eec9fb089f2b`: success.
+- Production migration advanced from `v3_remove_budget_guard` to `v4_qqopen_gateway`.
+- Production now exposes both `OneBotHub` and `QqOpenGateway`.
+- Existing D1, Vectorize, Rate Limiter, AI binding, secrets and custom domains remained intact.
+- Added formal QQ Open vars:
+  - `QQ_OPEN_ENABLED=true`
+  - `QQ_OPEN_APP_ID=1905687174`
+  - `QQ_OPEN_INTENTS=33554432`
+  - `QQ_OPEN_TRANSPORT=websocket`
+- Removed 11 dead/empty/redundant production bindings:
+  - `AUTO_CHECKIN_CONCURRENCY`
+  - `AUTO_CHECKIN_ENABLED`
+  - `AUTO_CHECKIN_RETRY_INTERVAL_MS`
+  - `DEEPSEEK_PRO_MODEL`
+  - `DEPLOY_NOTIFY_DEVELOPER_IDS`
+  - `DEPLOY_NOTIFY_START_COOLDOWN_SECONDS`
+  - `DEVELOPER_ID`
+  - `ENABLE_ONEBOT_HTTP_EVENTS`
+  - `GEMINI_IMAGE_MODELS`
+  - `IMAGEN_MODELS`
+  - `PLUGIN_SECURITY_GPT_MODEL`
+- Cloudflare binding cleanup used `inherit` for all retained bindings; read-back confirmed all 11 removed and 34 required bindings retained.
+- Production `main` trigger now excludes `.Ray_Chen/**` so memory-only commits do not redeploy production.
+- Isolated `qqai-v4test` remains available and separate.
 
-## Production Verification
+## Verification Results
 
-Production `qqai` after test setup:
-- migration tag: `v3_remove_budget_guard`
-- named Durable Object: `OneBotHub`
-- modified_on remained `2026-09-27T09:46:34.642897Z`
-
-No production code/deployment migration occurred.
-
-## Current Blocker
-
-`qqai-v4test` has no `QQ_OPEN_CLIENT_SECRET` Secret yet. This is intentionally not copied from production or stored in GitHub.
+- GitHub CI: success
+- Cloudflare production build: success
+- production migration: `v4_qqopen_gateway`
+- OneBotHub namespace: retained
+- QqOpenGateway namespace: created
+- removed variable read-back: success
+- required binding read-back: success
+- QQ_OPEN_CLIENT_SECRET: absent
+- live QQ Gateway READY: not yet attempted
 
 ## next_exact_action
 
-In Cloudflare, open Worker `qqai-v4test` only and add `QQ_OPEN_CLIENT_SECRET` as a Secret. Then open `https://qqai-v4test.ray20123315.workers.dev`, press “連接 / 重試”, confirm READY, and test `!qqping` / `!qqecho hello`.
+Add `QQ_OPEN_CLIENT_SECRET` as a Cloudflare Secret on production Worker `qqai`. Then use the production Portal QQ Open panel or Gateway status endpoint to confirm READY and test C2C/group `!qqping` and `!qqecho hello`.
 
-last_checkpoint_at: 2026-09-27T23:43:00+08:00
+last_checkpoint_at: 2026-09-28T00:18:00+08:00

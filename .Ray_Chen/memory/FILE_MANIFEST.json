@@ -1,128 +1,131 @@
 {
   "schema_version": 1,
-  "memory_version": "v0.0.9",
+  "memory_version": "v0.0.10",
   "task_id": "qqaibot-20260927-qqopen-v4-native",
-  "goal_revision": 2,
-  "transaction": "file_change_transaction_20260927_v4_isolated_test_001",
+  "goal_revision": 3,
+  "transaction": "file_change_transaction_20260928_prod_v4_cutover_001",
   "repository": "Ray20123315/qqaibot",
-  "branch": "v4-qqopen-native",
-  "product_before_revision": "01fedebe06d1c09e075ba84458e6a49b9923476d",
-  "product_after_revision": "7ddfc56495d58a101626ad6911ac0c673c433a1f",
+  "production_branch": "main",
+  "development_branch": "v4-qqopen-native",
+  "product_before_revision": "523d2138ae413206eb8fe7aa85d45c5b8d7404c9",
+  "product_after_revision": "5ff25e2f97926fd0bfa038b4006427a0fb7f2962",
   "verification": {
-    "github_actions_run_id": 36330424094,
+    "github_actions_run_id": 36332485133,
     "github_ci": "success",
-    "cloudflare_test_build_id": "d92e427e-ee8c-48b8-92a7-0773cdc870c0",
-    "cloudflare_test_build": "success",
-    "production_worker_changed": false,
+    "cloudflare_production_build_id": "bb3b6a76-f7e1-4cdd-85c4-eec9fb089f2b",
+    "cloudflare_production_build": "success",
+    "production_migration": "v4_qqopen_gateway",
+    "removed_binding_count": 11,
+    "retained_binding_count": 34,
+    "qq_open_client_secret": "absent",
     "live_qqopen_e2e": "pending_secret"
   },
   "changes": [
     {
       "location_type": "github",
       "provider": "GitHub",
-      "resource_id_or_path": "worker.v4test.js",
-      "action": "created",
-      "branch_or_container": "v4-qqopen-native",
-      "verification": "CI + Cloudflare deploy",
-      "changed_at": "2026-09-27T23:43:00+08:00"
-    },
-    {
-      "location_type": "github",
-      "provider": "GitHub",
-      "resource_id_or_path": "wrangler.v4test.toml",
-      "action": "created",
-      "branch_or_container": "v4-qqopen-native",
-      "verification": "CI dry-run + Cloudflare deploy",
-      "changed_at": "2026-09-27T23:43:00+08:00"
-    },
-    {
-      "location_type": "github",
-      "provider": "GitHub",
-      "resource_id_or_path": "verify-v4-test-deployment.mjs",
-      "action": "created",
-      "branch_or_container": "v4-qqopen-native",
-      "verification": "CI success",
-      "changed_at": "2026-09-27T23:43:00+08:00"
-    },
-    {
-      "location_type": "github",
-      "provider": "GitHub",
-      "resource_id_or_path": "docs/v4-test-deployment.md",
-      "action": "created",
-      "branch_or_container": "v4-qqopen-native",
-      "verification": "read-back",
-      "changed_at": "2026-09-27T23:43:00+08:00"
-    },
-    {
-      "location_type": "github",
-      "provider": "GitHub",
-      "resource_id_or_path": "package.json",
+      "resource_id_or_path": "wrangler.toml",
       "action": "modified",
-      "branch_or_container": "v4-qqopen-native",
-      "verification": "CI success",
-      "changed_at": "2026-09-27T23:43:00+08:00"
+      "repository_or_drive": "Ray20123315/qqaibot",
+      "branch_or_container": "v4-qqopen-native -> main",
+      "after_revision": "5ff25e2f97926fd0bfa038b4006427a0fb7f2962",
+      "verification": "CI + production deploy success",
+      "changed_at": "2026-09-28T00:18:00+08:00"
     },
     {
       "location_type": "github",
       "provider": "GitHub",
-      "resource_id_or_path": ".github/workflows/validate.yml",
+      "resource_id_or_path": "wrangler.example.toml",
       "action": "modified",
-      "branch_or_container": "v4-qqopen-native",
+      "repository_or_drive": "Ray20123315/qqaibot",
+      "branch_or_container": "v4-qqopen-native -> main",
+      "after_revision": "5ff25e2f97926fd0bfa038b4006427a0fb7f2962",
       "verification": "CI success",
-      "changed_at": "2026-09-27T23:43:00+08:00"
+      "changed_at": "2026-09-28T00:18:00+08:00"
     },
     {
       "location_type": "github",
       "provider": "GitHub",
-      "resource_id_or_path": ".github/workflows/v4-test-deploy.yml",
-      "action": "created_then_deleted",
-      "branch_or_container": "v4-qqopen-native",
-      "verification": "removed after missing GitHub Cloudflare secrets",
-      "changed_at": "2026-09-27T23:43:00+08:00"
-    },
-    {
-      "location_type": "cloudflare",
-      "provider": "Cloudflare",
-      "resource_id_or_path": "workers/scripts/qqai-v4test",
-      "action": "created_and_deployed",
-      "branch_or_container": "qqai-v4test",
-      "before_revision": "absent",
-      "after_revision": "v4test_qqopen_gateway_v1",
-      "verification": "build d92e427e-ee8c-48b8-92a7-0773cdc870c0 success",
-      "changed_at": "2026-09-27T23:43:00+08:00"
-    },
-    {
-      "location_type": "cloudflare",
-      "provider": "Cloudflare",
-      "resource_id_or_path": "builds/triggers/522507cc-658f-4361-8e90-9a98e65b92d7",
-      "action": "created",
-      "branch_or_container": "qqai-v4test",
-      "verification": "branch v4-qqopen-native; .Ray_Chen excluded",
-      "changed_at": "2026-09-27T23:43:00+08:00"
-    },
-    {
-      "location_type": "cloudflare",
-      "provider": "Cloudflare",
-      "resource_id_or_path": "builds/triggers/437e44b7-da3a-4c1c-a5b6-f941e1002521",
+      "resource_id_or_path": "README.md",
       "action": "modified",
-      "branch_or_container": "qqai production non-production trigger",
-      "before_revision": "branch_excludes=[main]",
-      "after_revision": "branch_excludes=[main,v4-qqopen-native]",
-      "verification": "read-back; deploy command restored to versions upload",
-      "changed_at": "2026-09-27T23:43:00+08:00"
+      "repository_or_drive": "Ray20123315/qqaibot",
+      "branch_or_container": "v4-qqopen-native -> main",
+      "after_revision": "5ff25e2f97926fd0bfa038b4006427a0fb7f2962",
+      "verification": "CI success",
+      "changed_at": "2026-09-28T00:18:00+08:00"
+    },
+    {
+      "location_type": "github",
+      "provider": "GitHub",
+      "resource_id_or_path": "verify-config.mjs",
+      "action": "modified",
+      "repository_or_drive": "Ray20123315/qqaibot",
+      "branch_or_container": "v4-qqopen-native -> main",
+      "after_revision": "5ff25e2f97926fd0bfa038b4006427a0fb7f2962",
+      "verification": "CI success",
+      "changed_at": "2026-09-28T00:18:00+08:00"
+    },
+    {
+      "location_type": "github",
+      "provider": "GitHub",
+      "resource_id_or_path": "refs/heads/main",
+      "action": "fast_forward",
+      "repository_or_drive": "Ray20123315/qqaibot",
+      "branch_or_container": "main",
+      "before_revision": "523d2138ae413206eb8fe7aa85d45c5b8d7404c9",
+      "after_revision": "5ff25e2f97926fd0bfa038b4006427a0fb7f2962",
+      "verification": "GitHub update_ref success",
+      "changed_at": "2026-09-28T00:18:00+08:00"
     },
     {
       "location_type": "cloudflare",
       "provider": "Cloudflare",
-      "resource_id_or_path": "d1/qqaibot-v4test",
-      "action": "create_failed_no_resource",
-      "branch_or_container": "account",
-      "verification": "error 7406 D1 account limit 10; no deletion/modification performed",
-      "changed_at": "2026-09-27T23:43:00+08:00"
+      "resource_id_or_path": "workers/scripts/qqai",
+      "action": "deployed",
+      "repository_or_drive": "Cloudflare Workers",
+      "branch_or_container": "production",
+      "before_revision": "v3_remove_budget_guard",
+      "after_revision": "v4_qqopen_gateway",
+      "commit_or_hash": "dc1dff2f-a264-471f-a808-719dbad96c43",
+      "verification": "build bb3b6a76-f7e1-4cdd-85c4-eec9fb089f2b success",
+      "changed_at": "2026-09-28T00:18:00+08:00"
+    },
+    {
+      "location_type": "cloudflare",
+      "provider": "Cloudflare",
+      "resource_id_or_path": "workers/scripts/qqai/settings",
+      "action": "pruned_bindings",
+      "repository_or_drive": "Cloudflare Workers",
+      "branch_or_container": "production",
+      "before_revision": "45 bindings",
+      "after_revision": "34 bindings",
+      "verification": "read-back; 11 targets absent",
+      "changed_at": "2026-09-28T00:18:00+08:00"
+    },
+    {
+      "location_type": "cloudflare",
+      "provider": "Cloudflare",
+      "resource_id_or_path": "builds/triggers/6a16097b-71b5-4d81-92ac-ef903df2e1cd",
+      "action": "modified",
+      "repository_or_drive": "Cloudflare Workers Builds",
+      "branch_or_container": "main",
+      "after_revision": "path_excludes=.Ray_Chen/**",
+      "verification": "read-back success",
+      "changed_at": "2026-09-28T00:18:00+08:00"
+    },
+    {
+      "location_type": "cloudflare",
+      "provider": "Cloudflare",
+      "resource_id_or_path": "workers/scripts/qqai-v4test/settings",
+      "action": "temporary_binding_patch_test",
+      "repository_or_drive": "Cloudflare Workers",
+      "branch_or_container": "test",
+      "verification": "inherit semantics verified safely on test Worker",
+      "changed_at": "2026-09-28T00:18:00+08:00"
     }
   ],
   "internal_memory_transaction": {
-    "action": "update .Ray_Chen/memory to v0.0.9",
+    "action": "update .Ray_Chen/memory to v0.0.10",
     "note": "Memory files, archives, SHA manifests and Gmail evidence do not recursively trigger another memory transaction."
   }
 }
