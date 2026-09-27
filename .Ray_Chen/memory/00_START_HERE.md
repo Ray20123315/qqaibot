@@ -1,25 +1,25 @@
 # Ray_Chen Memory Entry
 
-- memory_version: v0.0.7
+- memory_version: v0.0.8
 - project: QQAIBOT
 - repository: Ray20123315/qqaibot
 - canonical_branch: main
 - development_branch: v4-qqopen-native
 - task_id: qqaibot-20260927-qqopen-v4-native
 - task_status: active
-- goal_revision: 1
-- latest_verified_product_commit: 1f12968a00db01518ef33abd7b7df4977b43e676
-- latest_verified_ci_run: 36310767685
-- updated_at: 2026-09-27T17:58:00+08:00
+- goal_revision: 2
+- latest_verified_product_commit: 75483f71fb0707043082f891851581f03ac2c15c
+- latest_verified_ci_run: 36327804832
+- updated_at: 2026-09-27T23:01:00+08:00
 
 ## Recovery Route
 
 1. Read `ACTIVE_TASK.md` and `CURRENT_STATE.md`.
-2. Verify GitHub `v4-qqopen-native` head and latest CI before further writes.
+2. Verify `v4-qqopen-native` head and the latest CI before further writes.
 3. Read `USER_REQUIREMENTS.md`, `DECISIONS.md`, `GOTCHAS.md`, and `VERIFY.md` as needed.
-4. Treat `FILE_MANIFEST.json` as the file-change ledger.
-5. Keep production `main` untouched until live QQ Open connectivity/reply succeeds and migration gates pass.
+4. Treat `FILE_MANIFEST.json` as the current file-change ledger.
+5. Keep `main` and production Cloudflare deployment unchanged until the user explicitly requests cutover.
 
 ## Quick Recovery Summary
 
-V4 Phase 2 now has a deployable QQ Open connectivity path: a `QqOpenGateway` Durable Object opens the outbound QQ Gateway WebSocket, persists session/sequence state, heartbeats, resumes/reconnects, and backs off on repeated failures. Incoming group/C2C messages can be answered natively through the QQ OpenAPI Action Dispatcher. Connectivity probes are `!qqping` and `!qqecho`. Existing OneBot production behavior remains unchanged.
+Goal revision 2 prioritizes a lean, animated V4 Portal and aggressive product-surface pruning before live QQ Open cutover. The V4 Portal now exposes six primary areas: Overview, QQ Open, Group Management, AI/Codex, Plugins, and System. It shows Gateway online/READY/error state, adds QQ-native group member/blacklist/join-request/mute management APIs, records official image/video/audio/file send/receive capability, and collapses direct !codex / !codexchat / !codexwork into one principal-scoped conversation. Legacy activity/vote/schedule surfaces are retired from the V4 navigation and Command Registry; old data/code is retained only as rollback material until QQ Open E2E proves the new path.

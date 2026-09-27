@@ -4,35 +4,64 @@
 
 - production branch: `main`
 - V4 branch: `v4-qqopen-native`
-- latest verified V4 product commit: `1f12968a00db01518ef33abd7b7df4977b43e676`
-- latest verified CI run: `36310767685` — success
+- latest verified V4 product commit: `75483f71fb0707043082f891851581f03ac2c15c`
+- latest verified product CI run: `36327804832` — success
 - production main switch: not performed
 - Cloudflare deployment/config: not changed
 - QQ Open console configuration: not changed
 
-## Phase 2 Connectivity State
+## V4 Portal
 
-Implemented:
-- persistent QQ Open Gateway Durable Object with AccessToken + outbound WebSocket.
-- Identify/Heartbeat/ACK/READY/Resume/Reconnect/Invalid Session handling.
-- persisted `session_id` / `seq`.
-- connection timeout and exponential-ish reconnect backoff capped at 60s.
-- native group/C2C passive message reply Action Dispatcher.
-- `!qqping` and `!qqecho` E2E probes.
-- System Admin status/connect/disconnect endpoints.
-- developer `!status` QQ Open diagnostics.
-- Wrangler binding/migration and CI coverage.
+Visible primary areas are now:
+1. Overview
+2. QQ Open
+3. Group Management
+4. AI / Codex
+5. Plugins
+6. System
 
-Not yet verified live:
-- actual Gateway READY against the user's QQ application.
-- real C2C/group receive and native reply.
-- full command/AI routing through QQ Open.
-- moderation/member/media/join request actions.
+The final V4 Portal layer hides the legacy navigation, forces Overview as the initial lean view, polls QQ Open status, and keeps system diagnostics accessible through the System section. Motion-heavy effects automatically disable for reduced-motion users.
 
-## Preserved Systems
+## QQ Open Capability State
 
-Codex Bridge EXE/security model, shared Codex conversations, AI providers, plugins, D1/Portal data, quotas/cooldowns, and OneBot production path remain intact.
+Implemented in code:
+- Gateway online/READY/status controls.
+- group info and bot state.
+- member list and member detail API wrappers.
+- batch member removal.
+- blacklist read/update.
+- join request list and approve/decline/decline+blacklist.
+- mute state and member mute operations.
+- group/C2C rich-media upload wrappers.
+
+Officially confirmed:
+- text send/receive.
+- Markdown send.
+- rich-media send/receive.
+- image, video, audio/voice, and file rich-media flow via `file_info`.
+- 2026-09 group member/blacklist APIs.
+- 2026-08 mute and join-request APIs.
+
+## Pruning State
+
+Retired from the V4 main Portal/product surface:
+- activity / poll
+- schedule
+- standalone appeals/history pages
+- Bilibili monitor
+- relationship management
+- platform feature catalog
+- event simulator / legacy OneBot-oriented tools
+
+Activity/vote/schedule entries are also removed from the V4 Command Registry. The underlying historical data/code is intentionally retained for rollback until live QQ Open verification.
+
+## Codex State
+
+Direct `!codex`, `!codexchat`, and `!codexwork` now use one principal-scoped session key:
+`qqaibot:principal:<principalId>:codex`.
+
+Plugin-internal Codex calls remain plugin/scope isolated. If no internal principal mapping exists, the current platform user identifier is used as fallback.
 
 ## Credential State
 
-No QQ AppSecret or live access token is stored in GitHub or Ray_Chen memory. Production should use Cloudflare Secrets for `QQ_OPEN_CLIENT_SECRET`.
+No real QQ AppSecret or live token is stored in the repository or Ray_Chen memory.

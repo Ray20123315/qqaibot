@@ -2,19 +2,24 @@
 
 ## Retained decisions
 
-D-001 through D-015 remain accepted, including curated user output, silent successful recall, registered-command execution boundaries, grounded sensitive parameters, Codex quota/security/session rules, QQ Open Native V4, Command Registry as source of truth, preservation of mature non-transport systems, and feature-branch-before-cutover.
+D-001 through D-018 remain accepted, including execution/permission safety, Codex bridge restrictions, QQ Open Native V4, Command Registry as the source of truth, preservation of mature systems, feature-branch-first migration, conservative intents, and persistent Gateway resume state.
 
-## D-016 Connectivity before migration breadth
+## D-019 Lean Portal becomes the V4 control surface
 status: accepted
 date: 2026-09-27
-Decision: prove real QQ Gateway READY plus group/C2C passive reply before migrating normal AI, legacy commands, moderation or media.
+Decision: the primary Portal is reduced to six areas — Overview, QQ Open, Group Management, AI/Codex, Plugins, System — with legacy surfaces hidden from normal navigation.
 
-## D-017 Conservative initial intents
+## D-020 Prune product surface before physical data deletion
 status: accepted
 date: 2026-09-27
-Decision: default first live connection to `GROUP_AND_C2C_EVENT (1 << 25 = 33554432)`, matching the documented C2C and group-at baseline. Additional intents are enabled only after confirming the application's granted permissions.
+Decision: retire nonessential V4 features from navigation/registry immediately, but keep historical data/code as rollback material until live QQ Open verification proves replacements. A later second pruning pass may physically remove dead modules.
 
-## D-018 Gateway session state survives runtime recreation
+## D-021 Direct Codex is principal-scoped
 status: accepted
 date: 2026-09-27
-Decision: persist Gateway `session_id` and `seq`, use Resume when possible, and combine reconnect/backoff with the existing minute cron watchdog instead of assuming an outbound WebSocket lives forever.
+Decision: direct `!codex`, `!codexchat`, and `!codexwork` share one session per stable principal instead of splitting by group/private scope. Plugin-internal Codex remains isolated.
+
+## D-022 Rich media is a native QQ Open capability
+status: accepted
+date: 2026-09-27
+Decision: V4 treats image/video/audio/file as supported native rich media. Sending uses the QQ upload flow to obtain `file_info`, then sends a `msg_type=7` message.

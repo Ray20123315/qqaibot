@@ -2,64 +2,69 @@
 
 task_id: qqaibot-20260927-qqopen-v4-native
 task_status: active
-goal_revision: 1
+goal_revision: 2
 
 ## Goal
 
-Build QQAIBOT V4 as a QQ Open Native architecture while preserving mature non-transport functionality. Current priority is proving real Gateway connectivity and native receive/reply before migrating the rest of the command surface.
+Rebuild the QQAIBOT backend/control surface around a visually strong but lean QQ Open Native V4. Prioritize online-state visibility, QQ-native group administration, useful media capabilities, and fewer Codex conversations while aggressively retiring nonessential legacy product surfaces.
 
 ## Acceptance Criteria
 
-- QQ Open WebSocket supports Identify, Heartbeat, Resume, reconnect and persisted session/sequence state.
-- Group/C2C events normalize into canonical messages using OpenID identities.
-- Native QQ OpenAPI can passively reply to the triggering group/C2C message.
-- Reconnect failures use timeout/backoff instead of hammering session creation.
-- Developer diagnostics expose Gateway enabled/configured/connected/READY/error state.
-- Production remains on OneBot until live QQ Open E2E succeeds.
-- No real AppSecret is committed or recorded in Ray_Chen memory.
+- Portal main navigation is reduced to six V4 areas.
+- Portal visibly reports QQ Open enabled/configured/connected/READY, last event, reconnect count, and last error.
+- Animation is intentionally rich but respects `prefers-reduced-motion`.
+- QQ Open group management surfaces cover member listing/info, remove, blacklist, mute state/actions, and join request approval/decline/decline+blacklist subject to granted QQ permissions.
+- QQ image/video/audio/file receive/send capability is represented using the official rich-media flow.
+- Direct `!codex`, `!codexchat`, and `!codexwork` use one principal-scoped conversation by default.
+- Nonessential V4 activity/vote/schedule command surfaces are retired.
+- Old D1 data is not destructively deleted during this first pruning pass.
+- Regression, V3, V4, and Worker bundle validation all pass.
+- `main` is not modified or deployed without explicit user instruction.
 
 ## Current Phase
 
-phase: 2 — connectivity and native reply
-current_step: deployable connectivity implementation complete; live QQ Open E2E awaits Cloudflare credential/config setup.
+phase: 2.5 — lean Portal and capability pruning
+current_step: product implementation and CI verification complete; live Portal/QQ Open deployment remains pending.
 
 ## Completed Steps
 
-- Added `src/v4/qqopen/runtime.js` with persistent `QqOpenGateway` Durable Object.
-- Gateway obtains AccessToken, fetches `/gateway`, opens outbound WebSocket, handles Hello/Identify/Heartbeat/ACK/READY/Resume/Reconnect/Invalid Session.
-- Persists QQ Gateway `session_id` and `seq` in Durable Object storage.
-- Added 20-second connection timeout and reconnect backoff 5s → 10s → 20s → 40s → 60s cap.
-- Added `src/v4/platform/actions.js` with native canonical `message.reply` / `message.send`.
-- Added passive probe replies: C2C `!qqping`, group `@机器人 !qqping`, and `!qqecho 内容`.
-- Added `QQ_OPEN_GATEWAY` binding and `v4_qqopen_gateway` Durable Object migration.
-- Existing minute cron calls Gateway `ensure` only when QQ Open is enabled/configured.
-- Added System Admin-only status/connect/disconnect HTTP endpoints.
-- Developer `!status` now reports QQ Open READY/connected/configured/last event/error.
-- Added config examples; AppSecret remains a secret-only value.
-- Updated V4/migration/config regression tests.
-- Final product CI run `36310767685`: success for regression, V3, V4 and Worker bundle.
-- Intermediate CI failures were test-assertion escaping mistakes and were repaired; they did not represent Gateway runtime failures.
+- Added `src/v4/portal/lean-dashboard.js` final Portal layer.
+- Reduced visible primary navigation to Overview / QQ Open / Group Management / AI-Codex / Plugins / System.
+- Added cosmic gradients, star motion, orb animation, glowing online state, animated navigation/cards, pointer tilt, and view transitions.
+- Added a stable high-contrast V4 color token set so legacy light mode cannot make the new dark Portal unreadable.
+- Added `prefers-reduced-motion` fallback.
+- Added `src/v4/portal/api.js` with developer/system-admin authentication, same-origin mutation checks, Gateway controls, and QQ Open group management endpoints.
+- Expanded `src/v4/qqopen/api.js` for media upload, group info/bot state, members, blacklist, join requests, mute state/actions.
+- Wired lean Portal/API into `worker.js`.
+- Confirmed official QQ docs support rich-media send/receive; rich media uses upload → `file_info` → `msg_type=7`.
+- Confirmed current QQ changelog includes member management, blacklist, mute and join-request APIs.
+- Collapsed direct Codex commands to `qqaibot:principal:<principalId>:codex`; plugin-internal Codex remains isolated.
+- Retired activity/vote/schedule from the V4 Command Registry.
+- Added/updated V4 Portal, media/group route, Codex session, and bridge packaging tests.
+- Final product commit `75483f71fb0707043082f891851581f03ac2c15c` passed CI run `36327804832`.
 
 ## Verification Results
 
-- latest product commit: `1f12968a00db01518ef33abd7b7df4977b43e676`
-- latest CI run: `36310767685` — success
 - repository regression: success
 - V3 regression: success
-- V4 QQ Open regression: success
-- Worker dry-run bundle: success
-- remote read-back of core connectivity files: success
-- live QQ Open E2E: not run because production credentials/config were not changed in this task
+- V4 QQ Open + lean Portal regression: success
+- Worker bundle dry-run: success
+- core changed files remote read-back: success
+- live browser visual check: not run
+- live QQ Open API E2E: not run
+- production deployment: not performed
 
-## Known Limitations
+## Known Limitations / Risks
 
-- No real QQ Gateway connection has been attempted from deployed Cloudflare yet.
-- Only connectivity probe replies use the new Action Dispatcher; normal AI and legacy commands still use existing paths.
-- Moderation/member/media/join-request action coverage remains Phase 3+.
-- Outbound WebSocket lifetime cannot be assumed permanent; persisted Resume state plus cron/watchdog reconnect is required.
+- This is the first pruning pass: retired legacy code/data remains available for rollback, even though the V4 Portal/Registry no longer exposes it.
+- The old OneBot path still exists on the feature branch until QQ Open migration is proven.
+- QQ group management endpoints can return permission errors if the actual application lacks the necessary QQ platform permissions.
+- Rich-media transport is API-wired but not yet live-tested with the user's QQ app.
+- Direct Codex uses `principalId` when available; QQ Open C2C/member OpenIDs cannot be assumed to be the same human without a future explicit identity mapping.
+- The animated Portal has CI/HTML injection coverage but has not yet been visually inspected in a deployed browser.
 
 ## next_exact_action
 
-Set Cloudflare `QQ_OPEN_APP_ID` as a variable, `QQ_OPEN_CLIENT_SECRET` as a Secret, `QQ_OPEN_ENABLED=true`, and baseline `QQ_OPEN_INTENTS=33554432`; deploy the V4 build in a safe test/cutover context; confirm developer `!status` shows QQ Open READY; then send C2C `!qqping` and group `@机器人 !qqping` / `!qqecho hello`. Only after these pass, route normal AI/command replies through the Action Dispatcher.
+Deploy/test the V4 branch in a safe QQ Open environment with AppID and AppSecret stored in Cloudflare variables/secrets, visually inspect the lean Portal, verify Gateway READY, exercise group member/join/blacklist/mute operations and image/video send/receive, then use those live results to perform the second pruning pass that physically deletes dead legacy modules.
 
-last_checkpoint_at: 2026-09-27T17:58:00+08:00
+last_checkpoint_at: 2026-09-27T23:01:00+08:00

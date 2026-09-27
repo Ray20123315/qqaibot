@@ -2,25 +2,30 @@
 
 ## Retained risks
 
-- Never expose raw internal structures when curated output is enough.
-- AI/model output is not an execution primitive; registered handlers and permissions remain authoritative.
 - OpenID is not a numeric QQ ID.
-- Filesystem safety cannot rely on prompts; CodexWork local enforcement remains authoritative.
-- Command-panel limits require paging; never silently truncate commands.
-- Large automated edits require syntax/CI gates.
+- Model output never bypasses registered handlers/authorization.
+- Filesystem safety remains local to CodexWork enforcement.
+- Gateway intents/session state are strict and must be persisted.
+- Outbound WebSocket lifetime is not permanent.
+- Reconnect storms must be bounded.
+- QQ UI/connection status alone is not E2E proof.
 
-## G-011 QQ Gateway intents/session rules
-Risk: requesting unauthorized intents can close the Gateway connection; losing session/sequence state reduces Resume reliability.
-Avoidance: request only granted intents and persist `session_id` / `seq`.
+## G-015 Portal animation versus accessibility/performance
+Risk: deliberately heavy animations can make low-power devices unpleasant or inaccessible.
+Avoidance: motion uses CSS transforms/opacity where possible and all decorative animation/tilt is disabled under `prefers-reduced-motion: reduce`.
 
-## G-012 Cloudflare outbound WebSocket lifecycle
-Risk: outbound WebSockets do not use inbound WebSocket hibernation semantics and runtime lifetime is not a permanent-connection guarantee.
-Avoidance: persist resume state, reconnect on close/error/timeout, and use the minute scheduler as a watchdog.
+## G-016 Legacy light-theme variables can break V4 contrast
+Risk: the old Portal theme can leave dark V4 surfaces with dark text.
+Avoidance: the V4 lean body defines its own high-contrast dark design tokens.
 
-## G-013 Reconnect storms consume QQ session capacity
-Risk: invalid credentials/intents/network failures can repeatedly create sessions.
-Avoidance: 20-second connect timeout and bounded backoff 5s/10s/20s/40s/60s.
+## G-017 Portal pruning can hide data still needed for migration
+Risk: deleting legacy modules or D1 data too early can remove configuration/history before QQ Open replacements are verified.
+Avoidance: first prune navigation and V4 registry; retain rollback code/data until live verification, then physically delete dead modules.
 
-## G-014 UI connection state is not proof of message flow
-Risk: socket OPEN is weaker than QQ READY, and READY is weaker than successful receive/reply.
-Avoidance: distinguish connected vs READY in `!status`, then require real `!qqping` / `!qqecho` tests before migration proceeds.
+## G-018 QQ management permission availability is app-specific
+Risk: documented group management APIs may return permission/admin errors for a specific bot.
+Avoidance: Portal handles permission failures visibly and live verification is required before declaring a management capability production-ready.
+
+## G-019 Principal identity is not automatically cross-context identity
+Risk: QQ Open may expose different opaque identifiers in C2C and group contexts.
+Avoidance: Codex accepts a stable `principalId` when identity mapping exists; otherwise it falls back to platform user ID and does not invent cross-ID equivalence.

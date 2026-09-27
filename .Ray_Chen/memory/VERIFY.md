@@ -1,37 +1,57 @@
 # VERIFY
 
-## V4 Phase 2 Verification
+## V4 Lean Portal / QQ Open Verification
 
 - branch: `v4-qqopen-native`
-- latest verified product commit: `1f12968a00db01518ef33abd7b7df4977b43e676`
-- GitHub Actions run: `36310767685`
+- latest verified product commit: `75483f71fb0707043082f891851581f03ac2c15c`
+- final product CI run: `36327804832`
 - repository regression: success
 - V3 regression: success
-- V4 QQ Open regression: success
-- Worker dry-run bundle: success
-- remote read-back of runtime/action/worker/wrangler/test blobs: success
+- V4 regression: success
+- Worker bundle dry-run: success
+- changed-file remote read-back: success
 
-## Connectivity Test Coverage
+## V4 Coverage Added
 
-- Gateway Identify, Heartbeat and Resume payload/state helpers.
-- canonical GROUP/C2C event normalization with OpenID identities.
-- native group/C2C passive reply Action Dispatcher with triggering `msg_id`.
-- `!qqping` and group-at `!qqecho` parsing.
-- default `GROUP_AND_C2C_EVENT` intent value `33554432`.
-- connection timeout helper wiring.
-- reconnect backoff sequence 5/5/10/20/40/60 seconds.
-- Wrangler `QQ_OPEN_GATEWAY` binding and `v4_qqopen_gateway` migration.
-- worker bundle includes QqOpenGateway export.
+- lean Portal style/script injection.
+- six primary V4 navigation labels.
+- forced V4 Overview landing instead of legacy-hash landing.
+- reduced-motion CSS.
+- authenticated QQ Open Portal status/connect/disconnect wiring.
+- group members / blacklist / join request / mute Portal routes.
+- media upload routes for group and C2C.
+- QQ Open group-management API paths/methods.
+- Codex principal-scoped direct session source assertions.
+- Codex Bridge EXE test updated for the principal session model.
+- retired activity/vote/schedule V4 registry surface.
 
-## Repaired Intermediate Failures
+## External Capability Verification
 
-Runs associated with commits before `090db336...` failed because a newly added test assertion used invalid RegExp escaping and because the following migration assertion had not yet been updated. These were test-code defects; the final product runs `36310584966`, `36310710245`, `36310756139`, and `36310767685` are successful.
+QQ official message overview confirms:
+- C2C/group send and receive.
+- `msg_type=0` text.
+- `msg_type=2` Markdown send.
+- `msg_type=7` rich media send/receive.
+- images, video, voice/audio, files use upload → `file_info` → message.
+
+QQ official changelog confirms:
+- 2026-09-03 member list/info, batch removal, blacklist query/update.
+- 2026-08-10 mute management, join request list/review, join request event.
+- 2026-08-12 custom menus and command panels.
+
+## Verification Limitations
+
+- No deployed-browser visual screenshot/interaction test was run.
+- No real QQ Open group/member/media request was sent with production credentials.
+- QQ permission-dependent endpoints remain unverified for the user's specific app.
+- Legacy rollback code/data is intentionally still present.
 
 ## Live Verification Still Required
 
-- configure Cloudflare AppID/Secret/enabled/intents without committing the Secret.
-- deploy a V4 test/cutover build.
-- confirm `!status` reports QQ Open READY.
-- C2C `!qqping` returns `QQ Open V4 已连接并可回话。`.
-- group `@机器人 !qqping` and `!qqecho hello` return via native QQ OpenAPI.
-- after connectivity success, migrate normal AI/command replies.
+1. Configure QQ Open credentials only in Cloudflare variable/secret storage.
+2. Deploy the V4 branch to a safe test/cutover context.
+3. Visually inspect desktop/mobile Portal and Gateway online state.
+4. Verify real member list, join approve/decline+blacklist, blacklist, mute/unmute.
+5. Send/receive image and video (plus file/audio as practical).
+6. Verify principal identity behavior across C2C/group.
+7. Only then perform physical legacy-code deletion.

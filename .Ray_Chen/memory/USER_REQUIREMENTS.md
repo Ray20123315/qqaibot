@@ -2,20 +2,23 @@
 
 ## Active V4 Requirements
 
-- Prioritize proving QQ Open connection and native reply before broader migration.
-- Rebuild toward QQ Open Native instead of permanently emulating OneBot.
-- Keep existing text commands compatible and converge commands into the Command Registry.
-- Use QQ custom menus/panels where useful, with backend permissions remaining authoritative.
-- If the bot is a QQ group administrator and official APIs permit it, member-message recall should remain available under QQAIBOT authorization rules.
-- Preserve mature systems: Codex Bridge, AI providers, plugins, D1/Portal data, quota/cooldown and security controls.
-- Do not commit or record AppSecret.
-- Keep OneBot production usable until QQ Open is verified.
+- Redesign the backend Portal to look substantially better and allow intentionally heavy animation.
+- Keep animation safe for reduced-motion users.
+- Show whether QQ Open is online/READY directly in the Portal.
+- Aggressively reduce unnecessary features.
+- Prefer QQ Open-supported, practical, and required capabilities.
+- Keep QQ group member management.
+- Support join-request approve, decline, and decline+blacklist when platform permissions allow.
+- Determine and support image/video/media send and receive using QQ Open capabilities.
+- Avoid excessive Codex conversation fragmentation; direct Codex modes should normally share one conversation.
+- Keep plugins as a controlled extensibility layer rather than stuffing optional features into core.
+- Do not destructively erase legacy data during the first pruning pass.
+- Keep `main` unchanged until explicit cutover.
 
-## Existing Codex / Local Work Requirements Still in Force
+## Existing Safety / Codex Requirements Still in Force
 
-- `!codex`, `!codexchat`, and `!codexwork` share a conversation for the same user/chat scope; plugin suffix variants retain plugin-scoped continuity.
-- Public `!codex` stays quota-bound and fixed to GPT-6 Luna/no reasoning; advanced modes remain developer-only.
-- CodexWork is read-only by default, edit roots are explicit allowlists, and deletion is never allowed.
-- Avoid unnecessary plugin/skill/context loading.
+- Public `!codex` remains quota-bound and fixed to GPT-6 Luna/no reasoning.
+- `!codexchat` / `!codexwork` remain developer capabilities.
+- CodexWork stays read-only by default, editing is allowlisted, deletion is forbidden, and export is explicit.
+- AppSecret and authorization credentials must not be committed or included in memory/notifications.
 - Existing permission/confirmation gates remain authoritative.
-- Successful administrator recall remains silent while failures remain visible.
