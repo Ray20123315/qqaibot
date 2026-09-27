@@ -103,12 +103,15 @@ async function setFeatureFlag(env, name, enabled) {
 
 async function isGroupWhitelisted(env, groupId) {
   if (!groupId) return false;
+  if (String(env?.QQAI_EVENT_PLATFORM || "") === "qq-open"
+    && String(env?.QQAI_QQOPEN_GROUP_ID || "") === String(groupId)) return true;
   return await dbGet(env, `group_whitelist:${groupId}`) === "true";
 }
 
 
 
 async function getPrivateAccessMode(env, userId) {
+  if (String(env?.QQAI_EVENT_PLATFORM || "") === "qq-open") return "full";
   if (isDeveloperId(env, userId)) return "full";
   const explicit = await dbGet(env, `private_access:${userId}`);
   if (["full", "commands", "none"].includes(explicit)) return explicit;
