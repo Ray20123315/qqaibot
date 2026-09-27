@@ -58,7 +58,7 @@ function createCanonicalMessage(meta = {}, parts = []) {
   const normalizedParts = Object.freeze((Array.isArray(parts) ? parts : []).map(freezePart));
   const message = {
     schemaVersion: MESSAGE_SCHEMA_VERSION,
-    platform: "onebot",
+    platform: textValue(meta.platform || "onebot") || "onebot",
     messageId: idValue(meta.messageId),
     scope,
     groupId: idValue(meta.groupId),
