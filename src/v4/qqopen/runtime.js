@@ -1,7 +1,7 @@
-import { createQqOpenActionDispatcher } from "../platform/actions.js";
+import { createQqOpenActionDispatcher } from "../platform/actions.js";\nimport { createInitialCommandRegistry } from "../commands/catalog.js";
 import { createQqOpenApiClient } from "./api.js";
 import { fromQqOpenEvent } from "./events.js";
-import { qqOpenJoinRequestToLegacyBody, qqOpenLegacyAction, qqOpenMessageToLegacyBody, sendQqOpenLegacyMessage } from "./legacy-bridge.js";
+import { qqOpenJoinRequestToLegacyBody, qqOpenLegacyAction, qqOpenMessageToLegacyBody, sendQqOpenLegacyMessage } from "./legacy-bridge.js";\nimport { syncQqOpenDiscovery } from "./discovery.js";\nimport { qqOpenClosePolicy, qqOpenDeliveryKey, qqOpenPassiveReplyPolicy, qqOpenShard } from "./protocol.js";
 import {
   QQ_OPEN_OPCODE,
   createGatewayState,
@@ -14,7 +14,7 @@ import {
 const QQ_OPEN_GATEWAY_STORAGE_KEY = "v4:qqopen:gateway";
 const DEFAULT_QQ_OPEN_INTENTS = 1 << 25;
 const DEFAULT_RECONNECT_MS = 5000;
-const CONNECT_TIMEOUT_MS = 20000;
+const CONNECT_TIMEOUT_MS = 20000;\nconst QQ_OPEN_COMMAND_REGISTRY = createInitialCommandRegistry();
 
 function truthy(value) {
   return /^(?:1|true|yes|on|enabled)$/i.test(String(value ?? "").trim());
@@ -347,7 +347,7 @@ export class QqOpenGateway {
       const canResume = Boolean(this.persisted.gateway.sessionId && Number.isSafeInteger(this.persisted.gateway.seq));
       const authPayload = canResume
         ? createResumePayload({ accessToken: this.accessToken, sessionId: this.persisted.gateway.sessionId, seq: this.persisted.gateway.seq })
-        : createIdentifyPayload({ accessToken: this.accessToken, intents: qqOpenIntents(this.env), shard: [0, 1] });
+        : createIdentifyPayload({ accessToken: this.accessToken, intents: qqOpenIntents(this.env), shard: qqOpenShard(this.env) });
       socket.send(JSON.stringify(authPayload));
       await this.persist();
       return;
@@ -399,6 +399,85 @@ export class QqOpenGateway {
     await this.handleDispatch(payload);
     this.persisted.gateway = reduceGatewayPayload(this.persisted.gateway, payload);
     await this.persist();
+  }
+
+  registerPassiveOrigin(message) {
+    const messageId = String(message?.messageId || "").trim();
+    if (!messageId) return null;
+    const scope = message?.scope === "group" ? "group" : "private";
+    const sentAt = Number(message?.time || 0) > 0 ? Number(message.time) * 1000 : Date.now();
+    const rows = Array.isArray(this.persisted.replyUsage) ? [...this.persisted.replyUsage] : [];
+    let row = rows.find(item => String(item?.messageId || "") === messageId);
+    if (!row) {
+      row = { messageId, scope, receivedAt: sentAt, nextSeq: 1, repliedCount: 0 };
+      rows.unshift(row);
+    } else {
+      row.scope = scope;
+      row.receivedAt = Math.min(Number(row.receivedAt || sentAt), sentAt);
+    }
+    const maxTtl = 2 * 60 * 60 * 1000;
+    this.persisted.replyUsage = rows
+      .filter(item => Date.now() - Number(item?.receivedAt || 0) <= maxTtl)
+      .slice(0, 120);
+    return row;
+  }
+
+  async reserveReplySequences(messageIdValue, scopeValue, countValue = 1) {
+    const messageId = String(messageIdValue || "").trim();
+    if (!messageId) return { start: 1, count: 0, passive: false };
+    const scope = String(scopeValue || "") === "group" ? "group" : "private";
+    const count = Math.max(1, Math.trunc(Number(countValue || 1) || 1));
+    let row = (Array.isArray(this.persisted.replyUsage) ? this.persisted.replyUsage : []).find(item => String(item?.messageId || "") === messageId);
+    if (!row) {
+      row = { messageId, scope, receivedAt: Date.now(), nextSeq: 1, repliedCount: 0 };
+      this.persisted.replyUsage = [row, ...(Array.isArray(this.persisted.replyUsage) ? this.persisted.replyUsage : [])].slice(0, 120);
+    }
+    const policy = qqOpenPassiveReplyPolicy(scope);
+    if (Date.now() - Number(row.receivedAt || 0) > policy.ttlMs) throw new Error("QQ_OPEN_PASSIVE_REPLY_EXPIRED");
+    if (Number(row.repliedCount || 0) + count > policy.maxReplies) throw new Error("QQ_OPEN_PASSIVE_REPLY_LIMIT");
+    const start = Math.max(1, Number(row.nextSeq || 1) || 1);
+    row.nextSeq = start + count;
+    row.repliedCount = Number(row.repliedCount || 0) + count;
+    await this.persist();
+    return { start, count, passive: true, remaining: Math.max(0, policy.maxReplies - row.repliedCount) };
+  }
+
+  deliverySeen(keyValue) {
+    const key = String(keyValue || "");
+    if (!key) return false;
+    if (this.inflightDeliveries.has(key)) return true;
+    const now = Date.now();
+    return (Array.isArray(this.persisted.recentDeliveries) ? this.persisted.recentDeliveries : [])
+      .some(item => String(item?.key || "") === key && now - Number(item?.at || 0) <= 2 * 60 * 60 * 1000);
+  }
+
+  async rememberDelivery(keyValue) {
+    const key = String(keyValue || "");
+    if (!key) return;
+    const now = Date.now();
+    this.persisted.recentDeliveries = [
+      { key, at: now },
+      ...(Array.isArray(this.persisted.recentDeliveries) ? this.persisted.recentDeliveries : [])
+        .filter(item => String(item?.key || "") !== key && now - Number(item?.at || 0) <= 2 * 60 * 60 * 1000)
+    ].slice(0, 240);
+    await this.persist();
+  }
+
+  async syncDiscoveryIfNeeded() {
+    if (!truthy(this.env.QQ_OPEN_DISCOVERY_SYNC)) return;
+    try {
+      const result = await syncQqOpenDiscovery(this.api(), QQ_OPEN_COMMAND_REGISTRY, {
+        previousFingerprint: String(this.persisted.lastDiscoverySyncFingerprint || "")
+      });
+      this.persisted.lastDiscoverySyncAt = Date.now();
+      this.persisted.lastDiscoverySyncFingerprint = String(result?.fingerprint || "");
+      this.persisted.lastDiscoverySyncError = "";
+      await this.persist();
+    } catch (error) {
+      this.persisted.lastDiscoverySyncAt = Date.now();
+      this.persisted.lastDiscoverySyncError = safeError(error);
+      await this.persist();
+    }
   }
 
   cachedMessage(id) {
@@ -465,25 +544,39 @@ export class QqOpenGateway {
     return data;
   }
 
-  async sendApplicationReplies(message, payload) {
+  async sendApplicationReplies(message, payload, deliveryKey = "") {
     const body = qqOpenMessageToLegacyBody(message, payload, { botUserId: this.persisted.botUserId });
     if (!body) return;
     this.cacheMessage(body, "human");
+    this.registerPassiveOrigin(message);
+    await this.persist();
+
     const result = await this.forwardLegacyBody(body);
+    await this.rememberDelivery(deliveryKey);
     this.persisted.lastApplicationAt = Date.now();
     this.persisted.lastApplicationKind = String(result?.reply_kind || (result?.reply ? "reply" : "no_reply"));
 
-    const chunks = Array.isArray(result?.reply_chunks) && result.reply_chunks.length
+    const rawChunks = Array.isArray(result?.reply_chunks) && result.reply_chunks.length
       ? result.reply_chunks
       : result?.reply ? [result.reply] : [];
+    const policy = qqOpenPassiveReplyPolicy(message.scope);
+    const chunks = rawChunks.slice(0, policy.maxReplies);
     let lastMessageId = "";
     for (let index = 0; index < chunks.length; index += 1) {
+      const reservation = await this.reserveReplySequences(message.messageId, message.scope, 1);
+      let value = chunks[index];
+      if (index === 0 && Array.isArray(result?.reply_plan?.mentionIds)) {
+        const prefix = [...new Set(result.reply_plan.mentionIds.map(String).filter(Boolean))]
+          .map(id => "[CQ:at,qq=" + id + "] ")
+          .join("");
+        if (prefix) value = prefix + String(value || "");
+      }
       const sent = await sendQqOpenLegacyMessage(this.api(), {
         scope: message.scope,
         groupId: message.groupId,
         userId: message.userId,
         messageId: message.messageId
-      }, chunks[index], { msgSeq: index + 1, replyMessageId: message.messageId });
+      }, value, { msgSeq: reservation.start, replyMessageId: message.messageId });
       const id = String(sent?.messageId || sent?.data?.id || sent?.data?.message_id || "");
       if (id) {
         lastMessageId = id;
@@ -504,41 +597,72 @@ export class QqOpenGateway {
       this.persisted.lastReplyAt = Date.now();
       this.persisted.lastReplyId = lastMessageId;
     }
+    await this.persist();
   }
 
   async handleDispatch(payload) {
     const message = fromQqOpenEvent(payload);
     if (message) {
-      this.persisted.lastInboundAt = Date.now();
-      this.persisted.lastInboundId = String(message.messageId || "");
-      this.persisted.lastInboundUserId = String(message.userId || "");
-
-      const reply = buildConnectivityReply(message);
-      if (reply) {
-        const result = await this.actionDispatcher().dispatch("message.reply", {
-          message,
-          content: reply,
-          msgSeq: 1
-        });
-        this.persisted.lastReplyAt = Date.now();
-        this.persisted.lastReplyId = String(result?.data?.id || result?.data?.message_id || "");
-        this.persisted.lastApplicationAt = Date.now();
-        this.persisted.lastApplicationKind = "connectivity";
+      const deliveryKey = qqOpenDeliveryKey(payload, message);
+      if (deliveryKey && this.deliverySeen(deliveryKey)) {
+        this.persisted.duplicateDropCount = Number(this.persisted.duplicateDropCount || 0) + 1;
+        await this.persist();
         return;
       }
-      await this.sendApplicationReplies(message, payload);
-      return;
+      if (deliveryKey) this.inflightDeliveries.add(deliveryKey);
+      try {
+        this.persisted.lastInboundAt = Date.now();
+        this.persisted.lastInboundId = String(message.messageId || "");
+        this.persisted.lastInboundUserId = String(message.userId || "");
+        this.registerPassiveOrigin(message);
+        await this.persist();
+
+        const reply = buildConnectivityReply(message);
+        if (reply) {
+          const reservation = await this.reserveReplySequences(message.messageId, message.scope, 1);
+          const result = await this.actionDispatcher().dispatch("message.reply", {
+            message,
+            content: reply,
+            msgSeq: reservation.start
+          });
+          await this.rememberDelivery(deliveryKey);
+          this.persisted.lastReplyAt = Date.now();
+          this.persisted.lastReplyId = String(result?.data?.id || result?.data?.message_id || "");
+          this.persisted.lastApplicationAt = Date.now();
+          this.persisted.lastApplicationKind = "connectivity";
+          await this.persist();
+          return;
+        }
+
+        await this.sendApplicationReplies(message, payload, deliveryKey);
+        return;
+      } finally {
+        if (deliveryKey) this.inflightDeliveries.delete(deliveryKey);
+      }
     }
 
     const requestBody = qqOpenJoinRequestToLegacyBody(payload, { botUserId: this.persisted.botUserId });
     if (requestBody) {
-      this.persisted.lastInboundAt = Date.now();
-      this.persisted.lastInboundId = String(requestBody.flag || "");
-      this.persisted.lastInboundUserId = String(requestBody.user_id || "");
-      this.cacheJoinRequest(requestBody);
-      await this.forwardLegacyBody(requestBody);
-      this.persisted.lastApplicationAt = Date.now();
-      this.persisted.lastApplicationKind = "group_join_request";
+      const deliveryKey = qqOpenDeliveryKey(payload, { messageId: requestBody.flag });
+      if (deliveryKey && this.deliverySeen(deliveryKey)) {
+        this.persisted.duplicateDropCount = Number(this.persisted.duplicateDropCount || 0) + 1;
+        await this.persist();
+        return;
+      }
+      if (deliveryKey) this.inflightDeliveries.add(deliveryKey);
+      try {
+        this.persisted.lastInboundAt = Date.now();
+        this.persisted.lastInboundId = String(requestBody.flag || "");
+        this.persisted.lastInboundUserId = String(requestBody.user_id || "");
+        this.cacheJoinRequest(requestBody);
+        await this.forwardLegacyBody(requestBody);
+        await this.rememberDelivery(deliveryKey);
+        this.persisted.lastApplicationAt = Date.now();
+        this.persisted.lastApplicationKind = "group_join_request";
+        await this.persist();
+      } finally {
+        if (deliveryKey) this.inflightDeliveries.delete(deliveryKey);
+      }
     }
   }
 
@@ -577,18 +701,27 @@ export class QqOpenGateway {
     this.socket = null;
     this.persisted.connected = false;
     this.persisted.connecting = false;
-    this.persisted.gateway = createGatewayState({
-      ...this.persisted.gateway,
-      ready: false
-    });
+
+    const code = Number(event?.code || 0);
+    const policy = this.persisted.suspended
+      ? { retry: false, preserveSession: true, suspend: true, mode: "manual" }
+      : qqOpenClosePolicy(code);
+    this.persisted.suspended = Boolean(policy.suspend || this.persisted.suspended);
+    this.persisted.gateway = policy.preserveSession
+      ? createGatewayState({ ...this.persisted.gateway, ready: false })
+      : createGatewayState();
+
     if (!this.persisted.suspended) {
       this.persisted.reconnectCount = Number(this.persisted.reconnectCount || 0) + 1;
       this.persisted.failureStreak = Number(this.persisted.failureStreak || 0) + 1;
-      this.persisted.lastErrorAt = Date.now();
-      this.persisted.lastError = `QQ_OPEN_SOCKET_CLOSED:${Number(event?.code || 0)}:${String(event?.reason || "").slice(0, 180)}`;
     }
+    this.persisted.lastErrorAt = Date.now();
+    this.persisted.lastError = `QQ_OPEN_SOCKET_CLOSED:${code}:${String(event?.reason || "").slice(0, 180)}:${policy.mode}`;
     await this.persist();
-    if (!this.persisted.suspended && qqOpenEnabled(this.env)) this.scheduleReconnect("socket_closed");
+
+    if (!this.persisted.suspended && policy.retry && qqOpenEnabled(this.env)) {
+      this.scheduleReconnect("socket_closed", code === 4009 ? 500 : 0);
+    }
   }
 
   async onError(socket, generation, event) {
