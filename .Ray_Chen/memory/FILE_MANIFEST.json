@@ -1,31 +1,132 @@
 {
   "schema_version": 1,
-  "memory_version": "v0.0.13",
+  "memory_version": "v0.0.14",
   "task_id": "qqaibot-20260927-qqopen-v4-native",
   "goal_revision": 4,
-  "transaction": "checkpoint_20260928_qqopen_full_runtime_bridge_corrected",
+  "transaction": "qqopen_full_runtime_bridge_implementation",
   "repository": "Ray20123315/qqaibot",
   "branch": "v4-qqopen-native",
-  "checkpoint": {
-    "safe_product_commit": "5ff25e2f97926fd0bfa038b4006427a0fb7f2962",
-    "qqopen_gateway": "configured_connected_ready_user_verified",
-    "qqping": "user_verified",
-    "onebot_fallback": "retained",
-    "ai_bridge": "not_implemented_yet"
+  "product_head": "18160ef97f602a324d5c094b2f15ec2f6ca5a415",
+  "verification": {
+    "github_actions_run": "36335909533",
+    "conclusion": "success",
+    "stages": [
+      "repository regression",
+      "V3 regression",
+      "V4 QQ Open regression",
+      "isolated V4 test deployment",
+      "single Worker bundle"
+    ]
   },
   "changes": [
     {
       "location_type": "github",
       "provider": "GitHub",
-      "resource_id_or_path": ".Ray_Chen/memory",
-      "action": "correct_checkpoint_and_goal_revision_4",
+      "resource_id_or_path": "src/v4/qqopen/legacy-bridge.js",
+      "action": "create",
       "branch_or_container": "v4-qqopen-native",
-      "verification": "read-back after commit",
-      "changed_at": "2026-09-28T00:36:00+08:00"
+      "after_revision": "7879d2a1c108f6491ff76c3bd202477727d9c296",
+      "verification": "CI success",
+      "changed_at": "2026-09-28T01:18:00+08:00"
+    },
+    {
+      "location_type": "github",
+      "provider": "GitHub",
+      "resource_id_or_path": "src/v4/qqopen/runtime.js",
+      "action": "modify",
+      "branch_or_container": "v4-qqopen-native",
+      "after_revision": "7333085058b380243a29867b094c7ef966617c5e",
+      "verification": "CI success",
+      "changed_at": "2026-09-28T01:18:00+08:00"
+    },
+    {
+      "location_type": "github",
+      "provider": "GitHub",
+      "resource_id_or_path": "src/core/permissions.js",
+      "action": "modify",
+      "branch_or_container": "v4-qqopen-native",
+      "after_revision": "9f30ca120784b17c39b5a009cc857a95d01221ee",
+      "verification": "CI success",
+      "changed_at": "2026-09-28T01:18:00+08:00"
+    },
+    {
+      "location_type": "github",
+      "provider": "GitHub",
+      "resource_id_or_path": "src/config/deployment.js",
+      "action": "modify",
+      "branch_or_container": "v4-qqopen-native",
+      "after_revision": "cbc9b58b7dd876b247e64d512d7d5c7c0ecf7950",
+      "verification": "CI success",
+      "changed_at": "2026-09-28T01:18:00+08:00"
+    },
+    {
+      "location_type": "github",
+      "provider": "GitHub",
+      "resource_id_or_path": "src/security/network.js",
+      "action": "modify",
+      "branch_or_container": "v4-qqopen-native",
+      "after_revision": "55e27ed8bb1ddb186494735d75ce4a657d903cbf",
+      "verification": "CI success",
+      "changed_at": "2026-09-28T01:18:00+08:00"
+    },
+    {
+      "location_type": "github",
+      "provider": "GitHub",
+      "resource_id_or_path": "worker.js",
+      "action": "modify",
+      "branch_or_container": "v4-qqopen-native",
+      "after_revision": "46cb8a920d8d5c17d5d268008887bc69ef686800",
+      "verification": "CI success",
+      "changed_at": "2026-09-28T01:18:00+08:00"
+    },
+    {
+      "location_type": "github",
+      "provider": "GitHub",
+      "resource_id_or_path": ".dev.vars.example",
+      "action": "modify",
+      "branch_or_container": "v4-qqopen-native",
+      "after_revision": "a9890ab87ce90a745d68f7a7d33ceab50485a0a5",
+      "verification": "CI success",
+      "changed_at": "2026-09-28T01:18:00+08:00"
+    },
+    {
+      "location_type": "github",
+      "provider": "GitHub",
+      "resource_id_or_path": "README.md",
+      "action": "modify",
+      "branch_or_container": "v4-qqopen-native",
+      "after_revision": "0a0a82834b972f63c9a96de4f59ddb2ec867cc0c",
+      "verification": "CI success",
+      "changed_at": "2026-09-28T01:18:00+08:00"
+    },
+    {
+      "location_type": "github",
+      "provider": "GitHub",
+      "resource_id_or_path": "verify-v4-runtime-bridge.mjs",
+      "action": "create",
+      "branch_or_container": "v4-qqopen-native",
+      "after_revision": "1663382cac93b6c67378d81c2f099ef869a3af8f",
+      "verification": "CI success",
+      "changed_at": "2026-09-28T01:18:00+08:00"
+    },
+    {
+      "location_type": "github",
+      "provider": "GitHub",
+      "resource_id_or_path": "package.json",
+      "action": "modify",
+      "branch_or_container": "v4-qqopen-native",
+      "after_revision": "18160ef97f602a324d5c094b2f15ec2f6ca5a415",
+      "verification": "CI success",
+      "changed_at": "2026-09-28T01:18:00+08:00"
     }
   ],
+  "production": {
+    "main_updated": false,
+    "cloudflare_deployed": false,
+    "reason": "explicit production authorization not given in this turn"
+  },
   "internal_memory_transaction": {
-    "action": "update memory checkpoint to v0.0.13",
+    "action": "update memory to v0.0.14",
     "note": "No secrets stored."
   }
 }
