@@ -50,7 +50,12 @@ function developerId(env = {}) {
 }
 
 function isDeveloperId(env, qq) {
-  const id = normalizeQqId(qq);
+  const raw = String(qq ?? "").trim();
+  if (String(env?.QQAI_EVENT_PLATFORM || "") === "qq-open") {
+    const openids = envList(env?.QQ_OPEN_DEVELOPER_OPENIDS);
+    if (raw && openids.includes(raw)) return true;
+  }
+  const id = normalizeQqId(raw);
   return Boolean(id && developerIds(env).includes(id));
 }
 
