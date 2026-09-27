@@ -1,24 +1,73 @@
 # VERIFY
 
-## Pre-phase Baseline
+## Product Revision
 
-Feature head: `e7292b6ba90c3e2228cbdec43cb8cf153e21224e`
-Prior full CI: `36337247900` success
+`e75dd25ffd7900567bc4938f656b29ffaedcb5da`
 
-## Official Facts To Preserve In Tests
+## GitHub CI
 
-- GROUP_MESSAGE_CREATE uses GROUP_AND_C2C_EVENT (1<<25) and requires QQ "receive all messages" capability.
-- INTERACTION_CREATE uses INTERACTION (1<<26).
-- Interaction types 11 and 12 require acknowledgement; other documented interaction types do not.
-- C2C/GROUP MSG RECEIVE/REJECT represent active-message permission changes, not ordinary chat messages.
+Run: `36340836211`
+Conclusion: SUCCESS
 
-## Required Verification Before Main
+Passed:
+- repository regression
+- V3 regression
+- V4 QQ Open regression
+- `verify-v4-hybrid-official.mjs`
+- isolated V4 test deployment dry-run
+- production Worker bundle dry-run
 
-1. repository regression
-2. V3 regression
-3. V4 QQ Open regression including hybrid ownership
-4. isolated V4 test deployment
-5. Worker bundle dry-run
-6. diagnostics assertions for full-message/interaction/push state
-7. no interaction intent forced unless permission is explicitly enabled
-8. OneBot fallback remains present
+## Isolated Cloudflare Test
+
+Build: `610409e1-41c7-4ef8-a9be-3af4af0042dd`
+Outcome: success
+
+## Production Cloudflare
+
+Build: `f74c53e5-4f75-48b6-b45e-d8d7b7755cce`
+Outcome: success
+
+Read-back verified:
+- OneBotHub present
+- QqOpenGateway present
+- D1 present
+- Vectorize present
+- AI binding present
+- Rate Limiter present
+- QQ_OPEN_CLIENT_SECRET present as secret binding
+- all previous secret bindings present
+- DEVELOPER_IDS preserved
+- PORTAL_ADMIN_USERNAME preserved
+- plugin security vars preserved
+- QQ_OPEN_INTENTS=33554432
+- QQ_HYBRID_PRIMARY=qq-open
+- QQ_HYBRID_GROUP_MAP={}
+
+Observability:
+- query timeframe covered deployment window
+- exact needle `QQ Open gateway ensure failed`
+- result count: 0
+
+## Hybrid Regression Coverage
+
+- explicit numeric group -> group_openid map parsing
+- OneBot C2C ownership
+- group-at ownership
+- dynamic full-group ownership
+- push permission normalization
+- Interaction ACK policy
+- button callback command parsing
+- feedback / clear / model / auth controls
+- Portal diagnostics
+- active scheduled transport fallback
+- no forced INTERACTION intent
+
+## Live Verification Remaining
+
+1. User checks production Gateway remains READY after deploy.
+2. Ordinary C2C AI response through QQ Open.
+3. Group @ AI response through QQ Open.
+4. Configure a test QQ_HYBRID_GROUP_MAP entry.
+5. If receive-all-message is enabled, observe GROUP_MESSAGE_CREATE and verify mapped OneBot event becomes auxiliary.
+6. Trigger GROUP_MSG_RECEIVE/REJECT and verify status/active schedule routing.
+7. Confirm INTERACTION permission before enabling Intent bit.

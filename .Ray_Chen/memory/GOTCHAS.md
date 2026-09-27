@@ -2,32 +2,32 @@
 
 ## Retained
 
-Previous QQ Open, OpenID, Gateway lifecycle, reconnect, Portal animation, pruning, permissions, principal identity, Connected Builds name override, D1 limit, Cron limit and GitHub credential risks remain in force.
-
-## G-024 keep_vars preserves dead Dashboard variables
-Risk: `keep_vars=true` preserves Dashboard-managed values but can also preserve dead historical vars.
-Avoidance: prune only verified dead bindings.
-
-## G-025 READY is not full app verification
-Risk: Gateway READY does not prove AI/plugin/management routing.
-Avoidance: live-test application paths separately.
-
-## G-026 Memory-only build churn
-Risk: memory commits can trigger unnecessary builds.
-Avoidance: keep build path exclusions explicit.
-
-## G-027 OpenID is not numeric QQ
-Risk: identity corruption if OpenIDs are coerced to QQ numbers.
-Avoidance: preserve opaque OpenIDs and use explicit linking/allowlists.
-
-## G-028 Platform action leakage
-Risk: QQ Open events may accidentally execute NapCat side effects.
-Avoidance: use platform-marked action routing; unsupported official actions fail explicitly.
+All prior QQ Open, OpenID, Gateway, Portal, permissions, D1/Cron and Connected Builds risks remain relevant.
 
 ## G-029 Dual-observation duplicates
-Risk: QQ Open full-group events and OneBot full-message events may represent the same human action and cause duplicate AI/plugin/moderation.
-Avoidance: hybrid ownership/dedupe must suppress secondary side effects while still allowing auxiliary observation/storage.
+Risk: QQ Open and OneBot may both observe one human action.
+Mitigation: C2C and explicit group-at are QQ Open-owned. Ordinary group messages transition only after actual official full-group evidence, and mapped OneBot messages then become observation-only.
 
 ## G-030 Interaction permission failure
-Risk: enabling INTERACTION intent without QQ authorization can fail Gateway authentication.
-Avoidance: implement support first; opt in only after permission is confirmed.
+Risk: enabling INTERACTION intent without permission can make Gateway Identify fail.
+Mitigation: production remains at `33554432`; enable `100663296` only after permission confirmation.
+
+## G-031 Group id domains are different
+Risk: numeric OneBot group id and QQ group_openid are not interchangeable.
+Mitigation: `QQ_HYBRID_GROUP_MAP` is explicit JSON. No automatic inference.
+
+## G-032 Active push authorization
+Risk: an official active group message can fail if the group has disabled bot active messages.
+Mitigation: persist GROUP_MSG_RECEIVE/REJECT state and use official active send only when allowed; otherwise OneBot fallback.
+
+## G-033 Numeric mentions cannot be translated safely
+Risk: OneBot schedule payloads may contain numeric QQ mentions that QQ Open expects as OpenID mentions.
+Mitigation: such sends stay on OneBot until explicit user identity linking exists.
+
+## G-034 CodexWork export filesystem boundary
+Risk: Cloudflare Worker cannot read local Codex Bridge filesystem paths.
+Mitigation: retain local/OneBot export helper or design an explicit bounded file-transfer channel; never pretend the Worker can upload a local path.
+
+## G-035 Dashboard config difference warning
+Risk: Wrangler may report remote Dashboard vars that differ from local config.
+Verification: post-deploy read-back confirmed DEVELOPER_IDS, PORTAL_ADMIN_USERNAME, plugin security vars and all existing Secrets remained present after this deployment.

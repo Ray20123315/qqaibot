@@ -1,32 +1,58 @@
 # CURRENT_STATE
 
-## Production Baseline
+## GitHub
 
-Production QQ Open Gateway is configured and previously user-verified READY. OneBotHub and QqOpenGateway both remain deployed. The latest hybrid/event-expansion work is not yet on main.
+- `main`: `e75dd25ffd7900567bc4938f656b29ffaedcb5da`
+- `v4-qqopen-native`: same product revision before this memory checkpoint
+- CI: `36340836211` SUCCESS
+- all regression, V3, V4, isolated V4 test dry-run and Worker bundle stages succeeded
 
-## Feature Branch Baseline
+## Cloudflare Production
 
-Branch: `v4-qqopen-native`
-Head before this phase: `e7292b6ba90c3e2228cbdec43cb8cf153e21224e`
+Worker: `qqai`
+Build: `f74c53e5-4f75-48b6-b45e-d8d7b7755cce`
+Outcome: success
+Migration: `v4_qqopen_gateway`
+Durable Objects:
+- OneBotHub
+- QqOpenGateway
 
-Already implemented:
-- shared QQ Open application runtime
-- AI/Codex/D1/Vectorize/cooldown reuse
-- QQ Open-aware action translation
-- official passive-reply limits and msg_seq allocation
-- Gateway heartbeat/Resume/Identify hardening
-- rich-media normalization and official send/recall wrappers
-- V3 plugin dispatch through QQ Open
-- optional menu/panel synchronization
+Retained:
+- D1
+- Vectorize
+- Workers AI binding
+- Rate Limiter
+- all existing Secrets
+- DEVELOPER_IDS
+- PORTAL_ADMIN_USERNAME
+- plugin security flags
 
-## New Hybrid Requirement
+Current official/hybrid vars:
+- QQ_OPEN_ENABLED=true
+- QQ_OPEN_INTENTS=33554432
+- QQ_OPEN_SHARD_ID=0
+- QQ_OPEN_SHARD_TOTAL=1
+- QQ_OPEN_DISCOVERY_SYNC=true
+- QQ_HYBRID_PRIMARY=qq-open
+- QQ_HYBRID_GROUP_MAP={}
 
-QQ Open is primary where official capabilities exist. NapCat/OneBot remains an auxiliary source for full visibility and legacy-only data/capabilities. Hybrid ownership/dedupe is not yet fully implemented.
+## Cloudflare Verification
 
-## Official Event Expansion To Implement
+- isolated test build `610409e1-41c7-4ef8-a9be-3af4af0042dd`: success
+- production build: success
+- post-deploy binding/secrets read-back: success
+- observability query for `QQ Open gateway ensure failed` in the deployment window: 0 events
 
-- GROUP_MESSAGE_CREATE full-group observation
-- INTERACTION_CREATE
-- C2C_MSG_RECEIVE / C2C_MSG_REJECT
-- GROUP_MSG_RECEIVE / GROUP_MSG_REJECT
-- transport ownership/dedupe diagnostics
+The assistant cannot safely read the authenticated production Gateway status endpoint directly. Pre-deploy Gateway READY and !qqping were user-verified; post-deploy READY remains a live QQ-side verification item.
+
+## Hybrid State
+
+Because QQ_HYBRID_GROUP_MAP is currently empty:
+- OneBot C2C and group-at duplicates are suppressed under QQ Open ownership.
+- ordinary OneBot group messages remain functional.
+- no numeric group is yet mirrored into a corresponding group_openid context.
+- official active scheduled sends fall back to OneBot until mapping + push permission exist.
+
+## Interaction
+
+Code support is deployed but INTERACTION intent is intentionally disabled. Do not set `100663296` until QQ application permission is confirmed.
