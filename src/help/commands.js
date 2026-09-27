@@ -114,7 +114,7 @@ const DEVELOPER_SECTION = Object.freeze({
     "!自我调整／!自我修正",
     "AI 指令可用：--codex 为所有人固定 GPT-6 Luna／无思考；开发者进阶使用 --codexchat 或 --codexwork",
     "!codexchat [模型] [思考等级] [原版输入:是否] 问题：开发者进阶 Codex 对话",
-    "!codexwork [--root 名称] [--edit] [--export] 工作：开发者受限本机资料工作区；默认唯读、永不删除",
+    "!codexwork [--root 名称] [--edit] [--export] 工作：开发者受限本机资料工作区；默认唯读、永不删除；与 !codex / !codexchat 共用同一对话",
     "Root 与 Portal 可管理模型、通知、权限、资料与系统维护"
   ]
 });

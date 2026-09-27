@@ -316,7 +316,7 @@ CODEX_PUBLIC_DAILY_REQUESTS = "5"
 CODEX_PUBLIC_MAX_OUTPUT_TOKENS = "1536"
 ```
 
-開發者原本的進階能力改為 `!codexchat`／`--codexchat`；可自行選模型與 reasoning。`!codexwork`／`--codexwork` 只限開發者，用來透過本機 bridge 處理允許的電腦資料。
+開發者原本的進階能力改為 `!codexchat`／`--codexchat`；可自行選模型與 reasoning。`!codexwork`／`--codexwork` 只限開發者，用來透過本機 bridge 處理允許的電腦資料。三種 Codex 模式在同一 QQ 使用者／群聊範圍內共用同一個 Codex thread；切換 `!codex`、`!codexchat`、`!codexwork` 不會另開聊天室。
 
 本機 bridge 安全模型：
 
@@ -328,11 +328,27 @@ CODEX_PUBLIC_MAX_OUTPUT_TOKENS = "1536"
 - bridge 使用獨立 `CODEX_HOME` 並覆寫成最小設定，不載入一般使用者 Codex Home 中的插件／技能；工作資料夾內的 `.codex`、`.agents` 也不會被帶入。
 - bridge 是 outbound-only WebSocket；Worker 不會取得任意 shell 或任意電腦檔案 API。
 
-本機先安裝 WebSocket client 套件（不需要加入 Worker bundle）：
+本機仍可直接用 Node 啟動既有 bridge；另外提供 Windows EXE 封裝。EXE 沿用同一份 `tools/codex-work-bridge.mjs` 安全核心，不另做第二套檔案權限邏輯。
+
+Node 模式先安裝 WebSocket client 套件（不需要加入 Worker bundle）：
 
 ```bash
 npm install --no-save ws@8.21.3
 ```
+
+Windows EXE 可由 GitHub Actions「Build Codex Bridge Windows EXE」取得，或在 repo 執行：
+
+```bash
+npm run codex:bridge:exe
+```
+
+首次設定可執行 `QQAIBOT-CodexBridge.exe --init-config`，預設設定檔位於 `%APPDATA%\\QQAIBOT\\codex-bridge.json`。完成設定後：
+
+- 雙擊 EXE：以隱藏背景程序啟動。
+- `--run`：前景執行，方便除錯。
+- `--install-startup`：使用 Windows Task Scheduler 設為目前使用者登入時自動啟動。
+- `--uninstall-startup`：移除自動啟動工作。
+- Token 只放本機設定或環境變數，不寫入 Git。
 
 設定環境變數後啟動：
 

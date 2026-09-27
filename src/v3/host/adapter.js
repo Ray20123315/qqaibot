@@ -158,11 +158,9 @@ async function defaultAiChat(env, input, context = {}) {
     const scope = String(message.scope || "private");
     const peer = scope === "group" ? String(message.groupId || "") : String(message.userId || actorId);
     const rootAlias = String(override?.work?.rootAlias || "");
-    const sessionKey = mode === "public"
-      ? `qqaibot:plugin:${pluginId}:${scope}:${peer}:user:${actorId}:public`
-      : mode === "work"
-        ? `qqaibot:plugin:${pluginId}:${scope}:${peer}:developer:${actorId}:work:${rootAlias || "default"}:${override?.work?.edit ? "edit" : "read"}`
-        : `qqaibot:plugin:${pluginId}:${scope}:${peer}:developer:${actorId}:chat`;
+    // Suffix --codex/--codexchat/--codexwork share one conversation
+    // within the same plugin + QQ user + chat scope.
+    const sessionKey = `qqaibot:plugin:${pluginId}:${scope}:${peer}:user:${actorId}:codex`;
     const systemText = messages.filter(item => item.role === "system").map(item => item.content).join("\n\n");
     const codexExecutor = context?.eventContext?.codexExecutor;
     if (typeof codexExecutor !== "function") throw new Error("PLUGIN_CODEX_BRIDGE_UNAVAILABLE");

@@ -148,7 +148,7 @@ function codexWorkUsage() {
     "格式：!codexwork [--root 名稱] [--edit] [--export] [--model 模型] [--reasoning 等級] <工作>",
     "預設唯讀；--edit 只允許本機 Bridge 設定的可編輯區域，永遠不提供刪除能力。",
     "若加 --export，Bridge 可將允許範圍內的指定產物交給 QQ 上傳。",
-    "開發者專用；檔案邊界由本機 Bridge 再次驗證。"
+    "開發者專用；檔案邊界由本機 Bridge 再次驗證，並與 !codex／!codexchat 共用同一對話。"
   ].join("\n");
 }
 
@@ -288,7 +288,7 @@ function codexCommandUsage() {
   return [
     "格式：!codex <問題>",
     "所有人可用；固定 GPT-6 Luna／無思考，使用個人每日額度。",
-    "同一使用者／群組會沿用同一 Codex 對話，不會每次新開對話。"
+    "同一使用者／群組的 !codex、!codexchat、!codexwork 共用同一 Codex 對話，不會因模式切換另開對話。"
   ].join("\n");
 }
 
@@ -296,7 +296,7 @@ function codexChatCommandUsage() {
   return [
     "格式：!codexchat <模型> <思考等級> <忽略程式碼及其他提示詞（原版輸入）:是否> <問題>",
     "模型、思考等級、是否都可省略；預設 GPT-6 Luna／無思考。",
-    "僅開發者可用，保留原本 !codex 的進階能力。"
+    "僅開發者可用，保留原本 !codex 的進階能力，並與 !codex／!codexwork 共用同一對話。"
   ].join("\n");
 }
 

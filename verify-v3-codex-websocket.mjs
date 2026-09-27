@@ -153,7 +153,9 @@ assert.match(worker, /!codex 今日额度/);
 assert.match(worker, /if \(isDeveloper\)/);
 
 const commandRuntime = fs.readFileSync("src/v3/ai/codex-command-runtime.js", "utf8");
-assert.match(commandRuntime, /qqaibot:\$\{scope\}:user:\$\{context\.userId\}:public/);
+assert.match(commandRuntime, /qqaibot:\$\{scope\}:user:\$\{context\.userId\}:codex/);
+assert.doesNotMatch(commandRuntime, /sessionKey = mode === "public"/);
+assert.doesNotMatch(commandRuntime, /:work:\$\{rootAlias/);
 assert.match(commandRuntime, /consumePublicCodexQuota/);
 assert.match(commandRuntime, /refundPublicCodexQuota/);
 assert.match(commandRuntime, /upload_private_file/);
@@ -176,6 +178,8 @@ assert.match(hostAdapter, /PLUGIN_CODEX_DEVELOPER_REQUIRED/);
 assert.match(hostAdapter, /eventContext\?\.codexExecutor/);
 assert.match(hostAdapter, /deps\.aiChat\(input, \{ plugin, eventContext, aiProviderOverride:/);
 assert.doesNotMatch(hostAdapter, /callCodexBridgeWebSocket/, "V3 plugin Codex override must not call the same OneBotHub through its binding");
+assert.match(hostAdapter, /qqaibot:plugin:\$\{pluginId\}:\$\{scope\}:\$\{peer\}:user:\$\{actorId\}:codex/);
+assert.doesNotMatch(hostAdapter, /sessionKey = mode === "public"/);
 
 const portal = fs.readFileSync("src/portal/runtime.js", "utf8");
 assert.match(portal, /id="codexQuotaStatus"/);

@@ -75,11 +75,9 @@ async function executeCodexUserCommand(env, command, context = {}) {
   const scope = codexScope(context);
   const raw = command.originalPromptOnly === true;
   const rootAlias = String(command.rootAlias || "");
-  const sessionKey = mode === "public"
-    ? `qqaibot:${scope}:user:${context.userId}:public`
-    : mode === "work"
-      ? `qqaibot:${scope}:developer:${context.userId}:work:${rootAlias || "default"}:${command.edit ? "edit" : "read"}`
-      : `qqaibot:${scope}:developer:${context.userId}:chat:${raw ? "raw" : "group"}`;
+  // Public Codex, CodexChat and CodexWork are capability modes inside one
+  // stable conversation for the same QQ user + chat scope.
+  const sessionKey = `qqaibot:${scope}:user:${context.userId}:codex`;
 
   const messages = [];
   if (!raw && mode !== "work") {

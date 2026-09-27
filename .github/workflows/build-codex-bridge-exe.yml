@@ -1,0 +1,54 @@
+name: Build Codex Bridge Windows EXE
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - "tools/codex-work-bridge.mjs"
+      - "tools/codex-bridge-windows.mjs"
+      - "tools/codex-bridge.config.example.json"
+      - "package.json"
+      - ".github/workflows/build-codex-bridge-exe.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Install repository dependencies
+        run: npm ci --ignore-scripts
+      - name: Ensure bridge WebSocket dependency
+        run: npm install --no-save --ignore-scripts ws@8.21.0
+      - name: Build Windows executable
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force dist | Out-Null
+          npx --yes esbuild@0.28.1 tools/codex-bridge-windows.mjs --bundle --platform=node --target=node22 --format=cjs --outfile=dist/codex-bridge-bundle.cjs
+          npx --yes @yao-pkg/pkg@6.22.0 dist/codex-bridge-bundle.cjs --targets node22-win-x64 --output dist/QQAIBOT-CodexBridge.exe --compress GZip
+      - name: Smoke test executable
+        shell: pwsh
+        run: |
+          & .\dist\QQAIBOT-CodexBridge.exe --help
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $hash = (Get-FileHash .\dist\QQAIBOT-CodexBridge.exe -Algorithm SHA256).Hash.ToLower()
+          "$hash  QQAIBOT-CodexBridge.exe" | Set-Content -Encoding ascii .\dist\QQAIBOT-CodexBridge_SHA256SUMS.txt
+          Get-Item .\dist\QQAIBOT-CodexBridge.exe | Format-List Name,Length
+          Get-Content .\dist\QQAIBOT-CodexBridge_SHA256SUMS.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: QQAIBOT-CodexBridge-Windows-x64
+          path: |
+            dist/QQAIBOT-CodexBridge.exe
+            dist/QQAIBOT-CodexBridge_SHA256SUMS.txt
+          if-no-files-found: error
+          retention-days: 30

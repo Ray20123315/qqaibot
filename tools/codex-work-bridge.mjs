@@ -328,7 +328,7 @@ async function main() {
   connect();
 }
 
-export { applyStagedChanges, assertAllowedPath, bridgeConfig, collectExports, copySnapshot, exportMarkers, isPathInside, isSensitiveRelativePath, normalizeRoots, parseRootSpec, rootByAlias, runCodexRequest };
+export { applyStagedChanges, assertAllowedPath, bridgeConfig, collectExports, copySnapshot, exportMarkers, isPathInside, isSensitiveRelativePath, main, normalizeRoots, parseRootSpec, rootByAlias, runCodexRequest };
 
 const invoked = process.argv[1] ? pathToFileURL(path.resolve(process.argv[1])).href : "";
 if (invoked && import.meta.url === invoked) main().catch(e => { console.error("[qqai-codex-bridge]", e?.stack || e); process.exitCode = 1; });
