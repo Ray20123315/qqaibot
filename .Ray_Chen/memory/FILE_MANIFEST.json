@@ -1,131 +1,38 @@
 {
   "schema_version": 1,
-  "memory_version": "v0.0.10",
+  "memory_version": "v0.0.11",
   "task_id": "qqaibot-20260927-qqopen-v4-native",
   "goal_revision": 3,
-  "transaction": "file_change_transaction_20260928_prod_v4_cutover_001",
+  "transaction": "file_change_transaction_20260928_test_secret_prod_blocked_001",
   "repository": "Ray20123315/qqaibot",
   "production_branch": "main",
-  "development_branch": "v4-qqopen-native",
-  "product_before_revision": "523d2138ae413206eb8fe7aa85d45c5b8d7404c9",
-  "product_after_revision": "5ff25e2f97926fd0bfa038b4006427a0fb7f2962",
   "verification": {
-    "github_actions_run_id": 36332485133,
-    "github_ci": "success",
-    "cloudflare_production_build_id": "bb3b6a76-f7e1-4cdd-85c4-eec9fb089f2b",
-    "cloudflare_production_build": "success",
-    "production_migration": "v4_qqopen_gateway",
-    "removed_binding_count": 11,
-    "retained_binding_count": 34,
-    "qq_open_client_secret": "absent",
-    "live_qqopen_e2e": "pending_secret"
+    "test_secret_binding": "present",
+    "production_secret_binding": "absent",
+    "production_secret_write": "blocked_by_platform_safety"
   },
   "changes": [
     {
-      "location_type": "github",
-      "provider": "GitHub",
-      "resource_id_or_path": "wrangler.toml",
-      "action": "modified",
-      "repository_or_drive": "Ray20123315/qqaibot",
-      "branch_or_container": "v4-qqopen-native -> main",
-      "after_revision": "5ff25e2f97926fd0bfa038b4006427a0fb7f2962",
-      "verification": "CI + production deploy success",
-      "changed_at": "2026-09-28T00:18:00+08:00"
-    },
-    {
-      "location_type": "github",
-      "provider": "GitHub",
-      "resource_id_or_path": "wrangler.example.toml",
-      "action": "modified",
-      "repository_or_drive": "Ray20123315/qqaibot",
-      "branch_or_container": "v4-qqopen-native -> main",
-      "after_revision": "5ff25e2f97926fd0bfa038b4006427a0fb7f2962",
-      "verification": "CI success",
-      "changed_at": "2026-09-28T00:18:00+08:00"
-    },
-    {
-      "location_type": "github",
-      "provider": "GitHub",
-      "resource_id_or_path": "README.md",
-      "action": "modified",
-      "repository_or_drive": "Ray20123315/qqaibot",
-      "branch_or_container": "v4-qqopen-native -> main",
-      "after_revision": "5ff25e2f97926fd0bfa038b4006427a0fb7f2962",
-      "verification": "CI success",
-      "changed_at": "2026-09-28T00:18:00+08:00"
-    },
-    {
-      "location_type": "github",
-      "provider": "GitHub",
-      "resource_id_or_path": "verify-config.mjs",
-      "action": "modified",
-      "repository_or_drive": "Ray20123315/qqaibot",
-      "branch_or_container": "v4-qqopen-native -> main",
-      "after_revision": "5ff25e2f97926fd0bfa038b4006427a0fb7f2962",
-      "verification": "CI success",
-      "changed_at": "2026-09-28T00:18:00+08:00"
-    },
-    {
-      "location_type": "github",
-      "provider": "GitHub",
-      "resource_id_or_path": "refs/heads/main",
-      "action": "fast_forward",
-      "repository_or_drive": "Ray20123315/qqaibot",
-      "branch_or_container": "main",
-      "before_revision": "523d2138ae413206eb8fe7aa85d45c5b8d7404c9",
-      "after_revision": "5ff25e2f97926fd0bfa038b4006427a0fb7f2962",
-      "verification": "GitHub update_ref success",
-      "changed_at": "2026-09-28T00:18:00+08:00"
-    },
-    {
       "location_type": "cloudflare",
       "provider": "Cloudflare",
-      "resource_id_or_path": "workers/scripts/qqai",
-      "action": "deployed",
-      "repository_or_drive": "Cloudflare Workers",
-      "branch_or_container": "production",
-      "before_revision": "v3_remove_budget_guard",
-      "after_revision": "v4_qqopen_gateway",
-      "commit_or_hash": "dc1dff2f-a264-471f-a808-719dbad96c43",
-      "verification": "build bb3b6a76-f7e1-4cdd-85c4-eec9fb089f2b success",
-      "changed_at": "2026-09-28T00:18:00+08:00"
-    },
-    {
-      "location_type": "cloudflare",
-      "provider": "Cloudflare",
-      "resource_id_or_path": "workers/scripts/qqai/settings",
-      "action": "pruned_bindings",
-      "repository_or_drive": "Cloudflare Workers",
-      "branch_or_container": "production",
-      "before_revision": "45 bindings",
-      "after_revision": "34 bindings",
-      "verification": "read-back; 11 targets absent",
-      "changed_at": "2026-09-28T00:18:00+08:00"
-    },
-    {
-      "location_type": "cloudflare",
-      "provider": "Cloudflare",
-      "resource_id_or_path": "builds/triggers/6a16097b-71b5-4d81-92ac-ef903df2e1cd",
-      "action": "modified",
-      "repository_or_drive": "Cloudflare Workers Builds",
-      "branch_or_container": "main",
-      "after_revision": "path_excludes=.Ray_Chen/**",
-      "verification": "read-back success",
-      "changed_at": "2026-09-28T00:18:00+08:00"
-    },
-    {
-      "location_type": "cloudflare",
-      "provider": "Cloudflare",
-      "resource_id_or_path": "workers/scripts/qqai-v4test/settings",
-      "action": "temporary_binding_patch_test",
-      "repository_or_drive": "Cloudflare Workers",
+      "resource_id_or_path": "workers/scripts/qqai-v4test/secrets/QQ_OPEN_CLIENT_SECRET",
+      "action": "created",
       "branch_or_container": "test",
-      "verification": "inherit semantics verified safely on test Worker",
-      "changed_at": "2026-09-28T00:18:00+08:00"
+      "verification": "secret-name read-back present",
+      "changed_at": "2026-09-28T00:24:00+08:00"
+    },
+    {
+      "location_type": "cloudflare",
+      "provider": "Cloudflare",
+      "resource_id_or_path": "workers/scripts/qqai/secrets/QQ_OPEN_CLIENT_SECRET",
+      "action": "write_blocked_no_change",
+      "branch_or_container": "production",
+      "verification": "secret-name read-back absent",
+      "changed_at": "2026-09-28T00:24:00+08:00"
     }
   ],
   "internal_memory_transaction": {
-    "action": "update .Ray_Chen/memory to v0.0.10",
-    "note": "Memory files, archives, SHA manifests and Gmail evidence do not recursively trigger another memory transaction."
+    "action": "update .Ray_Chen/memory to v0.0.11",
+    "note": "Secret values are never stored in memory."
   }
 }

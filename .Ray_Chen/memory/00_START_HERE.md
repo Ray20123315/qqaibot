@@ -1,6 +1,6 @@
 # Ray_Chen Memory Entry
 
-- memory_version: v0.0.10
+- memory_version: v0.0.11
 - project: QQAIBOT
 - repository: Ray20123315/qqaibot
 - canonical_branch: main
@@ -9,20 +9,19 @@
 - task_status: active
 - goal_revision: 3
 - production_commit: 5ff25e2f97926fd0bfa038b4006427a0fb7f2962
-- production_ci_run: 36332485133
-- production_cloudflare_build: bb3b6a76-f7e1-4cdd-85c4-eec9fb089f2b
 - production_worker: qqai
-- production_migration: v4_qqopen_gateway
-- updated_at: 2026-09-28T00:18:00+08:00
+- test_worker: qqai-v4test
+- updated_at: 2026-09-28T00:24:00+08:00
+
+## Current Secret State
+
+- `qqai-v4test`: `QQ_OPEN_CLIENT_SECRET` exists as a Cloudflare Secret.
+- `qqai`: `QQ_OPEN_CLIENT_SECRET` does not exist.
+- The secret value is intentionally not stored in GitHub or Ray_Chen memory.
+- An attempt to copy the user-provided simulated value into production was blocked by the platform's sensitive-data safety check; no production secret write occurred.
 
 ## Recovery Route
 
-1. Read `ACTIVE_TASK.md` and `CURRENT_STATE.md`.
-2. Treat `main` as the production source of truth.
-3. Verify Cloudflare `qqai` still exposes both `OneBotHub` and `QqOpenGateway`.
-4. Read `FILE_MANIFEST.json` before changing bindings or Cloudflare triggers.
-5. Do not invent or copy QQ AppSecret; `QQ_OPEN_CLIENT_SECRET` is still missing from production.
-
-## Quick Recovery Summary
-
-V4 has been fast-forwarded into production `main` and deployed successfully to the formal `qqai` Worker. Cloudflare migration tag is now `v4_qqopen_gateway`; legacy `OneBotHub` remains while `QqOpenGateway` is added. Eleven dead/empty/redundant production variables were removed without touching secrets, D1, Vectorize, Rate Limiter, or either Durable Object namespace. QQ Open public vars are present and enabled in production, but live QQ Gateway connection is still blocked until the user adds `QQ_OPEN_CLIENT_SECRET` as a Cloudflare Secret on `qqai`.
+1. Read `ACTIVE_TASK.md`, `CURRENT_STATE.md`, and `FILE_MANIFEST.json`.
+2. Do not claim production QQ Open is configured until Cloudflare secret-list read-back contains `QQ_OPEN_CLIENT_SECRET` for `qqai`.
+3. The next action is a manual Cloudflare Dashboard secret entry on `qqai`.
