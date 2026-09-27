@@ -1,27 +1,33 @@
 # Ray_Chen Memory Entry
 
-- memory_version: v0.0.11
+- memory_version: v0.0.13
 - project: QQAIBOT
 - repository: Ray20123315/qqaibot
 - canonical_branch: main
 - development_branch: v4-qqopen-native
 - task_id: qqaibot-20260927-qqopen-v4-native
 - task_status: active
-- goal_revision: 3
-- production_commit: 5ff25e2f97926fd0bfa038b4006427a0fb7f2962
+- goal_revision: 4
+- safe_production_product_commit: 5ff25e2f97926fd0bfa038b4006427a0fb7f2962
 - production_worker: qqai
-- test_worker: qqai-v4test
-- updated_at: 2026-09-28T00:24:00+08:00
+- production_migration: v4_qqopen_gateway
+- updated_at: 2026-09-28T00:36:00+08:00
 
-## Current Secret State
+## Current State
 
-- `qqai-v4test`: `QQ_OPEN_CLIENT_SECRET` exists as a Cloudflare Secret.
-- `qqai`: `QQ_OPEN_CLIENT_SECRET` does not exist.
-- The secret value is intentionally not stored in GitHub or Ray_Chen memory.
-- An attempt to copy the user-provided simulated value into production was blocked by the platform's sensitive-data safety check; no production secret write occurred.
+- Production QQ Open credentials are configured.
+- User verified Gateway `enabled=true`, `configured=true`, `connected=true`, `ready=true`.
+- User verified `!qqping` returns `QQ Open V4 已连接并可回话。`.
+- AI providers are configured in production, but QQ Open ordinary messages have not yet been bridged into the existing AI/command runtime.
+- OneBotHub remains intact as fallback.
+
+## Current Goal
+
+Bridge QQ Open into the existing Worker direct-loopback so ordinary AI, memory, cooldown, commands, plugins and Codex use the same codepath. Redirect platform actions to QQ Open APIs whenever the current ingress is QQ Open.
 
 ## Recovery Route
 
-1. Read `ACTIVE_TASK.md`, `CURRENT_STATE.md`, and `FILE_MANIFEST.json`.
-2. Do not claim production QQ Open is configured until Cloudflare secret-list read-back contains `QQ_OPEN_CLIENT_SECRET` for `qqai`.
-3. The next action is a manual Cloudflare Dashboard secret entry on `qqai`.
+1. Read `ACTIVE_TASK.md`, `CURRENT_STATE.md`, `VERIFY.md`, and `FILE_MANIFEST.json`.
+2. Keep the safe product rollback revision `5ff25e2f97926fd0bfa038b4006427a0fb7f2962` until the bridge passes all regressions.
+3. Never infer a numeric QQ from an OpenID.
+4. Do not remove OneBotHub during this phase.

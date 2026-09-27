@@ -1,30 +1,31 @@
 {
   "schema_version": 1,
-  "memory_version": "v0.0.12",
+  "memory_version": "v0.0.13",
   "task_id": "qqaibot-20260927-qqopen-v4-native",
   "goal_revision": 4,
-  "transaction": "checkpoint_20260928_qqopen_full_runtime_bridge",
+  "transaction": "checkpoint_20260928_qqopen_full_runtime_bridge_corrected",
   "repository": "Ray20123315/qqaibot",
   "branch": "v4-qqopen-native",
   "checkpoint": {
     "safe_product_commit": "5ff25e2f97926fd0bfa038b4006427a0fb7f2962",
-    "memory_head_before": "fe1c3023a9464ef4e784ae3b4b597519eee74128",
-    "qqopen_gateway": "ready_user_verified",
-    "onebot_fallback": "retained"
+    "qqopen_gateway": "configured_connected_ready_user_verified",
+    "qqping": "user_verified",
+    "onebot_fallback": "retained",
+    "ai_bridge": "not_implemented_yet"
   },
   "changes": [
     {
       "location_type": "github",
       "provider": "GitHub",
       "resource_id_or_path": ".Ray_Chen/memory",
-      "action": "checkpoint_goal_revision_4",
+      "action": "correct_checkpoint_and_goal_revision_4",
       "branch_or_container": "v4-qqopen-native",
       "verification": "read-back after commit",
-      "changed_at": "2026-09-28T00:32:00+08:00"
+      "changed_at": "2026-09-28T00:36:00+08:00"
     }
   ],
   "internal_memory_transaction": {
-    "action": "update memory checkpoint to v0.0.12",
+    "action": "update memory checkpoint to v0.0.13",
     "note": "No secrets stored."
   }
 }
