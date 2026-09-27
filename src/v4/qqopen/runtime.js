@@ -1,6 +1,7 @@
 import { createQqOpenActionDispatcher } from "../platform/actions.js";
 import { createQqOpenApiClient } from "./api.js";
 import { fromQqOpenEvent } from "./events.js";
+import { qqOpenJoinRequestToLegacyBody, qqOpenLegacyAction, qqOpenMessageToLegacyBody, sendQqOpenLegacyMessage } from "./legacy-bridge.js";
 import {
   QQ_OPEN_OPCODE,
   createGatewayState,
@@ -86,6 +87,11 @@ function defaultPersistedState() {
     lastEventType: "",
     lastInboundAt: 0,
     lastInboundId: "",
+    lastInboundUserId: "",
+    lastApplicationAt: 0,
+    lastApplicationKind: "",
+    messageCache: [],
+    joinRequestCache: [],
     lastReplyAt: 0,
     lastReplyId: "",
     lastHeartbeatSentAt: 0,
@@ -171,6 +177,9 @@ export class QqOpenGateway {
       lastEventType: String(this.persisted.lastEventType || ""),
       lastInboundAt: Number(this.persisted.lastInboundAt || 0),
       lastInboundId: String(this.persisted.lastInboundId || ""),
+      lastInboundUserId: String(this.persisted.lastInboundUserId || ""),
+      lastApplicationAt: Number(this.persisted.lastApplicationAt || 0),
+      lastApplicationKind: String(this.persisted.lastApplicationKind || ""),
       lastReplyAt: Number(this.persisted.lastReplyAt || 0),
       lastReplyId: String(this.persisted.lastReplyId || ""),
       lastHeartbeatSentAt: Number(this.persisted.lastHeartbeatSentAt || 0),
@@ -217,6 +226,19 @@ export class QqOpenGateway {
       if (this.persisted.suspended) return Response.json(this.status());
       const status = await this.ensureConnected({ force: false });
       return Response.json(status, { status: status.ok === false ? 503 : 200 });
+    }
+
+    if (request.method === "POST" && ["/legacy-action", "/api/v4/qqopen/legacy-action"].includes(path)) {
+      const payload = await request.json().catch(() => ({}));
+      try {
+        const data = await qqOpenLegacyAction(this.api(), payload.action, payload.params || {}, payload.context || {}, {
+          getCachedMessage: id => this.cachedMessage(id),
+          getCachedJoinRequest: id => this.cachedJoinRequest(id)
+        });
+        return Response.json({ ok: true, data });
+      } catch (error) {
+        return Response.json({ ok: false, error: safeError(error) }, { status: 502 });
+      }
     }
 
     if (request.method === "POST" && ["/disconnect", "/api/v4/qqopen/disconnect"].includes(path)) {
@@ -379,23 +401,145 @@ export class QqOpenGateway {
     await this.persist();
   }
 
+  cachedMessage(id) {
+    const key = String(id || "");
+    return (Array.isArray(this.persisted.messageCache) ? this.persisted.messageCache : []).find(item => String(item?.message_id || "") === key) || null;
+  }
+
+  cachedJoinRequest(id) {
+    const key = String(id || "");
+    return (Array.isArray(this.persisted.joinRequestCache) ? this.persisted.joinRequestCache : []).find(item => String(item?.flag || "") === key) || null;
+  }
+
+  cacheMessage(body, source = "human") {
+    if (!body?.message_id) return;
+    const row = {
+      message_id: String(body.message_id || ""),
+      message: body.message || [],
+      raw_message: String(body.raw_message || ""),
+      message_type: String(body.message_type || ""),
+      group_id: String(body.group_id || ""),
+      user_id: String(body.user_id || ""),
+      self_id: String(body.self_id || ""),
+      sender: body.sender || {},
+      time: Number(body.time || Math.floor(Date.now() / 1000)),
+      source: String(source || "human")
+    };
+    this.persisted.messageCache = [
+      row,
+      ...(Array.isArray(this.persisted.messageCache) ? this.persisted.messageCache : []).filter(item => String(item?.message_id || "") !== row.message_id)
+    ].slice(0, 60);
+  }
+
+  cacheJoinRequest(body) {
+    if (!body?.flag) return;
+    const row = {
+      flag: String(body.flag || ""),
+      group_id: String(body.group_id || ""),
+      user_id: String(body.user_id || ""),
+      comment: String(body.comment || ""),
+      at: Date.now()
+    };
+    this.persisted.joinRequestCache = [
+      row,
+      ...(Array.isArray(this.persisted.joinRequestCache) ? this.persisted.joinRequestCache : []).filter(item => String(item?.flag || "") !== row.flag)
+    ].slice(0, 40);
+  }
+
+  oneBotHub() {
+    if (!this.env?.ONEBOT_HUB) throw new Error("ONEBOT_HUB_NOT_BOUND");
+    return this.env.ONEBOT_HUB.get(this.env.ONEBOT_HUB.idFromName("default"));
+  }
+
+  async forwardLegacyBody(body) {
+    const response = await this.oneBotHub().fetch("https://onebot-hub/v4/qqopen/process", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ body })
+    });
+    if (response.status === 204) return null;
+    const text = await response.text();
+    let data = null;
+    try { data = text ? JSON.parse(text) : null; } catch {}
+    if (!response.ok) throw new Error(String(data?.error || text || ("QQ_OPEN_APP_" + response.status)).slice(0, 500));
+    return data;
+  }
+
+  async sendApplicationReplies(message, payload) {
+    const body = qqOpenMessageToLegacyBody(message, payload, { botUserId: this.persisted.botUserId });
+    if (!body) return;
+    this.cacheMessage(body, "human");
+    const result = await this.forwardLegacyBody(body);
+    this.persisted.lastApplicationAt = Date.now();
+    this.persisted.lastApplicationKind = String(result?.reply_kind || (result?.reply ? "reply" : "no_reply"));
+
+    const chunks = Array.isArray(result?.reply_chunks) && result.reply_chunks.length
+      ? result.reply_chunks
+      : result?.reply ? [result.reply] : [];
+    let lastMessageId = "";
+    for (let index = 0; index < chunks.length; index += 1) {
+      const sent = await sendQqOpenLegacyMessage(this.api(), {
+        scope: message.scope,
+        groupId: message.groupId,
+        userId: message.userId,
+        messageId: message.messageId
+      }, chunks[index], { msgSeq: index + 1, replyMessageId: message.messageId });
+      const id = String(sent?.messageId || sent?.data?.id || sent?.data?.message_id || "");
+      if (id) {
+        lastMessageId = id;
+        this.cacheMessage({
+          message_id: id,
+          message: [{ type: "text", data: { text: String(chunks[index] || "") } }],
+          raw_message: String(chunks[index] || ""),
+          message_type: message.scope === "group" ? "group" : "private",
+          group_id: String(message.groupId || ""),
+          user_id: String(this.persisted.botUserId || ""),
+          self_id: String(this.persisted.botUserId || ""),
+          sender: { user_id: String(this.persisted.botUserId || ""), nickname: "QQAI", role: "member" },
+          time: Math.floor(Date.now() / 1000)
+        }, "ai");
+      }
+    }
+    if (lastMessageId) {
+      this.persisted.lastReplyAt = Date.now();
+      this.persisted.lastReplyId = lastMessageId;
+    }
+  }
+
   async handleDispatch(payload) {
     const message = fromQqOpenEvent(payload);
-    if (!message) return;
+    if (message) {
+      this.persisted.lastInboundAt = Date.now();
+      this.persisted.lastInboundId = String(message.messageId || "");
+      this.persisted.lastInboundUserId = String(message.userId || "");
 
-    this.persisted.lastInboundAt = Date.now();
-    this.persisted.lastInboundId = String(message.messageId || "");
+      const reply = buildConnectivityReply(message);
+      if (reply) {
+        const result = await this.actionDispatcher().dispatch("message.reply", {
+          message,
+          content: reply,
+          msgSeq: 1
+        });
+        this.persisted.lastReplyAt = Date.now();
+        this.persisted.lastReplyId = String(result?.data?.id || result?.data?.message_id || "");
+        this.persisted.lastApplicationAt = Date.now();
+        this.persisted.lastApplicationKind = "connectivity";
+        return;
+      }
+      await this.sendApplicationReplies(message, payload);
+      return;
+    }
 
-    const reply = buildConnectivityReply(message);
-    if (!reply) return;
-
-    const result = await this.actionDispatcher().dispatch("message.reply", {
-      message,
-      content: reply,
-      msgSeq: 1
-    });
-    this.persisted.lastReplyAt = Date.now();
-    this.persisted.lastReplyId = String(result?.data?.id || result?.data?.message_id || "");
+    const requestBody = qqOpenJoinRequestToLegacyBody(payload, { botUserId: this.persisted.botUserId });
+    if (requestBody) {
+      this.persisted.lastInboundAt = Date.now();
+      this.persisted.lastInboundId = String(requestBody.flag || "");
+      this.persisted.lastInboundUserId = String(requestBody.user_id || "");
+      this.cacheJoinRequest(requestBody);
+      await this.forwardLegacyBody(requestBody);
+      this.persisted.lastApplicationAt = Date.now();
+      this.persisted.lastApplicationKind = "group_join_request";
+    }
   }
 
   startHeartbeat(intervalMs) {
