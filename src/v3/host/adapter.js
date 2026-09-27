@@ -515,7 +515,7 @@ function createV3HostAdapter(env, {
         });
         message = Object.freeze({ ...message, text: codexOverride.text });
       }
-      const eventName = message.scope === "group"      const eventName = message.scope === "group" ? "group_message" : message.scope === "private" ? "private_message" : "message";
+      const eventName = message.scope === "group" ? "group_message" : message.scope === "private" ? "private_message" : "message";
       const codexExecutor = typeof body?.__qqai_codex_executor === "function" ? body.__qqai_codex_executor : null;
       const results = await host.dispatch(eventName, message, { message, groupId: message.groupId, userId: message.userId, aiProviderOverride, codexExecutor });
       return { handled: true, eventName, message, results };
