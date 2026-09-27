@@ -28,7 +28,7 @@ Decision: public `!codex` is quota-bound, fixed to GPT-6 Luna and reasoning `non
 ## D-006 Public quota is per user and per Taipei day
 status: accepted
 date: 2026-09-27
-Decision: use D1-backed counters with a deployment-configurable default of 5 requests/day/user. Reserve before invocation and refund on failed bridge invocation when possible.
+Decision: use D1-backed counters with a deployment-configurable default of 5 requests/day/user. Reserve before invocation and refund failed bridge calls where possible.
 
 ## D-007 Filesystem authority lives on the local host
 status: accepted
@@ -44,3 +44,13 @@ Decision: use a dedicated `QQAI_CODEX_HOME`, do not copy `.codex`/`.agents`/`nod
 status: accepted
 date: 2026-09-27
 Decision: Portal self-check and safe repair are deterministic/no-AI. Repair is limited to reversible runtime housekeeping such as socket restoration and queue scheduler kick; it does not modify user computer files.
+
+## D-010 One direct Codex thread across capability modes
+status: accepted
+date: 2026-09-27
+Decision: for the same QQ user and direct chat scope, `!codex`, `!codexchat`, and `!codexwork` use one session key. Command mode changes capabilities/policy, not conversation identity. Plugin/suffix routes use the same principle while retaining plugin isolation.
+
+## D-011 Windows EXE wraps the existing bridge core
+status: accepted
+date: 2026-09-27
+Decision: the Windows executable is a packaging/config/startup layer around `tools/codex-work-bridge.mjs`. Filesystem allowlists, staging, export, and no-delete enforcement remain single-owned by the existing bridge core. Local config lives under `%APPDATA%\QQAIBOT` by default and Task Scheduler is used for logon startup.

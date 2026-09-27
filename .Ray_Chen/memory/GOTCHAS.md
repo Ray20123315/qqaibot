@@ -29,5 +29,9 @@ Risk: using the user's normal Codex home or copying project integration director
 Avoidance: dedicated `QQAI_CODEX_HOME`, excluded integration directories, and explicit on-demand-minimal policy.
 
 ## G-008 Large feature edits can leave duplicated source/test fragments
-Risk: sequential automated replacements in a large file produced duplicated declarations (`const statusMsg`, `rawPlugin`, `statusStart`) that blocked CI before functional tests ran.
-Avoidance: always treat syntax/CI failures as blockers, inspect exact failure lines, repair only the duplicated fragment, and rerun the full workflow through bundle success.
+Risk: sequential automated replacements in a large file produced duplicated declarations that blocked CI before functional tests ran.
+Avoidance: treat syntax/CI failures as blockers, inspect exact failure lines, repair only the duplicated fragment, and rerun the full workflow through bundle success.
+
+## G-009 CJS executable bundles cannot assume import.meta.url
+Risk: bundling ESM source to CommonJS for `pkg` turns `import.meta` into an empty object; calling `fileURLToPath(import.meta.url)` then crashes the packaged EXE.
+Avoidance: executable wrapper entry detection must use `process.pkg` / `process.argv` and avoid `import.meta.url` in the CJS bundle path. The fixed Windows smoke test proves `--help` executes.
