@@ -153,9 +153,11 @@ assert.match(worker, /!codex 今日额度/);
 assert.match(worker, /if \(isDeveloper\)/);
 
 const commandRuntime = fs.readFileSync("src/v3/ai/codex-command-runtime.js", "utf8");
-assert.match(commandRuntime, /qqaibot:\$\{scope\}:user:\$\{context\.userId\}:codex/);
+assert.match(commandRuntime, /qqaibot:principal:\$\{principalId\}:codex/);
 assert.doesNotMatch(commandRuntime, /sessionKey = mode === "public"/);
 assert.doesNotMatch(commandRuntime, /:work:\$\{rootAlias/);
+assert.match(commandRuntime, /context\.principalId \|\| context\.userId/);
+assert.match(commandRuntime, /CODEX_PRINCIPAL_REQUIRED/);
 assert.match(commandRuntime, /consumePublicCodexQuota/);
 assert.match(commandRuntime, /refundPublicCodexQuota/);
 assert.match(commandRuntime, /upload_private_file/);
