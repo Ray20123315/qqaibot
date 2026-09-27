@@ -28,6 +28,10 @@ binding = "AI"
 name = "ONEBOT_HUB"
 class_name = "OneBotHub"
 
+[[durable_objects.bindings]]
+name = "QQ_OPEN_GATEWAY"
+class_name = "QqOpenGateway"
+
 # Durable Object migration history must not be deleted, renamed or reordered.
 [[migrations]]
 tag = "v1_onebot_hub"
@@ -40,6 +44,10 @@ new_sqlite_classes = ["BudgetGuard"]
 [[migrations]]
 tag = "v3_remove_budget_guard"
 deleted_classes = ["BudgetGuard"]
+
+[[migrations]]
+tag = "v4_qqopen_gateway"
+new_sqlite_classes = ["QqOpenGateway"]
 
 # Active production resources. Fork owners must create and substitute their own IDs.
 [[d1_databases]]

@@ -33,6 +33,7 @@ assert(moduleFiles.length >= 17, `Expected at least 17 JavaScript modules, found
 assert((worker.match(/^import\s/mg) || []).length >= 17, 'worker.js must import the extracted modules');
 assert(/export default QQAIWorker;/.test(worker), 'worker.js must keep the default Worker export');
 assert(/export class OneBotHub/.test(worker), 'worker.js must keep the OneBotHub export');
+assert(/export \\{ QqOpenGateway \\} from "\\.\\/src\\/v4\\/qqopen\\/runtime\\.js";/.test(worker), 'worker.js must keep the QqOpenGateway export');
 assert(!worker.includes('!截图') && !worker.includes('!截圖'), 'Screenshot command must not exist in worker.js');
 assert(!readme.includes('!截图') && !readme.includes('!截圖'), 'Screenshot command must not exist in README.md');
 assert(worker.includes("cleanMessage.startsWith('//')"), 'Same-account // chat trigger must remain');

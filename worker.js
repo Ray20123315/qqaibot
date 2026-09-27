@@ -33,6 +33,7 @@ import { parseCodexChatCommand, parseCodexCommand, parseCodexWorkCommand } from 
 import { executeCodexUserCommand } from "./src/v3/ai/codex-command-runtime.js";
 import { readPublicCodexQuota } from "./src/v3/ai/codex-policy.js";
 import { dispatchV3RuntimeEvent, handleV3RuntimeFetch, runV3RuntimeScheduled } from "./src/v3/runtime/bridge.js";
+import { getQqOpenGateway, qqOpenConfigured, qqOpenEnabled } from "./src/v4/qqopen/runtime.js";
 import { handleV3PluginManagerApi, injectV3PluginManagerClient } from "./src/v3/portal/plugin-manager.js";
 import { handleV3PackageManagerApi, injectV3PackageManagerClient } from "./src/v3/portal/package-manager.js";
 import { handleV3PluginSecurityPublic, runV3PluginSecurityScheduled } from "./src/v3/public/plugin-security.js";
@@ -234,6 +235,14 @@ const QQAIWorker = {
     if (upgradeHeader && upgradeHeader.toLowerCase() === "websocket" && ["/onebot", "/ws", "/ws/onebot"].includes(url.pathname)) {
       if (!verifyOneBotAccess(request, env)) return new Response("Unauthorized", { status: 401 });
       return getOneBotHub(env).fetch(request);
+    }
+
+    if (url.pathname.startsWith("/api/v4/qqopen/")) {
+      const session = await getPortalSession(env, readCookie(request, "qqai_session"), { touch: false }).catch(() => null);
+      if (!session?.systemAdmin) return jsonResponse({ ok: false, error: "UNAUTHORIZED" }, 401);
+      if (!env.QQ_OPEN_GATEWAY) return jsonResponse({ ok: false, error: "QQ_OPEN_GATEWAY_NOT_BOUND" }, 503);
+      const target = `https://qq-open-gateway${url.pathname}${url.search}`;
+      return getQqOpenGateway(env).fetch(new Request(target, request));
     }
 
     if (request.method === "GET" && url.pathname === "/system-admin") {
@@ -3784,6 +3793,13 @@ ${deepseekContextSummary}`;
     ctx.waitUntil(runV3RuntimeScheduled(env, scheduledTime).catch(error => console.error("v3 runtime scheduled failed", error)));
     ctx.waitUntil(runV3PluginSecurityScheduled(env, scheduledTime).catch(error => console.error("v3 plugin security scheduled failed", error)));
     ctx.waitUntil(processDueSchedules(env, scheduledTime));
+    if (qqOpenEnabled(env) && qqOpenConfigured(env) && env.QQ_OPEN_GATEWAY) {
+      ctx.waitUntil(
+        getQqOpenGateway(env)
+          .fetch("https://qq-open-gateway/api/v4/qqopen/ensure", { method: "POST" })
+          .catch(error => console.warn("QQ Open gateway ensure failed:", error?.message || error))
+      );
+    }
     // Deterministic automatic Codex/OneBot safe repair: restore hibernated sockets and kick queued work; never calls AI.
     ctx.waitUntil(getOneBotHub(env).fetch("https://onebot-hub/v3/repair-safe", { method: "POST" }).catch(error => console.warn("automatic Codex/OneBot safe repair failed:", error?.message || error)));
   },
@@ -3796,7 +3812,7 @@ ${deepseekContextSummary}`;
  // 结束 QQAIWorker
 
 export default QQAIWorker;
-
+export { QqOpenGateway } from "./src/v4/qqopen/runtime.js";
 
 
 export class OneBotHub {
