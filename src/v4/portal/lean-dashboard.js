@@ -137,7 +137,7 @@ function ensureLeanNav(){
 }
 function applyLean(){
   document.body.classList.add('v4-lean-enabled');renderOverview();renderQqOpen();renderGroups();renderCodex();renderSystem();ensureLeanNav();
-  if(!document.querySelector('.view.active')||!String(location.hash||'').replace('#',''))showCustom('v4overview','总览');
+  showCustom('v4overview','总览');
   document.querySelectorAll('[data-open-legacy]').forEach(function(b){if(b.dataset.bound)return;b.dataset.bound='1';b.onclick=function(){openLegacy(b.dataset.openLegacy,b.textContent||'系统')}})
   bindGroup();bindStatusButtons();bindTilt()
 }
@@ -154,8 +154,8 @@ async function refreshStatus(){
 }
 function bindStatusButtons(){
   if(q('v4StatusRefresh')&&!q('v4StatusRefresh').dataset.bound){q('v4StatusRefresh').dataset.bound='1';q('v4StatusRefresh').onclick=refreshStatus}
-  if(q('v4Connect')&&!q('v4Connect').dataset.bound){q('v4Connect').dataset.bound='1';q('v4Connect').onclick=async function(){try{await jsonReq('/api/v4/qqopen/connect','POST',{});await refreshStatus()}catch(e){q('v4QqRaw').textContent=String(e.message||e)}}}
-  if(q('v4Disconnect')&&!q('v4Disconnect').dataset.bound){q('v4Disconnect').dataset.bound='1';q('v4Disconnect').onclick=async function(){try{await jsonReq('/api/v4/qqopen/disconnect','POST',{});await refreshStatus()}catch(e){q('v4QqRaw').textContent=String(e.message||e)}}}
+  if(q('v4Connect')&&!q('v4Connect').dataset.bound){q('v4Connect').dataset.bound='1';q('v4Connect').onclick=async function(){try{await jsonReq('/api/portal/v4/qqopen/gateway/connect','POST',{});await refreshStatus()}catch(e){q('v4QqRaw').textContent=String(e.message||e)}}}
+  if(q('v4Disconnect')&&!q('v4Disconnect').dataset.bound){q('v4Disconnect').dataset.bound='1';q('v4Disconnect').onclick=async function(){try{await jsonReq('/api/portal/v4/qqopen/gateway/disconnect','POST',{});await refreshStatus()}catch(e){q('v4QqRaw').textContent=String(e.message||e)}}}
 }
 function arr(v){if(Array.isArray(v))return v;if(Array.isArray(v&&v.list))return v.list;if(Array.isArray(v&&v.members))return v.members;if(Array.isArray(v&&v.data))return v.data;return[]}
 function groupId(){return String((q('v4GroupId')||{}).value||'').trim()}
