@@ -606,6 +606,30 @@ async function isKnownOutboundMessage(env, info) {
 
 
 async function callOneBotAction(env, actionPayload, timeoutMs = 15000) {
+  if (String(env?.QQAI_EVENT_PLATFORM || "") === "qq-open") {
+    if (!env.QQ_OPEN_GATEWAY) throw new Error("QQ_OPEN_GATEWAY_NOT_BOUND");
+    const payload = actionPayload?.action ? actionPayload : { action: actionPayload?.action, params: actionPayload?.params || {} };
+    const stub = env.QQ_OPEN_GATEWAY.get(env.QQ_OPEN_GATEWAY.idFromName("default"));
+    const res = await stub.fetch("https://qq-open-gateway/api/v4/qqopen/legacy-action", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        ...payload,
+        timeoutMs,
+        context: {
+          platform: "qq-open",
+          scope: String(env.QQAI_QQOPEN_GROUP_ID || "") ? "group" : "private",
+          groupId: String(env.QQAI_QQOPEN_GROUP_ID || ""),
+          userId: String(env.QQAI_QQOPEN_USER_ID || ""),
+          messageId: String(env.QQAI_QQOPEN_MESSAGE_ID || ""),
+          botUserId: String(env.QQAI_QQOPEN_BOT_USER_ID || "")
+        }
+      })
+    });
+    const data = await res.json().catch(() => null);
+    if (!res.ok || data?.ok !== true) throw new Error(data?.error || ("QQ_OPEN_LEGACY_ACTION_" + res.status));
+    return data.data;
+  }
   if (!env.ONEBOT_HUB) throw new Error("ONEBOT_HUB_NOT_BOUND");
   const payload = actionPayload?.action ? actionPayload : { action: actionPayload?.action, params: actionPayload?.params || {} };
   const action = String(payload?.action || "").trim();
