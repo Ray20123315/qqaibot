@@ -1,0 +1,101 @@
+name: Deploy isolated V4 QQ Open test Worker
+
+on:
+  push:
+    branches:
+      - v4-qqopen-native
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: qqaibot-v4test
+  cancel-in-progress: true
+
+jobs:
+  deploy-v4test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      FORCE_COLOR: "0"
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Install dependencies
+        run: npm ci --ignore-scripts
+
+      - name: Verify isolated V4 test config
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm run check:v4test
+          ! grep -Eq 'aibot\.ray2025\.com|qqai\.ray2025\.com|569a01fe-3297-40e1-832f-09c3793056ed|\[\[d1_databases\]\]|\[\[routes\]\]|ONEBOT_HUB' wrangler.v4test.toml
+          grep -q 'name = "qqai-v4test"' wrangler.v4test.toml
+          grep -q 'main = "worker.v4test.js"' wrangler.v4test.toml
+          grep -q 'name = "QQ_OPEN_GATEWAY"' wrangler.v4test.toml
+
+      - name: Verify Cloudflare CI credentials exist
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$CLOUDFLARE_API_TOKEN" || { echo "::error::Missing GitHub Actions secret CLOUDFLARE_API_TOKEN"; exit 1; }
+          test -n "$CLOUDFLARE_ACCOUNT_ID" || { echo "::error::Missing GitHub Actions secret CLOUDFLARE_ACCOUNT_ID"; exit 1; }
+
+      - name: Deploy isolated V4 test Worker
+        id: deploy
+        shell: bash
+        env:
+          WRANGLER_OUTPUT_FILE_PATH: /tmp/wrangler-v4test-output.ndjson
+        run: |
+          set -euo pipefail
+          npx wrangler deploy --config wrangler.v4test.toml --no-assets | tee /tmp/wrangler-v4test-deploy.log
+          DEPLOY_URL="$(node --input-type=module <<'NODE'
+          import fs from "node:fs";
+          const urls = [];
+          const collect = value => {
+            if (typeof value === "string") {
+              for (const match of value.matchAll(/https:\/\/[A-Za-z0-9.-]+\.workers\.dev\/?/g)) urls.push(match[0].replace(/\/$/, ""));
+              return;
+            }
+            if (Array.isArray(value)) for (const item of value) collect(item);
+            else if (value && typeof value === "object") for (const item of Object.values(value)) collect(item);
+          };
+          if (fs.existsSync("/tmp/wrangler-v4test-output.ndjson")) {
+            for (const line of fs.readFileSync("/tmp/wrangler-v4test-output.ndjson", "utf8").split(/\r?\n/)) {
+              if (!line.trim()) continue;
+              try { collect(JSON.parse(line)); } catch {}
+            }
+          }
+          if (!urls.length && fs.existsSync("/tmp/wrangler-v4test-deploy.log")) collect(fs.readFileSync("/tmp/wrangler-v4test-deploy.log", "utf8"));
+          process.stdout.write(urls.at(-1) || "");
+          NODE
+          )"
+          test -n "$DEPLOY_URL" || { echo "::error::Could not determine isolated V4 workers.dev URL"; exit 1; }
+          echo "url=$DEPLOY_URL" >> "$GITHUB_OUTPUT"
+          echo "V4 test URL: $DEPLOY_URL"
+
+      - name: Smoke test isolated V4 test Worker
+        shell: bash
+        env:
+          V4TEST_URL: ${{ steps.deploy.outputs.url }}
+        run: |
+          set -euo pipefail
+          curl -fsS --retry 10 --retry-delay 3 --retry-all-errors "$V4TEST_URL/healthz" -o /tmp/v4-health.json
+          curl -fsS --retry 10 --retry-delay 3 --retry-all-errors "$V4TEST_URL/" -o /tmp/v4-index.html
+          node --input-type=module - <<'NODE'
+          import fs from "node:fs";
+          const x = JSON.parse(fs.readFileSync("/tmp/v4-health.json", "utf8"));
+          if (x.ok !== true || x.worker !== "qqai-v4test" || x.isolated !== true) process.exit(1);
+          NODE
+          grep -q 'QQAIBOT / ISOLATED V4 TEST' /tmp/v4-index.html
+          grep -q '沒有正式網域、沒有 D1、沒有 OneBot' /tmp/v4-index.html
+          echo "Isolated V4 smoke tests passed: $V4TEST_URL"
