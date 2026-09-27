@@ -101,3 +101,12 @@ assert(!config.includes('QQ_OPEN_INTENTS = "100663296"'),"interaction intent mus
 assert.match(config,/QQ_HYBRID_GROUP_MAP\s*=\s*"\{\}"/);
 
 console.log("verify-v4-hybrid-official: ok");
+
+const scheduler=fs.readFileSync("src/scheduler/runtime.js","utf8");
+assert.match(scheduler,/async function sendHybridGroupMessage/);
+assert.match(scheduler,/qqOpenGroupPushAllowed/);
+assert.match(scheduler,/qqopen_push_permission:group:/);
+assert.match(scheduler,/NUMERIC_MENTION_REQUIRES_ONEBOT/);
+assert.match(scheduler,/hybrid_active_send_fallback/);
+assert.match(scheduler,/sendHybridGroupMessage\(env, item\.groupId, outboundMessage/);
+assert.match(scheduler,/sendHybridGroupMessage\(env, groupId, result\.text/);

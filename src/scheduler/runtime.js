@@ -12,6 +12,7 @@ import { opsFuseAllows, opsGetSettings, opsQuietState, opsRecordAutomationResult
 import { readJson, sendPortalVerificationMessage } from "../portal/auth.js";
 import { getFeatureFlag, isGroupWhitelisted, numericId } from "../security/network.js";
 import { isManagementRole, isManagerStopSignal, looksLikeRoughBanter, managerExchangeContext, readRecentConversationRecords } from "../moderation/social-boundaries.js";
+import { hybridPrimaryTransport, qqOpenGroupForOneBot } from "../v4/hybrid/ownership.js";
 
 export const SCHEDULED_ROUTINE_CRON = "* * * * *";
 export const SCHEDULED_D1_CLEANUP_CRON = "17 * * * *";
@@ -94,6 +95,88 @@ function nextTaipeiMonthly(day, time, now = Date.now()) {
 }
 
 
+
+function hasLegacyNumericMentions(message) {
+  if (!Array.isArray(message)) return false;
+  return message.some(part => String(part?.type || "").toLowerCase() === "at" && /^\d+$/.test(String(part?.data?.qq || "")));
+}
+
+async function qqOpenGroupPushAllowed(env, groupOpenid) {
+  const id = String(groupOpenid || "").trim();
+  if (!id) return false;
+  const raw = await dbGet(env, `qqopen_push_permission:group:${id}`);
+  if (!raw) return false;
+  try {
+    const record = JSON.parse(raw);
+    return record?.allowed === true;
+  } catch {
+    return false;
+  }
+}
+
+async function sendHybridGroupMessage(env, oneBotGroupId, message, timeoutMs = 15000) {
+  const numericGroupId = String(oneBotGroupId || "").replace(/\D/g, "");
+  const groupOpenid = qqOpenGroupForOneBot(env, numericGroupId);
+  const canUseOfficial = hybridPrimaryTransport(env) === "qq-open"
+    && Boolean(groupOpenid)
+    && !hasLegacyNumericMentions(message)
+    && await qqOpenGroupPushAllowed(env, groupOpenid);
+
+  if (canUseOfficial && env.QQ_OPEN_GATEWAY) {
+    try {
+      const stub = env.QQ_OPEN_GATEWAY.get(env.QQ_OPEN_GATEWAY.idFromName("default"));
+      const response = await stub.fetch("https://qq-open-gateway/api/v4/qqopen/legacy-action", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "send_group_msg",
+          params: { group_id: groupOpenid, message, auto_escape: false },
+          timeoutMs,
+          context: {
+            platform: "qq-open",
+            scope: "group",
+            groupId: groupOpenid,
+            userId: "",
+            messageId: "",
+            eventId: "",
+            botUserId: ""
+          }
+        })
+      });
+      const data = await response.json().catch(() => null);
+      if (response.ok && data?.ok === true) {
+        return { ok: true, transport: "qq-open", groupOpenid, data: data.data };
+      }
+      throw new Error(data?.error || `QQ_OPEN_ACTIVE_GROUP_${response.status}`);
+    } catch (error) {
+      await writeSystemAudit(env, {
+        type: "hybrid_active_send_fallback",
+        groupId: numericGroupId,
+        actorId: "system",
+        action: "qq_open_to_onebot",
+        error: String(error?.message || error).slice(0, 500)
+      }).catch(() => {});
+    }
+  }
+
+  const data = await callOneBotAction(env, {
+    action: "send_group_msg",
+    params: { group_id: numericId(numericGroupId), message, auto_escape: false }
+  }, timeoutMs);
+  return {
+    ok: true,
+    transport: "onebot",
+    groupOpenid: groupOpenid || "",
+    reason: !groupOpenid
+      ? "GROUP_OPENID_NOT_MAPPED"
+      : hasLegacyNumericMentions(message)
+        ? "NUMERIC_MENTION_REQUIRES_ONEBOT"
+        : canUseOfficial
+          ? "QQ_OPEN_SEND_FAILED_FALLBACK"
+          : "QQ_OPEN_ACTIVE_PUSH_NOT_ALLOWED",
+    data
+  };
+}
 
 async function reviewScheduleWithGemma(env, content) {
   try {
@@ -404,8 +487,8 @@ async function processDueSchedules(env, now = Date.now()) {
         const outboundMessage = /^(AI生成|AI生成：|AI:)/i.test(String(item.content || ""))
           ? message
           : buildScheduledGroupMessage(message, item.mentionIds || extractScheduleMentionIds(item.content));
-        await callOneBotAction(env, { action: "send_group_msg", params: { group_id: numericId(item.groupId), message: outboundMessage, auto_escape: false } }, 15000);
-        result = { ok: true };
+        const sent = await sendHybridGroupMessage(env, item.groupId, outboundMessage, 15000);
+        result = { ok: true, transport: sent.transport, transportReason: sent.reason || "" };
       }
       if (!result?.ok) throw new Error(result?.error || "执行失败");
       item.lastRunAt = new Date(now).toISOString(); item.lastResult = "success"; item.failureCount = 0;
@@ -474,12 +557,12 @@ async function processActiveSpeaking(env, now = Date.now()) {
       if (now - freshLastMessage < config.quietMinutes * 60000 || freshCount >= config.maxDaily || now - freshLastSpeak < config.quietMinutes * 60000) continue;
       try {
         const result = await callGeminiGenerate(env, { models: parseList(env.GEMINI_CHAT_MODELS, ["gemini-3.1-flash-lite", "gemini-3.5-flash"]), system: "生成一句自然的QQ群开场话题，简体中文，不提AI身份，不引用私人记忆，不@任何人。", contents: [{ role: "user", parts: [{ text: "群里有一段时间没人说话，请自然开启一个轻松话题。" }] }], maxOutputTokens: 120, temperature: 0.9, useSearch: false });
-        const sent = await callOneBotAction(env, { action: "send_group_msg", params: { group_id: numericId(groupId), message: result.text, auto_escape: false } }, 12000);
-        const messageId = String(sent?.message_id || sent?.data?.message_id || "");
+        const sent = await sendHybridGroupMessage(env, groupId, result.text, 12000);
+        const messageId = String(sent?.data?.message_id || sent?.data?.id || sent?.data?.data?.message_id || "");
         await dbPut(env, countKey, String(freshCount + 1));
         await dbPut(env, `active_speaking:last:${groupId}`, String(now));
-        await dbPut(env, stateKey, JSON.stringify({ ok: true, at: now, source: "automatic", model: result.model || "Gemini", messageId, preview: String(result.text || "").slice(0, 180) }));
-        await writeSystemAudit(env, { type: "active_speaking", groupId, actorId: "system", action: "automatic_sent", model: result.model || "Gemini", messageId });
+        await dbPut(env, stateKey, JSON.stringify({ ok: true, at: now, source: "automatic", model: result.model || "Gemini", messageId, transport: sent.transport, preview: String(result.text || "").slice(0, 180) }));
+        await writeSystemAudit(env, { type: "active_speaking", groupId, actorId: "system", action: "automatic_sent", model: result.model || "Gemini", messageId, transport: sent.transport });
       } catch (error) {
         const message = String(error?.message || error).slice(0, 500);
         await dbPut(env, stateKey, JSON.stringify({ ok: false, at: now, source: "automatic", error: message }));
@@ -748,4 +831,4 @@ async function processConflictSignal(env, { groupId, userId, senderName, senderR
   return { replyText: "先停一下，语气有点冲了。把事情说清楚就好，别继续针对人。" };
 }
 
-export { appealApprovalReached, buildScheduledGroupMessage, cancelSchedule, cleanupExpiredModerationProposals, cleanupTransientState, computeNextScheduleRun, countActiveSchedulesForUser, createAppealFromText, createScheduleRecord, deleteScheduleRecord, executeManagementSchedule, extractScheduleMentionIds, formatScheduleLine, listUserSchedules, nextTaipeiMonthly, nextTaipeiTime, nextTaipeiWeekday, parseManagementScheduleAction, parseScheduleRequest, parseTaipeiDateTime, processActiveSpeaking, processConflictSignal, processDueSchedules, reviewScheduleWithGemma, reviseScheduleRecord, sanitizeAppealForReviewer, scheduleApprovalReached, scheduleSpecFromRecord, skipScheduleOnce, sleepMs, taipeiParts, voteAppeal, voteSchedule };
+export { sendHybridGroupMessage, appealApprovalReached, buildScheduledGroupMessage, cancelSchedule, cleanupExpiredModerationProposals, cleanupTransientState, computeNextScheduleRun, countActiveSchedulesForUser, createAppealFromText, createScheduleRecord, deleteScheduleRecord, executeManagementSchedule, extractScheduleMentionIds, formatScheduleLine, listUserSchedules, nextTaipeiMonthly, nextTaipeiTime, nextTaipeiWeekday, parseManagementScheduleAction, parseScheduleRequest, parseTaipeiDateTime, processActiveSpeaking, processConflictSignal, processDueSchedules, reviewScheduleWithGemma, reviseScheduleRecord, sanitizeAppealForReviewer, scheduleApprovalReached, scheduleSpecFromRecord, skipScheduleOnce, sleepMs, taipeiParts, voteAppeal, voteSchedule };
