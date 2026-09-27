@@ -594,7 +594,7 @@ const QQAIWorker = {
     // 🤖 OneBot 事件入口：預設只接受 Durable Object 內部轉送
     // ==========================================
     if (request.method !== 'POST') return new Response(`🤖 QQAI Worker ${VERSION} 运行正常`, { status: 200 });
-    const internalTransport = url.pathname === "/__onebot_event" && request.headers.get("X-QQAI-Transport") === "websocket-do" && verifyOneBotAccess(request, env);
+    const internalTransport = url.pathname === "/__onebot_event" && ["websocket-do", "qqopen-do"].includes(String(request.headers.get("X-QQAI-Transport") || "")) && verifyOneBotAccess(request, env);
     const httpTransport = ["/onebot/event", "/event"].includes(url.pathname) && env.ENABLE_ONEBOT_HTTP_EVENTS === "true" && verifyOneBotAccess(request, env);
     if (!internalTransport && !httpTransport) return new Response("Not Found", { status: 404 });
 
@@ -1114,7 +1114,8 @@ const QQAIWorker = {
           voiceFile = quotedVoice.file;
         }
       }
-      const botMentioned = Boolean(botId && mentionedQqs.includes(botId));
+      const qqOpenIngress = body.__qqai_platform === "qq-open";
+      const botMentioned = Boolean((qqOpenIngress && body.__qqai_explicit_question === true && isGroup) || (botId && mentionedQqs.includes(botId)));
       const duplicateMentionNoise = isGroup && botMentioned && oneBotBotMentionCount(body) > 1 && (!eventPlainText(body).trim() || oneBotEventIsPunctuationOnly(body));
       if (duplicateMentionNoise) {
         ctx.waitUntil(writeAiDecisionLog(env, {
@@ -1132,8 +1133,8 @@ const QQAIWorker = {
       // 为保留「所有指令均有自然语言」，此处只运行本地确定性解析器，不调用任何模型。
       if (isPrivate && !isDeveloper) {
         privateAccessMode = await getPrivateAccessMode(env, userId);
-        const privateChatEnabled = await getFeatureFlag(env, 'private_chat_enabled', false);
-        const privateScheduleEnabled = await getFeatureFlag(env, 'private_schedule_enabled', false);
+        const privateChatEnabled = qqOpenIngress ? true : await getFeatureFlag(env, 'private_chat_enabled', false);
+        const privateScheduleEnabled = qqOpenIngress ? true : await getFeatureFlag(env, 'private_schedule_enabled', false);
         const appealEnabled = await getFeatureFlag(env, 'private_appeal_enabled', DEFAULTS.appealEnabled);
 
         if (!isCommandMessage && !aiReplyOptOut) {
@@ -1326,7 +1327,8 @@ const QQAIWorker = {
             isDeveloper,
             isGroup,
             groupId: currentGroupId,
-            userId
+            userId,
+            principalId: String(body.__qqai_principal_id || userId)
           });
           await clearThinkingIndicator();
 
@@ -4084,6 +4086,59 @@ export class OneBotHub {
 
       this.trackEventTask(this.kickQueueScheduler().catch(error => console.error("restore queued questions failed", error)));
       return new Response(null, { status: 101, webSocket: client });
+    }
+
+    if (request.method === "POST" && url.pathname === "/v4/qqopen/process") {
+      const payload = await request.json().catch(() => null);
+      const body = payload?.body;
+      if (!body || body.__qqai_platform !== "qq-open") {
+        return Response.json({ ok: false, error: "QQ_OPEN_INTERNAL_EVENT_INVALID" }, { status: 400 });
+      }
+
+      const hub = this;
+      const localOneBotBinding = {
+        idFromName(name) { return String(name || "default"); },
+        get() {
+          return {
+            fetch(input, init) {
+              const directRequest = input instanceof Request ? input : new Request(String(input), init);
+              return hub.fetch(directRequest);
+            }
+          };
+        }
+      };
+      const platformEnv = Object.create(this.env);
+      Object.defineProperty(platformEnv, "ONEBOT_HUB", { value: localOneBotBinding, enumerable: true, configurable: true });
+      platformEnv.QQAI_EVENT_PLATFORM = "qq-open";
+      platformEnv.QQAI_QQOPEN_GROUP_ID = String(body.group_id || "");
+      platformEnv.QQAI_QQOPEN_USER_ID = String(body.user_id || "");
+      platformEnv.QQAI_QQOPEN_MESSAGE_ID = String(body.message_id || body.flag || "");
+      platformEnv.QQAI_QQOPEN_BOT_USER_ID = String(body.self_id || "");
+
+      const token = String(this.env.ONEBOT_ACCESS_TOKEN || "").trim();
+      if (!token) return Response.json({ ok: false, error: "ONEBOT_ACCESS_TOKEN_REQUIRED_FOR_INTERNAL_LOOPBACK" }, { status: 503 });
+      const base = String(this.env.PUBLIC_BASE_URL || "https://qqai-internal").replace(/\/+$/, "");
+      const internalRequest = new Request(base + "/__onebot_event", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": "Bearer " + token,
+          "X-QQAI-Transport": "qqopen-do"
+        },
+        body: JSON.stringify(body)
+      });
+      const waits = [];
+      const directContext = {
+        waitUntil(promise) {
+          const pending = Promise.resolve(promise);
+          waits.push(pending);
+          try { hub.state?.waitUntil?.(pending); } catch {}
+        },
+        passThroughOnException() {}
+      };
+      const response = await QQAIWorker.fetch(internalRequest, platformEnv, directContext);
+      for (const pending of waits) this.trackEventTask(pending.catch(() => {}));
+      return response;
     }
 
     if (request.method === "POST" && url.pathname === "/v3/codex/quota") {
