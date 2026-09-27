@@ -3,8 +3,8 @@ import { dbGet } from "../../data/store.js";
 import { callCodexBridgeWebSocket } from "./codex-bridge.js";
 import { consumePublicCodexQuota, publicCodexQuotaConfig, refundPublicCodexQuota } from "./codex-policy.js";
 
-function codexScope({ isGroup, groupId, userId }) {
-  return isGroup ? `group:${String(groupId || "")}` : `private:${String(userId || "")}`;
+function codexPrincipalId(context = {}) {
+  return String(context.principalId || context.userId || "").trim();
 }
 
 async function groupPrompt(env, { isGroup, groupId, userId, developer = false } = {}) {
@@ -72,12 +72,18 @@ async function executeCodexUserCommand(env, command, context = {}) {
     }
   }
 
-  const scope = codexScope(context);
+  const principalId = codexPrincipalId(context);
+  if (!principalId) {
+    const error = new Error("CODEX_PRINCIPAL_REQUIRED");
+    error.code = "CODEX_PRINCIPAL_REQUIRED";
+    throw error;
+  }
   const raw = command.originalPromptOnly === true;
   const rootAlias = String(command.rootAlias || "");
-  // Public Codex, CodexChat and CodexWork are capability modes inside one
-  // stable conversation for the same QQ user + chat scope.
-  const sessionKey = `qqaibot:${scope}:user:${context.userId}:codex`;
+  // Direct !codex / !codexchat / !codexwork intentionally share one
+  // conversation per stable principal. Plugin-internal Codex keeps its own
+  // isolated session because it is machine work, not the user's main chat.
+  const sessionKey = `qqaibot:principal:${principalId}:codex`;
 
   const messages = [];
   if (!raw && mode !== "work") {
@@ -151,4 +157,4 @@ async function executeCodexUserCommand(env, command, context = {}) {
   };
 }
 
-export { executeCodexUserCommand, uploadCodexAttachments };
+export { codexPrincipalId, executeCodexUserCommand, uploadCodexAttachments };
