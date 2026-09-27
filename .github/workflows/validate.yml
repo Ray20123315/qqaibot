@@ -7,6 +7,7 @@ on:
       - refactor/v2-modular-worker
       - codex/v3-forward-staging-20260924
       - chatgpt/qqaibot-continue-20260925
+      - v4-qqopen-native
   pull_request:
     branches:
       - main
@@ -31,5 +32,7 @@ jobs:
         run: npm run check
       - name: Run V3 regression checks
         run: npm run check:v3
+      - name: Run V4 QQ Open regression checks
+        run: npm run check:v4
       - name: Build the single Worker bundle
         run: npm run check:bundle
