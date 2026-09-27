@@ -1,33 +1,38 @@
 # VERIFY
 
-## Product verification
+## Canonical Product Verification
 
-Canonical GitHub Actions workflow:
-- `.github/workflows/validate.yml`
+- workflow: `.github/workflows/validate.yml`
+- verified product commit: `b6d757261f2c5ceffda09e78b20bfc466456640f`
+- verified run_id: `36304035160`
+- `npm run check`: success
+- `npm run check:v3`: success
+- `npm run check:bundle`: success
 
-Required checks:
-- `npm run check`
-- `npm run check:v3`
-- `npm run check:bundle`
+## Targeted Codex / Diagnostics Regressions Included in `check:v3`
 
-Verified run:
-- run_id: 36268773902
-- product_commit: 0d86baf190a02de5be3e9622ddceea248eb67e8a
-- result: success
+- `verify-v3-host-adapter.mjs`: success
+- `verify-v3-codex-websocket.mjs`: success
+- `verify-codex-command.mjs`: success
+- `verify-codex-policy.mjs`: success
+- `verify-codex-work-security.mjs`: success
+- `verify-portal-diagnostics.mjs`: success
 
-## Targeted invariants
+## Important Invariants
 
-- `src/members/details.js` must not contain user-visible sections named `【OneBot 即时原始资料】` or `【D1 已保存完整资料】`.
-- The formatter must not stringify `details.liveSources`, `details.storedSources`, or the whole `details.operationalState` into QQ output.
-- `worker.js` must not contain the success text `已尝试撤回该消息。`.
-- Successful administrator recall path must return HTTP 204.
-- `src/operations/runtime.js` must keep a fixed AI command allowlist and reject unknown intent.
-- Routed execution must occur before effective permissions are recalculated in the normal command path.
+- Public `!codex` cannot select another model or reasoning level; policy remains GPT-6 Luna / `none`.
+- Public quota storage failure fails closed.
+- Public failure path refunds quota where possible.
+- `!codexchat` and `!codexwork` remain developer-only.
+- Work bridge read roots are required for filesystem work.
+- Edit roots must be contained within read roots.
+- Sensitive paths and symlinks are excluded from snapshots.
+- Staging deletions are reported/ignored and never applied to source files.
+- Writeback validates every target against local edit roots.
+- QQ export requires explicit markers and a safe file inside the staging root.
+- Portal diagnostics requires developer/system-admin authorization and redacts log output.
+- Safe repair reports `aiUsed: false`.
 
-## Runtime smoke test still recommended
+## External / Live Verification Still Needed
 
-Use a real QQ group/NapCat connection and confirm:
-1. `!详细资料 @成员` is concise and contains no raw JSON.
-2. Admin reply + `!撤回` removes the target message without a bot success message.
-3. A normal member cannot use natural language to perform an admin-only command.
-4. Admin natural-language requests still trigger the same confirmation/permission behavior as explicit `!` commands.
+A live test on the user's computer is still required because this environment cannot inspect the installed Codex CLI, its authentication state, Windows filesystem ACLs, or the actual NapCat process. The first smoke test should use read-only CodexWork with no edit roots configured.

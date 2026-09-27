@@ -1,29 +1,46 @@
 # DECISIONS
 
 ## D-001 Curated member-detail output
-
 status: accepted
 date: 2026-09-27
-
-Decision: retain the underlying data collection for functionality/audit, but format QQ output as curated fields and source-state summaries. Do not stringify full OneBot/D1 objects into user-visible QQ messages.
+Decision: retain underlying collection for functionality/audit, but expose curated fields and source-state summaries rather than raw OneBot/D1 objects.
 
 ## D-002 Silent successful recall
-
 status: accepted
 date: 2026-09-27
-
-Decision: keep errors visible, but return HTTP 204 after a successful administrator `!撤回`.
+Decision: keep recall errors visible, but successful administrator `!撤回` sends no additional success chat message.
 
 ## D-003 AI selects commands, handlers execute them
-
 status: accepted
 date: 2026-09-27
-
-Decision: AI is a routing/classification layer only. It selects from a fixed command allowlist and produces a normalized existing command. The existing command handler remains the sole executor and therefore retains all established permission and confirmation behavior.
+Decision: AI routing selects only from an allowlist and returns to the normal command path; existing permission and confirmation checks remain the executor boundary.
 
 ## D-004 Ground sensitive parameters
-
 status: accepted
 date: 2026-09-27
+Decision: sensitive target parameters must be grounded in the actual user message/mentions/quote context.
 
-Decision: member targets and web URLs selected by the router must be grounded in actual mentions/source text. Recall additionally requires an actual quoted message.
+## D-005 Split public and developer Codex surfaces
+status: accepted
+date: 2026-09-27
+Decision: public `!codex` is quota-bound, fixed to GPT-6 Luna and reasoning `none`; developer-only advanced controls move to `!codexchat`; local filesystem work is developer-only via `!codexwork`.
+
+## D-006 Public quota is per user and per Taipei day
+status: accepted
+date: 2026-09-27
+Decision: use D1-backed counters with a deployment-configurable default of 5 requests/day/user. Reserve before invocation and refund on failed bridge invocation when possible.
+
+## D-007 Filesystem authority lives on the local host
+status: accepted
+date: 2026-09-27
+Decision: Worker-supplied work metadata and model prompts are not sufficient authorization. The local bridge independently canonicalizes roots, excludes sensitive/symlink paths, snapshots into staging, validates every write destination against edit roots, and never applies deletions.
+
+## D-008 Isolate CodexWork context and integrations
+status: accepted
+date: 2026-09-27
+Decision: use a dedicated `QQAI_CODEX_HOME`, do not copy `.codex`/`.agents`/`node_modules` or sensitive credential files into the work snapshot, and instruct Codex to use only necessary/on-demand context rather than loading unrelated integrations.
+
+## D-009 Deterministic diagnostics before AI repair
+status: accepted
+date: 2026-09-27
+Decision: Portal self-check and safe repair are deterministic/no-AI. Repair is limited to reversible runtime housekeeping such as socket restoration and queue scheduler kick; it does not modify user computer files.

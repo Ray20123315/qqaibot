@@ -1,25 +1,33 @@
 # GOTCHAS
 
 ## G-001 Raw structure leakage through report formatters
-
-Risk: even when values are secret-sanitized, `JSON.stringify` of operational/live/stored objects exposes unnecessary internal schema and large payloads.
-
-Avoidance: format only named user-facing fields and source availability/status summaries.
+Risk: even secret-sanitized `JSON.stringify` can expose internal schema and oversized operational payloads.
+Avoidance: expose named user-facing fields and concise state summaries only.
 
 ## G-002 Natural-language routing can desynchronize parser inputs
-
-Risk: changing only `cleanMessage` leaves `parseArgs` reading the original `userMessage`, which can break parameterized commands.
-
-Avoidance: when applying a routed command, synchronize the normalized command into the parser's command view while preserving actual quote context from the OneBot event.
+Risk: changing only normalized command text while parameter parsing still reads the original message can break routed commands.
+Avoidance: synchronize routed command text into the existing parser view while preserving real OneBot quote/mention context.
 
 ## G-003 Model output must not become an execution primitive
+Risk: arbitrary model-produced command/action text could bypass permissions.
+Avoidance: fixed command allowlists plus existing handlers remain authoritative.
 
-Risk: allowing a classifier to emit arbitrary `!` text or OneBot actions could create a permission bypass.
+## G-004 Host filesystem safety cannot rely on prompts
+Risk: a prompt saying “read only” does not technically prevent path traversal, symlink escape, deletion, or writeback outside the intended folders.
+Avoidance: canonicalize locally, require read/edit allowlists, skip symlinks/sensitive paths, work in staging, validate every destination, and never propagate deletion.
 
-Avoidance: use `AI_COMMAND_TOOL_COMMANDS` + `buildAiCommandToolCommand`; unknown intent returns empty and execution always returns to the existing handler.
+## G-005 Public Codex needs atomic-ish quota behavior
+Risk: checking quota separately from incrementing allows races and failed calls can consume user allowance unfairly.
+Avoidance: reserve with D1 update/verification and refund failed bridge calls where possible; fail closed when quota storage is unavailable.
 
-## G-004 Interruption can leave delivery claims unverified
+## G-006 Conversation continuity must survive bridge process restarts
+Risk: a stable Worker session key alone does not resume a Codex CLI thread after the bridge restarts.
+Avoidance: map session keys to Codex thread IDs in the dedicated bridge home and use `codex exec resume`; treat unexpected thread changes as an error.
 
-Risk: a tool action can complete even when its result message is interrupted.
+## G-007 Context isolation is part of the safety/performance boundary
+Risk: using the user's normal Codex home or copying project integration directories can silently load unrelated MCP/plugin/skill context and consume context window or expose capabilities.
+Avoidance: dedicated `QQAI_CODEX_HOME`, excluded integration directories, and explicit on-demand-minimal policy.
 
-Avoidance: recovery must read back GitHub/Gmail state before retrying. In this task the Gmail notification was verified in Sent, so it must not be resent.
+## G-008 Large feature edits can leave duplicated source/test fragments
+Risk: sequential automated replacements in a large file produced duplicated declarations (`const statusMsg`, `rawPlugin`, `statusStart`) that blocked CI before functional tests ran.
+Avoidance: always treat syntax/CI failures as blockers, inspect exact failure lines, repair only the duplicated fragment, and rerun the full workflow through bundle success.
