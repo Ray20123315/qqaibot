@@ -1,37 +1,29 @@
 # GOTCHAS
 
-## G-001 Raw structure leakage through report formatters
-Risk: even secret-sanitized `JSON.stringify` can expose internal schema and oversized operational payloads.
-Avoidance: expose named user-facing fields and concise state summaries only.
+## Existing retained risks
 
-## G-002 Natural-language routing can desynchronize parser inputs
-Risk: changing only normalized command text while parameter parsing still reads the original message can break routed commands.
-Avoidance: synchronize routed command text into the existing parser view while preserving real OneBot quote/mention context.
+- Do not leak raw internal structures in user reports.
+- Natural-language routing must not desynchronize parser inputs.
+- Model output is never an execution primitive; allowlists/handlers remain authoritative.
+- Filesystem safety cannot rely on prompts; local canonicalization/allowlists/staging/no-delete are mandatory.
+- Public Codex quota operations must handle races/failures safely.
+- Codex conversation continuity must survive bridge restarts.
+- Context isolation is part of the security/performance boundary.
+- Large automated edits can create duplicated source/test fragments; syntax and CI are blocking gates.
+- CJS executable bundles cannot assume `import.meta.url`.
 
-## G-003 Model output must not become an execution primitive
-Risk: arbitrary model-produced command/action text could bypass permissions.
-Avoidance: fixed command allowlists plus existing handlers remain authoritative.
+## G-010 OpenID is not a QQ number
+Risk: numeric-only helpers can strip or corrupt `openid`, `member_openid`, and `group_openid`.
+Avoidance: V4 identities remain opaque strings and gain an explicit platform identity layer before legacy numeric code is migrated.
 
-## G-004 Host filesystem safety cannot rely on prompts
-Risk: a prompt saying “read only” does not technically prevent path traversal, symlink escape, deletion, or writeback outside the intended folders.
-Avoidance: canonicalize locally, require read/edit allowlists, skip symlinks/sensitive paths, work in staging, validate every destination, and never propagate deletion.
+## G-011 QQ Gateway intents and session state are strict
+Risk: unauthorized intents can close the connection; losing `session_id`/`seq` weakens Resume behavior.
+Avoidance: request only authorized intents, persist session/sequence state, implement heartbeat/reconnect/resume as a first-class runtime.
 
-## G-005 Public Codex needs atomic-ish quota behavior
-Risk: checking quota separately from incrementing allows races and failed calls can consume user allowance unfairly.
-Avoidance: reserve with D1 update/verification and refund failed bridge calls where possible; fail closed when quota storage is unavailable.
+## G-012 QQ command-panel limits
+Risk: a single panel has a finite item limit and silently slicing the registry loses commands.
+Avoidance: generate multiple panels/pages; never truncate the compatibility catalog without surfacing the omission.
 
-## G-006 Conversation continuity must survive bridge process restarts
-Risk: a stable Worker session key alone does not resume a Codex CLI thread after the bridge restarts.
-Avoidance: map session keys to Codex thread IDs in the dedicated bridge home and use `codex exec resume`; treat unexpected thread changes as an error.
-
-## G-007 Context isolation is part of the safety/performance boundary
-Risk: using the user's normal Codex home or copying project integration directories can silently load unrelated MCP/plugin/skill context and consume context window or expose capabilities.
-Avoidance: dedicated `QQAI_CODEX_HOME`, excluded integration directories, and explicit on-demand-minimal policy.
-
-## G-008 Large feature edits can leave duplicated source/test fragments
-Risk: sequential automated replacements in a large file produced duplicated declarations that blocked CI before functional tests ran.
-Avoidance: treat syntax/CI failures as blockers, inspect exact failure lines, repair only the duplicated fragment, and rerun the full workflow through bundle success.
-
-## G-009 CJS executable bundles cannot assume import.meta.url
-Risk: bundling ESM source to CommonJS for `pkg` turns `import.meta` into an empty object; calling `fileURLToPath(import.meta.url)` then crashes the packaged EXE.
-Avoidance: executable wrapper entry detection must use `process.pkg` / `process.argv` and avoid `import.meta.url` in the CJS bundle path. The fixed Windows smoke test proves `--help` executes.
+## G-013 Cloudflare outbound WebSocket lifecycle
+Risk: an outbound WebSocket from a Durable Object does not use inbound WebSocket hibernation semantics and can still require reconnection after lifecycle events.
+Avoidance: persist enough Gateway state for reconnection/resume and do not treat process lifetime as connection lifetime.

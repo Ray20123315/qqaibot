@@ -1,26 +1,22 @@
 # USER_REQUIREMENTS
 
-## Current Codex / Local Work Requirements
+## Active V4 Requirements
 
-- `!codexwork` and `--codexwork` may access the user's computer only through explicitly permitted folders.
-- Local files are read-only by default; no delete capability is permitted.
-- Restricted editing is allowed only for explicitly configured folders and must not imply general computer access.
-- CodexWork should be able to return selected local/generated files through the bridge and send them to QQ.
-- Avoid loading unrelated plugins, skills, MCP servers, or other context unless the request actually needs them.
-- Public `!codex` / `--codex` is available to everyone with bounded quota and always uses GPT-6 Luna with no reasoning, including developers.
-- Developers use `!codexchat` / `--codexchat` for advanced Codex behavior.
-- Direct `!codex`, `!codexchat`, and `!codexwork` must use the same Codex conversation for the same QQ user/chat scope.
-- Suffix/plugin `--codex`, `--codexchat`, and `--codexwork` should likewise keep continuity within the same plugin/user/chat scope.
-- Windows EXE packaging must reuse the existing Codex bridge rather than replacing its established filesystem security behavior.
-- The bridge should run in the background without requiring a persistent PowerShell window and should support Windows logon auto-start.
-- Bridge secrets and allowlisted local paths must stay in local config/environment, not Git.
-- The computer must remain protected by explicit local folder boundaries.
-- Portal needs terminal-style logs that can be viewed and downloaded.
-- Portal needs self-check and safe automatic repair; prefer deterministic/no-AI repair.
-- Changes requested in this task go directly to `main` after verification.
+- Rebuild QQAIBOT toward QQ Open Platform native integration rather than maintaining a permanent OneBot compatibility illusion.
+- All existing commands should become compatible with the new architecture.
+- Use QQ custom menus and command panels where useful, while keeping text-command compatibility.
+- Command definitions should be single-source so text commands, AI routing, help, menus and panels do not drift apart.
+- If the bot is a QQ group administrator and the official API permits it, member-message recall should remain available under QQAIBOT authorization rules.
+- Preserve valuable mature systems: Codex Bridge, AI providers, plugins, D1/Portal data, quota/cooldown and security controls.
+- Do not expose or commit AppSecret.
+- Migration should be recoverable; keep the current OneBot production path until QQ Open passes verification.
 
-## Existing Durable Requirements Still in Force
+## Existing Codex / Local Work Requirements Still in Force
 
-- Existing command permissions and confirmation gates remain authoritative; AI routing must not bypass them.
-- User-visible member-detail output should remain curated instead of dumping raw OneBot/D1 structures.
+- `!codex`, `!codexchat`, and `!codexwork` share one conversation for the same user/chat scope; plugin suffix variants keep plugin-scoped continuity.
+- Public `!codex` is quota-bound and fixed to GPT-6 Luna with no reasoning; advanced CodexChat/CodexWork remain developer-only.
+- CodexWork local files are read-only by default, editing is restricted to explicit local allowlists, and deletion is never allowed.
+- CodexWork may export selected allowed files back to QQ.
+- Avoid loading unrelated plugins/skills/integrations unless necessary.
+- Existing permission/confirmation gates remain authoritative.
 - Successful administrator recall remains silent while failures remain visible.

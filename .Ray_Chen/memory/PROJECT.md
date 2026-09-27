@@ -2,17 +2,19 @@
 
 ## Purpose
 
-QQAIBOT is a QQ bot project using Cloudflare Worker infrastructure, OneBot/NapCat integration, permission-aware command handling, AI routing, and a V3 plugin platform.
+QQAIBOT is a QQ bot project on Cloudflare Workers. The current production path uses OneBot/NapCat; the active V4 migration builds a native QQ Open Platform transport while preserving mature AI, Codex, plugin, Portal, and data layers.
 
 ## Canonical Repository
 
 - GitHub: `Ray20123315/qqaibot`
-- Canonical branch: `main`
+- production branch: `main`
+- active V4 branch: `v4-qqopen-native`
 
 ## Long-term Safety Constraints
 
-- Preserve existing command permission checks; AI routing must never become a bypass.
-- High-risk group operations remain governed by existing role/permission/confirmation logic.
-- Do not expose raw internal OneBot/D1 structures to QQ users when a curated human-readable report is sufficient.
-- Avoid unnecessary plugin/tool loading in runtime paths.
-- Never write secrets, tokens, cookies, private keys, or authorization material into project memory.
+- Existing command permission and confirmation checks remain authoritative; UI/AI must not bypass them.
+- QQ Open `openid` / `group_openid` are first-class identifiers; do not fake them into numeric QQ IDs.
+- Bot capability and caller authorization are separate checks.
+- Never commit AppSecret, tokens, cookies, private keys, bridge tokens, or other authorization material.
+- Keep CodexWork local filesystem authorization on the local bridge with explicit read/edit allowlists and no deletion.
+- Keep production OneBot available until QQ Open receive/send/permissions/moderation pass end-to-end verification.

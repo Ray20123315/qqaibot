@@ -1,69 +1,77 @@
 # ACTIVE_TASK
 
-task_id: qqaibot-20260927-codex-shared-session-exe
-task_status: completed
+task_id: qqaibot-20260927-qqopen-v4-native
+task_status: active
 goal_revision: 1
 
 ## Goal
 
-Extend the existing Codex bridge without replacing its security model:
-1. Package the existing local Codex bridge as a Windows x64 EXE suitable for background use.
-2. Preserve the existing read/edit allowlists, staging, sensitive-path exclusions, no-delete behavior, export flow, and outbound-only WebSocket architecture.
-3. Make direct `!codex`, `!codexchat`, and `!codexwork` reuse the same Codex conversation for the same QQ user/chat scope.
-4. Keep suffix/plugin `--codex`, `--codexchat`, and `--codexwork` on one stable thread within the same plugin/user/chat scope.
-5. Add CI that actually builds and smoke-tests the Windows EXE.
+Build QQAIBOT V4 as a QQ Open Native architecture while preserving mature non-transport functionality. Replace transport, identity, message/action integration, and command presentation incrementally instead of emulating QQ Open as OneBot.
 
 ## Acceptance Criteria
 
-- The EXE imports and runs `tools/codex-work-bridge.mjs`; it does not duplicate filesystem authorization logic.
-- Local bridge token/config remain local and are not committed as secrets.
-- The EXE supports config initialization, foreground debug mode, hidden background launch, install/remove logon startup, and custom config path.
-- Direct three-mode Codex commands share `qqaibot:<scope>:user:<qq>:codex`.
-- Plugin/suffix three-mode Codex commands share one plugin-scoped Codex key.
-- Mode switches, work root changes, and read/edit mode changes do not intentionally create another direct Codex thread.
-- Existing public quota and developer-only restrictions remain unchanged.
-- Repository regression, V3 regression, and Worker dry-run bundle pass.
-- A Windows runner builds the executable and runs `QQAIBOT-CodexBridge.exe --help` successfully.
-- Built EXE SHA-256 is recorded.
+- QQ Open WebSocket lifecycle supports Identify, Heartbeat, Resume, reconnect and persisted session/sequence state.
+- QQ Open events normalize into the canonical message model using OpenID identities.
+- QQ OpenAPI actions cover messaging, media, member operations, moderation, join approval, menus and panels needed by existing features.
+- A single Command Registry becomes the source for text commands, AI routing, help, QQ custom menu and QQ command panels.
+- Existing command aliases remain compatible unless explicitly retired.
+- Backend permissions remain authoritative even when QQ panels use `only_admin`.
+- Codex Bridge, AI providers, plugin runtime, D1/Portal data, quotas and cooldowns remain preserved unless migration requires an adapter.
+- Production does not switch until regression, Worker bundle, and live QQ Open end-to-end tests pass.
+
+## Current Phase
+
+phase: 1 — foundation
+current_step: Phase 1 foundation written, remotely read back, and CI-verified.
 
 ## Completed Steps
 
-- Unified direct Codex session key in `src/v3/ai/codex-command-runtime.js`.
-- Unified plugin/suffix Codex session key in `src/v3/host/adapter.js`.
-- Updated help/usage/README and relevant regression expectations.
-- Exported bridge `main()` so the Windows wrapper reuses the existing core.
-- Added `tools/codex-bridge-windows.mjs` and local config example.
-- Added `npm run codex:bridge:exe`.
-- Added `.github/workflows/build-codex-bridge-exe.yml`.
-- Added `verify-codex-bridge-exe.mjs`.
-- Repaired the first Windows bundle smoke failure caused by CJS `import.meta.url` handling.
-- Product commits: `9b4a20cf4aec9d2322b6aec6b1788e103c227ecd`, `700402392c28678931f8432103fe464814fcaf86`, `e2956f001e1c6263aa58b7224c2645dd6a2c91cf`.
-- Windows EXE artifact downloaded and independently inspected as PE32+ x86-64.
+- Created branch `v4-qqopen-native` from `main` commit `523d2138ae413206eb8fe7aa85d45c5b8d7404c9`.
+- Added QQ Open gateway protocol helpers for opcodes, Identify, Heartbeat, Resume and session state.
+- Added QQ Open message-event normalization for C2C/group/channel/direct-message event shapes.
+- Added QQ OpenAPI client with access-token caching, one-time 401 refresh, menu/panel/message/recall methods.
+- Made canonical messages accept an explicit platform while preserving OneBot as the default.
+- Added Command Registry and initial 24-command compatibility catalog.
+- Added automatic multi-panel paging so commands are not silently truncated at QQ's per-panel item limit.
+- Added `npm run check:v4` and wired V4 validation into branch CI.
+- Added `docs/v4-qqopen-native.md`.
+- No AppSecret or real credential was committed.
+
+## Files Created
+
+- `src/v4/qqopen/gateway.js`
+- `src/v4/qqopen/events.js`
+- `src/v4/qqopen/api.js`
+- `src/v4/commands/registry.js`
+- `src/v4/commands/catalog.js`
+- `src/v4/index.js`
+- `verify-v4-qqopen.mjs`
+- `docs/v4-qqopen-native.md`
+
+## Files Modified
+
+- `src/v3/message/core.js`
+- `package.json`
+- `.dev.vars.example`
+- `.github/workflows/validate.yml`
 
 ## Verification Results
 
-- GitHub Actions validate run `36305191852`: success.
-- `npm run check`: success.
-- `npm run check:v3`: success.
-- `npm run check:bundle`: success.
-- Windows EXE run `36305191806`: success.
-- Windows EXE build: success.
-- Windows EXE `--help` smoke test: success.
-- Artifact ID: `10926823025`.
-- Artifact GitHub digest: `sha256:1cbd5f11699a3daeb1b7bf597d32ccee6518db99cf9f7a5d5d4d0d932af84e9b`.
-- EXE size: `57625687` bytes.
-- EXE SHA-256: `457a5d6ca74011ae2a9c13c5f95f9017492a82787a050428819e888a6b205513`.
-- Final relevant blobs read back from `main`: success.
-- Live end-to-end test on the user's Windows machine with the user's actual Codex CLI/NapCat remains not available from this environment.
+- isolated `npm run check:v4`: success (`verify-v4-qqopen: ok`) before remote publication.
+- remote branch read-back of all Phase 1 product files: success.
+- branch CI: success; latest product run `36309169883` passed regression, V3, V4 and Worker bundle.
+- production/live QQ Open end-to-end: not run.
 
-## Known Limitations
+## Known Limitations / Blockers
 
-- The EXE does not contain the user's bridge token or filesystem paths; these must be configured locally.
-- Production Cloudflare deployment revision was not changed or verified by this task.
-- Actual local Codex CLI login, Windows ACLs, NapCat file upload, and real QQ end-to-end behavior still require one smoke test on the user's computer.
+- No persistent Gateway runtime is connected to Worker/Durable Object yet.
+- No production QQ Open credential has been configured or used.
+- Action coverage is intentionally incomplete; current client is Phase 1 only.
+- Initial registry covers 24 key commands, not the complete legacy command surface yet.
+- `main` remains OneBot/NapCat and has not been changed by this migration phase.
 
 ## next_exact_action
 
-On the user's Windows computer, place `QQAIBOT-CodexBridge.exe`, run `--init-config`, fill only the local bridge token and explicit read/edit roots, run `--run` for the first smoke test, then issue `!codex`, `!codexchat`, and `!codexwork` sequentially in the same QQ chat and confirm context continuity plus one safe CodexWork read/export.
+Implement a persistent QQ Gateway runtime with Durable Object lifecycle/session persistence, then add a platform action dispatcher so existing handlers can migrate from OneBot actions to native QQ OpenAPI one capability at a time.
 
-last_checkpoint_at: 2026-09-27T16:10:00+08:00
+last_checkpoint_at: 2026-09-27T17:25:00+08:00

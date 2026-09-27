@@ -1,68 +1,37 @@
 # CURRENT_STATE
 
-## Verified Product State
+## Repository State
 
-- canonical repository: `Ray20123315/qqaibot`
-- canonical branch: `main`
-- verified product commit: `e2956f001e1c6263aa58b7224c2645dd6a2c91cf`
-- validate run: `36305191852` — success
-- Windows EXE run: `36305191806` — success
-- regression checks: success
-- V3 regression checks: success
-- single Worker dry-run bundle: success
+- production branch: `main`
+- production base observed at migration start: `523d2138ae413206eb8fe7aa85d45c5b8d7404c9`
+- V4 development branch: `v4-qqopen-native`
+- latest Phase 1 product commit: `685f6923bec7a010af8802ccd6e8ada3adc7242f`
+- latest Phase 1 CI run: `36309169883` — success
+- production runtime switch: not performed
+- Cloudflare deployment: not changed
+- QQ Open console configuration: not changed
 
-## Shared Codex Conversation Model
+## V4 Phase 1
 
-### Direct QQ commands
+Implemented:
+- QQ Open WebSocket protocol payload/state helpers.
+- QQ Open message-event to canonical-message normalization using OpenID values.
+- QQ OpenAPI access-token caching and initial API wrappers.
+- Command Registry with aliases, scopes, permissions, menu metadata, panel metadata, and automatic multi-panel paging.
+- Initial 24-command compatibility catalog.
+- V4 isolated verification and CI hook.
 
-For the same QQ user and chat scope, these capability modes share one stable session key:
+Not yet implemented:
+- live persistent QQ Gateway client in Worker/Durable Object.
+- platform action dispatcher replacing OneBot RPC calls.
+- full legacy-command catalog migration.
+- full moderation/member/media/join-request API coverage.
+- live QQ Open end-to-end verification.
 
-`qqaibot:<group-or-private-scope>:user:<qq>:codex`
+## Preserved Systems
 
-Therefore:
-- `!codex`
-- `!codexchat`
-- `!codexwork`
+Existing Codex Bridge EXE/security model, shared Codex conversation design, AI providers, plugin runtime, D1 data, Portal, quota/cooldown logic and current OneBot production path remain intact.
 
-resume the same Codex thread instead of creating mode-specific threads. Changing CodexWork root or toggling read/edit no longer intentionally changes the direct thread key.
+## Credential State
 
-Public `!codex` remains quota-bound and fixed to GPT-6 Luna with reasoning `none`. `!codexchat` and `!codexwork` remain developer-only.
-
-### Plugin/suffix Codex modes
-
-`--codex`, `--codexchat`, and `--codexwork` share a stable key within the same plugin + QQ user + chat scope. Plugin isolation is retained so unrelated plugin tasks do not silently merge conversations.
-
-## Windows Codex Bridge EXE
-
-- File: `QQAIBOT-CodexBridge.exe`
-- Architecture: Windows x86-64 PE32+.
-- Size: 57,625,687 bytes.
-- SHA-256: `457a5d6ca74011ae2a9c13c5f95f9017492a82787a050428819e888a6b205513`.
-- GitHub Actions artifact: `QQAIBOT-CodexBridge-Windows-x64`, artifact ID `10926823025`.
-- Artifact expires according to GitHub retention policy; a conversation copy was also downloaded for delivery.
-
-The EXE wrapper imports the existing `tools/codex-work-bridge.mjs` core. It supports:
-- `--init-config`
-- `--run`
-- `--install-startup`
-- `--uninstall-startup`
-- `--config <path>`
-- no-argument hidden background launch
-
-Default local config path is `%APPDATA%\QQAIBOT\codex-bridge.json`.
-
-## Filesystem Security Boundary
-
-The existing bridge remains authoritative:
-- read roots are explicit allowlists;
-- edit roots must be inside read roots;
-- staging snapshots are used;
-- symlinks and sensitive paths are excluded;
-- deletions are never propagated;
-- writeback validates destinations;
-- exports are explicit and bounded;
-- the bridge connects outbound to Worker.
-
-## Deployment / Runtime State
-
-Repository implementation and Windows packaging are verified. Production Cloudflare deployment revision and live local Windows Codex CLI/NapCat/QQ behavior were not changed or verified in this task.
+No QQ AppSecret or live access token is present in the repository or Ray_Chen memory. `.dev.vars.example` contains placeholders only.
