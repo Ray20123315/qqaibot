@@ -40,7 +40,8 @@ const fakeFetch = async (url, options={}) => {
 const api = createQqOpenApiClient({ appId:"1905687174", clientSecret:"secret", fetchImpl:fakeFetch, now:()=>1000 });
 await api.getMenu();
 await api.sendGroupMessage("group/A", { content:"hello", msg_type:0 });
-await api.deleteGroupMessage("group/A", "m/1", { hideTip:true });\nawait api.deleteC2CMessage("user/A", "cm/1");
+await api.deleteGroupMessage("group/A", "m/1", { hideTip:true });
+await api.deleteC2CMessage("user/A", "cm/1");
 await api.uploadGroupFile("group/A", { file_type:1, url:"https://example.com/a.png", srv_send_msg:false });
 await api.uploadC2CFile("user/A", { file_type:2, url:"https://example.com/a.mp4", srv_send_msg:false });
 await api.getGroupMembers("group/A", { cursor:"next/1", limit:20 });
@@ -55,7 +56,8 @@ await api.setGroupMuteSetting("group/A", { mutes:[{ op:"add", member_openid:"mem
 assert.equal(tokenCalls, 1, "token should be cached");
 assert.equal(requests[1].options.headers.Authorization, "QQBot token-1");
 assert.match(requests[2].url, /\/v2\/groups\/group%2FA\/messages$/);
-assert.match(requests[3].url, /group%2FA\/messages\/m%2F1\?hidetip=true$/);\nassert(requests.some(x => /\/v2\/users\/user%2FA\/messages\/cm%2F1$/.test(x.url) && x.options.method === "DELETE"));
+assert.match(requests[3].url, /group%2FA\/messages\/m%2F1\?hidetip=true$/);
+assert(requests.some(x => /\/v2\/users\/user%2FA\/messages\/cm%2F1$/.test(x.url) && x.options.method === "DELETE"));
 assert(requests.some(x => /\/v2\/groups\/group%2FA\/files$/.test(x.url) && x.options.method === "POST"));
 assert(requests.some(x => /\/v2\/users\/user%2FA\/files$/.test(x.url) && x.options.method === "POST"));
 assert(requests.some(x => /\/v2\/groups\/group%2FA\/members\?cursor=next%2F1&limit=20$/.test(x.url)));

@@ -2,7 +2,8 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import { createCanonicalMessage } from "./src/v3/message/core.js";
 import {
-  countQqOpenLegacyMessages,\n  legacyMessageParts,
+  countQqOpenLegacyMessages,
+  legacyMessageParts,
   qqOpenJoinRequestToLegacyBody,
   qqOpenLegacyAction,
   qqOpenMessageToLegacyBody,
@@ -47,7 +48,8 @@ const api = {
   sendC2CMessage: async (id, payload) => { calls.push(["sendC2CMessage", id, payload]); return { id: "sent-c" }; },
   uploadGroupFile: async (id, payload) => { calls.push(["uploadGroupFile", id, payload]); return { file_info: "fi-g" }; },
   uploadC2CFile: async (id, payload) => { calls.push(["uploadC2CFile", id, payload]); return { file_info: "fi-c" }; },
-  deleteGroupMessage: async (groupId, messageId) => { calls.push(["deleteGroupMessage", groupId, messageId]); return { ok: true }; },\n  deleteC2CMessage: async (userId, messageId) => { calls.push(["deleteC2CMessage", userId, messageId]); return { ok: true }; },
+  deleteGroupMessage: async (groupId, messageId) => { calls.push(["deleteGroupMessage", groupId, messageId]); return { ok: true }; },
+  deleteC2CMessage: async (userId, messageId) => { calls.push(["deleteC2CMessage", userId, messageId]); return { ok: true }; },
   getGroupInfo: async id => ({ group_openid: id, name: "G" }),
   getGroupMember: async (groupId, userId) => ({ member_openid: userId, member_name: "M", role: "admin" }),
   getGroupMembers: async () => ({ members: [{ member_openid: "u1", member_name: "M1", role: "member" }] }),
