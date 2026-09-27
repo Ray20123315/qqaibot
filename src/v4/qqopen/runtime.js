@@ -13,6 +13,7 @@ import {
 const QQ_OPEN_GATEWAY_STORAGE_KEY = "v4:qqopen:gateway";
 const DEFAULT_QQ_OPEN_INTENTS = 1 << 25;
 const DEFAULT_RECONNECT_MS = 5000;
+const CONNECT_TIMEOUT_MS = 20000;
 
 function truthy(value) {
   return /^(?:1|true|yes|on|enabled)$/i.test(String(value ?? "").trim());
@@ -66,6 +67,12 @@ function safeError(error) {
   return String(error?.message || error || "UNKNOWN_ERROR").slice(0, 500);
 }
 
+function qqOpenReconnectDelay(failureStreak) {
+  const streak = Math.max(0, Number(failureStreak || 0));
+  const exponent = Math.min(4, Math.max(0, Math.floor(streak) - 1));
+  return Math.min(60000, DEFAULT_RECONNECT_MS * (2 ** exponent));
+}
+
 function defaultPersistedState() {
   return {
     gateway: createGatewayState(),
@@ -85,7 +92,8 @@ function defaultPersistedState() {
     lastErrorAt: 0,
     lastError: "",
     reconnectCount: 0,
-    connectCount: 0
+    connectCount: 0,
+    failureStreak: 0
   };
 }
 
@@ -100,6 +108,7 @@ export class QqOpenGateway {
     this.dispatcher = null;
     this.heartbeatTimer = null;
     this.reconnectTimer = null;
+    this.connectTimeoutTimer = null;
     this.connectPromise = null;
     this.eventTasks = new Set();
     this.persisted = defaultPersistedState();
@@ -168,7 +177,8 @@ export class QqOpenGateway {
       lastErrorAt: Number(this.persisted.lastErrorAt || 0),
       lastError: String(this.persisted.lastError || ""),
       reconnectCount: Number(this.persisted.reconnectCount || 0),
-      connectCount: Number(this.persisted.connectCount || 0)
+      connectCount: Number(this.persisted.connectCount || 0),
+      failureStreak: Number(this.persisted.failureStreak || 0)
     });
   }
 
@@ -230,6 +240,7 @@ export class QqOpenGateway {
 
     this.connectPromise = this.connect()
       .catch(async error => {
+        this.persisted.failureStreak = Number(this.persisted.failureStreak || 0) + 1;
         await this.recordError(error);
         this.scheduleReconnect("connect_failed");
         return { ...this.status(), ok: false, error: safeError(error) };
@@ -266,6 +277,7 @@ export class QqOpenGateway {
     this.persisted.connectCount = Number(this.persisted.connectCount || 0) + 1;
     await this.persist();
 
+    this.startConnectTimeout(socket, generation);
     socket.addEventListener("open", () => {
       this.track(this.onOpen(socket, generation));
     });
@@ -288,6 +300,7 @@ export class QqOpenGateway {
 
   async onOpen(socket, generation) {
     if (!this.isCurrent(socket, generation)) return;
+    this.clearConnectTimeout();
     this.persisted.connecting = false;
     this.persisted.connected = true;
     this.persisted.connectedAt = Date.now();
@@ -349,6 +362,8 @@ export class QqOpenGateway {
     if (eventType === "READY") {
       this.persisted.gateway = reduceGatewayPayload(this.persisted.gateway, payload);
       this.persisted.botUserId = String(payload?.d?.user?.id || "");
+      this.persisted.failureStreak = 0;
+      this.persisted.lastError = "";
       await this.persist();
       return;
     }
@@ -413,6 +428,7 @@ export class QqOpenGateway {
 
   async onClose(socket, generation, event) {
     if (!this.isCurrent(socket, generation)) return;
+    this.clearConnectTimeout();
     this.stopHeartbeat();
     this.socket = null;
     this.persisted.connected = false;
@@ -423,6 +439,7 @@ export class QqOpenGateway {
     });
     if (!this.persisted.suspended) {
       this.persisted.reconnectCount = Number(this.persisted.reconnectCount || 0) + 1;
+      this.persisted.failureStreak = Number(this.persisted.failureStreak || 0) + 1;
       this.persisted.lastErrorAt = Date.now();
       this.persisted.lastError = `QQ_OPEN_SOCKET_CLOSED:${Number(event?.code || 0)}:${String(event?.reason || "").slice(0, 180)}`;
     }
@@ -432,12 +449,35 @@ export class QqOpenGateway {
 
   async onError(socket, generation, event) {
     if (!this.isCurrent(socket, generation)) return;
+    this.persisted.failureStreak = Number(this.persisted.failureStreak || 0) + 1;
     await this.recordError(new Error(`QQ_OPEN_SOCKET_ERROR:${String(event?.message || event?.type || "error")}`));
+    await this.disconnect("socket_error", { preserveSession: true, suspend: false });
+    this.scheduleReconnect("socket_error");
   }
 
-  scheduleReconnect(reason, delayMs = DEFAULT_RECONNECT_MS) {
+  startConnectTimeout(socket, generation) {
+    this.clearConnectTimeout();
+    this.connectTimeoutTimer = setTimeout(() => {
+      this.connectTimeoutTimer = null;
+      if (!this.isCurrent(socket, generation) || socketOpen(socket)) return;
+      this.persisted.failureStreak = Number(this.persisted.failureStreak || 0) + 1;
+      this.track((async () => {
+        await this.recordError(new Error("QQ_OPEN_CONNECT_TIMEOUT"));
+        await this.disconnect("connect_timeout", { preserveSession: true, suspend: false });
+        this.scheduleReconnect("connect_timeout");
+      })());
+    }, CONNECT_TIMEOUT_MS);
+  }
+
+  clearConnectTimeout() {
+    if (this.connectTimeoutTimer) clearTimeout(this.connectTimeoutTimer);
+    this.connectTimeoutTimer = null;
+  }
+
+  scheduleReconnect(reason, delayMs = 0) {
     if (this.persisted.suspended || !qqOpenEnabled(this.env) || this.reconnectTimer) return;
-    const delay = Math.max(500, Math.min(60000, Number(delayMs) || DEFAULT_RECONNECT_MS));
+    const requested = Number(delayMs) || qqOpenReconnectDelay(this.persisted.failureStreak);
+    const delay = Math.max(500, Math.min(60000, requested));
     this.reconnectTimer = setTimeout(() => {
       this.reconnectTimer = null;
       this.track(this.ensureConnected({ force: true }).catch(error => this.recordError(new Error(`${reason}:${safeError(error)}`))));
@@ -451,6 +491,7 @@ export class QqOpenGateway {
 
   async disconnect(reason = "disconnect", { preserveSession = true, suspend = true } = {}) {
     this.clearReconnectTimer();
+    this.clearConnectTimeout();
     this.stopHeartbeat();
     if (suspend) this.persisted.suspended = true;
     const socket = this.socket;
@@ -469,6 +510,7 @@ export class QqOpenGateway {
 }
 
 export {
+  CONNECT_TIMEOUT_MS,
   DEFAULT_QQ_OPEN_INTENTS,
   QQ_OPEN_GATEWAY_STORAGE_KEY,
   buildConnectivityReply,
@@ -476,5 +518,6 @@ export {
   qqOpenConfigured,
   qqOpenEnabled,
   qqOpenIntents,
+  qqOpenReconnectDelay,
   stripBotMention
 };
