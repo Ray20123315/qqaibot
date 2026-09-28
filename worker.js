@@ -49,7 +49,7 @@ import { deleteUserMemoryList, readUserMemoryList, writeUserMemoryList } from ".
 import { handleV3PluginManagerApi, injectV3PluginManagerClient } from "./src/v3/portal/plugin-manager.js";
 import { handleV3PackageManagerApi, injectV3PackageManagerClient } from "./src/v3/portal/package-manager.js";
 import { handleV3PluginSecurityPublic, runV3PluginSecurityScheduled } from "./src/v3/public/plugin-security.js";
-import { withV3TestDatabaseNamespace } from "./src/v3/testing/db-namespace.js";
+import { withConfiguredDatabaseNamespace } from "./src/data/db-namespace.js";
 import { oneBotReadOnlyMode } from "./src/onebot/read-only.js";
 
 
@@ -202,7 +202,7 @@ async function checkPortalAuthRateLimit(env, scope, principal, request) {
 
 const QQAIWorker = {
   async fetch(request, env, ctx) {
-    env = withV3TestDatabaseNamespace(env);
+    env = withConfiguredDatabaseNamespace(env);
     env = await portalEnvironmentWithManagedDeveloperIds(env);
     const url = new URL(request.url); // 👈 保留此行，避免後續代碼崩潰！
 
@@ -4068,7 +4068,7 @@ ${deepseekContextSummary}`;
   }, // 结束 fetch 函式
 
   async scheduled(controller, env, ctx) {
-    env = withV3TestDatabaseNamespace(env);
+    env = withConfiguredDatabaseNamespace(env);
     const cronMode = scheduledCronMode(controller?.cron);
     if (cronMode === "cleanup") {
       const now = Number(controller?.scheduledTime || Date.now());
@@ -4108,7 +4108,7 @@ export { QqOpenGateway } from "./src/v4/qqopen/runtime.js";
 export class OneBotHub {
   constructor(state, env) {
     this.state = state;
-    this.env = withV3TestDatabaseNamespace(env);
+    this.env = withConfiguredDatabaseNamespace(env);
     this.activeSocket = null;
     this.connectionId = "";
     this.connectedAt = null;

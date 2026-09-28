@@ -1,3 +1,4 @@
+import { withConfiguredDatabaseNamespace } from "../../data/db-namespace.js";
 import { createQqOpenActionDispatcher } from "../platform/actions.js";
 import { createInitialCommandRegistry } from "../commands/catalog.js";
 import { createQqOpenApiClient } from "./api.js";
@@ -130,7 +131,7 @@ function defaultPersistedState() {
 export class QqOpenGateway {
   constructor(state, env) {
     this.state = state;
-    this.env = env;
+    this.env = withConfiguredDatabaseNamespace(env);
     this.socket = null;
     this.socketGeneration = 0;
     this.accessToken = "";
