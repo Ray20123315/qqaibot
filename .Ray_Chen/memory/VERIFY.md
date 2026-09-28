@@ -1,8 +1,12 @@
 # VERIFY
 
-## Verified Main Revision
+## Verified Revisions
 
+Product revision:
 `a78003cda6ef9b5d8b8b9d28dd2a798aa3d2424a`
+
+Final main/dev memory head:
+`806af06ba56f0d8f9741bb2520b58be60069126f`
 
 ## Keyboard Regression
 
@@ -11,7 +15,7 @@ Verified by V4 regression:
 - basic category contains clickable `help` / `status` callbacks;
 - AI-management category paginates;
 - navigation callbacks use `!面板 ... --page=N`;
-- QQ Open group message endpoint receives keyboard payload;
+- QQ Open group endpoint receives keyboard payload;
 - runtime normalizes/sanitizes keyboard payloads;
 - deterministic keyboard capability failures may fall back to text;
 - ambiguous failures are not duplicated;
@@ -21,8 +25,11 @@ Verified by V4 regression:
 
 - original keyboard branch `36477960735`: SUCCESS
 - keyboard/main product merge `36478691850`: SUCCESS
-- latest dev head `36479102835`: SUCCESS
-- main `36479310886`: SUCCESS
+- latest dev head before promotion `36479102835`: SUCCESS
+- product main `36479310886`: SUCCESS
+- final memory-head `36479807514`: SUCCESS
+- duplicate final validation `36479804549`: SUCCESS
+- v0.0.35 packaging `36479807508`: SUCCESS
 
 All passed:
 - repository regression checks
@@ -38,14 +45,6 @@ Connected Build `09d6a646-a0b2-4e98-b73d-d9f2c74925c0`:
 - commit: `a78003cda6ef9b5d8b8b9d28dd2a798aa3d2424a`
 - branch: `main`
 - outcome: success
-
-## Main Read-back
-
-Confirmed on main:
-- worker contains `buildGroupCategoryKeyboard` and `qq_inline_keyboard`;
-- group-panel module contains keyboard builder, pagination and two-column layout;
-- QQ Open runtime contains keyboard normalization and deterministic fallback;
-- Portal TEMP-admin and D1 auth-rate-limit fallback are still present.
 
 ## Remaining Live Verification
 
