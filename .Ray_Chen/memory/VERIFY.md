@@ -1,37 +1,52 @@
 # VERIFY
 
-## Keyboard Product Integration
+## Verified Main Revision
 
-Product merge commit:
-`af4b743fec796cc071aafce3559f66c2ae7c9a50`
+`a78003cda6ef9b5d8b8b9d28dd2a798aa3d2424a`
 
-Integration run `36478691850`: SUCCESS.
+## Keyboard Regression
 
-Passed:
+Verified by V4 regression:
+- category reply includes keyboard rows;
+- basic category contains clickable `help` / `status` callbacks;
+- AI-management category paginates;
+- navigation callbacks use `!面板 ... --page=N`;
+- QQ Open group message endpoint receives keyboard payload;
+- runtime normalizes/sanitizes keyboard payloads;
+- deterministic keyboard capability failures may fall back to text;
+- ambiguous failures are not duplicated;
+- Worker exposes `qq_inline_keyboard` for category-only replies.
+
+## GitHub Actions
+
+- original keyboard branch `36477960735`: SUCCESS
+- keyboard/main product merge `36478691850`: SUCCESS
+- latest dev head `36479102835`: SUCCESS
+- main `36479310886`: SUCCESS
+
+All passed:
 - repository regression checks
 - V3 regression checks
 - V4 QQ Open regression checks
 - isolated V4 test deployment checks
 - single Worker bundle
-- system-admin authentication regression inherited from newest main
+- system-admin auth regression
 
-Keyboard regression verifies:
-- category reply contains inline keyboard rows;
-- basic category has clickable help/status callbacks;
-- AI-management category paginates;
-- page navigation uses `!面板 ... --page=N`;
-- QQ Open group message endpoint receives keyboard payload;
-- runtime includes keyboard normalization and deterministic fallback;
-- Worker returns `qq_inline_keyboard` metadata for category-only routing.
+## Cloudflare Production
 
-## Preserved TEMP Admin Verification
+Connected Build `09d6a646-a0b2-4e98-b73d-d9f2c74925c0`:
+- commit: `a78003cda6ef9b5d8b8b9d28dd2a798aa3d2424a`
+- branch: `main`
+- outcome: success
 
-- hotfix CI `36477469841`: SUCCESS
-- prior main CI `36477699417`: SUCCESS
-- production build `e1e34aef-e53d-4851-9fbe-0f686f9c3651`: SUCCESS
-- TEMP secret binding names present
-- live health: HTTP 200, ok=true, 10 ok / 1 warning / 0 error
+## Main Read-back
 
-## Pending
+Confirmed on main:
+- worker contains `buildGroupCategoryKeyboard` and `qq_inline_keyboard`;
+- group-panel module contains keyboard builder, pagination and two-column layout;
+- QQ Open runtime contains keyboard normalization and deterministic fallback;
+- Portal TEMP-admin and D1 auth-rate-limit fallback are still present.
 
-Latest memory-reconciled development-head CI must pass, then main and production must be verified after promotion.
+## Remaining Live Verification
+
+Automated tests cannot render QQ's actual client. Live-click one group category and one child button.

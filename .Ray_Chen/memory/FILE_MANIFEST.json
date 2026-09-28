@@ -1,22 +1,22 @@
 {
   "schema_version": 1,
-  "memory_version": "v0.0.34",
+  "memory_version": "v0.0.35",
   "task_id": "qqaibot-20260929-group-panel-keyboard",
   "goal_revision": 1,
-  "transaction": "group_panel_keyboard_merge_main_memory_20260929",
+  "transaction": "group_panel_keyboard_final_20260929",
   "repository": "Ray20123315/qqaibot",
   "production_branch": "main",
   "development_branch": "hotfix/temp-system-admin-login-20260929",
-  "product_before_revision": "4865c7c6c9f381916082e70063be78aaaba8e6d6",
-  "product_after_revision": "af4b743fec796cc071aafce3559f66c2ae7c9a50",
+  "product_before_revision": "a78003cda6ef9b5d8b8b9d28dd2a798aa3d2424a",
+  "product_after_revision": "a78003cda6ef9b5d8b8b9d28dd2a798aa3d2424a",
   "verification": {
     "feature_product_ci_run": 36366445081,
     "regression_ci_run": 36366534308,
-    "main_ci_run": 36476525721,
+    "main_ci_run": 36479310886,
     "github_ci": "success",
     "isolated_cloudflare_build": "e280d9fb-bb0d-4659-91e8-cb2db205e1a3",
     "isolated_cloudflare_outcome": "success",
-    "production_cloudflare_build": "e1e34aef-e53d-4851-9fbe-0f686f9c3651",
+    "production_cloudflare_build": "09d6a646-a0b2-4e98-b73d-d9f2c74925c0",
     "production_cloudflare_outcome": "success",
     "production_worker_version": "2aa24e2a-b640-4ac2-83ae-07efb428b099",
     "production_bindings_readback": "success",
@@ -25,10 +25,10 @@
     "live_mapping_after_fix": "pending_user_test",
     "command_fallback_implementation": "verified",
     "development_ci": "success",
-    "main_update": "pending",
+    "main_update": "verified",
     "development_ci_run": 36476322049,
     "main_ci": "success",
-    "production_commit": "64513e94f6634921f0b1ee8f7c6d5d44a754a6f5",
+    "production_commit": "a78003cda6ef9b5d8b8b9d28dd2a798aa3d2424a",
     "main_readback": "success",
     "command_catalog_entries": 77,
     "full_command_panel_restoration": "verified",
@@ -90,7 +90,14 @@
     "keyboard_pagination": "verified",
     "keyboard_interaction_routing": "verified",
     "temp_admin_memory_preserved": true,
-    "latest_dev_head_ci": "pending"
+    "latest_dev_head_ci": "pending",
+    "keyboard_original_dev_ci_run": 36477960735,
+    "keyboard_product_merge_ci_run": 36478691850,
+    "keyboard_latest_dev_head_ci_run": 36479102835,
+    "keyboard_latest_dev_head_ci": "success",
+    "keyboard_deterministic_fallback": "verified",
+    "temp_admin_hotfix_preserved": "verified",
+    "live_keyboard_smoke_test": "pending_user"
   },
   "changes": [
     {
@@ -1365,10 +1372,44 @@
       "after_revision": "this_memory_merge",
       "verification": "v0.0.34 archive + CI required",
       "changed_at": "2026-09-29T04:55:00+08:00"
+    },
+    {
+      "location_type": "github",
+      "provider": "GitHub",
+      "resource_id_or_path": "refs/heads/main",
+      "action": "fast_forward",
+      "branch_or_container": "main",
+      "before_revision": "e1af24a4a35afcda1d9e20d47f7fd03f87d59298",
+      "after_revision": "a78003cda6ef9b5d8b8b9d28dd2a798aa3d2424a",
+      "verification": "main CI 36479310886 success",
+      "changed_at": "2026-09-29T05:05:00+08:00"
+    },
+    {
+      "location_type": "cloudflare",
+      "provider": "Cloudflare",
+      "resource_id_or_path": "workers/scripts/qqai",
+      "action": "auto_deployed_by_connected_build",
+      "branch_or_container": "production",
+      "before_revision": "4865c7c6c9f381916082e70063be78aaaba8e6d6",
+      "after_revision": "a78003cda6ef9b5d8b8b9d28dd2a798aa3d2424a",
+      "commit_or_hash": "09d6a646-a0b2-4e98-b73d-d9f2c74925c0",
+      "verification": "Connected Build outcome success",
+      "changed_at": "2026-09-29T05:05:00+08:00"
+    },
+    {
+      "location_type": "github",
+      "provider": "GitHub",
+      "resource_id_or_path": ".Ray_Chen/memory/*",
+      "action": "final_reconciliation",
+      "branch_or_container": "main + v4-qqopen-native",
+      "before_revision": "v0.0.34",
+      "after_revision": "v0.0.35",
+      "verification": "read-back + TAR.GZ extraction + SHA-256 required before final response",
+      "changed_at": "2026-09-29T05:05:00+08:00"
     }
   ],
   "internal_memory_transaction": {
-    "action": "merge completed TEMP-admin memory with active keyboard task and bump to v0.0.34",
-    "note": "No product code changes in this memory-history merge."
+    "action": "complete QQ group-panel inline-keyboard task and bump memory to v0.0.35",
+    "note": "Product is verified on main and production. Remaining work is one live QQ client smoke test only."
   }
 }

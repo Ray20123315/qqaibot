@@ -5,11 +5,14 @@
 - QQ Open/AIBot is the primary official bot transport and action path.
 - Do not make the old Bot a competing primary command responder.
 - Restore and retain the full QQAI 2.7.12 function surface, including !codexchat and !codexwork.
-- Group command discovery must expose ordinary functions as well as management/developer functions.
+- Group discovery must expose ordinary functions as well as management/developer functions.
 - Developer is the top cumulative permission level for commands available in the current scope.
 - QQ group discovery must work in the actual client, not merely create API resources successfully.
-- Because QQ group PanelItem has no nested submenu, use one managed group root panel with category commands and route category subcommands to existing handlers.
-- QQ-rendered `/!面板 ...` must be treated as a reserved panel command.
+- Use one managed group category-root panel because QQ group PanelItem has no nested submenu.
+- Selecting a category should return a clickable two-column QQ button card similar to the user's reference UX; plain text is fallback, not the primary UX.
+- Large categories must paginate within QQ keyboard limits.
+- Button callbacks must reuse the existing canonical ! commands and existing handlers.
+- QQ-rendered `/!面板 ...` is reserved for panel routing.
 - Ordinary manual `/!普通内容` must continue to bypass AI.
 - Existing server-side permission checks, confirmations, cooldowns and Portal switches remain authoritative.
 - Restore and retain the full Portal/web functionality.
