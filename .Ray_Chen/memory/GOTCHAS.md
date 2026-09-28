@@ -2,12 +2,12 @@
 
 ## Retained
 
-G-001 through G-048 remain relevant.
+G-001 through G-050 remain relevant.
 
-## G-049 Specific QQ panels can shadow general discovery
-Risk: a `target_type=specific` panel set filtered to only privileged commands can make ordinary commands disappear for the privileged user if the QQ client prioritizes specific panels.
-Mitigation: specific privileged panels must be cumulative and regression-tested against the lower-permission command set.
+## G-051 Group panels cannot target one user
+Risk: assuming `target_type=specific` can target a Developer inside a group leads to a design the QQ API does not support.
+Mitigation: group panels are group-scoped; keep all group commands discoverable by category and enforce Developer/owner permissions at runtime.
 
-## G-050 Artificial panel caps can break cumulative visibility
-Risk: inheriting lower-permission categories increases panel count; an internal cap below QQ's official 20-panel limit can reject otherwise valid discovery.
-Mitigation: enforce the official 20-panel maximum and rely on discovery fingerprinting to avoid unnecessary resyncs.
+## G-052 Privileged-only group filtering removes normal commands
+Risk: building group discovery from only management permission classes makes ordinary commands appear missing to privileged users.
+Mitigation: group discovery is generated from all permission classes and regression-tested against every enabled group-scoped command.
