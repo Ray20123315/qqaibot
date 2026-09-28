@@ -54,6 +54,91 @@ function compactChildList(rows, max = 12) {
   return names.join("、") + (rows.length > max ? "…" : "");
 }
 
+const GROUP_PANEL_BUTTON_COLUMNS = 2;
+const GROUP_PANEL_BUTTON_ROWS = 5;
+const GROUP_PANEL_COMMANDS_PER_PAGED_VIEW = 8;
+
+function groupCategoryMeta(value) {
+  const token = clean(value);
+  return GROUP_PANEL_CATEGORY_META.find(meta => meta.key === token) || categoryMetaByToken(token);
+}
+
+function keyboardButton(id, label, data, style = 1) {
+  const text = clean(label).slice(0, 20) || "指令";
+  return Object.freeze({
+    id: clean(id).slice(0, 64),
+    render_data: Object.freeze({
+      label: text,
+      visited_label: text,
+      style: Number(style || 0)
+    }),
+    action: Object.freeze({
+      type: 1,
+      data: clean(data).slice(0, 1000)
+    })
+  });
+}
+
+function buildGroupCategoryKeyboard(registry, category, { page = 1 } = {}) {
+  const meta = groupCategoryMeta(category);
+  if (!meta) return null;
+  const commands = groupCommandsForCategory(registry, meta.key);
+  if (!commands.length) return null;
+
+  const paged = commands.length > GROUP_PANEL_BUTTON_COLUMNS * GROUP_PANEL_BUTTON_ROWS;
+  const pageSize = paged ? GROUP_PANEL_COMMANDS_PER_PAGED_VIEW : commands.length;
+  const totalPages = Math.max(1, Math.ceil(commands.length / pageSize));
+  const currentPage = Math.min(totalPages, Math.max(1, Number(page) || 1));
+  const start = (currentPage - 1) * pageSize;
+  const visible = commands.slice(start, start + pageSize);
+
+  const rows = [];
+  for (let offset = 0; offset < visible.length; offset += GROUP_PANEL_BUTTON_COLUMNS) {
+    rows.push(Object.freeze({
+      buttons: Object.freeze(visible.slice(offset, offset + GROUP_PANEL_BUTTON_COLUMNS).map((command, index) =>
+        keyboardButton(
+          `qqai_${meta.key}_${currentPage}_${offset + index}`,
+          commandToken(command.panel.command),
+          command.panel.command,
+          1
+        )
+      ))
+    }));
+  }
+
+  if (totalPages > 1) {
+    const nav = [];
+    if (currentPage > 1) nav.push(keyboardButton(
+      `qqai_${meta.key}_prev_${currentPage}`,
+      "上一页",
+      `!面板 ${meta.label} --page=${currentPage - 1}`,
+      0
+    ));
+    if (currentPage < totalPages) nav.push(keyboardButton(
+      `qqai_${meta.key}_next_${currentPage}`,
+      "下一页",
+      `!面板 ${meta.label} --page=${currentPage + 1}`,
+      0
+    ));
+    if (nav.length) rows.push(Object.freeze({ buttons:Object.freeze(nav) }));
+  }
+
+  if (rows.length > GROUP_PANEL_BUTTON_ROWS) throw new Error(`QQ_OPEN_GROUP_KEYBOARD_ROWS:${rows.length}`);
+  if (rows.some(row => row.buttons.length > 5)) throw new Error("QQ_OPEN_GROUP_KEYBOARD_COLUMNS");
+  return Object.freeze({
+    category: meta.key,
+    label: meta.label,
+    page: currentPage,
+    totalPages,
+    commands: Object.freeze(visible),
+    keyboard: Object.freeze({
+      content: Object.freeze({
+        rows: Object.freeze(rows)
+      })
+    })
+  });
+}
+
 function buildGroupRootPanel(registry, { remark = "QQAIBOT V4 GROUP ROOT" } = {}) {
   const items = [];
   for (const meta of GROUP_PANEL_CATEGORY_META) {
@@ -98,8 +183,23 @@ function resolveGroupPanelInput(input, registry) {
   }
 
   const tail = clean(match[2] || "");
-  const help = `【${meta.label}】子指令：${compactChildList(rows)}\n用法：!面板 ${meta.label} <子指令> [参数]\n原本的 ! 指令仍可直接使用。`;
-  if (!tail) return Object.freeze({ matched:true, expanded:"", category:meta.key, rows:Object.freeze(rows), message:help });
+  const pageMatch = tail.match(/^--page(?:=|\s+)(\d+)$/i);
+  const requestedPage = pageMatch ? Number(pageMatch[1] || 1) : 1;
+  const keyboardView = buildGroupCategoryKeyboard(registry, meta.key, { page:requestedPage });
+  const pageSuffix = keyboardView && keyboardView.totalPages > 1
+    ? `（${keyboardView.page}/${keyboardView.totalPages}）`
+    : "";
+  const help = `【${meta.label}】请选择子指令${pageSuffix}\n备用文字：${compactChildList(rows)}\n原本的 ! 指令仍可直接使用。`;
+  if (!tail || pageMatch) return Object.freeze({
+    matched:true,
+    expanded:"",
+    category:meta.key,
+    rows:Object.freeze(rows),
+    page:keyboardView?.page || 1,
+    totalPages:keyboardView?.totalPages || 1,
+    keyboard:keyboardView?.keyboard || null,
+    message:help
+  });
 
   const tokenMatch = tail.match(/^([^\s]+)(?:\s+([\s\S]+))?$/);
   const token = commandToken(tokenMatch?.[1] || "");
@@ -137,6 +237,7 @@ function assertGroupPanelCoverage(registry) {
 export {
   GROUP_PANEL_CATEGORY_META,
   assertGroupPanelCoverage,
+  buildGroupCategoryKeyboard,
   buildGroupRootPanel,
   normalizeGroupPanelSlashInvocation,
   resolveGroupPanelInput
