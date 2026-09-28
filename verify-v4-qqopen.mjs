@@ -251,6 +251,13 @@ assert(firstDiscovery.categories.includes("basic"));
 assert(firstDiscovery.categories.includes("group-ops"));
 assert(firstDiscovery.categories.includes("ai-admin"));
 assert(firstDiscovery.categories.includes("developer"));
+const groupSyncPanels = discoveryCalls
+  .filter(row => row[0] === "createPanel" && row[1] === "group" && row[2]?.target_type === "all")
+  .map(row => row[2]);
+const groupSyncNames = new Set(groupSyncPanels.flatMap(panel => panel.panel.items).map(item => item.name));
+for (const name of ["!help","!codex","!群状态","!活动","!禁言","!群白名单","!授权"]) {
+  assert(groupSyncNames.has(name), `Synced group panels missing ${name}`);
+}
 const developerSyncPanels = discoveryCalls
   .filter(row => row[0] === "createPanel" && row[2]?.target_type === "specific" && row[2]?.user_openids?.includes("dev-openid"))
   .map(row => row[2]);
