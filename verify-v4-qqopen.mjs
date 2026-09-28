@@ -53,6 +53,9 @@ await api.getGroupJoinRequests("group/A", { limit:20 });
 await api.reviewGroupJoinRequest("group/A", "member/A", { op:"approve", join_request_id:"req-1" });
 await api.getGroupMuteSetting("group/A");
 await api.setGroupMuteSetting("group/A", { mutes:[{ op:"add", member_openid:"member/A", mute_expire_at:"2026-09-28T00:00:00+08:00" }] });
+await api.putMenu({ items:[{ name:"帮助", type:"send_message", send_message:"!help" }] });
+await api.listPanels({ scope:"c2c", limit:20 });
+await api.updatePanel("panel/A", { items:[{ type:"command", name:"!help" }] });
 assert.equal(tokenCalls, 1, "token should be cached");
 assert.equal(requests[1].options.headers.Authorization, "QQBot token-1");
 assert.match(requests[2].url, /\/v2\/groups\/group%2FA\/messages$/);
@@ -67,6 +70,11 @@ assert(requests.some(x => /\/v2\/groups\/group%2FA\/member_blacklist/.test(x.url
 assert(requests.some(x => /\/v2\/groups\/group%2FA\/join_request_list/.test(x.url)));
 assert(requests.some(x => /\/v2\/groups\/group%2FA\/approval_join_request\/member%2FA$/.test(x.url)));
 assert(requests.some(x => /\/v2\/groups\/group%2FA\/restrict_chat_setting$/.test(x.url)));
+const menuPut = requests.find(x => /\/v2\/menu$/.test(x.url) && x.options.method === "PUT");
+assert.deepEqual(JSON.parse(menuPut.options.body), { menu:{ items:[{ name:"帮助", type:"send_message", send_message:"!help" }] } });
+assert(requests.some(x => /\/v2\/panels\?scope=c2c&limit=20$/.test(x.url) && x.options.method === "GET"));
+const panelPut = requests.find(x => /\/v2\/panels\/panel%2FA$/.test(x.url) && x.options.method === "PUT");
+assert.deepEqual(JSON.parse(panelPut.options.body), { panel:{ items:[{ type:"command", name:"!help" }] } });
 
 const registry = createInitialCommandRegistry();
 assert(registry.size >= 20);
@@ -160,10 +168,16 @@ assert.match(buildConnectivityReply(qqidGroup), /私聊机器人发送 !qqid/);
 const discoveryCalls = [];
 const discoveryApi = {
   putMenu: async menu => { discoveryCalls.push(["putMenu", menu]); return { ok:true }; },
-  listPanels: async () => ({ panels:[
-    { panel_id:"old-v4", panel:{ remark:"QQAIBOT V4 GROUP 1" } },
-    { panel_id:"foreign", panel:{ remark:"OTHER BOT" } }
-  ] }),
+  listPanels: async ({scope,cursor,limit}) => {
+    discoveryCalls.push(["listPanels", scope, cursor, limit]);
+    return {
+      records: scope === "group"
+        ? [{ panel_id:"old-v4", panel:{ remark:"QQAIBOT V4 GROUP 1" } }, { panel_id:"foreign", panel:{ remark:"OTHER BOT" } }]
+        : [{ panel_id:"old-c2c", panel:{ remark:"QQAIBOT V4 C2C 1" } }],
+      next_cursor:"",
+      is_end:true
+    };
+  },
   deletePanel: async id => { discoveryCalls.push(["deletePanel", id]); return { ok:true }; },
   createPanel: async panel => { discoveryCalls.push(["createPanel", panel.scope]); return { id:"new-" + discoveryCalls.length }; }
 };
@@ -172,7 +186,10 @@ assert.equal(firstDiscovery.ok, true);
 assert.equal(firstDiscovery.changed, true);
 assert(discoveryCalls.some(row => row[0] === "putMenu"));
 assert(discoveryCalls.some(row => row[0] === "deletePanel" && row[1] === "old-v4"));
+assert(discoveryCalls.some(row => row[0] === "deletePanel" && row[1] === "old-c2c"));
 assert(!discoveryCalls.some(row => row[0] === "deletePanel" && row[1] === "foreign"));
+assert(discoveryCalls.some(row => row[0] === "listPanels" && row[1] === "c2c"));
+assert(discoveryCalls.some(row => row[0] === "listPanels" && row[1] === "group"));
 const callCountAfterFirst = discoveryCalls.length;
 const secondDiscovery = await syncQqOpenDiscovery(discoveryApi, registry, { previousFingerprint:firstDiscovery.fingerprint });
 assert.equal(secondDiscovery.changed, false);

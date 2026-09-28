@@ -67,7 +67,7 @@ const sent = await sendQqOpenLegacyMessage(
 assert.equal(sent.ok, true);
 assert(calls.some(row => row[0] === "sendGroupMessage" && String(row[2].content || "").includes("<@u2>")));
 assert(calls.some(row => row[0] === "uploadGroupFile" && row[2].file_type === 1));
-assert(calls.some(row => row[0] === "sendGroupMessage" && row[2].msg_type === 7));
+assert(calls.some(row => row[0] === "sendGroupMessage" && row[2].msg_type === 7 && row[2].content === " "));
 
 await qqOpenLegacyAction(api, "set_group_ban", { group_id: "g1", user_id: "u2", duration: 60 }, {});
 assert(calls.some(row => row[0] === "mute" && row[2].mutes[0].member_openid === "u2"));
@@ -127,6 +127,8 @@ assert.match(worker, /dispatchV3RuntimeEvent\(pluginEnv, pluginBody\)/);
 assert.match(worker, /body\.__qqai_principal_id \|\| userId/);
 assert.match(worker, /qqOpenIngress \? true : await getFeatureFlag\(env, 'private_chat_enabled'/);
 assert.match(runtime, /sendApplicationReplies/);
+assert(!runtime.includes("reply_plan?.mentionIds"), "QQ Open runtime must not inject raw OpenID mentions into AI replies");
+assert.match(runtime, /replyMessageId: message\.messageId/);
 assert.match(runtime, /qqOpenLegacyAction/);
 assert.match(runtime, /lastInboundUserId/);
 assert.match(runtime, /group_join_request/);
