@@ -85,7 +85,7 @@ jobs:
           grep -qi '<html' /tmp/home.html
           grep -qi 'QQAI' /tmp/home.html
           grep -qi '<html' /tmp/portal.html
-          grep -q 'QQAI 插件安全中心' /tmp/plugin-security.html
+          grep -q '插件安全检测中心' /tmp/plugin-security.html
           node --input-type=module -e 'const x=JSON.parse(await (await import("node:fs/promises")).readFile("/tmp/health.json","utf8")); if(!x||typeof x!=="object") process.exit(1);'
           printf '%s\n' "preview_url=$PREVIEW_URL" "commit=$GITHUB_SHA" > /tmp/preview-evidence.txt
           echo "Live Preview smoke tests passed."

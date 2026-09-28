@@ -14,6 +14,7 @@ assert.match(workflow,/npm run check:bundle/);
 assert.match(workflow,/Cloudflare GitHub secrets are not configured; Preview deploy steps will be skipped/);
 assert.match(workflow,/if: steps\.cf_creds\.outputs\.available == 'true'/);
 assert.match(workflow,/Smoke test live Preview/);
+assert.match(workflow,/插件安全检测中心/);
 assert.match(workflow,/upload-artifact@v4/);
 assert.doesNotMatch(workflow,/wrangler deploy --config wrangler\.toml(?! --dry-run)/);
 assert.doesNotMatch(workflow,/CLOUDFLARE_API_TOKEN:\s*["']?[A-Za-z0-9_-]{20,}/);
