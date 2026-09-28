@@ -23,6 +23,20 @@ const DISCOVERY_CATEGORY_META = Object.freeze({
 const DEFAULT_GLOBAL_DISCOVERY_PERMISSIONS = Object.freeze(["member", "group_ops", "ai_admin", "owner"]);
 
 function text(value) { return String(value ?? "").trim(); }
+function qqTextUnits(value) {
+  let units = 0;
+  for (const char of String(value ?? "")) units += char.codePointAt(0) > 0x7f ? 2 : 1;
+  return units;
+}
+function qqSlice(value, maxUnits) {
+  let out = "", units = 0;
+  for (const char of String(value ?? "")) {
+    const size = char.codePointAt(0) > 0x7f ? 2 : 1;
+    if (units + size > maxUnits) break;
+    out += char; units += size;
+  }
+  return out;
+}
 function normalizeScopes(value) {
   const rows = Array.isArray(value) ? value : [value];
   const out = [...new Set(rows.map(text).filter(Boolean))];
@@ -40,6 +54,8 @@ function defineCommand(spec = {}) {
   if (!aliases.length) throw new Error(`V4_COMMAND_ALIAS_REQUIRED:${id}`);
   const category = text(spec.category || "general");
   const categoryMeta = discoveryCategory(spec.panel?.category || category);
+  const panelCommand = text(spec.panel?.command || aliases[0]);
+  if (spec.panel?.enabled !== false && qqTextUnits(panelCommand) > 14) throw new Error(`V4_COMMAND_PANEL_NAME_TOO_LONG:${id}`);
   return Object.freeze({
     id,
     aliases: Object.freeze(aliases),
@@ -52,8 +68,8 @@ function defineCommand(spec = {}) {
     panel: Object.freeze({
       enabled: spec.panel?.enabled !== false,
       onlyAdmin: Boolean(spec.panel?.onlyAdmin),
-      command: text(spec.panel?.command || aliases[0]),
-      desc: text(spec.panel?.desc || spec.description).slice(0, 30)
+      command: panelCommand,
+      desc: qqSlice(text(spec.panel?.desc || spec.description), 30)
     }),
     menu: Object.freeze({
       enabled: spec.menu?.enabled !== false,
@@ -105,8 +121,8 @@ function createCommandRegistry(definitions = []) {
     );
     return Object.freeze({
       type: "command",
-      name: command.panel.command.slice(0, 14),
-      desc: command.panel.desc.slice(0, 30),
+      name: command.panel.command,
+      desc: command.panel.desc,
       ...(adminOnly ? { only_admin: true } : {})
     });
   }
@@ -204,7 +220,7 @@ function createCommandRegistry(definitions = []) {
     for (const group of grouped.values()) {
       if (items.length >= topLimit) break;
       const children = group.rows.slice(0, subLimit).map(command => ({
-        name: (command.menu.name || command.aliases[0]).slice(0, 14),
+        name: qqSlice(command.menu.name || command.aliases[0], 14),
         type: command.menu.type === "link" ? "link" : "send_message",
         ...(command.menu.type === "link"
           ? { link:command.menu.value }
@@ -212,7 +228,7 @@ function createCommandRegistry(definitions = []) {
       }));
       if (!children.length) continue;
       items.push(Object.freeze({
-        name: String(group.label || "更多").replace(/\s+/g, "").slice(0, 10),
+        name: qqSlice(String(group.label || "更多").replace(/\s+/g, ""), 10),
         type: "menu",
         sub_menu_items: Object.freeze(children)
       }));
