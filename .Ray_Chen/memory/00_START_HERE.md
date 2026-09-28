@@ -1,38 +1,33 @@
 # Ray_Chen Memory Entry
 
-- memory_version: v0.0.20
+- memory_version: v0.0.21
 - project: QQAIBOT
 - repository: Ray20123315/qqaibot
 - canonical_branch: main
 - development_branch: v4-qqopen-native
 - task_id: qqaibot-20260928-command-capability-fallback
-- task_status: active
+- task_status: completed
 - goal_revision: 1
-- base_commit: 08ceeb725590d9efb0160ea38733d929e6e7d18c
-- updated_at: 2026-09-28T12:25:00+08:00
+- product_revision: fd11cd640cae1124edc03b0fef3d8d8d529cc52b
+- updated_at: 2026-09-28T12:50:30+08:00
 
-## Current Goal
+## Quick Recovery
 
-Restore the full documented command surface on the QQ Open AIBot path and add a conservative capability-aware legacy OneBot fallback.
+The requested command/capability restoration is complete and verified.
 
-## Confirmed Root Causes
-
-- QQ Open inbound commands already reach the existing command pipeline through /v4/qqopen/process.
-- QQ Open actions currently throw instead of falling back when an official action is unsupported or deterministically unavailable.
-- The V4 command catalog exposes only 20 commands while !help documents a substantially larger active surface.
-- Existing hybrid mapping resolves groups, but does not retain member OpenID -> numeric QQ identity needed by some legacy-only member actions.
-
-## Safety Invariants
-
-- QQ Open remains the single primary inbound owner.
-- OneBot fallback occurs inside one AIBot command execution only after official capability evaluation.
-- Never cross-retry an ambiguous mutating QQ Open timeout/5xx result.
-- Preserve ONEBOT_READ_ONLY when it is explicitly enabled.
-- Never send group_openid/member_openid directly to NapCat numeric group/user parameters.
+- QQ Open/AIBot remains the primary inbound owner and the first action transport.
+- The V4 command catalog now exposes 75 command entries while preserving the original first-panel ordering.
+- Deterministically unsupported/unavailable QQ Open actions may fall back to legacy NapCat/OneBot only inside the same AIBot command execution.
+- Mutating legacy group fallback resolves the confirmed numeric group mapping and checks that the legacy Bot is present with the action-required role.
+- Missing legacy permission returns an actionable permission request.
+- Member-target legacy fallback requires a confirmed member OpenID <-> numeric QQ mapping; unsafe IDs are never coerced.
+- Ambiguous mutating QQ Open timeout/5xx failures are not cross-retried.
+- Development CI run 36378926121 and main CI run 36379048954 both succeeded.
+- Cloudflare production Connected Build 53058046-38a3-4ecc-9fbd-581032693db5 succeeded for fd11cd640cae1124edc03b0fef3d8d8d529cc52b.
 
 ## Recovery Route
 
-1. Read ACTIVE_TASK.md, CURRENT_STATE.md, USER_REQUIREMENTS.md, DECISIONS.md, GOTCHAS.md and VERIFY.md.
-2. Continue implementation on v4-qqopen-native.
-3. Run the full repository CI; only after success may main be fast-forwarded.
-4. Reconcile final memory, package the next version, and send the required Gmail notification.
+1. Read ACTIVE_TASK.md and CURRENT_STATE.md.
+2. Treat fd11cd640cae1124edc03b0fef3d8d8d529cc52b as the verified product revision.
+3. If live QQ behavior differs, inspect the command/action audit and the legacy Bot role/group/member mappings before changing routing.
+4. Do not re-enable parallel OneBot ingress while QQ Open is primary.

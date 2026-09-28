@@ -2,24 +2,24 @@
 
 ## Retained
 
-D-001 through D-041 remain in force.
+D-001 through D-045 remain in force.
 
-## D-042 QQ Open reply does not synthesize user mention text
+## D-046 Capability-aware legacy action fallback
 status: accepted
 date: 2026-09-28
-Decision: ordinary QQ Open AI replies must not prepend `reply_plan.mentionIds` as visible CQ/OpenID mention text. The official source-message `msg_id` and `msg_seq` carry passive-reply semantics.
+Decision: QQ Open remains the first execution transport. Legacy OneBot may run only after a deterministic official capability/permission/unavailability result (or safe read fallback), required group mapping and legacy Bot role checks pass, and required target identities can be represented safely.
 
-## D-043 Mapping observation is independent from ownership
+## D-047 Ingress ownership remains single-path
 status: accepted
 date: 2026-09-28
-Decision: all eligible human OneBot group messages may be recorded as mapping observations before transport ownership is decided. Observation does not authorize OneBot to reply or execute side effects.
+Decision: restoring legacy capabilities does not re-enable parallel command handling by the old Bot. Fallback is inside the single AIBot command execution after official capability evaluation.
 
-## D-044 Hybrid correlation is order-independent
+## D-048 Cross-transport writes use conservative retry semantics
 status: accepted
 date: 2026-09-28
-Decision: retain recent official and OneBot observations separately so either transport may arrive first. Later arrival rechecks the opposite-side observations and may add mapping evidence.
+Decision: ambiguous mutating QQ Open timeout/5xx results are not replayed through OneBot because the official side effect may already have occurred.
 
-## D-045 Discovery payload follows QQ API wrappers
+## D-049 Member identity mapping is evidence-based
 status: accepted
 date: 2026-09-28
-Decision: menu update uses `{menu}`, panel listing always supplies a scene scope, and panel update uses `{panel}`. Discovery enumerates C2C and group panels separately.
+Decision: member OpenID -> numeric QQ mapping is recorded only after the group mapping is confirmed and a correlated OneBot observation provides a numeric user ID without conflict.

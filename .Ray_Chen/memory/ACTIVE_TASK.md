@@ -1,57 +1,47 @@
 # ACTIVE_TASK
 
 task_id: qqaibot-20260928-command-capability-fallback
-task_status: active
+task_status: completed
 goal_revision: 1
 
 ## Goal
 
-Make main commands effective again while preserving QQ Open as the primary AIBot transport. Restore the documented command catalog and use the legacy Bot only as a permission-checked execution fallback for capabilities that QQ Open cannot safely execute.
+Restore the documented command/function surface on main and make legacy Bot execution a permission-checked fallback behind AIBot/QQ Open.
 
-## Acceptance Criteria
+## Acceptance Results
 
-- QQ Open inbound commands continue through the existing command/plugin pipeline.
-- Documented command families missing from V4 discovery are restored.
-- Official QQ Open action is attempted first.
-- Legacy fallback is limited to deterministic unsupported/permission/not-configured/rate-limit conditions or safe read operations.
-- Mutating group fallback resolves the numeric OneBot group and verifies legacy Bot membership/role.
-- Insufficient legacy permission returns an actionable permission request.
-- Legacy member targets require a numeric or confirmed mapped QQ identity.
-- No duplicate command execution from both ingress transports.
-- Full CI and Worker bundle validation pass before main is updated.
+- VERIFIED: QQ Open inbound commands still use the existing shared command/plugin pipeline.
+- VERIFIED: V4 command catalog restored to 75 entries while preserving the original primary panel ordering.
+- VERIFIED: QQ Open action is attempted first.
+- VERIFIED: deterministic unsupported/unavailable official actions can fall back to OneBot.
+- VERIFIED: ambiguous mutating 5xx failures do not cross-retry.
+- VERIFIED: legacy group fallback resolves the numeric group and checks legacy Bot membership/role.
+- VERIFIED: insufficient legacy permission returns a specific actionable message.
+- VERIFIED: member-target legacy fallback requires confirmed OpenID <-> numeric QQ mapping.
+- VERIFIED: auxiliary OneBot ingress remains suppressed from duplicate command ownership.
+- VERIFIED: development and main CI suites pass.
+- VERIFIED: Cloudflare production Connected Build for the final product revision succeeds.
 
-## Hard Constraints
+## Product Revision
 
-- Keep QQ_HYBRID_PRIMARY=qq-open.
-- Keep OneBot/NapCat auxiliary except for controlled action fallback.
-- Never retry ambiguous mutating QQ Open failures through OneBot.
-- Preserve ONEBOT_READ_ONLY where enabled.
-- Do not store secrets.
+`fd11cd640cae1124edc03b0fef3d8d8d529cc52b`
 
-## Execution Plan
+## Verification Evidence
 
-### Phase 1 — VERIFIED
-- Recovered v0.0.19 and current main/dev baseline 08ceeb725590d9efb0160ea38733d929e6e7d18c.
-- Confirmed the missing action fallback and the reduced V4 command catalog.
+- development CI: run `36378926121` — success
+- main CI: run `36379048954` — success
+- production build: `53058046-38a3-4ecc-9fbd-581032693db5` — success
+- main read-back: 75 command entries and representative restored aliases confirmed
+- main read-back: fallback permission probe, member mapping and 5xx write safety guard confirmed
 
-### Phase 2 — IN_PROGRESS
-- Add safe group/member mapping needed for legacy fallback.
-- Add direct OneBot fallback plus action-specific Bot role checks.
-- Expand V4 command discovery/catalog.
-- Add regression coverage.
+## Resolved Failures
 
-### Phase 3 — PLANNED
-- Commit product changes to v4-qqopen-native.
-- Verify full GitHub Actions validation and repair failures.
-- Fast-forward main only after success.
-
-### Phase 4 — PLANNED
-- Reconcile final Ray_Chen memory and verification evidence.
-- Create and verify the next TAR.GZ memory package.
-- Send one Gmail notification to ray20123315@gmail.com.
+- `d397a04d...`: V4 panel regression exposed primary panel ordering drift.
+- `6049cacf...`: catalog repair attempt exposed a malformed module tail.
+- Final repair `fd11cd640cae1124edc03b0fef3d8d8d529cc52b` resolved both; full CI is green.
 
 ## next_exact_action
 
-Implement product changes on v4-qqopen-native, then run full repository CI before updating main.
+Perform one live QQ smoke test using a restored command and one legacy-only group operation; if the latter reports insufficient legacy Bot permission, grant exactly the role named by the prompt and retry.
 
-last_checkpoint_at: 2026-09-28T12:25:00+08:00
+last_checkpoint_at: 2026-09-28T12:50:30+08:00

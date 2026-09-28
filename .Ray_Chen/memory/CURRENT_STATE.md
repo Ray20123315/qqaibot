@@ -2,71 +2,57 @@
 
 ## GitHub
 
-Production product head:
-`edeacf6cf8c215cc3987b86a4a0d5220c7f581d9`
-
-Feature implementation:
-`535804857f530dd8bf16d221422a6ed095300fe8`
-
-Verification:
-- feature product CI: success
-- regression CI `36366534308`: success
-- main CI `36366701774`: success
+- main: `fd11cd640cae1124edc03b0fef3d8d8d529cc52b`
+- v4-qqopen-native product revision: `fd11cd640cae1124edc03b0fef3d8d8d529cc52b`
+- development CI `36378926121`: success
+- main CI `36379048954`: success
 
 ## Cloudflare
 
-Production Worker: `qqai`
-Production build: `2f3fa902-2e60-44a2-8355-7459a5ef9db4`
-Outcome: success
-Worker version: `4d8fff7e-5713-4e5c-83e2-7caa9bcbb633`
+- Worker: `qqai`
+- Connected Build: `53058046-38a3-4ecc-9fbd-581032693db5`
+- commit: `fd11cd640cae1124edc03b0fef3d8d8d529cc52b`
+- branch: `main`
+- outcome: `success`
+- deploy command: `npx wrangler deploy worker.js --no-assets`
 
-Retained bindings:
-- OneBotHub
-- QqOpenGateway
-- D1
-- Vectorize
-- Workers AI
-- Rate Limiter
-- QQ Open Secret and all existing application Secrets
+## Command Surface
 
-Production Intent remains `33554432`.
+`src/v4/commands/catalog.js` contains 75 entries.
 
-## Reply Fix
+Representative restored aliases verified from main:
+- `!读网页`, `!翻译`
+- `!活动`, `!投票`, `!排程`
+- `!关闭ai`
+- `!改群名`, `!改名片`, `!确认op`
+- `!群白名单`
 
-QQ Open ordinary AI responses:
-- do not prepend `reply_plan.mentionIds`;
-- do not serialize the source user OpenID into visible text;
-- continue to include source `msg_id` and allocated `msg_seq`;
-- rich media `msg_type=7` includes placeholder content.
+The original first 20 command ordering is retained so the primary official panel behavior remains compatible with existing tests.
 
-Current QQ group/C2C message reference/quote UI cannot be forced through an unsupported `message_reference` field.
+## Capability Fallback
 
-## Discovery Fix
+`src/core/permissions.js` now:
+1. attempts QQ Open first;
+2. classifies whether fallback is safe;
+3. resolves the confirmed OneBot group mapping;
+4. checks the old Bot is connected and present in the group;
+5. verifies the action-required role;
+6. resolves member OpenID to numeric QQ when required;
+7. executes through OneBot only after those checks.
 
-The deployed API now:
-- PUTs global menu as `{ menu }`;
-- lists panels with required `scope` separately for C2C and group;
-- supports panel-list `records` and pagination;
-- PUTs panel updates as `{ panel }`.
+Owner-required fallback includes actions such as setting group administrators/special titles.
+Admin-or-owner fallback includes moderation/group-management operations such as mute, kick, whole-group mute, group rename and group card changes.
 
-Live Gateway discovery status has not yet been re-read from the authenticated Portal after deploy.
+## Safety Guards
 
-## Hybrid Mapping Fix
+- Mutating QQ Open timeout/5xx failures are not automatically replayed through OneBot.
+- QQ Open message/request IDs that cannot be safely translated are not sent to OneBot.
+- `ONEBOT_READ_ONLY` blocks write fallback when enabled.
+- OneBot remains auxiliary at ingress, preventing duplicate command execution.
 
-New D1 keys/data:
-- `hybrid_aux_recent`: OneBot observations
-- `hybrid_qqopen_recent`: QQ Open observations
-- `qqopen_group_map_evidence:<group_openid>:<numeric_group>`
-- `qqopen_group_map_candidates`
-- `qqopen_dynamic_group_map`
+## Hybrid Identity Mapping
 
-Mapping behavior:
-- observations are recorded before ownership suppression;
-- either transport may arrive first;
-- correlation window is 12 seconds;
-- generic/low-information text is ignored;
-- ambiguous candidates are rejected;
-- 3 distinct official message IDs remain required;
-- Portal exposes pending candidates/progress.
+`src/v4/hybrid/ownership.js` now stores conflict-safe member mappings after group mapping is confirmed and a matching cross-transport observation identifies a numeric QQ account.
 
-Pre-fix production D1 contained none of the learner rows, explaining the user's 0 mapping count.
+D1 member mapping key:
+- `qqopen_dynamic_member_map`

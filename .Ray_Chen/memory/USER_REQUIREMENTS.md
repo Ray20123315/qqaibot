@@ -2,16 +2,18 @@
 
 ## Active Requirements
 
-- QQ Open is the primary official bot transport/API surface.
-- Keep NapCat/OneBot for full visibility and legacy capabilities not available through QQ Open.
-- Prevent duplicate AI replies, plugins, moderation and management side effects between transports.
-- QQ Open replies must not expose raw OpenID markup such as `<@OPENID>`.
-- Use official QQ reply semantics where supported; do not fake unsupported visible quote/reference UI.
-- Automatic group mapping must work without requiring the old bot itself to be @mentioned.
-- Mapping must remain conservative and keep a static authoritative override.
-- Portal should expose mapping learning progress rather than only final mapping totals.
-- Discovery/menu/panel synchronization must use current QQ API-required fields.
-- Keep Interaction permission-gated.
+- QQ Open/AIBot is the primary official bot transport and action path.
+- All usable operations should use AIBot first.
+- When AIBot cannot deterministically perform an operation, automatically check the legacy Bot as a fallback.
+- Before a legacy group write, verify the old Bot is connected, is in the mapped group and has the required QQ group role.
+- If the old Bot lacks permission, clearly state which permission/role must be granted.
+- If the old Bot has sufficient permission and required identifiers can be safely resolved, execute the action through OneBot.
+- Do not make the old Bot a competing primary command responder; avoid duplicate replies and side effects.
+- Restore the documented command/function surface instead of exposing only a reduced subset.
+- Preserve existing first-panel command ordering/compatibility.
 - Never treat QQ Open OpenIDs as numeric QQ IDs.
-- Keep OneBot until hybrid live verification succeeds.
+- Member-target legacy actions require a confirmed member identity mapping.
+- Never retry ambiguous mutating timeout/5xx results across transports.
+- Keep `ONEBOT_READ_ONLY` protection authoritative when configured.
+- Keep conservative automatic group/member mapping with conflict rejection.
 - Secrets must not be stored in Git or Ray_Chen memory.

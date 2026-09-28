@@ -2,33 +2,33 @@
 
 ## Purpose
 
-QQAIBOT is a Cloudflare Workers QQ AI bot using a hybrid transport architecture. QQ Open is the primary official transport while NapCat/OneBot is retained for additional visibility and legacy-only capabilities.
+QQAIBOT is a Cloudflare Workers QQ AI bot using a hybrid transport architecture. QQ Open/AIBot is the primary official transport; NapCat/OneBot remains an auxiliary observation channel and a controlled capability fallback.
 
-## Production
+## Current Production
 
 - branch: `main`
+- verified product revision: `fd11cd640cae1124edc03b0fef3d8d8d529cc52b`
 - Worker: `qqai`
-- product revision: `edeacf6cf8c215cc3987b86a4a0d5220c7f581d9`
-- Durable Objects: `OneBotHub` and `QqOpenGateway`
-- D1: `qqaibot`
-- Vectorize: `qqai`
-- QQ Open Intent baseline: `33554432`
+- Cloudflare Connected Build: `53058046-38a3-4ecc-9fbd-581032693db5`
+- build outcome: `success`
+- deploy command: `npx wrangler deploy worker.js --no-assets`
+- Durable Objects: `OneBotHub`, `QqOpenGateway`
 - Hybrid primary: `qq-open`
 
 ## Transport Rules
 
-- QQ Open owns supported official message/action flows.
-- OneBot supplements missing visibility/capabilities and must not duplicate QQ Open-owned side effects.
-- Static numeric-group -> group_openid mapping is authoritative.
-- A missing group mapping may be learned only through repeated, unambiguous, time-correlated evidence; 3 distinct official message IDs are required.
-- GROUP_MESSAGE_CREATE is the switch proving official full-group observation is actually live for that official group.
-- Official active pushes require a confirmed group mapping and stored QQ push permission.
-- Numeric QQ mentions remain OneBot-owned until explicit user identity linking exists.
-- Interaction support exists but the Intent remains permission-gated.
+- QQ Open owns supported official message/action flows and is always attempted first.
+- OneBot must not process the same inbound command in parallel while QQ Open is primary.
+- A legacy action fallback is allowed only after a deterministic official unsupported/unavailable condition or for a safe read fallback.
+- Ambiguous mutating timeout/5xx results are never cross-retried.
+- Mutating group fallback requires a confirmed QQ Open group -> numeric OneBot group mapping and a live legacy Bot role check.
+- Member-target fallback requires a confirmed member OpenID -> numeric QQ mapping.
+- Static group mapping remains authoritative; learned mappings remain conservative and conflict-safe.
+- `ONEBOT_READ_ONLY` remains authoritative when enabled.
 
 ## Safety
 
 - Never store QQ AppSecret/access tokens in Git or memory.
-- Never coerce OpenID into numeric QQ.
-- Keep OneBotHub until hybrid operation is live-verified.
-- Never silently route a QQ Open side effect to NapCat.
+- Never coerce OpenID/group_openid into numeric QQ IDs.
+- Never retry a potentially completed write through another transport after an ambiguous result.
+- Keep OneBot auxiliary; do not restore duplicate reply ownership.
