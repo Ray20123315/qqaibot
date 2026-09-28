@@ -7,9 +7,9 @@ QQAIBOT is a Cloudflare Workers QQ AI bot using QQ Open/AIBot as the primary tra
 ## Current Production
 
 - branch: `main`
-- verified product revision: `d0b4a610c68a4736abdc5f71f8e35a4e82b45b4a`
+- verified product revision: `df7958e9e99be0d5724dc4fd24a39da616e1befd`
 - Worker: `qqai`
-- Cloudflare Connected Build: `005556b2-9747-4bb4-852c-e3157e5c7069`
+- Cloudflare Connected Build: `9070f843-d627-4d69-8c03-d3e8c6f751b9`
 - outcome: `success`
 - Hybrid primary: `qq-open`
 
@@ -31,3 +31,10 @@ Permission discovery is cumulative. Higher privilege adds commands and never rem
 - Never store secrets in Git or memory.
 - Never coerce OpenID into numeric QQ IDs.
 - Never use discovery visibility as an authorization boundary.
+
+## Public V4 Resource Model
+
+- Shared platform infrastructure stays central, while user-owned AI/storage resources are modeled as explicit per-principal resources.
+- User AI provider accounts may be private or shared to explicit groups, with live membership checks where required.
+- Same-Worker Preview uses a dedicated D1 table namespace; production must never inherit the Preview table override.
+- Runtime authorization, tenant ownership and storage ownership remain security boundaries.

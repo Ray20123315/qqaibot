@@ -1,40 +1,45 @@
 # ACTIVE_TASK
 
-task_id: qqaibot-20260928-full-command-panels-portal
+task_id: qqaibot-20260928-v4-public-main-integration
 task_status: completed
-goal_revision: 3
+goal_revision: 4
 
 ## Goal
 
-Make command discovery cumulative in the correct direction:
-- ordinary group commands remain visible in group panels;
-- management/owner/developer commands are additional;
-- Developer is the top level and gets every command available in the current scope.
+Integrate the V4 public-bot branch into the current main safely, preserve all newer main changes, validate the isolated same-Worker Preview model, and promote only after GitHub/Cloudflare/live verification.
 
 ## Acceptance Results
 
-- VERIFIED: every enabled `scope:"group"` command is present in categorized group discovery.
-- VERIFIED: ordinary examples `!help`, `!status`, `!codex`, `!模型`, `!群状态`, `!群规`, `!成员发言分析`, `!活动`, `!投票` are present.
-- VERIFIED: management examples `!禁言`, `!关闭ai`, `!授权AI踢出` remain present.
-- VERIFIED: Developer group commands `!群白名单`, `!授权`, `!撤销授权`, `!禁记忆` are present.
-- VERIFIED: Developer C2C discovery is generated from all permission classes, constrained only by command scope.
-- VERIFIED: runtime permission checks are unchanged.
-- VERIFIED: development CI `36403191041` succeeded.
-- VERIFIED: main CI `36403381999` succeeded.
-- VERIFIED: production build `005556b2-9747-4bb4-852c-e3157e5c7069` succeeded.
+- VERIFIED: feature commit `6baf983bb538bd6819900caefe86d477cd44b34e` was merged with current main through a two-parent merge; no force update was used.
+- VERIFIED: the feature branch became an ancestor of main with behind_by=0.
+- VERIFIED: integration CI `36445181452` passed repository, V3, V4, isolated V4 and bundle checks.
+- VERIFIED: clean merge commit `ba6dda144d05c7fb92a498e753ef3530c1f57780` passed main CI `36445884523`.
+- VERIFIED: production build `dac3a88a-7d71-4cb2-99b0-818e11b6bf0a` for the merge succeeded.
+- FOUND LIVE: OneBot health path failed with `hybridStatus is not defined`.
+- FIXED: `worker.js` now awaits `hybridRuntimeStatus(this.env)`; regression added to `verify-v4-hybrid-official.mjs`.
+- VERIFIED: hotfix branch CI `36447367149` passed.
+- VERIFIED: final main CI `36447663272` passed.
+- VERIFIED: final production build `9070f843-d627-4d69-8c03-d3e8c6f751b9` succeeded.
+- VERIFIED LIVE: `/healthz` HTTP 200, ok=true, error=0; OneBot/NapCat connected and RPC round-trip succeeds.
+- VERIFIED: production has DB/AI/VECTORIZE/ONEBOT_HUB/QQ_OPEN_GATEWAY and QQ Open secret bindings; production has no `QQAI_DB_TABLE` Preview override.
 
 ## Product Revision
 
-`d0b4a610c68a4736abdc5f71f8e35a4e82b45b4a`
+`df7958e9e99be0d5724dc4fd24a39da616e1befd`
 
-## Changed Product Files
+## Main Product Areas Changed
 
-- `src/v4/commands/registry.js`
-- `src/v4/qqopen/discovery.js`
-- `verify-v4-qqopen.mjs`
+- public-user access, membership, settings, memory, persistence and storage connector modules
+- user AI provider ownership/sharing/routing
+- V4 resource Portal/API and developer-mode UI
+- plugin runtime guard and plugin security page behavior
+- QQ Open hybrid capability routing and OneBot fallback safety
+- same-Worker Preview workflow with dedicated D1 table namespace
+- source-available proprietary license notice
+- OneBot health runtime regression fix
 
 ## next_exact_action
 
-Open the QQ group command panel and confirm the ordinary categories and management/developer categories are all present after the next discovery sync.
+No required engineering action. Next user-driven action is to test the public account/resource setup flow and QQ group behavior in normal usage.
 
-last_checkpoint_at: 2026-09-28T17:27:00+08:00
+last_checkpoint_at: 2026-09-29T03:35:00+08:00

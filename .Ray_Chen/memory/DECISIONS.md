@@ -18,3 +18,23 @@ Decision: categorized group panels include all enabled group-scoped commands acr
 status: accepted
 date: 2026-09-28
 Decision: QQ group panels can be specific to group_openids but not to an individual user inside a group. Developer-only group commands therefore cannot be both group-visible to the Developer and invisible to every other member using only the official panel API.
+
+## D-058 Public V4 integration preserves current main history
+status: accepted
+date: 2026-09-29
+Decision: V4 public work is integrated through a two-parent merge whose first parent is the current main. Force-replacing main with the older feature branch is prohibited.
+
+## D-059 Preview isolation is a D1 table namespace
+status: accepted
+date: 2026-09-29
+Decision: same-Worker Preview may share the physical D1 database but must use `QQAI_DB_TABLE=kv_store_v4public_preview`; production must keep `QQAI_DB_TABLE` unset.
+
+## D-060 Public resources are principal-owned
+status: accepted
+date: 2026-09-29
+Decision: user AI providers, storage connectors, settings, memories and private persistence are modeled with explicit principal ownership and may only be shared through explicit policy.
+
+## D-061 Hybrid health uses runtime hybrid status
+status: accepted
+date: 2026-09-29
+Decision: OneBotHub status must call `await hybridRuntimeStatus(this.env)`; the removed/unimported `hybridStatus` symbol must not be used from worker runtime.

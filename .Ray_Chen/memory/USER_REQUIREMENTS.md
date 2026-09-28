@@ -17,3 +17,11 @@
 - Never retry ambiguous mutating timeout/5xx results across transports.
 - Keep `ONEBOT_READ_ONLY` authoritative.
 - Secrets must not be stored in Git or Ray_Chen memory.
+
+## Public-Service Requirements
+
+- The service is intended for public use rather than only the developer's own QQ account.
+- Public users should connect their own external AI/storage resources instead of relying on unrestricted shared credentials.
+- Public-user data and resources must be isolated by principal/tenant ownership.
+- Preview/testing must not write to the production `kv_store` table.
+- Production QQ Open stays primary; the legacy QQ/OneBot account remains a guarded fallback where official capability is unavailable.
