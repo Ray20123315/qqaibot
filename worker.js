@@ -29,7 +29,7 @@ import { pickSticker, pickStickerForText, stickerCqMessage } from "./src/social/
 import { cancelSchedule, cleanupExpiredModerationProposals, cleanupTransientState, countActiveSchedulesForUser, createAppealFromText, createScheduleRecord, extractScheduleMentionIds, formatScheduleLine, listUserSchedules, parseManagementScheduleAction, parseScheduleRequest, processConflictSignal, processDueSchedules, reviewScheduleWithGemma, reviseScheduleRecord, scheduledCronMode, skipScheduleOnce } from "./src/scheduler/runtime.js";
 import { buildHelpText } from "./src/help/commands.js";
 import { createInitialCommandRegistry } from "./src/v4/commands/catalog.js";
-import { normalizeGroupPanelSlashInvocation, resolveGroupPanelInput } from "./src/v4/commands/group-panel.js";
+import { buildGroupCategoryKeyboard, normalizeGroupPanelSlashInvocation, resolveGroupPanelInput } from "./src/v4/commands/group-panel.js";
 import { fetchPublicUrl, getFeatureFlag, getPrivateAccessMode, isGroupWhitelisted, numericId, verifyCodexBridgeAccess, verifyOneBotAccess } from "./src/security/network.js";
 import { CODEX_BRIDGE_INTERNAL_CHAT_PATH, CODEX_BRIDGE_PATH, CODEX_BRIDGE_PROTOCOL, callCodexBridgeWebSocket, normalizeCodexBridgeRequest, normalizeCodexBridgeResponse } from "./src/v3/ai/codex-bridge.js";
 import { parseCodexChatCommand, parseCodexCommand, parseCodexWorkCommand } from "./src/v3/ai/codex-command.js";
@@ -1123,7 +1123,12 @@ const QQAIWorker = {
       // to the existing canonical ! command so permissions/confirmation/handlers stay shared.
       const groupPanelRoute = isGroup ? resolveGroupPanelInput(cleanMessage, QQAI_GROUP_PANEL_REGISTRY) : null;
       if (groupPanelRoute?.matched) {
-        if (!groupPanelRoute.expanded) return jsonReply(`${atSender}${groupPanelRoute.message}`);
+        if (!groupPanelRoute.expanded) {
+          const keyboard = groupPanelRoute.keyboard
+            || buildGroupCategoryKeyboard(QQAI_GROUP_PANEL_REGISTRY, groupPanelRoute.category, { page:groupPanelRoute.page || 1 })?.keyboard
+            || null;
+          return jsonReply(groupPanelRoute.message, keyboard ? { qq_inline_keyboard:keyboard } : {});
+        }
         cleanMessage = String(groupPanelRoute.expanded || "").trim();
         userMessage = cleanMessage.replace(/(^|\s)@(\d{5,12})(?=\s|$)/g, "$1[CQ:at,qq=$2]");
         msgLower = cleanMessage.toLowerCase();
