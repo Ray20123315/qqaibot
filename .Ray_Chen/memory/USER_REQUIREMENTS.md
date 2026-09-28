@@ -5,11 +5,13 @@
 - QQ Open is the primary official bot transport/API surface.
 - Keep NapCat/OneBot for full visibility and legacy capabilities not available through QQ Open.
 - Prevent duplicate AI replies, plugins, moderation and management side effects between transports.
-- Use official full-group messages where QQ grants receive-all-message capability.
-- Support automatic group mapping conservatively; static mapping must remain available as an authoritative override.
-- Track official friend/bot-group/member lifecycle events without faking numeric QQ IDs.
-- Add QQ Interaction and active-push permission support without enabling ungranted Intent bits.
-- Reuse existing AI/Codex/memory/plugin/command logic.
-- Preserve member management, join review, mute, rich media, scheduled notifications and active speaking.
+- QQ Open replies must not expose raw OpenID markup such as `<@OPENID>`.
+- Use official QQ reply semantics where supported; do not fake unsupported visible quote/reference UI.
+- Automatic group mapping must work without requiring the old bot itself to be @mentioned.
+- Mapping must remain conservative and keep a static authoritative override.
+- Portal should expose mapping learning progress rather than only final mapping totals.
+- Discovery/menu/panel synchronization must use current QQ API-required fields.
+- Keep Interaction permission-gated.
+- Never treat QQ Open OpenIDs as numeric QQ IDs.
 - Keep OneBot until hybrid live verification succeeds.
 - Secrets must not be stored in Git or Ray_Chen memory.

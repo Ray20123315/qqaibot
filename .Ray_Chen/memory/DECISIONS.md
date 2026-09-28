@@ -2,19 +2,24 @@
 
 ## Retained
 
-D-001 through D-038 remain in force.
+D-001 through D-041 remain in force.
 
-## D-039 Conservative automatic group mapping
+## D-042 QQ Open reply does not synthesize user mention text
 status: accepted
 date: 2026-09-28
-Decision: static `QQ_HYBRID_GROUP_MAP` remains authoritative, but missing mappings may be learned from short-window QQ Open/OneBot message correlation only after 3 distinct official-message evidence points for one unambiguous candidate. Generic/ambiguous/conflicting evidence does not learn.
+Decision: ordinary QQ Open AI replies must not prepend `reply_plan.mentionIds` as visible CQ/OpenID mention text. The official source-message `msg_id` and `msg_seq` carry passive-reply semantics.
 
-## D-040 Official lifecycle records stay OpenID-native
+## D-043 Mapping observation is independent from ownership
 status: accepted
 date: 2026-09-28
-Decision: FRIEND, bot group membership and group member lifecycle events are persisted separately using QQ Open identifiers; they are not inserted into legacy numeric QQ membership tables.
+Decision: all eligible human OneBot group messages may be recorded as mapping observations before transport ownership is decided. Observation does not authorize OneBot to reply or execute side effects.
 
-## D-041 GROUP_MESSAGE_CREATE remains ownership evidence
+## D-044 Hybrid correlation is order-independent
 status: accepted
 date: 2026-09-28
-Decision: learning a numeric-group/group_openid mapping alone does not disable ordinary OneBot group processing. Official full-message ownership activates only after the official group actually emits GROUP_MESSAGE_CREATE.
+Decision: retain recent official and OneBot observations separately so either transport may arrive first. Later arrival rechecks the opposite-side observations and may add mapping evidence.
+
+## D-045 Discovery payload follows QQ API wrappers
+status: accepted
+date: 2026-09-28
+Decision: menu update uses `{menu}`, panel listing always supplies a scene scope, and panel update uses `{panel}`. Discovery enumerates C2C and group panels separately.

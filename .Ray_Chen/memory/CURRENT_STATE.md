@@ -2,57 +2,71 @@
 
 ## GitHub
 
-- `main`: `a6a5996c2ec33da881e0dbb54725b4ab61ce7037`
-- `v4-qqopen-native`: same product revision before this memory checkpoint
-- CI: `36363693922` SUCCESS
-- repository / V3 / V4 / isolated test dry-run / Worker bundle all succeeded
+Production product head:
+`edeacf6cf8c215cc3987b86a4a0d5220c7f581d9`
 
-## Cloudflare Production
+Feature implementation:
+`535804857f530dd8bf16d221422a6ed095300fe8`
 
-Worker: `qqai`
-Build: `5669da1f-77c7-4fb3-8b42-ea26da91ed18`
+Verification:
+- feature product CI: success
+- regression CI `36366534308`: success
+- main CI `36366701774`: success
+
+## Cloudflare
+
+Production Worker: `qqai`
+Production build: `2f3fa902-2e60-44a2-8355-7459a5ef9db4`
 Outcome: success
-Worker version: `33538b7c-c04f-4b47-b8eb-82c444c6fe0a`
-Migration: `v4_qqopen_gateway`
+Worker version: `4d8fff7e-5713-4e5c-83e2-7caa9bcbb633`
 
-Retained:
+Retained bindings:
 - OneBotHub
 - QqOpenGateway
 - D1
 - Vectorize
 - Workers AI
 - Rate Limiter
-- existing Secrets including QQ_OPEN_CLIENT_SECRET
+- QQ Open Secret and all existing application Secrets
 
-Current hybrid vars:
-- QQ_OPEN_ENABLED=true
-- QQ_OPEN_INTENTS=33554432
-- QQ_OPEN_DISCOVERY_SYNC=true
-- QQ_HYBRID_PRIMARY=qq-open
-- QQ_HYBRID_GROUP_MAP={}
+Production Intent remains `33554432`.
 
-## Dynamic Group Mapping
+## Reply Fix
 
-D1 key: `qqopen_dynamic_group_map`.
+QQ Open ordinary AI responses:
+- do not prepend `reply_plan.mentionIds`;
+- do not serialize the source user OpenID into visible text;
+- continue to include source `msg_id` and allocated `msg_seq`;
+- rich media `msg_type=7` includes placeholder content.
 
-Rules:
-- static map wins;
-- otherwise exact normalized text + media types are correlated in a short time window;
-- generic low-information messages are ignored;
-- multi-group ambiguity is rejected;
-- 3 distinct official message IDs are required;
-- conflicts never overwrite an existing mapping.
+Current QQ group/C2C message reference/quote UI cannot be forced through an unsupported `message_reference` field.
 
-Portal status reports static, dynamic and total mapped-group counts.
+## Discovery Fix
 
-## Lifecycle State
+The deployed API now:
+- PUTs global menu as `{ menu }`;
+- lists panels with required `scope` separately for C2C and group;
+- supports panel-list `records` and pagination;
+- PUTs panel updates as `{ panel }`.
 
-Gateway normalizes FRIEND_ADD/DEL, GROUP_ADD/DEL_ROBOT and GROUP_MEMBER_ADD/REMOVE. Worker stores these as QQ Open-native state records and event history without writing OpenIDs into legacy numeric QQ tables.
+Live Gateway discovery status has not yet been re-read from the authenticated Portal after deploy.
 
-## Interaction
+## Hybrid Mapping Fix
 
-Code support remains deployed but `INTERACTION (1<<26)` is intentionally disabled. Production stays at `33554432` until QQ permission is confirmed.
+New D1 keys/data:
+- `hybrid_aux_recent`: OneBot observations
+- `hybrid_qqopen_recent`: QQ Open observations
+- `qqopen_group_map_evidence:<group_openid>:<numeric_group>`
+- `qqopen_group_map_candidates`
+- `qqopen_dynamic_group_map`
 
-## Live Status Gap
+Mapping behavior:
+- observations are recorded before ownership suppression;
+- either transport may arrive first;
+- correlation window is 12 seconds;
+- generic/low-information text is ignored;
+- ambiguous candidates are rejected;
+- 3 distinct official message IDs remain required;
+- Portal exposes pending candidates/progress.
 
-Production deployment/build/bindings are verified. Post-deploy live Gateway READY and live event behavior still require QQ-side observation.
+Pre-fix production D1 contained none of the learner rows, explaining the user's 0 mapping count.

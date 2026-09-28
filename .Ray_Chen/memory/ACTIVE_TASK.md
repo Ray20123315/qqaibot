@@ -6,53 +6,60 @@ goal_revision: 5
 
 ## Goal
 
-Run QQAIBOT as a hybrid QQ bot: QQ Open handles official interactions/actions while NapCat/OneBot supplements visibility and legacy capabilities without duplicate AI/plugin/moderation behavior.
+Run QQAIBOT as a hybrid QQ bot: QQ Open owns official interactions/actions while NapCat/OneBot supplements visibility and legacy capabilities without duplicate AI/plugin/moderation behavior.
 
-## Completed
+## Completed This Transaction
 
-- Added conservative D1-backed dynamic group mapping.
-- Static `QQ_HYBRID_GROUP_MAP` remains the authoritative override.
-- Dynamic mapping requires 3 distinct official message IDs, one unambiguous OneBot group candidate, matching normalized message/media evidence, and no existing conflict.
-- GROUP_AT_MESSAGE_CREATE and GROUP_MESSAGE_CREATE both contribute mapping observations.
-- GROUP_MESSAGE_CREATE still gates transition of mapped ordinary OneBot messages to auxiliary-only handling.
-- Added official lifecycle normalization/state for:
-  - FRIEND_ADD / FRIEND_DEL
-  - GROUP_ADD_ROBOT / GROUP_DEL_ROBOT
-  - GROUP_MEMBER_ADD / GROUP_MEMBER_REMOVE
-- Lifecycle OpenIDs are stored in separate QQ Open records, not legacy numeric QQ member tables.
-- Scheduler/active-speaking routing now accepts static or confirmed learned group mappings.
-- Portal QQ Open page now shows lifecycle count/last event and static/learned/total mapping counts.
-- Updated README, deployment example and V4 docs for learned mapping.
-- Full CI `36363693922`: success.
-- Isolated Worker build `02ca8a73-cdd4-4ffa-beeb-db3140105a74`: success.
-- Fast-forwarded `main` to `a6a5996c2ec33da881e0dbb54725b4ab61ce7037`.
-- Production build `5669da1f-77c7-4fb3-8b42-ea26da91ed18`: success.
-- Production Worker version: `33538b7c-c04f-4b47-b8eb-82c444c6fe0a`.
-- Production read-back confirms OneBotHub, QqOpenGateway, D1, Vectorize, Workers AI, Rate Limiter and existing Secrets are intact.
+- Diagnosed raw `<@OpenID>` as a QQ Open runtime bug caused by prepending `reply_plan.mentionIds` as CQ mentions.
+- Removed that prefix injection. QQ Open answers now send the AI text without synthetic OpenID mention markup.
+- Retained official passive-reply semantics: source `msg_id` plus unique `msg_seq`.
+- Did not add unsupported `message_reference`; current QQ group/C2C APIs do not guarantee a classic quote box.
+- Hardened rich-media reply payloads with non-empty content for `msg_type=7`.
+- Diagnosed discovery `必填字段缺失`:
+  - menu update lacked the outer `menu` property;
+  - panel list omitted required `scope`;
+  - panel update lacked the outer `panel` property.
+- Corrected menu/panel payloads and scoped C2C/group pagination.
+- Queried production D1 before mapping fix; learner keys/evidence were completely absent.
+- Diagnosed mapping chicken-and-egg:
+  - OneBot observation was recorded only after a message was already considered auxiliary;
+  - user was mentioning the official AIBot, not the legacy NapCat bot;
+  - therefore the old transport saw the group message but never recorded mapping evidence.
+- Added `recordHybridMappingObservation` before ownership suppression so every human OneBot group message may contribute evidence.
+- Added QQ Open recent-observation storage and reverse reconciliation so QQ Open-first and OneBot-first delivery order both work.
+- Retained safe mapping threshold: 3 distinct official message IDs.
+- Kept low-information rejection; a plain `HI` still does not count as mapping evidence by design.
+- Portal now displays candidate count and learning progress.
+- Feature commit `535804857f530dd8bf16d221422a6ed095300fe8`: full CI success.
+- Regression commit `edeacf6cf8c215cc3987b86a4a0d5220c7f581d9`: full CI `36366534308` success.
+- Main CI `36366701774`: success.
+- Isolated Worker build `e280d9fb-bb0d-4659-91e8-cb2db205e1a3`: success.
+- Production build `2f3fa902-2e60-44a2-8355-7459a5ef9db4`: success.
+- Production Worker version `4d8fff7e-5713-4e5c-83e2-7caa9bcbb633`.
+- Production read-back confirms OneBotHub, QqOpenGateway, D1, Vectorize, Workers AI, Rate Limiter and existing Secrets remain intact.
 - Production `QQ_OPEN_INTENTS` remains `33554432`.
-- Production `QQ_HYBRID_GROUP_MAP={}`, so automatic mapping can learn safely unless a static override is later added.
 
 ## Current Production Behavior
 
-- QQ Open is primary.
-- OneBot C2C and explicit @Bot duplicates are auxiliary.
-- Unmapped ordinary OneBot group traffic remains functional.
-- A learned mapping needs 3 official-message evidence points.
-- Even after mapping, ordinary OneBot group traffic only becomes auxiliary once that official group emits GROUP_MESSAGE_CREATE.
-- Official active pushes require mapped group + stored GROUP_MSG_RECEIVE/authorization state; otherwise OneBot fallback.
-- Interaction implementation is present but dormant until permission is confirmed and the Intent bit is explicitly enabled.
+- QQ Open AI reply text no longer receives a synthetic OpenID mention prefix.
+- QQ Open passive replies use `msg_id + msg_seq`.
+- OneBot/NapCat remains installed and connected as auxiliary visibility/fallback.
+- OneBot mapping observation is independent from ownership, so unmapped groups can now be learned.
+- QQ Open observations remain available for later OneBot correlation and vice versa.
+- Static `QQ_HYBRID_GROUP_MAP` remains authoritative.
+- Interaction implementation remains dormant unless its permission is explicitly confirmed.
 
-## Known Remaining Work
+## Live Verification Still Needed
 
-- Live-test post-deploy Gateway READY and normal C2C/group AI.
-- Generate repeated @Bot messages in a test group and verify automatic mapping reaches 3 evidence points.
-- If receive-all-message is enabled, verify GROUP_MESSAGE_CREATE flips mapped OneBot ordinary group traffic to observation-only.
-- Live-test FRIEND/GROUP_MEMBER lifecycle events and Portal counters.
-- Confirm Interaction permission before any Intent change.
-- CodexWork local file export still needs an explicit bounded local-to-QQ upload channel; Cloudflare cannot read the bridge filesystem directly.
+1. Refresh QQ Open diagnostics after deploy and verify discovery `lastError` clears and fingerprint becomes non-empty.
+2. Send three new distinctive @AIBot messages after this deploy. Avoid generic `HI/你好`-only samples.
+3. Confirm Portal mapping candidate progresses `1/3 → 2/3 → mapped`.
+4. Confirm replies no longer contain literal `<@OpenID>`.
+5. Confirm passive replies continue to succeed. A classic visible quote box is not expected because that reference field is not currently supported for QQ group/C2C.
+6. If receive-all-message is enabled, verify GROUP_MESSAGE_CREATE ownership after mapping.
 
 ## next_exact_action
 
-Live-test the production Gateway and one test group: send at least 3 distinctive @Bot messages visible to both transports, confirm the learned mapping appears in Portal, then—if receive-all-message is enabled—verify GROUP_MESSAGE_CREATE ownership. Keep Interaction Intent unchanged unless permission is confirmed.
+Ask the user to refresh the Gateway diagnostic and send three new distinctive @AIBot messages such as `映射测试 A7281`, `映射测试 B4136`, `映射测试 C9502`; then inspect Portal candidate progress and production D1 evidence.
 
-last_checkpoint_at: 2026-09-28T08:54:00+08:00
+last_checkpoint_at: 2026-09-28T09:40:00+08:00

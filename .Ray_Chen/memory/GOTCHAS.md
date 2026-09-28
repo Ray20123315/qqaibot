@@ -4,34 +4,26 @@
 
 All prior QQ Open, OpenID, Gateway, Portal, permissions, D1/Cron, Connected Builds and hybrid risks remain relevant.
 
-## G-029 Dual-observation duplicates
-Risk: QQ Open and OneBot can observe one human action.
-Mitigation: explicit interactions are QQ Open-owned; mapped ordinary OneBot traffic becomes observation-only only after GROUP_MESSAGE_CREATE evidence.
+## G-037 Synthetic OpenID mention leakage
+Risk: taking `reply_plan.mentionIds` from the legacy-compatible AI plan and serializing it as CQ mention makes QQ Open output literal `<@OpenID>` text.
+Mitigation: do not inject those mention IDs into ordinary QQ Open AI responses. Use source-message `msg_id + msg_seq` passive-reply semantics.
 
-## G-030 Interaction permission failure
-Risk: enabling INTERACTION intent without permission can make Gateway Identify fail.
-Mitigation: production remains at `33554432`; enable the extra bit only after permission confirmation.
+## G-038 QQ visible quote UI is not equivalent to passive reply
+Risk: assuming `msg_id` must render a classic quote bubble leads to attempts to send unsupported `message_reference`.
+Mitigation: keep official `msg_id + msg_seq`; do not depend on a currently unsupported group/C2C message-reference field.
 
-## G-031 Group identifier domains differ
-Risk: numeric OneBot group id and QQ group_openid are not interchangeable.
-Mitigation: static mapping overrides; automatic mapping requires 3 unambiguous message evidence points and never infers user IDs.
+## G-039 Hybrid mapping chicken-and-egg
+Risk: if OneBot observations are only recorded after a group is already auxiliary/mapped, an unmapped group can never learn.
+Mitigation: record lightweight human OneBot group observations before ownership logic; recording evidence must not imply OneBot ownership.
 
-## G-032 Active push authorization
-Risk: official active group sends can fail if a group disabled bot active messages.
-Mitigation: persist RECEIVE/REJECT state and use QQ Open active send only when allowed; otherwise OneBot fallback.
+## G-040 Hybrid event-order dependency
+Risk: QQ Open may arrive before OneBot or vice versa. One-sided immediate matching loses evidence.
+Mitigation: keep capped recent lists for both transports and reconcile again on the later event.
 
-## G-033 Numeric mentions cannot be translated safely
-Risk: OneBot payloads may contain numeric QQ mentions while QQ Open requires OpenID mention identities.
-Mitigation: such sends remain on OneBot until explicit user linking exists.
+## G-041 Low-information mapping evidence
+Risk: short/common text such as HI/你好 can collide across groups.
+Mitigation: keep those samples excluded. Require distinctive content/media and 3 distinct official message IDs.
 
-## G-034 CodexWork export filesystem boundary
-Risk: Cloudflare cannot read local Codex Bridge filesystem paths.
-Mitigation: retain local/legacy upload helper or build an explicit bounded transfer channel.
-
-## G-035 Auto-map false positive
-Risk: identical short messages can occur in multiple groups.
-Mitigation: generic text is rejected, ambiguous candidates are rejected, a short time window is used, media types are included, and 3 distinct official message IDs are required.
-
-## G-036 Lifecycle ID contamination
-Risk: member/friend OpenIDs could accidentally be inserted into legacy numeric QQ tables.
-Mitigation: official lifecycle state is stored under dedicated QQ Open keys only.
+## G-042 QQ discovery required fields
+Risk: menu/panel sync can return HTTP 400 "必填字段缺失" when the request body is not wrapped or panel scope is omitted.
+Mitigation: use `{menu}`, scoped panel listing, `records` pagination and `{panel}` updates.
