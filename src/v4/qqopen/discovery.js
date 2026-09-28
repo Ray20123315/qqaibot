@@ -14,6 +14,7 @@ function fingerprint(value) {
 
 function panelRows(value) {
   if (Array.isArray(value)) return value;
+  if (Array.isArray(value?.records)) return value.records;
   if (Array.isArray(value?.panels)) return value.panels;
   if (Array.isArray(value?.items)) return value.items;
   if (Array.isArray(value?.data)) return value.data;
@@ -28,6 +29,19 @@ function panelRemark(row = {}) {
   return text(row.panel?.remark || row.remark || row.data?.panel?.remark).trim();
 }
 
+async function listAllPanels(api, scope) {
+  const rows = [];
+  let cursor = "";
+  for (let page = 0; page < 20; page += 1) {
+    const result = await api.listPanels({ scope, cursor, limit: 50 });
+    rows.push(...panelRows(result));
+    const next = text(result?.next_cursor || result?.nextCursor).trim();
+    if (result?.is_end === true || !next || next === cursor) break;
+    cursor = next;
+  }
+  return rows;
+}
+
 async function syncQqOpenDiscovery(api, registry, { previousFingerprint = "" } = {}) {
   const menu = registry.buildMenu();
   const panels = [
@@ -40,9 +54,12 @@ async function syncQqOpenDiscovery(api, registry, { previousFingerprint = "" } =
   }
 
   await api.putMenu(menu);
-  const listed = await api.listPanels();
+  const listed = [
+    ...(await listAllPanels(api, "c2c")),
+    ...(await listAllPanels(api, "group"))
+  ];
   let deleted = 0;
-  for (const row of panelRows(listed)) {
+  for (const row of listed) {
     const id = panelId(row);
     const remark = panelRemark(row);
     if (!id || !/^QQAIBOT V4(?:\s|$)/i.test(remark)) continue;

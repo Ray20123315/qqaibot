@@ -34,7 +34,7 @@ import { executeCodexUserCommand } from "./src/v3/ai/codex-command-runtime.js";
 import { readPublicCodexQuota } from "./src/v3/ai/codex-policy.js";
 import { dispatchV3RuntimeEvent, handleV3RuntimeFetch, runV3RuntimeScheduled } from "./src/v3/runtime/bridge.js";
 import { getQqOpenGateway, qqOpenConfigured, qqOpenEnabled } from "./src/v4/qqopen/runtime.js";
-import { hybridObservationRow, hybridRuntimeStatus, isAuxiliaryOneBotMessage, recordOneBotHybridObservation, recordQqOpenHybridGroupObservation, resolveQqOpenGroupForOneBot } from "./src/v4/hybrid/ownership.js";
+import { hybridObservationRow, hybridPrimaryTransport, hybridRuntimeStatus, isAuxiliaryOneBotMessage, recordOneBotHybridObservation, recordQqOpenHybridGroupObservation, resolveQqOpenGroupForOneBot } from "./src/v4/hybrid/ownership.js";
 import { handleV4QqOpenPortalApi } from "./src/v4/portal/api.js";
 import { injectV4LeanPortalClient } from "./src/v4/portal/lean-dashboard.js";
 import { handleV3PluginManagerApi, injectV3PluginManagerClient } from "./src/v3/portal/plugin-manager.js";
@@ -3935,6 +3935,21 @@ export class OneBotHub {
     return overlay;
   }
 
+  async recordHybridMappingObservation(body) {
+    if (hybridPrimaryTransport(this.env) !== "qq-open") return null;
+    if (String(body?.post_type || "") !== "message" || String(body?.message_type || "") !== "group") return null;
+    if (String(body?.user_id || "") && String(body?.user_id || "") === String(body?.self_id || "")) return null;
+    const oneBotGroupId = String(body?.group_id || "");
+    if (!oneBotGroupId) return null;
+    const mappedQqOpenGroupId = await resolveQqOpenGroupForOneBot(this.env, oneBotGroupId);
+    const text = eventPlainText(body).trim() || extractMessageText(body?.message || body?.raw_message || "");
+    const mentions = eventMentionedQqs(body);
+    const mediaTypes = extractOutboundMediaTypes(body?.message || body?.raw_message || "");
+    const row = hybridObservationRow(body, { mappedQqOpenGroupId, text, mentions, mediaTypes });
+    const correlation = await recordOneBotHybridObservation(this.env, row);
+    return { row, correlation };
+  }
+
   async recordAuxiliaryOneBotObservation(body) {
     const isGroup = String(body?.message_type || "") === "group";
     const oneBotGroupId = isGroup ? String(body?.group_id || "") : "";
@@ -3980,7 +3995,6 @@ export class OneBotHub {
 
     const auxKey = isGroup ? `hybrid_aux_events:group:${oneBotGroupId || "unknown"}` : `hybrid_aux_events:private:${row.userId || "unknown"}`;
     tasks.push(dbAppendJsonArrayCapped(this.env, auxKey, row, 240));
-    if (isGroup) tasks.push(recordOneBotHybridObservation(this.env, row));
     if (mappedQqOpenGroupId) {
       tasks.push(dbAppendJsonArrayCapped(this.env, `hybrid_aux_events:qqopen-group:${mappedQqOpenGroupId}`, row, 240));
     }
@@ -4854,11 +4868,12 @@ export class OneBotHub {
       }
     }
 
+    const hybridMappingObservation = await this.recordHybridMappingObservation(body).catch(() => null);
     const hybridMappedGroup = body?.message_type === "group" ? await resolveQqOpenGroupForOneBot(this.env, String(body?.group_id || "")) : "";
     const hybridFullGroupOwned = hybridMappedGroup
       ? Boolean(await dbGet(this.env, `qqopen_full_group_active:${hybridMappedGroup}`))
       : false;
-    if (isAuxiliaryOneBotMessage(this.env, body, {
+    if (hybridMappingObservation?.correlation?.matchedOfficial === true || isAuxiliaryOneBotMessage(this.env, body, {
       explicit: eventHasBotMention(body),
       fullGroupOwned: hybridFullGroupOwned
     })) {

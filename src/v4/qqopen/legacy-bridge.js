@@ -190,7 +190,7 @@ async function sendQqOpenLegacyMessage(api, target, value, options) {
       : await api.uploadC2CFile(clean(target.userId), uploadBody);
     const fileInfo = clean(uploaded && (uploaded.file_info || uploaded.fileInfo));
     if (!fileInfo) throw new Error("QQ_OPEN_MEDIA_FILE_INFO_MISSING");
-    const sendBody = { msg_type: 7, msg_seq: seq++, media: { file_info: fileInfo } };
+    const sendBody = { content: " ", msg_type: 7, msg_seq: seq++, media: { file_info: fileInfo } };
     if (replyMessageId) sendBody.msg_id = replyMessageId;
     const sent = target.scope === "group"
       ? await api.sendGroupMessage(clean(target.groupId), sendBody)

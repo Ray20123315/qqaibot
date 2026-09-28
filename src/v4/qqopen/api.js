@@ -30,10 +30,14 @@ function createQqOpenApiClient({ appId, clientSecret, fetchImpl = fetch, baseUrl
     getGateway: () => request("/gateway"),
     getGatewayBot: () => request("/gateway/bot"),
     getMenu: () => request("/v2/menu"),
-    putMenu: menu => request("/v2/menu", { method: "PUT", body: menu }),
-    listPanels: () => request("/v2/panels"),
+    putMenu: menu => request("/v2/menu", { method: "PUT", body: { menu } }),
+    listPanels: ({ scope, cursor = "", limit = 50 } = {}) => {
+      const normalizedScope = clean(scope);
+      if (!normalizedScope) throw new Error("QQ_OPEN_PANEL_SCOPE_REQUIRED");
+      return request(withQuery("/v2/panels", { scope: normalizedScope, cursor, limit }));
+    },
     createPanel: panel => request("/v2/panels", { method: "POST", body: panel }),
-    updatePanel: (panelId, panel) => request(`/v2/panels/${encodePath(panelId, "PANEL_ID")}`, { method: "PUT", body: panel }),
+    updatePanel: (panelId, panel) => request(`/v2/panels/${encodePath(panelId, "PANEL_ID")}`, { method: "PUT", body: { panel } }),
     deletePanel: panelId => request(`/v2/panels/${encodePath(panelId, "PANEL_ID")}`, { method: "DELETE" }),
     sendGroupMessage: (groupOpenid, message) => request(`/v2/groups/${encodePath(groupOpenid, "GROUP_OPENID")}/messages`, { method: "POST", body: message }),
     sendC2CMessage: (openid, message) => request(`/v2/users/${encodePath(openid, "OPENID")}/messages`, { method: "POST", body: message }),

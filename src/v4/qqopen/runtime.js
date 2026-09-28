@@ -866,13 +866,7 @@ export class QqOpenGateway {
     let lastMessageId = "";
     for (let index = 0; index < chunks.length; index += 1) {
       const reservation = await this.reserveReplySequences(message.messageId, message.scope, 1);
-      let value = chunks[index];
-      if (index === 0 && Array.isArray(result?.reply_plan?.mentionIds)) {
-        const prefix = [...new Set(result.reply_plan.mentionIds.map(String).filter(Boolean))]
-          .map(id => "[CQ:at,qq=" + id + "] ")
-          .join("");
-        if (prefix) value = prefix + String(value || "");
-      }
+      const value = chunks[index];
       const sent = await sendQqOpenLegacyMessage(this.api(), {
         scope: message.scope,
         groupId: message.groupId,
@@ -920,7 +914,7 @@ export class QqOpenGateway {
           eventType,
           groupOpenid: message.groupId,
           messageId: String(message.messageId || ""),
-          text: String(message.text || ""),
+          text: String(payload?.d?.content ?? message.text ?? ""),
           mediaTypes,
           fullGroup: eventType === "GROUP_MESSAGE_CREATE",
           updatedAt: observedAt
