@@ -1,28 +1,29 @@
 # Ray_Chen Memory Entry
 
-- memory_version: v0.0.25
+- memory_version: v0.0.26
 - project: QQAIBOT
 - repository: Ray20123315/qqaibot
 - canonical_branch: main
 - development_branch: v4-qqopen-native
 - task_id: qqaibot-20260928-full-command-panels-portal
-- task_status: active
+- task_status: completed
 - goal_revision: 3
-- base_product_revision: f44c8118c83e57637a6b0f55f0013ff093b2f1fc
-- updated_at: 2026-09-28T17:10:00+08:00
+- product_revision: d0b4a610c68a4736abdc5f71f8e35a4e82b45b4a
+- updated_at: 2026-09-28T17:27:00+08:00
 
-## Current Goal
+## Completed Goal
 
-Correct group command discovery so ordinary group commands are present alongside management commands, and make Developer the top cumulative permission surface for all commands available in the current chat scope.
+QQ group command discovery now contains the full group-scoped command surface instead of only management commands. Developer is the top cumulative permission level: in any scope, Developer discovery includes every command enabled for that scope.
 
-## Confirmed QQ Constraint
+## QQ Platform Constraint
 
-QQ group panels can be specific to groups, not to individual users inside a group. Therefore per-user Developer-only group-panel hiding is not representable by the official API; runtime authorization remains authoritative.
+For group panels, target_type=specific associates a panel with group_openids, not individual user_openids. QQ cannot express a Developer-only panel for one person inside a group. Therefore group discovery contains all group-scoped commands, while runtime authorization remains the security boundary.
 
-## Recovery Route
+## Verified State
 
-1. Read ACTIVE_TASK.md and CURRENT_STATE.md.
-2. Continue on v4-qqopen-native.
-3. Restore all group-scoped registry entries into categorized group panels, including ordinary and Developer commands.
-4. Make Developer discovery cumulative across all permission classes for the current scope.
-5. Run full CI before updating main and production.
+- ordinary group commands are present together with management commands;
+- Developer commands are present in group discovery;
+- Developer C2C discovery uses all permission classes for C2C-capable commands;
+- development CI 36403191041: success;
+- main CI 36403381999: success;
+- production Connected Build 005556b2-9747-4bb4-852c-e3157e5c7069: success.
