@@ -19,3 +19,8 @@ Mitigation: keep the original first 20 catalog entries in their established orde
 ## G-046 Text-slice module reconstruction
 Risk: replacing an array by searching only for a closing token can accidentally retain/duplicate a second module body.
 Mitigation: for compact catalog modules, reconstruct the complete module boundary and verify entry count plus syntax through CI.
+
+
+## G-047 QQ command panels are flat
+Risk: treating a QQ command panel as a nested menu would either flatten all commands into one surface or invent unsupported payload fields.
+Mitigation: use separate category panels for group/channel discovery and use C2C custom-menu sub_menu_items only where the QQ API explicitly supports them.
