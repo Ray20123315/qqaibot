@@ -44,6 +44,7 @@ import { politicalGuardDecision, politicalTextPrefilter } from "./src/v4/public/
 import { resolveCanonicalPrincipal } from "./src/v4/public/resource-tickets.js";
 import { createLiveGroupMembershipResolver } from "./src/v4/public/membership.js";
 import { allowPlatformUserContentPersistence, canonicalQqOpenPrincipal, clearQqOpenPrivateHistory, isQqOpenEvent, persistQqOpenPrivateHistory, readQqOpenPrivateHistory } from "./src/v4/public/chat-persistence.js";
+import { readUserSetting, writeUserSetting } from "./src/v4/public/user-settings.js";
 import { handleV3PluginManagerApi, injectV3PluginManagerClient } from "./src/v3/portal/plugin-manager.js";
 import { handleV3PackageManagerApi, injectV3PackageManagerClient } from "./src/v3/portal/package-manager.js";
 import { handleV3PluginSecurityPublic, runV3PluginSecurityScheduled } from "./src/v3/public/plugin-security.js";
@@ -2064,22 +2065,34 @@ const QQAIWorker = {
       if (/^[!！](?:模型|model)(?:\s|$)/i.test(cleanMessage)) {
         const raw = cleanMessage.replace(/^[!！](?:模型|model)/i, '').trim();
         if (!raw) {
-          let pref = await dbGet(env, `model_pref:${currentGroupId || 'private'}:${userId}`) || 'auto';
+          let prefState = isQqOpenV4
+            ? await readUserSetting(env, qqOpenContentPrincipal, "model_preference", "auto")
+            : { available: true, value: await dbGet(env, `model_pref:${currentGroupId || 'private'}:${userId}`) || 'auto' };
+          let pref = normalizeModelPreference(prefState.value) || 'auto';
           if (!isDeveloper && String(pref).startsWith('deepseek')) {
             pref = 'auto';
-            await dbPut(env, `model_pref:${currentGroupId || 'private'}:${userId}`, pref);
+            if (isQqOpenV4) await writeUserSetting(env, qqOpenContentPrincipal, "model_preference", pref);
+            else await dbPut(env, `model_pref:${currentGroupId || 'private'}:${userId}`, pref);
           }
           const options = isDeveloper
             ? '自动、Gemma 26B、Gemma 31B、Gemini、DeepSeek、DeepSeek High、DeepSeek Max'
             : '自动、Gemma 26B、Gemma 31B、Gemini（DeepSeek 仅在免费模型连续失败后临时开放）';
-          return jsonReply(`${atSender}当前模型偏好：${modelPreferenceLabel(pref)}\n可选：${options}`);
+          const storageHint = isQqOpenV4 && prefState.available !== true ? '\n长期保存：未启用（请先连接自己的 D1 / KV）' : '';
+          return jsonReply(`${atSender}当前模型偏好：${modelPreferenceLabel(pref)}\n可选：${options}${storageHint}`);
         }
         const pref = normalizeModelPreference(raw);
         if (!pref) return jsonReply(`${atSender}可选：!模型 自动／Gemma 26B／Gemma 31B／Gemini${isDeveloper ? '／DeepSeek／DeepSeek High／DeepSeek Max' : ''}`);
         if (!isDeveloper && String(pref).startsWith('deepseek')) {
-          return jsonReply(`${atSender}DeepSeek 暂不对普通成员开放。Google 免费模型连续失败达到门槛时，系统会自动为当前会话临时开放并永久记录开放时段与实际调用时间。`);
+          return jsonReply(`${atSender}DeepSeek 暂不对普通成员开放。Google 免费模型连续失败达到门槛时，系统会自动为当前会话临时开放。`);
         }
-        await dbPut(env, `model_pref:${currentGroupId || 'private'}:${userId}`, pref);
+        if (isQqOpenV4) {
+          const saved = await writeUserSetting(env, qqOpenContentPrincipal, "model_preference", pref);
+          if (!saved.saved) {
+            return jsonReply(`${atSender}这个模型偏好没有保存。若要保存个人设置，请先在「AI 与资料」连接自己的 D1 或 KV。`);
+          }
+        } else {
+          await dbPut(env, `model_pref:${currentGroupId || 'private'}:${userId}`, pref);
+        }
         return jsonReply(`${atSender}模型偏好已保存：${modelPreferenceLabel(pref)}`);
       }
 
@@ -3625,7 +3638,10 @@ ${deepseekContextSummary}`;
       let usedProvider = "";
       let generationError = null;
       let searchInfo = { required: false, attempted: false, performed: false, query: "", context: "", sources: [], queries: [], provider: "", model: "", error: "" };
-      const modelPref = await dbGet(env, `model_pref:${currentGroupId || 'private'}:${userId}`) || 'auto';
+      const modelPrefState = isQqOpenV4
+        ? await readUserSetting(env, qqOpenContentPrincipal, "model_preference", "auto")
+        : { value: await dbGet(env, `model_pref:${currentGroupId || 'private'}:${userId}`) || 'auto' };
+      const modelPref = normalizeModelPreference(modelPrefState.value) || 'auto';
       if (standaloneTimeQuestion) {
         baseText = `【Asia/Taipei/Shanghai（亚洲/台北/上海时间）是：${currentTime}】`;
         usedModel = "deterministic-clock";
@@ -4437,7 +4453,11 @@ export class OneBotHub {
         if (!isDeveloperId(qqOpenEnv, userId) && String(preference).startsWith("deepseek")) {
           return Response.json({ ok: true, changed: false, reason: "MODEL_NOT_AVAILABLE_FOR_MEMBER" });
         }
-        await dbPut(this.env, `model_pref:${groupId || "private"}:${userId}`, preference);
+        const principalId = await resolveCanonicalPrincipal(this.env, `qqopen:${userId}`);
+        const saved = await writeUserSetting(this.env, principalId, "model_preference", preference);
+        if (!saved.saved) {
+          return Response.json({ ok: true, changed: false, reason: "USER_STORAGE_REQUIRED", preference: "auto" });
+        }
         return Response.json({ ok: true, changed: true, preference });
       }
 
