@@ -3,15 +3,15 @@
 ## Active Requirements
 
 - QQ Open/AIBot is the primary official bot transport and action path.
-- All usable operations should use AIBot first.
-- When AIBot cannot deterministically perform an operation, automatically check the legacy Bot as fallback.
 - Do not make the old Bot a competing primary command responder.
-- Restore the full active QQAI 2.7.12 function surface, including !codexchat and !codexwork.
-- Use categorized QQ official panels and QQ native C2C submenus where applicable.
-- Group panels must include ordinary group commands together with management commands.
-- Higher permissions are cumulative; Developer is the top level and should have every command available in the current scope.
-- Because QQ group panels cannot target an individual user, Developer-only group commands may be visible to others, but runtime authorization must reject unauthorized execution.
-- Keep server-side permission checks, confirmations, cooldowns and Portal switches authoritative.
+- Restore and retain the full QQAI 2.7.12 function surface, including !codexchat and !codexwork.
+- Group command discovery must expose ordinary functions as well as management/developer functions.
+- Developer is the top cumulative permission level for commands available in the current scope.
+- QQ group discovery must work in the actual client, not merely create API resources successfully.
+- Because QQ group PanelItem has no nested submenu, use one managed group root panel with category commands and route category subcommands to existing handlers.
+- QQ-rendered `/!面板 ...` must be treated as a reserved panel command.
+- Ordinary manual `/!普通内容` must continue to bypass AI.
+- Existing server-side permission checks, confirmations, cooldowns and Portal switches remain authoritative.
 - Restore and retain the full Portal/web functionality.
 - Never treat QQ Open OpenIDs as numeric QQ IDs.
 - Never retry ambiguous mutating timeout/5xx results across transports.
@@ -20,8 +20,6 @@
 
 ## Public-Service Requirements
 
-- The service is intended for public use rather than only the developer's own QQ account.
 - Public users should connect their own external AI/storage resources instead of relying on unrestricted shared credentials.
-- Public-user data and resources must be isolated by principal/tenant ownership.
+- Public-user data and resources must remain principal/tenant isolated.
 - Preview/testing must not write to the production `kv_store` table.
-- Production QQ Open stays primary; the legacy QQ/OneBot account remains a guarded fallback where official capability is unavailable.
