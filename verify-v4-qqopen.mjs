@@ -117,7 +117,14 @@ const menu = registry.buildMenu();
 assert(menu.items.length <= 10);
 assert(menu.items.every(item => item.type === "menu"));
 assert(menu.items.every(item => item.sub_menu_items.length <= 5));
-assert(menu.items.flatMap(item => item.sub_menu_items).some(item => item.send_message === "!codex"));
+const menuCommands = new Set(menu.items.flatMap(item => item.sub_menu_items).map(item => item.send_message).filter(Boolean));
+assert(menuCommands.has("!codex"));
+assert(menuCommands.has("!翻译"));
+assert(menuCommands.has("!QQ语音角色"));
+assert(menuCommands.has("!QQ语音"));
+for (const command of registry.list({ scope:"c2c" }).filter(command => command.permission === "member" && command.menu.enabled && command.panel.enabled)) {
+  assert(menuCommands.has(command.menu.value), `C2C menu missing ${command.id}`);
+}
 
 const replyCalls = [];
 const replyDispatcher = createQqOpenActionDispatcher({
