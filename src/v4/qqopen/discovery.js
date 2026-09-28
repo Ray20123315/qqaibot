@@ -42,15 +42,52 @@ async function listAllPanels(api, scope) {
   return rows;
 }
 
-async function syncQqOpenDiscovery(api, registry, { previousFingerprint = "" } = {}) {
-  const menu = registry.buildMenu();
-  const panels = [
-    ...registry.buildPanels("c2c", { remarkPrefix: "QQAIBOT V4 C2C", maxItemsPerPanel: 20 }),
-    ...registry.buildPanels("group", { remarkPrefix: "QQAIBOT V4 GROUP", maxItemsPerPanel: 20 })
-  ];
+function uniqueIds(values) {
+  return [...new Set((Array.isArray(values) ? values : []).map(text).map(v => v.trim()).filter(Boolean))].slice(0, 20);
+}
+
+async function syncQqOpenDiscovery(api, registry, {
+  previousFingerprint = "",
+  developerOpenids = []
+} = {}) {
+  const developerIds = uniqueIds(developerOpenids);
+  const menu = registry.buildMenu({ maxItems: 10, maxSubItems: 5 });
+
+  const globalC2C = registry.buildCategorizedPanels("c2c", {
+    remarkPrefix: "QQAIBOT V4 C2C",
+    maxItemsPerPanel: 20,
+    permissions: ["member"]
+  });
+  const globalGroup = registry.buildCategorizedPanels("group", {
+    remarkPrefix: "QQAIBOT V4 GROUP",
+    maxItemsPerPanel: 20,
+    permissions: ["member", "group_ops", "ai_admin", "owner"]
+  });
+  const developerC2C = developerIds.length
+    ? registry.buildCategorizedPanels("c2c", {
+        remarkPrefix: "QQAIBOT V4 DEV",
+        maxItemsPerPanel: 20,
+        permissions: ["developer"],
+        targetType: "specific",
+        userOpenids: developerIds
+      })
+    : [];
+
+  const panels = [...globalC2C, ...globalGroup, ...developerC2C];
+  if (panels.length > 10) {
+    throw new Error(`QQ_OPEN_DISCOVERY_QPM_SAFE_PANEL_LIMIT:${panels.length}`);
+  }
+
   const nextFingerprint = fingerprint({ menu, panels });
   if (previousFingerprint && previousFingerprint === nextFingerprint) {
-    return { ok: true, changed: false, fingerprint: nextFingerprint, menuItems: menu.items.length, panels: panels.length };
+    return {
+      ok: true,
+      changed: false,
+      fingerprint: nextFingerprint,
+      menuItems: menu.items.length,
+      panels: panels.length,
+      categories: [...new Set(panels.map(item => item.discovery_category).filter(Boolean))]
+    };
   }
 
   await api.putMenu(menu);
@@ -68,7 +105,10 @@ async function syncQqOpenDiscovery(api, registry, { previousFingerprint = "" } =
   }
 
   const created = [];
-  for (const panel of panels) created.push(await api.createPanel(panel));
+  for (const panel of panels) {
+    const { discovery_category, discovery_category_label, ...payload } = panel;
+    created.push(await api.createPanel(payload));
+  }
 
   return {
     ok: true,
@@ -77,7 +117,9 @@ async function syncQqOpenDiscovery(api, registry, { previousFingerprint = "" } =
     menuItems: menu.items.length,
     panels: panels.length,
     deleted,
-    created: created.length
+    created: created.length,
+    categories: [...new Set(panels.map(item => item.discovery_category).filter(Boolean))],
+    developerPanels: developerC2C.length
   };
 }
 
