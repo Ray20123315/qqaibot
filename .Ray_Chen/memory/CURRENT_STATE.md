@@ -3,53 +3,33 @@
 ## GitHub
 
 - canonical branch: `main`
-- verified product revision: `df7958e9e99be0d5724dc4fd24a39da616e1befd`
-- final main CI `36447663272`: success
-- previous clean merge main CI `36445884523`: success
-- Windows Codex Bridge build `36445884500`: success
-- feature branch `feature/v4-public-bot` is fully contained in main.
+- verified product revision: `64513e94f6634921f0b1ee8f7c6d5d44a754a6f5`
+- development CI `36476322049`: success
+- main CI `36476525721`: success
 
 ## Cloudflare Production
 
 - Worker: `qqai`
-- Connected Build: `9070f843-d627-4d69-8c03-d3e8c6f751b9`
+- Connected Build: `8aa6ab67-ad80-4ddd-b916-0b76e7bfcf3c`
+- commit: `64513e94f6634921f0b1ee8f7c6d5d44a754a6f5`
+- branch: `main`
 - outcome: success
-- deployment: `15d74fcd-2514-48a1-8892-f44b4660d7ec`
-- Worker version: `2aa24e2a-b640-4ac2-83ae-07efb428b099`
-- version number: 2129
-- main module: `worker.js`
-- production DB id: `569a01fe-3297-40e1-832f-09c3793056ed`
-- production `QQAI_DB_TABLE`: absent
-- QQ Open: enabled
-- live health: HTTP 200, ok=true, 10 ok / 1 warning / 0 error
-- OneBot/NapCat: connected=true, rpcRoundTrip=true
 
-## Public V4 Foundation
+## QQ Group Panel
 
-- user-scoped AI provider accounts can be owned and selectively shared to groups.
-- user settings, memory, private history and storage routing use explicit user resources where implemented.
-- D1/KV user storage connector infrastructure and Portal resource management are present.
-- plugin runtime guard can block unsafe plugin capabilities according to policy.
-- Preview uses the same Worker code path with an isolated `kv_store_v4public_preview` table namespace.
-- production does not inherit the Preview table namespace.
+- one managed group root panel contains category roots.
+- category router remains `!面板 <分类> [子指令] [参数]`.
+- QQ-rendered slash form `/!面板 ...` is normalized before group AI opt-out parsing.
+- ordinary `/!普通内容` still bypasses AI and is not treated as a panel command.
+- category + child reuses existing canonical handlers and permissions.
 
-## Hybrid QQ Transport
+## Public V4 / Hybrid State
 
 - QQ Open remains primary.
-- OneBot remains fallback/auxiliary and still enforces read-only mode and permission checks.
-- unsupported/denied official capabilities can route to OneBot only when the fallback is considered safe.
-- numeric QQ/group mapping safety remains required.
-- OneBot health uses `hybridRuntimeStatus`; the prior undefined `hybridStatus` runtime call is fixed.
+- OneBot remains controlled fallback/auxiliary.
+- public-user AI/storage isolation work from current main is preserved.
+- runtime authorization remains authoritative regardless of command-panel visibility.
 
-## Remaining Operational Risk
+## Remaining Live Verification
 
-- live health reports one warning, but zero errors.
-- NapCat has historical abnormal WebSocket closes (1006) in diagnostics; current socket is connected and RPC round-trip succeeds.
-
-
-## Ray_Chen Packaging
-
-- canonical memory version: `v0.0.28`
-- packaging workflow: `.github/workflows/ray-chen-memory-package.yml`
-- workflow packages the exact committed `.Ray_Chen/memory/` tree.
-- artifact includes `Ray_Chen_memory_v0.0.28.tar.gz`, SHA-256 evidence and archive listing.
+Automated tests prove input normalization and routing order but cannot generate a real QQ client panel click. One live group panel click should be checked after deployment.
