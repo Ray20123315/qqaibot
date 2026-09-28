@@ -9,6 +9,7 @@ on:
       - chatgpt/qqaibot-continue-20260925
       - v4-qqopen-native
       - feature/v4-public-bot
+      - integration/v4-public-main-20260928
   pull_request:
     branches:
       - main
