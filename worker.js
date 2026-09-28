@@ -37,6 +37,8 @@ import { getQqOpenGateway, qqOpenConfigured, qqOpenEnabled } from "./src/v4/qqop
 import { hybridObservationRow, hybridPrimaryTransport, hybridRuntimeStatus, isAuxiliaryOneBotMessage, recordOneBotHybridObservation, recordQqOpenHybridGroupObservation, resolveQqOpenGroupForOneBot } from "./src/v4/hybrid/ownership.js";
 import { handleV4QqOpenPortalApi } from "./src/v4/portal/api.js";
 import { injectV4LeanPortalClient } from "./src/v4/portal/lean-dashboard.js";
+import { handleV4ResourcePortalApi } from "./src/v4/portal/resources-api.js";
+import { resourceConnectPage } from "./src/v4/portal/resource-page.js";
 import { handleV3PluginManagerApi, injectV3PluginManagerClient } from "./src/v3/portal/plugin-manager.js";
 import { handleV3PackageManagerApi, injectV3PackageManagerClient } from "./src/v3/portal/package-manager.js";
 import { handleV3PluginSecurityPublic, runV3PluginSecurityScheduled } from "./src/v3/public/plugin-security.js";
@@ -283,6 +285,20 @@ const QQAIWorker = {
       }
     }
 
+    if (request.method === 'GET' && url.pathname === '/connect-resource') {
+      return new Response(resourceConnectPage(), {
+        headers: {
+          "Content-Type": "text/html; charset=utf-8",
+          "Cache-Control": "no-store",
+          "Strict-Transport-Security": "max-age=31536000",
+          "X-Content-Type-Options": "nosniff",
+          "X-Frame-Options": "DENY",
+          "Referrer-Policy": "no-referrer",
+          "Permissions-Policy": "camera=(), geolocation=(), microphone=()"
+        }
+      });
+    }
+
     // ==========================================
     // 🌌 公共首頁與記憶矩陣中心
     // ==========================================
@@ -325,6 +341,9 @@ const QQAIWorker = {
       if (!session) return jsonResponse({ ok: false, message: '请先登录 Portal。' }, 401);
       return jsonResponse(await getDeploymentStatusForViewer(env, session));
     }
+
+    const v4ResourcePortalResponse = await handleV4ResourcePortalApi(request, env, url);
+    if (v4ResourcePortalResponse) return v4ResourcePortalResponse;
 
     const v4QqOpenPortalResponse = await handleV4QqOpenPortalApi(request, env, url);
     if (v4QqOpenPortalResponse) return v4QqOpenPortalResponse;
