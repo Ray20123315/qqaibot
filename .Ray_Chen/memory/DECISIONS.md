@@ -23,3 +23,14 @@ Decision: ambiguous mutating QQ Open timeout/5xx results are not replayed throug
 status: accepted
 date: 2026-09-28
 Decision: member OpenID -> numeric QQ mapping is recorded only after the group mapping is confirmed and a correlated OneBot observation provides a numeric user ID without conflict.
+
+
+## D-050 QQ discovery is category-oriented
+status: accepted
+date: 2026-09-28
+Decision: QQ group command discovery is split into category-specific panels. QQ PanelItem has no nested child-panel primitive, so category separation is implemented as multiple panels. C2C custom menu uses QQ's native one-level submenu support.
+
+## D-051 Discovery visibility is not authorization
+status: accepted
+date: 2026-09-28
+Decision: hiding a privileged command from a menu/panel is only UX/discovery filtering. Runtime authorization, feature switches, cooldowns and confirmation flows remain mandatory for every command execution.
