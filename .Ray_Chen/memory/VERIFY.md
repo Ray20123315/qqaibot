@@ -2,12 +2,12 @@
 
 ## Verified Product Revision
 
-`fd11cd640cae1124edc03b0fef3d8d8d529cc52b`
+`b86f762000dc6f498340c54696123328d0328db6`
 
 ## GitHub Actions
 
-Development run `36378926121`: SUCCESS.
-Main run `36379048954`: SUCCESS.
+Development run `36385798148`: SUCCESS.
+Main run `36385930192`: SUCCESS.
 
 Passed on the final product revision:
 - repository regression checks
@@ -16,44 +16,42 @@ Passed on the final product revision:
 - isolated V4 test deployment checks
 - single Worker bundle
 
-## New Regression Coverage
+## Command / Discovery Regression Coverage
 
-- deterministic unsupported QQ Open group action falls back only after old Bot role probing;
-- old Bot `member` role is rejected for admin-required fallback and no write is sent;
-- mutating QQ Open 500 is not cross-retried through OneBot;
-- safe read fallback can use OneBot after presence/role probing;
-- V4 catalog has at least 70 entries and representative restored aliases;
-- member OpenID mapping hooks are present across QQ Open runtime, Worker and hybrid ownership;
-- original QQ Open primary panel still contains the established moderation entries.
+- command registry has at least 77 entries;
+- `!QQ语音角色` and `!QQ语音` resolve;
+- `!codexchat` and `!codexwork` resolve;
+- group categorized panels include 基础与多模态, 活动投票与排程, AI 管理 and 群操作;
+- developer commands are absent from global group panels;
+- developer C2C panels target configured OpenIDs and cover both AI/Codex and developer categories;
+- C2C menu is nested, each submenu has <=5 children, and every discoverable member C2C command is present;
+- discovery generates <=10 panels in the developer test fixture;
+- sync preserves foreign panels and replaces only QQAIBOT-managed panels.
 
-## Main Read-back
+## Portal Regression Coverage
 
-Verified directly from `main` after CI:
-- command entries: 75
-- restored aliases present: `!读网页`, `!翻译`, `!活动`, `!投票`, `!排程`, `!关闭ai`, `!改群名`, `!改名片`, `!确认op`, `!群白名单`
-- `probeLegacyBotGroupPermission` present
-- `hybrid_action_fallback` audit path present
-- read-only-only 5xx fallback guard present
-- `qqopen_dynamic_member_map` present
-- QQ Open runtime and Worker pass `userOpenid` into hybrid observations
+- full Portal navigation remains visible;
+- V4 no longer hides legacy nav groups;
+- overview states that complete functionality is restored;
+- active activity/poll, schedule, appeal, history, Bilibili, member/relationship, plugin and system entries are not shown as retired.
 
-Key blob SHAs:
-- `src/core/permissions.js`: `aa58867f125ac2f450a07b365b68602e243fb380`
-- `src/v4/commands/catalog.js`: `d0854fb4285558ce9b68a95497e4dd905d2a965d`
-- `src/v4/hybrid/ownership.js`: `a8f4c81c1a4e4faee659d6ae29b3161b34a5908d`
-- `src/v4/qqopen/runtime.js`: `060484618ff9e2883ea9a186672e80398825a20a`
-- `worker.js`: `8e585669ae68db2df9e8fb73f8d29ae271bbe18c`
-- `README.md`: `0f72880a9dc25f8f877ab2bffb68c7be21de185b`
+## Runtime / Fallback Coverage
+
+Previous capability-fallback regression remains green:
+- QQ Open attempted first;
+- legacy role/group/member mapping checks remain required;
+- mutating ambiguous 5xx/timeout is not cross-retried;
+- OneBot ingress remains auxiliary.
 
 ## Cloudflare Production
 
-Connected Build `53058046-38a3-4ecc-9fbd-581032693db5`:
-- commit: `fd11cd640cae1124edc03b0fef3d8d8d529cc52b`
+Connected Build `435505a0-a118-4830-a4dc-f216b2ace61b`:
+- commit: `b86f762000dc6f498340c54696123328d0328db6`
 - branch: `main`
-- status: stopped/completed
+- status: stopped
 - outcome: success
 - deploy command: `npx wrangler deploy worker.js --no-assets`
 
-## Remaining Live Smoke Check
+## Remaining Live Verification
 
-Automated verification cannot prove the actual QQ group currently grants the legacy Bot the desired role. The runtime now checks that at execution time and produces an actionable permission prompt when insufficient.
+Automated tests cannot prove QQ has already refreshed the official menu/panels for the live Bot account, or that each live group grants the legacy Bot the required role. The runtime checks legacy permission at action time.

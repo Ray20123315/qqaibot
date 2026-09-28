@@ -2,57 +2,41 @@
 
 ## GitHub
 
-- main: `fd11cd640cae1124edc03b0fef3d8d8d529cc52b`
-- v4-qqopen-native product revision: `fd11cd640cae1124edc03b0fef3d8d8d529cc52b`
-- development CI `36378926121`: success
-- main CI `36379048954`: success
+- product revision on main: `b86f762000dc6f498340c54696123328d0328db6`
+- product revision on v4-qqopen-native: `b86f762000dc6f498340c54696123328d0328db6`
+- development CI `36385798148`: success
+- main CI `36385930192`: success
 
 ## Cloudflare
 
 - Worker: `qqai`
-- Connected Build: `53058046-38a3-4ecc-9fbd-581032693db5`
-- commit: `fd11cd640cae1124edc03b0fef3d8d8d529cc52b`
+- Connected Build: `435505a0-a118-4830-a4dc-f216b2ace61b`
+- commit: `b86f762000dc6f498340c54696123328d0328db6`
 - branch: `main`
-- outcome: `success`
+- status: stopped
+- outcome: success
 - deploy command: `npx wrangler deploy worker.js --no-assets`
 
-## Command Surface
+## Command Discovery
 
-`src/v4/commands/catalog.js` contains 75 entries.
+- registry entries: 77
+- restored QQ voice discovery: `!QQ语音角色`, `!QQ语音`
+- Codex entries: `!codex`, `!codexchat`, `!codexwork`
+- group discovery uses 8 help-aligned public categories
+- privileged group items use QQ `only_admin` where representable
+- developer commands are not put in global group panels
+- developer C2C panels use `target_type=specific` when `QQ_OPEN_DEVELOPER_OPENIDS` is configured
+- C2C custom menu uses native nested `sub_menu_items`, max 5 children each, with automatic category pagination
+- discovery is capped to 10 generated panels to remain within the sync request-rate safety budget
 
-Representative restored aliases verified from main:
-- `!读网页`, `!翻译`
-- `!活动`, `!投票`, `!排程`
-- `!关闭ai`
-- `!改群名`, `!改名片`, `!确认op`
-- `!群白名单`
+## Portal
 
-The original first 20 command ordering is retained so the primary official panel behavior remains compatible with existing tests.
+The original Portal navigation remains visible. V4 adds QQ Open/Hybrid shortcuts without replacing or hiding existing activity, schedule, appeal, history, Bilibili, member/relationship, plugin and system surfaces.
 
-## Capability Fallback
+## Transport and Safety
 
-`src/core/permissions.js` now:
-1. attempts QQ Open first;
-2. classifies whether fallback is safe;
-3. resolves the confirmed OneBot group mapping;
-4. checks the old Bot is connected and present in the group;
-5. verifies the action-required role;
-6. resolves member OpenID to numeric QQ when required;
-7. executes through OneBot only after those checks.
-
-Owner-required fallback includes actions such as setting group administrators/special titles.
-Admin-or-owner fallback includes moderation/group-management operations such as mute, kick, whole-group mute, group rename and group card changes.
-
-## Safety Guards
-
-- Mutating QQ Open timeout/5xx failures are not automatically replayed through OneBot.
-- QQ Open message/request IDs that cannot be safely translated are not sent to OneBot.
-- `ONEBOT_READ_ONLY` blocks write fallback when enabled.
-- OneBot remains auxiliary at ingress, preventing duplicate command execution.
-
-## Hybrid Identity Mapping
-
-`src/v4/hybrid/ownership.js` now stores conflict-safe member mappings after group mapping is confirmed and a matching cross-transport observation identifies a numeric QQ account.
-
-D1 member mapping key:
-- `qqopen_dynamic_member_map`
+- QQ Open/AIBot remains primary for inbound commands and supported actions.
+- Legacy OneBot remains internal fallback only after capability, mapping and role checks.
+- Runtime permissions, Portal switches, cooldowns and confirmation flows remain authoritative.
+- OpenIDs are never treated as numeric QQ IDs.
+- Ambiguous mutating QQ Open timeout/5xx results are never cross-retried through OneBot.

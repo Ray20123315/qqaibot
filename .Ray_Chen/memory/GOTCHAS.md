@@ -24,3 +24,8 @@ Mitigation: for compact catalog modules, reconstruct the complete module boundar
 ## G-047 QQ command panels are flat
 Risk: treating a QQ command panel as a nested menu would either flatten all commands into one surface or invent unsupported payload fields.
 Mitigation: use separate category panels for group/channel discovery and use C2C custom-menu sub_menu_items only where the QQ API explicitly supports them.
+
+
+## G-048 C2C submenu truncation
+Risk: slicing a category to the QQ five-child submenu limit can make valid commands undiscoverable.
+Mitigation: paginate each C2C category into additional top-level menu items and fail closed if the ten-item global menu limit would be exceeded.

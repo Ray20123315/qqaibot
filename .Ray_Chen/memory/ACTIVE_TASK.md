@@ -1,56 +1,52 @@
 # ACTIVE_TASK
 
 task_id: qqaibot-20260928-full-command-panels-portal
-task_status: active
+task_status: completed
 goal_revision: 1
 
 ## Goal
 
-Restore all active QQAI 2.7.12 command/function entry points, generate categorized QQ official command discovery, keep developer/admin-only entries out of inappropriate discovery surfaces where QQ supports it, and restore the Portal sections previously hidden by the V4 lean overlay.
+Restore all active QQAI 2.7.12 command/function entry points, categorized QQ official discovery, and the full Portal while keeping QQ Open/AIBot primary and OneBot as an internal fallback only.
 
-## Acceptance Criteria
+## Acceptance Results
 
-- Existing QQAI 2.7.12 command handlers remain callable; discovery covers the documented active surface including !codex, !codexchat and !codexwork.
-- QQ group discovery is grouped by category instead of one flat first-level dump.
-- C2C global custom menu uses QQ native submenus where useful and stays within QQ menu limits.
-- Developer/owner/admin command metadata is represented consistently; server-side permission checks remain mandatory even when discovery hides an entry.
-- QQ Open/AIBot receives all user commands; users never need to command the legacy Bot directly.
-- Legacy OneBot fallback semantics from the previous task remain intact.
-- Portal no longer presents active modules as retired/removed and does not hide the complete existing navigation.
-- Regression tests cover categorized panels/menu, permission visibility metadata, restored web navigation and representative complete command families.
-- Full GitHub Actions and Worker bundle checks pass before main is updated.
+- VERIFIED: command registry exposes 77 entries and representative QQAI 2.7.12 families resolve.
+- VERIFIED: !codex, !codexchat and !codexwork remain registered; developer commands are excluded from global group discovery.
+- VERIFIED: QQ voice Beta commands are registered for C2C and group discovery.
+- VERIFIED: group command discovery is split into help-aligned categories instead of one flat panel.
+- VERIFIED: C2C custom menu uses native nested sub_menu_items and paginates categories at five children.
+- VERIFIED: all C2C member commands enabled for discovery are present in the generated menu.
+- VERIFIED: developer C2C discovery uses target_type=specific when developer OpenIDs are configured.
+- VERIFIED: owner/admin panel entries keep runtime permission checks and use panel-safe command aliases where QQ name limits require them.
+- VERIFIED: Portal full navigation is no longer hidden and active features are no longer presented as retired.
+- VERIFIED: QQ Open/AIBot remains primary; previous conservative OneBot fallback behavior is unchanged.
+- VERIFIED: development CI, main CI, isolated V4 deployment checks and Worker bundle all pass.
+- VERIFIED: production Connected Build succeeds.
 
-## Hard Constraints
+## Product Revision
 
-- Do not remove runtime authorization, confirmation, cooldown or Portal feature switches merely because a panel item is hidden.
-- Do not re-enable parallel OneBot command ingress.
-- Respect QQ official limits: <=20 panels per bot, <=20 items per panel, panel item name <=14 chars, description <=30 chars; global C2C menu <=10 items and submenu <=5 children.
-- Never coerce OpenID into numeric QQ identifiers.
-- Do not store secrets.
+`b86f762000dc6f498340c54696123328d0328db6`
 
-## Execution Plan
+## Verification Evidence
 
-### Phase 1 — IN_PROGRESS
-- Recovered v0.0.21 and current main/dev baseline.
-- Verified QQ official panel/menu constraints.
-- Compare help/handlers/plugins to the V4 discovery catalog and identify missing active entries.
+- development CI: `36385798148` — success
+- main CI: `36385930192` — success
+- production build: `435505a0-a118-4830-a4dc-f216b2ace61b` — success
+- command entries: 77
+- global group category panels: 8
+- developer C2C category panels in regression fixture: 2
+- maximum discovery panels with developer fixture: 10
+- C2C menu child limit: <= 5, with category pagination
 
-### Phase 2 — PLANNED
-- Expand/normalize registry metadata and add categorized panel/menu generation.
-- Restore missing discoverable commands, especially plugin-backed commands that are active but absent from catalog.
-- Restore complete Portal navigation and remove obsolete "retired" presentation.
-- Add regression coverage.
+## Resolved Failures
 
-### Phase 3 — PLANNED
-- Commit product changes on v4-qqopen-native.
-- Run full CI and repair all failures.
-- Fast-forward main only after verified success and confirm Connected Build.
-
-### Phase 4 — PLANNED
-- Reconcile Ray_Chen memory, create/verify TAR.GZ, send one Gmail notification.
+- An intermediate categorized-panel test assumed <=6 group panels; corrected to the help-aligned eight-category design.
+- A test-edit syntax error was repaired before product validation.
+- Developer commands span two discovery categories, so regression coverage now validates both instead of assuming one developer panel.
+- C2C menu generation was changed from truncation to pagination so commands after the fifth child are not lost.
 
 ## next_exact_action
 
-Finish command coverage inventory, then implement registry/panel/menu/Portal changes and regression tests on v4-qqopen-native.
+Perform one live QQ smoke check after discovery sync: inspect the C2C nested menu, the categorized group panels, and execute one QQ-Open-supported command plus one legacy-fallback group action.
 
-last_checkpoint_at: 2026-09-28T13:20:00+08:00
+last_checkpoint_at: 2026-09-28T14:24:00+08:00

@@ -1,34 +1,33 @@
 # Ray_Chen Memory Entry
 
-- memory_version: v0.0.22
+- memory_version: v0.0.23
 - project: QQAIBOT
 - repository: Ray20123315/qqaibot
 - canonical_branch: main
 - development_branch: v4-qqopen-native
 - task_id: qqaibot-20260928-full-command-panels-portal
-- task_status: active
+- task_status: completed
 - goal_revision: 1
-- base_product_revision: fd11cd640cae1124edc03b0fef3d8d8d529cc52b
-- base_repository_head: 3dcd7b052c60add687a097257c47cca9f7adb016
-- updated_at: 2026-09-28T13:20:00+08:00
+- product_revision: b86f762000dc6f498340c54696123328d0328db6
+- updated_at: 2026-09-28T14:24:00+08:00
 
-## Current Goal
+## Quick Recovery
 
-Restore the complete QQAI 2.7.12 command/function surface, expose it through categorized QQ official discovery instead of a flat command dump, and restore the full Portal without changing QQ Open/AIBot primary ownership.
+The full command-discovery and Portal restoration task is complete and verified.
 
-## Confirmed Design
-
-- Group command discovery uses multiple category panels because QQ PanelItem supports command/link items but no nested child panel.
-- C2C custom menu uses QQ's supported menu + sub_menu_items structure for category/subcommand discovery.
-- Panel visibility is a discoverability layer, not the security boundary; existing server-side permission/confirmation checks remain authoritative.
-- QQ Open/AIBot remains the only user-facing command target.
-- Legacy OneBot remains an internal execution fallback only when the official path cannot safely perform an action.
-- Existing QQAI 2.7.12 handlers are reused; command discovery must not imply a feature rewrite or deletion.
+- QQAI 2.7.12 discovery now exposes 77 registered command entries, including QQ voice Beta, !codex, !codexchat and !codexwork.
+- Group discovery is category-oriented instead of a flat command dump.
+- C2C uses QQ native custom-menu submenus; categories paginate instead of silently dropping commands after the five-child limit.
+- Developer commands stay out of global group panels and use specific C2C panels when developer OpenIDs are configured.
+- Runtime permission, feature-switch, cooldown and confirmation checks remain authoritative.
+- QQ Open/AIBot remains the only user-facing command path; legacy OneBot remains an internal permission-checked fallback.
+- The full pre-existing Portal navigation is visible again; V4 is an additive control surface rather than a replacement.
+- Development CI 36385798148 and main CI 36385930192 both succeeded.
+- Cloudflare production Connected Build 435505a0-a118-4830-a4dc-f216b2ace61b succeeded for b86f762000dc6f498340c54696123328d0328db6.
 
 ## Recovery Route
 
-1. Read ACTIVE_TASK.md, CURRENT_STATE.md, USER_REQUIREMENTS.md, DECISIONS.md, GOTCHAS.md and VERIFY.md.
-2. Continue on v4-qqopen-native.
-3. Verify command coverage against src/help/commands.js and existing handlers/plugins.
-4. Run full repository/V3/V4 CI before fast-forwarding main.
-5. Reconcile memory, package the next version, send one Gmail notification, then report completion.
+1. Read ACTIVE_TASK.md and CURRENT_STATE.md.
+2. Treat b86f762000dc6f498340c54696123328d0328db6 as the verified product revision.
+3. If live QQ discovery differs, inspect QQ_OPEN_DISCOVERY_SYNC status and official menu/panel API errors before changing the registry.
+4. Keep QQ Open primary and OneBot auxiliary.

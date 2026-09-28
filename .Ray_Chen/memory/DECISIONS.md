@@ -34,3 +34,9 @@ Decision: QQ group command discovery is split into category-specific panels. QQ 
 status: accepted
 date: 2026-09-28
 Decision: hiding a privileged command from a menu/panel is only UX/discovery filtering. Runtime authorization, feature switches, cooldowns and confirmation flows remain mandatory for every command execution.
+
+
+## D-052 C2C menu pagination preserves the full public surface
+status: accepted
+date: 2026-09-28
+Decision: when a C2C discovery category contains more than five commands, split it into multiple top-level menu entries so QQ's five-child submenu limit never silently drops later commands.

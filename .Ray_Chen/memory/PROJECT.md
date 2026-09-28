@@ -7,13 +7,20 @@ QQAIBOT is a Cloudflare Workers QQ AI bot using a hybrid transport architecture.
 ## Current Production
 
 - branch: `main`
-- verified product revision: `fd11cd640cae1124edc03b0fef3d8d8d529cc52b`
+- verified product revision: `b86f762000dc6f498340c54696123328d0328db6`
 - Worker: `qqai`
-- Cloudflare Connected Build: `53058046-38a3-4ecc-9fbd-581032693db5`
+- Cloudflare Connected Build: `435505a0-a118-4830-a4dc-f216b2ace61b`
 - build outcome: `success`
 - deploy command: `npx wrangler deploy worker.js --no-assets`
 - Durable Objects: `OneBotHub`, `QqOpenGateway`
 - Hybrid primary: `qq-open`
+
+## Discovery Model
+
+- C2C: QQ global custom menu with one-level native submenus; category pages keep every public member command discoverable within QQ limits.
+- Group: help-aligned category command panels; admin-capable entries use QQ `only_admin` when applicable.
+- Developer: not exposed globally in group discovery; specific C2C developer panels may be generated for configured developer OpenIDs.
+- Discovery visibility is UX only. Runtime authorization remains mandatory.
 
 ## Transport Rules
 
@@ -23,7 +30,6 @@ QQAIBOT is a Cloudflare Workers QQ AI bot using a hybrid transport architecture.
 - Ambiguous mutating timeout/5xx results are never cross-retried.
 - Mutating group fallback requires a confirmed QQ Open group -> numeric OneBot group mapping and a live legacy Bot role check.
 - Member-target fallback requires a confirmed member OpenID -> numeric QQ mapping.
-- Static group mapping remains authoritative; learned mappings remain conservative and conflict-safe.
 - `ONEBOT_READ_ONLY` remains authoritative when enabled.
 
 ## Safety
