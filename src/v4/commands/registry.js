@@ -56,7 +56,8 @@ function defineCommand(spec = {}) {
   const aliases = [...new Set((Array.isArray(spec.aliases) ? spec.aliases : [spec.command]).map(text).filter(Boolean))];
   if (!aliases.length) throw new Error(`V4_COMMAND_ALIAS_REQUIRED:${id}`);
   const category = text(spec.category || "general");
-  const categoryMeta = discoveryCategory(spec.panel?.category || category);
+  const discoverySource = spec.panel?.category || (text(spec.permission || "member") === "developer" ? "developer" : category);
+  const categoryMeta = discoveryCategory(discoverySource);
   const panelCommand = text(spec.panel?.command || aliases[0]);
   if (spec.panel?.enabled !== false && qqTextUnits(panelCommand) > 14) throw new Error(`V4_COMMAND_PANEL_NAME_TOO_LONG:${id}`);
   return Object.freeze({
