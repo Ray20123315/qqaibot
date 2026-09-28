@@ -49,6 +49,7 @@ assert.match(menu, /AI 服務：2 個/);
 assert.match(menu, /資料儲存：1 個/);
 assert.match(menu, /長期保存：已啟用/);
 assert.match(menu, /!資料庫 D1/);
+assert.match(menu, /!AI分享/);
 assert.match(menu, /!白名單/);
 
 const page = resourceConnectPage();
@@ -56,6 +57,7 @@ assert.match(page, /AIBot Secure Connect/);
 assert.match(page, /Cloudflare D1/);
 assert.match(page, /Cloudflare KV/);
 assert.match(page, /type="password"/);
+assert.match(page, /id="aiModel"/);
 assert.doesNotMatch(page, /<select\b/i, "secure resource page must use custom choices, not native select");
 assert.doesNotMatch(page, /localStorage|sessionStorage/i, "secrets/tickets must not be copied into browser storage");
 
@@ -71,6 +73,7 @@ assert.match(apiSource, /getPortalSession/);
 assert.match(apiSource, /qqai_session/);
 assert.match(apiSource, /consumeResourceInputTicket/);
 assert.match(apiSource, /upsertProviderAccount/);
+assert.match(apiSource, /updateProviderSharing/);
 assert.match(apiSource, /upsertStorageConnector/);
 assert.match(apiSource, /userPersistenceState/);
 

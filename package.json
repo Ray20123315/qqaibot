@@ -11,7 +11,7 @@
     "plugin:author": "node tools/qqai-plugin-author.mjs",
     "codex:bridge": "node tools/codex-work-bridge.mjs",
     "codex:bridge:exe": "npx --yes esbuild@0.28.1 tools/codex-bridge-windows.mjs --bundle --platform=node --target=node22 --format=cjs --outfile=dist/codex-bridge-bundle.cjs && npx --yes @yao-pkg/pkg@6.22.0 dist/codex-bridge-bundle.cjs --targets node22-win-x64 --output dist/QQAIBOT-CodexBridge.exe --compress GZip",
-    "check:v4": "node verify-v4-qqopen.mjs && node verify-v4-portal-lean.mjs && node verify-v4-runtime-bridge.mjs && node verify-v4-hybrid-official.mjs && node verify-v4-public-foundation.mjs && node verify-v4-user-resources.mjs",
+    "check:v4": "node verify-v4-qqopen.mjs && node verify-v4-portal-lean.mjs && node verify-v4-runtime-bridge.mjs && node verify-v4-hybrid-official.mjs && node verify-v4-public-foundation.mjs && node verify-v4-user-resources.mjs && node verify-v4-user-ai-routing.mjs",
     "check:v4test": "node verify-v4-test-deployment.mjs && wrangler deploy --config wrangler.v4test.toml --dry-run --outdir dist-v4test --no-assets",
     "check:v4:hybrid": "node verify-v4-hybrid-official.mjs"
   },

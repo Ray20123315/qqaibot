@@ -1,5 +1,5 @@
 import { isDeveloperId, envList, publicBaseUrl } from "../../config/deployment.js";
-import { listProviderAccountsForPrincipal, upsertProviderAccount } from "../../ai/provider-registry.js";
+import { getProviderAccount, listProviderAccountsForPrincipal, updateProviderSharing, upsertProviderAccount } from "../../ai/provider-registry.js";
 import { acceptLegalStatement, setDeveloperGroupWhitelist } from "./access.js";
 import { createResourceInputTicket, qqOpenPrincipal, resolveCanonicalPrincipal } from "./resource-tickets.js";
 import { listStorageConnectorsForPrincipal, testStorageConnector, upsertStorageConnector } from "./storage-registry.js";
@@ -51,7 +51,9 @@ function privateSettingsMenu({ aiCount = 0, storageCount = 0, persistenceReady =
     "可用指令：",
     "新增AI　建立安全輸入頁",
     "新增資料庫　建立 D1 / KV 安全輸入頁",
-    "!AI金鑰 <gemini|openai|deepseek|compatible> <金鑰>",
+    "!AI金鑰 <gemini|openai|deepseek|compatible> <金鑰> [模型]",
+    "!AI分享 <服務ID> <群組ID> 開/關",
+    "!AI群友私聊 <服務ID> 開/關",
     "!資料庫 D1 <Account ID> <Database ID> <API Token>",
     "!資料庫 KV <Account ID> <Namespace ID> <API Token>",
     "同意法律聲明",
@@ -106,7 +108,7 @@ async function handleV4PrivateSettingsMessage(env, message = {}) {
     });
   }
 
-  const aiDirect = normalized.match(/^[!！](?:AI金鑰|AI密鑰|AI密钥)\s+(gemini|google_gemini|gemma|google_gemma|deepseek|openai|openai_api|compatible|openai_compatible)\s+([^\s]+)$/i);
+  const aiDirect = normalized.match(/^[!！](?:AI金鑰|AI密鑰|AI密钥)\s+(gemini|google_gemini|gemma|google_gemma|deepseek|openai|openai_api|compatible|openai_compatible)\s+([^\s]+)(?:\s+([^\s]+))?$/i);
   if (aiDirect) {
     const provider = AI_PROVIDER_ALIASES[String(aiDirect[1] || "").toLowerCase()];
     const secret = clean(aiDirect[2], 4096);
@@ -116,6 +118,7 @@ async function handleV4PrivateSettingsMessage(env, message = {}) {
       ownerPrincipalId: principal,
       scope: "user",
       label: "我的 AI",
+      model: clean(aiDirect[3], 160),
       tasks: ["chat"],
       secret
     });
@@ -142,6 +145,43 @@ async function handleV4PrivateSettingsMessage(env, message = {}) {
         ? `${kind} 已安全連接並驗證成功。API Token 不會再次顯示。`
         : `${kind} 連線資料已加密儲存，但目前驗證未通過；請到後臺檢查權限或資源 ID。`
     });
+  }
+
+  const shareMatch = normalized.match(/^[!！]AI分享\s+([^\s]+)\s+([^\s]+)\s+(開|开|關|关)$/i);
+  if (shareMatch) {
+    const account = await getProviderAccount(env, clean(shareMatch[1], 80));
+    if (!account || account.ownerPrincipalId !== principal || account.scope !== "user") {
+      return Object.freeze({ handled: true, reply: "找不到屬於你的這個 AI 服務。" });
+    }
+    const groupId = clean(shareMatch[2], 180);
+    const enabled = /^(?:開|开)$/i.test(shareMatch[3]);
+    const groups = new Set(account.sharedGroupIds || []);
+    if (enabled) groups.add(groupId); else groups.delete(groupId);
+    const updated = await updateProviderSharing(env, account.id, {
+      ownerPrincipalId: principal,
+      sharedGroupIds: [...groups],
+      allowGroupMemberPrivateChat: account.allowGroupMemberPrivateChat === true
+    });
+    return Object.freeze({ handled: true, reply: enabled
+      ? `已允許這個 AI 服務在群組 ${groupId} 使用；實際呼叫前仍會確認你目前仍在該群。`
+      : `已停止這個 AI 服務在群組 ${groupId} 的分享。` });
+  }
+
+  const privateShareMatch = normalized.match(/^[!！]AI群友私聊\s+([^\s]+)\s+(開|开|關|关)$/i);
+  if (privateShareMatch) {
+    const account = await getProviderAccount(env, clean(privateShareMatch[1], 80));
+    if (!account || account.ownerPrincipalId !== principal || account.scope !== "user") {
+      return Object.freeze({ handled: true, reply: "找不到屬於你的這個 AI 服務。" });
+    }
+    const enabled = /^(?:開|开)$/i.test(privateShareMatch[2]);
+    await updateProviderSharing(env, account.id, {
+      ownerPrincipalId: principal,
+      sharedGroupIds: account.sharedGroupIds || [],
+      allowGroupMemberPrivateChat: enabled
+    });
+    return Object.freeze({ handled: true, reply: enabled
+      ? "已允許符合群組授權且仍在群內的成員於私訊使用此 AI；使用者仍需選定授權群組。"
+      : "已關閉群友私訊共享。" });
   }
 
   if (/^(?:同意法律聲明|同意法律声明|!同意法律聲明|!同意法律声明)$/i.test(normalized)) {

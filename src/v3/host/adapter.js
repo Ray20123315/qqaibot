@@ -1,12 +1,15 @@
 import { VERSION } from "../../config/runtime.js";
 import { createPluginLifecycleRegistry } from "../../plugins/lifecycle.js";
-import { callGeminiGenerate, effectiveRuntimeModels, geminiVisionApiKeys, googleApiKeysFor, parseList } from "../../ai/runtime.js";
-import { callProviderRoute } from "../../ai/provider-client.js";
+import { callGeminiGenerate, callGemmaDecision, effectiveRuntimeModels, geminiVisionApiKeys, googleApiKeysFor, parseList } from "../../ai/runtime.js";
+import { callProviderRoute, callUserProviderRoute } from "../../ai/provider-client.js";
 import { isDeveloperId, recentConversationMessagesForUser } from "../../core/identity.js";
 import { callOneBotAction } from "../../core/permissions.js";
 import { dbDel, dbGet, dbPut } from "../../data/store.js";
 import { createPluginHost } from "../../plugins/runtime.js";
 import { fetchPublicUrl } from "../../security/network.js";
+import { politicalGuardDecision } from "../../v4/public/politics.js";
+import { resolveCanonicalPrincipal } from "../../v4/public/resource-tickets.js";
+import { createLiveGroupMembershipResolver } from "../../v4/public/membership.js";
 import { parseAiCommandCodexOverride } from "../ai/codex-command.js";
 import { consumePublicCodexQuota, publicCodexQuotaConfig, refundPublicCodexQuota } from "../ai/codex-policy.js";
 import { runV3MultimodalAi } from "../ai/runtime.js";
@@ -131,6 +134,55 @@ function ttsApiKeys(env) {
   ].map(String).map(value => value.trim()).filter(Boolean))];
 }
 
+function pluginAiInputText(source = {}) {
+  const chunks = [];
+  if (source.system) chunks.push(String(source.system));
+  if (source.text) chunks.push(String(source.text));
+  if (source.prompt) chunks.push(String(source.prompt));
+  if (Array.isArray(source.messages)) {
+    for (const row of source.messages) chunks.push(String(row?.content ?? row?.text ?? ""));
+  }
+  if (Array.isArray(source.contents)) {
+    for (const row of source.contents) {
+      const parts = Array.isArray(row?.parts) ? row.parts : [];
+      for (const part of parts) if (typeof part?.text === "string") chunks.push(part.text);
+    }
+  }
+  return chunks.filter(Boolean).join("\n").slice(0, 80000);
+}
+
+function pluginAiHasMedia(source = {}) {
+  if (!Array.isArray(source.contents)) return false;
+  return source.contents.some(row => (Array.isArray(row?.parts) ? row.parts : []).some(part =>
+    part && typeof part === "object" && !Object.prototype.hasOwnProperty.call(part, "text")
+  ));
+}
+
+async function classifyPoliticalWithGemma(env, text) {
+  const result = await callGemmaDecision(env, {
+    system: "你是內容分類器。只輸出 POLITICAL 或 NON_POLITICAL。政治人物、政黨、選舉、政治立場、政治制度、地緣政治與政治事件為 POLITICAL。單純的隱私、資料保護、服務條款、API 或平台合規問題若不要求政治評價，為 NON_POLITICAL。不得回答原問題。",
+    prompt: String(text || "").slice(0, 12000),
+    maxOutputTokens: 16,
+    deadlineAt: Date.now() + 7000,
+    maxAttempts: 2
+  });
+  return String(result?.text || "UNCERTAIN").trim();
+}
+
+async function enforcePluginPoliticalGuard(env, text, stage) {
+  const decision = await politicalGuardDecision(text, {
+    stage,
+    classify: value => classifyPoliticalWithGemma(env, value)
+  });
+  if (decision.blocked) {
+    const error = new Error("PLUGIN_AI_POLITICAL_CONTENT_BLOCKED");
+    error.code = "PLUGIN_AI_POLITICAL_CONTENT_BLOCKED";
+    error.politicalDecision = decision;
+    throw error;
+  }
+  return decision;
+}
+
 function oneBotCapabilityValue(value) {
   const data = value && typeof value === "object" && Object.prototype.hasOwnProperty.call(value, "data") ? value.data : value;
   if (typeof data === "boolean") return data;
@@ -201,10 +253,50 @@ async function defaultAiChat(env, input, context = {}) {
     }
   }
 
+  const aiInputText = pluginAiInputText(source);
+  await enforcePluginPoliticalGuard(env, aiInputText, "input");
+
+  const eventMessage = context?.eventContext?.message || {};
+  const eventPlatform = String(context?.eventContext?.platform || "onebot").toLowerCase();
+  const rawPrincipal = String(context?.eventContext?.principalId || "").trim()
+    || (eventPlatform === "qq-open"
+      ? `qqopen:${String(eventMessage.userId || context?.eventContext?.userId || "")}`
+      : `qq:${String(eventMessage.userId || context?.eventContext?.userId || "")}`);
+  const principalId = await resolveCanonicalPrincipal(env, rawPrincipal);
+  const groupId = String(eventMessage.groupId || context?.eventContext?.groupId || "");
+  const membershipResolver = createLiveGroupMembershipResolver(env, {
+    platform: eventPlatform,
+    groupId,
+    currentPrincipalId: principalId
+  });
+
+  if (!pluginAiHasMedia(source)) {
+    try {
+      const userRouted = await callUserProviderRoute(env, "chat", source, {
+        principalId,
+        groupId,
+        privateChat: String(eventMessage.scope || "") === "private",
+        providerAccountId: String(source.providerAccountId || ""),
+        membershipResolver
+      });
+      if (userRouted?.text) {
+        await enforcePluginPoliticalGuard(env, userRouted.text, "output");
+        return safeAiResult(userRouted);
+      }
+    } catch (error) {
+      if (String(error?.code || error?.message || "") === "PLUGIN_AI_POLITICAL_CONTENT_BLOCKED") throw error;
+      console.warn("[v3-host] user AI provider unavailable; falling back to platform route", String(error?.message || error).slice(0, 240));
+    }
+  }
+
   try {
     const routed = await callProviderRoute(env, "chat", source);
-    if (routed?.text) return safeAiResult(routed);
+    if (routed?.text) {
+      await enforcePluginPoliticalGuard(env, routed.text, "output");
+      return safeAiResult(routed);
+    }
   } catch (error) {
+    if (String(error?.code || error?.message || "") === "PLUGIN_AI_POLITICAL_CONTENT_BLOCKED") throw error;
     console.warn("[v3-host] configured chat providers unavailable; falling back to legacy route", String(error?.message || error).slice(0, 240));
   }
   const text = String(source.text || "").slice(0, 30000);
@@ -224,6 +316,7 @@ async function defaultAiChat(env, input, context = {}) {
     timeoutMs: clampNumber(source.timeoutMs, 15000, 1000, 30000),
     maxAttempts: 2
   });
+  await enforcePluginPoliticalGuard(env, result?.text || "", "output");
   return safeAiResult(result);
 }
 
@@ -517,7 +610,19 @@ function createV3HostAdapter(env, {
       }
       const eventName = message.scope === "group" ? "group_message" : message.scope === "private" ? "private_message" : "message";
       const codexExecutor = typeof body?.__qqai_codex_executor === "function" ? body.__qqai_codex_executor : null;
-      const results = await host.dispatch(eventName, message, { message, groupId: message.groupId, userId: message.userId, aiProviderOverride, codexExecutor });
+      const transport = String(body?.__qqai_platform || "onebot").toLowerCase();
+      const principalId = transport === "qq-open"
+        ? `qqopen:${String(body?.__qqai_principal_id || message.userId || "")}`
+        : `qq:${String(message.userId || "")}`;
+      const results = await host.dispatch(eventName, message, {
+        message,
+        groupId: message.groupId,
+        userId: message.userId,
+        principalId,
+        platform: transport,
+        aiProviderOverride,
+        codexExecutor
+      });
       return { handled: true, eventName, message, results };
     }
     if (postType === "notice") return { handled: true, eventName: "notice", message: null, results: await host.dispatch("notice", body) };

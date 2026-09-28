@@ -2,6 +2,7 @@ import {
   deleteProviderAccount,
   getProviderAccount,
   listProviderAccountsForPrincipal,
+  updateProviderSharing,
   upsertProviderAccount
 } from "../../ai/provider-registry.js";
 import { getPortalSession, jsonResponse, readCookie } from "../../portal/auth.js";
@@ -145,6 +146,25 @@ async function handleV4ResourcePortalApi(request, env, url = null) {
         });
       }
       throw new Error("RESOURCE_KIND_INVALID");
+    }
+
+    const aiSharing = target.pathname.match(new RegExp("^" + BASE + "/ai/([^/]+)/sharing$"));
+    if (request.method === "POST" && aiSharing) {
+      const id = decodeURIComponent(aiSharing[1]);
+      const account = await getProviderAccount(env, id);
+      if (!account) return jsonResponse({ ok: false, message: "找不到這個 AI 服務。" }, 404);
+      if (account.ownerPrincipalId !== principal || account.scope !== "user") throw new Error("AI_PROVIDER_OWNER_MISMATCH");
+      const payload = await bodyJson(request);
+      const updated = await updateProviderSharing(env, id, {
+        ownerPrincipalId: principal,
+        sharedGroupIds: Array.isArray(payload.groupIds) ? payload.groupIds : account.sharedGroupIds,
+        allowGroupMemberPrivateChat: payload.allowGroupMemberPrivateChat === true
+      });
+      return jsonResponse({
+        ok: true,
+        resource: updated,
+        message: "AI 分享範圍已更新；實際使用仍會即時驗證提供者與使用者的群成員身分。"
+      });
     }
 
     const aiDelete = target.pathname.match(new RegExp("^" + BASE + "/ai/([^/]+)$"));

@@ -1,5 +1,6 @@
-import { aiReplyPromisesFutureSearch, aiReplySignalsUncertainty, appendSearchSources, buildDeepSeekContextSummary, callDeepSeekSummaryTask, callGoogleDecision, decideReplyMentionRouting, deepSeekApiKeys, effectiveRuntimeModels, enforceExecutedSearchForReply, generateHybridReply, googleApiKeysFor, imageInspectionEnabled, isLightweightAcknowledgement, isLowContextInterjectionFragment, mergeAbortSignal, notifyDeveloper, roundRobinKeys, searchRequirement, stripBotMentionFromConversation } from "./src/ai/runtime.js";
+import { aiReplyPromisesFutureSearch, aiReplySignalsUncertainty, appendSearchSources, buildDeepSeekContextSummary, callDeepSeekSummaryTask, callGemmaDecision, callGoogleDecision, decideReplyMentionRouting, deepSeekApiKeys, effectiveRuntimeModels, enforceExecutedSearchForReply, generateHybridReply, googleApiKeysFor, imageInspectionEnabled, isLightweightAcknowledgement, isLowContextInterjectionFragment, mergeAbortSignal, notifyDeveloper, roundRobinKeys, searchRequirement, stripBotMentionFromConversation } from "./src/ai/runtime.js";
 import { providerRegistryState } from "./src/ai/provider-registry.js";
+import { callUserProviderRoute } from "./src/ai/provider-client.js";
 import { buildImmediateConversationContext, splitOutboundText } from "./src/ai/conversation-quality.js";
 import { AI_MEDIA_LIMITS, DEFAULTS, VERSION, classifyOperationalFailure } from "./src/config/runtime.js";
 import { publicBaseUrl } from "./src/config/deployment.js";
@@ -39,6 +40,9 @@ import { handleV4QqOpenPortalApi } from "./src/v4/portal/api.js";
 import { injectV4LeanPortalClient } from "./src/v4/portal/lean-dashboard.js";
 import { handleV4ResourcePortalApi } from "./src/v4/portal/resources-api.js";
 import { resourceConnectPage } from "./src/v4/portal/resource-page.js";
+import { politicalGuardDecision, politicalTextPrefilter } from "./src/v4/public/politics.js";
+import { resolveCanonicalPrincipal } from "./src/v4/public/resource-tickets.js";
+import { createLiveGroupMembershipResolver } from "./src/v4/public/membership.js";
 import { handleV3PluginManagerApi, injectV3PluginManagerClient } from "./src/v3/portal/plugin-manager.js";
 import { handleV3PackageManagerApi, injectV3PackageManagerClient } from "./src/v3/portal/package-manager.js";
 import { handleV3PluginSecurityPublic, runV3PluginSecurityScheduled } from "./src/v3/public/plugin-security.js";
@@ -49,7 +53,25 @@ import { oneBotReadOnlyMode } from "./src/onebot/read-only.js";
 const POLITICAL_TOPIC_PATTERN = /(?:政治|政党|政黨|选举|選舉|总统|總統|主席|国会|國會|立法院|立法委员|立法委員|立委|议员|議員|首相|总理|總理|内阁|內閣|政府|政权|政權|执政|執政|在野|政治人物|政治制度|公共政策|外交|制裁|领土争议|領土爭議|两岸|兩岸|统一|統一|台独|台獨|罢免|罷免|公投|意识形态|意識形態|民进党|民進黨|国民党|國民黨|共产党|共產黨|民主党|民主黨|共和党|共和黨|\b(?:politics|political|election|government|parliament|congress|president|prime minister)\b)/i;
 
 function isPoliticalTopicText(value) {
-  return POLITICAL_TOPIC_PATTERN.test(String(value || "").normalize("NFKC"));
+  return politicalTextPrefilter(value).decision === "block";
+}
+
+async function classifyPoliticalWithGemma(env, text) {
+  const result = await callGemmaDecision(env, {
+    system: "你是內容分類器。只輸出 POLITICAL 或 NON_POLITICAL。政治人物、政黨、選舉、政治立場、政治制度、地緣政治與政治事件為 POLITICAL。單純的隱私、資料保護、服務條款、API 或平台合規問題若不要求政治評價，為 NON_POLITICAL。不得回答原問題。",
+    prompt: String(text || "").slice(0, 12000),
+    maxOutputTokens: 16,
+    deadlineAt: Date.now() + 7000,
+    maxAttempts: 2
+  });
+  return String(result?.text || "UNCERTAIN").trim();
+}
+
+async function layeredPoliticalGuard(env, text, stage = "input") {
+  return politicalGuardDecision(text, {
+    stage,
+    classify: value => classifyPoliticalWithGemma(env, value)
+  });
 }
 
 function normalizeShortReplyFingerprint(value) {
@@ -1095,6 +1117,23 @@ const QQAIWorker = {
         return new Response(null, { status: 204 });
       }
 
+      if (!isCommandMessage && politicalTextPrefilter(cleanMessage).decision === "review") {
+        const politicalGate = await layeredPoliticalGuard(env, cleanMessage, "input");
+        if (politicalGate.blocked) {
+          await clearThinkingIndicator();
+          ctx.waitUntil(writeSystemAudit(env, {
+            type: "political_topic_silent_drop",
+            groupId: currentGroupId,
+            actorId: userId,
+            action: "silent_drop",
+            messageId: replyMessageId,
+            detector: politicalGate.source,
+            reason: politicalGate.reason
+          }).catch(() => {}));
+          return new Response(null, { status: 204 });
+        }
+      }
+
       // 自我禁言只能由本人私讯解除。该命令独立于私聊 AI 开关，成功或失败都不发送聊天提示。
       const privateSelfUnmuteCommand = isPrivate && cleanMessage.match(/^[!！](?:解除禁言|解禁)(?:\s+(\d{5,}))?$/i);
       if (privateSelfUnmuteCommand) {
@@ -1881,6 +1920,21 @@ const QQAIWorker = {
           generatedReply: ""
         }).catch(() => {}));
         return new Response(null, { status: 204 });
+      }
+
+      if (politicalTextPrefilter(conversationText).decision === "review") {
+        const politicalGate = await layeredPoliticalGuard(env, conversationText, "context");
+        if (politicalGate.blocked) {
+          ctx.waitUntil(writeAiDecisionLog(env, {
+            ...aiDecisionBase,
+            decision: "skipped",
+            reason: "political_topic_classifier_silence",
+            triggerType: botMentioned ? "mention" : repliedToBot ? "reply_to_ai" : sameQqSelfAsk ? "self_ask" : isPrivate ? "private" : "none",
+            generatedReply: "",
+            detector: politicalGate.source
+          }).catch(() => {}));
+          return new Response(null, { status: 204 });
+        }
       }
       const explicitTimeQuestion = isExplicitCurrentTimeQuestion(conversationText);
       const standaloneTimeQuestion = isStandaloneCurrentTimeQuestion(conversationText);
@@ -3564,14 +3618,44 @@ ${deepseekContextSummary}`;
         success = true;
       } else {
         try {
-          const generated = await generateHybridReply(env, {
-            modelPref, chatModels, finalStylePrompt, contents, cleanText: conversationText,
-            fastChat: isFastAcknowledgement,
-            hasMedia: Boolean(loadedImage || voiceUrl || voiceFile || videoUrl || videoFile),
-            visionRequest: loadedImage,
-            userId, groupId: currentGroupId, isDeveloper, signal: request.signal,
-            onSearchStatus: replaceThinkingStatus
-          });
+          let generated = null;
+          const hasProviderMedia = Boolean(loadedImage || voiceUrl || voiceFile || videoUrl || videoFile);
+          if (!hasProviderMedia) {
+            const transport = body.__qqai_platform === "qq-open" ? "qq-open" : "onebot";
+            const rawPrincipal = transport === "qq-open"
+              ? `qqopen:${String(body.__qqai_principal_id || userId || "")}`
+              : `qq:${String(userId || "")}`;
+            const principalId = await resolveCanonicalPrincipal(env, rawPrincipal);
+            const membershipResolver = createLiveGroupMembershipResolver(env, {
+              platform: transport,
+              groupId: currentGroupId,
+              currentPrincipalId: principalId
+            });
+            generated = await callUserProviderRoute(env, "chat", {
+              system: finalStylePrompt,
+              contents,
+              text: conversationText,
+              maxOutputTokens: DEFAULTS.replyHardChars
+            }, {
+              principalId,
+              groupId: isGroup ? currentGroupId : "",
+              privateChat: isPrivate,
+              membershipResolver
+            }).catch(error => {
+              console.warn("User AI provider route failed:", String(error?.message || error).slice(0, 240));
+              return null;
+            });
+          }
+          if (!generated?.text) {
+            generated = await generateHybridReply(env, {
+              modelPref, chatModels, finalStylePrompt, contents, cleanText: conversationText,
+              fastChat: isFastAcknowledgement,
+              hasMedia: hasProviderMedia,
+              visionRequest: loadedImage,
+              userId, groupId: currentGroupId, isDeveloper, signal: request.signal,
+              onSearchStatus: replaceThinkingStatus
+            });
+          }
           baseText = String(generated?.text || '').trim();
           usedModel = generated?.model || 'unknown';
           usedProvider = generated?.provider || 'unknown';
@@ -3704,6 +3788,22 @@ ${deepseekContextSummary}`;
         replyText = searchInfo.performed && searchInfo.context
           ? appendSearchSources(searchInfo.context, searchInfo.sources || [])
           : "这个问题需要查证，但本轮没有成功取得可验证的联网检索结果。我不会假装稍后还会继续处理，请稍后重新提问。";
+      }
+
+      const politicalOutputGate = await layeredPoliticalGuard(env, replyText, "output");
+      if (politicalOutputGate.blocked) {
+        await clearThinkingIndicator();
+        ctx.waitUntil(writeAiDecisionLog(env, {
+          ...aiDecisionBase,
+          decision: "skipped",
+          reason: "political_output_blocked",
+          triggerType,
+          provider: usedProvider,
+          model: usedModel,
+          generatedReply: "",
+          detector: politicalOutputGate.source
+        }).catch(() => {}));
+        return new Response(null, { status: 204 });
       }
 
       if (isAutoInterject && await shouldSuppressRepeatedShortReply(env, {

@@ -33,6 +33,7 @@ function resourceConnectPage() {
           <button type="button" class="choice" data-value="openai_compatible">相容服務</button>
         </div></div>
         <div class="field"><label>顯示名稱</label><input id="aiLabel" value="我的 AI" maxlength="120"></div>
+        <div class="field"><label>模型</label><input id="aiModel" maxlength="160" placeholder="請填入供應商支援的模型名稱"></div>
         <div class="field"><label>API Key</label><input id="aiSecret" type="password" maxlength="4096" autocomplete="new-password"></div>
       </div>
       <div id="storageFields" class="hidden">
@@ -71,7 +72,7 @@ function resourceConnectPage() {
   form.onsubmit=async e=>{
     e.preventDefault();const btn=document.getElementById('submit');btn.disabled=true;notice.className='notice';notice.textContent='正在安全儲存…';
     let payload;
-    if(kind==='ai'){payload={ticket,kind:'ai',secret:document.getElementById('aiSecret').value,config:{provider:aiProvider,label:document.getElementById('aiLabel').value,tasks:['chat']}}}
+    if(kind==='ai'){payload={ticket,kind:'ai',secret:document.getElementById('aiSecret').value,config:{provider:aiProvider,label:document.getElementById('aiLabel').value,model:document.getElementById('aiModel').value,tasks:['chat']}}}
     else{payload={ticket,kind:'storage',secret:document.getElementById('storageSecret').value,config:{type:storageType,label:document.getElementById('storageLabel').value,accountId:document.getElementById('accountId').value,resourceId:document.getElementById('resourceId').value,purposes:['settings','memory','chat_history','plugin_data']}}}
     const r=await api('/consume','POST',payload);payload.secret='';if(r.data.ok){form.reset();form.classList.add('hidden');notice.textContent=r.data.message||'已完成。';notice.classList.add('success')}else{notice.textContent=r.data.message||'設定失敗。';notice.classList.add('error');btn.disabled=false}
   };

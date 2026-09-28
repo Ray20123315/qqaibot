@@ -1,5 +1,7 @@
 import {
   getProviderAccount,
+  listProviderAccounts,
+  providerGroupAccessDecision,
   providerQuotaState,
   readProviderRoute,
   recordProviderUsage
@@ -12,6 +14,13 @@ function clampNumber(value, fallback, min, max) {
   return Math.max(min, Math.min(max, n));
 }
 
+function contentPartText(part) {
+  if (typeof part === "string") return part;
+  if (!part || typeof part !== "object") return "";
+  if (typeof part.text === "string") return part.text;
+  return "";
+}
+
 function normalizeMessages(input = {}) {
   if (Array.isArray(input.messages) && input.messages.length) {
     return input.messages.slice(-80).map(row => ({
@@ -21,6 +30,19 @@ function normalizeMessages(input = {}) {
   }
   const messages = [];
   if (input.system) messages.push({ role: "system", content: String(input.system).slice(0, 20000) });
+  if (Array.isArray(input.contents) && input.contents.length) {
+    for (const row of input.contents.slice(-80)) {
+      const roleRaw = String(row?.role || "user").toLowerCase();
+      const role = roleRaw === "model" || roleRaw === "assistant" ? "assistant" : roleRaw === "system" ? "system" : "user";
+      const content = (Array.isArray(row?.parts) ? row.parts : [row?.content ?? row?.text])
+        .map(contentPartText)
+        .filter(Boolean)
+        .join("\n")
+        .slice(0, 50000);
+      if (content) messages.push({ role, content });
+    }
+    if (messages.length) return messages;
+  }
   const text = String(input.text ?? input.prompt ?? "").slice(0, 80000);
   if (text) messages.push({ role: "user", content: text });
   return messages;
@@ -226,6 +248,71 @@ async function executeProviderAccount(env, account, input = {}, dependencies = {
   return Object.freeze({ ...result, provider: full.provider, accountId: full.id, usage });
 }
 
+async function callUserProviderRoute(env, task, input = {}, accessContext = {}, dependencies = {}) {
+  const kind = String(task || "").trim().toLowerCase();
+  const principalId = String(accessContext?.principalId || "").trim();
+  if (!principalId) return null;
+  const groupId = String(accessContext?.groupId || "").trim();
+  const privateChat = accessContext?.privateChat === true;
+  const membershipResolver = accessContext?.membershipResolver;
+  const preferredAccountId = String(accessContext?.providerAccountId || "").trim();
+
+  const accounts = (await listProviderAccounts(env)).filter(account =>
+    account?.scope === "user" &&
+    account?.enabled !== false &&
+    Array.isArray(account.tasks) &&
+    account.tasks.includes(kind)
+  );
+  if (!accounts.length) return null;
+
+  const own = [];
+  const shared = [];
+  for (const account of accounts) {
+    if (preferredAccountId && account.id !== preferredAccountId) continue;
+    if (account.ownerPrincipalId === principalId) own.push(account);
+    else if (groupId && account.sharedGroupIds?.includes(groupId)) shared.push(account);
+  }
+  const ordered = [...own, ...shared];
+  if (!ordered.length) return null;
+
+  const attempts = [];
+  for (const account of ordered) {
+    const access = await providerGroupAccessDecision(account, {
+      principalId,
+      groupId,
+      membershipResolver,
+      privateChat
+    });
+    if (!access.ok) {
+      attempts.push({ accountId: account.id, provider: account.provider, ok: false, stage: "access", reason: access.reason });
+      continue;
+    }
+    const estimate = {
+      inputTokens: Math.max(1, Math.ceil(JSON.stringify(normalizeMessages(input)).length / 3)),
+      outputTokens: clampNumber(input.maxOutputTokens, 1000, 1, 8192),
+      money: 0,
+      requests: 1
+    };
+    const quota = await providerQuotaState(env, account.id, estimate);
+    if (!quota.ok) {
+      attempts.push({ accountId: account.id, provider: account.provider, ok: false, stage: "quota", reason: quota.reason });
+      continue;
+    }
+    try {
+      const result = await executeProviderAccount(env, account, { ...input, task: kind }, dependencies);
+      return Object.freeze({ ...result, task: kind, access: access.reason, attempts: Object.freeze(attempts) });
+    } catch (error) {
+      attempts.push({ accountId: account.id, provider: account.provider, ok: false, stage: "call", error: String(error?.message || error).slice(0, 300) });
+    }
+  }
+  if (preferredAccountId) {
+    const error = new Error("AI_USER_PROVIDER_ROUTE_EXHAUSTED");
+    error.attempts = attempts;
+    throw error;
+  }
+  return null;
+}
+
 async function callProviderRoute(env, task, input = {}, dependencies = {}) {
   const kind = String(task || "").trim().toLowerCase();
   const route = await readProviderRoute(env, kind);
@@ -264,6 +351,7 @@ export {
   callGoogleGenerativeLanguage,
   callOpenAiCompatible,
   callProviderRoute,
+  callUserProviderRoute,
   executeProviderAccount,
   extractOpenAiText,
   normalizeMessages,

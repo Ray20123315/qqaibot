@@ -2,6 +2,7 @@ import { dbCompareAndSwapStrict, dbGet, dbPut } from "../../data/store.js";
 
 const RESOURCE_TICKET_PREFIX = "v4_resource_ticket:";
 const IDENTITY_LINK_PREFIX = "v4_identity_link:";
+const IDENTITY_REVERSE_PREFIX = "v4_identity_reverse:";
 
 function clean(value, max = 220) {
   return String(value ?? "").trim().slice(0, max);
@@ -94,6 +95,7 @@ async function claimResourceInputTicket(env, token, targetPrincipalId) {
   if (record.claimedPrincipalId && record.claimedPrincipalId !== target) throw new Error("RESOURCE_TICKET_ALREADY_CLAIMED");
 
   const linkKey = IDENTITY_LINK_PREFIX + record.principalId;
+  const reverseKey = IDENTITY_REVERSE_PREFIX + target;
   const existingLink = await dbGet(env, linkKey);
   if (existingLink) {
     try {
@@ -111,10 +113,44 @@ async function claimResourceInputTicket(env, token, targetPrincipalId) {
       source: "resource_ticket_claim"
     }));
   }
+
+  const existingReverse = await dbGet(env, reverseKey);
+  if (existingReverse) {
+    try {
+      const reverse = JSON.parse(existingReverse);
+      if (clean(reverse?.sourcePrincipalId) !== clean(record.principalId)) throw new Error("QQ_IDENTITY_REVERSE_CONFLICT");
+    } catch (error) {
+      if (error?.message === "QQ_IDENTITY_REVERSE_CONFLICT") throw error;
+      throw new Error("QQ_IDENTITY_REVERSE_INVALID");
+    }
+  } else {
+    await dbPut(env, reverseKey, JSON.stringify({
+      sourcePrincipalId: record.principalId,
+      targetPrincipalId: target,
+      linkedAt: Date.now(),
+      source: "resource_ticket_claim"
+    }));
+  }
+
   const next = { ...record, claimedPrincipalId: target, claimedAt: Date.now() };
   const updated = await dbCompareAndSwapStrict(env, key, raw, JSON.stringify(next));
   if (!updated) throw new Error("RESOURCE_TICKET_CLAIM_CONFLICT");
   return Object.freeze({ ...next, effectivePrincipalId: target });
+}
+
+async function resolveQqOpenPrincipalForCanonical(env, principalId) {
+  const principal = clean(principalId);
+  if (!principal) return "";
+  if (principal.startsWith("qqopen:")) return principal;
+  const raw = await dbGet(env, IDENTITY_REVERSE_PREFIX + principal);
+  if (!raw) return "";
+  try {
+    const record = JSON.parse(raw);
+    const source = clean(record?.sourcePrincipalId);
+    return source.startsWith("qqopen:") ? source : "";
+  } catch {
+    return "";
+  }
 }
 
 async function consumeResourceInputTicket(env, token, targetPrincipalId, expectedKind) {
@@ -137,6 +173,7 @@ async function consumeResourceInputTicket(env, token, targetPrincipalId, expecte
 
 export {
   IDENTITY_LINK_PREFIX,
+  IDENTITY_REVERSE_PREFIX,
   RESOURCE_TICKET_PREFIX,
   claimResourceInputTicket,
   consumeResourceInputTicket,
@@ -144,5 +181,6 @@ export {
   portalPrincipal,
   qqOpenPrincipal,
   readResourceInputTicket,
-  resolveCanonicalPrincipal
+  resolveCanonicalPrincipal,
+  resolveQqOpenPrincipalForCanonical
 };
