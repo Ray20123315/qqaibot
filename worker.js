@@ -44,7 +44,8 @@ import { politicalGuardDecision, politicalTextPrefilter } from "./src/v4/public/
 import { resolveCanonicalPrincipal } from "./src/v4/public/resource-tickets.js";
 import { createLiveGroupMembershipResolver } from "./src/v4/public/membership.js";
 import { allowPlatformUserContentPersistence, canonicalQqOpenPrincipal, clearQqOpenPrivateHistory, isQqOpenEvent, persistQqOpenPrivateHistory, readQqOpenPrivateHistory } from "./src/v4/public/chat-persistence.js";
-import { readUserSetting, writeUserSetting } from "./src/v4/public/user-settings.js";
+import { deleteUserSetting, readUserSetting, writeUserSetting } from "./src/v4/public/user-settings.js";
+import { deleteUserMemoryList, readUserMemoryList, writeUserMemoryList } from "./src/v4/public/user-memory.js";
 import { handleV3PluginManagerApi, injectV3PluginManagerClient } from "./src/v3/portal/plugin-manager.js";
 import { handleV3PackageManagerApi, injectV3PackageManagerClient } from "./src/v3/portal/package-manager.js";
 import { handleV3PluginSecurityPublic, runV3PluginSecurityScheduled } from "./src/v3/public/plugin-security.js";
@@ -883,6 +884,14 @@ const QQAIWorker = {
       const isQqOpenV4 = isQqOpenEvent(body);
       const allowPlatformUserContent = allowPlatformUserContentPersistence(body);
       const qqOpenContentPrincipal = isQqOpenV4 ? await canonicalQqOpenPrincipal(env, body) : "";
+
+      const qqOpenSettingScope = String(currentGroupId || "private");
+      const qqOpenTargetPrincipal = async targetUserId => {
+        const target = String(targetUserId || "").trim();
+        if (!target) return "";
+        if (target === String(userId || "")) return qqOpenContentPrincipal;
+        return resolveCanonicalPrincipal(env, `qqopen:${target}`);
+      };
 
       // ==========================================
       // 💬 對話歷史：QQ Open 私訊只走使用者自己的 Storage Connector；
@@ -2764,55 +2773,119 @@ const QQAIWorker = {
       // 第四段到此完美結束，準備進入第五段的專屬记忆管理與人設切換模組...
 
       // ==========================================
-      // 🧠 专属记忆管理 (D1 数据库重构版)
+      // 🧠 专属记忆管理
+      // QQ Open：只保存到使用者自己的 Storage Connector，不写平台 D1 / Vectorize。
+      // OneBot：维持既有平台 D1 + Vectorize 行为。
       // ==========================================
-      // !记住：普通成员只能修改自己；AI 管理员可用 @ 指定成员。
       if (['!记住', '!記住', '!remember', '！记住', '！記住', '！remember'].some(p => msgLower.startsWith(p))) {
         const prefix = ['!记住', '!記住', '!remember', '！记住', '！記住', '！remember'].find(p => msgLower.startsWith(p));
         const { targetQq, restText } = parseArgs(userMessage, prefix);
-        const memoryOwner = targetQq || userId;
-        const targetMem = targetQq ? restText : cleanMessage.slice(prefix.length).replace(/\[CQ:[^\]]+\]/g, '').trim();
+        const mentionedTarget = (targetMentionQqs || []).map(String).find(id => id && id !== String(botId || ""));
+        const memoryOwner = targetQq || mentionedTarget || userId;
+        const targetMem = (targetQq || mentionedTarget) ? restText : cleanMessage.slice(prefix.length).replace(/\[CQ:[^\]]+\]/g, '').trim();
         if (!targetMem) return jsonReply(`${atSender}请输入要记住的内容。`);
         if (memoryOwner !== userId && !hasAdminAuth) return jsonReply(`${atSender}你只能修改自己的私人记忆。`);
         if (await isMemoryBanned(env, memoryOwner)) return jsonReply(`${atSender}【操作失败：该账号的记忆编辑权限已被冻结】`);
-        const kvKey = `user_memo:${currentGroupId}:${memoryOwner}`;
-        const memos = normalizeMemoryItems(await readJson(env, kvKey, []), memoryOwner);
+
+        let memos = [];
+        let memoryPrincipal = "";
+        if (isQqOpenV4) {
+          memoryPrincipal = await qqOpenTargetPrincipal(memoryOwner);
+          const state = await readUserMemoryList(env, memoryPrincipal, qqOpenSettingScope);
+          if (!state.available) {
+            return jsonReply(`${atSender}${memoryOwner === userId ? "你的" : "目标成员的"}长期记忆没有保存。若要使用此功能，请先连接自己的 D1 或 KV，并启用「记忆」用途。`);
+          }
+          memos = normalizeMemoryItems(state.memories || [], memoryOwner);
+        } else {
+          memos = normalizeMemoryItems(await readJson(env, `user_memo:${currentGroupId}:${memoryOwner}`, []), memoryOwner);
+        }
+
         if (!hasAdminAuth && memos.length >= 100) return jsonReply(`${atSender}专属记忆已达 100 条上限，请先删除部分内容。`);
         let item = { id: crypto.randomUUID(), text: targetMem, scope: 'private', owner: memoryOwner, subjectQq: memoryOwner, creator: userId, at: new Date().toISOString() };
-        item = await upsertMemoryVector(env, item, currentGroupId).catch(error => { console.warn("指令记忆向量写入失败", error); return item; });
+        if (!isQqOpenV4) {
+          item = await upsertMemoryVector(env, item, currentGroupId).catch(error => { console.warn("指令记忆向量写入失败", error); return item; });
+        }
         memos.push(item);
-        await dbPut(env, kvKey, JSON.stringify(memos));
-        await writeMemoryAudit(env, { groupId: currentGroupId, userId, action: `新增记忆:${memoryOwner}`, before: null, after: targetMem });
-        return jsonReply(`${atSender}已记住${memoryOwner === userId ? '' : `关于 QQ:${memoryOwner} 的内容`}：${targetMem}`);
+
+        if (isQqOpenV4) {
+          const saved = await writeUserMemoryList(env, memoryPrincipal, qqOpenSettingScope, memos);
+          if (!saved.saved) return jsonReply(`${atSender}长期记忆没有保存，请检查自己的 D1 / KV 连接。`);
+          ctx.waitUntil(writeSystemAudit(env, {
+            type: "qqopen_user_memory_changed",
+            groupId: String(currentGroupId || ""),
+            actorId: String(userId || ""),
+            targetId: String(memoryOwner || ""),
+            action: "add",
+            itemId: String(item.id || "")
+          }).catch(() => {}));
+        } else {
+          await dbPut(env, `user_memo:${currentGroupId}:${memoryOwner}`, JSON.stringify(memos));
+          await writeMemoryAudit(env, { groupId: currentGroupId, userId, action: `新增记忆:${memoryOwner}`, before: null, after: targetMem });
+        }
+        return jsonReply(`${atSender}已记住${memoryOwner === userId ? '' : `关于 ${memoryOwner} 的内容`}：${targetMem}`);
       }
 
-      // !忘记：只删除 D1 手动记忆，不删除 Vectorize 历史向量。
       if (['!忘记', '!忘記', '!forget', '！忘记', '！忘記', '！forget'].some(p => msgLower.startsWith(p))) {
         const prefix = ['!忘记', '!忘記', '!forget', '！忘记', '！忘記', '！forget'].find(p => msgLower.startsWith(p));
         const { targetQq, restText } = parseArgs(userMessage, prefix);
-        const memoryOwner = targetQq || userId;
-        const query = targetQq ? restText : cleanMessage.slice(prefix.length).replace(/\[CQ:[^\]]+\]/g, '').trim();
+        const mentionedTarget = (targetMentionQqs || []).map(String).find(id => id && id !== String(botId || ""));
+        const memoryOwner = targetQq || mentionedTarget || userId;
+        const query = (targetQq || mentionedTarget) ? restText : cleanMessage.slice(prefix.length).replace(/\[CQ:[^\]]+\]/g, '').trim();
         if (!query) return jsonReply(`${atSender}格式：!忘记 [@成员] 关键词`);
         if (memoryOwner !== userId && !hasAdminAuth) return jsonReply(`${atSender}你只能删除自己的私人记忆。`);
         if (await isMemoryBanned(env, memoryOwner)) return jsonReply(`${atSender}【操作失败：该账号的记忆编辑权限已被冻结】`);
-        const kvKey = `user_memo:${currentGroupId}:${memoryOwner}`;
-        const memos = normalizeMemoryItems(await readJson(env, kvKey, []), memoryOwner);
+
+        let memos = [];
+        let memoryPrincipal = "";
+        if (isQqOpenV4) {
+          memoryPrincipal = await qqOpenTargetPrincipal(memoryOwner);
+          const state = await readUserMemoryList(env, memoryPrincipal, qqOpenSettingScope);
+          if (!state.available) return jsonReply(`${atSender}长期记忆未启用；请先连接自己的 D1 或 KV。`);
+          memos = normalizeMemoryItems(state.memories || [], memoryOwner);
+        } else {
+          memos = normalizeMemoryItems(await readJson(env, `user_memo:${currentGroupId}:${memoryOwner}`, []), memoryOwner);
+        }
+
         const removed = memos.filter(m => m.text.includes(query));
         const next = memos.filter(m => !m.text.includes(query));
         if (!removed.length) return jsonReply(`${atSender}没找到包含「${query}」的记忆。`);
-        if (next.length) await dbPut(env, kvKey, JSON.stringify(next)); else await dbDel(env, kvKey);
-        for (const item of removed) await deleteMemoryVector(env, item).catch(error => console.warn("指令记忆向量删除失败", error));
-        await writeMemoryAudit(env, { groupId: currentGroupId, userId, action: `删除记忆与向量:${memoryOwner}`, before: removed.map(x => x.text).join(' | '), after: null });
-        return jsonReply(`${atSender}已删除 ${removed.length} 条长期记忆，并同步删除对应 Vectorize 向量。`);
+
+        if (isQqOpenV4) {
+          const result = next.length
+            ? await writeUserMemoryList(env, memoryPrincipal, qqOpenSettingScope, next)
+            : await deleteUserMemoryList(env, memoryPrincipal, qqOpenSettingScope);
+          const ok = next.length ? result.saved : result.deleted;
+          if (!ok) return jsonReply(`${atSender}长期记忆没有更新，请检查自己的 D1 / KV 连接。`);
+          ctx.waitUntil(writeSystemAudit(env, {
+            type: "qqopen_user_memory_changed",
+            groupId: String(currentGroupId || ""),
+            actorId: String(userId || ""),
+            targetId: String(memoryOwner || ""),
+            action: "delete",
+            count: removed.length
+          }).catch(() => {}));
+        } else {
+          if (next.length) await dbPut(env, `user_memo:${currentGroupId}:${memoryOwner}`, JSON.stringify(next)); else await dbDel(env, `user_memo:${currentGroupId}:${memoryOwner}`);
+          for (const item of removed) await deleteMemoryVector(env, item).catch(error => console.warn("指令记忆向量删除失败", error));
+          await writeMemoryAudit(env, { groupId: currentGroupId, userId, action: `删除记忆与向量:${memoryOwner}`, before: removed.map(x => x.text).join(' | '), after: null });
+        }
+        return jsonReply(`${atSender}已删除 ${removed.length} 条长期记忆${isQqOpenV4 ? "。" : "，并同步删除对应 Vectorize 向量。"}`);
       }
 
-      // !你记住了什么：支持 @，但查看他人私人记忆需要 AI 管理权。
       if (/^[!！]你(?:记住|記住)了(?:什么|什麼)(?:\s|$)/.test(cleanMessage)) {
-        const memoryOwner = targetMentionQqs[0] || userId;
+        const memoryOwner = (targetMentionQqs || []).map(String).find(id => id && id !== String(botId || "")) || userId;
         if (memoryOwner !== userId && !hasAdminAuth) return jsonReply(`${atSender}你没有查看他人私人记忆的权限。`);
-        const memos = normalizeMemoryItems(await readJson(env, `user_memo:${currentGroupId}:${memoryOwner}`, []), memoryOwner);
-        if (!memos.length) return jsonReply(`${atSender}目前没有${memoryOwner === userId ? '你的' : ` QQ:${memoryOwner} 的`}专属记忆。`);
-        return jsonReply(`${atSender}【${memoryOwner === userId ? '你的' : `QQ:${memoryOwner}`}专属记忆】\n` + memos.slice(-30).map((m, i) => `${i + 1}. ${m.text}`).join('\n'));
+        let memos = [];
+        if (isQqOpenV4) {
+          const memoryPrincipal = await qqOpenTargetPrincipal(memoryOwner);
+          const state = await readUserMemoryList(env, memoryPrincipal, qqOpenSettingScope);
+          if (!state.available) return jsonReply(`${atSender}${memoryOwner === userId ? "你的" : "目标成员的"}长期记忆未启用；请先连接自己的 D1 或 KV。`);
+          memos = normalizeMemoryItems(state.memories || [], memoryOwner);
+        } else {
+          memos = normalizeMemoryItems(await readJson(env, `user_memo:${currentGroupId}:${memoryOwner}`, []), memoryOwner);
+        }
+        if (!memos.length) return jsonReply(`${atSender}目前没有${memoryOwner === userId ? '你的' : ` ${memoryOwner} 的`}专属记忆。`);
+        return jsonReply(`${atSender}【${memoryOwner === userId ? '你的' : memoryOwner}专属记忆】\n` + memos.slice(-30).map((m, i) => `${i + 1}. ${m.text}`).join('\n'));
       }
 
       if (['!群规', '!群規', '!rules', '！群规', '！群規'].includes(msgLower)) {
@@ -2864,40 +2937,48 @@ const QQAIWorker = {
       if (['!set人格', '!set風格', '!setpersonality', '！set人格', '！set風格'].some(p => msgLower.startsWith(p))) {
         const prefix = ['!set人格', '!set風格', '!setpersonality', '！set人格', '！set風格'].find(p => msgLower.startsWith(p));
         const { targetQq, restText } = parseArgs(userMessage, prefix);
-        const targetUserId = targetQq || userId;
+        const mentionedTarget = (targetMentionQqs || []).map(String).find(id => id && id !== String(botId || ""));
+        const targetUserId = targetQq || mentionedTarget || userId;
         const isSettingOthers = targetUserId !== userId;
 
         if (isSettingOthers && !hasAdminAuth) return jsonReply(`${atSender}⚠️ 权限不足。您无法帮他人设置专属人格。`);
         if (!restText) return jsonReply(`${atSender}⚠️ 风格内容不能为空哦！格式：!set人格 [@成员] 傲娇妹妹`);
-
-        // 🔒 【最高核心锁】绝对防御：禁止任何人更改开发者的个人设定
-        if (isDeveloperId(env, targetUserId)) {
-           if (!isOnlyMe) return jsonReply(`${atSender}❌ 安全警告：拒绝访问！您无权修改最高核心开发者的专属个人设定！`);
+        if (isDeveloperId(env, targetUserId) && !isOnlyMe) {
+          return jsonReply(`${atSender}❌ 安全警告：拒绝访问！您无权修改最高核心开发者的专属个人设定！`);
         }
 
-        await dbPut(env, `custom_style:${currentGroupId}:${targetUserId}`, restText);
-        if (isSettingOthers) {
-          return jsonReply(`${atSender}✨ 已成功为 QQ:${targetUserId} 设定专属外挂人格！`);
+        if (isQqOpenV4) {
+          const targetPrincipal = await qqOpenTargetPrincipal(targetUserId);
+          const saved = await writeUserSetting(env, targetPrincipal, `custom_style.${qqOpenSettingScope}`, restText);
+          if (!saved.saved) return jsonReply(`${atSender}${isSettingOthers ? "目标成员" : "你的"}专属人格没有保存。请先连接自己的 D1 或 KV。`);
+        } else {
+          await dbPut(env, `custom_style:${currentGroupId}:${targetUserId}`, restText);
         }
+
+        if (isSettingOthers) return jsonReply(`${atSender}✨ 已成功为 ${targetUserId} 设定专属人格！`);
         return jsonReply(`${atSender}✨ 专属人格定制成功！以后我单独回你时会切换成这种风格。`);
       }
 
-      // !del人格 [@成员/QQ号]
       if (['!del人格', '!del風格', '!clear人格', '！del人格', '！del風格'].some(p => msgLower.startsWith(p))) {
         const prefix = ['!del人格', '!del風格', '!clear人格', '！del人格', '！del風格'].find(p => msgLower.startsWith(p));
         const { targetQq } = parseArgs(userMessage, prefix);
-        const targetUserId = targetQq || userId;
+        const mentionedTarget = (targetMentionQqs || []).map(String).find(id => id && id !== String(botId || ""));
+        const targetUserId = targetQq || mentionedTarget || userId;
         const isSettingOthers = targetUserId !== userId;
 
         if (isSettingOthers && !hasAdminAuth) return jsonReply(`${atSender}⚠️ 权限不足。您无法帮他人清除人格。`);
-
-        // 🔒 【最高核心锁】绝对防御：禁止任何人删除开发者的个人设定
-        if (isDeveloperId(env, targetUserId)) {
-           if (!isOnlyMe) return jsonReply(`${atSender}❌ 安全警告：拒绝访问！您无权删除最高核心开发者的专属个人设定！`);
+        if (isDeveloperId(env, targetUserId) && !isOnlyMe) {
+          return jsonReply(`${atSender}❌ 安全警告：拒绝访问！您无权删除最高核心开发者的专属个人设定！`);
         }
 
-        await dbDel(env, `custom_style:${currentGroupId}:${targetUserId}`);
-        return jsonReply(`${atSender}🗑️ 已清除 QQ:${targetUserId} 的专属外挂人格。`);
+        if (isQqOpenV4) {
+          const targetPrincipal = await qqOpenTargetPrincipal(targetUserId);
+          const deleted = await deleteUserSetting(env, targetPrincipal, `custom_style.${qqOpenSettingScope}`);
+          if (!deleted.deleted && deleted.reason === "user_storage_required") return jsonReply(`${atSender}没有可删除的长期专属人格；请先连接自己的 D1 或 KV。`);
+        } else {
+          await dbDel(env, `custom_style:${currentGroupId}:${targetUserId}`);
+        }
+        return jsonReply(`${atSender}🗑️ 已清除 ${targetUserId} 的专属人格。`);
       }
 
       // ==========================================
@@ -2906,35 +2987,39 @@ const QQAIWorker = {
       if (['!免打扰', '!免打擾', '!noat', '！免打扰', '！免打擾'].some(p => msgLower.startsWith(p))) {
         const prefix = ['!免打扰', '!免打擾', '!noat', '！免打扰', '！免打擾'].find(p => msgLower.startsWith(p));
         const { targetQq } = parseArgs(userMessage, prefix);
-        const targetUserId = targetQq || userId;
+        const mentionedTarget = (targetMentionQqs || []).map(String).find(id => id && id !== String(botId || ""));
+        const targetUserId = targetQq || mentionedTarget || userId;
         const isSettingOthers = targetUserId !== userId;
-
         if (isSettingOthers && !hasAdminAuth) return jsonReply(`${atSender}⚠️ 权限不足。您无法帮他人开启免打扰。`);
+        if (isDeveloperId(env, targetUserId) && !isOnlyMe) return jsonReply(`${atSender}❌ 安全警告：您无权修改核心开发者的免打扰状态！`);
 
-        // 🔒 【最高核心锁】保护开发者
-        if (isDeveloperId(env, targetUserId)) {
-           if (!isOnlyMe) return jsonReply(`${atSender}❌ 安全警告：您无权修改核心开发者的免打扰状态！`);
+        if (isQqOpenV4) {
+          const targetPrincipal = await qqOpenTargetPrincipal(targetUserId);
+          const saved = await writeUserSetting(env, targetPrincipal, `dnd.${qqOpenSettingScope}`, true);
+          if (!saved.saved) return jsonReply(`${atSender}${isSettingOthers ? "目标成员" : "你的"}免打扰状态没有保存。请先连接自己的 D1 或 KV。`);
+        } else {
+          await dbPut(env, `dnd:${currentGroupId}:${targetUserId}`, "true");
         }
-
-        await dbPut(env, `dnd:${currentGroupId}:${targetUserId}`, "true");
-        return jsonReply(`${atSender}🤫 已为 QQ:${targetUserId} 开启免打扰，我回复时将不再 @ 提醒。`);
+        return jsonReply(`${atSender}🤫 已为 ${targetUserId} 开启免打扰，我回复时将不再 @ 提醒。`);
       }
 
       if (['!取消免打扰', '!取消免打擾', '!cancelnoat', '！取消免打扰', '！取消免打擾'].some(p => msgLower.startsWith(p))) {
         const prefix = ['!取消免打扰', '!取消免打擾', '!cancelnoat', '！取消免打扰', '！取消免打擾'].find(p => msgLower.startsWith(p));
         const { targetQq } = parseArgs(userMessage, prefix);
-        const targetUserId = targetQq || userId;
+        const mentionedTarget = (targetMentionQqs || []).map(String).find(id => id && id !== String(botId || ""));
+        const targetUserId = targetQq || mentionedTarget || userId;
         const isSettingOthers = targetUserId !== userId;
-
         if (isSettingOthers && !hasAdminAuth) return jsonReply(`${atSender}⚠️ 权限不足。您无法帮他人取消免打扰。`);
+        if (isDeveloperId(env, targetUserId) && !isOnlyMe) return jsonReply(`${atSender}❌ 安全警告：您无权修改核心开发者的免打扰状态！`);
 
-        // 🔒 【最高核心锁】保护开发者
-        if (isDeveloperId(env, targetUserId)) {
-           if (!isOnlyMe) return jsonReply(`${atSender}❌ 安全警告：您无权修改核心开发者的免打扰状态！`);
+        if (isQqOpenV4) {
+          const targetPrincipal = await qqOpenTargetPrincipal(targetUserId);
+          const deleted = await deleteUserSetting(env, targetPrincipal, `dnd.${qqOpenSettingScope}`);
+          if (!deleted.deleted && deleted.reason === "user_storage_required") return jsonReply(`${atSender}免打扰状态没有长期保存；请先连接自己的 D1 或 KV。`);
+        } else {
+          await dbDel(env, `dnd:${currentGroupId}:${targetUserId}`);
         }
-
-        await dbDel(env, `dnd:${currentGroupId}:${targetUserId}`);
-        return jsonReply(`${atSender}🔔 已为 QQ:${targetUserId} 取消免打扰，欢迎回来！`);
+        return jsonReply(`${atSender}🔔 已为 ${targetUserId} 取消免打扰，欢迎回来！`);
       }
 
       // 第五段到此完美結束，準備進入第六段的全局開關、黑白名單防禦與模仿竊取模組...
@@ -3002,7 +3087,12 @@ const QQAIWorker = {
 
       if (['!clear', '!重置', '！clear', '！重置'].some(p => msgLower === p)) {
         if (!hasAdminAuth) return jsonReply(`${atSender}⚠️ 权限不足。仅限管理员、群主或开发者操作。`);
-        await dbDel(env, sessionKey);
+        if (isQqOpenV4 && isPrivate) {
+          await clearQqOpenPrivateHistory(env, body, sessionKey).catch(() => null);
+          await dbDel(env, sessionKey).catch(() => null); // legacy privacy cleanup only
+        } else if (!isQqOpenV4) {
+          await dbDel(env, sessionKey);
+        }
         await dbDel(env, `mimic:${currentGroupId}`);
         await dbDel(env, `mimic_target:${currentGroupId}`);
         return jsonReply(`${atSender}♻️ 已清空当前会话上下文与模仿状态。`);
@@ -3253,7 +3343,10 @@ const QQAIWorker = {
 // 🌟 获取群组全局人格（持续基底）与个人／模仿覆盖层
       const mimicTargetQq = await dbGet(env, `mimic_target:${currentGroupId}`);
       const groupPersona = await dbGet(env, `group_persona:${currentGroupId}`);
-      const userCustomStyle = await dbGet(env, `custom_style:${currentGroupId}:${userId}`);
+      const userCustomStyleState = isQqOpenV4
+        ? await readUserSetting(env, qqOpenContentPrincipal, `custom_style.${qqOpenSettingScope}`, "")
+        : { value: await dbGet(env, `custom_style:${currentGroupId}:${userId}`) || "" };
+      const userCustomStyle = String(userCustomStyleState.value || "");
       const personaLayers = [];
 
       // 群组人格是管理员保存的持续基底，不能因为启用模仿或个人风格而消失。
@@ -3328,8 +3421,11 @@ ${String(userCustomStyle).slice(0, 2000)}`);
         ctx.waitUntil(dbDel(env, `emotion_buff:${currentGroupId}:${userId}`));
       }
 
-      // 🧠 注入统一格式的专属记忆。删除 D1 记忆不会删除 Vectorize。
-      const parsedMemos = normalizeMemoryItems(await readJson(env, `user_memo:${currentGroupId}:${userId}`, []), userId);
+      // 🧠 注入专属记忆：QQ Open 只读使用者自己的 Storage Connector。
+      const userMemoryState = isQqOpenV4
+        ? await readUserMemoryList(env, qqOpenContentPrincipal, qqOpenSettingScope)
+        : { memories: await readJson(env, `user_memo:${currentGroupId}:${userId}`, []) };
+      const parsedMemos = normalizeMemoryItems(userMemoryState.memories || [], userId);
       if (parsedMemos.length > 0) {
         finalStylePrompt += `\n\n【📖 专属记忆库】：
 关于当前用户（QQ:${userId}）的已保存记忆：
@@ -3414,7 +3510,10 @@ ${profileLines.join("\n")}
       if (!shouldReply && body.__qqai_suppress_optional_ai === true) {
         noReplyReason = "explicit_chat_priority";
       } else if (!shouldReply && !aiReplyOptOut && isGroup && interjectChance > 0 && !msgLower.startsWith('!') && !msgLower.startsWith('！')) {
-        const targetDnd = await dbGet(env, `dnd:${currentGroupId}:${userId}`);
+        const targetDndState = isQqOpenV4
+          ? await readUserSetting(env, qqOpenContentPrincipal, `dnd.${qqOpenSettingScope}`, false)
+          : { value: await dbGet(env, `dnd:${currentGroupId}:${userId}`) === "true" };
+        const targetDnd = targetDndState.value === true || targetDndState.value === "true";
         if (targetDnd === "true") {
           noReplyReason = "sender_dnd";
         } else if (lowContextFragment && !socialDecision.allowLowContextInterject) {
@@ -3464,7 +3563,7 @@ ${profileLines.join("\n")}
       // ==========================================
       let memoryContext = "";
 
-      if (env.VECTORIZE && cleanMessage && await dbGet(env, `memo:${currentGroupId}`) !== "false") {
+      if (!isQqOpenV4 && env.VECTORIZE && cleanMessage && await dbGet(env, `memo:${currentGroupId}`) !== "false") {
         try {
           const queryVec = await getVector(conversationText);
           if (queryVec && typeof queryVec !== 'string') {
@@ -3881,7 +3980,10 @@ ${deepseekContextSummary}`;
       // ==========================================
       const generatedMentionIds = [...new Set([...extractTextMentionIds(replyText), ...(socialDecision.managerMentionId ? [String(socialDecision.managerMentionId)] : [])])];
       const visibleReplyText = removeTextMentionTokens(replyText);
-      const senderDndCheck = await dbGet(env, `dnd:${currentGroupId}:${userId}`) === "true";
+      const senderDndState = isQqOpenV4
+        ? await readUserSetting(env, qqOpenContentPrincipal, `dnd.${qqOpenSettingScope}`, false)
+        : { value: await dbGet(env, `dnd:${currentGroupId}:${userId}`) === "true" };
+      const senderDndCheck = senderDndState.value === true || senderDndState.value === "true";
       const mentionRouting = await decideReplyMentionRouting(env, {
         isGroup, isAutoInterject, botMentioned, quotedMessageId, userId, selfId: botId,
         quotedSenderId: String(quotedMessage?.senderId || ""), targetMentionQqs, generatedMentionIds,
