@@ -1578,7 +1578,7 @@ const QQAIWorker = {
         await writeSystemAudit(env, { type: "rule_proxy_kick_auth", groupId: currentGroupId, actorId: userId, action: "authorized" });
         return jsonReply(`${atSender}已完成一次性 AI 踢出授权。授权会持续生效，直到发送「!撤回AI踢出授权」。`);
       }
-      if (/^[!！](?:撤回AI踢出授权|撤回AI踢出授權)$/i.test(cleanMessage)) {
+      if (/^[!！](?:撤回AI踢出授权|撤回AI踢出授權|撤回AI踢出)$/i.test(cleanMessage)) {
         if (!(await isVerifiedGroupOwner(env, currentGroupId, userId))) return jsonReply(`${atSender}只有 NapCat 即時確認的目前群主可以撤回 AI 踢出授權。`);
         await dbDel(env, `rule_proxy_kick_authorized:${currentGroupId}`);
         await writeSystemAudit(env, { type: "rule_proxy_kick_auth", groupId: currentGroupId, actorId: userId, action: "revoked" });
@@ -1615,13 +1615,13 @@ const QQAIWorker = {
         return jsonReply(`${atSender}全局调用速率限制已设为 ${seconds} 秒；群组单独值优先，0 代表关闭。`);
       }
 
-      if (/^[!！](?:授权AI拒绝入群|授權AI拒絕入群)$/i.test(cleanMessage)) {
+      if (/^[!！](?:授权AI拒绝入群|授權AI拒絕入群|授权AI拒入群)$/i.test(cleanMessage)) {
         if (!(await isVerifiedGroupOwner(env, currentGroupId, userId))) return jsonReply(`${atSender}只有 NapCat 即時確認的目前群主可以授權 AI 拒絕入群申請。`);
         await dbPut(env, `join_reject_authorized:${currentGroupId}`, "true");
         await writeSystemAudit(env, { type: "join_reject_auth", groupId: currentGroupId, actorId: userId, action: "authorized" });
         return jsonReply(`${atSender}已授权 AI 在高置信度明显违规时拒绝入群申请。可用「!撤回AI拒绝入群」撤回。`);
       }
-      if (/^[!！](?:撤回AI拒绝入群|撤回AI拒絕入群)$/i.test(cleanMessage)) {
+      if (/^[!！](?:撤回AI拒绝入群授权|撤回AI拒絕入群授權|撤回AI拒绝入群|撤回AI拒絕入群|撤回AI拒入群)$/i.test(cleanMessage)) {
         if (!(await isVerifiedGroupOwner(env, currentGroupId, userId))) return jsonReply(`${atSender}只有 NapCat 即時確認的目前群主可以撤回 AI 拒絕入群授權。`);
         await dbDel(env, `join_reject_authorized:${currentGroupId}`);
         await writeSystemAudit(env, { type: "join_reject_auth", groupId: currentGroupId, actorId: userId, action: "revoked" });
@@ -1715,7 +1715,7 @@ const QQAIWorker = {
         await dbPut(env, `moderation_target_cooldown_seconds:${currentGroupId}`, String(seconds));
         return jsonReply(`${atSender}同一对象处置冷却已设为 ${seconds} 秒；0 代表关闭。`);
       }
-      settingMatch = cleanMessage.match(/^[!！](?:设置新人观察期|設定新人觀察期)\s+(\d+)$/i);
+      settingMatch = cleanMessage.match(/^[!！](?:设置新人观察期|設定新人觀察期|设置新人期)\s+(\d+)$/i);
       if (settingMatch) {
         if (!ownerOrDeveloperSetting) return jsonReply(`${atSender}只有群主或开发者可以设置新人观察期。`);
         const days = Math.max(0, Math.min(30, Number(settingMatch[1])));
