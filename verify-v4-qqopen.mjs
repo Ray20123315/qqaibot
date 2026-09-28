@@ -77,18 +77,45 @@ const panelPut = requests.find(x => /\/v2\/panels\/panel%2FA$/.test(x.url) && x.
 assert.deepEqual(JSON.parse(panelPut.options.body), { panel:{ items:[{ type:"command", name:"!help" }] } });
 
 const registry = createInitialCommandRegistry();
-assert(registry.size >= 20);
+assert(registry.size >= 77);
 assert.equal(registry.resolve("!禁言 @123 10分钟").id, "group.mute");
+assert.equal(registry.resolve("!QQ语音角色").id, "qq.voice_roles");
+assert.equal(registry.resolve("!QQ语音 角色 测试").id, "qq.voice_reply");
+assert.equal(registry.resolve("!codexchat 测试").id, "ai.codexchat");
+assert.equal(registry.resolve("!codexwork --export 测试").id, "ai.codexwork");
+
 const groupPanel = registry.buildPanel("group");
 assert(groupPanel.panel.items.length <= 20);
 assert(groupPanel.panel.items.some(item => item.name === "!禁言" && item.only_admin === true));
+
 const groupPanels = registry.buildPanels("group", { maxItemsPerPanel: 7 });
 assert(groupPanels.length >= 2);
 assert(groupPanels.every(panel => panel.panel.items.length <= 7));
 assert(groupPanels.flatMap(panel => panel.panel.items).some(item => item.name === "!禁言" && item.only_admin === true));
+
+const categorizedGroupPanels = registry.buildCategorizedPanels("group");
+assert(categorizedGroupPanels.length <= 6);
+assert(categorizedGroupPanels.every(panel => panel.panel.items.length <= 20));
+assert(categorizedGroupPanels.some(panel => /\[基础与 AI\]/.test(panel.panel.remark)));
+assert(categorizedGroupPanels.some(panel => /\[管理操作\]/.test(panel.panel.remark)));
+assert(categorizedGroupPanels.flatMap(panel => panel.panel.items).some(item => item.name === "!禁言" && item.only_admin === true));
+assert(!categorizedGroupPanels.flatMap(panel => panel.panel.items).some(item => item.name === "!codexchat"));
+
+const developerPanels = registry.buildCategorizedPanels("c2c", {
+  permissions:["developer"],
+  targetType:"specific",
+  userOpenids:["dev-openid"]
+});
+assert.equal(developerPanels.length, 1);
+assert.deepEqual(developerPanels[0].user_openids, ["dev-openid"]);
+assert(developerPanels[0].panel.items.some(item => item.name === "!codexchat"));
+assert(developerPanels[0].panel.items.some(item => item.name === "!codexwork"));
+
 const menu = registry.buildMenu();
 assert(menu.items.length <= 10);
-assert(menu.items.some(item => item.send_message === "!codex"));
+assert(menu.items.every(item => item.type === "menu"));
+assert(menu.items.every(item => item.sub_menu_items.length <= 5));
+assert(menu.items.flatMap(item => item.sub_menu_items).some(item => item.send_message === "!codex"));
 
 const replyCalls = [];
 const replyDispatcher = createQqOpenActionDispatcher({
@@ -179,9 +206,9 @@ const discoveryApi = {
     };
   },
   deletePanel: async id => { discoveryCalls.push(["deletePanel", id]); return { ok:true }; },
-  createPanel: async panel => { discoveryCalls.push(["createPanel", panel.scope]); return { id:"new-" + discoveryCalls.length }; }
+  createPanel: async panel => { discoveryCalls.push(["createPanel", panel.scope, panel]); return { id:"new-" + discoveryCalls.length }; }
 };
-const firstDiscovery = await syncQqOpenDiscovery(discoveryApi, registry);
+const firstDiscovery = await syncQqOpenDiscovery(discoveryApi, registry, { developerOpenids:["dev-openid"] });
 assert.equal(firstDiscovery.ok, true);
 assert.equal(firstDiscovery.changed, true);
 assert(discoveryCalls.some(row => row[0] === "putMenu"));
@@ -190,8 +217,14 @@ assert(discoveryCalls.some(row => row[0] === "deletePanel" && row[1] === "old-c2
 assert(!discoveryCalls.some(row => row[0] === "deletePanel" && row[1] === "foreign"));
 assert(discoveryCalls.some(row => row[0] === "listPanels" && row[1] === "c2c"));
 assert(discoveryCalls.some(row => row[0] === "listPanels" && row[1] === "group"));
+assert(firstDiscovery.panels <= 10);
+assert(firstDiscovery.categories.includes("basic-ai"));
+assert(firstDiscovery.categories.includes("developer"));
+assert(discoveryCalls.some(row => row[0] === "createPanel" && row[2]?.target_type === "specific" && row[2]?.user_openids?.includes("dev-openid")));
+const syncedMenu = discoveryCalls.find(row => row[0] === "putMenu")?.[1];
+assert(syncedMenu.items.every(item => item.type === "menu" && item.sub_menu_items?.length <= 5));
 const callCountAfterFirst = discoveryCalls.length;
-const secondDiscovery = await syncQqOpenDiscovery(discoveryApi, registry, { previousFingerprint:firstDiscovery.fingerprint });
+const secondDiscovery = await syncQqOpenDiscovery(discoveryApi, registry, { previousFingerprint:firstDiscovery.fingerprint, developerOpenids:["dev-openid"] });
 assert.equal(secondDiscovery.changed, false);
 assert.equal(discoveryCalls.length, callCountAfterFirst);
 
