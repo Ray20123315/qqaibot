@@ -43,6 +43,7 @@ import { resourceConnectPage } from "./src/v4/portal/resource-page.js";
 import { politicalGuardDecision, politicalTextPrefilter } from "./src/v4/public/politics.js";
 import { resolveCanonicalPrincipal } from "./src/v4/public/resource-tickets.js";
 import { createLiveGroupMembershipResolver } from "./src/v4/public/membership.js";
+import { allowPlatformUserContentPersistence, canonicalQqOpenPrincipal, clearQqOpenPrivateHistory, isQqOpenEvent, persistQqOpenPrivateHistory, readQqOpenPrivateHistory } from "./src/v4/public/chat-persistence.js";
 import { handleV3PluginManagerApi, injectV3PluginManagerClient } from "./src/v3/portal/plugin-manager.js";
 import { handleV3PackageManagerApi, injectV3PackageManagerClient } from "./src/v3/portal/package-manager.js";
 import { handleV3PluginSecurityPublic, runV3PluginSecurityScheduled } from "./src/v3/public/plugin-security.js";
@@ -878,16 +879,28 @@ const QQAIWorker = {
       
       // 🎯 【就在這裡補上這行宣告！】
       const sessionKey = isGroup ? `chat:group:${currentGroupId}` : `chat:private:${userId}`;
+      const isQqOpenV4 = isQqOpenEvent(body);
+      const allowPlatformUserContent = allowPlatformUserContentPersistence(body);
+      const qqOpenContentPrincipal = isQqOpenV4 ? await canonicalQqOpenPrincipal(env, body) : "";
 
       // ==========================================
-      // 💬 D1 歷史紀錄讀取 (維持上下文記憶)
+      // 💬 對話歷史：QQ Open 私訊只走使用者自己的 Storage Connector；
+      // QQ Open 群聊在尚未指定群資料擁有者前不建立平台長期歷史。
+      // OneBot 維持既有平台儲存行為。
       // ==========================================
       let history = [];
       try {
-        history = await readChatHistory(env, sessionKey, DEFAULTS.conversationHistoryItems);
+        if (isQqOpenV4 && isPrivate) {
+          const state = await readQqOpenPrivateHistory(env, body, sessionKey, DEFAULTS.conversationHistoryItems);
+          history = [...(state.history || [])];
+        } else if (isQqOpenV4 && isGroup) {
+          history = [];
+        } else {
+          history = await readChatHistory(env, sessionKey, DEFAULTS.conversationHistoryItems);
+        }
         if (history.length) console.log(`🧠 成功加载历史记忆，当前记忆条数: ${history.length}`);
       } catch (historyError) {
-        console.error("读取 D1 历史记录失败:", historyError);
+        console.error("读取历史记录失败:", historyError);
         history = [];
       }
       
@@ -1340,7 +1353,7 @@ const QQAIWorker = {
       // /! 是群友明确要求“只作为普通群聊，不进入任何 AI 流程”。
       // 除了不生成聊天回复，也跳过群规分类、插话判断、摘要與向量检索。
       if (aiReplyOptOut) {
-        if (isGroup) {
+        if (isGroup && allowPlatformUserContent) {
           await recordStructuredMessage(env, {
             groupId: currentGroupId,
             userId,
@@ -1437,10 +1450,12 @@ const QQAIWorker = {
 
       // 同號人工普通發言只納入上下文，不觸發 AI；人工命令與 ?? 提問可繼續。
       if (sameQqHumanOnly) {
-        await recordStructuredMessage(env, {
-          groupId: currentGroupId, userId, senderName: senderCard, messageId: replyMessageId,
-          text: cleanMessage, mentions: mentionedQqs, replyId: quotedMessageId, source: 'owner-human'
-        });
+        if (allowPlatformUserContent) {
+          await recordStructuredMessage(env, {
+            groupId: currentGroupId, userId, senderName: senderCard, messageId: replyMessageId,
+            text: cleanMessage, mentions: mentionedQqs, replyId: quotedMessageId, source: 'owner-human'
+          });
+        }
         return new Response(null, { status: 204 });
       }
 
@@ -3110,7 +3125,7 @@ const QQAIWorker = {
       // ==========================================
       // 只有群聊且「非指令」的普通对话，才纳入系统语料库
       let groupConversationLogs = [];
-      if (isGroup && !msgLower.startsWith('!') && !msgLower.startsWith('！')) {
+      if (isGroup && allowPlatformUserContent && !msgLower.startsWith('!') && !msgLower.startsWith('！')) {
          const logKey = `recent_logs:${currentGroupId}`;
          let recentLogs = [];
 
@@ -3829,7 +3844,13 @@ ${deepseekContextSummary}`;
       const modelHistoryItem = { role: 'model', parts: [{ text: replyText }] };
       history.push(userHistoryItem, modelHistoryItem);
       if (history.length > DEFAULTS.conversationHistoryItems) history = history.slice(-DEFAULTS.conversationHistoryItems);
-      if (isGroup) {
+      if (isQqOpenV4 && isPrivate) {
+        ctx.waitUntil(persistQqOpenPrivateHistory(env, body, sessionKey, history).catch(error => {
+          console.error("QQ Open 私訊歷史寫入使用者儲存失敗:", String(error?.message || error).slice(0, 240));
+        }));
+      } else if (isQqOpenV4 && isGroup) {
+        // 群資料庫尚未有明確擁有者／授權前，不保存 QQ Open 群聊長期歷史。
+      } else if (isGroup) {
         ctx.waitUntil(appendChatHistoryTurn(env, sessionKey, [userHistoryItem, modelHistoryItem], {
           createdAt: Number(body.time || 0) > 0 ? Number(body.time) * 1000 : Date.now(),
           messageId: replyMessageId,
@@ -4394,9 +4415,17 @@ export class OneBotHub {
           await dbAppendJsonArrayCapped(this.env, "qqopen_clear_session_events", record, 200);
           return Response.json({ ok: true, cleared: false, reason: record.reason });
         }
-        await clearChatSessionHistory(this.env, `chat:private:${userId}`);
-        await dbAppendJsonArrayCapped(this.env, "qqopen_clear_session_events", { scene, userId, at, cleared: true }, 200);
-        return Response.json({ ok: true, cleared: true });
+        const principalId = await resolveCanonicalPrincipal(this.env, `qqopen:${userId}`);
+        const userStorageResult = await clearQqOpenPrivateHistory(this.env, principalId, `chat:private:${userId}`).catch(error => ({
+          cleared: false,
+          reason: String(error?.message || error).slice(0, 120)
+        }));
+        // 清除舊版曾寫入平台 D1 的私訊歷史，只做資料刪除，不再新增平台內容。
+        await clearChatSessionHistory(this.env, `chat:private:${userId}`).catch(() => {});
+        await dbAppendJsonArrayCapped(this.env, "qqopen_clear_session_events", {
+          scene, userId, at, cleared: true, userStorage: userStorageResult.reason || "unknown"
+        }, 200);
+        return Response.json({ ok: true, cleared: true, userStorage: userStorageResult });
       }
 
       if (action === "switch_model") {
