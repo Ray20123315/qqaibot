@@ -108,10 +108,13 @@ const developerPanels = registry.buildCategorizedPanels("c2c", {
   targetType:"specific",
   userOpenids:["dev-openid"]
 });
-assert.equal(developerPanels.length, 1);
-assert.deepEqual(developerPanels[0].user_openids, ["dev-openid"]);
-assert(developerPanels[0].panel.items.some(item => item.name === "!codexchat"));
-assert(developerPanels[0].panel.items.some(item => item.name === "!codexwork"));
+assert.equal(developerPanels.length, 2);
+assert(developerPanels.every(panel => JSON.stringify(panel.user_openids) === JSON.stringify(["dev-openid"])));
+const developerPanelItems = developerPanels.flatMap(panel => panel.panel.items);
+assert(developerPanelItems.some(item => item.name === "!codexchat"));
+assert(developerPanelItems.some(item => item.name === "!codexwork"));
+assert(developerPanelItems.some(item => item.name === "!群白名单"));
+assert(developerPanelItems.some(item => item.name === "!重置"));
 
 const menu = registry.buildMenu();
 assert(menu.items.length <= 10);
