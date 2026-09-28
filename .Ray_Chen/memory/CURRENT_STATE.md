@@ -4,39 +4,35 @@
 
 Development branch: `feature/v4-public-bot`
 Base main commit: `08ceeb725590d9efb0160ea38733d929e6e7d18c`
-Verified foundation commit: `21e5a8f00daeb7e465ca927c6f1d6acfadfe1259`
-Current product commit: `678d6a1d1eb21637fb8c542d90da54c590bce6d0`
+Verified resource commit: `678d6a1d1eb21637fb8c542d90da54c590bce6d0`
+Current product commit: `fea78bf7604d388a6e0a4e9cc4d0f1a3044ddeea`
 Main modified by this task: no.
 
-## Produced Resource Integration
+## Verified Resource Onboarding
 
-### AI / credential onboarding
-- Authenticated web flow uses existing `qqai_session`.
-- One-time resource ticket expires and is single-use.
-- QQ DM can create a secure ticket or submit an AI key directly.
-- Full AI secrets are encrypted in existing Provider Registry and never redisplayed.
+- User AI Provider and Storage Connector secure onboarding exists.
+- D1 and KV connector API tokens are encrypted and never redisplayed.
+- QQ private direct credential commands are intercepted before ordinary chat bridging.
+- Authenticated one-time secure web entry exists.
+- D1/KV use current Cloudflare API paths.
+- Resource integration passed full repo regression/V3/V4/V4-test/bundle CI at commit 678d6a1d1eb21637fb8c542d90da54c590bce6d0.
 
-### User-owned persistence
-- New Storage Connector types: `cloudflare_d1`, `cloudflare_kv`.
-- Connector stores owner principal, Cloudflare account/resource IDs, purposes and encrypted API token.
-- Supported low-volume internal get/put/delete operations are tenant-namespaced.
-- D1 uses the Cloudflare D1 query REST endpoint and a dedicated `qqaibot_kv` table in the user's database.
-- KV uses current `/storage/kv/namespaces/` API routes.
-- No additional platform D1/KV binding/resource was created.
+## Persistence Policy Produced
 
-### Identity / QQ private flow
-- QQ Open principal format: `qqopen:<openid>`.
-- Portal principal format: `qq:<number>`.
-- A QQ-DM secure ticket can be claimed only from an authenticated portal session; that claim creates the explicit identity link.
-- Direct QQ-DM credential commands resolve an existing explicit link, otherwise remain scoped to the QQ Open principal.
-- QQ private settings are intercepted before `sendApplicationReplies`, preventing credential commands from first entering the general chat bridge.
+`src/v4/public/user-persistence.js` now defines:
+- control plane: `platform_d1`
+- user content: `user_storage_required`
+- fallback: `none`
 
-### Portal
-- Added `/connect-resource?ticket=...` human-readable secure page.
-- Added authenticated `/api/portal/v4/resources/*` API.
-- Secure page uses custom choice buttons, not native select, and does not place secrets/tickets in browser local/session storage.
+The facade selects an enabled user connector by purpose and exposes put/get/delete through the connector. Without a connector for the requested purpose, it raises `USER_STORAGE_REQUIRED`.
+
+QQ private settings and the resource Portal API now report whether long-term persistence is actually connected.
+
+## Storage Boundary
+
+Platform D1 may retain only control-plane state necessary to operate the service, such as login sessions, consent evidence, identity links and encrypted resource configuration. V4 user-content categories such as settings, memory, chat history and plugin data must use the user's Storage Connector when persisted.
 
 ## Verification
 
-Current product CI: pending.
+Persistence-policy product CI: pending.
 Production Cloudflare resources: unchanged.
