@@ -7,8 +7,6 @@ const INITIAL_COMMANDS = Object.freeze([
   { id:"ai.codexchat", aliases:["!codexchat"], scopes:["c2c","group"], permission:"developer", description:"开发者 Codex 对话", category:"ai" },
   { id:"ai.codexwork", aliases:["!codexwork"], scopes:["c2c","group"], permission:"developer", description:"受限本机工作区", category:"ai" },
   { id:"ai.model", aliases:["!模型"], scopes:["c2c","group"], description:"切换个人模型", category:"ai", menu:{enabled:true,name:"模型"} },
-  { id:"interaction.voice_roles", aliases:["!QQ语音角色","!QQ語音角色"], scopes:["c2c","group"], description:"查看 QQ 语音 Beta 角色", category:"interaction", plugin:"official.qq-interactions" },
-  { id:"interaction.voice", aliases:["!QQ语音","!QQ語音"], scopes:["c2c","group"], description:"使用 QQ 语音 Beta 回复", category:"interaction", plugin:"official.qq-interactions" },
   { id:"qq.voice_roles", aliases:["!QQ语音角色","!QQ語音角色"], scopes:["group"], description:"查看 QQ 语音角色", category:"multimodal" },
   { id:"qq.voice_reply", aliases:["!QQ语音","!QQ語音"], scopes:["group"], description:"使用 QQ 语音角色回复", category:"multimodal" },
   { id:"group.status", aliases:["!群状态","!群狀態"], scopes:["group"], description:"查看群 AI 状态", category:"group", menu:{enabled:true,name:"群状态"} },
