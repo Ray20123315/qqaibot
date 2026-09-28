@@ -2,57 +2,57 @@
 
 ## GitHub
 
-- `main`: `e75dd25ffd7900567bc4938f656b29ffaedcb5da`
+- `main`: `a6a5996c2ec33da881e0dbb54725b4ab61ce7037`
 - `v4-qqopen-native`: same product revision before this memory checkpoint
-- CI: `36340836211` SUCCESS
-- all regression, V3, V4, isolated V4 test dry-run and Worker bundle stages succeeded
+- CI: `36363693922` SUCCESS
+- repository / V3 / V4 / isolated test dry-run / Worker bundle all succeeded
 
 ## Cloudflare Production
 
 Worker: `qqai`
-Build: `f74c53e5-4f75-48b6-b45e-d8d7b7755cce`
+Build: `5669da1f-77c7-4fb3-8b42-ea26da91ed18`
 Outcome: success
+Worker version: `33538b7c-c04f-4b47-b8eb-82c444c6fe0a`
 Migration: `v4_qqopen_gateway`
-Durable Objects:
-- OneBotHub
-- QqOpenGateway
 
 Retained:
+- OneBotHub
+- QqOpenGateway
 - D1
 - Vectorize
-- Workers AI binding
+- Workers AI
 - Rate Limiter
-- all existing Secrets
-- DEVELOPER_IDS
-- PORTAL_ADMIN_USERNAME
-- plugin security flags
+- existing Secrets including QQ_OPEN_CLIENT_SECRET
 
-Current official/hybrid vars:
+Current hybrid vars:
 - QQ_OPEN_ENABLED=true
 - QQ_OPEN_INTENTS=33554432
-- QQ_OPEN_SHARD_ID=0
-- QQ_OPEN_SHARD_TOTAL=1
 - QQ_OPEN_DISCOVERY_SYNC=true
 - QQ_HYBRID_PRIMARY=qq-open
 - QQ_HYBRID_GROUP_MAP={}
 
-## Cloudflare Verification
+## Dynamic Group Mapping
 
-- isolated test build `610409e1-41c7-4ef8-a9be-3af4af0042dd`: success
-- production build: success
-- post-deploy binding/secrets read-back: success
-- observability query for `QQ Open gateway ensure failed` in the deployment window: 0 events
+D1 key: `qqopen_dynamic_group_map`.
 
-The assistant cannot safely read the authenticated production Gateway status endpoint directly. Pre-deploy Gateway READY and !qqping were user-verified; post-deploy READY remains a live QQ-side verification item.
+Rules:
+- static map wins;
+- otherwise exact normalized text + media types are correlated in a short time window;
+- generic low-information messages are ignored;
+- multi-group ambiguity is rejected;
+- 3 distinct official message IDs are required;
+- conflicts never overwrite an existing mapping.
 
-## Hybrid State
+Portal status reports static, dynamic and total mapped-group counts.
 
-Because QQ_HYBRID_GROUP_MAP is currently empty:
-- OneBot C2C and group-at duplicates are suppressed under QQ Open ownership.
-- ordinary OneBot group messages remain functional.
-- no numeric group is yet mirrored into a corresponding group_openid context.
-- official active scheduled sends fall back to OneBot until mapping + push permission exist.
+## Lifecycle State
+
+Gateway normalizes FRIEND_ADD/DEL, GROUP_ADD/DEL_ROBOT and GROUP_MEMBER_ADD/REMOVE. Worker stores these as QQ Open-native state records and event history without writing OpenIDs into legacy numeric QQ tables.
 
 ## Interaction
 
-Code support is deployed but INTERACTION intent is intentionally disabled. Do not set `100663296` until QQ application permission is confirmed.
+Code support remains deployed but `INTERACTION (1<<26)` is intentionally disabled. Production stays at `33554432` until QQ permission is confirmed.
+
+## Live Status Gap
+
+Production deployment/build/bindings are verified. Post-deploy live Gateway READY and live event behavior still require QQ-side observation.

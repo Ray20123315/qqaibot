@@ -10,57 +10,49 @@ Run QQAIBOT as a hybrid QQ bot: QQ Open handles official interactions/actions wh
 
 ## Completed
 
-- Added hybrid ownership module and explicit numeric-group -> group_openid mapping.
-- Added official event normalization for push permission and INTERACTION_CREATE.
-- Added interaction acknowledgement API.
-- Added OneBot auxiliary observation path and structured observation mirroring.
-- Added QQ Open control bridge for:
-  - push permission
-  - feedback
-  - private-session clear
-  - model switch
-  - authorization/story/observe events
-- Added QQ Open Gateway handling for:
-  - C2C/GROUP MSG RECEIVE/REJECT
-  - INTERACTION_CREATE
-  - type 11/12 ACK
-  - callback command execution via existing runtime
-  - feedback/clear/model/auth control
-- Added hybrid Portal diagnostics.
-- Added regression suite `verify-v4-hybrid-official.mjs`.
-- Added active schedule/active-speaking official-first routing with OneBot fallback.
-- Added dynamic GROUP_MESSAGE_CREATE evidence before suppressing ordinary OneBot group side effects.
-- Documented hybrid behavior.
-- Full CI `36340836211`: success.
-- Isolated Worker build `610409e1-41c7-4ef8-a9be-3af4af0042dd`: success.
-- Fast-forwarded `main` to `e75dd25ffd7900567bc4938f656b29ffaedcb5da`.
-- Production build `f74c53e5-4f75-48b6-b45e-d8d7b7755cce`: success.
-- Production read-back confirms required plain vars, all secrets, D1, Vectorize, OneBotHub and QqOpenGateway remain present.
-- Cloudflare observability query found zero `QQ Open gateway ensure failed` events in the deployment window.
+- Added conservative D1-backed dynamic group mapping.
+- Static `QQ_HYBRID_GROUP_MAP` remains the authoritative override.
+- Dynamic mapping requires 3 distinct official message IDs, one unambiguous OneBot group candidate, matching normalized message/media evidence, and no existing conflict.
+- GROUP_AT_MESSAGE_CREATE and GROUP_MESSAGE_CREATE both contribute mapping observations.
+- GROUP_MESSAGE_CREATE still gates transition of mapped ordinary OneBot messages to auxiliary-only handling.
+- Added official lifecycle normalization/state for:
+  - FRIEND_ADD / FRIEND_DEL
+  - GROUP_ADD_ROBOT / GROUP_DEL_ROBOT
+  - GROUP_MEMBER_ADD / GROUP_MEMBER_REMOVE
+- Lifecycle OpenIDs are stored in separate QQ Open records, not legacy numeric QQ member tables.
+- Scheduler/active-speaking routing now accepts static or confirmed learned group mappings.
+- Portal QQ Open page now shows lifecycle count/last event and static/learned/total mapping counts.
+- Updated README, deployment example and V4 docs for learned mapping.
+- Full CI `36363693922`: success.
+- Isolated Worker build `02ca8a73-cdd4-4ffa-beeb-db3140105a74`: success.
+- Fast-forwarded `main` to `a6a5996c2ec33da881e0dbb54725b4ab61ce7037`.
+- Production build `5669da1f-77c7-4fb3-8b42-ea26da91ed18`: success.
+- Production Worker version: `33538b7c-c04f-4b47-b8eb-82c444c6fe0a`.
+- Production read-back confirms OneBotHub, QqOpenGateway, D1, Vectorize, Workers AI, Rate Limiter and existing Secrets are intact.
+- Production `QQ_OPEN_INTENTS` remains `33554432`.
+- Production `QQ_HYBRID_GROUP_MAP={}`, so automatic mapping can learn safely unless a static override is later added.
 
 ## Current Production Behavior
 
-- `QQ_HYBRID_PRIMARY=qq-open`
-- `QQ_HYBRID_GROUP_MAP={}` by default
-- C2C OneBot messages are auxiliary because QQ Open owns C2C.
-- OneBot group @ messages are auxiliary because QQ Open owns GROUP_AT_MESSAGE_CREATE.
-- Ordinary OneBot group messages continue existing behavior until that numeric group is explicitly mapped and the mapped QQ group has actually emitted GROUP_MESSAGE_CREATE.
-- Active scheduled group sends use QQ Open only if group mapping + official push permission exist; otherwise they use OneBot fallback.
-- Numeric QQ @mentions remain OneBot sends.
-- Interaction code is deployed but production Intent remains `33554432`, so INTERACTION_CREATE is dormant until permission is explicitly enabled.
+- QQ Open is primary.
+- OneBot C2C and explicit @Bot duplicates are auxiliary.
+- Unmapped ordinary OneBot group traffic remains functional.
+- A learned mapping needs 3 official-message evidence points.
+- Even after mapping, ordinary OneBot group traffic only becomes auxiliary once that official group emits GROUP_MESSAGE_CREATE.
+- Official active pushes require mapped group + stored GROUP_MSG_RECEIVE/authorization state; otherwise OneBot fallback.
+- Interaction implementation is present but dormant until permission is confirmed and the Intent bit is explicitly enabled.
 
 ## Known Remaining Work
 
-- Populate `QQ_HYBRID_GROUP_MAP` for groups that should merge OneBot observation into QQ Open group context.
-- Confirm whether QQ Open Platform has granted INTERACTION permission before changing Intent to `100663296`.
-- Live-test ordinary AI/Codex after current production deploy.
-- Live-test GROUP_MESSAGE_CREATE on a group with receive-all-message capability.
-- Live-test RECEIVE/REJECT state changes and official active schedule send.
-- CodexWork local file export still requires explicit local/legacy upload handling; Cloudflare cannot directly read the bridge filesystem path.
-- Additional official lifecycle events such as FRIEND_ADD/DEL and GROUP_MEMBER_ADD/REMOVE can be added in the next phase.
+- Live-test post-deploy Gateway READY and normal C2C/group AI.
+- Generate repeated @Bot messages in a test group and verify automatic mapping reaches 3 evidence points.
+- If receive-all-message is enabled, verify GROUP_MESSAGE_CREATE flips mapped OneBot ordinary group traffic to observation-only.
+- Live-test FRIEND/GROUP_MEMBER lifecycle events and Portal counters.
+- Confirm Interaction permission before any Intent change.
+- CodexWork local file export still needs an explicit bounded local-to-QQ upload channel; Cloudflare cannot read the bridge filesystem directly.
 
 ## next_exact_action
 
-Read the live production Gateway diagnostics and perform a QQ-side ordinary AI message test. Then map a test group explicitly, verify GROUP_MESSAGE_CREATE evidence, and only after QQ Platform confirms INTERACTION permission consider setting `QQ_OPEN_INTENTS=100663296`.
+Live-test the production Gateway and one test group: send at least 3 distinctive @Bot messages visible to both transports, confirm the learned mapping appears in Portal, then—if receive-all-message is enabled—verify GROUP_MESSAGE_CREATE ownership. Keep Interaction Intent unchanged unless permission is confirmed.
 
-last_checkpoint_at: 2026-09-28T02:35:00+08:00
+last_checkpoint_at: 2026-09-28T08:54:00+08:00

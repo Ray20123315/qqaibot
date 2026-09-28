@@ -1,6 +1,6 @@
 # Ray_Chen Memory Entry
 
-- memory_version: v0.0.16
+- memory_version: v0.0.17
 - project: QQAIBOT
 - repository: Ray20123315/qqaibot
 - canonical_branch: main
@@ -8,40 +8,42 @@
 - task_id: qqaibot-20260927-qqopen-v4-native
 - task_status: active
 - goal_revision: 5
-- production_product_commit: e75dd25ffd7900567bc4938f656b29ffaedcb5da
-- production_ci_run: 36340836211
-- isolated_test_build: 610409e1-41c7-4ef8-a9be-3af4af0042dd
-- production_cloudflare_build: f74c53e5-4f75-48b6-b45e-d8d7b7755cce
+- production_product_commit: a6a5996c2ec33da881e0dbb54725b4ab61ce7037
+- production_ci_run: 36363693922
+- isolated_test_build: 02ca8a73-cdd4-4ffa-beeb-db3140105a74
+- production_cloudflare_build: 5669da1f-77c7-4fb3-8b42-ea26da91ed18
+- production_worker_version: 33538b7c-c04f-4b47-b8eb-82c444c6fe0a
 - production_worker: qqai
-- updated_at: 2026-09-28T02:35:00+08:00
+- updated_at: 2026-09-28T08:54:00+08:00
 
 ## Current Architecture
 
-QQAIBOT now uses a hybrid QQ transport:
+QQAIBOT runs a hybrid QQ transport:
 
 1. QQ Open is the primary official interaction/action channel.
-2. NapCat/OneBot remains deployed and connected as auxiliary observation/capability fallback.
-3. C2C and explicit group @ interactions are owned by QQ Open.
-4. Ordinary OneBot group messages remain active until the mapped QQ Open group has actually emitted GROUP_MESSAGE_CREATE; after official full-group evidence exists, mapped OneBot group messages become observation-only.
-5. Active scheduled/group messages prefer QQ Open only when a numeric group is explicitly mapped to group_openid and official active-push permission is currently allowed; otherwise OneBot remains fallback.
-6. OpenID values remain opaque and are never inferred from numeric QQ IDs.
+2. NapCat/OneBot remains deployed as auxiliary observation/capability fallback.
+3. Static `QQ_HYBRID_GROUP_MAP` is an authoritative override.
+4. When no static mapping exists, group mapping can be learned conservatively from matching OneBot + QQ Open observations. A mapping is confirmed only after at least 3 distinct official message IDs point unambiguously to the same numeric group.
+5. Generic short text, ambiguous multi-group matches and mapping conflicts are never auto-learned.
+6. GROUP_AT_MESSAGE_CREATE may provide mapping evidence, but ordinary OneBot group traffic becomes observation-only only after the official group actually emits GROUP_MESSAGE_CREATE.
+7. QQ Open OpenIDs remain opaque and are never inferred as numeric QQ IDs.
 
 ## Official Event State
 
-Implemented:
-- GROUP_MESSAGE_CREATE support and dynamic full-group ownership evidence
+Implemented under the existing GROUP_AND_C2C_EVENT baseline:
+- GROUP_MESSAGE_CREATE full-group ownership evidence
+- FRIEND_ADD / FRIEND_DEL
+- GROUP_ADD_ROBOT / GROUP_DEL_ROBOT
+- GROUP_MEMBER_ADD / GROUP_MEMBER_REMOVE
 - C2C_MSG_RECEIVE / C2C_MSG_REJECT
 - GROUP_MSG_RECEIVE / GROUP_MSG_REJECT
-- INTERACTION_CREATE parsing/ACK/control path
-- hybrid Portal diagnostics
-- active-push transport ownership
 
-Important: production `QQ_OPEN_INTENTS` remains `33554432`. INTERACTION intent `1<<26` is implemented in code but NOT enabled until QQ Open Platform permission is confirmed.
+Interaction parsing/ACK/control is implemented, but production `QQ_OPEN_INTENTS` remains `33554432`; `INTERACTION (1<<26)` remains permission-gated.
 
 ## Recovery Route
 
 1. Read ACTIVE_TASK.md, CURRENT_STATE.md, VERIFY.md and FILE_MANIFEST.json.
 2. Keep OneBotHub and QqOpenGateway.
 3. Do not enable INTERACTION intent without confirmed app permission.
-4. Populate QQ_HYBRID_GROUP_MAP explicitly before expecting OneBot full-group events to merge into matching QQ Open group context.
-5. Do not claim post-deploy READY unless the live Gateway status is observed; deployment and telemetry currently show no Gateway ensure/reconnect error.
+4. Prefer static group mapping when configured; otherwise allow the conservative D1-backed learner.
+5. Do not treat post-deploy Gateway READY as verified until observed live; product/build/read-back are verified.

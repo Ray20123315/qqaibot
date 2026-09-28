@@ -1,61 +1,46 @@
 {
   "schema_version": 1,
-  "memory_version": "v0.0.16",
+  "memory_version": "v0.0.17",
   "task_id": "qqaibot-20260927-qqopen-v4-native",
   "goal_revision": 5,
-  "transaction": "file_change_transaction_20260928_hybrid_official_events_prod_001",
+  "transaction": "file_change_transaction_20260928_dynamic_hybrid_lifecycle_prod_001",
   "repository": "Ray20123315/qqaibot",
   "production_branch": "main",
   "development_branch": "v4-qqopen-native",
-  "product_before_revision": "e7292b6ba90c3e2228cbdec43cb8cf153e21224e",
-  "product_after_revision": "e75dd25ffd7900567bc4938f656b29ffaedcb5da",
+  "product_before_revision": "6465e3e3ad4ba1d970ca6781a2394f0998712e65",
+  "product_after_revision": "a6a5996c2ec33da881e0dbb54725b4ab61ce7037",
   "verification": {
-    "github_ci_run": 36340836211,
+    "github_ci_run": 36363693922,
     "github_ci": "success",
-    "isolated_cloudflare_build": "610409e1-41c7-4ef8-a9be-3af4af0042dd",
+    "isolated_cloudflare_build": "02ca8a73-cdd4-4ffa-beeb-db3140105a74",
     "isolated_cloudflare_outcome": "success",
-    "production_cloudflare_build": "f74c53e5-4f75-48b6-b45e-d8d7b7755cce",
+    "production_cloudflare_build": "5669da1f-77c7-4fb3-8b42-ea26da91ed18",
     "production_cloudflare_outcome": "success",
+    "production_worker_version": "33538b7c-c04f-4b47-b8eb-82c444c6fe0a",
     "production_bindings_readback": "success",
-    "gateway_ensure_error_count": 0,
-    "live_gateway_ready_after_deploy": "pending_user_verification"
+    "interaction_intent_enabled": false,
+    "live_gateway_ready_after_deploy": "pending_live_observation"
   },
   "changes": [
     {
       "location_type": "github",
       "provider": "GitHub",
       "resource_id_or_path": "src/v4/hybrid/ownership.js",
-      "action": "created",
+      "action": "modified",
       "branch_or_container": "v4-qqopen-native -> main",
+      "after_revision": "3f88c06de905d4f609e5614962bc0ebb4f4ae53e",
       "verification": "CI success",
-      "changed_at": "2026-09-28T02:35:00+08:00"
+      "changed_at": "2026-09-28T08:54:00+08:00"
     },
     {
       "location_type": "github",
       "provider": "GitHub",
       "resource_id_or_path": "src/v4/qqopen/official-events.js",
-      "action": "created",
-      "branch_or_container": "v4-qqopen-native -> main",
-      "verification": "CI success",
-      "changed_at": "2026-09-28T02:35:00+08:00"
-    },
-    {
-      "location_type": "github",
-      "provider": "GitHub",
-      "resource_id_or_path": "src/v4/qqopen/api.js",
       "action": "modified",
       "branch_or_container": "v4-qqopen-native -> main",
-      "verification": "CI + isolated deploy + prod deploy",
-      "changed_at": "2026-09-28T02:35:00+08:00"
-    },
-    {
-      "location_type": "github",
-      "provider": "GitHub",
-      "resource_id_or_path": "src/v4/index.js",
-      "action": "modified",
-      "branch_or_container": "v4-qqopen-native -> main",
+      "after_revision": "21c7762ad15d4a8f3a11299a5bd479d99fd24156",
       "verification": "CI success",
-      "changed_at": "2026-09-28T02:35:00+08:00"
+      "changed_at": "2026-09-28T08:54:00+08:00"
     },
     {
       "location_type": "github",
@@ -63,53 +48,9 @@
       "resource_id_or_path": "worker.js",
       "action": "modified",
       "branch_or_container": "v4-qqopen-native -> main",
-      "verification": "CI + prod bundle/deploy",
-      "changed_at": "2026-09-28T02:35:00+08:00"
-    },
-    {
-      "location_type": "github",
-      "provider": "GitHub",
-      "resource_id_or_path": "src/core/permissions.js",
-      "action": "modified",
-      "branch_or_container": "v4-qqopen-native -> main",
-      "verification": "CI success",
-      "changed_at": "2026-09-28T02:35:00+08:00"
-    },
-    {
-      "location_type": "github",
-      "provider": "GitHub",
-      "resource_id_or_path": "src/v4/qqopen/legacy-bridge.js",
-      "action": "modified",
-      "branch_or_container": "v4-qqopen-native -> main",
-      "verification": "CI success",
-      "changed_at": "2026-09-28T02:35:00+08:00"
-    },
-    {
-      "location_type": "github",
-      "provider": "GitHub",
-      "resource_id_or_path": "src/v4/qqopen/runtime.js",
-      "action": "modified",
-      "branch_or_container": "v4-qqopen-native -> main",
-      "verification": "CI + test/prod deploy",
-      "changed_at": "2026-09-28T02:35:00+08:00"
-    },
-    {
-      "location_type": "github",
-      "provider": "GitHub",
-      "resource_id_or_path": "src/v4/portal/api.js",
-      "action": "modified",
-      "branch_or_container": "v4-qqopen-native -> main",
-      "verification": "CI success",
-      "changed_at": "2026-09-28T02:35:00+08:00"
-    },
-    {
-      "location_type": "github",
-      "provider": "GitHub",
-      "resource_id_or_path": "src/v4/portal/lean-dashboard.js",
-      "action": "modified",
-      "branch_or_container": "v4-qqopen-native -> main",
-      "verification": "CI success",
-      "changed_at": "2026-09-28T02:35:00+08:00"
+      "after_revision": "255abf2669b61d5ec58f59e5761c4e8dcf530391",
+      "verification": "CI + production deploy",
+      "changed_at": "2026-09-28T08:54:00+08:00"
     },
     {
       "location_type": "github",
@@ -117,62 +58,59 @@
       "resource_id_or_path": "src/scheduler/runtime.js",
       "action": "modified",
       "branch_or_container": "v4-qqopen-native -> main",
+      "after_revision": "255abf2669b61d5ec58f59e5761c4e8dcf530391",
       "verification": "CI success",
-      "changed_at": "2026-09-28T02:35:00+08:00"
+      "changed_at": "2026-09-28T08:54:00+08:00"
+    },
+    {
+      "location_type": "github",
+      "provider": "GitHub",
+      "resource_id_or_path": "src/v4/portal/api.js",
+      "action": "modified",
+      "branch_or_container": "v4-qqopen-native -> main",
+      "after_revision": "255abf2669b61d5ec58f59e5761c4e8dcf530391",
+      "verification": "CI success",
+      "changed_at": "2026-09-28T08:54:00+08:00"
+    },
+    {
+      "location_type": "github",
+      "provider": "GitHub",
+      "resource_id_or_path": "src/v4/qqopen/runtime.js",
+      "action": "modified",
+      "branch_or_container": "v4-qqopen-native -> main",
+      "after_revision": "db47455e5d3fc49c0f2c7f151e4cbe8cbf283812",
+      "verification": "CI success",
+      "changed_at": "2026-09-28T08:54:00+08:00"
     },
     {
       "location_type": "github",
       "provider": "GitHub",
       "resource_id_or_path": "verify-v4-hybrid-official.mjs",
-      "action": "created",
+      "action": "modified",
       "branch_or_container": "v4-qqopen-native -> main",
+      "after_revision": "db47455e5d3fc49c0f2c7f151e4cbe8cbf283812",
       "verification": "CI success",
-      "changed_at": "2026-09-28T02:35:00+08:00"
+      "changed_at": "2026-09-28T08:54:00+08:00"
     },
     {
       "location_type": "github",
       "provider": "GitHub",
-      "resource_id_or_path": "package.json",
+      "resource_id_or_path": "src/v4/portal/lean-dashboard.js",
       "action": "modified",
       "branch_or_container": "v4-qqopen-native -> main",
-      "verification": "CI success",
-      "changed_at": "2026-09-28T02:35:00+08:00"
+      "after_revision": "5b375b95e916cb59ebe1e510be8d9cf38f5e1fc6",
+      "verification": "CI + test deploy",
+      "changed_at": "2026-09-28T08:54:00+08:00"
     },
     {
       "location_type": "github",
       "provider": "GitHub",
-      "resource_id_or_path": "wrangler.toml",
+      "resource_id_or_path": "README.md;docs/v4-qqopen-native.md;.dev.vars.example",
       "action": "modified",
       "branch_or_container": "v4-qqopen-native -> main",
-      "verification": "bundle + prod deploy + read-back",
-      "changed_at": "2026-09-28T02:35:00+08:00"
-    },
-    {
-      "location_type": "github",
-      "provider": "GitHub",
-      "resource_id_or_path": ".dev.vars.example",
-      "action": "modified",
-      "branch_or_container": "v4-qqopen-native -> main",
+      "after_revision": "a6a5996c2ec33da881e0dbb54725b4ab61ce7037",
       "verification": "CI success",
-      "changed_at": "2026-09-28T02:35:00+08:00"
-    },
-    {
-      "location_type": "github",
-      "provider": "GitHub",
-      "resource_id_or_path": "README.md",
-      "action": "modified",
-      "branch_or_container": "v4-qqopen-native -> main",
-      "verification": "CI success",
-      "changed_at": "2026-09-28T02:35:00+08:00"
-    },
-    {
-      "location_type": "github",
-      "provider": "GitHub",
-      "resource_id_or_path": "docs/v4-qqopen-native.md",
-      "action": "modified",
-      "branch_or_container": "v4-qqopen-native -> main",
-      "verification": "CI success",
-      "changed_at": "2026-09-28T02:35:00+08:00"
+      "changed_at": "2026-09-28T08:54:00+08:00"
     },
     {
       "location_type": "github",
@@ -180,10 +118,10 @@
       "resource_id_or_path": "refs/heads/main",
       "action": "fast_forward",
       "branch_or_container": "main",
-      "before_revision": "fe1c3023a9464ef4e784ae3b4b597519eee74128",
-      "after_revision": "e75dd25ffd7900567bc4938f656b29ffaedcb5da",
+      "before_revision": "6465e3e3ad4ba1d970ca6781a2394f0998712e65",
+      "after_revision": "a6a5996c2ec33da881e0dbb54725b4ab61ce7037",
       "verification": "update_ref success",
-      "changed_at": "2026-09-28T02:35:00+08:00"
+      "changed_at": "2026-09-28T08:54:00+08:00"
     },
     {
       "location_type": "cloudflare",
@@ -191,9 +129,9 @@
       "resource_id_or_path": "workers/scripts/qqai-v4test",
       "action": "deployed",
       "branch_or_container": "test",
-      "after_revision": "e75dd25ffd7900567bc4938f656b29ffaedcb5da",
-      "verification": "build 610409e1-41c7-4ef8-a9be-3af4af0042dd success",
-      "changed_at": "2026-09-28T02:35:00+08:00"
+      "after_revision": "a6a5996c2ec33da881e0dbb54725b4ab61ce7037",
+      "verification": "build 02ca8a73-cdd4-4ffa-beeb-db3140105a74 success",
+      "changed_at": "2026-09-28T08:54:00+08:00"
     },
     {
       "location_type": "cloudflare",
@@ -201,22 +139,14 @@
       "resource_id_or_path": "workers/scripts/qqai",
       "action": "deployed",
       "branch_or_container": "production",
-      "after_revision": "e75dd25ffd7900567bc4938f656b29ffaedcb5da",
-      "verification": "build f74c53e5-4f75-48b6-b45e-d8d7b7755cce success",
-      "changed_at": "2026-09-28T02:35:00+08:00"
-    },
-    {
-      "location_type": "cloudflare",
-      "provider": "Cloudflare",
-      "resource_id_or_path": "workers/observability/telemetry/query",
-      "action": "verified",
-      "branch_or_container": "production",
-      "verification": "0 QQ Open gateway ensure failed events in deployment window",
-      "changed_at": "2026-09-28T02:35:00+08:00"
+      "after_revision": "a6a5996c2ec33da881e0dbb54725b4ab61ce7037",
+      "commit_or_hash": "33538b7c-c04f-4b47-b8eb-82c444c6fe0a",
+      "verification": "build 5669da1f-77c7-4fb3-8b42-ea26da91ed18 success + bindings read-back",
+      "changed_at": "2026-09-28T08:54:00+08:00"
     }
   ],
   "internal_memory_transaction": {
-    "action": "update Ray_Chen memory to v0.0.16",
+    "action": "update Ray_Chen memory to v0.0.17",
     "note": "Memory/archive/hash/Gmail evidence do not recursively trigger another transaction. No secret values stored."
   }
 }

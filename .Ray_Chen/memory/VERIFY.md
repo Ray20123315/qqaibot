@@ -2,30 +2,31 @@
 
 ## Product Revision
 
-`e75dd25ffd7900567bc4938f656b29ffaedcb5da`
+`a6a5996c2ec33da881e0dbb54725b4ab61ce7037`
 
 ## GitHub CI
 
-Run: `36340836211`
+Run: `36363693922`
 Conclusion: SUCCESS
 
 Passed:
 - repository regression
 - V3 regression
 - V4 QQ Open regression
-- `verify-v4-hybrid-official.mjs`
-- isolated V4 test deployment dry-run
+- lifecycle + dynamic mapping regression
+- isolated V4 test deployment checks
 - production Worker bundle dry-run
 
 ## Isolated Cloudflare Test
 
-Build: `610409e1-41c7-4ef8-a9be-3af4af0042dd`
+Build: `02ca8a73-cdd4-4ffa-beeb-db3140105a74`
 Outcome: success
 
 ## Production Cloudflare
 
-Build: `f74c53e5-4f75-48b6-b45e-d8d7b7755cce`
+Build: `5669da1f-77c7-4fb3-8b42-ea26da91ed18`
 Outcome: success
+Worker version: `33538b7c-c04f-4b47-b8eb-82c444c6fe0a`
 
 Read-back verified:
 - OneBotHub present
@@ -34,40 +35,29 @@ Read-back verified:
 - Vectorize present
 - AI binding present
 - Rate Limiter present
-- QQ_OPEN_CLIENT_SECRET present as secret binding
-- all previous secret bindings present
-- DEVELOPER_IDS preserved
-- PORTAL_ADMIN_USERNAME preserved
-- plugin security vars preserved
+- QQ_OPEN_CLIENT_SECRET present as Secret
+- existing Secrets preserved
 - QQ_OPEN_INTENTS=33554432
 - QQ_HYBRID_PRIMARY=qq-open
 - QQ_HYBRID_GROUP_MAP={}
+- QQ_OPEN_DISCOVERY_SYNC=true
 
-Observability:
-- query timeframe covered deployment window
-- exact needle `QQ Open gateway ensure failed`
-- result count: 0
+## Regression Coverage Added
 
-## Hybrid Regression Coverage
-
-- explicit numeric group -> group_openid map parsing
-- OneBot C2C ownership
-- group-at ownership
-- dynamic full-group ownership
-- push permission normalization
-- Interaction ACK policy
-- button callback command parsing
-- feedback / clear / model / auth controls
-- Portal diagnostics
-- active scheduled transport fallback
-- no forced INTERACTION intent
+- lifecycle normalization for friend/member/bot-group add/remove
+- dynamic group fingerprinting
+- generic-message rejection
+- ambiguous multi-group rejection
+- 3-evidence design hooks
+- dynamic mapping used by OneBot observation, scheduler and Portal
+- GROUP_AT and GROUP_MESSAGE observations fed into mapping
+- Portal lifecycle/mapping metrics
+- no forced Interaction Intent
 
 ## Live Verification Remaining
 
-1. User checks production Gateway remains READY after deploy.
-2. Ordinary C2C AI response through QQ Open.
-3. Group @ AI response through QQ Open.
-4. Configure a test QQ_HYBRID_GROUP_MAP entry.
-5. If receive-all-message is enabled, observe GROUP_MESSAGE_CREATE and verify mapped OneBot event becomes auxiliary.
-6. Trigger GROUP_MSG_RECEIVE/REJECT and verify status/active schedule routing.
-7. Confirm INTERACTION permission before enabling Intent bit.
+1. Confirm production Gateway READY after this deploy.
+2. Send 3 distinctive @Bot test messages visible on both transports and confirm learned mapping.
+3. If receive-all-message capability is enabled, observe GROUP_MESSAGE_CREATE and confirm mapped ordinary OneBot events become auxiliary.
+4. Trigger a lifecycle event and confirm Portal lifecycle count changes.
+5. Confirm Interaction permission before changing Intent.
