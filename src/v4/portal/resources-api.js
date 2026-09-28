@@ -6,6 +6,7 @@ import {
   upsertProviderAccount
 } from "../../ai/provider-registry.js";
 import { getPortalSession, jsonResponse, readCookie } from "../../portal/auth.js";
+import { isDeveloperId } from "../../config/deployment.js";
 import {
   claimResourceInputTicket,
   consumeResourceInputTicket,
@@ -57,6 +58,22 @@ function resourceError(error) {
 async function handleV4ResourcePortalApi(request, env, url = null) {
   const target = url instanceof URL ? url : new URL(request.url);
   if (!target.pathname.startsWith(BASE)) return null;
+
+  if (request.method === "GET" && target.pathname === BASE + "/viewer") {
+    const token = readCookie(request, "qqai_session");
+    const session = await getPortalSession(env, token, { touch: true }).catch(() => null);
+    if (!session) return jsonResponse({ ok: false, message: "請先登入 AIBot 後臺。" }, 401);
+    const developer = Boolean(session.systemAdmin === true || session?.permissions?.developer === true || isDeveloperId(env, session.qq));
+    return jsonResponse({
+      ok: true,
+      viewer: {
+        developer,
+        role: developer ? "developer" : String(session.role || "member"),
+        systemAdmin: session.systemAdmin === true
+      }
+    });
+  }
+
   const auth = await requirePortalPrincipal(request, env);
   if (auth.error) return auth.error;
   const principal = await resolveCanonicalPrincipal(env, auth.principal);
@@ -68,7 +85,8 @@ async function handleV4ResourcePortalApi(request, env, url = null) {
         listStorageConnectorsForPrincipal(env, principal),
         userPersistenceState(env, principal)
       ]);
-      return jsonResponse({ ok: true, ai, storage, persistence });
+      const developer = Boolean(auth.session.systemAdmin === true || auth.session?.permissions?.developer === true || isDeveloperId(env, auth.session.qq));
+      return jsonResponse({ ok: true, ai, storage, persistence, viewer: { developer, role: developer ? "developer" : String(auth.session.role || "member") } });
     }
 
     if (request.method === "POST" && target.pathname === BASE + "/ticket") {

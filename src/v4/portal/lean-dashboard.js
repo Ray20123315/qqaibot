@@ -60,6 +60,20 @@ body.v4-lean-enabled .view.active{animation:v4enter .48s cubic-bezier(.2,.8,.2,1
 .v4-tabs{display:flex;gap:8px;flex-wrap:wrap}.v4-tabs button.active{background:var(--primary);color:#fff}.v4-empty{padding:30px;border:1px dashed rgba(150,160,220,.18);border-radius:15px;color:var(--muted);text-align:center}.v4-error{color:#ff8292}.v4-ok{color:#5ce0b1}
 .v4-retired{display:flex;gap:7px;flex-wrap:wrap}.v4-retired span{font-size:11px;color:#8994aa;border:1px solid rgba(150,160,220,.12);padding:5px 8px;border-radius:999px;text-decoration:line-through;opacity:.8}
 .v4-console{font-family:ui-monospace,SFMono-Regular,Consolas,monospace;font-size:12px;white-space:pre-wrap;word-break:break-word;background:rgba(1,3,8,.65);border:1px solid rgba(150,160,220,.12);border-radius:14px;padding:13px;max-height:300px;overflow:auto}
+
+.v4-resource-summary{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}
+.v4-resource-card{border:1px solid rgba(150,160,220,.13);border-radius:17px;padding:15px;background:rgba(255,255,255,.025)}
+.v4-resource-card .v4-resource-icon{width:38px;height:38px;border-radius:12px;display:grid;place-items:center;background:linear-gradient(135deg,rgba(123,108,255,.22),rgba(85,207,255,.10));font-weight:900;margin-bottom:12px}
+.v4-dev-only{display:none!important}body.v4-developer-mode .v4-dev-only{display:block!important}
+#v4DeveloperGate{position:relative;margin-top:14px;min-height:28px;border-radius:12px;opacity:.5;transition:opacity .2s ease}
+#v4DeveloperGate:hover,#v4DeveloperGate:focus-within{opacity:1}
+#v4DeveloperGate input{position:absolute;inset:0;width:100%;height:100%;opacity:0;cursor:text}
+#v4DeveloperMask{display:block;min-height:28px;padding:5px 9px;color:#8e99ad;font-size:11px;letter-spacing:.08em}
+body.v4-developer-mode #v4DeveloperMask{color:#78e4c1}
+.v4-modal-backdrop{position:fixed;inset:0;z-index:10000;display:grid;place-items:center;padding:20px;background:rgba(2,4,10,.66);backdrop-filter:blur(18px)}
+.v4-modal-backdrop.hidden{display:none}.v4-modal-card{width:min(560px,100%);border:1px solid rgba(150,160,220,.18);border-radius:22px;background:linear-gradient(145deg,rgba(18,23,38,.97),rgba(8,12,22,.97));box-shadow:0 30px 100px rgba(0,0,0,.45);padding:22px}
+.v4-modal-card h3{margin:0 0 8px}.v4-modal-actions{display:flex;justify-content:flex-end;gap:8px;margin-top:18px}
+@media(max-width:720px){.v4-resource-summary{grid-template-columns:1fr}}
 @media(max-width:1100px){.v4-card,.v4-card.wide{grid-column:span 6}.v4-hero:before,.v4-hero:after{opacity:.55}}
 @media(max-width:720px){.v4-card,.v4-card.wide{grid-column:1/-1}.v4-hero{padding:22px;min-height:230px}.v4-toolbar,.v4-inline{grid-template-columns:1fr}.v4-hero:before,.v4-hero:after{opacity:.25}}
 @media(prefers-reduced-motion:reduce){*,*:before,*:after{animation:none!important;transition:none!important;scroll-behavior:auto!important}.v4-card{transform:none!important}}
@@ -70,6 +84,7 @@ body.v4-lean-enabled .view.active{animation:v4enter .48s cubic-bezier(.2,.8,.2,1
 'use strict';
 var RETIRED=['活动/投票','排程提醒','匿名申诉','历史违规独立页','B站监控','关系管理','平台功能目录','事件模拟','旧 OneBot 专用工具'];
 var ACTIVE='v4overview';
+var VIEWER={developer:false};var DEV_UNLOCKED=false;
 function q(id){return document.getElementById(id)}
 function esc(v){return String(v==null?'':v).replace(/[&<>"']/g,function(c){return({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'})[c]})}
 function jsonReq(path,method,body){
@@ -87,7 +102,7 @@ function setActive(id,label){
   ACTIVE=id;document.querySelectorAll('#v4LeanNav button').forEach(function(b){b.classList.toggle('active',b.dataset.v4Target===id)});
   var h=document.querySelector('.topbar h2');if(h&&label)h.textContent=label
 }
-function showCustom(id,label){hideViews();var v=q('v-'+id);if(v)v.classList.add('active');setActive(id,label);if(id==='v4qqopen')refreshStatus();if(id==='v4groups')loadGroupAll()}
+function showCustom(id,label){hideViews();var v=q('v-'+id);if(v)v.classList.add('active');setActive(id,label);if(id==='v4qqopen')refreshStatus();if(id==='v4groups')loadGroupAll();if(id==='v4resources')loadResources()}
 function openLegacy(view,label){
   var btn=document.querySelector('#nav button[data-view="'+view+'"]');
   if(btn){btn.click();setTimeout(function(){setActive(view,label)},0)}
@@ -114,7 +129,7 @@ function renderQqOpen(){
     '<div class="v4-card"><div class="v4-sub">群映射</div><div id="v4QqMappings" class="v4-big">0</div><div id="v4QqMappingsDetail" class="v4-sub">静态 0 · 自动 0</div></div>'+
     '<div class="v4-card wide"><h3>消息 / 富媒体</h3><div class="v4-cap"><span>接收：文字、图片、影片、语音、文件、表情</span><b class="v4-tag">官方支持</b></div><div class="v4-cap"><span>发送：文字、Markdown、图片、影片、语音、文件</span><b class="v4-tag">官方支持</b></div><div class="v4-cap"><span>富媒体发送流程</span><b class="v4-tag pending">上传 → file_info → msg_type=7</b></div></div>'+
     '<div class="v4-card"><h3>群管理</h3><div class="v4-cap"><span>成员列表 / 资料</span><b class="v4-tag">支持</b></div><div class="v4-cap"><span>禁言 / 移出 / 黑名单</span><b class="v4-tag">支持</b></div><div class="v4-cap"><span>入群申请同意 / 拒绝 / 拉黑</span><b class="v4-tag">支持</b></div><div class="v4-sub" style="margin-top:10px">实际开放程度取决于当前 App 权限。</div></div>'+
-    '<div class="v4-card full"><h3>Gateway 诊断</h3><div id="v4QqRaw" class="v4-console">读取中...</div></div></div></div>');
+    '<div class="v4-card full v4-dev-only"><h3>开发者诊断</h3><div id="v4QqRaw" class="v4-console">读取中...</div></div></div></div>');
 }
 function renderGroups(){
   ensureView('v4groups','群管理','<div class="v4-shell"><div class="section-head"><div><h2>QQ Open 群管理</h2><p>直接使用 group_openid / member_openid，不再假装成数字 QQ。</p></div></div>'+
@@ -123,6 +138,44 @@ function renderGroups(){
     '<div id="v4GroupInfo" class="v4-card full"><div class="v4-empty">输入 Group OpenID 后读取。</div></div>'+
     '<div id="v4GroupMembers" class="v4-list"></div><div id="v4GroupJoins" class="v4-list hidden"></div><div id="v4GroupBlacklist" class="v4-list hidden"></div><div id="v4GroupMutes" class="v4-list hidden"></div></div>');
 }
+function renderResources(){
+  ensureView('v4resources','AI 与资料','<div class="v4-shell">'+
+    '<div class="section-head"><div><h2>AI 与资料</h2><p>连接你自己的 AI 与资料储存。完整金钥只用于建立连接，保存后不会再显示。</p></div><div class="v4-actions"><button id="v4AddAi" class="btn primary">新增 AI</button><button id="v4AddStorage" class="btn">连接资料储存</button></div></div>'+
+    '<div class="v4-resource-summary"><div class="v4-resource-card"><div class="v4-resource-icon">AI</div><div id="v4AiCount" class="v4-big">—</div><div class="v4-sub">自己的 AI 服务</div></div><div class="v4-resource-card"><div class="v4-resource-icon">DB</div><div id="v4StorageCount" class="v4-big">—</div><div class="v4-sub">已连接资料储存</div></div><div class="v4-resource-card"><div class="v4-resource-icon">✓</div><div id="v4PersistenceState" class="v4-big">—</div><div class="v4-sub">长期保存状态</div></div></div>'+
+    '<div class="v4-grid"><div class="v4-card wide"><h3>我的 AI</h3><p class="v4-sub">你可以自己使用，也可以只分享给你仍在的群组。离群后分享自动失效。</p><div id="v4AiList" class="v4-list"><div class="v4-empty">读取中…</div></div></div>'+
+    '<div class="v4-card"><h3>资料储存</h3><p class="v4-sub">要保存长期记忆、聊天记录、设置或插件资料，请连接自己的 D1 或 KV。</p><div id="v4StorageList" class="v4-list"><div class="v4-empty">读取中…</div></div></div></div>'+
+    '<div id="v4ResourceNotice" class="v4-sub"></div></div>');
+}
+function renderResourceRows(data){
+  var ai=Array.isArray(data&&data.ai)?data.ai:[],st=Array.isArray(data&&data.storage)?data.storage:[],p=(data&&data.persistence)||{};
+  if(q('v4AiCount'))q('v4AiCount').textContent=String(ai.length);
+  if(q('v4StorageCount'))q('v4StorageCount').textContent=String(st.length);
+  if(q('v4PersistenceState')){q('v4PersistenceState').textContent=p.connected?'已启用':'未启用';q('v4PersistenceState').className='v4-big '+(p.connected?'v4-ok':'v4-error')}
+  if(q('v4AiList'))q('v4AiList').innerHTML=ai.length?ai.map(function(x){return '<div class="v4-row"><div class="v4-row-head"><div><div class="v4-row-title">'+esc(x.label||'AI 服务')+'</div><div class="v4-row-meta">'+esc(x.provider||'服务')+(x.model?' · '+esc(x.model):'')+'</div></div><span class="v4-tag">'+(x.enabled===false?'停用':'可用')+'</span></div><div class="v4-row-meta">已分享群组 '+String(Array.isArray(x.sharedGroupIds)?x.sharedGroupIds.length:0)+' · 群友私聊 '+(x.allowGroupMemberPrivateChat?'允许':'关闭')+'</div><div class="v4-row-actions"><button class="btn" data-v4-ai-share="'+esc(x.id)+'">分享设置</button><button class="btn danger" data-v4-ai-delete="'+esc(x.id)+'">移除</button></div></div>'}).join(''):'<div class="v4-empty">尚未连接自己的 AI。</div>';
+  if(q('v4StorageList'))q('v4StorageList').innerHTML=st.length?st.map(function(x){var type=x.type==='cloudflare_d1'?'D1':'KV';return '<div class="v4-row"><div class="v4-row-head"><div><div class="v4-row-title">'+esc(x.label||type)+'</div><div class="v4-row-meta">Cloudflare '+type+' · '+(x.enabled===false?'已停用':'已连接')+'</div></div></div><div class="v4-row-actions"><button class="btn" data-v4-storage-test="'+esc(x.id)+'">测试连接</button><button class="btn danger" data-v4-storage-delete="'+esc(x.id)+'">移除</button></div></div>'}).join(''):'<div class="v4-empty">尚未连接资料储存；长期内容不会保存。</div>';
+  bindResourceActions(ai);
+}
+async function loadResources(){
+  try{var data=await jsonReq('/api/portal/v4/resources');VIEWER=data.viewer||VIEWER;renderResourceRows(data)}catch(e){if(q('v4ResourceNotice'))q('v4ResourceNotice').textContent=String(e.message||e)}
+}
+async function createResourceTicket(kind){
+  try{var r=await jsonReq('/api/portal/v4/resources/ticket','POST',{kind:kind});if(r.path)location.href=r.path}catch(e){if(q('v4ResourceNotice'))q('v4ResourceNotice').textContent=String(e.message||e)}
+}
+function closeV4Modal(){var el=q('v4Modal');if(el)el.classList.add('hidden')}
+function openV4Modal(title,body,onSave){
+  var el=q('v4Modal');if(!el){el=document.createElement('div');el.id='v4Modal';el.className='v4-modal-backdrop hidden';el.innerHTML='<div class="v4-modal-card"><h3 id="v4ModalTitle"></h3><div id="v4ModalBody"></div><div class="v4-modal-actions"><button id="v4ModalCancel" class="btn">取消</button><button id="v4ModalSave" class="btn primary">储存</button></div></div>';document.body.appendChild(el);q('v4ModalCancel').onclick=closeV4Modal}
+  q('v4ModalTitle').textContent=title;q('v4ModalBody').innerHTML=body;el.classList.remove('hidden');q('v4ModalSave').onclick=async function(){await onSave();closeV4Modal()}
+}
+function bindResourceActions(ai){
+  if(q('v4AddAi'))q('v4AddAi').onclick=function(){createResourceTicket('ai')};
+  if(q('v4AddStorage'))q('v4AddStorage').onclick=function(){createResourceTicket('storage')};
+  document.querySelectorAll('[data-v4-storage-test]').forEach(function(b){b.onclick=async function(){try{await jsonReq('/api/portal/v4/resources/storage/'+encodeURIComponent(b.dataset.v4StorageTest)+'/test','POST',{});q('v4ResourceNotice').textContent='资料储存连接正常。'}catch(e){q('v4ResourceNotice').textContent=String(e.message||e)}}});
+  document.querySelectorAll('[data-v4-storage-delete]').forEach(function(b){b.onclick=function(){openV4Modal('移除资料储存','<p class="v4-sub">移除连接不会自动删除你 Cloudflare 帐号里的资料，但 AIBot 将无法继续读取。</p>',async function(){await jsonReq('/api/portal/v4/resources/storage/'+encodeURIComponent(b.dataset.v4StorageDelete),'DELETE');await loadResources()})}});
+  document.querySelectorAll('[data-v4-ai-delete]').forEach(function(b){b.onclick=function(){openV4Modal('移除 AI 服务','<p class="v4-sub">移除后，这个 API 金钥将不再由 AIBot 使用。</p>',async function(){await jsonReq('/api/portal/v4/resources/ai/'+encodeURIComponent(b.dataset.v4AiDelete),'DELETE');await loadResources()})}});
+  document.querySelectorAll('[data-v4-ai-share]').forEach(function(b){b.onclick=function(){var account=ai.find(function(x){return x.id===b.dataset.v4AiShare})||{},groups=(account.sharedGroupIds||[]).join('\n');openV4Modal('AI 分享设置','<label class="v4-sub">允许使用的群组 ID，每行一个</label><textarea id="v4ShareGroups" class="v4-input" rows="6">'+esc(groups)+'</textarea><label style="display:flex;gap:8px;align-items:center;margin-top:12px"><input id="v4SharePrivate" type="checkbox" '+(account.allowGroupMemberPrivateChat?'checked':'')+'>允许这些群的成员在私讯使用</label><p class="v4-sub">实际使用前仍会确认 AI 提供者和使用者都还在对应群组。</p>',async function(){var groupIds=String(q('v4ShareGroups').value||'').split(/\n|,/).map(function(x){return x.trim()}).filter(Boolean);await jsonReq('/api/portal/v4/resources/ai/'+encodeURIComponent(account.id)+'/sharing','POST',{groupIds:groupIds,allowGroupMemberPrivateChat:q('v4SharePrivate').checked});await loadResources()})}}
+  );
+}
+function bindResources(){if(q('v4AddAi'))q('v4AddAi').onclick=function(){createResourceTicket('ai')};if(q('v4AddStorage'))q('v4AddStorage').onclick=function(){createResourceTicket('storage')}}
 function renderCodex(){
   ensureView('v4codex','AI / Codex','<div class="v4-shell"><div class="v4-hero"><div class="v4-eyebrow">AI / CODEX</div><h1>一个人，默认一个 Codex 对话。</h1><p>!codex、!codexchat、!codexwork 不再按群聊/私聊拆成一堆聊天室。只有插件内部分析、明确要求隔离的工作才保持独立会话。</p></div><div class="v4-grid">'+
     '<div class="v4-card"><div class="v4-sub">直接指令会话</div><div class="v4-big">统一</div><div class="v4-sub">优先使用 principalId；没有映射时退回当前平台 userId。</div></div>'+
@@ -140,14 +193,26 @@ function renderSystem(){
 function ensureLeanNav(){
   var nav=q('nav');if(!nav)return;
   if(!q('v4LeanNav')){var box=document.createElement('div');box.id='v4LeanNav';[
-    ['v4overview','总览'],['v4qqopen','QQ Open'],['v4groups','群管理'],['v4codex','AI / Codex'],['v3plugins','插件'],['v4system','系统']
-  ].forEach(function(x){var b=document.createElement('button');b.type='button';b.dataset.v4Target=x[0];b.textContent=x[1];b.onclick=function(){if(x[0]==='v3plugins')openLegacy('v3plugins','插件');else showCustom(x[0],x[1])};box.appendChild(b)});nav.appendChild(box)}
+    ['v4overview','总览'],['v4resources','AI 与资料'],['v4codex','AI / Codex'],['v3plugins','插件'],['v4qqopen','QQ Open','dev'],['v4groups','群管理','dev'],['v4system','系统','dev']
+  ].forEach(function(x){var b=document.createElement('button');b.type='button';b.dataset.v4Target=x[0];b.textContent=x[1];if(x[2]==='dev'){b.classList.add('v4-dev-only');b.dataset.v4DevOnly='1'}b.onclick=function(){if(x[0]==='v3plugins')openLegacy('v3plugins','插件');else showCustom(x[0],x[1])};box.appendChild(b)});nav.appendChild(box);ensureDeveloperGate()}
+}
+async function loadViewer(){
+  try{var r=await jsonReq('/api/portal/v4/resources/viewer');VIEWER=r.viewer||VIEWER;ensureDeveloperGate()}catch(e){VIEWER={developer:false}}
+}
+function ensureDeveloperGate(){
+  var nav=q('nav');if(!nav||!VIEWER.developer)return;
+  var gate=q('v4DeveloperGate');
+  if(!gate){gate=document.createElement('div');gate.id='v4DeveloperGate';gate.innerHTML='<span id="v4DeveloperMask"> </span><input id="v4DeveloperInput" inputmode="numeric" autocomplete="off" aria-label="开发者模式">';nav.appendChild(gate)}
+  var input=q('v4DeveloperInput'),mask=q('v4DeveloperMask');if(!input||input.dataset.bound)return;input.dataset.bound='1';
+  var proxy='开发者模式';
+  input.addEventListener('input',function(){var raw=String(input.value||'').replace(/[^0]/g,'').slice(0,5);input.value=raw;mask.textContent=proxy.slice(0,raw.length);if(raw==='00000'){DEV_UNLOCKED=true;document.body.classList.add('v4-developer-mode');mask.textContent='开发者模式';input.blur()}});
+  input.addEventListener('blur',function(){if(!DEV_UNLOCKED){input.value='';mask.textContent=' '}})
 }
 function applyLean(){
-  document.body.classList.add('v4-lean-enabled');renderOverview();renderQqOpen();renderGroups();renderCodex();renderSystem();ensureLeanNav();
+  document.body.classList.add('v4-lean-enabled');renderOverview();renderResources();renderQqOpen();renderGroups();renderCodex();renderSystem();ensureLeanNav();
   showCustom('v4overview','总览');
   document.querySelectorAll('[data-open-legacy]').forEach(function(b){if(b.dataset.bound)return;b.dataset.bound='1';b.onclick=function(){openLegacy(b.dataset.openLegacy,b.textContent||'系统')}})
-  bindGroup();bindStatusButtons();bindTilt()
+  bindGroup();bindStatusButtons();bindResources();bindTilt()
 }
 function stateLabel(g){if(g&&g.ready)return['READY','ok'];if(g&&g.connected)return['CONNECTED','warn'];return['OFFLINE','bad']}
 async function refreshStatus(){
@@ -200,7 +265,7 @@ function bindTilt(){
   if(matchMedia('(prefers-reduced-motion: reduce)').matches)return;
   document.querySelectorAll('.v4-tilt,.v4-card').forEach(function(el){if(el.dataset.tiltBound)return;el.dataset.tiltBound='1';el.addEventListener('pointermove',function(e){var r=el.getBoundingClientRect(),x=(e.clientX-r.left)/r.width-.5,y=(e.clientY-r.top)/r.height-.5;el.style.transform='perspective(900px) rotateX('+(-y*3)+'deg) rotateY('+(x*4)+'deg) translateY(-2px)'});el.addEventListener('pointerleave',function(){el.style.transform=''})})
 }
-function init(){applyLean();refreshStatus();setInterval(refreshStatus,5000);new MutationObserver(function(){ensureLeanNav()}).observe(q('nav')||document.body,{childList:true,subtree:true})}
+async function init(){await loadViewer();applyLean();if(VIEWER.developer)refreshStatus();setInterval(function(){if(VIEWER.developer&&DEV_UNLOCKED)refreshStatus()},5000);new MutationObserver(function(){ensureLeanNav();ensureDeveloperGate()}).observe(q('nav')||document.body,{childList:true,subtree:true})}
 if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',init,{once:true});else init();
 })();
 </script>`;
