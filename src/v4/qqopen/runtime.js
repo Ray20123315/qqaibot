@@ -910,18 +910,29 @@ export class QqOpenGateway {
     const message = fromQqOpenEvent(payload);
     if (message) {
       const eventType = String(payload?.t || "").toUpperCase();
-      if (eventType === "GROUP_MESSAGE_CREATE" && message.groupId) {
+      if (["GROUP_AT_MESSAGE_CREATE", "GROUP_MESSAGE_CREATE"].includes(eventType) && message.groupId) {
+        const observedAt = Number(message.time || 0) > 0 ? Number(message.time) * 1000 : Date.now();
+        const mediaTypes = [...new Set((Array.isArray(message.parts) ? message.parts : [])
+          .map(part => String(part?.kind || "").toLowerCase())
+          .filter(kind => ["image", "video", "audio", "file"].includes(kind)))];
         await this.forwardControl({
-          action: "full_group_observed",
-          groupOpenid: message.groupId,
-          updatedAt: Date.now()
-        }).catch(error => this.recordError(error));
-        this.persisted.lastOfficialStateEvent = {
-          kind: "full_group_message",
+          action: "group_observation",
           eventType,
-          groupId: String(message.groupId || ""),
-          at: Date.now()
-        };
+          groupOpenid: message.groupId,
+          messageId: String(message.messageId || ""),
+          text: String(message.text || ""),
+          mediaTypes,
+          fullGroup: eventType === "GROUP_MESSAGE_CREATE",
+          updatedAt: observedAt
+        }).catch(error => this.recordError(error));
+        if (eventType === "GROUP_MESSAGE_CREATE") {
+          this.persisted.lastOfficialStateEvent = {
+            kind: "full_group_message",
+            eventType,
+            groupId: String(message.groupId || ""),
+            at: observedAt
+          };
+        }
       }
       const deliveryKey = qqOpenDeliveryKey(payload, message);
       if (deliveryKey && this.deliverySeen(deliveryKey)) {

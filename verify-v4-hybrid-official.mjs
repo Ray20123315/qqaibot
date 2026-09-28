@@ -5,17 +5,20 @@ import {
   interactionControlAction,
   interactionRequiresAck,
   normalizeInteractionEvent,
+  normalizeLifecycleEvent,
   normalizePushPermissionEvent,
   parseFeatureCommandMap
 } from "./src/v4/qqopen/official-events.js";
 import {
+  hybridObservationFingerprint,
   hybridObservationRow,
   hybridPrimaryTransport,
   hybridStatus,
   isAuxiliaryOneBotMessage,
   oneBotGroupForQqOpen,
   parseGroupMap,
-  qqOpenGroupForOneBot
+  qqOpenGroupForOneBot,
+  selectHybridMappingCandidate
 } from "./src/v4/hybrid/ownership.js";
 
 assert.equal(hybridPrimaryTransport({}), "qq-open");
@@ -38,6 +41,30 @@ const observation=hybridObservationRow({
 assert.equal(observation.oneBotGroupId,"808882936");
 assert.equal(observation.qqOpenGroupId,"GROUP_OPEN_A");
 assert.equal(observation.senderRole,"admin");
+
+const memberAdd=normalizeLifecycleEvent({t:"GROUP_MEMBER_ADD",d:{group_openid:"GROUP_A",member_openid:"MEMBER_A",user_openid:"USER_A",timestamp:1784276757}});
+assert.deepEqual({eventType:memberAdd.eventType,subject:memberAdd.subject,groupId:memberAdd.groupId,memberId:memberAdd.memberId,active:memberAdd.active},{eventType:"GROUP_MEMBER_ADD",subject:"group_member",groupId:"GROUP_A",memberId:"MEMBER_A",active:true});
+const memberRemove=normalizeLifecycleEvent({t:"GROUP_MEMBER_REMOVE",d:{group_openid:"GROUP_A",member_openid:"MEMBER_A",timestamp:1784276759}});
+assert.equal(memberRemove.active,false);
+const friendAdd=normalizeLifecycleEvent({t:"FRIEND_ADD",d:{openid:"USER_F",scene:2003,scene_param:"campaign-a",author:{union_openid:"UNION_F"},timestamp:1784570600}});
+assert.deepEqual({subject:friendAdd.subject,userId:friendAdd.userId,unionOpenid:friendAdd.unionOpenid,scene:friendAdd.scene},{subject:"friend",userId:"USER_F",unionOpenid:"UNION_F",scene:2003});
+const botJoin=normalizeLifecycleEvent({t:"GROUP_ADD_ROBOT",d:{group_openid:"GROUP_B",op_member_openid:"ADMIN_B",timestamp:1784570534}});
+assert.deepEqual({subject:botJoin.subject,groupId:botJoin.groupId,operatorId:botJoin.operatorId,active:botJoin.active},{subject:"bot_group_membership",groupId:"GROUP_B",operatorId:"ADMIN_B",active:true});
+assert.equal(normalizeLifecycleEvent({t:"GROUP_AT_MESSAGE_CREATE",d:{}}),null);
+
+assert(hybridObservationFingerprint({text:"<@!bot> 測試動態映射 123",mediaTypes:["image"]}));
+assert.equal(hybridObservationFingerprint({text:"hi",mediaTypes:[]}),"");
+const candidate=selectHybridMappingCandidate([
+  {scope:"group",oneBotGroupId:"808882936",text:"[CQ:at,qq=2681167798] 測試動態映射 123",mediaTypes:["image"],observedAt:10000},
+  {scope:"group",oneBotGroupId:"123456789",text:"不同訊息",mediaTypes:[],observedAt:10000}
+],{text:"<@!bot> 測試動態映射 123",mediaTypes:["image"],observedAt:12000});
+assert.deepEqual({oneBotGroupId:candidate.oneBotGroupId,ambiguous:candidate.ambiguous},{oneBotGroupId:"808882936",ambiguous:false});
+const ambiguousCandidate=selectHybridMappingCandidate([
+  {scope:"group",oneBotGroupId:"808882936",text:"唯一匹配訊息 987",mediaTypes:[],observedAt:10000},
+  {scope:"group",oneBotGroupId:"123456789",text:"唯一匹配訊息 987",mediaTypes:[],observedAt:10050}
+],{text:"唯一匹配訊息 987",mediaTypes:[],observedAt:12000});
+assert.equal(ambiguousCandidate.ambiguous,true);
+assert.equal(ambiguousCandidate.oneBotGroupId,"");
 
 const c2cOn=normalizePushPermissionEvent({t:"C2C_MSG_RECEIVE",d:{openid:"USER_A",timestamp:1784570617}});
 assert.deepEqual({scope:c2cOn.scope,targetId:c2cOn.targetId,allowed:c2cOn.allowed},{scope:"c2c",targetId:"USER_A",allowed:true});
@@ -115,5 +142,12 @@ assert.match(scheduler,/sendHybridGroupMessage\(env, groupId, result\.text/);
 
 assert.match(worker,/qqopen_full_group_active:/);
 assert.match(worker,/hybridFullGroupOwned/);
-assert.match(runtime,/full_group_observed/);
+assert.match(worker,/recordQqOpenHybridGroupObservation/);
+assert.match(worker,/recordOneBotHybridObservation/);
+assert.match(worker,/qqopen_lifecycle_events/);
+assert.match(runtime,/group_observation/);
 assert.match(runtime,/GROUP_MESSAGE_CREATE/);
+assert.match(runtime,/GROUP_AT_MESSAGE_CREATE/);
+assert.match(runtime,/handleLifecycleEvent/);
+assert.match(runtime,/normalizeLifecycleEvent/);
+assert.match(scheduler,/resolveQqOpenGroupForOneBot/);
