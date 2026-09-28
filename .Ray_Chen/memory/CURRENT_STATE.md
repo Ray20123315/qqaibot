@@ -3,40 +3,27 @@
 ## Branch
 
 Development branch: `feature/v4-public-bot`
-Base main commit: `08ceeb725590d9efb0160ea38733d929e6e7d18c`
-Latest verified product commit: `c27821b247f3e8bdc35bf6987886b8c5855fcb60`
-Main was updated independently after this branch was created; this task has not modified main.
+Latest verified product commit: `d38b42137053db3781ff48e4fad0afd22b172a8a`
+Main modified by this task: no.
 
-## Verified AI Routing
+## Plugin Runtime Security
 
-- `callUserProviderRoute` now participates in actual chat generation.
-- User-owned provider is attempted before the configured platform route / legacy hybrid model path.
-- Shared provider use requires stored group authorization plus live membership checks for provider owner and consumer.
-- QQ Open membership is checked through the official QQ Open group-member API path.
-- OneBot membership is checked through live `get_group_member_info`.
-- Linked identities have an explicit reverse lookup; OpenID is never guessed from a QQ number.
+The plugin host now accepts a runtime security boundary callback. High-impact runtime errors are classified only when they carry an explicit security violation object or match specific global-risk error codes.
 
-## Verified Political Guard
+When a non-overridable runtime violation is detected:
+1. the current plugin execution throws;
+2. the plugin is removed from the active runtime set;
+3. V3 lifecycle state is marked `blocked`;
+4. the plugin security center receives the finding;
+5. the event is available for dedicated security review.
 
-- Direct political text is rejected by local prefilter before model invocation.
-- Ambiguous content uses Gemma classification.
-- Compliance/privacy/platform questions can classify NON_POLITICAL rather than being blocked solely for containing words such as government.
-- Generated output is checked before it is persisted or returned.
-- BYOK providers pass through the same political input/output gate.
-
-## AI Sharing UX
-
-- QQ private settings support `!AI分享 <服務ID> <群組ID> 開/關`.
-- QQ private settings support `!AI群友私聊 <服務ID> 開/關`.
-- Portal API supports AI sharing updates.
-- Secure AI page accepts provider model.
-- Direct QQ-DM AI-key entry accepts optional model.
+Ordinary plugin exceptions remain ordinary failures and do not automatically quarantine the plugin.
 
 ## Verification
 
-GitHub Actions run: `36385372063`
+GitHub Actions run: `36385909059`
 Conclusion: success
-Passed: base regression, V3 regression, V4 regression including new routing test, isolated V4 dry-run, single Worker bundle.
+Passed: base regression, V3, V4 including `verify-v4-plugin-runtime-guard.mjs`, V4 test dry-run, bundle.
 
 ## Production
 

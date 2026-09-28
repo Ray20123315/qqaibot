@@ -2,8 +2,8 @@
 
 ## Verified Product Commit
 
-Commit: `c27821b247f3e8bdc35bf6987886b8c5855fcb60`
-GitHub Actions run: `36385372063`
+Commit: `d38b42137053db3781ff48e4fad0afd22b172a8a`
+GitHub Actions run: `36385909059`
 Conclusion: `success`
 
 Passed:
@@ -13,19 +13,16 @@ Passed:
 - npm run check:v4test
 - npm run check:bundle
 
-New V4 assertions verify:
-- Gemini-style contents normalize for BYOK provider calls;
-- user provider route is attempted before platform route;
-- live membership resolver exists for QQ Open and OneBot;
-- explicit QQ OpenID -> QQ link has reverse lookup;
-- political prefilter/classifier/output guard are wired;
-- political output blocks before chat-history persistence;
-- AI sharing commands and Portal endpoint are present.
+Plugin runtime security assertions verify:
+- explicit cross-tenant violation is classified;
+- core-secret violation is classified;
+- ordinary plugin error is not classified as security violation;
+- runtime security boundary callback executes;
+- a blocked violation removes the plugin from active runtime state.
 
 ## Pending
 
-- runtime plugin force-stop/quarantine transaction.
-- concrete V4 memory/settings/chat/plugin writes through User Persistence.
-- full Portal/developer mode.
-- same-Worker Cloudflare preview.
+- Portal resources/developer-mode transaction.
+- concrete V4 persistence writers.
+- same-Worker preview.
 - QQ self-test workbook.

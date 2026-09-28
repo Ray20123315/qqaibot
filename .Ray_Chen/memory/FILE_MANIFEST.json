@@ -1,64 +1,39 @@
 {
   "schema_version": 1,
-  "memory_version": "v0.0.25",
+  "memory_version": "v0.0.26",
   "task_id": "qqaibot-20260928-v4-public-bot",
   "goal_revision": 2,
-  "transaction": "user_ai_routing_20260928_v4_public_006",
+  "transaction": "plugin_runtime_quarantine_20260928_v4_public_007",
   "repository": "Ray20123315/qqaibot",
   "production_branch": "main",
   "development_branch": "feature/v4-public-bot",
-  "product_before_revision": "6f030f1f71f3478da317ce89da6ab954a289b80f",
-  "product_after_revision": "c27821b247f3e8bdc35bf6987886b8c5855fcb60",
+  "product_before_revision": "4b42581ca9140b302b0248a11d0b3adffd2c636c",
+  "product_after_revision": "d38b42137053db3781ff48e4fad0afd22b172a8a",
   "verification": {
-    "github_actions_run": 36385372063,
+    "github_actions_run": 36385909059,
     "conclusion": "success",
-    "base_regression": "success",
-    "v3_regression": "success",
-    "v4_regression": "success",
-    "v4_test_dry_run": "success",
-    "single_worker_bundle": "success",
     "production_cloudflare_mutation": "none"
   },
   "changes": [
     {
       "location_type": "github",
       "provider": "GitHub",
-      "resource_id_or_path": "src/ai/provider-client.js;src/v4/public/membership.js;src/v4/public/resource-tickets.js",
-      "action": "modified_or_created",
-      "branch_or_container": "feature/v4-public-bot",
-      "after_revision": "c27821b247f3e8bdc35bf6987886b8c5855fcb60",
-      "verification": "CI success",
-      "changed_at": "2026-09-28T14:13:10+08:00"
-    },
-    {
-      "location_type": "github",
-      "provider": "GitHub",
-      "resource_id_or_path": "src/v3/host/adapter.js;worker.js",
+      "resource_id_or_path": "src/plugins/runtime-guard.js;src/plugins/runtime.js;src/v3/host/adapter.js",
       "action": "modified",
       "branch_or_container": "feature/v4-public-bot",
-      "after_revision": "c27821b247f3e8bdc35bf6987886b8c5855fcb60",
+      "after_revision": "d38b42137053db3781ff48e4fad0afd22b172a8a",
       "verification": "CI success",
-      "changed_at": "2026-09-28T14:13:10+08:00"
+      "changed_at": "2026-09-28T14:19:42+08:00"
     },
     {
       "location_type": "github",
       "provider": "GitHub",
-      "resource_id_or_path": "src/v4/public/private-settings.js;src/v4/portal/resources-api.js;src/v4/portal/resource-page.js",
-      "action": "modified",
-      "branch_or_container": "feature/v4-public-bot",
-      "after_revision": "c27821b247f3e8bdc35bf6987886b8c5855fcb60",
-      "verification": "CI success",
-      "changed_at": "2026-09-28T14:13:10+08:00"
-    },
-    {
-      "location_type": "github",
-      "provider": "GitHub",
-      "resource_id_or_path": "verify-v4-user-ai-routing.mjs;verify-v4-user-resources.mjs;package.json",
+      "resource_id_or_path": "verify-v4-plugin-runtime-guard.mjs;package.json",
       "action": "modified_or_created",
       "branch_or_container": "feature/v4-public-bot",
-      "after_revision": "c27821b247f3e8bdc35bf6987886b8c5855fcb60",
+      "after_revision": "d38b42137053db3781ff48e4fad0afd22b172a8a",
       "verification": "CI success",
-      "changed_at": "2026-09-28T14:13:10+08:00"
+      "changed_at": "2026-09-28T14:19:42+08:00"
     }
   ]
 }

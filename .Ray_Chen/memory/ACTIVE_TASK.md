@@ -8,51 +8,40 @@ goal: Build isolated V4 public-bot architecture and UI on feature/v4-public-bot 
 ## execution_plan
 
 Phase 0 — branch/recovery gate
-- [x] Recover Ray_Chen state and verify main head.
-- [x] Create feature/v4-public-bot from exact main head.
-- [x] Inspect implementation surfaces.
+- [x] isolated branch and recovery gate.
 
 Phase 1 — core policy/runtime
-- [x] Safe capability-first QQ Open -> OneBot fallback foundation.
-- [x] Roles + legal consent/group-whitelist state foundation.
-- [x] Membership-bound AI Provider access foundation.
-- [x] Text-first political guard contract.
-- [x] Runtime plugin boundary hook foundation.
-- [x] Foundation full CI/bundle gate.
-- [x] Authenticated dual-entry AI/resource onboarding.
-- [x] Cloudflare D1/KV Storage Connector registry + low-volume REST client.
-- [x] QQ private settings interception before general chat bridge.
-- [x] Explicit User Persistence policy/facade with no platform fallback for user content.
-- [x] User AI Provider real routing with live membership validation.
-- [x] Political classifier + output guard integrated into plugin AI and main Worker AI paths.
-- [x] AI Provider group/private-share controls exposed through QQ DM and Portal API.
-- [ ] Integrate runtime plugin guard into active host/quarantine flow.
-- [ ] Route concrete V4 memory/settings/chat/plugin writers through User Persistence facade.
+- [x] capability-first QQ Open -> OneBot safe fallback.
+- [x] roles/legal/whitelist state.
+- [x] dual-entry BYOK AI and D1/KV resource onboarding.
+- [x] user-persistence policy with no user-content fallback.
+- [x] live-membership-bound user AI routing.
+- [x] layered political input/output guard.
+- [x] runtime plugin forced-stop/quarantine flow.
+- [ ] route concrete V4 user-content writers through User Persistence facade.
 
 Phase 2 — user surfaces
-- [ ] Rebuild full V4 Portal with human-readable product UI.
-- [ ] Developer-only hidden 00000 progressive reveal.
-- [x] Standalone secure resource connection page with custom choices.
-- [ ] Integrate resource management cards into main V4 dashboard.
-- [ ] Plugin security review page modernization.
+- [ ] apply and verify V4 Portal resource cards.
+- [ ] apply and verify developer-only hidden 00000 progressive reveal.
+- [ ] modernize plugin security review page.
+- [ ] complete remaining human-readable Portal cleanup.
 
 Phase 3 — Cloudflare/self-test
-- [ ] Same-Worker preview with production storage isolation.
-- [ ] Integrated regression/live preview validation.
-- [ ] Fill official 2023 QQ self-test workbook after implementation verification.
+- [ ] same-Worker preview with production storage isolation.
+- [ ] live preview validation.
+- [ ] fill official 2023 QQ self-test workbook after implementation verification.
 
-current_phase: Phase 1
-current_step: Commit and verify plugin runtime forced-stop/quarantine wiring.
+current_phase: Phase 2
+current_step: Apply prepared Portal resource/developer-mode transaction.
 completed_steps:
-- c27821b247f3e8bdc35bf6987886b8c5855fcb60 passed GitHub Actions run 36385372063
+- plugin runtime security commit d38b42137053db3781ff48e4fad0afd22b172a8a
+- GitHub Actions run 36385909059 success
 verification_results:
-- user AI route + live membership: success
-- layered political input/output guard: success
-- secure resource regression: success
-- V3/V4/bundle: success
-known_failures:
-- none in current verified product state
+- plugin runtime guard regression: success
+- full repository regression: success
+- V3/V4/V4-test/bundle: success
+known_failures: []
 blockers: []
-next_exact_action: Commit prepared plugin runtime guard wiring, run full CI, then continue V4 Portal/resource UI.
+next_exact_action: Commit Portal resource cards + developer 00000 gate and run CI.
 resume_rule: Continue only on feature/v4-public-bot; never touch main.
-last_checkpoint_at: 2026-09-28T14:25:00+08:00
+last_checkpoint_at: 2026-09-28T14:32:00+08:00
