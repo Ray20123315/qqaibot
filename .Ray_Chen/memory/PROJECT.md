@@ -8,7 +8,7 @@ QQAIBOT is a Cloudflare Workers QQ AI bot using a hybrid transport architecture.
 
 - branch: `main`
 - Worker: `qqai`
-- product revision: `a6a5996c2ec33da881e0dbb54725b4ab61ce7037`
+- product revision: `edeacf6cf8c215cc3987b86a4a0d5220c7f581d9`
 - Durable Objects: `OneBotHub` and `QqOpenGateway`
 - D1: `qqaibot`
 - Vectorize: `qqai`

@@ -1,9 +1,9 @@
 {
   "schema_version": 1,
-  "memory_version": "v0.0.18",
+  "memory_version": "v0.0.19",
   "task_id": "qqaibot-20260927-qqopen-v4-native",
   "goal_revision": 5,
-  "transaction": "file_change_transaction_20260928_reply_mapping_discovery_fix_001",
+  "transaction": "memory_correction_20260928_product_revision_001",
   "repository": "Ray20123315/qqaibot",
   "production_branch": "main",
   "development_branch": "v4-qqopen-native",
@@ -145,10 +145,21 @@
       "branch_or_container": "production",
       "verification": "pre-fix learner query returned zero rows for aux/dynamic/evidence keys",
       "changed_at": "2026-09-28T09:40:00+08:00"
+    },
+    {
+      "location_type": "github",
+      "provider": "GitHub",
+      "resource_id_or_path": ".Ray_Chen/memory/PROJECT.md",
+      "action": "corrected_metadata",
+      "branch_or_container": "v4-qqopen-native -> main",
+      "before_revision": "a6a5996c2ec33da881e0dbb54725b4ab61ce7037",
+      "after_revision": "edeacf6cf8c215cc3987b86a4a0d5220c7f581d9",
+      "verification": "matches deployed production product commit",
+      "changed_at": "2026-09-28T09:43:00+08:00"
     }
   ],
   "internal_memory_transaction": {
-    "action": "update Ray_Chen memory to v0.0.18",
-    "note": "Memory/archive/hash/Gmail evidence do not recursively trigger another transaction. No secret values stored."
+    "action": "correct PROJECT product revision and bump Ray_Chen memory to v0.0.19",
+    "note": "No product code or production Worker mutation. No secrets stored."
   }
 }
