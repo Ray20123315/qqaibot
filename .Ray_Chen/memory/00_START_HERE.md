@@ -1,6 +1,6 @@
 # Ray_Chen Memory Entry
 
-- memory_version: v0.0.21
+- memory_version: v0.0.22
 - project: QQAIBOT
 - repository: Ray20123315/qqaibot
 - canonical_branch: main
@@ -9,32 +9,24 @@
 - task_status: active
 - goal_revision: 1
 - branch_base_commit: 08ceeb725590d9efb0160ea38733d929e6e7d18c
+- foundation_commit: 21e5a8f00daeb7e465ca927c6f1d6acfadfe1259
 - production_worker: qqai
-- updated_at: 2026-09-28T12:45:00+08:00
+- updated_at: 2026-09-28T13:00:00+08:00
 
 ## Current Phase
 
-Phase 1 foundation has been produced on the isolated branch:
-- capability-first QQ Open with safe OneBot fallback contract;
-- role/legal-access state;
-- membership-bound AI Provider sharing model;
-- text-first political guard contract;
-- runtime plugin boundary hook;
-- restrictive source-available copyright notice.
+Phase 1 foundation is VERIFIED by GitHub Actions run 36379116271:
+- existing regression checks: success
+- V3 regression checks: success
+- V4 regression + new public-foundation checks: success
+- isolated V4 test deployment dry-run: success
+- single Worker bundle: success
 
-GitHub CI for the foundation commit is the next gate. Production Cloudflare resources and main remain untouched.
+Next work is BYOK/authenticated secure entry, QQ private-message settings, provider live-membership integration, political guard integration and V4 user UI.
 
 ## Hard Boundary
 
-- Do not merge, fast-forward, deploy over, or otherwise modify main in this task.
-- Use feature/v4-public-bot only.
-- Cloudflare work must target the same qqai Worker preview/version mechanism rather than creating a second Worker.
-- Production D1/KV/DO must not be mutated by preview verification.
-
-## Recovery Route
-
-1. Read ACTIVE_TASK.md, CURRENT_STATE.md, USER_REQUIREMENTS.md, DECISIONS.md, GOTCHAS.md, VERIFY.md and FILE_MANIFEST.json.
-2. Verify branch feature/v4-public-bot still descends from base commit above.
-3. Check foundation CI before adding BYOK/DM/UI integration.
-4. Never fall back destructive operations after UNKNOWN timeout/network/5xx outcome.
-5. Never coerce QQ Open OpenID into numeric QQ.
+- Do not modify or merge main.
+- Continue only on feature/v4-public-bot.
+- Same qqai Worker preview only; do not create another Worker.
+- Do not mutate production D1/KV/DO during preview verification.

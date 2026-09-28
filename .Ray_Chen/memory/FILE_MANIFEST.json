@@ -1,69 +1,35 @@
 {
   "schema_version": 1,
-  "memory_version": "v0.0.21",
+  "memory_version": "v0.0.22",
   "task_id": "qqaibot-20260928-v4-public-bot",
   "goal_revision": 1,
-  "transaction": "foundation_20260928_v4_public_002",
+  "transaction": "foundation_verify_20260928_v4_public_003",
   "repository": "Ray20123315/qqaibot",
   "production_branch": "main",
   "development_branch": "feature/v4-public-bot",
   "product_before_revision": "61acced3d9bd96ec54cc02f30cff239bef9873b6",
-  "product_after_revision": "PENDING_COMMIT_SHA",
+  "product_after_revision": "21e5a8f00daeb7e465ca927c6f1d6acfadfe1259",
   "verification": {
     "branch_isolation": "verified",
-    "recovery_after_connector_limit": "branch head unchanged",
-    "foundation_source": "prepared",
-    "github_ci": "pending",
+    "github_actions_run": 36379116271,
+    "github_actions_conclusion": "success",
+    "base_regression": "success",
+    "v3_regression": "success",
+    "v4_regression": "success",
+    "v4_test_dry_run": "success",
+    "single_worker_bundle": "success",
     "production_cloudflare_mutation": "none"
   },
   "changes": [
     {
       "location_type": "github",
       "provider": "GitHub",
-      "resource_id_or_path": "src/v4/public/access.js;src/v4/public/politics.js;src/v4/hybrid/capability-router.js",
-      "action": "prepared_create",
-      "branch_or_container": "feature/v4-public-bot",
-      "verification": "foundation test prepared"
-    },
-    {
-      "location_type": "github",
-      "provider": "GitHub",
-      "resource_id_or_path": "src/core/permissions.js",
-      "action": "prepared_modify",
-      "branch_or_container": "feature/v4-public-bot",
-      "verification": "safe fallback wiring prepared"
-    },
-    {
-      "location_type": "github",
-      "provider": "GitHub",
-      "resource_id_or_path": "src/ai/provider-registry.js",
-      "action": "prepared_modify",
-      "branch_or_container": "feature/v4-public-bot",
-      "verification": "membership-bound provider model prepared"
-    },
-    {
-      "location_type": "github",
-      "provider": "GitHub",
-      "resource_id_or_path": "src/plugins/runtime-guard.js",
-      "action": "prepared_create",
-      "branch_or_container": "feature/v4-public-bot",
-      "verification": "runtime guard foundation prepared"
-    },
-    {
-      "location_type": "github",
-      "provider": "GitHub",
-      "resource_id_or_path": "LICENSE",
-      "action": "prepared_modify",
-      "branch_or_container": "feature/v4-public-bot",
-      "verification": "copyright/source-available terms prepared"
-    },
-    {
-      "location_type": "github",
-      "provider": "GitHub",
-      "resource_id_or_path": ".github/workflows/validate.yml;package.json;verify-v4-public-foundation.mjs",
-      "action": "prepared_modify_or_create",
-      "branch_or_container": "feature/v4-public-bot",
-      "verification": "CI update prepared"
+      "resource_id_or_path": "feature/v4-public-bot",
+      "action": "verified_foundation_commit",
+      "before_revision": "61acced3d9bd96ec54cc02f30cff239bef9873b6",
+      "after_revision": "21e5a8f00daeb7e465ca927c6f1d6acfadfe1259",
+      "verification": "GitHub Actions run 36379116271 success",
+      "changed_at": "2026-09-28T13:00:00+08:00"
     }
   ]
 }

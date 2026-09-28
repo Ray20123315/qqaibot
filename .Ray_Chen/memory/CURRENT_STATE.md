@@ -4,33 +4,31 @@
 
 Development branch: `feature/v4-public-bot`
 Base main commit: `08ceeb725590d9efb0160ea38733d929e6e7d18c`
-Pre-foundation branch head: `61acced3d9bd96ec54cc02f30cff239bef9873b6`
+Verified foundation commit: `21e5a8f00daeb7e465ca927c6f1d6acfadfe1259`
 Main modified by this task: no.
 
-## Foundation Prepared
+## Verified Foundation
 
-- QQ Open capability error classification distinguishes `unavailable/denied` from `unknown/failed`.
-- OneBot fallback is allowed only for explicit unavailable/denied cases.
-- Fallback requires numeric mapped group identity and never converts QQ Open member OpenID into a QQ number.
-- Official-message IDs are not reused for OneBot recall/get-message fallback.
-- Platform roles are normalized as 授權成員 / AI 提供者 / 管理員 / 開發者.
-- Legal consent is versioned and remains distinct from a silent developer group-whitelist override.
-- User-owned AI Provider records carry owner principal, shared groups, and private-chat sharing preference.
-- Provider access requires the provider owner and consumer to remain members of the shared group; owner retains access to their own provider.
-- Political guard runs text prefilter first and requires classifier review for ambiguous terms; uncertainty defaults to block.
-- Plugin runtime boundary helper marks non-overridable global/cross-tenant impacts for terminate-and-report.
-- License notice is changed to Copyright © 2026 Ray Chen. All rights reserved. with no software-use license beyond unavoidable hosting-platform rights or written permission.
-- Validation workflow includes feature/v4-public-bot; V4 checks include verify-v4-public-foundation.mjs.
+- QQ Open capability failures are classified; only explicit unsupported/unavailable or denied states may fall back to OneBot.
+- Timeout/network/5xx outcomes remain UNKNOWN and never trigger destructive replay.
+- OneBot group fallback requires an explicit mapped numeric group.
+- OpenID is never coerced into numeric QQ; member-target fallback requires an independently known numeric identity.
+- Official message IDs are never reused for OneBot recall/get-message.
+- Roles: 授權成員 / AI 提供者 / 管理員 / 開發者.
+- Legal consent is versioned and separate from silent developer group-whitelist override.
+- User AI Provider accounts have owner principal, shared-group list and group-member private-chat preference.
+- Shared-provider access requires live membership of provider owner and consumer; provider departure revokes access.
+- Political guard contract is text-first, classifier-second for ambiguous content, with conservative unknown handling.
+- Plugin global/cross-tenant runtime violations have a forced-stop/security-report hook.
+- License now states Copyright © 2026 Ray Chen. All rights reserved. with no software-use license beyond unavoidable host-platform rights or written permission.
+- No new Cloudflare storage product was added.
 
-## Storage
+## Verification Evidence
 
-No new Cloudflare storage product is introduced. Foundation reuses the existing D1-backed key/value abstraction and existing plugin security stores.
+GitHub Actions run: `36379116271`
+Result: success
+Passed stages: base regression, V3 regression, V4 regression, isolated V4 dry-run, single Worker bundle.
 
-## Recovery Evidence
+## Production
 
-A first attempt to create the transaction exceeded the connector's per-call orchestration limit. Read-back verified the branch head remained at the pre-transaction commit, so no partial product commit was treated as completed.
-
-## Verification
-
-Foundation source blobs are prepared. Branch commit and CI are pending at this checkpoint.
-Production Cloudflare resources were not changed.
+No Cloudflare production resource was changed.
