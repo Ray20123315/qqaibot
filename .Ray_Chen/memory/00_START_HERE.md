@@ -1,42 +1,36 @@
 # Ray_Chen Memory Entry
 
-- memory_version: v0.0.36
+- memory_version: v0.0.37
 - project: QQAIBOT
 - repository: Ray20123315/QQAIBOT
 - canonical_branch: main
 - development_branch: v4-qqopen-native
-- task_id: qqaibot-20260929-group-panel-keyboard
-- task_status: completed
+- task_id: qqaibot-20260929-keyboard-payload-fix
+- task_status: active
 - goal_revision: 1
-- verified_product_revision: a78003cda6ef9b5d8b8b9d28dd2a798aa3d2424a
-- verified_final_main_head: 806af06ba56f0d8f9741bb2520b58be60069126f
-- updated_at: 2026-09-29T05:12:00+08:00
+- base_product_revision: f74d6ecec99c9dde04ef97ce0a7452b42ad6bcf7
+- updated_at: 2026-09-29T05:25:00+08:00
 
-## Completed Goal
+## Current Goal
 
-QQ group command categories now reply with clickable inline-keyboard button cards. The final main/dev head is fully validated, and the production Worker is deployed from the verified product revision.
+Fix the live QQ inline-keyboard payload. The real QQ client currently shows only the text fallback, proving that the keyboard write is being rejected before rendering.
 
-## Result
+## Root Cause Hypothesis Confirmed Against Tencent SDK
 
-- two command buttons per row;
-- maximum five keyboard rows;
-- large categories paginate;
-- command buttons send existing canonical ! commands;
-- page buttons reuse !面板 routing;
-- passive and INTERACTION_CREATE replies support keyboards;
-- deterministic keyboard 4xx capability errors may fall back to text;
-- ambiguous 5xx/timeouts are not resent;
-- Portal TEMP-admin/D1 rate-limit hotfix remains preserved.
+The current payload omits fields serialized by Tencent's official SDK:
+- action.permission
+- action.click_limit
+- button.group_id
 
-## Final Verification
+The current runtime also sends keyboard replies as msg_type=0 text, while Tencent's current SDK end-to-end keyboard example sends msg_type=2 Markdown with keyboard attached.
 
-- keyboard product/main revision: a78003cda6ef9b5d8b8b9d28dd2a798aa3d2424a
-- product main CI: 36479310886 — success
-- final memory-head CI: 36479807514 — success
-- duplicate final validation run: 36479804549 — success
-- v0.0.35 packaging workflow: 36479807508 — success
-- production build: 09d6a646-a0b2-4e98-b73d-d9f2c74925c0 — success
+## Required Behavior
+
+- Serialize keyboard buttons in the current official SDK shape.
+- Send keyboard replies as Markdown message bodies while retaining msg_id/msg_seq passive-reply semantics.
+- Keep deterministic 4xx fallback to text, but persist the keyboard rejection code/reason for diagnostics.
+- Do not alter the existing command handlers, permissions, confirmations, cooldowns, slash-panel normalization, or TEMP-admin hotfix.
 
 ## next_exact_action
 
-In the QQ group, click a category such as “基础”; confirm the two-column child-command card appears, then click one child button and confirm the original command executes.
+Patch group-panel keyboard button shape, runtime keyboard normalization/message body, and regression tests; then run full CI.
