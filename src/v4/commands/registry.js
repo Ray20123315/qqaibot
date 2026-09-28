@@ -1,20 +1,20 @@
 const COMMAND_SCOPES = Object.freeze(["c2c", "group", "channel", "dm"]);
 
 const DISCOVERY_CATEGORY_META = Object.freeze({
-  core: Object.freeze({ key:"basic", label:"基础与多模态" }),
-  ai: Object.freeze({ key:"basic", label:"基础与多模态" }),
-  tool: Object.freeze({ key:"basic", label:"基础与多模态" }),
-  multimodal: Object.freeze({ key:"basic", label:"基础与多模态" }),
-  interaction: Object.freeze({ key:"basic", label:"基础与多模态" }),
-  group: Object.freeze({ key:"group-analysis", label:"群聊整理与分析" }),
-  member: Object.freeze({ key:"group-analysis", label:"群聊整理与分析" }),
-  memory: Object.freeze({ key:"memory-personal", label:"记忆人格与个人设置" }),
-  persona: Object.freeze({ key:"memory-personal", label:"记忆人格与个人设置" }),
-  user: Object.freeze({ key:"memory-personal", label:"记忆人格与个人设置" }),
-  message: Object.freeze({ key:"memory-personal", label:"记忆人格与个人设置" }),
-  event: Object.freeze({ key:"activity-schedule", label:"活动投票与排程" }),
-  schedule: Object.freeze({ key:"activity-schedule", label:"活动投票与排程" }),
-  appeal: Object.freeze({ key:"activity-schedule", label:"活动投票与排程" }),
+  core: Object.freeze({ key:"basic", label:"基础与多模态", menuLabel:"基础功能" }),
+  ai: Object.freeze({ key:"basic", label:"基础与多模态", menuLabel:"基础功能" }),
+  tool: Object.freeze({ key:"basic", label:"基础与多模态", menuLabel:"基础功能" }),
+  multimodal: Object.freeze({ key:"basic", label:"基础与多模态", menuLabel:"基础功能" }),
+  interaction: Object.freeze({ key:"basic", label:"基础与多模态", menuLabel:"基础功能" }),
+  group: Object.freeze({ key:"group-analysis", label:"群聊整理与分析", menuLabel:"群聊分析" }),
+  member: Object.freeze({ key:"group-analysis", label:"群聊整理与分析", menuLabel:"群聊分析" }),
+  memory: Object.freeze({ key:"memory-personal", label:"记忆人格与个人设置", menuLabel:"记忆人格" }),
+  persona: Object.freeze({ key:"memory-personal", label:"记忆人格与个人设置", menuLabel:"记忆人格" }),
+  user: Object.freeze({ key:"memory-personal", label:"记忆人格与个人设置", menuLabel:"记忆人格" }),
+  message: Object.freeze({ key:"memory-personal", label:"记忆人格与个人设置", menuLabel:"记忆人格" }),
+  event: Object.freeze({ key:"activity-schedule", label:"活动投票与排程", menuLabel:"活动排程" }),
+  schedule: Object.freeze({ key:"activity-schedule", label:"活动投票与排程", menuLabel:"活动排程" }),
+  appeal: Object.freeze({ key:"activity-schedule", label:"活动投票与排程", menuLabel:"活动排程" }),
   rules: Object.freeze({ key:"rules", label:"群规协作" }),
   ai_admin: Object.freeze({ key:"ai-admin", label:"AI 管理" }),
   moderation: Object.freeze({ key:"group-ops", label:"群操作" }),
@@ -219,21 +219,28 @@ function createCommandRegistry(definitions = []) {
     }
 
     const items = [];
-    for (const group of grouped.values()) {
-      if (items.length >= topLimit) break;
-      const children = group.rows.slice(0, subLimit).map(command => ({
-        name: qqSlice(command.menu.name || command.aliases[0], 14),
-        type: command.menu.type === "link" ? "link" : "send_message",
-        ...(command.menu.type === "link"
-          ? { link:command.menu.value }
-          : { send_message:command.menu.value })
-      }));
-      if (!children.length) continue;
-      items.push(Object.freeze({
-        name: qqSlice(String(group.label || "更多").replace(/\s+/g, ""), 10),
-        type: "menu",
-        sub_menu_items: Object.freeze(children)
-      }));
+    for (const [key, group] of grouped.entries()) {
+      const pageCount = Math.ceil(group.rows.length / subLimit);
+      for (let offset = 0; offset < group.rows.length; offset += subLimit) {
+        if (items.length >= topLimit) throw new Error("V4_COMMAND_MENU_LIMIT_EXCEEDED");
+        const pageNo = Math.floor(offset / subLimit) + 1;
+        const children = group.rows.slice(offset, offset + subLimit).map(command => ({
+          name: qqSlice(command.menu.name || command.aliases[0], 14),
+          type: command.menu.type === "link" ? "link" : "send_message",
+          ...(command.menu.type === "link"
+            ? { link:command.menu.value }
+            : { send_message:command.menu.value })
+        }));
+        if (!children.length) continue;
+        const meta = [...Object.values(DISCOVERY_CATEGORY_META)].find(item => item.key === key);
+        const baseName = String(meta?.menuLabel || group.label || "更多").replace(/\s+/g, "");
+        const pageName = pageCount > 1 ? `${baseName}${pageNo}` : baseName;
+        items.push(Object.freeze({
+          name: qqSlice(pageName, 10),
+          type: "menu",
+          sub_menu_items: Object.freeze(children)
+        }));
+      }
     }
     return Object.freeze({ items:Object.freeze(items) });
   }
