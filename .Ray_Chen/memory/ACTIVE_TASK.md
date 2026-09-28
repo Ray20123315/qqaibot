@@ -19,8 +19,18 @@ Make `!面板 <分类>` reply with a clickable QQ button grid rather than a plai
 - Existing direct commands and `/!普通内容` semantics remain unchanged.
 - Full CI passes before promotion to main.
 
+## Product Patch
+
+Current product revision: `a31a9dd6c79963001df95cb53f6e2654af8c2606`
+
+Changed:
+- `src/v4/commands/group-panel.js`: two-column button-card builder, pagination, callback data.
+- `worker.js`: category-only panel replies include structured `qq_inline_keyboard`.
+- `src/v4/qqopen/runtime.js`: sends keyboard payloads on group/C2C replies and callback interactions; deterministic 4xx capability failures may fall back to text.
+- `verify-v4-qqopen.mjs`: keyboard payload, pagination and transport regressions.
+
 ## next_exact_action
 
-Implement group category keyboard + QQ Open structured reply transport, then run regressions.
+Wait for development CI on `a31a9dd6c79963001df95cb53f6e2654af8c2606`; fix any real regression before promoting to main.
 
-last_checkpoint_at: 2026-09-29T04:20:00+08:00
+last_checkpoint_at: 2026-09-29T04:31:00+08:00
