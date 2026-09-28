@@ -12,7 +12,7 @@ import { opsFuseAllows, opsGetSettings, opsQuietState, opsRecordAutomationResult
 import { readJson, sendPortalVerificationMessage } from "../portal/auth.js";
 import { getFeatureFlag, isGroupWhitelisted, numericId } from "../security/network.js";
 import { isManagementRole, isManagerStopSignal, looksLikeRoughBanter, managerExchangeContext, readRecentConversationRecords } from "../moderation/social-boundaries.js";
-import { hybridPrimaryTransport, qqOpenGroupForOneBot } from "../v4/hybrid/ownership.js";
+import { hybridPrimaryTransport, resolveQqOpenGroupForOneBot } from "../v4/hybrid/ownership.js";
 
 export const SCHEDULED_ROUTINE_CRON = "* * * * *";
 export const SCHEDULED_D1_CLEANUP_CRON = "17 * * * *";
@@ -116,7 +116,7 @@ async function qqOpenGroupPushAllowed(env, groupOpenid) {
 
 async function sendHybridGroupMessage(env, oneBotGroupId, message, timeoutMs = 15000) {
   const numericGroupId = String(oneBotGroupId || "").replace(/\D/g, "");
-  const groupOpenid = qqOpenGroupForOneBot(env, numericGroupId);
+  const groupOpenid = await resolveQqOpenGroupForOneBot(env, numericGroupId);
   const canUseOfficial = hybridPrimaryTransport(env) === "qq-open"
     && Boolean(groupOpenid)
     && !hasLegacyNumericMentions(message)

@@ -34,7 +34,7 @@ import { executeCodexUserCommand } from "./src/v3/ai/codex-command-runtime.js";
 import { readPublicCodexQuota } from "./src/v3/ai/codex-policy.js";
 import { dispatchV3RuntimeEvent, handleV3RuntimeFetch, runV3RuntimeScheduled } from "./src/v3/runtime/bridge.js";
 import { getQqOpenGateway, qqOpenConfigured, qqOpenEnabled } from "./src/v4/qqopen/runtime.js";
-import { hybridObservationRow, hybridStatus, isAuxiliaryOneBotMessage, qqOpenGroupForOneBot } from "./src/v4/hybrid/ownership.js";
+import { hybridObservationRow, hybridRuntimeStatus, isAuxiliaryOneBotMessage, recordOneBotHybridObservation, recordQqOpenHybridGroupObservation, resolveQqOpenGroupForOneBot } from "./src/v4/hybrid/ownership.js";
 import { handleV4QqOpenPortalApi } from "./src/v4/portal/api.js";
 import { injectV4LeanPortalClient } from "./src/v4/portal/lean-dashboard.js";
 import { handleV3PluginManagerApi, injectV3PluginManagerClient } from "./src/v3/portal/plugin-manager.js";
@@ -3938,7 +3938,7 @@ export class OneBotHub {
   async recordAuxiliaryOneBotObservation(body) {
     const isGroup = String(body?.message_type || "") === "group";
     const oneBotGroupId = isGroup ? String(body?.group_id || "") : "";
-    const mappedQqOpenGroupId = isGroup ? qqOpenGroupForOneBot(this.env, oneBotGroupId) : "";
+    const mappedQqOpenGroupId = isGroup ? await resolveQqOpenGroupForOneBot(this.env, oneBotGroupId) : "";
     const text = eventPlainText(body).trim() || extractMessageText(body?.message || body?.raw_message || "");
     const mentions = eventMentionedQqs(body);
     const mediaTypes = extractOutboundMediaTypes(body?.message || body?.raw_message || "");
@@ -3980,6 +3980,7 @@ export class OneBotHub {
 
     const auxKey = isGroup ? `hybrid_aux_events:group:${oneBotGroupId || "unknown"}` : `hybrid_aux_events:private:${row.userId || "unknown"}`;
     tasks.push(dbAppendJsonArrayCapped(this.env, auxKey, row, 240));
+    if (isGroup) tasks.push(recordOneBotHybridObservation(this.env, row));
     if (mappedQqOpenGroupId) {
       tasks.push(dbAppendJsonArrayCapped(this.env, `hybrid_aux_events:qqopen-group:${mappedQqOpenGroupId}`, row, 240));
     }
@@ -4166,16 +4167,62 @@ export class OneBotHub {
       const targetId = String(payload.targetId || (scene === "group" ? groupId : userId)).trim();
       const at = Number(payload.updatedAt || Date.now());
 
-      if (action === "full_group_observed") {
+      if (action === "full_group_observed" || action === "group_observation") {
         const groupOpenid = String(payload.groupOpenid || "").trim();
-        if (!groupOpenid) return Response.json({ ok: false, error: "QQ_OPEN_FULL_GROUP_ID_REQUIRED" }, { status: 400 });
+        if (!groupOpenid) return Response.json({ ok: false, error: "QQ_OPEN_GROUP_ID_REQUIRED" }, { status: 400 });
+        const fullGroup = action === "full_group_observed" || payload.fullGroup === true;
         const record = {
           groupOpenid,
-          eventType: "GROUP_MESSAGE_CREATE",
+          eventType: fullGroup ? "GROUP_MESSAGE_CREATE" : String(payload.eventType || "GROUP_AT_MESSAGE_CREATE"),
           lastSeenAt: Number(payload.updatedAt || Date.now())
         };
-        await dbPut(this.env, `qqopen_full_group_active:${groupOpenid}`, JSON.stringify(record));
-        await dbAppendJsonArrayCapped(this.env, "qqopen_full_group_events", record, 200);
+        if (fullGroup) {
+          await dbPut(this.env, `qqopen_full_group_active:${groupOpenid}`, JSON.stringify(record));
+          await dbAppendJsonArrayCapped(this.env, "qqopen_full_group_events", record, 200);
+        }
+        const mapping = await recordQqOpenHybridGroupObservation(this.env, {
+          groupOpenid,
+          messageId: String(payload.messageId || ""),
+          text: String(payload.text || ""),
+          mediaTypes: Array.isArray(payload.mediaTypes) ? payload.mediaTypes : [],
+          observedAt: Number(payload.updatedAt || Date.now())
+        }).catch(error => ({ confirmed: false, reason: String(error?.message || error) }));
+        if (mapping?.confirmed && mapping?.source === "dynamic") {
+          await writeSystemAudit(this.env, {
+            type: "hybrid_group_mapping_confirmed",
+            groupId: String(mapping.oneBotGroupId || ""),
+            actorId: "system",
+            action: "qqopen_dynamic_map",
+            error: ""
+          }).catch(() => {});
+        }
+        return Response.json({ ok: true, record, mapping });
+      }
+
+      if (action === "lifecycle") {
+        const eventType = String(payload.eventType || "").trim().toUpperCase();
+        const record = {
+          eventType,
+          subject: String(payload.subject || ""),
+          scope: String(payload.scope || ""),
+          groupId: String(payload.groupId || ""),
+          memberId: String(payload.memberId || ""),
+          userId: String(payload.userId || ""),
+          unionOpenid: String(payload.unionOpenid || ""),
+          operatorId: String(payload.operatorId || ""),
+          scene: Number(payload.scene || 0),
+          sceneParam: String(payload.sceneParam || ""),
+          active: Boolean(payload.active),
+          updatedAt: Number(payload.updatedAt || Date.now())
+        };
+        await dbAppendJsonArrayCapped(this.env, "qqopen_lifecycle_events", record, 1000);
+        if (record.subject === "friend" && record.userId) {
+          await dbPut(this.env, `qqopen_friend:${record.userId}`, JSON.stringify(record));
+        } else if (record.subject === "bot_group_membership" && record.groupId) {
+          await dbPut(this.env, `qqopen_group_membership:${record.groupId}`, JSON.stringify(record));
+        } else if (record.subject === "group_member" && record.groupId && record.memberId) {
+          await dbPut(this.env, `qqopen_member:${record.groupId}:${record.memberId}`, JSON.stringify(record));
+        }
         return Response.json({ ok: true, record });
       }
 
@@ -4807,7 +4854,7 @@ export class OneBotHub {
       }
     }
 
-    const hybridMappedGroup = body?.message_type === "group" ? qqOpenGroupForOneBot(this.env, String(body?.group_id || "")) : "";
+    const hybridMappedGroup = body?.message_type === "group" ? await resolveQqOpenGroupForOneBot(this.env, String(body?.group_id || "")) : "";
     const hybridFullGroupOwned = hybridMappedGroup
       ? Boolean(await dbGet(this.env, `qqopen_full_group_active:${hybridMappedGroup}`))
       : false;
