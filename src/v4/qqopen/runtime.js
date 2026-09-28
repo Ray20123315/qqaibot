@@ -523,7 +523,11 @@ export class QqOpenGateway {
     if (!truthy(this.env.QQ_OPEN_DISCOVERY_SYNC)) return;
     try {
       const result = await syncQqOpenDiscovery(this.api(), QQ_OPEN_COMMAND_REGISTRY, {
-        previousFingerprint: String(this.persisted.lastDiscoverySyncFingerprint || "")
+        previousFingerprint: String(this.persisted.lastDiscoverySyncFingerprint || ""),
+        developerOpenids: String(this.env.QQ_OPEN_DEVELOPER_OPENIDS || "")
+          .split(/[\s,;]+/)
+          .map(value => value.trim())
+          .filter(Boolean)
       });
       this.persisted.lastDiscoverySyncAt = Date.now();
       this.persisted.lastDiscoverySyncFingerprint = String(result?.fingerprint || "");
