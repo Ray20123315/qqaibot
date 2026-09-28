@@ -1,36 +1,42 @@
 # ACTIVE_TASK
 
 task_id: qqaibot-20260929-keyboard-payload-fix
-task_status: active
+task_status: completed
 goal_revision: 1
 
 ## Goal
 
-Make the live QQ client render the inline keyboard instead of falling back to the plain child-command text.
+Make the real QQ client render the group category inline keyboard instead of silently falling back to plain text.
 
-## Live Evidence
+## Acceptance Results
 
-The QQ client showed:
-- category fallback text;
-- no inline buttons.
+- VERIFIED: keyboard action includes `permission:{type:2}`.
+- VERIFIED: keyboard action includes `click_limit:1`.
+- VERIFIED: each button includes a stable `group_id`.
+- VERIFIED: runtime keyboard normalization preserves/defaults all official fields.
+- VERIFIED: keyboard replies use `msg_type:2` and `markdown:{content}`.
+- VERIFIED: passive keyboard replies keep `msg_id` and `msg_seq`.
+- VERIFIED: interaction keyboard replies keep `event_id`.
+- VERIFIED: deterministic keyboard rejection increments keyboard-specific fallback diagnostics.
+- VERIFIED: ambiguous 5xx/timeouts do not trigger a second fallback write.
+- VERIFIED: existing command handlers, permissions, confirmations, cooldowns, slash-panel routing and TEMP-admin logic are unchanged.
+- VERIFIED: development and main full CI pass.
+- VERIFIED: production Connected Build succeeds.
 
-That means the keyboard branch executed, QQ rejected the keyboard write with a deterministic error, and the runtime text fallback succeeded.
+## Evidence
 
-## Acceptance Criteria
+- product revision: `0fa643433285df0879878441e846dcfc023054b7`
+- development CI: `36481097113` — success
+- main CI: `36481292173` — success
+- production build: `0d835129-1a85-413b-9e0a-ec063da9e464` — success
+- Tencent SDK reference used for DTO/message shape: `tencent-connect/qqbot-agent-sdk@6163b5dc979a2f12379b1916805009075008c3c3`
 
-- Keyboard button action includes `permission:{type:2}` and `click_limit`.
-- Keyboard button includes stable `group_id`.
-- Runtime normalization preserves/defaults those official fields.
-- Keyboard replies use `msg_type:2` plus `markdown:{content:...}`, matching Tencent's official SDK E2E pattern.
-- Passive keyboard replies retain `msg_id` and `msg_seq`.
-- Interaction keyboard replies retain `event_id`.
-- Deterministic keyboard rejection records a dedicated diagnostic state instead of being silently hidden.
-- Plain-text fallback remains available only for deterministic 4xx capability/validation failures.
-- Existing direct commands and runtime permissions remain unchanged.
-- Full CI and production Connected Build succeed before completion.
+## Remaining Live Verification
+
+Automated tests validate the exact outbound structure but cannot render the QQ client. One live category click remains required.
 
 ## next_exact_action
 
-Implement official keyboard DTO/message shape and add regression coverage.
+Live-click `/!面板 基础`; if buttons still do not render, inspect runtime `keyboard.lastError` and `keyboard.fallbackCount`.
 
-last_checkpoint_at: 2026-09-29T05:25:00+08:00
+last_checkpoint_at: 2026-09-29T05:45:00+08:00
