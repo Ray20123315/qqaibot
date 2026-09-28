@@ -6,6 +6,8 @@ import { isDeveloperId, recentConversationMessagesForUser } from "../../core/ide
 import { callOneBotAction } from "../../core/permissions.js";
 import { dbDel, dbGet, dbPut } from "../../data/store.js";
 import { createPluginHost } from "../../plugins/runtime.js";
+import { enforcePluginRuntimeBoundary } from "../../plugins/runtime-guard.js";
+import { securityCenterForEnv } from "../public/plugin-security.js";
 import { fetchPublicUrl } from "../../security/network.js";
 import { politicalGuardDecision } from "../../v4/public/politics.js";
 import { resolveCanonicalPrincipal } from "../../v4/public/resource-tickets.js";
@@ -491,7 +493,25 @@ function createV3HostAdapter(env, {
     }
   };
 
-  const host = createPluginHost({ services, storageAdapter, logger });
+  let runtimeSecurityCenter = dependencies.runtimeSecurityCenter || null;
+  const runtimeBoundary = async ({ plugin, error, violation, stage }) => {
+    if (!runtimeSecurityCenter) runtimeSecurityCenter = securityCenterForEnv(env, dependencies.pluginSecurity || {});
+    const outcome = await enforcePluginRuntimeBoundary({
+      pluginId: plugin.id,
+      version: plugin.version,
+      hash: plugin.sha256 || plugin.hash || "",
+      violation,
+      securityCenter: runtimeSecurityCenter,
+      actorId: "runtime"
+    });
+    if (outcome.blocked) {
+      const blocked = await pluginLifecycle.markRuntimeBlocked(plugin.id, `${violation.code}:${stage}`, "runtime-security");
+      lifecycleRecords.set(plugin.id, blocked);
+      logger?.error?.("[v3-host] plugin quarantined after runtime security violation", plugin.id, violation.code, String(error?.message || error).slice(0, 160));
+    }
+    return outcome;
+  };
+  const host = createPluginHost({ services, storageAdapter, logger, runtimeBoundary });
   for (const plugin of plugins) host.register(plugin);
 
   function lifecycleMap(snapshot) {
