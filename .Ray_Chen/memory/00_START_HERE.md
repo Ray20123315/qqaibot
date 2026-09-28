@@ -1,24 +1,24 @@
 # Ray_Chen Memory Entry
 
-- memory_version: v0.0.29
+- memory_version: v0.0.30
 - project: QQAIBOT
 - repository: Ray20123315/qqaibot
 - development_branch: feature/v4-public-bot
 - task_id: qqaibot-20260928-v4-public-bot
 - task_status: active
 - goal_revision: 2
-- latest_verified_product_commit: e080b4f9a2a1d6b621092facf5e90fb0518bb5d1
-- updated_at: 2026-09-28T14:55:00+08:00
+- latest_verified_product_commit: 820779518c8bf60bcc541182249f651101632080
+- updated_at: 2026-09-28T15:05:00+08:00
 
 ## Verified Through This Checkpoint
 
-- Existing /plugin-security was redesigned into a human-readable safety review center.
-- The page shows blocked/review/clear state, human-readable risk impact and guidance.
-- It does not render finding codes, SHA hashes, raw API routes, source code blocks, secrets or attack artifacts.
-- Existing machine-readable /api/v3/plugin-security remains available for automated protection.
-- Runtime quarantine behavior remains unchanged.
-- Full regression/V3/V4/V4-test/bundle checks passed for e080b4f9a2a1d6b621092facf5e90fb0518bb5d1.
+- QQ Open model preference no longer persists to platform D1.
+- QQ Open !模型 reads/writes the user's Storage Connector settings purpose.
+- Official switch-model interaction uses explicit canonical principal and user storage.
+- Without user storage, model preference remains default/non-durable and UI states that it was not saved.
+- OneBot legacy model preference behavior remains unchanged.
+- Full regression/V3/V4/V4-test/bundle checks passed.
 
-## Next
+## Next Checkpointed Operation
 
-Move QQ Open user model preference persistence from platform D1 to user-owned Storage Connector, then prepare same-Worker Preview.
+Create one Preview-only D1 database named `qqaibot-v4-public-preview` for the existing `qqai` Worker Preview. Do not create another Worker. Do not bind or mutate production D1 `qqaibot`.

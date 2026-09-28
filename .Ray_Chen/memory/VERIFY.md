@@ -1,29 +1,22 @@
 # VERIFY
 
-## Plugin Security Review UI
+## QQ Open Model Preference
 
-Verified commit: `e080b4f9a2a1d6b621092facf5e90fb0518bb5d1`
-GitHub Actions run: `36387524570`
+Verified commit: `820779518c8bf60bcc541182249f651101632080`
+GitHub Actions run: `36387904014`
 Conclusion: success
 
-Passed:
-- npm run check
-- npm run check:v3
-- npm run check:v4
-- npm run check:v4test
-- npm run check:bundle
+`verify-v4-user-settings-routing.mjs` verifies:
+- settings keys are namespaced;
+- settings go through User Persistence read/write/delete;
+- QQ Open model command uses user storage;
+- missing user storage is visibly non-durable;
+- generation reads user-storage preference;
+- official switch-model does not write model_pref to platform D1;
+- legacy OneBot path retains platform DB compatibility.
 
-`verify-v4-plugin-security-page.mjs` verifies:
-- human-readable page title/status/impact labels;
-- no raw finding code rendering;
-- no hash rendering;
-- no API-path link on the ordinary page;
-- no pre/code blocks;
-- reduced-motion support.
+## Preview preflight
 
-## Pending
-
-- QQ Open model-preference user-storage migration
-- same-Worker Preview
-- final persistence audit
-- QQ self-test workbook
+Cloudflare inventory read-back completed. No dedicated V4 public Preview D1 exists yet.
+Next create name: `qqaibot-v4-public-preview`.
+Production D1 UUID to protect: `569a01fe-3297-40e1-832f-09c3793056ed`.

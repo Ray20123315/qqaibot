@@ -2,29 +2,29 @@
 
 ## Latest Verified Product
 
-Commit: `e080b4f9a2a1d6b621092facf5e90fb0518bb5d1`
-GitHub Actions run: `36387524570`
+Commit: `820779518c8bf60bcc541182249f651101632080`
+GitHub Actions run: `36387904014`
 Conclusion: success.
 
-## Plugin Security Review Surface
+## QQ Open Individual Settings
 
-The existing public security page is now a product UI rather than an engineering dump:
-- blocked / review / clear summary counts;
-- human-readable risk level;
-- human-readable impact descriptions;
-- explicit explanation that global/cross-user/platform risks cannot be forced through;
-- responsive light/dark presentation;
-- reduced-motion support.
+Model preference is now a user-content setting:
+- QQ Open reads it from user Storage Connector `settings`;
+- QQ Open writes it only to user Storage Connector;
+- official interaction switch-model uses the same storage path;
+- missing connector returns USER_STORAGE_REQUIRED/non-durable behavior;
+- OneBot retains the old platform DB behavior for compatibility.
 
-The normal page intentionally does not render:
-- finding code identifiers;
-- SHA-256 values;
-- machine API URL;
-- source/attack artifacts;
-- pre/code blocks.
+## Cloudflare Preview Discovery
 
-The JSON security API remains unchanged for automated tooling.
+Read-only Cloudflare inventory shows:
+- production D1 `qqaibot`: `569a01fe-3297-40e1-832f-09c3793056ed`;
+- no existing `qqaibot-v4-public-preview` database;
+- production Vectorize indexes include `qqai` and `qq-ai`;
+- Worker scripts include `qqai`, `qqai-v3test`, `qqai-v4test`.
+
+Cloudflare documentation confirms Workers Previews use the same Worker, require a `previews` block, isolate Durable Objects automatically, and require D1/Vectorize bindings to point at Preview-safe resources.
 
 ## Production
 
-No production Cloudflare resource changed. main was not modified by this task.
+No production Cloudflare resource was changed yet.
