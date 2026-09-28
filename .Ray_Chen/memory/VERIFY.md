@@ -2,12 +2,12 @@
 
 ## Verified Product Revision
 
-`f44c8118c83e57637a6b0f55f0013ff093b2f1fc`
+`d0b4a610c68a4736abdc5f71f8e35a4e82b45b4a`
 
 ## GitHub Actions
 
-Development run `36400632740`: SUCCESS.
-Main run `36400793446`: SUCCESS.
+Development run `36403191041`: SUCCESS.
+Main run `36403381999`: SUCCESS.
 
 Passed:
 - repository regression checks
@@ -16,25 +16,39 @@ Passed:
 - isolated V4 test deployment checks
 - single Worker bundle
 
-## Cumulative Permission Discovery Regression
+## Group Discovery Regression
 
-Developer-specific C2C discovery uses:
-- `permissions: ["member", "developer"]`
-- `target_type: "specific"`
-- configured Developer OpenIDs
+The test suite verifies that every enabled `scope:"group"` command appears in categorized group panels.
 
-Tests require the Developer panel set to contain ordinary commands `!help`, `!codex`, `!QQ语音` plus Developer commands `!codexchat`, `!codexwork`, `!群白名单`, `!重置`.
+Representative ordinary commands required:
+- `!help`
+- `!status`
+- `!codex`
+- `!模型`
+- `!群状态`
+- `!群规`
+- `!成员发言分析`
+- `!活动`
+- `!投票`
 
-Every enabled C2C command with permission `member` or `developer` must be present. Discovery now enforces QQ's official 20-panel maximum instead of the previous internal 10-panel limit.
+Representative privileged commands required:
+- `!禁言`
+- `!关闭ai`
+- `!授权AI踢出`
+- `!群白名单`
+- `!授权`
+- `!撤销授权`
+- `!禁记忆`
+
+Developer C2C panels are generated from all permission classes and include every enabled C2C command.
 
 ## Cloudflare Production
 
-Connected Build `e5270c67-4c0e-4eaf-9d1a-3d5feb95cdd5`:
-- commit: `f44c8118c83e57637a6b0f55f0013ff093b2f1fc`
+Connected Build `005556b2-9747-4bb4-852c-e3157e5c7069`:
+- commit: `d0b4a610c68a4736abdc5f71f8e35a4e82b45b4a`
 - branch: `main`
-- status: stopped
 - outcome: success
 
 ## Remaining Live Verification
 
-Confirm on the real QQ client that a configured Developer OpenID sees ordinary commands and Developer-only commands simultaneously after discovery sync.
+Confirm the live QQ group command panel refreshes after discovery sync and shows ordinary categories plus management/developer categories.
