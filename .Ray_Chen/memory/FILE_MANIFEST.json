@@ -1,9 +1,9 @@
 {
   "schema_version": 1,
-  "memory_version": "v0.0.27",
+  "memory_version": "v0.0.28",
   "task_id": "qqaibot-20260928-v4-public-main-integration",
   "goal_revision": 4,
-  "transaction": "v4_public_main_integration_20260929_final",
+  "transaction": "v4_public_main_integration_20260929_packaged",
   "repository": "Ray20123315/qqaibot",
   "production_branch": "main",
   "development_branch": "feature/v4-public-bot",
@@ -66,7 +66,8 @@
     "live_health_errors": 0,
     "live_onebot_status": "ok",
     "live_onebot_connected": true,
-    "live_onebot_rpc_roundtrip": true
+    "live_onebot_rpc_roundtrip": true,
+    "memory_packaging_workflow": "configured"
   },
   "changes": [
     {
@@ -1140,10 +1141,32 @@
       "commit_or_hash": "a1e6f9aa-4ef0-4624-ba92-8246b69db391",
       "verification": "Preview health success; dedicated kv_store_v4public_preview namespace",
       "changed_at": "2026-09-28T23:00:00+08:00"
+    },
+    {
+      "location_type": "github",
+      "provider": "GitHub",
+      "resource_id_or_path": ".github/workflows/ray-chen-memory-package.yml",
+      "action": "added",
+      "branch_or_container": "main",
+      "before_revision": "absent",
+      "after_revision": "this_memory_infra_commit",
+      "verification": "workflow validates TAR.GZ listing, required files and SHA-256, then uploads artifact",
+      "changed_at": "2026-09-29T03:45:00+08:00"
+    },
+    {
+      "location_type": "github",
+      "provider": "GitHub",
+      "resource_id_or_path": ".Ray_Chen/memory/{MEMORY_VERSION.txt,00_START_HERE.md,CURRENT_STATE.md,VERIFY.md,FILE_MANIFEST.json}",
+      "action": "memory_packaging_reconciliation",
+      "branch_or_container": "main",
+      "before_revision": "01466af72a64e9c8ca73274dc7aca0a8275b0314",
+      "after_revision": "this_memory_infra_commit",
+      "verification": "exact committed memory tree will be packaged by GitHub Actions",
+      "changed_at": "2026-09-29T03:45:00+08:00"
     }
   ],
   "internal_memory_transaction": {
-    "action": "reconcile V4 public integration, runtime hotfix, final production verification and bump memory to v0.0.27",
-    "note": "Archive and Gmail notification are produced after memory commit/read-back and are not recursive file-change triggers."
+    "action": "add deterministic GitHub Actions memory packager and bump memory to v0.0.28",
+    "note": "The generated archive, SHA manifest and artifact evidence are internal packaging outputs and do not recursively trigger a new memory transaction."
   }
 }

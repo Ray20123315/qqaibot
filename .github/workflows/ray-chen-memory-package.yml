@@ -1,0 +1,52 @@
+name: Package Ray_Chen memory
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - ".Ray_Chen/memory/**"
+      - ".github/workflows/ray-chen-memory-package.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  package:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Read memory version
+        id: meta
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="$(tr -d '\r\n' < .Ray_Chen/memory/MEMORY_VERSION.txt)"
+          test -n "$version"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      - name: Package and verify memory
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="${{ steps.meta.outputs.version }}"
+          archive="Ray_Chen_memory_${version}.tar.gz"
+          tar -czf "$archive" .Ray_Chen/memory
+          tar -tzf "$archive" | tee "${archive}.listing.txt"
+          for required in             ".Ray_Chen/memory/00_START_HERE.md"             ".Ray_Chen/memory/MEMORY_VERSION.txt"             ".Ray_Chen/memory/ACTIVE_TASK.md"             ".Ray_Chen/memory/CURRENT_STATE.md"             ".Ray_Chen/memory/FILE_MANIFEST.json"; do
+            grep -Fxq "$required" "${archive}.listing.txt"
+          done
+          sha256sum "$archive" | tee "${archive}.sha256"
+
+      - name: Upload memory archive
+        uses: actions/upload-artifact@v4
+        with:
+          name: ray-chen-memory-${{ steps.meta.outputs.version }}
+          path: |
+            Ray_Chen_memory_${{ steps.meta.outputs.version }}.tar.gz
+            Ray_Chen_memory_${{ steps.meta.outputs.version }}.tar.gz.sha256
+            Ray_Chen_memory_${{ steps.meta.outputs.version }}.tar.gz.listing.txt
+          retention-days: 30

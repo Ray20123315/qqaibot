@@ -1,6 +1,6 @@
 # Ray_Chen Memory Entry
 
-- memory_version: v0.0.27
+- memory_version: v0.0.28
 - project: QQAIBOT
 - repository: Ray20123315/QQAIBOT
 - canonical_branch: main
@@ -8,7 +8,7 @@
 - task_status: completed
 - goal_revision: 4
 - product_revision: `df7958e9e99be0d5724dc4fd24a39da616e1befd`
-- updated_at: 2026-09-29T03:35:00+08:00
+- updated_at: 2026-09-29T03:45:00+08:00
 
 ## Completed Goal
 
@@ -24,6 +24,12 @@ V4 public-user foundation is integrated into current main without discarding new
 - live `/healthz`: HTTP 200, `ok: true`, errors 0
 - OneBot/NapCat live health: `ok`, connected true, RPC round-trip true
 - production D1 binding remains the normal DB; `QQAI_DB_TABLE` is absent in production.
+
+## Memory Packaging
+
+- workflow: `.github/workflows/ray-chen-memory-package.yml`
+- trigger: every main push that changes `.Ray_Chen/memory/**`
+- output: versioned TAR.GZ + SHA-256 + tar listing as a GitHub Actions artifact
 
 ## Resume Rule
 

@@ -56,3 +56,14 @@ This live probe caught and then verified the fix for `hybridStatus is not define
 ## Remaining Limit
 
 The one remaining health warning was not an error and did not prevent Worker, D1 or OneBot operation. NapCat diagnostics contain historical abnormal close code 1006 events, while the current socket is connected.
+
+
+## Memory Archive Automation
+
+`.github/workflows/ray-chen-memory-package.yml` packages the exact committed memory tree on main when `.Ray_Chen/memory/**` changes.
+
+Required checks in the workflow:
+- TAR.GZ can be listed.
+- required files are present: 00_START_HERE, MEMORY_VERSION, ACTIVE_TASK, CURRENT_STATE, FILE_MANIFEST.
+- SHA-256 is generated beside the archive.
+- archive listing is uploaded as evidence.

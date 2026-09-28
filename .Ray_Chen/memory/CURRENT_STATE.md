@@ -45,3 +45,11 @@
 
 - live health reports one warning, but zero errors.
 - NapCat has historical abnormal WebSocket closes (1006) in diagnostics; current socket is connected and RPC round-trip succeeds.
+
+
+## Ray_Chen Packaging
+
+- canonical memory version: `v0.0.28`
+- packaging workflow: `.github/workflows/ray-chen-memory-package.yml`
+- workflow packages the exact committed `.Ray_Chen/memory/` tree.
+- artifact includes `Ray_Chen_memory_v0.0.28.tar.gz`, SHA-256 evidence and archive listing.
