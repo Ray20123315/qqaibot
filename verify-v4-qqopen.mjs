@@ -104,17 +104,24 @@ assert(categorizedGroupPanels.flatMap(panel => panel.panel.items).some(item => i
 assert(!categorizedGroupPanels.flatMap(panel => panel.panel.items).some(item => item.name === "!codexchat"));
 
 const developerPanels = registry.buildCategorizedPanels("c2c", {
-  permissions:["developer"],
+  permissions:["member", "developer"],
   targetType:"specific",
   userOpenids:["dev-openid"]
 });
-assert.equal(developerPanels.length, 2);
+assert(developerPanels.length > 2);
 assert(developerPanels.every(panel => JSON.stringify(panel.user_openids) === JSON.stringify(["dev-openid"])));
 const developerPanelItems = developerPanels.flatMap(panel => panel.panel.items);
-assert(developerPanelItems.some(item => item.name === "!codexchat"));
-assert(developerPanelItems.some(item => item.name === "!codexwork"));
-assert(developerPanelItems.some(item => item.name === "!群白名单"));
-assert(developerPanelItems.some(item => item.name === "!重置"));
+const developerPanelNames = new Set(developerPanelItems.map(item => item.name));
+assert(developerPanelNames.has("!help"));
+assert(developerPanelNames.has("!codex"));
+assert(developerPanelNames.has("!QQ语音"));
+assert(developerPanelNames.has("!codexchat"));
+assert(developerPanelNames.has("!codexwork"));
+assert(developerPanelNames.has("!群白名单"));
+assert(developerPanelNames.has("!重置"));
+for (const command of registry.list({ scope:"c2c" }).filter(command => ["member", "developer"].includes(command.permission) && command.panel.enabled)) {
+  assert(developerPanelNames.has(command.panel.command), `Developer inherited discovery missing ${command.id}`);
+}
 
 const menu = registry.buildMenu();
 assert(menu.items.length <= 10);
@@ -229,12 +236,20 @@ assert(discoveryCalls.some(row => row[0] === "deletePanel" && row[1] === "old-c2
 assert(!discoveryCalls.some(row => row[0] === "deletePanel" && row[1] === "foreign"));
 assert(discoveryCalls.some(row => row[0] === "listPanels" && row[1] === "c2c"));
 assert(discoveryCalls.some(row => row[0] === "listPanels" && row[1] === "group"));
-assert(firstDiscovery.panels <= 10);
+assert(firstDiscovery.panels <= 20);
 assert(firstDiscovery.categories.includes("basic"));
 assert(firstDiscovery.categories.includes("group-ops"));
 assert(firstDiscovery.categories.includes("ai-admin"));
 assert(firstDiscovery.categories.includes("developer"));
-assert(discoveryCalls.some(row => row[0] === "createPanel" && row[2]?.target_type === "specific" && row[2]?.user_openids?.includes("dev-openid")));
+const developerSyncPanels = discoveryCalls
+  .filter(row => row[0] === "createPanel" && row[2]?.target_type === "specific" && row[2]?.user_openids?.includes("dev-openid"))
+  .map(row => row[2]);
+assert(developerSyncPanels.length >= developerPanels.length);
+const developerSyncNames = new Set(developerSyncPanels.flatMap(panel => panel.panel.items).map(item => item.name));
+assert(developerSyncNames.has("!help"));
+assert(developerSyncNames.has("!codex"));
+assert(developerSyncNames.has("!codexchat"));
+assert(developerSyncNames.has("!codexwork"));
 const syncedMenu = discoveryCalls.find(row => row[0] === "putMenu")?.[1];
 assert(syncedMenu.items.every(item => item.type === "menu" && item.sub_menu_items?.length <= 5));
 const callCountAfterFirst = discoveryCalls.length;
