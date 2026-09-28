@@ -1,47 +1,56 @@
 # ACTIVE_TASK
 
-task_id: qqaibot-20260928-command-capability-fallback
-task_status: completed
+task_id: qqaibot-20260928-full-command-panels-portal
+task_status: active
 goal_revision: 1
 
 ## Goal
 
-Restore the documented command/function surface on main and make legacy Bot execution a permission-checked fallback behind AIBot/QQ Open.
+Restore all active QQAI 2.7.12 command/function entry points, generate categorized QQ official command discovery, keep developer/admin-only entries out of inappropriate discovery surfaces where QQ supports it, and restore the Portal sections previously hidden by the V4 lean overlay.
 
-## Acceptance Results
+## Acceptance Criteria
 
-- VERIFIED: QQ Open inbound commands still use the existing shared command/plugin pipeline.
-- VERIFIED: V4 command catalog restored to 75 entries while preserving the original primary panel ordering.
-- VERIFIED: QQ Open action is attempted first.
-- VERIFIED: deterministic unsupported/unavailable official actions can fall back to OneBot.
-- VERIFIED: ambiguous mutating 5xx failures do not cross-retry.
-- VERIFIED: legacy group fallback resolves the numeric group and checks legacy Bot membership/role.
-- VERIFIED: insufficient legacy permission returns a specific actionable message.
-- VERIFIED: member-target legacy fallback requires confirmed OpenID <-> numeric QQ mapping.
-- VERIFIED: auxiliary OneBot ingress remains suppressed from duplicate command ownership.
-- VERIFIED: development and main CI suites pass.
-- VERIFIED: Cloudflare production Connected Build for the final product revision succeeds.
+- Existing QQAI 2.7.12 command handlers remain callable; discovery covers the documented active surface including !codex, !codexchat and !codexwork.
+- QQ group discovery is grouped by category instead of one flat first-level dump.
+- C2C global custom menu uses QQ native submenus where useful and stays within QQ menu limits.
+- Developer/owner/admin command metadata is represented consistently; server-side permission checks remain mandatory even when discovery hides an entry.
+- QQ Open/AIBot receives all user commands; users never need to command the legacy Bot directly.
+- Legacy OneBot fallback semantics from the previous task remain intact.
+- Portal no longer presents active modules as retired/removed and does not hide the complete existing navigation.
+- Regression tests cover categorized panels/menu, permission visibility metadata, restored web navigation and representative complete command families.
+- Full GitHub Actions and Worker bundle checks pass before main is updated.
 
-## Product Revision
+## Hard Constraints
 
-`fd11cd640cae1124edc03b0fef3d8d8d529cc52b`
+- Do not remove runtime authorization, confirmation, cooldown or Portal feature switches merely because a panel item is hidden.
+- Do not re-enable parallel OneBot command ingress.
+- Respect QQ official limits: <=20 panels per bot, <=20 items per panel, panel item name <=14 chars, description <=30 chars; global C2C menu <=10 items and submenu <=5 children.
+- Never coerce OpenID into numeric QQ identifiers.
+- Do not store secrets.
 
-## Verification Evidence
+## Execution Plan
 
-- development CI: run `36378926121` — success
-- main CI: run `36379048954` — success
-- production build: `53058046-38a3-4ecc-9fbd-581032693db5` — success
-- main read-back: 75 command entries and representative restored aliases confirmed
-- main read-back: fallback permission probe, member mapping and 5xx write safety guard confirmed
+### Phase 1 — IN_PROGRESS
+- Recovered v0.0.21 and current main/dev baseline.
+- Verified QQ official panel/menu constraints.
+- Compare help/handlers/plugins to the V4 discovery catalog and identify missing active entries.
 
-## Resolved Failures
+### Phase 2 — PLANNED
+- Expand/normalize registry metadata and add categorized panel/menu generation.
+- Restore missing discoverable commands, especially plugin-backed commands that are active but absent from catalog.
+- Restore complete Portal navigation and remove obsolete "retired" presentation.
+- Add regression coverage.
 
-- `d397a04d...`: V4 panel regression exposed primary panel ordering drift.
-- `6049cacf...`: catalog repair attempt exposed a malformed module tail.
-- Final repair `fd11cd640cae1124edc03b0fef3d8d8d529cc52b` resolved both; full CI is green.
+### Phase 3 — PLANNED
+- Commit product changes on v4-qqopen-native.
+- Run full CI and repair all failures.
+- Fast-forward main only after verified success and confirm Connected Build.
+
+### Phase 4 — PLANNED
+- Reconcile Ray_Chen memory, create/verify TAR.GZ, send one Gmail notification.
 
 ## next_exact_action
 
-Perform one live QQ smoke test using a restored command and one legacy-only group operation; if the latter reports insufficient legacy Bot permission, grant exactly the role named by the prompt and retry.
+Finish command coverage inventory, then implement registry/panel/menu/Portal changes and regression tests on v4-qqopen-native.
 
-last_checkpoint_at: 2026-09-28T12:50:30+08:00
+last_checkpoint_at: 2026-09-28T13:20:00+08:00
