@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
+import fs from "node:fs";
 import { buildConnectivityReply, createQqOpenActionDispatcher, createQqOpenApiClient, createGatewayState, createHeartbeatPayload, createIdentifyPayload, createResumePayload, fromQqOpenEvent, qqOpenClosePolicy, qqOpenDeliveryKey, qqOpenDeliverySequence, qqOpenIntents, qqOpenPassiveReplyPolicy, qqOpenReconnectDelay, qqOpenShard, reduceGatewayPayload, syncQqOpenDiscovery } from "./src/v4/index.js";
 import { createInitialCommandRegistry } from "./src/v4/commands/catalog.js";
-import { assertGroupPanelCoverage, buildGroupRootPanel, resolveGroupPanelInput } from "./src/v4/commands/group-panel.js";
+import { assertGroupPanelCoverage, buildGroupRootPanel, normalizeGroupPanelSlashInvocation, resolveGroupPanelInput } from "./src/v4/commands/group-panel.js";
 
 const group = fromQqOpenEvent({ t:"GROUP_MESSAGE_CREATE", s:42, d:{ id:"msg-1", group_openid:"group-A", timestamp:"2026-09-27T08:00:00Z", content:" hello ", author:{ member_openid:"member-A", member_role:"admin", username:"Ray" }, attachments:[{content_type:"image/png",url:"https://example.com/a.png",filename:"a.png"}] } });
 assert.equal(group.platform, "qq-open");
@@ -108,6 +109,14 @@ for (const name of ["!面板 基础","!面板 群聊","!面板 记忆","!面板 
 }
 assert.equal(resolveGroupPanelInput("!面板 基础 help", registry)?.expanded, "!help");
 assert.equal(resolveGroupPanelInput("！面板 群操作 禁言 @123456 10分钟", registry)?.expanded, "!禁言 @123456 10分钟");
+assert.deepEqual(normalizeGroupPanelSlashInvocation("/!面板 基础"), { matched:true, text:"!面板 基础" });
+assert.deepEqual(normalizeGroupPanelSlashInvocation("／！面板 开发者 codexwork --export 测试"), { matched:true, text:"！面板 开发者 codexwork --export 测试" });
+assert.deepEqual(normalizeGroupPanelSlashInvocation("[CQ:at,qq=123] /!面板 群操作 禁言"), { matched:true, text:"[CQ:at,qq=123] !面板 群操作 禁言" });
+assert.deepEqual(normalizeGroupPanelSlashInvocation("/!普通内容"), { matched:false, text:"/!普通内容" });
+const workerSource = fs.readFileSync("worker.js", "utf8");
+const panelSlashIndex = workerSource.indexOf("normalizeGroupPanelSlashInvocation(userMessage)");
+const optOutIndex = workerSource.indexOf("stripGroupAiOptOutPrefix(userMessage, botId)");
+assert(panelSlashIndex >= 0 && optOutIndex > panelSlashIndex, "panel slash normalization must run before /! AI opt-out stripping");
 assert.equal(resolveGroupPanelInput("!面板 开发者 codexwork --export 测试", registry)?.expanded, "!codexwork --export 测试");
 const groupRootHelp = resolveGroupPanelInput("!面板 基础", registry);
 assert.equal(groupRootHelp?.matched, true);
