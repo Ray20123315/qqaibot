@@ -10,7 +10,11 @@
 - If the old Bot has sufficient permission and required identifiers can be safely resolved, execute the action through OneBot.
 - Do not make the old Bot a competing primary command responder; avoid duplicate replies and side effects.
 - Restore the documented command/function surface instead of exposing only a reduced subset.
-- Preserve existing first-panel command ordering/compatibility.
+- Replace the flat command-discovery presentation with categorized QQ official panels; do not dump every command into one top-level panel.
+- Use QQ native C2C custom-menu submenus for category/subcommand discovery where applicable.
+- Restore the full active QQAI 2.7.12 function surface, including !codexchat and !codexwork.
+- Hide privileged discovery entries where the QQ surface can represent the relevant permission, while retaining server-side permission checks.
+- Restore the full Portal/web functionality and stop presenting active modules as retired/removed.
 - Never treat QQ Open OpenIDs as numeric QQ IDs.
 - Member-target legacy actions require a confirmed member identity mapping.
 - Never retry ambiguous mutating timeout/5xx results across transports.
