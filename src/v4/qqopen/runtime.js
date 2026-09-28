@@ -86,8 +86,11 @@ function normalizeInlineKeyboard(value) {
       const label = String(button?.render_data?.label || "").trim().slice(0, 20) || `指令${rowIndex + 1}-${buttonIndex + 1}`;
       const visited = String(button?.render_data?.visited_label || label).trim().slice(0, 20) || label;
       const data = String(button?.action?.data || "").trim().slice(0, 1000);
+      const id = String(button?.id || `qqai_${rowIndex}_${buttonIndex}`).trim().slice(0, 64);
+      const permissionType = Number(button?.action?.permission?.type || 2);
+      const clickLimit = Math.max(1, Number(button?.action?.click_limit || 1));
       return {
-        id: String(button?.id || `qqai_${rowIndex}_${buttonIndex}`).trim().slice(0, 64),
+        id,
         render_data: {
           label,
           visited_label: visited,
@@ -95,8 +98,11 @@ function normalizeInlineKeyboard(value) {
         },
         action: {
           type: Number(button?.action?.type || 1),
-          data
-        }
+          data,
+          permission: { type:Number.isFinite(permissionType) ? permissionType : 2 },
+          click_limit: Number.isFinite(clickLimit) ? clickLimit : 1
+        },
+        group_id: String(button?.group_id || id).trim().slice(0, 64) || id
       };
     }).filter(button => button.action.data)
   })).filter(row => row.buttons.length);
@@ -150,6 +156,9 @@ function defaultPersistedState() {
     lastHeartbeatSentAt: 0,
     lastErrorAt: 0,
     lastError: "",
+    lastKeyboardErrorAt: 0,
+    lastKeyboardError: "",
+    keyboardFallbackCount: 0,
     reconnectCount: 0,
     connectCount: 0,
     failureStreak: 0
@@ -213,6 +222,13 @@ export class QqOpenGateway {
     await this.persist().catch(() => {});
   }
 
+  async recordKeyboardFallback(error) {
+    this.persisted.lastKeyboardErrorAt = Date.now();
+    this.persisted.lastKeyboardError = safeError(error);
+    this.persisted.keyboardFallbackCount = Number(this.persisted.keyboardFallbackCount || 0) + 1;
+    await this.recordError(error);
+  }
+
   status() {
     return Object.freeze({
       ok: true,
@@ -239,6 +255,11 @@ export class QqOpenGateway {
       lastHeartbeatSentAt: Number(this.persisted.lastHeartbeatSentAt || 0),
       lastErrorAt: Number(this.persisted.lastErrorAt || 0),
       lastError: String(this.persisted.lastError || ""),
+      keyboard: {
+        lastErrorAt: Number(this.persisted.lastKeyboardErrorAt || 0),
+        lastError: String(this.persisted.lastKeyboardError || ""),
+        fallbackCount: Number(this.persisted.keyboardFallbackCount || 0)
+      },
       reconnectCount: Number(this.persisted.reconnectCount || 0),
       connectCount: Number(this.persisted.connectCount || 0),
       failureStreak: Number(this.persisted.failureStreak || 0),
@@ -609,11 +630,15 @@ export class QqOpenGateway {
     const content = String(value || "").trim();
     if (!content || !interaction?.id) return null;
     const normalizedKeyboard = normalizeInlineKeyboard(keyboard);
-    const body = {
+    const body = normalizedKeyboard ? {
+      msg_type: 2,
+      markdown: { content },
+      event_id: String(interaction.id),
+      keyboard: normalizedKeyboard
+    } : {
       content,
       msg_type: 0,
-      event_id: String(interaction.id),
-      ...(normalizedKeyboard ? { keyboard:normalizedKeyboard } : {})
+      event_id: String(interaction.id)
     };
     const send = payload => {
       if (interaction.scene === "group" && interaction.groupId) {
@@ -628,9 +653,12 @@ export class QqOpenGateway {
       return await send(body);
     } catch (error) {
       if (!normalizedKeyboard || !keyboardCapabilityError(error)) throw error;
-      this.recordError(error);
-      const { keyboard: _ignored, ...fallback } = body;
-      return send(fallback);
+      await this.recordKeyboardFallback(error);
+      return send({
+        content,
+        msg_type: 0,
+        event_id: String(interaction.id)
+      });
     }
   }
 
@@ -917,8 +945,8 @@ export class QqOpenGateway {
     if (keyboard && keyboardContent && (message.scope === "group" || message.scope === "private")) {
       const reservation = await this.reserveReplySequences(message.messageId, message.scope, 1);
       const keyboardBody = {
-        content: keyboardContent,
-        msg_type: 0,
+        msg_type: 2,
+        markdown: { content:keyboardContent },
         msg_seq: reservation.start,
         msg_id: message.messageId,
         keyboard
@@ -936,7 +964,7 @@ export class QqOpenGateway {
         return;
       } catch (error) {
         if (!keyboardCapabilityError(error)) throw error;
-        this.recordError(error);
+        await this.recordKeyboardFallback(error);
       }
     }
     const policy = qqOpenPassiveReplyPolicy(message.scope);
