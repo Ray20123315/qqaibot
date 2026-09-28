@@ -33,7 +33,6 @@ body.v4-lean-enabled .side-brand .logo{box-shadow:0 0 32px rgba(111,93,255,.38);
 #v4LeanNav button:hover:before{transform:translateX(130%)}
 #v4LeanNav button:hover,#v4LeanNav button.active{color:#fff;border-color:rgba(129,119,255,.28);background:linear-gradient(120deg,rgba(109,91,255,.18),rgba(50,201,255,.08));transform:translateX(3px)}
 #v4LeanNav button.active{box-shadow:0 0 26px rgba(94,79,255,.16)}
-body.v4-lean-enabled #nav>.nav-group,body.v4-lean-enabled #nav>button[data-view]{display:none!important}
 body.v4-lean-enabled #v4LeanNav{display:grid!important}
 body.v4-lean-enabled .main{background:transparent!important}
 body.v4-lean-enabled .topbar{background:rgba(5,8,15,.62)!important;border-color:rgba(140,153,220,.14)!important;backdrop-filter:blur(24px) saturate(160%)}
@@ -58,7 +57,7 @@ body.v4-lean-enabled .view.active{animation:v4enter .48s cubic-bezier(.2,.8,.2,1
 .v4-input{width:100%;border:1px solid rgba(150,160,220,.16);background:rgba(7,10,18,.72);color:var(--text);border-radius:13px;padding:11px 12px;outline:none}.v4-input:focus{border-color:rgba(115,101,255,.7);box-shadow:0 0 0 4px rgba(108,92,255,.12)}
 .v4-toolbar{display:grid;grid-template-columns:minmax(260px,1fr) auto;gap:10px;align-items:end}.v4-list{display:grid;gap:10px;margin-top:12px}.v4-row{border:1px solid rgba(150,160,220,.12);border-radius:14px;padding:13px;background:rgba(255,255,255,.025)}.v4-row-head{display:flex;align-items:flex-start;justify-content:space-between;gap:12px}.v4-row-title{font-weight:850;overflow-wrap:anywhere}.v4-row-meta{font-size:12px;color:var(--muted);margin-top:4px;overflow-wrap:anywhere}.v4-row-actions{display:flex;gap:7px;flex-wrap:wrap;margin-top:10px}.v4-inline{display:grid;grid-template-columns:minmax(190px,1fr) auto auto;gap:8px;align-items:center;margin-top:10px}
 .v4-tabs{display:flex;gap:8px;flex-wrap:wrap}.v4-tabs button.active{background:var(--primary);color:#fff}.v4-empty{padding:30px;border:1px dashed rgba(150,160,220,.18);border-radius:15px;color:var(--muted);text-align:center}.v4-error{color:#ff8292}.v4-ok{color:#5ce0b1}
-.v4-retired{display:flex;gap:7px;flex-wrap:wrap}.v4-retired span{font-size:11px;color:#8994aa;border:1px solid rgba(150,160,220,.12);padding:5px 8px;border-radius:999px;text-decoration:line-through;opacity:.8}
+.v4-restored{display:flex;gap:7px;flex-wrap:wrap}.v4-restored span{font-size:11px;color:#aeb9d2;border:1px solid rgba(150,160,220,.16);padding:5px 8px;border-radius:999px;background:rgba(255,255,255,.03)}
 .v4-console{font-family:ui-monospace,SFMono-Regular,Consolas,monospace;font-size:12px;white-space:pre-wrap;word-break:break-word;background:rgba(1,3,8,.65);border:1px solid rgba(150,160,220,.12);border-radius:14px;padding:13px;max-height:300px;overflow:auto}
 @media(max-width:1100px){.v4-card,.v4-card.wide{grid-column:span 6}.v4-hero:before,.v4-hero:after{opacity:.55}}
 @media(max-width:720px){.v4-card,.v4-card.wide{grid-column:1/-1}.v4-hero{padding:22px;min-height:230px}.v4-toolbar,.v4-inline{grid-template-columns:1fr}.v4-hero:before,.v4-hero:after{opacity:.25}}
@@ -68,7 +67,7 @@ body.v4-lean-enabled .view.active{animation:v4enter .48s cubic-bezier(.2,.8,.2,1
   const script = `<script id="qqai-v4-lean-portal-client">
 (function(){
 'use strict';
-var RETIRED=['活动/投票','排程提醒','匿名申诉','历史违规独立页','B站监控','关系管理','平台功能目录','事件模拟','旧 OneBot 专用工具'];
+var RESTORED=['活动/投票','排程提醒','匿名申诉','历史违规','B站监控','成员与关系','平台功能目录','插件管理','系统工具'];
 var ACTIVE='v4overview';
 function q(id){return document.getElementById(id)}
 function esc(v){return String(v==null?'':v).replace(/[&<>"']/g,function(c){return({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'})[c]})}
@@ -94,13 +93,13 @@ function openLegacy(view,label){
 }
 function renderOverview(){
   ensureView('v4overview','总览','<div class="v4-shell">'+
-    '<div class="v4-hero v4-tilt"><div class="v4-eyebrow">QQAIBOT / V4 LEAN CONTROL</div><h1>少一点功能，<br>多一点能用。</h1><p>V4 后台只保留 QQ Open 原生能力、AI/Codex、插件与必要系统工具。旧功能不再挤满控制台。</p><div class="v4-statusline"><span class="v4-pill"><i id="v4HeroDot" class="v4-dot"></i><b id="v4HeroState">读取 QQ Open...</b></span><span class="v4-pill">WebSocket Native</span><span class="v4-pill">OpenID Identity</span></div></div>'+
+    '<div class="v4-hero v4-tilt"><div class="v4-eyebrow">QQAIBOT / FULL CONTROL</div><h1>完整功能回来了，<br>QQ Open 负责主路径。</h1><p>原有 Portal 导航与 QQAI 2.7.12 功能完整保留；V4 区块只增加 QQ Open、分类指令面板与 Hybrid 状态，不再隐藏旧功能。</p><div class="v4-statusline"><span class="v4-pill"><i id="v4HeroDot" class="v4-dot"></i><b id="v4HeroState">读取 QQ Open...</b></span><span class="v4-pill">WebSocket Native</span><span class="v4-pill">OpenID Identity</span></div></div>'+
     '<div class="v4-grid">'+
       '<div class="v4-card"><div class="v4-sub">Gateway</div><div id="v4MetricGateway" class="v4-big">—</div><div id="v4MetricEvent" class="v4-sub">等待状态</div></div>'+
       '<div class="v4-card"><div class="v4-sub">消息 / 媒体</div><div class="v4-big">6 类</div><div class="v4-sub">文字、图片、影片、语音、文件、Markdown</div></div>'+
-      '<div class="v4-card"><div class="v4-sub">主导航</div><div class="v4-big">6</div><div class="v4-sub">总览 / QQ Open / 群管理 / AI-Codex / 插件 / 系统</div></div>'+
-      '<div class="v4-card wide"><h3>保留的核心</h3><div class="v4-cap"><span>QQ Open WebSocket + OpenAPI</span><b class="v4-tag">保留</b></div><div class="v4-cap"><span>群成员 / 禁言 / 移出 / 黑名单 / 入群审批</span><b class="v4-tag">保留</b></div><div class="v4-cap"><span>AI / Codex / Plugin Runtime</span><b class="v4-tag">保留</b></div><div class="v4-cap"><span>自定义菜单 / 指令面板</span><b class="v4-tag">保留</b></div></div>'+
-      '<div class="v4-card"><h3>大砍清单</h3><div class="v4-retired">'+RETIRED.map(function(x){return'<span>'+esc(x)+'</span>'}).join('')+'</div><div class="v4-sub" style="margin-top:12px">数据暂不破坏性删除；入口先退役，待 QQ Open 实机验证后再物理删 code。</div></div>'+
+      '<div class="v4-card"><div class="v4-sub">V4 快捷区</div><div class="v4-big">6</div><div class="v4-sub">原 Portal 完整导航保留，另加总览 / QQ Open / 群管理 / AI-Codex / 插件 / 系统</div></div>'+
+      '<div class="v4-card wide"><h3>完整能力</h3><div class="v4-cap"><span>QQ Open WebSocket + OpenAPI</span><b class="v4-tag">主路径</b></div><div class="v4-cap"><span>完整 QQAI 2.7.12 指令与群管理</span><b class="v4-tag">恢复</b></div><div class="v4-cap"><span>AI / Codex / CodexChat / CodexWork / Plugin Runtime</span><b class="v4-tag">完整</b></div><div class="v4-cap"><span>分类自定义菜单 / 指令面板</span><b class="v4-tag">同步</b></div></div>'+
+      '<div class="v4-card"><h3>已恢复入口</h3><div class="v4-restored">'+RESTORED.map(function(x){return'<span>'+esc(x)+'</span>'}).join('')+'</div><div class="v4-sub" style="margin-top:12px">这些功能继续使用原本的权限、确认、插件与资料层；V4 不再覆盖或隐藏它们。</div></div>'+
     '</div></div>');
 }
 function renderQqOpen(){
@@ -131,7 +130,7 @@ function renderCodex(){
     '<div class="v4-card full"><h3>保留原则</h3><div class="v4-cap"><span>!codex / !codexchat / !codexwork</span><b class="v4-tag">同主会话</b></div><div class="v4-cap"><span>Plugin Codex override</span><b class="v4-tag pending">特殊隔离</b></div><div class="v4-cap"><span>跨 QQ OpenID 自动认同一人</span><b class="v4-tag pending">需 identity mapping 后启用</b></div></div></div></div>');
 }
 function renderSystem(){
-  ensureView('v4system','系统','<div class="v4-shell"><div class="section-head"><div><h2>系统</h2><p>只保留维护、诊断、日志与系统管理员入口。</p></div></div><div class="v4-grid">'+
+  ensureView('v4system','系统','<div class="v4-shell"><div class="section-head"><div><h2>系统</h2><p>集中展示 V4 系统快捷入口；原 Portal 的完整系统与功能导航仍全部保留。</p></div></div><div class="v4-grid">'+
     '<div class="v4-card"><h3>系统管理</h3><p class="v4-sub">开发者、变量与高权限管理。</p><div class="v4-actions"><button class="btn primary" data-open-legacy="systemadmin">打开</button></div></div>'+
     '<div class="v4-card"><h3>健康检查</h3><p class="v4-sub">Provider、D1、Worker 与运行状态。</p><div class="v4-actions"><button class="btn primary" data-open-legacy="health">打开</button></div></div>'+
     '<div class="v4-card"><h3>日志</h3><p class="v4-sub">终端样式日志与排错。</p><div class="v4-actions"><button class="btn primary" data-open-legacy="logs">打开</button></div></div>'+
