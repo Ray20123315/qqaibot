@@ -29,7 +29,7 @@ import { pickSticker, pickStickerForText, stickerCqMessage } from "./src/social/
 import { cancelSchedule, cleanupExpiredModerationProposals, cleanupTransientState, countActiveSchedulesForUser, createAppealFromText, createScheduleRecord, extractScheduleMentionIds, formatScheduleLine, listUserSchedules, parseManagementScheduleAction, parseScheduleRequest, processConflictSignal, processDueSchedules, reviewScheduleWithGemma, reviseScheduleRecord, scheduledCronMode, skipScheduleOnce } from "./src/scheduler/runtime.js";
 import { buildHelpText } from "./src/help/commands.js";
 import { createInitialCommandRegistry } from "./src/v4/commands/catalog.js";
-import { resolveGroupPanelInput } from "./src/v4/commands/group-panel.js";
+import { normalizeGroupPanelSlashInvocation, resolveGroupPanelInput } from "./src/v4/commands/group-panel.js";
 import { fetchPublicUrl, getFeatureFlag, getPrivateAccessMode, isGroupWhitelisted, numericId, verifyCodexBridgeAccess, verifyOneBotAccess } from "./src/security/network.js";
 import { CODEX_BRIDGE_INTERNAL_CHAT_PATH, CODEX_BRIDGE_PATH, CODEX_BRIDGE_PROTOCOL, callCodexBridgeWebSocket, normalizeCodexBridgeRequest, normalizeCodexBridgeResponse } from "./src/v3/ai/codex-bridge.js";
 import { parseCodexChatCommand, parseCodexCommand, parseCodexWorkCommand } from "./src/v3/ai/codex-command.js";
@@ -1028,6 +1028,9 @@ const QQAIWorker = {
       forwardIds = [...new Set(forwardIds.filter(Boolean))].slice(0, AI_MEDIA_LIMITS.forwardBundles);
       fileAttachments = fileAttachments.filter(item => item && (item.name || item.file || item.url)).slice(0, 20);
       mentionedQqs = [...new Set([...mentionedQqs, ...eventMentionedQqs(body)].filter(Boolean).map(String))];
+      const groupPanelSlash = isGroup ? normalizeGroupPanelSlashInvocation(userMessage) : null;
+      if (groupPanelSlash?.matched) userMessage = groupPanelSlash.text;
+
       if (isSelfAccount) {
         const selfSlashBang = stripGroupAiOptOutPrefix(userMessage, botId);
         if (selfSlashBang.optedOut) {
