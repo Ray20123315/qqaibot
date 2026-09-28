@@ -1,9 +1,9 @@
 # VERIFY
 
-## QQ Open User Persistence
+## Plugin Security Review UI
 
-Verified commit: `38b5cbac605e8add9c25e28a8375dea3d6052bb5`
-GitHub Actions run: `36387088840`
+Verified commit: `e080b4f9a2a1d6b621092facf5e90fb0518bb5d1`
+GitHub Actions run: `36387524570`
 Conclusion: success
 
 Passed:
@@ -13,19 +13,17 @@ Passed:
 - npm run check:v4test
 - npm run check:bundle
 
-`verify-v4-user-persistence-routing.mjs` asserts:
-- QQ Open detection and canonical principal format;
-- private history module uses User Persistence read/write/delete;
-- USER_STORAGE_REQUIRED has no platform fallback;
-- worker reads QQ Open private history through user storage;
-- worker writes QQ Open private history through user storage;
-- QQ Open group chat-history branch has no appendChatHistoryTurn/dbPut;
-- platform group-content persistence block is disabled for QQ Open;
-- QQ Open clear-session routes through user storage.
+`verify-v4-plugin-security-page.mjs` verifies:
+- human-readable page title/status/impact labels;
+- no raw finding code rendering;
+- no hash rendering;
+- no API-path link on the ordinary page;
+- no pre/code blocks;
+- reduced-motion support.
 
 ## Pending
 
-- plugin security center UI modernization
-- same-Worker Cloudflare Preview
-- remaining QQ Open persistent-setting audit
+- QQ Open model-preference user-storage migration
+- same-Worker Preview
+- final persistence audit
 - QQ self-test workbook

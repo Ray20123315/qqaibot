@@ -2,32 +2,29 @@
 
 ## Latest Verified Product
 
-Commit: `38b5cbac605e8add9c25e28a8375dea3d6052bb5`
-GitHub Actions: `36387088840` success.
+Commit: `e080b4f9a2a1d6b621092facf5e90fb0518bb5d1`
+GitHub Actions run: `36387524570`
+Conclusion: success.
 
-## QQ Open User Content Persistence
+## Plugin Security Review Surface
 
-Private:
-- canonical QQ Open/portal principal is resolved explicitly;
-- `chat_history` reads and writes use `User Persistence`;
-- no connector means no durable history, not platform-D1 fallback.
+The existing public security page is now a product UI rather than an engineering dump:
+- blocked / review / clear summary counts;
+- human-readable risk level;
+- human-readable impact descriptions;
+- explicit explanation that global/cross-user/platform risks cannot be forced through;
+- responsive light/dark presentation;
+- reduced-motion support.
 
-Group:
-- platform conversation history is disabled for QQ Open;
-- `recent_logs`, per-message D1 snapshots and Vectorize conversational archiving are skipped on QQ Open path;
-- group durable context remains disabled until an explicit group storage-owner/connector relationship exists.
+The normal page intentionally does not render:
+- finding code identifiers;
+- SHA-256 values;
+- machine API URL;
+- source/attack artifacts;
+- pre/code blocks.
 
-Legacy cleanup:
-- QQ Open clear-session removes user-storage chat history if configured;
-- old platform-D1 private history is deleted for backwards privacy cleanup.
-
-OneBot:
-- existing persistence behavior remains unchanged by this transaction.
-
-## Verification
-
-Passed base regression, V3, V4 including `verify-v4-user-persistence-routing.mjs`, V4 test dry-run and Worker bundle.
+The JSON security API remains unchanged for automated tooling.
 
 ## Production
 
-No production Cloudflare resource was changed. main remains untouched by this task.
+No production Cloudflare resource changed. main was not modified by this task.
