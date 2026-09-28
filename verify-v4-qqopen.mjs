@@ -84,6 +84,8 @@ assert.equal(registry.resolve("!QQ语音角色").id, "qq.voice_roles");
 assert.equal(registry.resolve("!QQ语音 角色 测试").id, "qq.voice_reply");
 assert.equal(registry.resolve("!codexchat 测试").id, "ai.codexchat");
 assert.equal(registry.resolve("!codexwork --export 测试").id, "ai.codexwork");
+assert.equal(registry.get("ai.codexchat").discoveryCategory, "developer");
+assert.equal(registry.get("ai.codexwork").discoveryCategory, "developer");
 
 const groupPanel = registry.buildPanel("group");
 assert(groupPanel.panel.items.length <= 20);
