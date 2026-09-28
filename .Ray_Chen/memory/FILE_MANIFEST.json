@@ -1,14 +1,14 @@
 {
   "schema_version": 1,
-  "memory_version": "v0.0.30",
-  "task_id": "qqaibot-20260929-group-panel-slash-dispatch",
+  "memory_version": "v0.0.31",
+  "task_id": "qqaibot-20260929-temp-system-admin-login",
   "goal_revision": 1,
-  "transaction": "group_panel_slash_dispatch_20260929_final",
+  "transaction": "temp_system_admin_login_hotfix_20260929_final",
   "repository": "Ray20123315/qqaibot",
   "production_branch": "main",
-  "development_branch": "feature/v4-public-bot",
-  "product_before_revision": "6bcdb255f90e822ec68fec6cdc971cd292150802",
-  "product_after_revision": "64513e94f6634921f0b1ee8f7c6d5d44a754a6f5",
+  "development_branch": "hotfix/temp-system-admin-login-20260929",
+  "product_before_revision": "b7f8dcba63c7e86cbcb3d7c82e4b64d27b2c840b",
+  "product_after_revision": "4865c7c6c9f381916082e70063be78aaaba8e6d6",
   "verification": {
     "feature_product_ci_run": 36366445081,
     "regression_ci_run": 36366534308,
@@ -16,7 +16,7 @@
     "github_ci": "success",
     "isolated_cloudflare_build": "e280d9fb-bb0d-4659-91e8-cb2db205e1a3",
     "isolated_cloudflare_outcome": "success",
-    "production_cloudflare_build": "8aa6ab67-ad80-4ddd-b916-0b76e7bfcf3c",
+    "production_cloudflare_build": "e1e34aef-e53d-4851-9fbe-0f686f9c3651",
     "production_cloudflare_outcome": "success",
     "production_worker_version": "2aa24e2a-b640-4ac2-83ae-07efb428b099",
     "production_bindings_readback": "success",
@@ -70,7 +70,19 @@
     "memory_packaging_workflow": "configured",
     "group_panel_slash_dispatch": "verified",
     "ordinary_slash_bang_opt_out_preserved": "verified",
-    "live_panel_click_after_fix": "pending_user_test"
+    "live_panel_click_after_fix": "pending_user_test",
+    "temp_admin_hotfix_ci_run": 36477469841,
+    "temp_admin_main_ci_run": 36477699417,
+    "temp_admin_ci": "success",
+    "auth_rate_limiter_primary": "cloudflare",
+    "auth_rate_limiter_fallback": "d1_compare_and_swap",
+    "temp_admin_expiry": "2026-10-02T00:00:00+08:00",
+    "temp_admin_secret_values_recorded": false,
+    "temp_admin_secret_bindings_readback": "success",
+    "temp_admin_secret_deployment": "9f61378e-d52d-4617-b799-e1fe9c11cbab",
+    "temp_admin_worker_version": "0c070598-6d6e-436a-8704-25a46acd0a6f",
+    "temp_admin_worker_version_number": 2137,
+    "live_true_password_smoke_test": "pending_user"
   },
   "changes": [
     {
@@ -1244,10 +1256,89 @@
       "after_revision": "this_memory_commit",
       "verification": "memory packaging workflow must produce exact v0.0.30 archive + SHA-256",
       "changed_at": "2026-09-29T04:08:00+08:00"
+    },
+    {
+      "location_type": "github",
+      "provider": "GitHub",
+      "resource_id_or_path": "src/portal/auth.js",
+      "action": "modified",
+      "branch_or_container": "hotfix/temp-system-admin-login-20260929 -> main",
+      "before_revision": "b7f8dcba63c7e86cbcb3d7c82e4b64d27b2c840b",
+      "after_revision": "4865c7c6c9f381916082e70063be78aaaba8e6d6",
+      "verification": "TEMP credential validation/expiry + system-admin session regression; CI success",
+      "changed_at": "2026-09-29T04:23:00+08:00"
+    },
+    {
+      "location_type": "github",
+      "provider": "GitHub",
+      "resource_id_or_path": "worker.js",
+      "action": "modified",
+      "branch_or_container": "hotfix/temp-system-admin-login-20260929 -> main",
+      "before_revision": "b7f8dcba63c7e86cbcb3d7c82e4b64d27b2c840b",
+      "after_revision": "4865c7c6c9f381916082e70063be78aaaba8e6d6",
+      "verification": "Cloudflare Rate Limiter preferred; D1 CAS fallback on invocation failure; CI success",
+      "changed_at": "2026-09-29T04:23:00+08:00"
+    },
+    {
+      "location_type": "github",
+      "provider": "GitHub",
+      "resource_id_or_path": "verify-system-admin-auth.mjs",
+      "action": "modified",
+      "branch_or_container": "hotfix/temp-system-admin-login-20260929 -> main",
+      "before_revision": "b7f8dcba63c7e86cbcb3d7c82e4b64d27b2c840b",
+      "after_revision": "4865c7c6c9f381916082e70063be78aaaba8e6d6",
+      "verification": "TEMP system-admin, expiry and D1 fallback rate-limit regression; CI success",
+      "changed_at": "2026-09-29T04:23:00+08:00"
+    },
+    {
+      "location_type": "github",
+      "provider": "GitHub",
+      "resource_id_or_path": "refs/heads/main",
+      "action": "fast_forward",
+      "branch_or_container": "main",
+      "before_revision": "b7f8dcba63c7e86cbcb3d7c82e4b64d27b2c840b",
+      "after_revision": "4865c7c6c9f381916082e70063be78aaaba8e6d6",
+      "verification": "main CI 36477699417 success",
+      "changed_at": "2026-09-29T04:23:00+08:00"
+    },
+    {
+      "location_type": "cloudflare",
+      "provider": "Cloudflare",
+      "resource_id_or_path": "workers/scripts/qqai",
+      "action": "auto_deployed_by_connected_build",
+      "branch_or_container": "production",
+      "before_revision": "b7f8dcba63c7e86cbcb3d7c82e4b64d27b2c840b",
+      "after_revision": "4865c7c6c9f381916082e70063be78aaaba8e6d6",
+      "commit_or_hash": "e1e34aef-e53d-4851-9fbe-0f686f9c3651",
+      "verification": "Connected Build success + live health HTTP 200 / ok=true",
+      "changed_at": "2026-09-29T04:23:00+08:00"
+    },
+    {
+      "location_type": "cloudflare",
+      "provider": "Cloudflare",
+      "resource_id_or_path": "workers/scripts/qqai secrets: PORTAL_TEMP_ADMIN_USERNAME, PORTAL_TEMP_ADMIN_PASSWORD, PORTAL_TEMP_ADMIN_EXPIRES_AT",
+      "action": "secret_bindings_added",
+      "branch_or_container": "production",
+      "before_revision": "absent",
+      "after_revision": "secret-triggered deployment 9f61378e-d52d-4617-b799-e1fe9c11cbab",
+      "commit_or_hash": "0c070598-6d6e-436a-8704-25a46acd0a6f",
+      "verification": "binding names read back; values intentionally unreadable/unrecorded; health success",
+      "changed_at": "2026-09-29T04:23:00+08:00"
+    },
+    {
+      "location_type": "github",
+      "provider": "GitHub",
+      "resource_id_or_path": ".Ray_Chen/memory/*",
+      "action": "final_reconciliation",
+      "branch_or_container": "main",
+      "before_revision": "v0.0.30",
+      "after_revision": "v0.0.31",
+      "verification": "memory packaging workflow must produce exact v0.0.31 TAR.GZ + SHA-256",
+      "changed_at": "2026-09-29T04:23:00+08:00"
     }
   ],
   "internal_memory_transaction": {
-    "action": "complete QQ group panel slash dispatch repair and bump memory to v0.0.30",
-    "note": "Only reserved /!面板 is normalized. Ordinary /! remains AI opt-out."
+    "action": "record Portal auth hotfix and TEMP system-admin creation; bump memory to v0.0.31",
+    "note": "TEMP username/password values are excluded. Generated archive/SHA/evidence do not recursively trigger another memory transaction."
   }
 }

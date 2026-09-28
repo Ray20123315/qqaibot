@@ -1,30 +1,35 @@
 # Ray_Chen Memory Entry
 
-- memory_version: v0.0.30
+- memory_version: v0.0.31
 - project: QQAIBOT
 - repository: Ray20123315/QQAIBOT
 - canonical_branch: main
-- development_branch: v4-qqopen-native
-- task_id: qqaibot-20260929-group-panel-slash-dispatch
+- development_branch: hotfix/temp-system-admin-login-20260929
+- task_id: qqaibot-20260929-temp-system-admin-login
 - task_status: completed
 - goal_revision: 1
-- product_revision: 64513e94f6634921f0b1ee8f7c6d5d44a754a6f5
-- updated_at: 2026-09-29T04:08:00+08:00
+- product_revision: 4865c7c6c9f381916082e70063be78aaaba8e6d6
+- updated_at: 2026-09-29T04:23:00+08:00
 
 ## Completed Goal
 
-Fixed live QQ group panel clicks that were sending a leading-slash command such as `/!面板 基础` and being swallowed by the existing `/!` AI-opt-out syntax.
+Repair Portal login returning `AUTH_RATE_LIMIT_UNAVAILABLE` and provide a temporary highest-privilege system-admin account without replacing the normal production admin credential.
 
 ## Verified Behavior
 
-- `/!面板 基础` is normalized to `!面板 基础` before AI opt-out parsing and returns category child commands.
-- `/!面板 基础 help` expands to the existing `!help` handler.
-- `/!普通内容` remains the original group-member AI bypass and is not converted into a command.
-- Existing direct `!` commands, permissions, confirmations, cooldowns and Portal switches are unchanged.
-- Development CI 36476322049: success.
-- Main CI 36476525721: success.
-- Cloudflare production Connected Build 8aa6ab67-ad80-4ddd-b916-0b76e7bfcf3c: success.
+- Cloudflare `MY_RATE_LIMITER` is still the preferred authentication limiter.
+- If the Cloudflare limiter invocation is unavailable, Portal auth uses an atomic D1 compare-and-swap fallback instead of disabling rate limits.
+- Repeated login attempts remain rate-limited in fallback mode.
+- TEMP system-admin login is separate from the normal environment admin and creates `systemAdmin=true`, role `developer`.
+- TEMP credentials require an explicit expiry, cannot exceed 7 days, and are rejected after expiry.
+- TEMP credential values are stored only as Cloudflare secrets and are excluded from Git, Ray_Chen memory and Gmail.
+- TEMP account expiry: 2026-10-02T00:00:00+08:00.
+- hotfix CI 36477469841: success.
+- main CI 36477699417: success.
+- Cloudflare main build e1e34aef-e53d-4851-9fbe-0f686f9c3651: success.
+- secret-triggered deployment 9f61378e-d52d-4617-b799-e1fe9c11cbab / Worker version 0c070598-6d6e-436a-8704-25a46acd0a6f.
+- production /healthz: HTTP 200, ok=true, 10 ok / 1 warning / 0 error.
 
 ## Recovery Route
 
-Treat 64513e94f6634921f0b1ee8f7c6d5d44a754a6f5 as the verified product revision. If a live QQ panel command still fails, capture the exact sent message text and QQ event type; do not change the category registry until the transport/input shape is known.
+Treat 4865c7c6c9f381916082e70063be78aaaba8e6d6 as the verified product revision. Do not recover TEMP credential values from memory; if the emergency account is lost or expired, rotate the three `PORTAL_TEMP_ADMIN_*` secrets with a new short expiry.
