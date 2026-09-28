@@ -94,10 +94,12 @@ assert(groupPanels.every(panel => panel.panel.items.length <= 7));
 assert(groupPanels.flatMap(panel => panel.panel.items).some(item => item.name === "!禁言" && item.only_admin === true));
 
 const categorizedGroupPanels = registry.buildCategorizedPanels("group");
-assert(categorizedGroupPanels.length <= 6);
+assert(categorizedGroupPanels.length <= 8);
 assert(categorizedGroupPanels.every(panel => panel.panel.items.length <= 20));
-assert(categorizedGroupPanels.some(panel => /\[基础与 AI\]/.test(panel.panel.remark)));
-assert(categorizedGroupPanels.some(panel => /\[管理操作\]/.test(panel.panel.remark)));
+assert(categorizedGroupPanels.some(panel => /\[基础与多模态\]/.test(panel.panel.remark)));
+assert(categorizedGroupPanels.some(panel => /\[AI 管理\]/.test(panel.panel.remark));
+assert(categorizedGroupPanels.some(panel => /\[群操作\]/.test(panel.panel.remark));
+assert(categorizedGroupPanels.some(panel => /\[活动投票与排程\]/.test(panel.panel.remark));
 assert(categorizedGroupPanels.flatMap(panel => panel.panel.items).some(item => item.name === "!禁言" && item.only_admin === true));
 assert(!categorizedGroupPanels.flatMap(panel => panel.panel.items).some(item => item.name === "!codexchat"));
 
@@ -218,7 +220,9 @@ assert(!discoveryCalls.some(row => row[0] === "deletePanel" && row[1] === "forei
 assert(discoveryCalls.some(row => row[0] === "listPanels" && row[1] === "c2c"));
 assert(discoveryCalls.some(row => row[0] === "listPanels" && row[1] === "group"));
 assert(firstDiscovery.panels <= 10);
-assert(firstDiscovery.categories.includes("basic-ai"));
+assert(firstDiscovery.categories.includes("basic"));
+assert(firstDiscovery.categories.includes("group-ops"));
+assert(firstDiscovery.categories.includes("ai-admin"));
 assert(firstDiscovery.categories.includes("developer"));
 assert(discoveryCalls.some(row => row[0] === "createPanel" && row[2]?.target_type === "specific" && row[2]?.user_openids?.includes("dev-openid")));
 const syncedMenu = discoveryCalls.find(row => row[0] === "putMenu")?.[1];
