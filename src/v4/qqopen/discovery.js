@@ -53,11 +53,6 @@ async function syncQqOpenDiscovery(api, registry, {
   const developerIds = uniqueIds(developerOpenids);
   const menu = registry.buildMenu({ maxItems: 10, maxSubItems: 5 });
 
-  const globalC2C = registry.buildCategorizedPanels("c2c", {
-    remarkPrefix: "QQAIBOT V4 C2C",
-    maxItemsPerPanel: 20,
-    permissions: ["member"]
-  });
   const globalGroup = registry.buildCategorizedPanels("group", {
     remarkPrefix: "QQAIBOT V4 GROUP",
     maxItemsPerPanel: 20,
@@ -73,7 +68,7 @@ async function syncQqOpenDiscovery(api, registry, {
       })
     : [];
 
-  const panels = [...globalC2C, ...globalGroup, ...developerC2C];
+  const panels = [...globalGroup, ...developerC2C];
   if (panels.length > 10) {
     throw new Error(`QQ_OPEN_DISCOVERY_QPM_SAFE_PANEL_LIMIT:${panels.length}`);
   }
