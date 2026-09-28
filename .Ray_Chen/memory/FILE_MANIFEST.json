@@ -1,14 +1,14 @@
 {
   "schema_version": 1,
-  "memory_version": "v0.0.30",
-  "task_id": "qqaibot-20260929-group-panel-slash-dispatch",
+  "memory_version": "v0.0.31",
+  "task_id": "qqaibot-20260929-group-panel-keyboard",
   "goal_revision": 1,
-  "transaction": "group_panel_slash_dispatch_20260929_final",
+  "transaction": "group_panel_keyboard_checkpoint_20260929",
   "repository": "Ray20123315/qqaibot",
   "production_branch": "main",
   "development_branch": "feature/v4-public-bot",
-  "product_before_revision": "6bcdb255f90e822ec68fec6cdc971cd292150802",
-  "product_after_revision": "64513e94f6634921f0b1ee8f7c6d5d44a754a6f5",
+  "product_before_revision": "b7f8dcba63c7e86cbcb3d7c82e4b64d27b2c840b",
+  "product_after_revision": "b7f8dcba63c7e86cbcb3d7c82e4b64d27b2c840b",
   "verification": {
     "feature_product_ci_run": 36366445081,
     "regression_ci_run": 36366534308,
@@ -24,8 +24,8 @@
     "discovery_sync_after_fix": "pending_authenticated_status",
     "live_mapping_after_fix": "pending_user_test",
     "command_fallback_implementation": "verified",
-    "development_ci": "success",
-    "main_update": "verified",
+    "development_ci": "pending",
+    "main_update": "pending",
     "development_ci_run": 36476322049,
     "main_ci": "success",
     "production_commit": "64513e94f6634921f0b1ee8f7c6d5d44a754a6f5",
@@ -70,7 +70,10 @@
     "memory_packaging_workflow": "configured",
     "group_panel_slash_dispatch": "verified",
     "ordinary_slash_bang_opt_out_preserved": "verified",
-    "live_panel_click_after_fix": "pending_user_test"
+    "live_panel_click_after_fix": "pending_user_test",
+    "group_panel_keyboard": "in_progress",
+    "keyboard_pagination": "pending",
+    "keyboard_interaction_routing": "pending"
   },
   "changes": [
     {
@@ -1244,10 +1247,21 @@
       "after_revision": "this_memory_commit",
       "verification": "memory packaging workflow must produce exact v0.0.30 archive + SHA-256",
       "changed_at": "2026-09-29T04:08:00+08:00"
+    },
+    {
+      "location_type": "github",
+      "provider": "GitHub",
+      "resource_id_or_path": ".Ray_Chen/memory/{MEMORY_VERSION.txt,00_START_HERE.md,ACTIVE_TASK.md,FILE_MANIFEST.json}",
+      "action": "checkpoint_planned",
+      "branch_or_container": "v4-qqopen-native",
+      "before_revision": "b7f8dcba63c7e86cbcb3d7c82e4b64d27b2c840b",
+      "after_revision": "this_checkpoint",
+      "verification": "button-card UX task recorded before product patch",
+      "changed_at": "2026-09-29T04:20:00+08:00"
     }
   ],
   "internal_memory_transaction": {
-    "action": "complete QQ group panel slash dispatch repair and bump memory to v0.0.30",
-    "note": "Only reserved /!面板 is normalized. Ordinary /! remains AI opt-out."
+    "action": "start QQ group panel inline-keyboard UX",
+    "note": "Product code unchanged in this checkpoint."
   }
 }
