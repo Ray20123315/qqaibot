@@ -498,13 +498,15 @@ QQAIBOT V4 不会直接删除 NapCat/OneBot。生产目标是混合模式：
 - NapCat/OneBot 保留为辅助观测与旧能力通道，补官方暂时无法提供的客户端级事件/资料。
 - 私聊和明确 @ 机器人消息由 QQ Open 拥有；OneBot 对应消息只入库观察，不重复执行插件/AI/群管。
 - 普通群消息不会因为“计划使用官方全量”就直接禁用 OneBot。只有某个 `group_openid` 实际收到过 `GROUP_MESSAGE_CREATE` 后，才动态标记该群的官方全量已生效，并让映射群的 OneBot 普通消息降级为辅助观测。
-- 数字 QQ 群号和 `group_openid` 绝不猜测对应关系，需显式设置 `QQ_HYBRID_GROUP_MAP`。
-- 排程/主动插话：只有存在群映射且官方 `GROUP_MSG_RECEIVE` / 授权状态允许时走 QQ Open；否则保留 OneBot fallback。含数字 QQ @mention 的旧排程仍走 OneBot，避免把数字 QQ 当成 OpenID。
+- 数字 QQ 群号和 `group_openid` 不做单次猜测。显式 `QQ_HYBRID_GROUP_MAP` 永远优先；若未配置，系统会把 OneBot 与 QQ Open 在短时间内看到的同一群消息做保守关联，只有同一候选群累计至少 3 个不同官方消息 ID 的一致证据才写入 D1 动态映射。内容过短/常见、同时命中多个群或出现映射冲突时不会学习。
+- 自动映射可先借 `GROUP_AT_MESSAGE_CREATE` 学习；当同一 `group_openid` 后续真正出现 `GROUP_MESSAGE_CREATE`，才视为该群官方「接收所有消息」已实际生效，普通 OneBot 群消息才降为辅助观测。
+- 排程/主动插话：只要静态或已确认的动态群映射存在，且官方 `GROUP_MSG_RECEIVE` / 授权状态允许，就优先走 QQ Open；否则保留 OneBot fallback。含数字 QQ @mention 的旧排程仍走 OneBot，避免把数字 QQ 当成 OpenID。
 
 示例：
 
 ```text
 QQ_HYBRID_PRIMARY=qq-open
+# 可选：静态覆盖；留 {} 时允许系统用多次消息证据保守学习
 QQ_HYBRID_GROUP_MAP={"808882936":"你的_group_openid"}
 ```
 
@@ -521,3 +523,16 @@ QQ_OPEN_INTENTS=100663296
 ```
 
 按钮/快捷菜单 callback 可以直接使用 `!指令`、JSON/Base64 JSON 内的 `command`，或通过 `QQ_OPEN_FEATURE_COMMAND_MAP` 显式将 `feature_id` 映射到现有命令。未知 callback 只 ACK/记录，不猜测执行内容。
+
+
+### QQ Open 官方生命周期事件
+
+目前基础 Intent `33554432 (1<<25)` 下，系统也会记录官方生命周期状态：
+
+- `FRIEND_ADD / FRIEND_DEL`：记录好友关系、来源 scene/scene_param 与可用的 union_openid。
+- `GROUP_ADD_ROBOT / GROUP_DEL_ROBOT`：记录机器人加入/退出官方群，以及操作成员 OpenID。
+- `GROUP_MEMBER_ADD / GROUP_MEMBER_REMOVE`：记录官方群成员 OpenID 的加入/退出状态。
+- 这些 OpenID 状态独立存储，不会塞进旧版 numeric QQ 成员表，也不会因此伪造 QQ 号映射。
+- Portal 的 QQ Open 页会显示生命周期事件计数、最后事件、静态映射数与自动学习映射数。
+
+静态群映射仍是部署者的最高优先级覆盖；自动映射只用于减少人工配置，不会覆盖冲突映射。

@@ -62,6 +62,8 @@ QQ_OPEN_DEVELOPER_OPENIDS=
 # Hybrid QQ transport
 QQ_HYBRID_PRIMARY=qq-open
 # JSON: {"numeric_onebot_group_id":"qq_group_openid"}
+# Optional authoritative numeric QQ group -> group_openid override.
+# If left {}, the hybrid runtime may learn mappings conservatively from 3 distinct official message matches.
 QQ_HYBRID_GROUP_MAP={}
 # Optional callback feature_id -> existing command, for INTERACTION type 12.
 QQ_OPEN_FEATURE_COMMAND_MAP={}

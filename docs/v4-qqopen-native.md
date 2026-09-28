@@ -86,7 +86,9 @@ QQ Open owns official interactive side effects. OneBot remains an auxiliary obse
 - Group messages that explicitly mention the bot are auxiliary because QQ Open receives the corresponding group-at event.
 - Ordinary OneBot group messages remain on the legacy path until the mapped QQ Open group has actually emitted `GROUP_MESSAGE_CREATE`.
 - Receipt of `GROUP_MESSAGE_CREATE` writes an official-full-group evidence key. After that, mapped OneBot group message events are observation-only.
-- `QQ_HYBRID_GROUP_MAP` is the only accepted mapping from numeric OneBot group ids to QQ `group_openid`; no inference is performed.
+- Explicit `QQ_HYBRID_GROUP_MAP` remains the authoritative override.
+- If no explicit mapping exists, V4 may learn a D1-backed mapping conservatively by correlating short-window OneBot and QQ Open group observations. It requires at least 3 distinct official message ids for one unambiguous numeric-group candidate; generic short text, multi-group ambiguity and mapping conflicts are rejected.
+- `GROUP_AT_MESSAGE_CREATE` can contribute mapping evidence, but ordinary OneBot group messages only become auxiliary after that official group has actually emitted `GROUP_MESSAGE_CREATE` and therefore demonstrated receive-all-message capability.
 
 Auxiliary OneBot events continue to update structured observation/history data but stop before V3 plugin dispatch and the AI/application side-effect path.
 
@@ -96,7 +98,7 @@ Auxiliary OneBot events continue to update structured observation/history data b
 
 Informational group schedules and active-speaking messages prefer QQ Open only when:
 1. QQ Open is the hybrid primary;
-2. the numeric group has an explicit `group_openid` mapping;
+2. the numeric group has an explicit or confirmed learned `group_openid` mapping;
 3. the mapped group currently has official active-push permission;
 4. the outgoing legacy message does not contain numeric QQ mentions.
 
@@ -114,3 +116,14 @@ Otherwise the existing OneBot send path remains the fallback.
 - unknown/unmapped callbacks are acknowledged/recorded but are never guessed into commands.
 
 The current default Intent remains `33554432`. Only after the QQ application is granted INTERACTION permission should it be changed to `100663296`.
+
+
+## Official lifecycle state
+
+The existing `GROUP_AND_C2C_EVENT (1<<25)` baseline also normalizes lifecycle events without requiring the Interaction intent:
+
+- `FRIEND_ADD` / `FRIEND_DEL`
+- `GROUP_ADD_ROBOT` / `GROUP_DEL_ROBOT`
+- `GROUP_MEMBER_ADD` / `GROUP_MEMBER_REMOVE`
+
+Lifecycle records remain OpenID-native. They are stored separately from the legacy numeric QQ member tables so an OpenID is never mistaken for a QQ number. Gateway diagnostics expose lifecycle count/last event, while the Portal exposes lifecycle activity plus static/learned hybrid mapping counts.
