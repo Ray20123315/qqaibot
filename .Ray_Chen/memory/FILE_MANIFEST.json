@@ -1,34 +1,69 @@
 {
   "schema_version": 1,
-  "memory_version": "v0.0.20",
+  "memory_version": "v0.0.21",
   "task_id": "qqaibot-20260928-v4-public-bot",
   "goal_revision": 1,
-  "transaction": "task_bootstrap_20260928_v4_public_001",
+  "transaction": "foundation_20260928_v4_public_002",
   "repository": "Ray20123315/qqaibot",
   "production_branch": "main",
   "development_branch": "feature/v4-public-bot",
-  "product_before_revision": "08ceeb725590d9efb0160ea38733d929e6e7d18c",
-  "product_after_revision": "08ceeb725590d9efb0160ea38733d929e6e7d18c",
+  "product_before_revision": "61acced3d9bd96ec54cc02f30cff239bef9873b6",
+  "product_after_revision": "PENDING_COMMIT_SHA",
   "verification": {
-    "main_head_readback": "08ceeb725590d9efb0160ea38733d929e6e7d18c",
-    "branch_creation": "success",
-    "product_code_changes": "not_started"
+    "branch_isolation": "verified",
+    "recovery_after_connector_limit": "branch head unchanged",
+    "foundation_source": "prepared",
+    "github_ci": "pending",
+    "production_cloudflare_mutation": "none"
   },
   "changes": [
     {
       "location_type": "github",
       "provider": "GitHub",
-      "resource_id_or_path": "refs/heads/feature/v4-public-bot",
-      "action": "created",
+      "resource_id_or_path": "src/v4/public/access.js;src/v4/public/politics.js;src/v4/hybrid/capability-router.js",
+      "action": "prepared_create",
       "branch_or_container": "feature/v4-public-bot",
-      "before_revision": null,
-      "after_revision": "08ceeb725590d9efb0160ea38733d929e6e7d18c",
-      "verification": "create_branch success",
-      "changed_at": "2026-09-28T12:09:00+08:00"
+      "verification": "foundation test prepared"
+    },
+    {
+      "location_type": "github",
+      "provider": "GitHub",
+      "resource_id_or_path": "src/core/permissions.js",
+      "action": "prepared_modify",
+      "branch_or_container": "feature/v4-public-bot",
+      "verification": "safe fallback wiring prepared"
+    },
+    {
+      "location_type": "github",
+      "provider": "GitHub",
+      "resource_id_or_path": "src/ai/provider-registry.js",
+      "action": "prepared_modify",
+      "branch_or_container": "feature/v4-public-bot",
+      "verification": "membership-bound provider model prepared"
+    },
+    {
+      "location_type": "github",
+      "provider": "GitHub",
+      "resource_id_or_path": "src/plugins/runtime-guard.js",
+      "action": "prepared_create",
+      "branch_or_container": "feature/v4-public-bot",
+      "verification": "runtime guard foundation prepared"
+    },
+    {
+      "location_type": "github",
+      "provider": "GitHub",
+      "resource_id_or_path": "LICENSE",
+      "action": "prepared_modify",
+      "branch_or_container": "feature/v4-public-bot",
+      "verification": "copyright/source-available terms prepared"
+    },
+    {
+      "location_type": "github",
+      "provider": "GitHub",
+      "resource_id_or_path": ".github/workflows/validate.yml;package.json;verify-v4-public-foundation.mjs",
+      "action": "prepared_modify_or_create",
+      "branch_or_container": "feature/v4-public-bot",
+      "verification": "CI update prepared"
     }
-  ],
-  "internal_memory_transaction": {
-    "action": "start isolated V4 public-bot task and record accepted constraints",
-    "note": "No production code, production Cloudflare resource, or secret was modified."
-  }
+  ]
 }

@@ -8,6 +8,7 @@ on:
       - codex/v3-forward-staging-20260924
       - chatgpt/qqaibot-continue-20260925
       - v4-qqopen-native
+      - feature/v4-public-bot
   pull_request:
     branches:
       - main

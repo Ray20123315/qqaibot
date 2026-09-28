@@ -1,12 +1,35 @@
-SOURCE-AVAILABLE SOFTWARE LICENSE AGREEMENT
+SOURCE-AVAILABLE PROPRIETARY NOTICE
 
-Copyright (c) 2026 ray20123315. All rights reserved.
+Copyright © 2026 Ray Chen. All rights reserved.
 
-Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the "Software"), to use, copy, and distribute the Software, subject to the following conditions:
+The source code and associated materials in this repository are made publicly
+visible for inspection and transparency. Public visibility does not make this
+software open source and does not grant a license to use the software.
 
-1. FREE USAGE: You are permitted to download, deploy, and execute the Software for personal or internal use without charge.
-2. MODIFICATION BY REQUEST ONLY: Modification, alteration, translation, or creation of derivative works of the Software is strictly prohibited UNLESS explicit, written consent is granted by the copyright holder (ray20123315) upon your request.
-3. NO PUBLIC DISTRIBUTION OF MODIFICATIONS: Even if modification rights are granted by the copyright holder, any modified version of the Software MUST NOT be published, shared, or distributed publicly in any form (e.g., GitHub, Hugging Face, public forums).
-4. The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
+No license is granted to use, execute, deploy, host, copy, reproduce, modify,
+translate, adapt, create derivative works from, redistribute, sublicense,
+sell, offer as a service, or otherwise exploit any part of this software,
+except when one of the following applies:
 
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+1. Ray Chen has given you prior explicit written permission for the specific
+   use; or
+2. a right is granted to you directly and unavoidably by the terms of the
+   hosting platform solely as necessary to access, view, or use that
+   platform's repository features. No additional software-use rights are
+   granted by this notice.
+
+Any permission granted in writing may be subject to additional conditions and
+may be revoked or limited according to its terms.
+
+Third-party components, libraries, APIs, trademarks, and other materials
+remain subject to their respective owners' terms and licenses.
+
+THE SOFTWARE AND MATERIALS ARE PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO WARRANTIES OF
+MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE, TITLE, AND
+NONINFRINGEMENT. TO THE MAXIMUM EXTENT PERMITTED BY APPLICABLE LAW, THE
+COPYRIGHT HOLDER SHALL NOT BE LIABLE FOR ANY CLAIM, DAMAGES, OR OTHER
+LIABILITY ARISING FROM OR IN CONNECTION WITH THE SOFTWARE OR ITS USE.
+
+For licensing permission, contact the copyright holder before using the
+software beyond the limited repository-access rights described above.

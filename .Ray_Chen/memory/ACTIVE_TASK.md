@@ -17,68 +17,71 @@ goal: Build isolated V4 public-bot architecture and UI on feature/v4-public-bot 
 - Developer can enable/disable silent group whitelist from AIBot private chat; whitelist state is not announced in the group.
 - Political content uses text prefilter first, then classifier for uncertain content, plus output guard.
 - User plugins run with tenant/resource boundaries; global-risk behavior is terminated, quarantined and surfaced in a security-review page.
-- Copyright notice becomes "Copyright © 2026 Ray Chen. All rights reserved." with source-available no-use terms consistent with public GitHub constraints.
-- Cloudflare preview uses the existing qqai Worker preview/version flow, not a second Worker.
+- Copyright notice is "Copyright © 2026 Ray Chen. All rights reserved." with source-available no-use terms.
+- Cloudflare preview uses existing qqai Worker preview/version flow, not a second Worker.
 - Main branch remains untouched.
-
-## hard_constraints
-
-- No production merge/deploy.
-- No raw secrets in Git, logs, Ray_Chen memory, diagnostics or normal UI.
-- No implicit mapping between QQ OpenID and numeric QQ IDs.
-- Destructive fallback must not double-execute after ambiguous timeout/unknown result.
-- D1/KV scale should remain lean; add storage only when required.
-- QQ platform privacy guide is platform-authored and is not modified by this task.
 
 ## execution_plan
 
 Phase 0 — branch/recovery gate
-- [x] Read current Ray_Chen canonicals from main.
-- [x] Verify latest main head.
+- [x] Recover Ray_Chen state and verify main head.
 - [x] Create feature/v4-public-bot from exact main head.
-- [ ] Inspect current V4/auth/plugin/provider/politics surfaces.
+- [x] Inspect V4/auth/plugin/provider/politics surfaces.
 
 Phase 1 — core policy/runtime
-- [ ] Add capability-first QQ Open/OneBot decision layer.
-- [ ] Add roles and membership-bound AI sharing.
-- [ ] Add consent/whitelist state model and political layered guard.
-- [ ] Add plugin runtime guard/quarantine model.
+- [x] Add safe capability-first QQ Open -> OneBot fallback foundation.
+- [x] Add platform role/legal-consent/group-whitelist state module.
+- [x] Add membership-bound AI Provider access foundation.
+- [x] Add text-first political guard contract.
+- [x] Add runtime plugin boundary/quarantine hook foundation.
+- [ ] Integrate provider ownership/BYOK endpoints and QQ private-message settings.
+- [ ] Integrate political classifier/output guard into AI send path.
+- [ ] Integrate runtime plugin guard into active plugin host.
 
 Phase 2 — user surfaces
-- [ ] Rebuild V4 portal language/interaction shell.
+- [ ] Rebuild V4 portal human-readable product shell.
 - [ ] Implement developer-mode hidden 00000 interaction.
-- [ ] Implement BYOK secure-page + QQ-DM onboarding.
+- [ ] Implement authenticated secure-page + QQ-DM BYOK onboarding.
 - [ ] Add QQ-DM settings flows and plugin security center.
 
-Phase 3 — licensing/Cloudflare/self-test
-- [ ] Replace licensing notice/terms.
-- [ ] Configure/verify same-Worker preview workflow without production storage mutation.
-- [ ] Add regression tests and run V4/full checks.
-- [ ] Fill official 2023 QQ self-test report only after implementation verification.
+Phase 3 — Cloudflare/self-test
+- [ ] Configure/verify same-Worker preview without production storage mutation.
+- [ ] Run V4/full checks and repair regressions.
+- [ ] Fill official 2023 QQ self-test report after implementation verification.
 
-current_phase: Phase 0
-current_step: Inspect implementation surfaces before first product-code transaction.
+current_phase: Phase 1
+current_step: Foundation transaction prepared; commit and CI verification are the current gate.
 completed_steps:
-- recovered Ray_Chen memory v0.0.19 from main
-- main head verified as 08ceeb725590d9efb0160ea38733d929e6e7d18c
-- feature/v4-public-bot created from that exact commit
-files_created: []
+- branch isolation and v0.0.20 checkpoint
+- inspected existing provider registry, plugin governance/quarantine/security center, QQ Open legacy bridge and Portal
+- reused existing D1-backed provider store and plugin security architecture instead of adding new storage products
+- prepared safe capability fallback, access model, provider sharing model, political guard, runtime plugin guard and license update
+files_created:
+- src/v4/public/access.js
+- src/v4/public/politics.js
+- src/v4/hybrid/capability-router.js
+- src/plugins/runtime-guard.js
+- verify-v4-public-foundation.mjs
 files_modified:
-- .Ray_Chen/memory/00_START_HERE.md
-- .Ray_Chen/memory/ACTIVE_TASK.md
-- .Ray_Chen/memory/CURRENT_STATE.md
-- .Ray_Chen/memory/USER_REQUIREMENTS.md
-- .Ray_Chen/memory/DECISIONS.md
-- .Ray_Chen/memory/FILE_MANIFEST.json
-- .Ray_Chen/memory/MEMORY_VERSION.txt
+- src/ai/provider-registry.js
+- src/core/permissions.js
+- package.json
+- .github/workflows/validate.yml
+- LICENSE
+- Ray_Chen memory files
 files_pending:
-- V4 runtime/policy/provider/plugin/portal files after inspection
-commands_run:
-- GitHub branch/read operations only
+- BYOK authenticated endpoint and DM workflow
+- provider membership resolver integration
+- portal redesign/developer mode
+- plugin runtime wiring/security-review UI
+- Cloudflare same-Worker preview
+- self-test workbook
 verification_results:
-- branch creation succeeded
-known_failures: []
+- source blobs prepared
+- branch commit/CI pending
+known_failures:
+- first large connector orchestration hit per-call limit before creating a commit; Recovery Gate confirmed branch head remained 61acced3d9bd96ec54cc02f30cff239bef9873b6 and no product write landed
 blockers: []
-next_exact_action: Inspect current authentication, AI provider, V4 runtime/portal, plugin governance and political filtering implementation on feature/v4-public-bot, then implement Phase 1 foundation.
-resume_rule: Continue only on feature/v4-public-bot; re-check branch head and main divergence before each write transaction.
-last_checkpoint_at: 2026-09-28T12:09:00+08:00
+next_exact_action: Create one Git tree/commit from prepared blobs, move feature/v4-public-bot, then inspect GitHub CI.
+resume_rule: Continue only on feature/v4-public-bot. Never fallback destructive QQ Open operations on unknown timeout/5xx outcomes.
+last_checkpoint_at: 2026-09-28T12:45:00+08:00

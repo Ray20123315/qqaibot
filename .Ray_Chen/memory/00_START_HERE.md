@@ -1,6 +1,6 @@
 # Ray_Chen Memory Entry
 
-- memory_version: v0.0.20
+- memory_version: v0.0.21
 - project: QQAIBOT
 - repository: Ray20123315/qqaibot
 - canonical_branch: main
@@ -10,11 +10,19 @@
 - goal_revision: 1
 - branch_base_commit: 08ceeb725590d9efb0160ea38733d929e6e7d18c
 - production_worker: qqai
-- updated_at: 2026-09-28T12:09:00+08:00
+- updated_at: 2026-09-28T12:45:00+08:00
 
-## Goal
+## Current Phase
 
-Build the public V4 product on an isolated branch without modifying main: QQ Open capability-first with automatic OneBot fallback; human-readable portal; QQ-private-message settings; BYOK with authenticated secure-page and direct-message key entry; consent/legal gate; developer-controlled silent group whitelist; layered political blocking; tenant-safe user plugins; and source-available all-rights-reserved licensing.
+Phase 1 foundation has been produced on the isolated branch:
+- capability-first QQ Open with safe OneBot fallback contract;
+- role/legal-access state;
+- membership-bound AI Provider sharing model;
+- text-first political guard contract;
+- runtime plugin boundary hook;
+- restrictive source-available copyright notice.
+
+GitHub CI for the foundation commit is the next gate. Production Cloudflare resources and main remain untouched.
 
 ## Hard Boundary
 
@@ -27,6 +35,6 @@ Build the public V4 product on an isolated branch without modifying main: QQ Ope
 
 1. Read ACTIVE_TASK.md, CURRENT_STATE.md, USER_REQUIREMENTS.md, DECISIONS.md, GOTCHAS.md, VERIFY.md and FILE_MANIFEST.json.
 2. Verify branch feature/v4-public-bot still descends from base commit above.
-3. Never assume a capability from configuration alone; use runtime permission/API evidence.
-4. Never expose raw API keys or source code in normal UI.
-5. Do not touch main unless the user explicitly changes this task boundary.
+3. Check foundation CI before adding BYOK/DM/UI integration.
+4. Never fall back destructive operations after UNKNOWN timeout/network/5xx outcome.
+5. Never coerce QQ Open OpenID into numeric QQ.

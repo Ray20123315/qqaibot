@@ -4,26 +4,26 @@
 
 All prior QQ Open, OpenID, Gateway, Portal, permissions, D1/Cron, Connected Builds and hybrid risks remain relevant.
 
-## G-037 Synthetic OpenID mention leakage
-Risk: taking `reply_plan.mentionIds` from the legacy-compatible AI plan and serializing it as CQ mention makes QQ Open output literal `<@OpenID>` text.
-Mitigation: do not inject those mention IDs into ordinary QQ Open AI responses. Use source-message `msg_id + msg_seq` passive-reply semantics.
+## G-043 Destructive fallback ambiguity
+Risk: QQ Open may complete a moderation action while the caller only sees a timeout/5xx. Falling back to OneBot in this state can execute the action twice.
+Mitigation: classify timeout/network/5xx as UNKNOWN and never fallback. Only explicit unsupported/unavailable or permission-denied states may fall back.
 
-## G-038 QQ visible quote UI is not equivalent to passive reply
-Risk: assuming `msg_id` must render a classic quote bubble leads to attempts to send unsupported `message_reference`.
-Mitigation: keep official `msg_id + msg_seq`; do not depend on a currently unsupported group/C2C message-reference field.
+## G-044 OpenID is not a numeric QQ identity
+Risk: mapped group identity does not imply member identity mapping. Reusing a QQ Open member OpenID as OneBot user_id can target the wrong entity or fail unpredictably.
+Mitigation: targeted OneBot fallback requires an independently known numeric user ID. Never coerce OpenID.
 
-## G-039 Hybrid mapping chicken-and-egg
-Risk: if OneBot observations are only recorded after a group is already auxiliary/mapped, an unmapped group can never learn.
-Mitigation: record lightweight human OneBot group observations before ownership logic; recording evidence must not imply OneBot ownership.
+## G-045 AI Provider soul-existence
+Risk: a provider could keep sharing an API to a group after leaving it if authorization only checks a stored group list.
+Mitigation: sharing records are only intent; every shared access decision must re-verify current membership for both provider owner and consuming member.
 
-## G-040 Hybrid event-order dependency
-Risk: QQ Open may arrive before OneBot or vice versa. One-sided immediate matching loses evidence.
-Mitigation: keep capped recent lists for both transports and reconcile again on the later event.
+## G-046 Legal whitelist is not consent
+Risk: treating a developer group whitelist as user consent creates false consent records.
+Mitigation: store consent and developer group override separately. Override changes access only and remains silent in the target group.
 
-## G-041 Low-information mapping evidence
-Risk: short/common text such as HI/你好 can collide across groups.
-Mitigation: keep those samples excluded. Require distinctive content/media and 3 distinct official message IDs.
+## G-047 Text-only political filters are incomplete
+Risk: names, euphemisms and indirect political questions may bypass keyword rules.
+Mitigation: text prefilter executes first; ambiguous content requires a classifier and generated output receives the same guard before send. Unknown classification defaults to block.
 
-## G-042 QQ discovery required fields
-Risk: menu/panel sync can return HTTP 400 "必填字段缺失" when the request body is not wrapped or panel scope is omitted.
-Mitigation: use `{menu}`, scoped panel listing, `records` pagination and `{panel}` updates.
+## G-048 Plugin static scan is not enough
+Risk: benign-looking plugin code may attempt cross-tenant/global access only at runtime.
+Mitigation: runtime boundary violations with non-overridable impacts must terminate execution and create/update a security-center record.

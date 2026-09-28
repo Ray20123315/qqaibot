@@ -9,6 +9,8 @@ import { parseUnlimitedNonNegativeInteger } from "../moderation/runtime.js";
 import { getOneBotHub, readJson, sha256Hex } from "../portal/auth.js";
 import { numericId } from "../security/network.js";
 import { oneBotReadOnlyActionAllowed, oneBotReadOnlyMode } from "../onebot/read-only.js";
+import { resolveOneBotGroupForQqOpen } from "../v4/hybrid/ownership.js";
+import { classifyOfficialCapabilityError, prepareOneBotFallbackPayload, shouldFallbackToOneBot } from "../v4/hybrid/capability-router.js";
 
 
 
@@ -605,35 +607,8 @@ async function isKnownOutboundMessage(env, info) {
 
 
 
-async function callOneBotAction(env, actionPayload, timeoutMs = 15000) {
-  if (String(env?.QQAI_EVENT_PLATFORM || "") === "qq-open") {
-    if (!env.QQ_OPEN_GATEWAY) throw new Error("QQ_OPEN_GATEWAY_NOT_BOUND");
-    const payload = actionPayload?.action ? actionPayload : { action: actionPayload?.action, params: actionPayload?.params || {} };
-    const stub = env.QQ_OPEN_GATEWAY.get(env.QQ_OPEN_GATEWAY.idFromName("default"));
-    const res = await stub.fetch("https://qq-open-gateway/api/v4/qqopen/legacy-action", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        ...payload,
-        timeoutMs,
-        context: {
-          platform: "qq-open",
-          scope: String(env.QQAI_QQOPEN_GROUP_ID || "") ? "group" : "private",
-          groupId: String(env.QQAI_QQOPEN_GROUP_ID || ""),
-          userId: String(env.QQAI_QQOPEN_USER_ID || ""),
-          messageId: String(env.QQAI_QQOPEN_MESSAGE_ID || ""),
-          eventId: String(env.QQAI_QQOPEN_EVENT_ID || ""),
-          captureMessageSends: String(env.QQAI_QQOPEN_CAPTURE_SENDS || "") === "true",
-          botUserId: String(env.QQAI_QQOPEN_BOT_USER_ID || "")
-        }
-      })
-    });
-    const data = await res.json().catch(() => null);
-    if (!res.ok || data?.ok !== true) throw new Error(data?.error || ("QQ_OPEN_LEGACY_ACTION_" + res.status));
-    return data.data;
-  }
+async function callOneBotRpc(env, payload, timeoutMs = 15000) {
   if (!env.ONEBOT_HUB) throw new Error("ONEBOT_HUB_NOT_BOUND");
-  const payload = actionPayload?.action ? actionPayload : { action: actionPayload?.action, params: actionPayload?.params || {} };
   const action = String(payload?.action || "").trim();
   if (oneBotReadOnlyMode(env) && !oneBotReadOnlyActionAllowed(action)) {
     throw new Error("ONEBOT_READ_ONLY_ACTION_BLOCKED");
@@ -646,6 +621,51 @@ async function callOneBotAction(env, actionPayload, timeoutMs = 15000) {
   const data = await res.json().catch(() => null);
   if (!res.ok || !data?.ok) throw new Error(data?.error || `ONEBOT_RPC_${res.status}`);
   return data.data;
+}
+
+async function callOneBotAction(env, actionPayload, timeoutMs = 15000) {
+  const payload = actionPayload?.action ? actionPayload : { action: actionPayload?.action, params: actionPayload?.params || {} };
+  if (String(env?.QQAI_EVENT_PLATFORM || "") === "qq-open") {
+    if (!env.QQ_OPEN_GATEWAY) throw new Error("QQ_OPEN_GATEWAY_NOT_BOUND");
+    const stub = env.QQ_OPEN_GATEWAY.get(env.QQ_OPEN_GATEWAY.idFromName("default"));
+    try {
+      const res = await stub.fetch("https://qq-open-gateway/api/v4/qqopen/legacy-action", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          ...payload,
+          timeoutMs,
+          context: {
+            platform: "qq-open",
+            scope: String(env.QQAI_QQOPEN_GROUP_ID || "") ? "group" : "private",
+            groupId: String(env.QQAI_QQOPEN_GROUP_ID || ""),
+            userId: String(env.QQAI_QQOPEN_USER_ID || ""),
+            messageId: String(env.QQAI_QQOPEN_MESSAGE_ID || ""),
+            eventId: String(env.QQAI_QQOPEN_EVENT_ID || ""),
+            captureMessageSends: String(env.QQAI_QQOPEN_CAPTURE_SENDS || "") === "true",
+            botUserId: String(env.QQAI_QQOPEN_BOT_USER_ID || "")
+          }
+        })
+      });
+      const data = await res.json().catch(() => null);
+      if (!res.ok || data?.ok !== true) throw new Error(data?.error || ("QQ_OPEN_LEGACY_ACTION_" + res.status));
+      return data.data;
+    } catch (error) {
+      const capability = classifyOfficialCapabilityError(error);
+      if (!shouldFallbackToOneBot(capability)) throw error;
+      if (!env.ONEBOT_HUB) throw error;
+      const params = payload?.params && typeof payload.params === "object" ? payload.params : {};
+      const officialGroupId = String(env.QQAI_QQOPEN_GROUP_ID || params.group_id || params.group || "").trim();
+      const oneBotGroupId = officialGroupId ? await resolveOneBotGroupForQqOpen(env, officialGroupId) : "";
+      const fallbackPayload = prepareOneBotFallbackPayload(payload, {
+        oneBotGroupId,
+        officialGroupId,
+        reason: capability.kind
+      });
+      return callOneBotRpc(env, fallbackPayload, timeoutMs);
+    }
+  }
+  return callOneBotRpc(env, payload, timeoutMs);
 }
 
 export { PERMISSIONS, appendIndex, buildLongGroupConversationContext, callOneBotAction, checkRuntimeRateLimit, enrichAuditLogsForPortal, explicitProgramPermissionIndexKey, getEffectivePermissions, getRuntimeRateLimitSeconds, isKnownOutboundMessage, listAiDecisionLogs, listExplicitPrivateAccess, listExplicitProgramPermissions, markOutboundPending, markRuntimeRateLimitCompletion, modelCapabilityLabel, modelHealthStatusLabel, modelHealthStatusRank, modelPreferenceLabel, normalizeFingerprintText, normalizeMemoryItems, normalizeModelPreference, normalizePermissionName, outboundFingerprint, permissionLabel, removeFromIndex, runtimeRateLimitScope, setExplicitPermission, setPrivateAccessMode, updateAiDecisionLog, updateExplicitProgramPermissionIndex, writeAiDecisionLog, writeSystemAudit };
