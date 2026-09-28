@@ -22,7 +22,7 @@ const DISCOVERY_CATEGORY_META = Object.freeze({
   developer: Object.freeze({ key:"developer", label:"开发者" }),
   general: Object.freeze({ key:"other", label:"其他" })
 });
-const DEFAULT_GLOBAL_DISCOVERY_PERMISSIONS = Object.freeze(["member", "group_ops", "ai_admin", "owner"]);
+const DEFAULT_GLOBAL_DISCOVERY_PERMISSIONS = Object.freeze(["member", "group_ops", "ai_admin", "owner", "developer"]);
 
 function text(value) { return String(value ?? "").trim(); }
 function qqTextUnits(value) {
@@ -131,7 +131,7 @@ function createCommandRegistry(definitions = []) {
   function buildPanel(scope, { remark = "QQAIBOT V4", maxItems = 20 } = {}) {
     if (!COMMAND_SCOPES.includes(scope)) throw new Error("V4_COMMAND_INVALID_SCOPE");
     const items = list({ scope })
-      .filter(command => command.panel.enabled && command.permission !== "developer")
+      .filter(command => command.panel.enabled)
       .slice(0, Math.max(1, Math.min(20, Number(maxItems) || 20)))
       .map(command => panelItem(command, scope));
     return Object.freeze({
@@ -143,7 +143,7 @@ function createCommandRegistry(definitions = []) {
   function buildPanels(scope, { remarkPrefix = "QQAIBOT V4", maxItemsPerPanel = 20 } = {}) {
     if (!COMMAND_SCOPES.includes(scope)) throw new Error("V4_COMMAND_INVALID_SCOPE");
     const limit = Math.max(1, Math.min(20, Number(maxItemsPerPanel) || 20));
-    const rows = list({ scope }).filter(command => command.panel.enabled && command.permission !== "developer");
+    const rows = list({ scope }).filter(command => command.panel.enabled);
     const panels = [];
     for (let offset = 0; offset < rows.length; offset += limit) {
       const page = rows.slice(offset, offset + limit);
