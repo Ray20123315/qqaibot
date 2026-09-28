@@ -97,9 +97,9 @@ const categorizedGroupPanels = registry.buildCategorizedPanels("group");
 assert(categorizedGroupPanels.length <= 8);
 assert(categorizedGroupPanels.every(panel => panel.panel.items.length <= 20));
 assert(categorizedGroupPanels.some(panel => /\[基础与多模态\]/.test(panel.panel.remark)));
-assert(categorizedGroupPanels.some(panel => /\[AI 管理\]/.test(panel.panel.remark));
-assert(categorizedGroupPanels.some(panel => /\[群操作\]/.test(panel.panel.remark));
-assert(categorizedGroupPanels.some(panel => /\[活动投票与排程\]/.test(panel.panel.remark));
+assert(categorizedGroupPanels.some(panel => /\[AI 管理\]/.test(panel.panel.remark)));
+assert(categorizedGroupPanels.some(panel => /\[群操作\]/.test(panel.panel.remark)));
+assert(categorizedGroupPanels.some(panel => /\[活动投票与排程\]/.test(panel.panel.remark)));
 assert(categorizedGroupPanels.flatMap(panel => panel.panel.items).some(item => item.name === "!禁言" && item.only_admin === true));
 assert(!categorizedGroupPanels.flatMap(panel => panel.panel.items).some(item => item.name === "!codexchat"));
 
