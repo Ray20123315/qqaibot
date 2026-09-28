@@ -10,6 +10,8 @@ assert.match(workflow,/--ignore-base-config/);
 assert.match(workflow,/wrangler d1 execute DB --remote --config wrangler\.toml --file tools\/v4public-preview-bootstrap\.sql/);
 assert.match(workflow,/npm run check:v4/);
 assert.match(workflow,/npm run check:bundle/);
+assert.match(workflow,/Cloudflare GitHub secrets are not configured; Preview deploy steps will be skipped/);
+assert.match(workflow,/if: steps\\.cf_creds\\.outputs\\.available == 'true'/);
 assert.match(workflow,/Smoke test live Preview/);
 assert.match(workflow,/upload-artifact@v4/);
 assert.doesNotMatch(workflow,/wrangler deploy --config wrangler\.toml(?! --dry-run)/);

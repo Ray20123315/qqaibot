@@ -1,9 +1,6 @@
 name: Deploy V4 same-Worker Preview
 
 on:
-  push:
-    branches:
-      - feature/v4-public-bot
   workflow_dispatch:
 
 permissions:
@@ -37,14 +34,20 @@ jobs:
       - name: Run repository verification
         run: npm run check && npm run check:v3 && npm run check:v4 && npm run check:v4test && npm run check:bundle
 
-      - name: Verify Cloudflare CI credentials exist
+      - name: Check optional Cloudflare CI credentials
+        id: cf_creds
         shell: bash
         run: |
-          set -euo pipefail
-          test -n "$CLOUDFLARE_API_TOKEN" || { echo "::error::Missing GitHub Actions secret CLOUDFLARE_API_TOKEN"; exit 1; }
-          test -n "$CLOUDFLARE_ACCOUNT_ID" || { echo "::error::Missing GitHub Actions secret CLOUDFLARE_ACCOUNT_ID"; exit 1; }
+          if [ -n "$CLOUDFLARE_API_TOKEN" ] && [ -n "$CLOUDFLARE_ACCOUNT_ID" ]; then
+            echo "available=true" >> "$GITHUB_OUTPUT"
+            echo "Cloudflare CI credentials are available."
+          else
+            echo "available=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::Cloudflare GitHub secrets are not configured; Preview deploy steps will be skipped."
+          fi
 
       - name: Bootstrap isolated V4 Preview table
+        if: steps.cf_creds.outputs.available == 'true'
         shell: bash
         run: |
           set -euo pipefail
@@ -54,6 +57,7 @@ jobs:
           npx wrangler d1 execute DB --remote --config wrangler.toml --file tools/v4public-preview-bootstrap.sql --yes
 
       - name: Create or update same-Worker Preview
+        if: steps.cf_creds.outputs.available == 'true'
         id: preview
         shell: bash
         run: |
@@ -68,6 +72,7 @@ jobs:
           if [ -n "$DEPLOYMENT_URL" ]; then echo "Deployment URL: $DEPLOYMENT_URL"; fi
 
       - name: Smoke test live Preview
+        if: steps.cf_creds.outputs.available == 'true'
         shell: bash
         env:
           PREVIEW_URL: ${{ steps.preview.outputs.preview_url }}
@@ -86,6 +91,7 @@ jobs:
           echo "Live Preview smoke tests passed."
 
       - name: Upload Preview evidence
+        if: steps.cf_creds.outputs.available == 'true'
         uses: actions/upload-artifact@v4
         with:
           name: v4-public-preview-evidence
@@ -94,3 +100,7 @@ jobs:
             /tmp/preview-evidence.txt
             /tmp/health.json
           retention-days: 14
+
+      - name: Preview deploy fallback status
+        if: steps.cf_creds.outputs.available != 'true'
+        run: echo "Preview deployment skipped because optional GitHub Cloudflare secrets are not configured."
