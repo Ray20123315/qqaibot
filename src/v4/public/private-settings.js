@@ -3,6 +3,7 @@ import { listProviderAccountsForPrincipal, upsertProviderAccount } from "../../a
 import { acceptLegalStatement, setDeveloperGroupWhitelist } from "./access.js";
 import { createResourceInputTicket, qqOpenPrincipal, resolveCanonicalPrincipal } from "./resource-tickets.js";
 import { listStorageConnectorsForPrincipal, testStorageConnector, upsertStorageConnector } from "./storage-registry.js";
+import { userPersistenceState } from "./user-persistence.js";
 
 const AI_PROVIDER_ALIASES = Object.freeze({
   gemini: "google_gemini",
@@ -40,11 +41,12 @@ function resourceLink(env, ticket) {
   return base ? `${base}/connect-resource?ticket=${encodeURIComponent(ticket)}` : "";
 }
 
-function privateSettingsMenu({ aiCount = 0, storageCount = 0, developer = false } = {}) {
+function privateSettingsMenu({ aiCount = 0, storageCount = 0, persistenceReady = false, developer = false } = {}) {
   return [
     "AIBot 設定中心",
     `AI 服務：${safeCountLabel(aiCount)} 個`,
     `資料儲存：${safeCountLabel(storageCount)} 個`,
+    `長期保存：${persistenceReady ? "已啟用" : "未啟用（請連接 D1 / KV）"}`,
     "",
     "可用指令：",
     "新增AI　建立安全輸入頁",
@@ -69,11 +71,17 @@ async function handleV4PrivateSettingsMessage(env, message = {}) {
   const normalized = text.normalize("NFKC").trim();
 
   if (/^(?:設定|设置|AI設定|AI设置|資料設定|资料设置|!設定|!设置)$/i.test(normalized)) {
-    const [ai, storage] = await Promise.all([
+    const [ai, storage, persistence] = await Promise.all([
       listProviderAccountsForPrincipal(env, principal),
-      listStorageConnectorsForPrincipal(env, principal)
+      listStorageConnectorsForPrincipal(env, principal),
+      userPersistenceState(env, principal)
     ]);
-    return Object.freeze({ handled: true, reply: privateSettingsMenu({ aiCount: ai.length, storageCount: storage.length, developer }) });
+    return Object.freeze({ handled: true, reply: privateSettingsMenu({
+      aiCount: ai.length,
+      storageCount: storage.length,
+      persistenceReady: persistence.connected,
+      developer
+    }) });
   }
 
   if (/^(?:新增AI|新增 AI|!新增AI)$/i.test(normalized)) {

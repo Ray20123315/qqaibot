@@ -9,6 +9,7 @@ import {
 import { portalPrincipal, qqOpenPrincipal } from "./src/v4/public/resource-tickets.js";
 import { privateSettingsMenu } from "./src/v4/public/private-settings.js";
 import { resourceConnectPage } from "./src/v4/portal/resource-page.js";
+import { USER_PERSISTENCE_POLICY } from "./src/v4/public/user-persistence.js";
 
 const d1 = normalizeStorageConnector({
   id: "my-d1",
@@ -39,10 +40,14 @@ assert.throws(() => normalizeStorageConnector({
 assert.equal(portalPrincipal({ qq: "3569028262" }), "qq:3569028262");
 assert.equal(portalPrincipal({ systemAdmin: true, qq: "system-admin" }), "");
 assert.equal(qqOpenPrincipal("OPENID_ABC"), "qqopen:OPENID_ABC");
+assert.equal(USER_PERSISTENCE_POLICY.controlPlane, "platform_d1");
+assert.equal(USER_PERSISTENCE_POLICY.userContent, "user_storage_required");
+assert.equal(USER_PERSISTENCE_POLICY.fallback, "none");
 
-const menu = privateSettingsMenu({ aiCount: 2, storageCount: 1, developer: true });
+const menu = privateSettingsMenu({ aiCount: 2, storageCount: 1, persistenceReady: true, developer: true });
 assert.match(menu, /AI 服務：2 個/);
 assert.match(menu, /資料儲存：1 個/);
+assert.match(menu, /長期保存：已啟用/);
 assert.match(menu, /!資料庫 D1/);
 assert.match(menu, /!白名單/);
 
@@ -67,6 +72,7 @@ assert.match(apiSource, /qqai_session/);
 assert.match(apiSource, /consumeResourceInputTicket/);
 assert.match(apiSource, /upsertProviderAccount/);
 assert.match(apiSource, /upsertStorageConnector/);
+assert.match(apiSource, /userPersistenceState/);
 
 const runtime = fs.readFileSync("src/v4/qqopen/runtime.js", "utf8");
 const privateIntercept = runtime.indexOf("const privateSettings = await handleV4PrivateSettingsMessage");

@@ -20,6 +20,7 @@ import {
   testStorageConnector,
   upsertStorageConnector
 } from "../public/storage-registry.js";
+import { userPersistenceState } from "../public/user-persistence.js";
 
 const BASE = "/api/portal/v4/resources";
 
@@ -61,11 +62,12 @@ async function handleV4ResourcePortalApi(request, env, url = null) {
 
   try {
     if (request.method === "GET" && target.pathname === BASE) {
-      const [ai, storage] = await Promise.all([
+      const [ai, storage, persistence] = await Promise.all([
         listProviderAccountsForPrincipal(env, principal),
-        listStorageConnectorsForPrincipal(env, principal)
+        listStorageConnectorsForPrincipal(env, principal),
+        userPersistenceState(env, principal)
       ]);
-      return jsonResponse({ ok: true, ai, storage });
+      return jsonResponse({ ok: true, ai, storage, persistence });
     }
 
     if (request.method === "POST" && target.pathname === BASE + "/ticket") {
