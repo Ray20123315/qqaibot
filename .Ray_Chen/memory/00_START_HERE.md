@@ -1,29 +1,36 @@
 # Ray_Chen Memory Entry
 
-- memory_version: v0.0.26
+- memory_version: v0.0.27
 - project: QQAIBOT
 - repository: Ray20123315/qqaibot
 - canonical_branch: main
 - development_branch: v4-qqopen-native
-- task_id: qqaibot-20260928-full-command-panels-portal
-- task_status: completed
-- goal_revision: 3
-- product_revision: d0b4a610c68a4736abdc5f71f8e35a4e82b45b4a
-- updated_at: 2026-09-28T17:27:00+08:00
+- task_id: qqaibot-20260929-group-panel-hierarchy
+- task_status: active
+- goal_revision: 4
+- base_repository_head: df7958e9e99be0d5724dc4fd24a39da616e1befd
+- updated_at: 2026-09-29T03:40:00+08:00
 
-## Completed Goal
+## Current Goal
 
-QQ group command discovery now contains the full group-scoped command surface instead of only management commands. Developer is the top cumulative permission level: in any scope, Developer discovery includes every command enabled for that scope.
+Repair the live QQ group command panel based on the user's screenshot. Multiple group panels created through /v2/panels are not being presented by the QQ client as a merged categorized command surface; the client currently exposes only one effective group panel.
 
-## QQ Platform Constraint
+## Confirmed Platform Limits
 
-For group panels, target_type=specific associates a panel with group_openids, not individual user_openids. QQ cannot express a Developer-only panel for one person inside a group. Therefore group discovery contains all group-scoped commands, while runtime authorization remains the security boundary.
+- one bot: at most 20 panels;
+- one panel: at most 20 PanelItem entries;
+- group PanelItem supports command/link only, not nested submenu items;
+- group target_type=specific targets group_openids, not individual users.
 
-## Verified State
+## Implementation Direction
 
-- ordinary group commands are present together with management commands;
-- Developer commands are present in group discovery;
-- Developer C2C discovery uses all permission classes for C2C-capable commands;
-- development CI 36403191041: success;
-- main CI 36403381999: success;
-- production Connected Build 005556b2-9747-4bb4-852c-e3157e5c7069: success.
+Use exactly one managed group panel containing category-root commands (well below 20 items). Category roots route to existing registered commands as subcommands, so the full group command surface remains reachable without deleting existing command aliases or bypassing permissions. C2C keeps the native submenu menu.
+
+## Recovery Route
+
+1. Read ACTIVE_TASK.md.
+2. Continue on v4-qqopen-native, already fast-forwarded to current main.
+3. Add reusable group-panel category/router helper.
+4. Sync exactly one QQAIBOT V4 group panel.
+5. Route !面板 <分类> <子指令> to the existing handler.
+6. Run full CI, then update main and verify production.
