@@ -1,35 +1,29 @@
 # CURRENT_STATE
 
-## GitHub
+## Integration Candidate
 
-- canonical branch: `main`
-- verified product revision: `64513e94f6634921f0b1ee8f7c6d5d44a754a6f5`
-- development CI `36476322049`: success
-- main CI `36476525721`: success
+- integration commit: `af4b743fec796cc071aafce3559f66c2ae7c9a50`
+- first parent / newest main: `4865c7c6c9f381916082e70063be78aaaba8e6d6`
+- second parent / keyboard branch: `d4ae8580ff28c7cc7a88d888b2ea0a65c6a55f0f`
+- development integration CI: pending
 
-## Cloudflare Production
+## Preserved Main Work
 
-- Worker: `qqai`
-- Connected Build: `8aa6ab67-ad80-4ddd-b916-0b76e7bfcf3c`
-- commit: `64513e94f6634921f0b1ee8f7c6d5d44a754a6f5`
-- branch: `main`
-- outcome: success
+- Portal temporary system-admin credential support remains present.
+- D1 fallback rate limiting for Portal auth remains present.
+- verify-system-admin-auth.mjs remains from newest main.
 
-## QQ Group Panel
+## Keyboard Work Included
 
-- one managed group root panel contains category roots.
-- category router remains `!面板 <分类> [子指令] [参数]`.
-- QQ-rendered slash form `/!面板 ...` is normalized before group AI opt-out parsing.
-- ordinary `/!普通内容` still bypasses AI and is not treated as a panel command.
-- category + child reuses existing canonical handlers and permissions.
+- group category replies can carry two-column QQ inline keyboards.
+- large categories paginate within keyboard row limits.
+- callback data reuses existing canonical command handlers.
+- QQ Open runtime sends keyboard payloads for passive message replies and interaction replies.
+- deterministic unsupported keyboard responses may fall back to text.
 
-## Public V4 / Hybrid State
+## Safety
 
-- QQ Open remains primary.
-- OneBot remains controlled fallback/auxiliary.
-- public-user AI/storage isolation work from current main is preserved.
-- runtime authorization remains authoritative regardless of command-panel visibility.
-
-## Remaining Live Verification
-
-Automated tests prove input normalization and routing order but cannot generate a real QQ client panel click. One live group panel click should be checked after deployment.
+- no force update was used;
+- runtime permissions and confirmations are unchanged;
+- ordinary /! AI bypass semantics are unchanged;
+- QQ Open remains primary and OneBot remains controlled fallback.
