@@ -62,15 +62,15 @@ async function syncQqOpenDiscovery(api, registry, {
     ? registry.buildCategorizedPanels("c2c", {
         remarkPrefix: "QQAIBOT V4 DEV",
         maxItemsPerPanel: 20,
-        permissions: ["developer"],
+        permissions: ["member", "developer"],
         targetType: "specific",
         userOpenids: developerIds
       })
     : [];
 
   const panels = [...globalGroup, ...developerC2C];
-  if (panels.length > 10) {
-    throw new Error(`QQ_OPEN_DISCOVERY_QPM_SAFE_PANEL_LIMIT:${panels.length}`);
+  if (panels.length > 20) {
+    throw new Error(`QQ_OPEN_DISCOVERY_PANEL_LIMIT:${panels.length}`);
   }
 
   const nextFingerprint = fingerprint({ menu, panels });
