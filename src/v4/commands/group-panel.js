@@ -23,6 +23,19 @@ function commandToken(value) {
   return normalized(value).replace(/^[!！]+/, "");
 }
 
+function normalizeGroupPanelSlashInvocation(value) {
+  const source = String(value ?? "");
+  const prefix = source.match(/^(\s*(?:\[CQ:(?:reply|at),[^\]]+\]\s*)*)/i)?.[1] || "";
+  const rest = source.slice(prefix.length);
+  if (!/^[/／][!！]面板(?:\s|$)/i.test(rest)) {
+    return Object.freeze({ matched:false, text:source });
+  }
+  return Object.freeze({
+    matched:true,
+    text:`${prefix}${rest.replace(/^[/／](?=[!！]面板(?:\s|$))/i, "")}`
+  });
+}
+
 function categoryMetaByToken(value) {
   const token = normalized(value);
   return GROUP_PANEL_CATEGORY_META.find(meta =>
@@ -125,5 +138,6 @@ export {
   GROUP_PANEL_CATEGORY_META,
   assertGroupPanelCoverage,
   buildGroupRootPanel,
+  normalizeGroupPanelSlashInvocation,
   resolveGroupPanelInput
 };
