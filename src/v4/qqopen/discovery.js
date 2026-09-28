@@ -51,18 +51,19 @@ async function syncQqOpenDiscovery(api, registry, {
   developerOpenids = []
 } = {}) {
   const developerIds = uniqueIds(developerOpenids);
+  const allPermissions = ["member", "group_ops", "ai_admin", "owner", "developer"];
   const menu = registry.buildMenu({ maxItems: 10, maxSubItems: 5 });
 
   const globalGroup = registry.buildCategorizedPanels("group", {
     remarkPrefix: "QQAIBOT V4 GROUP",
     maxItemsPerPanel: 20,
-    permissions: ["member", "group_ops", "ai_admin", "owner"]
+    permissions: allPermissions
   });
   const developerC2C = developerIds.length
     ? registry.buildCategorizedPanels("c2c", {
         remarkPrefix: "QQAIBOT V4 DEV",
         maxItemsPerPanel: 20,
-        permissions: ["member", "developer"],
+        permissions: allPermissions,
         targetType: "specific",
         userOpenids: developerIds
       })
