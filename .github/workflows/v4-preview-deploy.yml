@@ -1,0 +1,96 @@
+name: Deploy V4 same-Worker Preview
+
+on:
+  push:
+    branches:
+      - feature/v4-public-bot
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: qqaibot-v4-public-preview
+  cancel-in-progress: true
+
+jobs:
+  preview:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      FORCE_COLOR: "0"
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Install dependencies
+        run: npm ci --ignore-scripts
+
+      - name: Run repository verification
+        run: npm run check && npm run check:v3 && npm run check:v4 && npm run check:v4test && npm run check:bundle
+
+      - name: Verify Cloudflare CI credentials exist
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$CLOUDFLARE_API_TOKEN" || { echo "::error::Missing GitHub Actions secret CLOUDFLARE_API_TOKEN"; exit 1; }
+          test -n "$CLOUDFLARE_ACCOUNT_ID" || { echo "::error::Missing GitHub Actions secret CLOUDFLARE_ACCOUNT_ID"; exit 1; }
+
+      - name: Bootstrap isolated V4 Preview table
+        shell: bash
+        run: |
+          set -euo pipefail
+          grep -q 'CREATE TABLE IF NOT EXISTS kv_store_v4public_preview' tools/v4public-preview-bootstrap.sql
+          ! grep -Eq 'CREATE TABLE IF NOT EXISTS kv_store[[:space:]]*\\(' tools/v4public-preview-bootstrap.sql
+          ! grep -Eqi '\\bDROP[[:space:]]+(TABLE|DATABASE)\\b' tools/v4public-preview-bootstrap.sql
+          npx wrangler d1 execute DB --remote --config wrangler.toml --file tools/v4public-preview-bootstrap.sql --yes
+
+      - name: Create or update same-Worker Preview
+        id: preview
+        shell: bash
+        run: |
+          set -euo pipefail
+          output="$(npx wrangler preview --config wrangler.toml --name feature-v4-public-bot --ignore-base-config --message "GitHub ${GITHUB_SHA}" --json)"
+          printf '%s\n' "$output" | tee /tmp/v4-preview.json
+          PREVIEW_URL="$(printf '%s' "$output" | jq -er '.preview.urls[0]')"
+          DEPLOYMENT_URL="$(printf '%s' "$output" | jq -er '.deployment.urls[0] // empty')"
+          echo "preview_url=$PREVIEW_URL" >> "$GITHUB_OUTPUT"
+          echo "deployment_url=$DEPLOYMENT_URL" >> "$GITHUB_OUTPUT"
+          echo "Preview URL: $PREVIEW_URL"
+          if [ -n "$DEPLOYMENT_URL" ]; then echo "Deployment URL: $DEPLOYMENT_URL"; fi
+
+      - name: Smoke test live Preview
+        shell: bash
+        env:
+          PREVIEW_URL: ${{ steps.preview.outputs.preview_url }}
+        run: |
+          set -euo pipefail
+          curl -fsS --retry 10 --retry-delay 3 --retry-all-errors "$PREVIEW_URL/" -o /tmp/home.html
+          curl -fsS --retry 10 --retry-delay 3 --retry-all-errors "$PREVIEW_URL/portal" -o /tmp/portal.html
+          curl -fsS --retry 10 --retry-delay 3 --retry-all-errors "$PREVIEW_URL/plugin-security" -o /tmp/plugin-security.html
+          curl -fsS --retry 10 --retry-delay 3 --retry-all-errors "$PREVIEW_URL/healthz" -o /tmp/health.json
+          grep -qi '<html' /tmp/home.html
+          grep -qi 'QQAI' /tmp/home.html
+          grep -qi '<html' /tmp/portal.html
+          grep -q 'QQAI 插件安全中心' /tmp/plugin-security.html
+          node --input-type=module -e 'const x=JSON.parse(await (await import("node:fs/promises")).readFile("/tmp/health.json","utf8")); if(!x||typeof x!=="object") process.exit(1);'
+          printf '%s\n' "preview_url=$PREVIEW_URL" "commit=$GITHUB_SHA" > /tmp/preview-evidence.txt
+          echo "Live Preview smoke tests passed."
+
+      - name: Upload Preview evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: v4-public-preview-evidence
+          path: |
+            /tmp/v4-preview.json
+            /tmp/preview-evidence.txt
+            /tmp/health.json
+          retention-days: 14
