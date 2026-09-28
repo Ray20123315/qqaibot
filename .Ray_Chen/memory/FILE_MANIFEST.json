@@ -1,14 +1,14 @@
 {
   "schema_version": 1,
-  "memory_version": "v0.0.31",
-  "task_id": "qqaibot-20260929-temp-system-admin-login",
+  "memory_version": "v0.0.34",
+  "task_id": "qqaibot-20260929-group-panel-keyboard",
   "goal_revision": 1,
-  "transaction": "temp_system_admin_login_hotfix_20260929_final",
+  "transaction": "group_panel_keyboard_merge_main_memory_20260929",
   "repository": "Ray20123315/qqaibot",
   "production_branch": "main",
   "development_branch": "hotfix/temp-system-admin-login-20260929",
-  "product_before_revision": "b7f8dcba63c7e86cbcb3d7c82e4b64d27b2c840b",
-  "product_after_revision": "4865c7c6c9f381916082e70063be78aaaba8e6d6",
+  "product_before_revision": "4865c7c6c9f381916082e70063be78aaaba8e6d6",
+  "product_after_revision": "af4b743fec796cc071aafce3559f66c2ae7c9a50",
   "verification": {
     "feature_product_ci_run": 36366445081,
     "regression_ci_run": 36366534308,
@@ -25,7 +25,7 @@
     "live_mapping_after_fix": "pending_user_test",
     "command_fallback_implementation": "verified",
     "development_ci": "success",
-    "main_update": "verified",
+    "main_update": "pending",
     "development_ci_run": 36476322049,
     "main_ci": "success",
     "production_commit": "64513e94f6634921f0b1ee8f7c6d5d44a754a6f5",
@@ -82,7 +82,15 @@
     "temp_admin_secret_deployment": "9f61378e-d52d-4617-b799-e1fe9c11cbab",
     "temp_admin_worker_version": "0c070598-6d6e-436a-8704-25a46acd0a6f",
     "temp_admin_worker_version_number": 2137,
-    "live_true_password_smoke_test": "pending_user"
+    "live_true_password_smoke_test": "pending_user",
+    "keyboard_product_merge": "af4b743fec796cc071aafce3559f66c2ae7c9a50",
+    "keyboard_integration_ci_run": 36478691850,
+    "keyboard_integration_ci": "success",
+    "keyboard_inline_card": "verified",
+    "keyboard_pagination": "verified",
+    "keyboard_interaction_routing": "verified",
+    "temp_admin_memory_preserved": true,
+    "latest_dev_head_ci": "pending"
   },
   "changes": [
     {
@@ -1335,10 +1343,32 @@
       "after_revision": "v0.0.31",
       "verification": "memory packaging workflow must produce exact v0.0.31 TAR.GZ + SHA-256",
       "changed_at": "2026-09-29T04:23:00+08:00"
+    },
+    {
+      "location_type": "github",
+      "provider": "GitHub",
+      "resource_id_or_path": "refs/heads/v4-qqopen-native",
+      "action": "merge_main_memory_history",
+      "branch_or_container": "v4-qqopen-native",
+      "before_revision": "fd1fff15a5d7c7111e65fa8fa56e7172733ca783",
+      "after_revision": "this_memory_merge",
+      "verification": "latest dev CI pending",
+      "changed_at": "2026-09-29T04:55:00+08:00"
+    },
+    {
+      "location_type": "github",
+      "provider": "GitHub",
+      "resource_id_or_path": ".Ray_Chen/memory/*",
+      "action": "merge_temp_admin_and_keyboard_memory",
+      "branch_or_container": "v4-qqopen-native",
+      "before_revision": "e1af24a4a35afcda1d9e20d47f7fd03f87d59298",
+      "after_revision": "this_memory_merge",
+      "verification": "v0.0.34 archive + CI required",
+      "changed_at": "2026-09-29T04:55:00+08:00"
     }
   ],
   "internal_memory_transaction": {
-    "action": "record Portal auth hotfix and TEMP system-admin creation; bump memory to v0.0.31",
-    "note": "TEMP username/password values are excluded. Generated archive/SHA/evidence do not recursively trigger another memory transaction."
+    "action": "merge completed TEMP-admin memory with active keyboard task and bump to v0.0.34",
+    "note": "No product code changes in this memory-history merge."
   }
 }

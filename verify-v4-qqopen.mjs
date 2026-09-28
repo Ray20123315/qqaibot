@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import { buildConnectivityReply, createQqOpenActionDispatcher, createQqOpenApiClient, createGatewayState, createHeartbeatPayload, createIdentifyPayload, createResumePayload, fromQqOpenEvent, qqOpenClosePolicy, qqOpenDeliveryKey, qqOpenDeliverySequence, qqOpenIntents, qqOpenPassiveReplyPolicy, qqOpenReconnectDelay, qqOpenShard, reduceGatewayPayload, syncQqOpenDiscovery } from "./src/v4/index.js";
 import { createInitialCommandRegistry } from "./src/v4/commands/catalog.js";
-import { assertGroupPanelCoverage, buildGroupRootPanel, normalizeGroupPanelSlashInvocation, resolveGroupPanelInput } from "./src/v4/commands/group-panel.js";
+import { assertGroupPanelCoverage, buildGroupCategoryKeyboard, buildGroupRootPanel, normalizeGroupPanelSlashInvocation, resolveGroupPanelInput } from "./src/v4/commands/group-panel.js";
 
 const group = fromQqOpenEvent({ t:"GROUP_MESSAGE_CREATE", s:42, d:{ id:"msg-1", group_openid:"group-A", timestamp:"2026-09-27T08:00:00Z", content:" hello ", author:{ member_openid:"member-A", member_role:"admin", username:"Ray" }, attachments:[{content_type:"image/png",url:"https://example.com/a.png",filename:"a.png"}] } });
 assert.equal(group.platform, "qq-open");
@@ -123,6 +123,41 @@ assert.equal(groupRootHelp?.matched, true);
 assert.equal(groupRootHelp?.expanded, "");
 assert.match(groupRootHelp?.message || "", /help/);
 assert.match(groupRootHelp?.message || "", /status/);
+assert(groupRootHelp?.keyboard?.content?.rows?.length > 0);
+assert(groupRootHelp.keyboard.content.rows.length <= 5);
+assert(groupRootHelp.keyboard.content.rows.every(row => row.buttons.length <= 2));
+const basicKeyboard = buildGroupCategoryKeyboard(registry, "basic");
+assert.equal(basicKeyboard.page, 1);
+assert.equal(basicKeyboard.totalPages, 1);
+const basicButtons = basicKeyboard.keyboard.content.rows.flatMap(row => row.buttons);
+assert(basicButtons.some(button => button.render_data.label === "help" && button.action.type === 1 && button.action.data === "!help"));
+assert(basicButtons.some(button => button.render_data.label === "status" && button.action.data === "!status"));
+const aiAdminKeyboard = buildGroupCategoryKeyboard(registry, "ai-admin", { page:1 });
+assert(aiAdminKeyboard.totalPages >= 2);
+assert(aiAdminKeyboard.keyboard.content.rows.length <= 5);
+assert(aiAdminKeyboard.keyboard.content.rows.flatMap(row => row.buttons).some(button => button.action.data === "!面板 AI管理 --page=2"));
+const aiAdminPage2 = resolveGroupPanelInput("!面板 AI管理 --page=2", registry);
+assert.equal(aiAdminPage2?.matched, true);
+assert.equal(aiAdminPage2?.expanded, "");
+assert.equal(aiAdminPage2?.page, 2);
+assert(aiAdminPage2?.keyboard?.content?.rows?.length > 0);
+
+await api.sendGroupMessage("group/A", {
+  content:"【基础】请选择子指令",
+  msg_type:0,
+  keyboard:basicKeyboard.keyboard
+});
+const keyboardPost = requests.find(x => /\/v2\/groups\/group%2FA\/messages$/.test(x.url)
+  && x.options.method === "POST"
+  && JSON.parse(x.options.body || "{}")?.keyboard);
+assert(keyboardPost, "group keyboard payload must be sent through the QQ Open message endpoint");
+assert.equal(JSON.parse(keyboardPost.options.body).keyboard.content.rows[0].buttons[0].action.type, 1);
+
+const qqOpenRuntimeSource = fs.readFileSync("src/v4/qqopen/runtime.js", "utf8");
+assert.match(qqOpenRuntimeSource, /qq_inline_keyboard/);
+assert.match(qqOpenRuntimeSource, /normalizeInlineKeyboard/);
+assert.match(qqOpenRuntimeSource, /keyboardCapabilityError/);
+assert.match(workerSource, /qq_inline_keyboard/);
 
 const developerPanels = registry.buildCategorizedPanels("c2c", {
   permissions:allPermissions,

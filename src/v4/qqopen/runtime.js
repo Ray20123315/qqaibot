@@ -79,6 +79,34 @@ function safeError(error) {
   return String(error?.message || error || "UNKNOWN_ERROR").slice(0, 500);
 }
 
+function normalizeInlineKeyboard(value) {
+  const rows = Array.isArray(value?.content?.rows) ? value.content.rows.slice(0, 5) : [];
+  const normalizedRows = rows.map((row, rowIndex) => ({
+    buttons: (Array.isArray(row?.buttons) ? row.buttons : []).slice(0, 5).map((button, buttonIndex) => {
+      const label = String(button?.render_data?.label || "").trim().slice(0, 20) || `指令${rowIndex + 1}-${buttonIndex + 1}`;
+      const visited = String(button?.render_data?.visited_label || label).trim().slice(0, 20) || label;
+      const data = String(button?.action?.data || "").trim().slice(0, 1000);
+      return {
+        id: String(button?.id || `qqai_${rowIndex}_${buttonIndex}`).trim().slice(0, 64),
+        render_data: {
+          label,
+          visited_label: visited,
+          style: Number(button?.render_data?.style || 0)
+        },
+        action: {
+          type: Number(button?.action?.type || 1),
+          data
+        }
+      };
+    }).filter(button => button.action.data)
+  })).filter(row => row.buttons.length);
+  return normalizedRows.length ? { content:{ rows:normalizedRows } } : null;
+}
+
+function keyboardCapabilityError(error) {
+  return /^QQ_OPEN_API_(?:400|403|404|405|409|415|422):/i.test(safeError(error));
+}
+
 function qqOpenReconnectDelay(failureStreak) {
   const streak = Math.max(0, Number(failureStreak || 0));
   const exponent = Math.min(4, Math.max(0, Math.floor(streak) - 1));
@@ -577,17 +605,33 @@ export class QqOpenGateway {
     return data || { ok: true };
   }
 
-  async sendInteractionEventReply(interaction, value) {
+  async sendInteractionEventReply(interaction, value, keyboard = null) {
     const content = String(value || "").trim();
     if (!content || !interaction?.id) return null;
-    const body = { content, msg_type: 0, event_id: String(interaction.id) };
-    if (interaction.scene === "group" && interaction.groupId) {
-      return this.api().sendGroupMessage(interaction.groupId, body);
+    const normalizedKeyboard = normalizeInlineKeyboard(keyboard);
+    const body = {
+      content,
+      msg_type: 0,
+      event_id: String(interaction.id),
+      ...(normalizedKeyboard ? { keyboard:normalizedKeyboard } : {})
+    };
+    const send = payload => {
+      if (interaction.scene === "group" && interaction.groupId) {
+        return this.api().sendGroupMessage(interaction.groupId, payload);
+      }
+      if (interaction.scene === "c2c" && interaction.userId) {
+        return this.api().sendC2CMessage(interaction.userId, payload);
+      }
+      return null;
+    };
+    try {
+      return await send(body);
+    } catch (error) {
+      if (!normalizedKeyboard || !keyboardCapabilityError(error)) throw error;
+      this.recordError(error);
+      const { keyboard: _ignored, ...fallback } = body;
+      return send(fallback);
     }
-    if (interaction.scene === "c2c" && interaction.userId) {
-      return this.api().sendC2CMessage(interaction.userId, body);
-    }
-    return null;
   }
 
   interactionLegacyBody(interaction) {
@@ -710,7 +754,8 @@ export class QqOpenGateway {
         ? result.reply_chunks
         : result?.reply ? [result.reply] : [];
       const reply = chunks.map(value => String(value || "").trim()).filter(Boolean).join("\n\n").slice(0, 3800);
-      if (reply) await this.sendInteractionEventReply(interaction, reply);
+      const keyboard = normalizeInlineKeyboard(result?.qq_inline_keyboard);
+      if (reply) await this.sendInteractionEventReply(interaction, reply, keyboard);
       this.persisted.lastApplicationAt = Date.now();
       this.persisted.lastApplicationKind = "interaction_command";
     } else if (action === "feedback") {
@@ -867,6 +912,33 @@ export class QqOpenGateway {
     const rawChunks = Array.isArray(result?.reply_chunks) && result.reply_chunks.length
       ? result.reply_chunks
       : result?.reply ? [result.reply] : [];
+    const keyboard = normalizeInlineKeyboard(result?.qq_inline_keyboard);
+    const keyboardContent = String(result?.reply || rawChunks[0] || "").trim().slice(0, 3800);
+    if (keyboard && keyboardContent && (message.scope === "group" || message.scope === "private")) {
+      const reservation = await this.reserveReplySequences(message.messageId, message.scope, 1);
+      const keyboardBody = {
+        content: keyboardContent,
+        msg_type: 0,
+        msg_seq: reservation.start,
+        msg_id: message.messageId,
+        keyboard
+      };
+      try {
+        const sent = message.scope === "group"
+          ? await this.api().sendGroupMessage(message.groupId, keyboardBody)
+          : await this.api().sendC2CMessage(message.userId, keyboardBody);
+        const id = String(sent?.id || sent?.message_id || sent?.data?.id || sent?.data?.message_id || "");
+        if (id) {
+          this.persisted.lastReplyAt = Date.now();
+          this.persisted.lastReplyId = id;
+        }
+        await this.persist();
+        return;
+      } catch (error) {
+        if (!keyboardCapabilityError(error)) throw error;
+        this.recordError(error);
+      }
+    }
     const policy = qqOpenPassiveReplyPolicy(message.scope);
     const chunks = rawChunks.slice(0, policy.maxReplies);
     let lastMessageId = "";

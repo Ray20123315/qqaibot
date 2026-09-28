@@ -2,25 +2,19 @@
 
 ## Retained
 
-D-001 through D-061 remain in force.
+D-001 through D-065 remain in force.
 
-## D-062 QQ group panel slash is a reserved transport form
+## D-066 Group category replies use QQ inline keyboards
 status: accepted
 date: 2026-09-29
-Decision: QQ-rendered `/!面板 ...` is normalized into the internal `!面板 ...` category router before generic group `/!` opt-out parsing.
+Decision: selecting a group-panel category returns a QQ inline keyboard instead of only a plain child-command list. Buttons reuse canonical existing commands so there is no second authorization or execution path.
 
-## D-063 Generic /! semantics are preserved
+## D-067 Keyboard fallback is deterministic-only
 status: accepted
 date: 2026-09-29
-Decision: the slash normalization is intentionally narrow. Inputs such as `/!普通内容` keep the existing explicit AI-bypass behavior and are never promoted into commands merely because a panel fix exists.
+Decision: when QQ rejects keyboard capability with deterministic client/capability 4xx responses, the same response may fall back to text. Ambiguous 5xx/timeouts are not resent because the original write may have succeeded.
 
-## D-064 Portal auth rate-limit fallback remains fail-safe
+## D-068 Concurrent main work is merged, never overwritten
 status: accepted
 date: 2026-09-29
-Decision: Cloudflare `MY_RATE_LIMITER` remains the preferred Portal auth limiter. If its binding call is unavailable or throws, authentication falls back to an atomic D1 compare-and-swap limiter; missing/unavailable D1 still fails closed.
-
-## D-065 Temporary system-admin credentials are isolated and self-expiring
-status: accepted
-date: 2026-09-29
-Decision: emergency highest-privilege Portal access uses separate `PORTAL_TEMP_ADMIN_*` bindings instead of replacing the normal admin credential. TEMP access must carry an explicit expiry no more than 7 days ahead and is rejected after expiry. Credential values are never written to Git, Ray_Chen memory, logs, or notification email.
-
+Decision: the keyboard feature is integrated with two-parent merges that preserve the Portal temporary-admin hotfix and its memory history. Main is never force-replaced by the feature branch.
