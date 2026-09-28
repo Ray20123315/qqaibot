@@ -7,27 +7,29 @@ QQAIBOT is a Cloudflare Workers QQ AI bot using QQ Open/AIBot as the primary tra
 ## Current Production
 
 - branch: `main`
-- verified revision: `a78003cda6ef9b5d8b8b9d28dd2a798aa3d2424a`
+- verified product revision: `0fa643433285df0879878441e846dcfc023054b7`
 - Worker: `qqai`
-- Cloudflare Connected Build: `09d6a646-a0b2-4e98-b73d-d9f2c74925c0`
+- Cloudflare Connected Build: `0d835129-1a85-413b-9e0a-ec063da9e464`
 - outcome: `success`
 - Hybrid primary: `qq-open`
 
 ## Discovery / Command UX
 
 - C2C global custom menu uses QQ native submenu discovery.
-- Group discovery uses one managed category-root panel because group PanelItem has no nested submenu.
-- Selecting a group category returns a clickable QQ inline-keyboard card.
+- Group discovery uses one managed category-root panel.
+- Selecting a group category returns a QQ inline-keyboard card.
 - Keyboard pages use two command buttons per row, at most five rows, with pagination for large categories.
-- Button callback data is the existing canonical `!` command, so permissions and handlers are not duplicated.
-- Plain text remains a fallback only when QQ deterministically rejects keyboard capability.
+- Button callback data is the existing canonical `!` command.
+- Custom keyboard payload follows Tencent's current SDK DTO shape and is carried in Markdown `msg_type:2` messages.
+- Deterministic keyboard rejection may fall back to text and is recorded in keyboard-specific diagnostics.
+- Ambiguous failures are never resent.
 - Developer remains the highest cumulative permission level; runtime authorization is authoritative.
 
 ## Portal Authentication
 
 - normal production admin credential remains intact.
 - separate TEMP system-admin credentials are secret-backed and self-expiring.
-- Cloudflare Rate Limiter remains primary with atomic D1 fallback on limiter invocation failure.
+- Cloudflare Rate Limiter remains primary with atomic D1 fallback.
 - TEMP credential values are never stored in Git or memory.
 
 ## Public V4 Resource Model
