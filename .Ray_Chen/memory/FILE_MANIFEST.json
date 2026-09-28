@@ -1,14 +1,14 @@
 {
   "schema_version": 1,
-  "memory_version": "v0.0.36",
-  "task_id": "qqaibot-20260929-group-panel-keyboard",
+  "memory_version": "v0.0.37",
+  "task_id": "qqaibot-20260929-keyboard-payload-fix",
   "goal_revision": 1,
-  "transaction": "group_panel_keyboard_final_head_reconciliation_20260929",
+  "transaction": "keyboard_payload_fix_checkpoint_20260929",
   "repository": "Ray20123315/qqaibot",
   "production_branch": "main",
   "development_branch": "hotfix/temp-system-admin-login-20260929",
-  "product_before_revision": "a78003cda6ef9b5d8b8b9d28dd2a798aa3d2424a",
-  "product_after_revision": "a78003cda6ef9b5d8b8b9d28dd2a798aa3d2424a",
+  "product_before_revision": "f74d6ecec99c9dde04ef97ce0a7452b42ad6bcf7",
+  "product_after_revision": "f74d6ecec99c9dde04ef97ce0a7452b42ad6bcf7",
   "verification": {
     "feature_product_ci_run": 36366445081,
     "regression_ci_run": 36366534308,
@@ -24,8 +24,8 @@
     "discovery_sync_after_fix": "pending_authenticated_status",
     "live_mapping_after_fix": "pending_user_test",
     "command_fallback_implementation": "verified",
-    "development_ci": "success",
-    "main_update": "verified",
+    "development_ci": "pending",
+    "main_update": "pending",
     "development_ci_run": 36476322049,
     "main_ci": "success",
     "production_commit": "a78003cda6ef9b5d8b8b9d28dd2a798aa3d2424a",
@@ -105,7 +105,11 @@
     "final_memory_head_duplicate_ci": "success",
     "v0035_package_run": 36479807508,
     "v0035_package": "success",
-    "v0035_archive_sha256": "e0b14cef6dcbbb8411ded035428f6a842bc98c1d8cd5caa74bebba832cd09210"
+    "v0035_archive_sha256": "e0b14cef6dcbbb8411ded035428f6a842bc98c1d8cd5caa74bebba832cd09210",
+    "live_keyboard_render": "failed_text_fallback_observed",
+    "official_keyboard_shape": "to_implement",
+    "keyboard_markdown_body": "to_implement",
+    "keyboard_error_diagnostic": "to_implement"
   },
   "changes": [
     {
@@ -1425,10 +1429,21 @@
       "after_revision": "v0.0.36",
       "verification": "final main/dev head CI success; v0.0.36 package workflow required",
       "changed_at": "2026-09-29T05:12:00+08:00"
+    },
+    {
+      "location_type": "github",
+      "provider": "GitHub",
+      "resource_id_or_path": ".Ray_Chen/memory/{MEMORY_VERSION.txt,00_START_HERE.md,ACTIVE_TASK.md,FILE_MANIFEST.json}",
+      "action": "checkpoint_planned",
+      "branch_or_container": "v4-qqopen-native",
+      "before_revision": "f74d6ecec99c9dde04ef97ce0a7452b42ad6bcf7",
+      "after_revision": "this_checkpoint",
+      "verification": "live keyboard fallback failure recorded before product patch",
+      "changed_at": "2026-09-29T05:25:00+08:00"
     }
   ],
   "internal_memory_transaction": {
-    "action": "record final main/dev head validation and bump memory to v0.0.36",
-    "note": "No product code changed; product remains deployed and verified. Only live QQ UI smoke test remains."
+    "action": "start live keyboard payload repair and bump memory to v0.0.37",
+    "note": "No product code changed in this checkpoint."
   }
 }
