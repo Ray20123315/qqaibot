@@ -1,33 +1,34 @@
 # Ray_Chen Memory Entry
 
-- memory_version: v0.0.21
+- memory_version: v0.0.22
 - project: QQAIBOT
 - repository: Ray20123315/qqaibot
 - canonical_branch: main
 - development_branch: v4-qqopen-native
-- task_id: qqaibot-20260928-command-capability-fallback
-- task_status: completed
+- task_id: qqaibot-20260928-full-command-panels-portal
+- task_status: active
 - goal_revision: 1
-- product_revision: fd11cd640cae1124edc03b0fef3d8d8d529cc52b
-- updated_at: 2026-09-28T12:50:30+08:00
+- base_product_revision: fd11cd640cae1124edc03b0fef3d8d8d529cc52b
+- base_repository_head: 3dcd7b052c60add687a097257c47cca9f7adb016
+- updated_at: 2026-09-28T13:20:00+08:00
 
-## Quick Recovery
+## Current Goal
 
-The requested command/capability restoration is complete and verified.
+Restore the complete QQAI 2.7.12 command/function surface, expose it through categorized QQ official discovery instead of a flat command dump, and restore the full Portal without changing QQ Open/AIBot primary ownership.
 
-- QQ Open/AIBot remains the primary inbound owner and the first action transport.
-- The V4 command catalog now exposes 75 command entries while preserving the original first-panel ordering.
-- Deterministically unsupported/unavailable QQ Open actions may fall back to legacy NapCat/OneBot only inside the same AIBot command execution.
-- Mutating legacy group fallback resolves the confirmed numeric group mapping and checks that the legacy Bot is present with the action-required role.
-- Missing legacy permission returns an actionable permission request.
-- Member-target legacy fallback requires a confirmed member OpenID <-> numeric QQ mapping; unsafe IDs are never coerced.
-- Ambiguous mutating QQ Open timeout/5xx failures are not cross-retried.
-- Development CI run 36378926121 and main CI run 36379048954 both succeeded.
-- Cloudflare production Connected Build 53058046-38a3-4ecc-9fbd-581032693db5 succeeded for fd11cd640cae1124edc03b0fef3d8d8d529cc52b.
+## Confirmed Design
+
+- Group command discovery uses multiple category panels because QQ PanelItem supports command/link items but no nested child panel.
+- C2C custom menu uses QQ's supported menu + sub_menu_items structure for category/subcommand discovery.
+- Panel visibility is a discoverability layer, not the security boundary; existing server-side permission/confirmation checks remain authoritative.
+- QQ Open/AIBot remains the only user-facing command target.
+- Legacy OneBot remains an internal execution fallback only when the official path cannot safely perform an action.
+- Existing QQAI 2.7.12 handlers are reused; command discovery must not imply a feature rewrite or deletion.
 
 ## Recovery Route
 
-1. Read ACTIVE_TASK.md and CURRENT_STATE.md.
-2. Treat fd11cd640cae1124edc03b0fef3d8d8d529cc52b as the verified product revision.
-3. If live QQ behavior differs, inspect the command/action audit and the legacy Bot role/group/member mappings before changing routing.
-4. Do not re-enable parallel OneBot ingress while QQ Open is primary.
+1. Read ACTIVE_TASK.md, CURRENT_STATE.md, USER_REQUIREMENTS.md, DECISIONS.md, GOTCHAS.md and VERIFY.md.
+2. Continue on v4-qqopen-native.
+3. Verify command coverage against src/help/commands.js and existing handlers/plugins.
+4. Run full repository/V3/V4 CI before fast-forwarding main.
+5. Reconcile memory, package the next version, send one Gmail notification, then report completion.
