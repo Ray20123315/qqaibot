@@ -1,22 +1,22 @@
 {
   "schema_version": 1,
-  "memory_version": "v0.0.23",
+  "memory_version": "v0.0.24",
   "task_id": "qqaibot-20260928-full-command-panels-portal",
-  "goal_revision": 1,
-  "transaction": "full_command_panels_portal_20260928_final",
+  "goal_revision": 2,
+  "transaction": "cumulative_permission_discovery_20260928_final",
   "repository": "Ray20123315/qqaibot",
   "production_branch": "main",
   "development_branch": "v4-qqopen-native",
-  "product_before_revision": "fd11cd640cae1124edc03b0fef3d8d8d529cc52b",
-  "product_after_revision": "b86f762000dc6f498340c54696123328d0328db6",
+  "product_before_revision": "b86f762000dc6f498340c54696123328d0328db6",
+  "product_after_revision": "f44c8118c83e57637a6b0f55f0013ff093b2f1fc",
   "verification": {
     "feature_product_ci_run": 36366445081,
     "regression_ci_run": 36366534308,
-    "main_ci_run": 36385930192,
+    "main_ci_run": 36400793446,
     "github_ci": "success",
     "isolated_cloudflare_build": "e280d9fb-bb0d-4659-91e8-cb2db205e1a3",
     "isolated_cloudflare_outcome": "success",
-    "production_cloudflare_build": "435505a0-a118-4830-a4dc-f216b2ace61b",
+    "production_cloudflare_build": "e5270c67-4c0e-4eaf-9d1a-3d5feb95cdd5",
     "production_cloudflare_outcome": "success",
     "production_worker_version": "4d8fff7e-5713-4e5c-83e2-7caa9bcbb633",
     "production_bindings_readback": "success",
@@ -26,9 +26,9 @@
     "command_fallback_implementation": "verified",
     "development_ci": "success",
     "main_update": "verified",
-    "development_ci_run": 36385798148,
+    "development_ci_run": 36400632740,
     "main_ci": "success",
-    "production_commit": "b86f762000dc6f498340c54696123328d0328db6",
+    "production_commit": "f44c8118c83e57637a6b0f55f0013ff093b2f1fc",
     "main_readback": "success",
     "command_catalog_entries": 77,
     "full_command_panel_restoration": "verified",
@@ -38,7 +38,10 @@
     "developer_c2c_panel_categories": 2,
     "qq_discovery_max_panels_with_developer_target": 10,
     "c2c_nested_menu_complete": "verified",
-    "portal_full_navigation_restored": "verified"
+    "portal_full_navigation_restored": "verified",
+    "cumulative_privileged_visibility": "verified",
+    "developer_inherits_member_discovery": "verified",
+    "qq_discovery_panel_limit": 20
   },
   "changes": [
     {
@@ -449,10 +452,66 @@
       "after_revision": "this_memory_commit",
       "verification": "read-back + TAR.GZ extraction + SHA-256 required before final response",
       "changed_at": "2026-09-28T14:24:00+08:00"
+    },
+    {
+      "location_type": "github",
+      "provider": "GitHub",
+      "resource_id_or_path": "src/v4/qqopen/discovery.js",
+      "action": "modified",
+      "branch_or_container": "v4-qqopen-native -> main",
+      "before_revision": "1351bcdd2ac5bbd3c21e68533acd582861d11183",
+      "after_revision": "f44c8118c83e57637a6b0f55f0013ff093b2f1fc",
+      "verification": "development CI 36400632740 + main CI 36400793446 success",
+      "changed_at": "2026-09-28T17:02:00+08:00"
+    },
+    {
+      "location_type": "github",
+      "provider": "GitHub",
+      "resource_id_or_path": "verify-v4-qqopen.mjs",
+      "action": "modified",
+      "branch_or_container": "v4-qqopen-native -> main",
+      "before_revision": "1351bcdd2ac5bbd3c21e68533acd582861d11183",
+      "after_revision": "f44c8118c83e57637a6b0f55f0013ff093b2f1fc",
+      "verification": "cumulative Developer visibility regression + CI success",
+      "changed_at": "2026-09-28T17:02:00+08:00"
+    },
+    {
+      "location_type": "github",
+      "provider": "GitHub",
+      "resource_id_or_path": "refs/heads/main",
+      "action": "fast_forward",
+      "branch_or_container": "main",
+      "before_revision": "1351bcdd2ac5bbd3c21e68533acd582861d11183",
+      "after_revision": "f44c8118c83e57637a6b0f55f0013ff093b2f1fc",
+      "verification": "update_ref success + main CI 36400793446 success",
+      "changed_at": "2026-09-28T17:02:00+08:00"
+    },
+    {
+      "location_type": "cloudflare",
+      "provider": "Cloudflare",
+      "resource_id_or_path": "workers/scripts/qqai",
+      "action": "auto_deployed_by_connected_build",
+      "branch_or_container": "production",
+      "before_revision": "b86f762000dc6f498340c54696123328d0328db6",
+      "after_revision": "f44c8118c83e57637a6b0f55f0013ff093b2f1fc",
+      "commit_or_hash": "e5270c67-4c0e-4eaf-9d1a-3d5feb95cdd5",
+      "verification": "Cloudflare build outcome success",
+      "changed_at": "2026-09-28T17:02:00+08:00"
+    },
+    {
+      "location_type": "github",
+      "provider": "GitHub",
+      "resource_id_or_path": ".Ray_Chen/memory/*",
+      "action": "final_reconciliation",
+      "branch_or_container": "v4-qqopen-native -> main",
+      "before_revision": "f44c8118c83e57637a6b0f55f0013ff093b2f1fc",
+      "after_revision": "this_memory_commit",
+      "verification": "read-back + archive SHA-256 required",
+      "changed_at": "2026-09-28T17:02:00+08:00"
     }
   ],
   "internal_memory_transaction": {
-    "action": "complete full QQAI 2.7.12 categorized discovery and Portal restoration; bump memory to v0.0.23",
-    "note": "Product revision is verified on development and main and deployed successfully. The memory-only commit is excluded from the production Connected Build path."
+    "action": "fix cumulative privileged command discovery and bump memory to v0.0.24",
+    "note": "Higher privilege now adds commands instead of replacing ordinary command visibility."
   }
 }
