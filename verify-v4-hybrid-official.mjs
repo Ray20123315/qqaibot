@@ -116,6 +116,8 @@ const config=fs.readFileSync("wrangler.toml","utf8");
 
 assert.match(worker,/isAuxiliaryOneBotMessage\(this\.env, body, \{/);
 assert.match(worker,/recordAuxiliaryOneBotObservation/);
+assert.match(worker,/hybrid:\s*await hybridRuntimeStatus\(this\.env\)/);
+assert.doesNotMatch(worker,/hybrid:\s*hybridStatus\(this\.env\)/);
 assert(worker.indexOf("isAuxiliaryOneBotMessage(this.env, body)") < worker.indexOf("const v3PluginBody = body"));
 assert.match(worker,/\/v4\/qqopen\/control/);
 assert.match(worker,/clearChatSessionHistory/);

@@ -4753,7 +4753,7 @@ export class OneBotHub {
         lastSocketError: this.socketDiagnostics?.lastError || null,
         recentSocketEvents: Array.isArray(this.socketDiagnostics?.history) ? this.socketDiagnostics.history.slice(-8) : [],
         recentGroupIngress,
-        hybrid: hybridStatus(this.env),
+        hybrid: await hybridRuntimeStatus(this.env),
         queues: this.queueSnapshot()
       });
     }
