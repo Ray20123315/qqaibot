@@ -2,38 +2,53 @@
 
 ## GitHub
 
-- canonical branch: `main`
-- final main/dev head: `806af06ba56f0d8f9741bb2520b58be60069126f`
-- verified product revision: `a78003cda6ef9b5d8b8b9d28dd2a798aa3d2424a`
-- product main CI `36479310886`: success
-- final memory-head CI `36479807514`: success
-- duplicate final validation `36479804549`: success
-- v0.0.35 package workflow `36479807508`: success
+- product revision on `main`: `0fa643433285df0879878441e846dcfc023054b7`
+- development CI `36481097113`: success
+- main CI `36481292173`: success
 
 ## Cloudflare Production
 
 - Worker: `qqai`
-- Connected Build: `09d6a646-a0b2-4e98-b73d-d9f2c74925c0`
-- commit: `a78003cda6ef9b5d8b8b9d28dd2a798aa3d2424a`
+- Connected Build: `0d835129-1a85-413b-9e0a-ec063da9e464`
+- commit: `0fa643433285df0879878441e846dcfc023054b7`
+- branch: `main`
 - outcome: success
 
-## QQ Group Panel UX
+## QQ Keyboard Payload
 
-- root panel: one managed category list;
-- category reply: QQ inline keyboard card;
-- layout: two buttons per row, maximum five rows;
-- large categories: paginated;
-- command callbacks: existing canonical `!` commands;
-- navigation callbacks: `!面板 <分类> --page=N`;
-- deterministic keyboard rejection: text fallback;
-- ambiguous timeout/5xx: no second write.
+Current custom keyboard button shape includes:
+- `id`
+- `render_data.label / visited_label / style`
+- `action.type=1`
+- `action.data`
+- `action.permission.type=2`
+- `action.click_limit=1`
+- `group_id`
 
-## Preserved Portal Security
+Keyboard message shape:
+- `msg_type=2`
+- `markdown.content`
+- `keyboard.content.rows`
+- passive replies retain `msg_id` and `msg_seq`
+- interaction replies retain `event_id`
 
-- TEMP system-admin support remains present;
-- D1 CAS auth-rate-limit fallback remains present;
-- TEMP secret values remain absent from Git/memory.
+## Diagnostics
 
-## Remaining Live Check
+QqOpenGateway status now includes:
+- `keyboard.lastErrorAt`
+- `keyboard.lastError`
+- `keyboard.fallbackCount`
 
-Click one category and one child button in the actual QQ group client.
+These fields make deterministic keyboard rejection visible instead of silently hiding it behind the text fallback.
+
+## Preserved State
+
+- QQ Open/AIBot remains primary.
+- OneBot remains controlled fallback only.
+- direct commands and runtime authorization are unchanged.
+- `/!普通内容` still bypasses AI.
+- Portal TEMP-admin/D1 rate-limit hotfix remains preserved.
+
+## Remaining Live Verification
+
+Click one category in the real QQ group and confirm the inline keyboard renders.
