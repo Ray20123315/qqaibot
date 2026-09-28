@@ -1,30 +1,30 @@
 # Ray_Chen Memory Entry
 
-- memory_version: v0.0.30
+- memory_version: v0.0.31
 - project: QQAIBOT
 - repository: Ray20123315/QQAIBOT
 - canonical_branch: main
 - development_branch: v4-qqopen-native
-- task_id: qqaibot-20260929-group-panel-slash-dispatch
-- task_status: completed
+- task_id: qqaibot-20260929-group-panel-keyboard
+- task_status: active
 - goal_revision: 1
-- product_revision: 64513e94f6634921f0b1ee8f7c6d5d44a754a6f5
-- updated_at: 2026-09-29T04:08:00+08:00
+- base_product_revision: b7f8dcba63c7e86cbcb3d7c82e4b64d27b2c840b
+- updated_at: 2026-09-29T04:20:00+08:00
 
-## Completed Goal
+## Current Goal
 
-Fixed live QQ group panel clicks that were sending a leading-slash command such as `/!面板 基础` and being swallowed by the existing `/!` AI-opt-out syntax.
+Replace the plain-text group panel category reply with a QQ inline-keyboard button card. The root panel remains a compact category list; selecting a category should return clickable child-command buttons similar to the user's reference screenshot.
 
-## Verified Behavior
+## Design
 
-- `/!面板 基础` is normalized to `!面板 基础` before AI opt-out parsing and returns category child commands.
-- `/!面板 基础 help` expands to the existing `!help` handler.
-- `/!普通内容` remains the original group-member AI bypass and is not converted into a command.
-- Existing direct `!` commands, permissions, confirmations, cooldowns and Portal switches are unchanged.
-- Development CI 36476322049: success.
-- Main CI 36476525721: success.
-- Cloudflare production Connected Build 8aa6ab67-ad80-4ddd-b916-0b76e7bfcf3c: success.
+- two command buttons per row for normal pages;
+- up to five rows per keyboard page;
+- categories over ten commands paginate;
+- button callback data is the existing canonical ! command;
+- page navigation is handled through the same !面板 category router;
+- existing runtime permissions, confirmations, cooldowns and feature switches remain authoritative;
+- plain-text child list remains a fallback if QQ rejects keyboard capability.
 
-## Recovery Route
+## next_exact_action
 
-Treat 64513e94f6634921f0b1ee8f7c6d5d44a754a6f5 as the verified product revision. If a live QQ panel command still fails, capture the exact sent message text and QQ event type; do not change the category registry until the transport/input shape is known.
+Add category keyboard builder, structured Worker reply metadata, QQ Open keyboard send path and regression coverage.
