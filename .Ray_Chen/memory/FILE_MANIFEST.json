@@ -1,37 +1,61 @@
 {
   "schema_version": 1,
-  "memory_version": "v0.0.30",
+  "memory_version": "v0.0.31",
   "task_id": "qqaibot-20260928-v4-public-bot",
   "goal_revision": 2,
-  "transaction": "qqopen_user_settings_20260928_011",
+  "transaction": "qqopen_profile_memory_persistence_20260928_012",
   "repository": "Ray20123315/qqaibot",
   "production_branch": "main",
   "development_branch": "feature/v4-public-bot",
-  "product_before_revision": "d08073c0d79d53f55d4271adef3f827ce2467146",
-  "product_after_revision": "820779518c8bf60bcc541182249f651101632080",
+  "product_before_revision": "3cf96f79daa8fefbe4ec96155e208821cc31534a",
+  "product_after_revision": "5def3958512fcd45a5219be83a0b77cfe454061d",
   "verification": {
-    "github_actions_run": 36387904014,
+    "github_actions_run": 36403470105,
     "conclusion": "success",
+    "base_regression": "success",
+    "v3_regression": "success",
+    "v4_regression": "success",
+    "v4_test_dry_run": "success",
+    "single_worker_bundle": "success",
     "production_cloudflare_mutation": "none"
   },
   "changes": [
     {
       "location_type": "github",
       "provider": "GitHub",
-      "resource_id_or_path": "src/v4/public/user-settings.js",
+      "resource_id_or_path": "src/v4/public/user-memory.js",
       "action": "created",
       "branch_or_container": "feature/v4-public-bot",
-      "after_revision": "820779518c8bf60bcc541182249f651101632080",
-      "verification": "CI success"
+      "before_revision": "absent",
+      "after_revision": "5def3958512fcd45a5219be83a0b77cfe454061d",
+      "commit_or_hash": "5def3958512fcd45a5219be83a0b77cfe454061d",
+      "verification": "GitHub Actions 36403470105 success",
+      "changed_at": "2026-09-28T17:26:05+08:00"
     },
     {
       "location_type": "github",
       "provider": "GitHub",
-      "resource_id_or_path": "worker.js;verify-v4-user-settings-routing.mjs;package.json",
+      "resource_id_or_path": "worker.js;package.json;verify-v4-user-profile-persistence.mjs",
       "action": "modified_or_created",
       "branch_or_container": "feature/v4-public-bot",
-      "after_revision": "820779518c8bf60bcc541182249f651101632080",
-      "verification": "CI success"
+      "before_revision": "3cf96f79daa8fefbe4ec96155e208821cc31534a",
+      "after_revision": "5def3958512fcd45a5219be83a0b77cfe454061d",
+      "commit_or_hash": "5def3958512fcd45a5219be83a0b77cfe454061d",
+      "verification": "GitHub Actions 36403470105 success",
+      "changed_at": "2026-09-28T17:26:05+08:00"
+    },
+    {
+      "location_type": "cloudflare",
+      "provider": "Cloudflare",
+      "resource_id_or_path": "D1/qqaibot-v4-public-preview",
+      "action": "create_failed",
+      "repository_or_drive": "account",
+      "branch_or_container": "same-worker Preview preflight",
+      "before_revision": "absent",
+      "after_revision": "absent",
+      "commit_or_hash": "UNKNOWN",
+      "verification": "Cloudflare API 7406; exact-name read-back absent; existing D1 count 10",
+      "changed_at": "2026-09-28T17:22:00+08:00"
     }
   ]
 }

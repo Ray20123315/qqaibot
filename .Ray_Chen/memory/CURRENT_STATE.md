@@ -2,29 +2,33 @@
 
 ## Latest Verified Product
 
-Commit: `820779518c8bf60bcc541182249f651101632080`
-GitHub Actions run: `36387904014`
-Conclusion: success.
+Commit: `5def3958512fcd45a5219be83a0b77cfe454061d`
+GitHub Actions run: `36403470105`
+Conclusion: `success`
 
-## QQ Open Individual Settings
+## QQ Open Personal Persistence
 
-Model preference is now a user-content setting:
-- QQ Open reads it from user Storage Connector `settings`;
-- QQ Open writes it only to user Storage Connector;
-- official interaction switch-model uses the same storage path;
-- missing connector returns USER_STORAGE_REQUIRED/non-durable behavior;
-- OneBot retains the old platform DB behavior for compatibility.
+The following V4 personal data now uses the canonical user's own Storage Connector and does not silently fall back to platform D1:
 
-## Cloudflare Preview Discovery
+- private chat history — `chat_history`
+- model preference — `settings`
+- personal style — `settings`
+- do-not-disturb state — `settings`
+- manual long-term memories — `memory`
 
-Read-only Cloudflare inventory shows:
-- production D1 `qqaibot`: `569a01fe-3297-40e1-832f-09c3793056ed`;
-- no existing `qqaibot-v4-public-preview` database;
-- production Vectorize indexes include `qqai` and `qq-ai`;
-- Worker scripts include `qqai`, `qqai-v3test`, `qqai-v4test`.
+QQ Open manual memories are not inserted into platform Vectorize. Runtime prompt injection reads those memories from the user's own connector. QQ Open DND and personal-style runtime reads use the same user-owned setting path.
 
-Cloudflare documentation confirms Workers Previews use the same Worker, require a `previews` block, isolate Durable Objects automatically, and require D1/Vectorize bindings to point at Preview-safe resources.
+OneBot keeps the previous platform persistence path for legacy compatibility.
+
+## Preview Preflight
+
+Attempted to create `qqaibot-v4-public-preview` through the Cloudflare API. Creation failed with code 7406 because the account already has 10 D1 databases.
+
+Read-back inventory confirms:
+- no `qqaibot-v4-public-preview` exists;
+- production `qqaibot` remains UUID `569a01fe-3297-40e1-832f-09c3793056ed`;
+- none of the ten existing D1 databases was changed.
 
 ## Production
 
-No production Cloudflare resource was changed yet.
+No production Cloudflare Worker, D1, KV, Vectorize or Durable Object resource was modified by this transaction.
