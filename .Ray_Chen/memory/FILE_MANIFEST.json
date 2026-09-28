@@ -1,13 +1,13 @@
 {
   "schema_version": 1,
-  "memory_version": "v0.0.21",
-  "task_id": "qqaibot-20260928-command-capability-fallback",
+  "memory_version": "v0.0.22",
+  "task_id": "qqaibot-20260928-full-command-panels-portal",
   "goal_revision": 1,
-  "transaction": "command_capability_fallback_20260928_final",
+  "transaction": "memory_checkpoint_20260928_full_command_panels_portal_001",
   "repository": "Ray20123315/qqaibot",
   "production_branch": "main",
   "development_branch": "v4-qqopen-native",
-  "product_before_revision": "08ceeb725590d9efb0160ea38733d929e6e7d18c",
+  "product_before_revision": "fd11cd640cae1124edc03b0fef3d8d8d529cc52b",
   "product_after_revision": "fd11cd640cae1124edc03b0fef3d8d8d529cc52b",
   "verification": {
     "feature_product_ci_run": 36366445081,
@@ -24,13 +24,16 @@
     "discovery_sync_after_fix": "pending_authenticated_status",
     "live_mapping_after_fix": "pending_user_test",
     "command_fallback_implementation": "verified",
-    "development_ci": "success",
-    "main_update": "verified",
+    "development_ci": "pending",
+    "main_update": "pending",
     "development_ci_run": 36378926121,
     "main_ci": "success",
     "production_commit": "fd11cd640cae1124edc03b0fef3d8d8d529cc52b",
     "main_readback": "success",
-    "command_catalog_entries": 75
+    "command_catalog_entries": 75,
+    "full_command_panel_restoration": "in_progress",
+    "categorized_panel_tests": "pending",
+    "portal_restore_tests": "pending"
   },
   "changes": [
     {
@@ -297,10 +300,21 @@
       "after_revision": "this_memory_commit",
       "verification": "UTF-8/read-back and archive verification required after commit",
       "changed_at": "2026-09-28T12:50:30+08:00"
+    },
+    {
+      "location_type": "github",
+      "provider": "GitHub",
+      "resource_id_or_path": ".Ray_Chen/memory/{00_START_HERE.md,ACTIVE_TASK.md,USER_REQUIREMENTS.md,DECISIONS.md,GOTCHAS.md,FILE_MANIFEST.json,MEMORY_VERSION.txt}",
+      "action": "checkpoint_planned",
+      "branch_or_container": "v4-qqopen-native",
+      "before_revision": "3dcd7b052c60add687a097257c47cca9f7adb016",
+      "after_revision": "this_checkpoint",
+      "verification": "task/design checkpoint recorded before product implementation",
+      "changed_at": "2026-09-28T13:20:00+08:00"
     }
   ],
   "internal_memory_transaction": {
-    "action": "complete command capability fallback task and bump Ray_Chen memory to v0.0.21",
-    "note": "Product revision is fully CI-verified and production Connected Build succeeded. Memory package and Gmail notification are completed after this commit."
+    "action": "start complete QQAI 2.7.12 categorized panel and Portal restoration task",
+    "note": "No product code has changed yet in this checkpoint. QQ Open remains primary; OneBot remains fallback only."
   }
 }
