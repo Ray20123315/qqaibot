@@ -13,6 +13,8 @@
 - AI private chat via AIBot is available only when the user has their own AI API or authorized access to an AI Provider; do not provide a public API proxy.
 - AI API key onboarding must support BOTH: authenticated one-time secure web input and direct AIBot private-message input.
 - Full AI API keys are never redisplayed after storage.
+- If a user needs persistent data beyond the platform's limited default capability, support connecting user-owned storage including Cloudflare D1 and KV, with an extensible connector model for future backends.
+- User-owned storage credentials must use the same security posture as AI credentials: encrypted, non-redisplayed, non-logged and tenant-scoped.
 - Roles: 授權成員, AI 提供者, 管理員, 開發者.
 - AI 提供者 may authorize use only inside groups that provider currently belongs to. If provider is no longer in the group, provider-backed access must stop.
 - 管理員 has lower platform permissions than 開發者; 開發者 has full platform ownership.
@@ -21,7 +23,7 @@
 - Developer group whitelist is controlled from AIBot private messages and must not announce activation/deactivation inside the target group.
 - Political topics are prohibited by product policy. Apply text prefilter first, then classifier for ambiguous content, plus output guard.
 - Users may create plugins. Plugins with global/cross-tenant/system risk must be forcibly stopped, quarantined and surfaced to a dedicated web security-review flow.
-- Keep D1/KV/DO usage lean; do not add unnecessary storage.
+- Keep platform D1/KV/DO usage lean; do not add unnecessary storage resources.
 - Copyright notice: `Copyright © 2026 Ray Chen. All rights reserved.`
 - Public source remains source-available, not open-source; no-use terms should be as restrictive as legally/platform-contractually practical.
 - Use the same Cloudflare `qqai` Worker via branch/preview capability, not a second Worker.
