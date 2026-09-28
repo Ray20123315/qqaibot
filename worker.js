@@ -28,6 +28,8 @@ import { applySocialOutputPolicy, buildSocialDecision, buildSocialPromptBlock, c
 import { pickSticker, pickStickerForText, stickerCqMessage } from "./src/social/sticker-library.js";
 import { cancelSchedule, cleanupExpiredModerationProposals, cleanupTransientState, countActiveSchedulesForUser, createAppealFromText, createScheduleRecord, extractScheduleMentionIds, formatScheduleLine, listUserSchedules, parseManagementScheduleAction, parseScheduleRequest, processConflictSignal, processDueSchedules, reviewScheduleWithGemma, reviseScheduleRecord, scheduledCronMode, skipScheduleOnce } from "./src/scheduler/runtime.js";
 import { buildHelpText } from "./src/help/commands.js";
+import { createInitialCommandRegistry } from "./src/v4/commands/catalog.js";
+import { resolveGroupPanelInput } from "./src/v4/commands/group-panel.js";
 import { fetchPublicUrl, getFeatureFlag, getPrivateAccessMode, isGroupWhitelisted, numericId, verifyCodexBridgeAccess, verifyOneBotAccess } from "./src/security/network.js";
 import { CODEX_BRIDGE_INTERNAL_CHAT_PATH, CODEX_BRIDGE_PATH, CODEX_BRIDGE_PROTOCOL, callCodexBridgeWebSocket, normalizeCodexBridgeRequest, normalizeCodexBridgeResponse } from "./src/v3/ai/codex-bridge.js";
 import { parseCodexChatCommand, parseCodexCommand, parseCodexWorkCommand } from "./src/v3/ai/codex-command.js";
@@ -52,6 +54,8 @@ import { handleV3PluginSecurityPublic, runV3PluginSecurityScheduled } from "./sr
 import { withConfiguredDatabaseNamespace } from "./src/data/db-namespace.js";
 import { oneBotReadOnlyMode } from "./src/onebot/read-only.js";
 
+
+const QQAI_GROUP_PANEL_REGISTRY = createInitialCommandRegistry();
 
 const POLITICAL_TOPIC_PATTERN = /(?:政治|政党|政黨|选举|選舉|总统|總統|主席|国会|國會|立法院|立法委员|立法委員|立委|议员|議員|首相|总理|總理|内阁|內閣|政府|政权|政權|执政|執政|在野|政治人物|政治制度|公共政策|外交|制裁|领土争议|領土爭議|两岸|兩岸|统一|統一|台独|台獨|罢免|罷免|公投|意识形态|意識形態|民进党|民進黨|国民党|國民黨|共产党|共產黨|民主党|民主黨|共和党|共和黨|\b(?:politics|political|election|government|parliament|congress|president|prime minister)\b)/i;
 
@@ -1110,6 +1114,23 @@ const QQAIWorker = {
       let naturalLanguageIntent = null;
       let privateAccessMode = "";
       let privateAccessChecked = false;
+
+      // QQ group panels do not support nested submenu items. The official panel therefore
+      // exposes category roots such as "!面板 基础"; optional child text is expanded back
+      // to the existing canonical ! command so permissions/confirmation/handlers stay shared.
+      const groupPanelRoute = isGroup ? resolveGroupPanelInput(cleanMessage, QQAI_GROUP_PANEL_REGISTRY) : null;
+      if (groupPanelRoute?.matched) {
+        if (!groupPanelRoute.expanded) return jsonReply(`${atSender}${groupPanelRoute.message}`);
+        cleanMessage = String(groupPanelRoute.expanded || "").trim();
+        userMessage = cleanMessage.replace(/(^|\s)@(\d{5,12})(?=\s|$)/g, "$1[CQ:at,qq=$2]");
+        msgLower = cleanMessage.toLowerCase();
+        isCommandMessage = true;
+        commandBody = cleanMessage.replace(/^[!！]+/, "").trim();
+        isAppealCommand = /^(申诉|申訴|appeal)(?:\s|$)/i.test(commandBody);
+        isScheduleCommand = /^(排程|定时|定時|schedule)(?:\s|$)/i.test(commandBody);
+        isActivityInteraction = /(?:活动|活動|报名|報名|候补|候補|参加|參加)/i.test(cleanMessage);
+      }
+
       const applyNaturalLanguageCommand = normalized => {
         if (!normalized?.commandText) return false;
         naturalLanguageIntent = normalized;
