@@ -251,8 +251,8 @@ assert(discoveryCalls.some(row => row[0] === "listPanels" && row[1] === "group")
 assert(firstDiscovery.panels <= 20);
 assert(firstDiscovery.categories.includes("basic"));
 assert(firstDiscovery.categories.includes("group-root"));
-assert(firstDiscovery.categories.includes("ai-admin"));
 assert(firstDiscovery.categories.includes("developer"));
+assert.equal(firstDiscovery.panels, 1 + developerPanels.length, "discovery must create one group root panel plus Developer C2C panels");
 const groupSyncPanels = discoveryCalls
   .filter(row => row[0] === "createPanel" && row[1] === "group" && row[2]?.target_type === "all")
   .map(row => row[2]);
