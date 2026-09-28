@@ -93,18 +93,28 @@ assert(groupPanels.length >= 2);
 assert(groupPanels.every(panel => panel.panel.items.length <= 7));
 assert(groupPanels.flatMap(panel => panel.panel.items).some(item => item.name === "!禁言" && item.only_admin === true));
 
-const categorizedGroupPanels = registry.buildCategorizedPanels("group");
-assert(categorizedGroupPanels.length <= 8);
+const allPermissions = ["member", "group_ops", "ai_admin", "owner", "developer"];
+const categorizedGroupPanels = registry.buildCategorizedPanels("group", { permissions:allPermissions });
+assert(categorizedGroupPanels.length <= 10);
 assert(categorizedGroupPanels.every(panel => panel.panel.items.length <= 20));
 assert(categorizedGroupPanels.some(panel => /\[基础与多模态\]/.test(panel.panel.remark)));
+assert(categorizedGroupPanels.some(panel => /\[群聊整理与分析\]/.test(panel.panel.remark)));
+assert(categorizedGroupPanels.some(panel => /\[活动投票与排程\]/.test(panel.panel.remark)));
 assert(categorizedGroupPanels.some(panel => /\[AI 管理\]/.test(panel.panel.remark)));
 assert(categorizedGroupPanels.some(panel => /\[群操作\]/.test(panel.panel.remark)));
-assert(categorizedGroupPanels.some(panel => /\[活动投票与排程\]/.test(panel.panel.remark)));
-assert(categorizedGroupPanels.flatMap(panel => panel.panel.items).some(item => item.name === "!禁言" && item.only_admin === true));
-assert(!categorizedGroupPanels.flatMap(panel => panel.panel.items).some(item => item.name === "!codexchat"));
+assert(categorizedGroupPanels.some(panel => /\[开发者\]/.test(panel.panel.remark)));
+const groupPanelItems = categorizedGroupPanels.flatMap(panel => panel.panel.items);
+const groupPanelNames = new Set(groupPanelItems.map(item => item.name));
+for (const name of ["!help","!status","!codex","!模型","!群状态","!群规","!成员发言分析","!活动","!投票","!禁言","!关闭ai","!授权AI踢出","!群白名单","!授权","!撤销授权","!禁记忆"]) {
+  assert(groupPanelNames.has(name), `Group panel missing representative command ${name}`);
+}
+assert(groupPanelItems.some(item => item.name === "!禁言" && item.only_admin === true));
+for (const command of registry.list({ scope:"group" }).filter(command => command.panel.enabled)) {
+  assert(groupPanelNames.has(command.panel.command), `Group discovery missing ${command.id}`);
+}
 
 const developerPanels = registry.buildCategorizedPanels("c2c", {
-  permissions:["member", "developer"],
+  permissions:allPermissions,
   targetType:"specific",
   userOpenids:["dev-openid"]
 });
@@ -119,8 +129,8 @@ assert(developerPanelNames.has("!codexchat"));
 assert(developerPanelNames.has("!codexwork"));
 assert(developerPanelNames.has("!群白名单"));
 assert(developerPanelNames.has("!重置"));
-for (const command of registry.list({ scope:"c2c" }).filter(command => ["member", "developer"].includes(command.permission) && command.panel.enabled)) {
-  assert(developerPanelNames.has(command.panel.command), `Developer inherited discovery missing ${command.id}`);
+for (const command of registry.list({ scope:"c2c" }).filter(command => command.panel.enabled)) {
+  assert(developerPanelNames.has(command.panel.command), `Developer all-command discovery missing ${command.id}`);
 }
 
 const menu = registry.buildMenu();
