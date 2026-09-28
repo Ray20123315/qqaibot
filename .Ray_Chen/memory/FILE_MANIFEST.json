@@ -1,14 +1,14 @@
 {
   "schema_version": 1,
-  "memory_version": "v0.0.30",
-  "task_id": "qqaibot-20260929-group-panel-slash-dispatch",
+  "memory_version": "v0.0.33",
+  "task_id": "qqaibot-20260929-group-panel-keyboard",
   "goal_revision": 1,
-  "transaction": "group_panel_slash_dispatch_20260929_final",
+  "transaction": "group_panel_keyboard_integration_20260929",
   "repository": "Ray20123315/qqaibot",
   "production_branch": "main",
   "development_branch": "feature/v4-public-bot",
-  "product_before_revision": "6bcdb255f90e822ec68fec6cdc971cd292150802",
-  "product_after_revision": "64513e94f6634921f0b1ee8f7c6d5d44a754a6f5",
+  "product_before_revision": "4865c7c6c9f381916082e70063be78aaaba8e6d6",
+  "product_after_revision": "af4b743fec796cc071aafce3559f66c2ae7c9a50",
   "verification": {
     "feature_product_ci_run": 36366445081,
     "regression_ci_run": 36366534308,
@@ -24,9 +24,9 @@
     "discovery_sync_after_fix": "pending_authenticated_status",
     "live_mapping_after_fix": "pending_user_test",
     "command_fallback_implementation": "verified",
-    "development_ci": "success",
-    "main_update": "verified",
-    "development_ci_run": 36476322049,
+    "development_ci": "in_progress",
+    "main_update": "pending",
+    "development_ci_run": 36477960735,
     "main_ci": "success",
     "production_commit": "64513e94f6634921f0b1ee8f7c6d5d44a754a6f5",
     "main_readback": "success",
@@ -48,7 +48,7 @@
     "group_commands_include_all_permission_classes": "verified",
     "integration_merge_commit": "ba6dda144d05c7fb92a498e753ef3530c1f57780",
     "integration_ci_run": 36445181452,
-    "integration_ci": "success",
+    "integration_ci": "pending",
     "main_merge_ci_run": 36445884523,
     "main_merge_ci": "success",
     "codex_bridge_main_run": 36445884500,
@@ -70,7 +70,16 @@
     "memory_packaging_workflow": "configured",
     "group_panel_slash_dispatch": "verified",
     "ordinary_slash_bang_opt_out_preserved": "verified",
-    "live_panel_click_after_fix": "pending_user_test"
+    "live_panel_click_after_fix": "pending_user_test",
+    "group_panel_keyboard": "implemented",
+    "keyboard_pagination": "implemented",
+    "keyboard_interaction_routing": "implemented",
+    "keyboard_original_dev_ci_run": 36477960735,
+    "keyboard_original_dev_ci": "success",
+    "integration_commit": "af4b743fec796cc071aafce3559f66c2ae7c9a50",
+    "integration_main_base": "4865c7c6c9f381916082e70063be78aaaba8e6d6",
+    "integration_keyboard_parent": "d4ae8580ff28c7cc7a88d888b2ea0a65c6a55f0f",
+    "portal_temp_admin_hotfix_preserved": "verified_by_merge_tree"
   },
   "changes": [
     {
@@ -1244,10 +1253,109 @@
       "after_revision": "this_memory_commit",
       "verification": "memory packaging workflow must produce exact v0.0.30 archive + SHA-256",
       "changed_at": "2026-09-29T04:08:00+08:00"
+    },
+    {
+      "location_type": "github",
+      "provider": "GitHub",
+      "resource_id_or_path": ".Ray_Chen/memory/{MEMORY_VERSION.txt,00_START_HERE.md,ACTIVE_TASK.md,FILE_MANIFEST.json}",
+      "action": "checkpoint_planned",
+      "branch_or_container": "v4-qqopen-native",
+      "before_revision": "b7f8dcba63c7e86cbcb3d7c82e4b64d27b2c840b",
+      "after_revision": "this_checkpoint",
+      "verification": "button-card UX task recorded before product patch",
+      "changed_at": "2026-09-29T04:20:00+08:00"
+    },
+    {
+      "location_type": "github",
+      "provider": "GitHub",
+      "resource_id_or_path": "src/v4/commands/group-panel.js",
+      "action": "modified",
+      "branch_or_container": "v4-qqopen-native",
+      "before_revision": "b7f8dcba63c7e86cbcb3d7c82e4b64d27b2c840b",
+      "after_revision": "a31a9dd6c79963001df95cb53f6e2654af8c2606",
+      "verification": "development CI in progress",
+      "changed_at": "2026-09-29T04:31:00+08:00"
+    },
+    {
+      "location_type": "github",
+      "provider": "GitHub",
+      "resource_id_or_path": "worker.js",
+      "action": "modified",
+      "branch_or_container": "v4-qqopen-native",
+      "before_revision": "b7f8dcba63c7e86cbcb3d7c82e4b64d27b2c840b",
+      "after_revision": "a31a9dd6c79963001df95cb53f6e2654af8c2606",
+      "verification": "development CI in progress",
+      "changed_at": "2026-09-29T04:31:00+08:00"
+    },
+    {
+      "location_type": "github",
+      "provider": "GitHub",
+      "resource_id_or_path": "src/v4/qqopen/runtime.js",
+      "action": "modified",
+      "branch_or_container": "v4-qqopen-native",
+      "before_revision": "b7f8dcba63c7e86cbcb3d7c82e4b64d27b2c840b",
+      "after_revision": "a31a9dd6c79963001df95cb53f6e2654af8c2606",
+      "verification": "development CI in progress",
+      "changed_at": "2026-09-29T04:31:00+08:00"
+    },
+    {
+      "location_type": "github",
+      "provider": "GitHub",
+      "resource_id_or_path": "verify-v4-qqopen.mjs",
+      "action": "modified",
+      "branch_or_container": "v4-qqopen-native",
+      "before_revision": "b7f8dcba63c7e86cbcb3d7c82e4b64d27b2c840b",
+      "after_revision": "a31a9dd6c79963001df95cb53f6e2654af8c2606",
+      "verification": "development CI in progress",
+      "changed_at": "2026-09-29T04:31:00+08:00"
+    },
+    {
+      "location_type": "github",
+      "provider": "GitHub",
+      "resource_id_or_path": "worker.js",
+      "action": "merge_preserve_main_auth_plus_keyboard_reply",
+      "branch_or_container": "v4-qqopen-native",
+      "before_revision": "4865c7c6c9f381916082e70063be78aaaba8e6d6",
+      "after_revision": "af4b743fec796cc071aafce3559f66c2ae7c9a50",
+      "verification": "integration CI pending",
+      "changed_at": "2026-09-29T04:47:00+08:00"
+    },
+    {
+      "location_type": "github",
+      "provider": "GitHub",
+      "resource_id_or_path": "src/v4/commands/group-panel.js;src/v4/qqopen/runtime.js;verify-v4-qqopen.mjs",
+      "action": "merge_keyboard_patch",
+      "branch_or_container": "v4-qqopen-native",
+      "before_revision": "4865c7c6c9f381916082e70063be78aaaba8e6d6",
+      "after_revision": "af4b743fec796cc071aafce3559f66c2ae7c9a50",
+      "verification": "integration CI pending",
+      "changed_at": "2026-09-29T04:47:00+08:00"
+    },
+    {
+      "location_type": "github",
+      "provider": "GitHub",
+      "resource_id_or_path": "src/portal/auth.js;verify-system-admin-auth.mjs",
+      "action": "preserved_from_main",
+      "branch_or_container": "v4-qqopen-native",
+      "before_revision": "4865c7c6c9f381916082e70063be78aaaba8e6d6",
+      "after_revision": "af4b743fec796cc071aafce3559f66c2ae7c9a50",
+      "verification": "integration CI pending",
+      "changed_at": "2026-09-29T04:47:00+08:00"
+    },
+    {
+      "location_type": "github",
+      "provider": "GitHub",
+      "resource_id_or_path": ".Ray_Chen/memory/*",
+      "action": "integration_checkpoint",
+      "branch_or_container": "v4-qqopen-native",
+      "before_revision": "d4ae8580ff28c7cc7a88d888b2ea0a65c6a55f0f",
+      "after_revision": "this_memory_head",
+      "verification": "archive and CI required",
+      "changed_at": "2026-09-29T04:47:00+08:00"
     }
   ],
   "internal_memory_transaction": {
-    "action": "complete QQ group panel slash dispatch repair and bump memory to v0.0.30",
-    "note": "Only reserved /!面板 is normalized. Ordinary /! remains AI opt-out."
+    "action": "record non-destructive keyboard/main integration; bump memory to v0.0.33",
+    "note": "Main auth hotfix and keyboard feature are both present; integration CI pending."
   }
 }
