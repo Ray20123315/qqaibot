@@ -65,8 +65,9 @@ function groupCategoryMeta(value) {
 
 function keyboardButton(id, label, data, style = 1) {
   const text = clean(label).slice(0, 20) || "指令";
+  const buttonId = clean(id).slice(0, 64) || "qqai_command";
   return Object.freeze({
-    id: clean(id).slice(0, 64),
+    id: buttonId,
     render_data: Object.freeze({
       label: text,
       visited_label: text,
@@ -74,8 +75,11 @@ function keyboardButton(id, label, data, style = 1) {
     }),
     action: Object.freeze({
       type: 1,
-      data: clean(data).slice(0, 1000)
-    })
+      data: clean(data).slice(0, 1000),
+      permission: Object.freeze({ type:2 }),
+      click_limit: 1
+    }),
+    group_id: buttonId
   });
 }
 
