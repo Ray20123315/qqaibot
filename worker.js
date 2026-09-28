@@ -6,7 +6,7 @@ import { AI_MEDIA_LIMITS, DEFAULTS, VERSION, classifyOperationalFailure } from "
 import { publicBaseUrl } from "./src/config/deployment.js";
 import { consumeManualRuleCheckRate, developerIds, isDeveloperId, latestConversationMessageForUser, recentConversationMessagesForUser, stripGroupAiOptOutPrefix } from "./src/core/identity.js";
 import { appendIndex, buildLongGroupConversationContext, callOneBotAction, checkRuntimeRateLimit, getEffectivePermissions, isKnownOutboundMessage, markOutboundPending, markRuntimeRateLimitCompletion, modelPreferenceLabel, normalizeMemoryItems, normalizeModelPreference, normalizePermissionName, permissionLabel, removeFromIndex, setExplicitPermission, updateAiDecisionLog, writeAiDecisionLog, writeSystemAudit } from "./src/core/permissions.js";
-import { appendChatHistoryTurn, clearChatSessionHistory, dbAppendJsonArrayCapped, dbDel, dbGet, dbPut, readChatHistory, withTimeout } from "./src/data/store.js";
+import { appendChatHistoryTurn, clearChatSessionHistory, dbAppendJsonArrayCapped, dbCompareAndSwapStrict, dbDel, dbGet, dbGetStrict, dbPut, readChatHistory, withTimeout } from "./src/data/store.js";
 import { getDeploymentStatusForViewer, handleDeploymentBuildQueue, injectDeploymentPortalClient } from "./src/deployment/notifications.js";
 import { botCanRunRuleMonitor, getBotGroupRole, getGroupFamilyForGroup, getGroupJoinPage, isVerifiedGroupOwner } from "./src/group/runtime.js";
 import { buildHealthState } from "./src/health/runtime.js";
@@ -18,7 +18,7 @@ import { MAX_MUTE_SECONDS as MUTE_LOCK_MAX_SECONDS, canUnlockMute, clearMuteLock
 import { MASTER_RELATIONSHIP_DEFAULTS, MASTER_RELATIONSHIP_MAX_LEVEL, clearPartnerBinding, createMasterBindingRequest, createPartnerBindingRequest, decidePartnerBindingRequest, getBindingRequest, getPartnerBinding } from "./src/moderation/partner-bindings.js";
 import { applyConversationOutputGuards, auditIgnoredRobotMessage, botInteractionAllowKey, buildReplyPlan, cacheBotSenderClassification, clearRegisteredThinkingIndicators, detectLiteralPseudoElementLabels, eventHasBotMention, eventMentionedQqs, eventPlainText, eventSenderDisplayName, eventSenderRobotHint, extractFileDescriptors, extractForwardIds, extractMediaDescriptor, extractMessageText, extractOutboundMediaTypes, extractTextMentionIds, filterRobotMentionIds, formatForwardContext, getForwardMessageSnapshot, getQuotedMessage, getTaipeiTimeContext, isExplicitCurrentTimeQuestion, isExplicitRoleplayRequest, isGroupRobotInteractionAllowed, isIgnoredGroupRobotSender, isStandaloneCurrentTimeQuestion, looksLikeRobotDisplayName, normalizeFileDescriptor, parseDurationSeconds, prepareConversationHistory, purgeLegacyBotRepliesFromRecentLogs, qqaiTruthyRobotFlag, recordStructuredMessage, registerThinkingIndicator, removeTextMentionTokens, resolveOneBotMediaAsBase64, runOneBotGroupOperation, sanitizeAiReply, sendThinkingIndicator, thinkingIndicatorRegistryKey } from "./src/onebot/messages.js";
 import { classifyNaturalLanguageCommandIntent, normalizeNaturalLanguageCommandText, opsGetGroupMember, opsGetSettings, opsHandleMemberLeave } from "./src/operations/runtime.js";
-import { authDbDelStrict, authDbGetStrict, authDbPutStrict, clearPasswordLoginGuard, commandChangesWebSettings, constantTimeEqual, createPortalPasswordRecord, createPortalSession, decryptPortalAuthSecret, encryptPortalAuthSecret, deleteMemoryVector, generateSixDigitCode, getOneBotHub, getPortalSession, getPublicNebulaSeed, hashBackupCode, isMemoryBanned, isValidPortalPasswordRecord, jsonResponse, markGroupMemberLeft, needsPortalPasswordRehash, normalizePortalAdminUsername, notePasswordLoginFailure, portalAdminCredentialConfig, portalAdminUsernameIsClaimed, portalEnvironmentWithManagedDeveloperIds, portalSessionCookie, readCookie, readJson, readPasswordLoginGuard, readPortalAuthJson, readPortalManagedDeveloperIds, rehashPortalPasswordIfNeeded, sendOneBotAction, sendOneBotHttpAction, sendPortalVerificationMessage, upsertGroupMember, upsertMemoryVector, validatePortalPassword, verifyPortalAdminCredentials, verifyPortalPassword, verifyPortalVerificationCode, verifyTotpCode, writeMemoryAudit, writePortalManagedDeveloperIds, writeSystemError } from "./src/portal/auth.js";
+import { authDbDelStrict, authDbGetStrict, authDbPutStrict, clearPasswordLoginGuard, commandChangesWebSettings, constantTimeEqual, createPortalPasswordRecord, createPortalSession, decryptPortalAuthSecret, encryptPortalAuthSecret, deleteMemoryVector, generateSixDigitCode, getOneBotHub, getPortalSession, getPublicNebulaSeed, hashBackupCode, isMemoryBanned, isValidPortalPasswordRecord, jsonResponse, markGroupMemberLeft, needsPortalPasswordRehash, normalizePortalAdminUsername, notePasswordLoginFailure, portalAdminCredentialConfig, portalAdminUsernameIsClaimed, portalEnvironmentWithManagedDeveloperIds, portalTemporaryAdminCredentialConfig, portalSessionCookie, readCookie, readJson, readPasswordLoginGuard, readPortalAuthJson, readPortalManagedDeveloperIds, rehashPortalPasswordIfNeeded, sendOneBotAction, sendOneBotHttpAction, sendPortalVerificationMessage, upsertGroupMember, upsertMemoryVector, validatePortalPassword, verifyPortalAdminCredentials, verifyPortalTemporaryAdminCredentials, verifyPortalPassword, verifyPortalVerificationCode, verifyTotpCode, writeMemoryAudit, writePortalManagedDeveloperIds, writeSystemError } from "./src/portal/auth.js";
 import { getPortalHomePage, handlePortalApi } from "./src/portal/runtime.js";
 import { handlePortalDiagnosticsApi, injectPortalDiagnosticsClient } from "./src/portal/diagnostics.js";
 import { handlePortalMaintenanceApi, handlePortalMaintenanceGate } from "./src/portal/maintenance.js";
@@ -186,19 +186,50 @@ const QQAI_V1_COMPLETE_MARKER = "QQAI_V1_COMPLETE_MARKER";
 
 const QQAI_V1_R3_MARKER = "QQAI_V1_R3_MARKER";
 
+async function checkPortalAuthRateLimitD1(env, key, { limit = 1, windowMs = 10000 } = {}) {
+  if (!env?.DB) return { ok: false, unavailable: true, source: "d1" };
+  const storageKey = `portal_auth_rate_fallback:${String(key || "unknown").slice(0, 180)}`;
+  try {
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+      const now = Date.now();
+      const raw = await dbGetStrict(env, storageKey);
+      let current = null;
+      try { current = raw ? JSON.parse(raw) : null; } catch { current = null; }
+      const expired = !current || Number(current.expiresAt || 0) <= now;
+      const count = expired ? 1 : Number(current.count || 0) + 1;
+      const next = JSON.stringify({
+        count,
+        windowStartedAt: expired ? now : Number(current.windowStartedAt || now),
+        expiresAt: expired ? now + Math.max(1000, Number(windowMs) || 10000) : Number(current.expiresAt || now + windowMs)
+      });
+      if (await dbCompareAndSwapStrict(env, storageKey, raw, next)) {
+        return { ok: count <= Math.max(1, Number(limit) || 1), unavailable: false, source: "d1" };
+      }
+    }
+    return { ok: false, unavailable: false, source: "d1-contention" };
+  } catch {
+    return { ok: false, unavailable: true, source: "d1" };
+  }
+}
+
 async function checkPortalAuthRateLimit(env, scope, principal, request) {
-  if (typeof env?.MY_RATE_LIMITER?.limit !== "function") return { ok: false, unavailable: true };
   const accountKey = `portal:${scope}:account:${String(principal || "unknown").slice(0, 96)}`;
   const ip = String(request?.headers?.get("CF-Connecting-IP") || "unknown").slice(0, 96);
-  try {
-    const accountResult = await env.MY_RATE_LIMITER.limit({ key: accountKey });
-    if (!accountResult?.success) return { ok: false, unavailable: false };
-    const ipResult = await env.MY_RATE_LIMITER.limit({ key: `portal:${scope}:ip:${ip}` });
-    if (!ipResult?.success) return { ok: false, unavailable: false };
-    return { ok: true, unavailable: false };
-  } catch {
-    return { ok: false, unavailable: true };
+  const ipKey = `portal:${scope}:ip:${ip}`;
+  if (typeof env?.MY_RATE_LIMITER?.limit === "function") {
+    try {
+      const accountResult = await env.MY_RATE_LIMITER.limit({ key: accountKey });
+      if (!accountResult?.success) return { ok: false, unavailable: false, source: "cloudflare" };
+      const ipResult = await env.MY_RATE_LIMITER.limit({ key: ipKey });
+      if (!ipResult?.success) return { ok: false, unavailable: false, source: "cloudflare" };
+      return { ok: true, unavailable: false, source: "cloudflare" };
+    } catch (error) {
+      console.warn("Portal auth Rate Limiter unavailable; using D1 fallback", String(error?.message || error || "").slice(0, 160));
+    }
   }
+  const accountFallback = await checkPortalAuthRateLimitD1(env, accountKey);
+  if (!accountFallback.ok) return accountFallback;
+  return checkPortalAuthRateLimitD1(env, ipKey);
 }
 
 
@@ -522,6 +553,46 @@ const QQAIWorker = {
       const loginName = String(payload.username ?? payload.qq ?? "").normalize("NFKC").trim();
       const normalizedLoginName = normalizePortalAdminUsername(loginName);
       const password = String(payload.password || "");
+      const tempAdminConfig = portalTemporaryAdminCredentialConfig(env);
+      if (tempAdminConfig.mode === "invalid" && normalizedLoginName === tempAdminConfig.normalizedUsername) {
+        return jsonResponse({ ok: false, code: "TEMP_ADMIN_CREDENTIALS_MISCONFIGURED", message: "TEMP 管理員帳號設定無效，請重新建立臨時帳號。" }, 503);
+      }
+      if (tempAdminConfig.mode === "expired" && normalizedLoginName === tempAdminConfig.normalizedUsername) {
+        return jsonResponse({ ok: false, code: "TEMP_ADMIN_EXPIRED", message: "這組 TEMP 管理員帳號已到期，請重新建立。" }, 403);
+      }
+      if (tempAdminConfig.mode === "configured" && normalizedLoginName === tempAdminConfig.normalizedUsername) {
+        if (!password) return jsonResponse({ ok: false, message: "請輸入帳號與密碼。" }, 400);
+        const tempRateLimit = await checkPortalAuthRateLimit(env, "password-login", `temp:${tempAdminConfig.normalizedUsername}`, request);
+        if (!tempRateLimit.ok) return jsonResponse({ ok: false, code: tempRateLimit.unavailable ? "AUTH_RATE_LIMIT_UNAVAILABLE" : "AUTH_RATE_LIMITED", message: tempRateLimit.unavailable ? "登入服務目前無法安全啟動，請稍後再試。" : "登入嘗試過於頻繁，請 10 秒後再試。" }, tempRateLimit.unavailable ? 503 : 429);
+        const verifiedTemp = verifyPortalTemporaryAdminCredentials(env, loginName, password);
+        if (!verifiedTemp.ok) return jsonResponse({ ok: false, code: "PASSWORD_INVALID", message: "TEMP 管理員帳號或密碼錯誤。" }, 401);
+        try {
+          if (await portalAdminUsernameIsClaimed(env, tempAdminConfig.normalizedUsername)) {
+            return jsonResponse({ ok: false, code: "ADMIN_USERNAME_COLLISION", message: "TEMP 管理員名稱已被既有帳號使用，請更換名稱。" }, 409);
+          }
+          const session = await createPortalSession(env, {
+            systemAdmin: true,
+            username: verifiedTemp.username,
+            persistent: false,
+            authMethod: "temporary_environment_admin_password"
+          });
+          await writeSystemAudit(env, {
+            type: "portal_auth_security",
+            actorId: "temp-system-admin",
+            action: "temporary_environment_admin_login",
+            expiresAt: verifiedTemp.expiresAt
+          }).catch(() => {});
+          return jsonResponse({
+            ok: true,
+            systemAdmin: true,
+            temporary: true,
+            expiresAt: verifiedTemp.expiresAt,
+            message: "TEMP 系統管理員登入成功。"
+          }, 200, { "Set-Cookie": portalSessionCookie(session.token, 30 * 60) });
+        } catch {
+          return jsonResponse({ ok: false, code: "ADMIN_AUTH_STORAGE_UNAVAILABLE", message: "TEMP 管理員登入暫時無法安全完成，請稍後重試。" }, 503);
+        }
+      }
       const adminConfig = portalAdminCredentialConfig(env);
       if (adminConfig.mode === "invalid" && (normalizedLoginName === normalizePortalAdminUsername(env.PORTAL_ADMIN_USERNAME) || normalizedLoginName === "admin")) {
         return jsonResponse({ ok: false, code: "ADMIN_CREDENTIALS_MISCONFIGURED", message: "管理員帳號與密碼變數設定不完整或格式無效，請同時設定有效的 PORTAL_ADMIN_USERNAME 與 PORTAL_ADMIN_PASSWORD。" }, 503);

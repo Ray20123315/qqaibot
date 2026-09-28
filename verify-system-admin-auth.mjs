@@ -12,10 +12,12 @@ import {
   needsPortalPasswordRehash,
   portalAdminCredentialConfig,
   portalEnvironmentWithManagedDeveloperIds,
+  portalTemporaryAdminCredentialConfig,
   readPortalManagedDeveloperIds,
   rehashPortalPasswordIfNeeded,
   sendPortalVerificationMessage,
   verifyPortalAdminCredentials,
+  verifyPortalTemporaryAdminCredentials,
   writePortalManagedDeveloperIds
 } from "./src/portal/auth.js";
 
@@ -66,6 +68,20 @@ assert.equal(normalizePortalAdminUsername("  OPS.ROOT "), "ops.root");
 assert.equal(verifyPortalAdminCredentials(adminEnv, "ops.root", password).ok, true);
 assert.equal(verifyPortalAdminCredentials(adminEnv, "ops.root", `${password}wrong`).ok, false);
 
+const tempNow = Date.parse("2026-09-29T04:30:00+08:00");
+const tempExpiry = tempNow + 48 * 60 * 60 * 1000;
+const tempAdminEnv = {
+  PORTAL_TEMP_ADMIN_USERNAME: "Temp.Root",
+  PORTAL_TEMP_ADMIN_PASSWORD: "temporary-system-admin-2026!",
+  PORTAL_TEMP_ADMIN_EXPIRES_AT: String(tempExpiry)
+};
+assert.equal(portalTemporaryAdminCredentialConfig({}, tempNow).mode, "unconfigured");
+assert.equal(portalTemporaryAdminCredentialConfig({ ...tempAdminEnv, PORTAL_TEMP_ADMIN_PASSWORD: "" }, tempNow).mode, "invalid");
+assert.equal(portalTemporaryAdminCredentialConfig(tempAdminEnv, tempNow).mode, "configured");
+assert.equal(portalTemporaryAdminCredentialConfig(tempAdminEnv, tempExpiry + 1).mode, "expired");
+assert.equal(verifyPortalTemporaryAdminCredentials(tempAdminEnv, "temp.root", "temporary-system-admin-2026!", tempNow).ok, true);
+assert.equal(verifyPortalTemporaryAdminCredentials(tempAdminEnv, "temp.root", "wrong-password-value", tempNow).ok, false);
+
 assert.deepEqual(normalizePortalManagedDeveloperIds(["12345", "67890", "12345"]), ["12345", "67890"]);
 assert.throws(() => normalizePortalManagedDeveloperIds(["1234x"]), { code: "DEVELOPER_QQ_INVALID" });
 assert.throws(() => normalizePortalManagedDeveloperIds(Array.from({ length: 51 }, (_, index) => String(10000 + index))), { code: "DEVELOPER_QQ_LIMIT" });
@@ -110,6 +126,39 @@ const postJson = (path, body, origin = "https://qqai.test", cookie = "") => new 
   headers: { "Content-Type": "application/json", Origin: origin, ...(cookie ? { Cookie: cookie } : {}) },
   body: JSON.stringify(body)
 });
+
+const tempPortalEnv = {
+  DB: new MemoryD1(),
+  PORTAL_TEMP_ADMIN_USERNAME: "Temp.Root",
+  PORTAL_TEMP_ADMIN_PASSWORD: "temporary-system-admin-2026!",
+  PORTAL_TEMP_ADMIN_EXPIRES_AT: String(Date.now() + 60 * 60 * 1000),
+  MY_RATE_LIMITER: { limit: async () => { throw new Error("rate limiter unavailable"); } }
+};
+const tempLoginResponse = await worker.fetch(postJson("/api/auth/login-password", { username: "temp.root", password: "temporary-system-admin-2026!" }), tempPortalEnv, {});
+const tempLogin = await tempLoginResponse.json();
+assert.equal(tempLoginResponse.status, 200, JSON.stringify(tempLogin));
+assert.equal(tempLogin.systemAdmin, true);
+assert.equal(tempLogin.temporary, true);
+assert.ok(Number(tempLogin.expiresAt) > Date.now());
+assert.match(tempLoginResponse.headers.get("Set-Cookie") || "", /HttpOnly/);
+const tempSessionToken = decodeURIComponent((tempLoginResponse.headers.get("Set-Cookie") || "").split(";")[0].split("=")[1] || "");
+const tempSession = await getPortalSession(tempPortalEnv, tempSessionToken, { touch: false });
+assert.equal(tempSession?.systemAdmin, true);
+assert.equal(tempSession?.role, "developer");
+assert.equal(tempSession?.authMethod, "temporary_environment_admin_password");
+const tempSecondResponse = await worker.fetch(postJson("/api/auth/login-password", { username: "temp.root", password: "temporary-system-admin-2026!" }), tempPortalEnv, {});
+assert.equal(tempSecondResponse.status, 429, "D1 fallback must rate-limit immediate repeated TEMP admin login");
+const expiredTempEnv = {
+  DB: new MemoryD1(),
+  PORTAL_TEMP_ADMIN_USERNAME: "Temp.Root",
+  PORTAL_TEMP_ADMIN_PASSWORD: "temporary-system-admin-2026!",
+  PORTAL_TEMP_ADMIN_EXPIRES_AT: String(Date.now() - 1),
+  MY_RATE_LIMITER: { limit: async () => ({ success: true }) }
+};
+const expiredTempResponse = await worker.fetch(postJson("/api/auth/login-password", { username: "temp.root", password: "temporary-system-admin-2026!" }), expiredTempEnv, {});
+assert.equal(expiredTempResponse.status, 403);
+assert.equal((await expiredTempResponse.json()).code, "TEMP_ADMIN_EXPIRED");
+
 const loginResponse = await worker.fetch(postJson("/api/auth/login-password", { username: "ops.root", password }), portalEnv, {});
 const login = await loginResponse.json();
 assert.equal(loginResponse.status, 200);
@@ -246,6 +295,9 @@ const loginEnd = workerSource.indexOf("url.pathname === '/api/auth/logout'", log
 const loginRoute = workerSource.slice(loginStart, loginEnd);
 assert.ok(loginStart >= 0 && loginEnd > loginStart, "password login route must remain present");
 assert.match(loginRoute, /portalAdminCredentialConfig\(env\)/);
+assert.match(loginRoute, /portalTemporaryAdminCredentialConfig\(env\)/);
+assert.match(loginRoute, /temporary_environment_admin_password/);
+assert.match(workerSource, /checkPortalAuthRateLimitD1/);
 assert.match(loginRoute, /verifyPortalAdminCredentials\(env, loginName, password\)/);
 assert.match(loginRoute, /createPortalSession\(env, \{ systemAdmin: true/);
 assert.match(workerSource, /url\.pathname === "\/api\/system-admin\/developers"/);

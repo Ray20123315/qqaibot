@@ -207,6 +207,42 @@ function verifyPortalAdminCredentials(env, username, password) {
   return { ok: true, username: config.username };
 }
 
+const PORTAL_TEMP_ADMIN_MAX_LIFETIME_MS = 7 * 24 * 60 * 60 * 1000;
+
+function portalTemporaryAdminCredentialConfig(env = {}, now = Date.now()) {
+  const username = String(env.PORTAL_TEMP_ADMIN_USERNAME ?? "").normalize("NFKC").trim();
+  const password = String(env.PORTAL_TEMP_ADMIN_PASSWORD ?? "");
+  const expiresRaw = String(env.PORTAL_TEMP_ADMIN_EXPIRES_AT ?? "").trim();
+  const normalizedUsername = normalizePortalAdminUsername(username);
+  if (!username && !password && !expiresRaw) return { mode: "unconfigured", username: "", normalizedUsername: "", password: "", expiresAt: 0 };
+  if (!username || !password || !expiresRaw) return { mode: "invalid", username, normalizedUsername, password: "", expiresAt: 0 };
+  const usernameValid = username.length >= 4 && username.length <= 32
+    && /^[a-z0-9][a-z0-9._-]*$/i.test(username)
+    && /[a-z]/i.test(username)
+    && !/^\d+$/.test(username);
+  const expiresAt = /^\d+$/.test(expiresRaw) ? Number(expiresRaw) : Date.parse(expiresRaw);
+  if (!usernameValid || !validatePortalPassword(password).ok || !Number.isFinite(expiresAt) || expiresAt <= 0) {
+    return { mode: "invalid", username, normalizedUsername, password: "", expiresAt: 0 };
+  }
+  if (expiresAt <= Number(now || 0)) return { mode: "expired", username, normalizedUsername, password: "", expiresAt };
+  if (expiresAt - Number(now || 0) > PORTAL_TEMP_ADMIN_MAX_LIFETIME_MS) {
+    return { mode: "invalid", username, normalizedUsername, password: "", expiresAt };
+  }
+  return { mode: "configured", username, normalizedUsername, password, expiresAt };
+}
+
+function verifyPortalTemporaryAdminCredentials(env, username, password, now = Date.now()) {
+  const config = portalTemporaryAdminCredentialConfig(env, now);
+  if (config.mode === "expired") return { ok: false, code: "TEMP_ADMIN_EXPIRED", expiresAt: config.expiresAt };
+  if (config.mode === "invalid") return { ok: false, code: "TEMP_ADMIN_CREDENTIALS_MISCONFIGURED", expiresAt: config.expiresAt || 0 };
+  if (config.mode !== "configured") return { ok: false, code: "INVALID_CREDENTIALS", expiresAt: 0 };
+  if (normalizePortalAdminUsername(username) !== config.normalizedUsername
+    || !constantTimeEqual(String(password ?? ""), config.password)) {
+    return { ok: false, code: "INVALID_CREDENTIALS", expiresAt: config.expiresAt };
+  }
+  return { ok: true, username: config.username, expiresAt: config.expiresAt };
+}
+
 
 
 async function portalAdminUsernameIsClaimed(env, username) {
@@ -695,7 +731,7 @@ async function createPortalSession(env, data) {
       expiresAt: now + PORTAL_SYSTEM_ADMIN_IDLE_TTL_MS,
       absoluteExpiresAt: now + PORTAL_SYSTEM_ADMIN_ABSOLUTE_TTL_MS,
       authenticatedAt: now,
-      authMethod: "environment_admin_password"
+      authMethod: String(data.authMethod || "environment_admin_password")
     };
     const key = `portal_session:${token}`;
     await authDbPutStrict(env, key, JSON.stringify(session));
@@ -1147,4 +1183,4 @@ async function writePortalSettingValue(env, definition, groupId, targetQq, value
   }
 }
 
-export { BASE32_ALPHABET, PORTAL_SETTING_DEFINITIONS, authDbDelStrict, authDbGetStrict, authDbPutStrict, authDbRetry, authStorageError, base32Decode, base32Encode, base64UrlToBytes, buildGroupReplyMessage, bytesToBase64Url, bytesToHex, clearPasswordLoginGuard, commandChangesWebSettings, constantTimeEqual, createPortalPasswordRecord, createPortalSession, decryptPortalAuthSecret, deleteMemoryVector, derivePortalPassword, encryptPortalAuthSecret, extractGroupId, generateBackupCodes, generateSixDigitCode, generateTotpCode, getOneBotHub, getPortalSession, getPublicNebulaSeed, getUserQuota, hasAdminRole, hashBackupCode, isMemoryBanned, isValidPortalPasswordRecord, jsonResponse, markGroupMemberLeft, migratePortalMemories, needsPortalPasswordRehash, normalizeBackupCode, normalizePortalAdminUsername, normalizePortalManagedDeveloperIds, notePasswordLoginFailure, oneBotHttpActionUrl, portalAdminCredentialConfig, portalAdminUsernameIsClaimed, portalAuthEncryptionKey, portalAuthEncryptionMaterial, portalEnvironmentWithManagedDeveloperIds, portalRoleRank, portalSessionCookie, randomBytes, readCookie, readJson, readPasswordLoginGuard, readPortalAuthJson, readPortalManagedDeveloperIds, readPortalSettingValue, rehashPortalPasswordIfNeeded, resolvePortalRole, searchPortalVectors, sendOneBotAction, sendOneBotHttpAction, sendPortalVerificationMessage, sha256Hex, simplifyJsonValue, upsertGroupMember, upsertMemoryVector, validatePortalPassword, verifyPortalAdminCredentials, verifyPortalPassword, verifyPortalVerificationCode, verifyTotpCode, writeMemoryAudit, writePortalManagedDeveloperIds, writePortalSettingValue, writeSystemError };
+export { BASE32_ALPHABET, PORTAL_SETTING_DEFINITIONS, authDbDelStrict, authDbGetStrict, authDbPutStrict, authDbRetry, authStorageError, base32Decode, base32Encode, base64UrlToBytes, buildGroupReplyMessage, bytesToBase64Url, bytesToHex, clearPasswordLoginGuard, commandChangesWebSettings, constantTimeEqual, createPortalPasswordRecord, createPortalSession, decryptPortalAuthSecret, deleteMemoryVector, derivePortalPassword, encryptPortalAuthSecret, extractGroupId, generateBackupCodes, generateSixDigitCode, generateTotpCode, getOneBotHub, getPortalSession, getPublicNebulaSeed, getUserQuota, hasAdminRole, hashBackupCode, isMemoryBanned, isValidPortalPasswordRecord, jsonResponse, markGroupMemberLeft, migratePortalMemories, needsPortalPasswordRehash, normalizeBackupCode, normalizePortalAdminUsername, normalizePortalManagedDeveloperIds, notePasswordLoginFailure, oneBotHttpActionUrl, portalAdminCredentialConfig, portalAdminUsernameIsClaimed, portalTemporaryAdminCredentialConfig, portalAuthEncryptionKey, portalAuthEncryptionMaterial, portalEnvironmentWithManagedDeveloperIds, portalRoleRank, portalSessionCookie, randomBytes, readCookie, readJson, readPasswordLoginGuard, readPortalAuthJson, readPortalManagedDeveloperIds, readPortalSettingValue, rehashPortalPasswordIfNeeded, resolvePortalRole, searchPortalVectors, sendOneBotAction, sendOneBotHttpAction, sendPortalVerificationMessage, sha256Hex, simplifyJsonValue, upsertGroupMember, upsertMemoryVector, validatePortalPassword, verifyPortalAdminCredentials, verifyPortalTemporaryAdminCredentials, verifyPortalPassword, verifyPortalVerificationCode, verifyTotpCode, writeMemoryAudit, writePortalManagedDeveloperIds, writePortalSettingValue, writeSystemError };
