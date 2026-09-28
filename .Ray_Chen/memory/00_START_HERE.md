@@ -1,36 +1,46 @@
 # Ray_Chen Memory Entry
 
-- memory_version: v0.0.37
+- memory_version: v0.0.38
 - project: QQAIBOT
 - repository: Ray20123315/QQAIBOT
 - canonical_branch: main
 - development_branch: v4-qqopen-native
 - task_id: qqaibot-20260929-keyboard-payload-fix
-- task_status: active
+- task_status: completed
 - goal_revision: 1
-- base_product_revision: f74d6ecec99c9dde04ef97ce0a7452b42ad6bcf7
-- updated_at: 2026-09-29T05:25:00+08:00
+- verified_product_revision: 0fa643433285df0879878441e846dcfc023054b7
+- updated_at: 2026-09-29T05:45:00+08:00
 
-## Current Goal
+## Completed Goal
 
-Fix the live QQ inline-keyboard payload. The real QQ client currently shows only the text fallback, proving that the keyboard write is being rejected before rendering.
+Fixed the live QQ inline-keyboard payload after the real QQ client proved the previous implementation was being rejected and downgraded to plain text.
 
-## Root Cause Hypothesis Confirmed Against Tencent SDK
+## Root Cause
 
-The current payload omits fields serialized by Tencent's official SDK:
-- action.permission
-- action.click_limit
-- button.group_id
+The previous custom keyboard did not match Tencent's current official SDK serialization:
+- button action omitted `permission`;
+- button action omitted `click_limit`;
+- button omitted `group_id`;
+- keyboard replies were sent as plain text `msg_type:0` instead of the Markdown `msg_type:2` shape used by Tencent's current keyboard E2E path.
 
-The current runtime also sends keyboard replies as msg_type=0 text, while Tencent's current SDK end-to-end keyboard example sends msg_type=2 Markdown with keyboard attached.
+## Result
 
-## Required Behavior
+- keyboard buttons now include `permission:{type:2}`, `click_limit:1`, and stable `group_id`;
+- runtime normalization preserves/defaults those fields;
+- keyboard messages use `msg_type:2` + `markdown:{content}`;
+- passive replies still include `msg_id` / `msg_seq`;
+- interaction replies still include `event_id`;
+- deterministic keyboard 4xx fallback is recorded in keyboard-specific runtime diagnostics;
+- ambiguous 5xx/timeouts are never resent as text;
+- existing handlers, permissions, confirmation flows, /! bypass behavior, and Portal TEMP-admin hotfix remain unchanged.
 
-- Serialize keyboard buttons in the current official SDK shape.
-- Send keyboard replies as Markdown message bodies while retaining msg_id/msg_seq passive-reply semantics.
-- Keep deterministic 4xx fallback to text, but persist the keyboard rejection code/reason for diagnostics.
-- Do not alter the existing command handlers, permissions, confirmations, cooldowns, slash-panel normalization, or TEMP-admin hotfix.
+## Verification
+
+- development CI 36481097113: success
+- main CI 36481292173: success
+- Cloudflare production Connected Build 0d835129-1a85-413b-9e0a-ec063da9e464: success
+- production product revision: 0fa643433285df0879878441e846dcfc023054b7
 
 ## next_exact_action
 
-Patch group-panel keyboard button shape, runtime keyboard normalization/message body, and regression tests; then run full CI.
+In the QQ group, click the “基础” category once. The expected result is a two-column inline keyboard. If QQ still falls back to text, read the new keyboard diagnostic fields before changing payload format again.
