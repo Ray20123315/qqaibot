@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import { createCanonicalMessage } from "./src/v3/message/core.js";
+import { callOneBotAction } from "./src/core/permissions.js";
+import { INITIAL_COMMANDS } from "./src/v4/commands/catalog.js";
 import {
   countQqOpenLegacyMessages,
   legacyMessageParts,
@@ -108,6 +110,109 @@ await assert.rejects(
   /QQ_OPEN_LEGACY_ACTION_UNSUPPORTED/
 );
 
+function mockBinding(stub) {
+  return { idFromName: () => "default", get: () => stub };
+}
+
+function makeOneBotStub({ role = "admin" } = {}) {
+  const actions = [];
+  return {
+    actions,
+    stub: {
+      async fetch(_url, init = {}) {
+        const payload = JSON.parse(String(init.body || "{}"));
+        actions.push(payload.action);
+        if (payload.action === "get_login_info") {
+          return Response.json({ ok: true, data: { user_id: 2681167798, nickname: "LegacyBot" } });
+        }
+        if (payload.action === "get_group_member_info") {
+          return Response.json({ ok: true, data: { user_id: 2681167798, role } });
+        }
+        if (payload.action === "set_group_name") {
+          return Response.json({ ok: true, data: { applied: true } });
+        }
+        if (payload.action === "get_group_info") {
+          return Response.json({ ok: true, data: { group_id: 808882936, group_name: "Legacy Group" } });
+        }
+        return Response.json({ ok: false, error: "TEST_UNSUPPORTED:" + payload.action }, { status: 502 });
+      }
+    }
+  };
+}
+
+function qqOpenFailureStub(error, status = 400) {
+  return {
+    async fetch() {
+      return Response.json({ ok: false, error }, { status });
+    }
+  };
+}
+
+const fallbackOneBot = makeOneBotStub({ role: "admin" });
+const fallbackEnv = {
+  QQAI_EVENT_PLATFORM: "qq-open",
+  QQAI_QQOPEN_GROUP_ID: "GROUP_OPEN_A",
+  QQAI_QQOPEN_USER_ID: "USER_OPEN_A",
+  QQ_HYBRID_GROUP_MAP: JSON.stringify({ "808882936": "GROUP_OPEN_A" }),
+  QQ_OPEN_GATEWAY: mockBinding(qqOpenFailureStub("QQ_OPEN_LEGACY_ACTION_UNSUPPORTED:set_group_name")),
+  ONEBOT_HUB: mockBinding(fallbackOneBot.stub)
+};
+const fallbackResult = await callOneBotAction(fallbackEnv, {
+  action: "set_group_name",
+  params: { group_id: "GROUP_OPEN_A", group_name: "Restored" }
+}, 5000);
+assert.deepEqual(fallbackResult, { applied: true });
+assert.deepEqual(fallbackOneBot.actions, ["get_login_info", "get_group_member_info", "set_group_name"]);
+
+const deniedOneBot = makeOneBotStub({ role: "member" });
+const deniedEnv = {
+  ...fallbackEnv,
+  QQ_OPEN_GATEWAY: mockBinding(qqOpenFailureStub("QQ_OPEN_LEGACY_ACTION_UNSUPPORTED:set_group_name")),
+  ONEBOT_HUB: mockBinding(deniedOneBot.stub)
+};
+await assert.rejects(
+  () => callOneBotAction(deniedEnv, {
+    action: "set_group_name",
+    params: { group_id: "GROUP_OPEN_A", group_name: "Denied" }
+  }, 5000),
+  /请先将旧 Bot 设为群管理员/
+);
+assert.deepEqual(deniedOneBot.actions, ["get_login_info", "get_group_member_info"]);
+
+const ambiguousOneBot = makeOneBotStub({ role: "admin" });
+const ambiguousEnv = {
+  ...fallbackEnv,
+  QQ_OPEN_GATEWAY: mockBinding(qqOpenFailureStub("QQ_OPEN_API_500:upstream uncertain", 500)),
+  ONEBOT_HUB: mockBinding(ambiguousOneBot.stub)
+};
+await assert.rejects(
+  () => callOneBotAction(ambiguousEnv, {
+    action: "set_group_name",
+    params: { group_id: "GROUP_OPEN_A", group_name: "Do not retry" }
+  }, 5000),
+  /QQ_OPEN_API_500/
+);
+assert.deepEqual(ambiguousOneBot.actions, []);
+
+const readFallbackOneBot = makeOneBotStub({ role: "member" });
+const readFallbackEnv = {
+  ...fallbackEnv,
+  QQ_OPEN_GATEWAY: mockBinding(qqOpenFailureStub("QQ_OPEN_API_500:temporary read failure", 500)),
+  ONEBOT_HUB: mockBinding(readFallbackOneBot.stub)
+};
+const readFallback = await callOneBotAction(readFallbackEnv, {
+  action: "get_group_info",
+  params: { group_id: "GROUP_OPEN_A" }
+}, 5000);
+assert.equal(readFallback.group_id, 808882936);
+assert.deepEqual(readFallbackOneBot.actions, ["get_login_info", "get_group_member_info", "get_group_info"]);
+
+const commandAliases = new Set(INITIAL_COMMANDS.flatMap(item => item.aliases || []));
+assert(INITIAL_COMMANDS.length >= 70, "V4 command catalog should restore the documented command surface");
+for (const alias of ["!读网页", "!翻译", "!活动", "!投票", "!排程", "!关闭ai", "!改群名", "!改名片", "!确认op", "!群白名单"]) {
+  assert(commandAliases.has(alias), "Missing restored V4 command alias: " + alias);
+}
+
 const worker = fs.readFileSync("worker.js", "utf8");
 const runtime = fs.readFileSync("src/v4/qqopen/runtime.js", "utf8");
 const hostAdapter = fs.readFileSync("src/v3/host/adapter.js", "utf8");
@@ -139,8 +244,12 @@ assert.match(runtime, /qqOpenClosePolicy/);
 assert.match(runtime, /syncQqOpenDiscovery/);
 assert.match(runtime, /api\.getGatewayBot/);
 assert.match(runtime, /QQ_OPEN_DISCOVERY_SYNC/);
+assert.match(runtime, /userOpenid: String\(message\.userId/);
 assert.match(permissions, /QQ_OPEN_GATEWAY_NOT_BOUND/);
 assert.match(permissions, /api\/v4\/qqopen\/legacy-action/);
+assert.match(permissions, /probeLegacyBotGroupPermission/);
+assert.match(permissions, /resolveOneBotUserForQqOpen/);
+assert.match(permissions, /hybrid_action_fallback/);
 assert.match(deployment, /QQ_OPEN_DEVELOPER_OPENIDS/);
 assert.match(network, /QQAI_QQOPEN_GROUP_ID/);
 

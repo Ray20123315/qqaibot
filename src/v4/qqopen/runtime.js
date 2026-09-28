@@ -913,6 +913,7 @@ export class QqOpenGateway {
           action: "group_observation",
           eventType,
           groupOpenid: message.groupId,
+          userOpenid: String(message.userId || ""),
           messageId: String(message.messageId || ""),
           text: String(payload?.d?.content ?? message.text ?? ""),
           mediaTypes,

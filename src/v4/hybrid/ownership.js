@@ -1,6 +1,7 @@
 import { dbAppendJsonArrayCapped, dbGet, dbPut } from "../../data/store.js";
 
 const DYNAMIC_MAP_KEY = "qqopen_dynamic_group_map";
+const MEMBER_MAP_KEY = "qqopen_dynamic_member_map";
 const AUX_RECENT_KEY = "hybrid_aux_recent";
 const OFFICIAL_RECENT_KEY = "hybrid_qqopen_recent";
 const MAP_HISTORY_KEY = "qqopen_dynamic_group_map_history";
@@ -66,6 +67,21 @@ async function readDynamicGroupMap(env = {}) {
   return parseDynamicGroupMap(await dbGet(env, DYNAMIC_MAP_KEY));
 }
 
+function parseDynamicMemberMap(raw) {
+  if (!raw) return { groups: {}, updatedAt: 0 };
+  try {
+    const parsed = JSON.parse(String(raw));
+    const groups = parsed?.groups && typeof parsed.groups === "object" && !Array.isArray(parsed.groups) ? parsed.groups : {};
+    return { groups, updatedAt: Number(parsed?.updatedAt || 0) };
+  } catch {
+    return { groups: {}, updatedAt: 0 };
+  }
+}
+
+async function readDynamicMemberMap(env = {}) {
+  return parseDynamicMemberMap(await dbGet(env, MEMBER_MAP_KEY));
+}
+
 function qqOpenGroupForOneBot(env = {}, oneBotGroupId) {
   const id = clean(oneBotGroupId);
   if (!id) return "";
@@ -94,6 +110,14 @@ async function resolveOneBotGroupForQqOpen(env = {}, qqOpenGroupId) {
   if (fixed) return fixed;
   const dynamic = await readDynamicGroupMap(env);
   return clean(dynamic.qqOpenToOneBot[id]);
+}
+
+async function resolveOneBotUserForQqOpen(env = {}, qqOpenGroupId, qqOpenUserId) {
+  const groupOpenid = clean(qqOpenGroupId);
+  const userOpenid = clean(qqOpenUserId);
+  if (!groupOpenid || !userOpenid) return "";
+  const state = await readDynamicMemberMap(env);
+  return clean(state.groups?.[groupOpenid]?.qqOpenToOneBotUser?.[userOpenid]);
 }
 
 function normalizeHybridObservationText(value) {
@@ -141,6 +165,7 @@ function officialObservationRow(observation = {}) {
     source: "qq-open",
     scope: "group",
     groupOpenid: clean(observation.groupOpenid),
+    userOpenid: clean(observation.userOpenid),
     messageId: clean(observation.messageId),
     text: String(observation.text || "").slice(0, 4000),
     mediaTypes: Object.freeze(normalizeMediaTypes(observation.mediaTypes).slice(0, 16)),
@@ -150,6 +175,78 @@ function officialObservationRow(observation = {}) {
 
 async function appendCandidateStatus(env, row) {
   await dbAppendJsonArrayCapped(env, CANDIDATE_STATUS_KEY, row, 240);
+}
+
+function closestOneBotObservation(rows, official, oneBotGroupId) {
+  const fingerprint = hybridObservationFingerprint(official);
+  if (!fingerprint) return null;
+  const observedAt = Number(official?.observedAt || 0);
+  return (Array.isArray(rows) ? rows : [])
+    .filter(row => row?.scope === "group" && clean(row.oneBotGroupId) === clean(oneBotGroupId))
+    .filter(row => /^\d+$/.test(clean(row.userId)))
+    .filter(row => Math.abs(observedAt - Number(row.observedAt || 0)) <= DEFAULT_MATCH_WINDOW_MS)
+    .filter(row => hybridObservationFingerprint(row) === fingerprint)
+    .sort((a, b) => Math.abs(observedAt - Number(a.observedAt || 0)) - Math.abs(observedAt - Number(b.observedAt || 0)))[0] || null;
+}
+
+async function recordConfirmedMemberMapping(env, official, oneBotRow, oneBotGroupId) {
+  const groupOpenid = clean(official?.groupOpenid);
+  const userOpenid = clean(official?.userOpenid);
+  const oneBotId = clean(oneBotGroupId);
+  const qq = clean(oneBotRow?.userId);
+  if (!groupOpenid || !userOpenid || !oneBotId || !/^\d+$/.test(qq)) {
+    return Object.freeze({ recorded: false, reason: "MEMBER_OBSERVATION_INCOMPLETE" });
+  }
+  const confirmedGroup = await resolveOneBotGroupForQqOpen(env, groupOpenid);
+  if (clean(confirmedGroup) !== oneBotId) {
+    return Object.freeze({ recorded: false, reason: "GROUP_MAPPING_NOT_CONFIRMED" });
+  }
+
+  const state = await readDynamicMemberMap(env);
+  const current = state.groups?.[groupOpenid] || {};
+  const qqOpenToOneBotUser = { ...(current.qqOpenToOneBotUser || {}) };
+  const oneBotToQqOpenUser = { ...(current.oneBotToQqOpenUser || {}) };
+  const existingQq = clean(qqOpenToOneBotUser[userOpenid]);
+  const existingOpenid = clean(oneBotToQqOpenUser[qq]);
+  if ((existingQq && existingQq !== qq) || (existingOpenid && existingOpenid !== userOpenid)) {
+    await dbAppendJsonArrayCapped(env, MAP_HISTORY_KEY, {
+      action: "member_conflict",
+      groupOpenid,
+      oneBotGroupId: oneBotId,
+      userOpenid,
+      oneBotUserId: qq,
+      existingQq,
+      existingOpenid,
+      at: Date.now()
+    }, 200);
+    return Object.freeze({ recorded: false, reason: "MEMBER_MAP_CONFLICT" });
+  }
+
+  qqOpenToOneBotUser[userOpenid] = qq;
+  oneBotToQqOpenUser[qq] = userOpenid;
+  const now = Date.now();
+  const next = {
+    groups: {
+      ...(state.groups || {}),
+      [groupOpenid]: {
+        oneBotGroupId: oneBotId,
+        qqOpenToOneBotUser,
+        oneBotToQqOpenUser,
+        updatedAt: now
+      }
+    },
+    updatedAt: now
+  };
+  await dbPut(env, MEMBER_MAP_KEY, JSON.stringify(next));
+  await dbAppendJsonArrayCapped(env, MAP_HISTORY_KEY, {
+    action: "member_confirmed",
+    groupOpenid,
+    oneBotGroupId: oneBotId,
+    userOpenid,
+    oneBotUserId: qq,
+    at: now
+  }, 200);
+  return Object.freeze({ recorded: true, groupOpenid, oneBotGroupId: oneBotId, userOpenid, oneBotUserId: qq });
 }
 
 async function applyMappingEvidence(env, official, oneBotGroupId) {
@@ -248,6 +345,7 @@ async function recordOneBotHybridObservation(env, row) {
     const candidate = selectHybridMappingCandidate(oneBotRows, official);
     if (candidate.ambiguous || candidate.oneBotGroupId !== clean(row.oneBotGroupId)) continue;
     const applied = await applyMappingEvidence(env, official, candidate.oneBotGroupId);
+    if (applied?.confirmed) await recordConfirmedMemberMapping(env, official, row, candidate.oneBotGroupId);
     if (!best || Number(applied.count || 0) > Number(best.count || 0)) best = applied;
   }
   return Object.freeze({
@@ -265,10 +363,14 @@ async function recordQqOpenHybridGroupObservation(env, observation = {}) {
 
   await dbAppendJsonArrayCapped(env, OFFICIAL_RECENT_KEY, official, 360);
 
-  const fixed = oneBotGroupForQqOpen(env, official.groupOpenid);
-  if (fixed) return Object.freeze({ confirmed: true, source: "static", oneBotGroupId: fixed, groupOpenid: official.groupOpenid });
-
   const recent = await readJsonArray(env, AUX_RECENT_KEY);
+  const fixed = oneBotGroupForQqOpen(env, official.groupOpenid);
+  if (fixed) {
+    const matched = closestOneBotObservation(recent, official, fixed);
+    if (matched) await recordConfirmedMemberMapping(env, official, matched, fixed);
+    return Object.freeze({ confirmed: true, source: "static", oneBotGroupId: fixed, groupOpenid: official.groupOpenid });
+  }
+
   const candidate = selectHybridMappingCandidate(recent, official);
   if (!candidate.oneBotGroupId) {
     return Object.freeze({
@@ -279,7 +381,12 @@ async function recordQqOpenHybridGroupObservation(env, observation = {}) {
       groupOpenid: official.groupOpenid
     });
   }
-  return applyMappingEvidence(env, official, candidate.oneBotGroupId);
+  const applied = await applyMappingEvidence(env, official, candidate.oneBotGroupId);
+  if (applied?.confirmed) {
+    const matched = closestOneBotObservation(recent, official, candidate.oneBotGroupId);
+    if (matched) await recordConfirmedMemberMapping(env, official, matched, candidate.oneBotGroupId);
+  }
+  return applied;
 }
 
 function isAuxiliaryOneBotMessage(env = {}, body = {}, { explicit = false, fullGroupOwned = false } = {}) {
@@ -340,14 +447,16 @@ function latestCandidates(rows = []) {
 
 async function hybridRuntimeStatus(env = {}) {
   const staticStatus = hybridStatus(env);
-  const [dynamic, candidateRows] = await Promise.all([
+  const [dynamic, memberMap, candidateRows] = await Promise.all([
     readDynamicGroupMap(env),
+    readDynamicMemberMap(env),
     readJsonArray(env, CANDIDATE_STATUS_KEY)
   ]);
   const candidates = latestCandidates(candidateRows);
   return Object.freeze({
     ...staticStatus,
     dynamicMappedGroups: Object.keys(dynamic.oneBotToQqOpen).length,
+    dynamicMappedMembers: Object.values(memberMap.groups || {}).reduce((sum, group) => sum + Object.keys(group?.qqOpenToOneBotUser || {}).length, 0),
     totalMappedGroups: new Set([
       ...Object.keys(parseGroupMap(env).oneBotToQqOpen),
       ...Object.keys(dynamic.oneBotToQqOpen)
@@ -365,6 +474,7 @@ export {
   DEFAULT_EVIDENCE_REQUIRED,
   DEFAULT_MATCH_WINDOW_MS,
   DYNAMIC_MAP_KEY,
+  MEMBER_MAP_KEY,
   OFFICIAL_RECENT_KEY,
   hybridObservationFingerprint,
   hybridObservationRow,
@@ -377,9 +487,11 @@ export {
   parseGroupMap,
   qqOpenGroupForOneBot,
   readDynamicGroupMap,
+  readDynamicMemberMap,
   recordOneBotHybridObservation,
   recordQqOpenHybridGroupObservation,
   resolveOneBotGroupForQqOpen,
+  resolveOneBotUserForQqOpen,
   resolveQqOpenGroupForOneBot,
   selectHybridMappingCandidate
 };

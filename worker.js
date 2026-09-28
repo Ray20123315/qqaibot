@@ -4196,6 +4196,7 @@ export class OneBotHub {
         }
         const mapping = await recordQqOpenHybridGroupObservation(this.env, {
           groupOpenid,
+          userOpenid: String(payload.userOpenid || ""),
           messageId: String(payload.messageId || ""),
           text: String(payload.text || ""),
           mediaTypes: Array.isArray(payload.mediaTypes) ? payload.mediaTypes : [],

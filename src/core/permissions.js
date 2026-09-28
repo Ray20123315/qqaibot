@@ -9,6 +9,7 @@ import { parseUnlimitedNonNegativeInteger } from "../moderation/runtime.js";
 import { getOneBotHub, readJson, sha256Hex } from "../portal/auth.js";
 import { numericId } from "../security/network.js";
 import { oneBotReadOnlyActionAllowed, oneBotReadOnlyMode } from "../onebot/read-only.js";
+import { resolveOneBotGroupForQqOpen, resolveOneBotUserForQqOpen } from "../v4/hybrid/ownership.js";
 
 
 
@@ -605,35 +606,44 @@ async function isKnownOutboundMessage(env, info) {
 
 
 
-async function callOneBotAction(env, actionPayload, timeoutMs = 15000) {
-  if (String(env?.QQAI_EVENT_PLATFORM || "") === "qq-open") {
-    if (!env.QQ_OPEN_GATEWAY) throw new Error("QQ_OPEN_GATEWAY_NOT_BOUND");
-    const payload = actionPayload?.action ? actionPayload : { action: actionPayload?.action, params: actionPayload?.params || {} };
-    const stub = env.QQ_OPEN_GATEWAY.get(env.QQ_OPEN_GATEWAY.idFromName("default"));
-    const res = await stub.fetch("https://qq-open-gateway/api/v4/qqopen/legacy-action", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        ...payload,
-        timeoutMs,
-        context: {
-          platform: "qq-open",
-          scope: String(env.QQAI_QQOPEN_GROUP_ID || "") ? "group" : "private",
-          groupId: String(env.QQAI_QQOPEN_GROUP_ID || ""),
-          userId: String(env.QQAI_QQOPEN_USER_ID || ""),
-          messageId: String(env.QQAI_QQOPEN_MESSAGE_ID || ""),
-          eventId: String(env.QQAI_QQOPEN_EVENT_ID || ""),
-          captureMessageSends: String(env.QQAI_QQOPEN_CAPTURE_SENDS || "") === "true",
-          botUserId: String(env.QQAI_QQOPEN_BOT_USER_ID || "")
-        }
-      })
-    });
-    const data = await res.json().catch(() => null);
-    if (!res.ok || data?.ok !== true) throw new Error(data?.error || ("QQ_OPEN_LEGACY_ACTION_" + res.status));
-    return data.data;
-  }
+function normalizedActionPayload(actionPayload) {
+  return actionPayload?.action
+    ? { ...actionPayload, params: { ...(actionPayload.params || {}) } }
+    : { action: actionPayload?.action, params: { ...(actionPayload?.params || {}) } };
+}
+
+function oneBotActionIsReadOnly(action) {
+  return /^(?:get_|can_)/i.test(String(action || "").trim()) || ["get_status", "get_version_info"].includes(String(action || "").trim());
+}
+
+function qqOpenFallbackEligible(action, error) {
+  const message = String(error?.message || error || "");
+  if (/QQ_OPEN_LEGACY_ACTION_UNSUPPORTED/i.test(message)) return true;
+  if (/QQ_OPEN_GATEWAY_NOT_BOUND|QQ_OPEN_NOT_CONFIGURED|QQ_OPEN_DISABLED|QQ_OPEN_SUSPENDED/i.test(message)) return true;
+  if (/QQ_OPEN_TOKEN_(?:400|401|403|404|429)/i.test(message)) return true;
+  if (/QQ_OPEN_API_(?:401|403|405|429|501)(?::|$)/i.test(message)) return true;
+  if (oneBotActionIsReadOnly(action) && /QQ_OPEN_(?:API_5\d\d|TOKEN_5\d\d|LEGACY_ACTION_5\d\d)/i.test(message)) return true;
+  return false;
+}
+
+function legacyGroupPermissionRequirement(action) {
+  const name = String(action || "").trim();
+  if (["set_group_admin", "set_group_special_title"].includes(name)) return "owner";
+  if ([
+    "set_group_ban", "set_group_kick", "set_group_whole_ban", "set_group_name",
+    "set_group_card", "delete_msg", "set_group_add_request", "set_group_invite_request"
+  ].includes(name)) return "admin";
+  return "member";
+}
+
+function actionNeedsGroupMapping(action, params = {}) {
+  const name = String(action || "").trim();
+  return Boolean(params.group_id || params.group || /^set_group_|^get_group_|^send_group_msg$/.test(name));
+}
+
+async function callOneBotDirectAction(env, actionPayload, timeoutMs = 15000) {
   if (!env.ONEBOT_HUB) throw new Error("ONEBOT_HUB_NOT_BOUND");
-  const payload = actionPayload?.action ? actionPayload : { action: actionPayload?.action, params: actionPayload?.params || {} };
+  const payload = normalizedActionPayload(actionPayload);
   const action = String(payload?.action || "").trim();
   if (oneBotReadOnlyMode(env) && !oneBotReadOnlyActionAllowed(action)) {
     throw new Error("ONEBOT_READ_ONLY_ACTION_BLOCKED");
@@ -646,6 +656,155 @@ async function callOneBotAction(env, actionPayload, timeoutMs = 15000) {
   const data = await res.json().catch(() => null);
   if (!res.ok || !data?.ok) throw new Error(data?.error || `ONEBOT_RPC_${res.status}`);
   return data.data;
+}
+
+async function mapQqOpenActionForOneBot(env, actionPayload) {
+  const payload = normalizedActionPayload(actionPayload);
+  const action = String(payload.action || "").trim();
+  const params = { ...(payload.params || {}) };
+  const qqOpenGroupId = String(env.QQAI_QQOPEN_GROUP_ID || params.group_id || params.group || "").trim();
+  let oneBotGroupId = /^\d+$/.test(String(params.group_id || "").trim()) ? String(params.group_id).trim() : "";
+
+  if (actionNeedsGroupMapping(action, params) && !oneBotGroupId) {
+    oneBotGroupId = await resolveOneBotGroupForQqOpen(env, qqOpenGroupId);
+    if (!oneBotGroupId) {
+      throw new Error("AIBot 当前无法执行该操作；尚未建立本群与旧 Bot 的群号映射。请先让 AIBot 与旧 Bot 同时在线观察本群消息，完成映射后再试。");
+    }
+  }
+  if (oneBotGroupId) params.group_id = numericId(oneBotGroupId);
+  return { ...payload, params, qqOpenGroupId, oneBotGroupId };
+}
+
+async function mapQqOpenTargetForOneBot(env, mapped) {
+  const action = String(mapped?.action || "").trim();
+  const params = { ...(mapped?.params || {}) };
+  const qqOpenGroupId = String(mapped?.qqOpenGroupId || "").trim();
+  const rawUserId = String(params.user_id ?? params.qq ?? "").trim();
+
+  if (rawUserId && !/^\d+$/.test(rawUserId)) {
+    if (!qqOpenGroupId) {
+      throw new Error("AIBot 当前无法执行该操作；旧 Bot 需要数字 QQ 号，但当前目标只有 OpenID。");
+    }
+    const mappedUserId = await resolveOneBotUserForQqOpen(env, qqOpenGroupId, rawUserId);
+    if (!mappedUserId) {
+      throw new Error("AIBot 当前无法执行该操作；旧 Bot 权限已确认，但目标成员尚未建立 OpenID 与数字 QQ 的安全映射。请让该成员先在本群正常发言以完成关联，或改用数字 QQ 号。");
+    }
+    if ("user_id" in params) params.user_id = numericId(mappedUserId);
+    if ("qq" in params) params.qq = numericId(mappedUserId);
+  }
+
+  if (action === "delete_msg") {
+    const messageId = String(params.message_id || "").trim();
+    if (messageId && !/^\d+$/.test(messageId)) {
+      throw new Error("AIBot 当前无法撤回该消息；旧 Bot 权限已确认，但 QQ Open 消息 ID 无法安全转换为 OneBot 消息 ID。");
+    }
+  }
+  if (action === "set_group_add_request") {
+    throw new Error("AIBot 当前无法转交这笔入群审核；旧 Bot 权限已确认，但 QQ Open 与 OneBot 的入群申请 ID 不可安全互换。");
+  }
+
+  return { ...mapped, params };
+}
+
+async function probeLegacyBotGroupPermission(env, action, oneBotGroupId, timeoutMs = 15000) {
+  if (!oneBotGroupId) return { role: "unknown", userId: "" };
+  let identity;
+  try {
+    identity = await callOneBotDirectAction(env, { action: "get_login_info", params: {} }, Math.min(timeoutMs, 10000));
+  } catch {
+    throw new Error("AIBot 当前无法执行该操作；旧 Bot 目前未连接，无法接管。请先启动并连接旧 Bot。");
+  }
+  const botUserId = String(identity?.user_id || identity?.userId || "").trim();
+  if (!/^\d+$/.test(botUserId)) {
+    throw new Error("AIBot 当前无法执行该操作；旧 Bot 身份无法确认，请检查 NapCat/OneBot 连接。");
+  }
+
+  let member;
+  try {
+    member = await callOneBotDirectAction(env, {
+      action: "get_group_member_info",
+      params: { group_id: numericId(oneBotGroupId), user_id: numericId(botUserId), no_cache: true }
+    }, Math.min(timeoutMs, 10000));
+  } catch {
+    throw new Error("AIBot 当前无法执行该操作；旧 Bot 不在对应群聊或无法读取自身群权限。请先确认旧 Bot 已加入该群。");
+  }
+
+  const role = String(member?.role || "member").toLowerCase();
+  const required = legacyGroupPermissionRequirement(action);
+  if (required === "owner" && role !== "owner") {
+    throw new Error(`AIBot 当前无法执行该操作；旧 Bot 权限不足。此操作需要群主权限，旧 Bot 当前角色为 ${role || "member"}。`);
+  }
+  if (required === "admin" && !["owner", "admin"].includes(role)) {
+    throw new Error("AIBot 当前无法执行该操作；旧 Bot 权限不足。请先将旧 Bot 设为群管理员后重试。");
+  }
+  return { role, userId: botUserId, required };
+}
+
+async function callOneBotAction(env, actionPayload, timeoutMs = 15000) {
+  const payload = normalizedActionPayload(actionPayload);
+  const action = String(payload?.action || "").trim();
+
+  if (String(env?.QQAI_EVENT_PLATFORM || "") === "qq-open") {
+    let officialError = null;
+    try {
+      if (!env.QQ_OPEN_GATEWAY) throw new Error("QQ_OPEN_GATEWAY_NOT_BOUND");
+      const stub = env.QQ_OPEN_GATEWAY.get(env.QQ_OPEN_GATEWAY.idFromName("default"));
+      const res = await stub.fetch("https://qq-open-gateway/api/v4/qqopen/legacy-action", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          ...payload,
+          timeoutMs,
+          context: {
+            platform: "qq-open",
+            scope: String(env.QQAI_QQOPEN_GROUP_ID || "") ? "group" : "private",
+            groupId: String(env.QQAI_QQOPEN_GROUP_ID || ""),
+            userId: String(env.QQAI_QQOPEN_USER_ID || ""),
+            messageId: String(env.QQAI_QQOPEN_MESSAGE_ID || ""),
+            eventId: String(env.QQAI_QQOPEN_EVENT_ID || ""),
+            captureMessageSends: String(env.QQAI_QQOPEN_CAPTURE_SENDS || "") === "true",
+            botUserId: String(env.QQAI_QQOPEN_BOT_USER_ID || "")
+          }
+        })
+      });
+      const data = await res.json().catch(() => null);
+      if (!res.ok || data?.ok !== true) throw new Error(data?.error || ("QQ_OPEN_LEGACY_ACTION_" + res.status));
+      return data.data;
+    } catch (error) {
+      officialError = error;
+    }
+
+    if (!qqOpenFallbackEligible(action, officialError)) throw officialError;
+    if (oneBotReadOnlyMode(env) && !oneBotReadOnlyActionAllowed(action)) {
+      throw new Error("AIBot 当前无法执行该操作；旧 Bot 处于只读模式，无法接管写入型群操作。");
+    }
+
+    const mappedGroup = await mapQqOpenActionForOneBot(env, payload);
+    if (mappedGroup.oneBotGroupId) {
+      await probeLegacyBotGroupPermission(env, action, mappedGroup.oneBotGroupId, timeoutMs);
+    }
+    const mapped = await mapQqOpenTargetForOneBot(env, mappedGroup);
+
+    try {
+      const data = await callOneBotDirectAction(env, { action, params: mapped.params }, timeoutMs);
+      await writeSystemAudit(env, {
+        type: "hybrid_action_fallback",
+        groupId: String(mapped.oneBotGroupId || ""),
+        actorId: String(env.QQAI_QQOPEN_USER_ID || "system"),
+        action,
+        error: String(officialError?.message || officialError || "").slice(0, 300)
+      }).catch(() => {});
+      return data;
+    } catch (legacyError) {
+      const message = String(legacyError?.message || legacyError || "");
+      if (/ONEBOT_READ_ONLY_ACTION_BLOCKED/.test(message)) {
+        throw new Error("AIBot 当前无法执行该操作；旧 Bot 处于只读模式，无法接管。");
+      }
+      throw new Error(`AIBot 当前无法执行该操作；旧 Bot 已通过前置权限检查，但执行失败：${message.slice(0, 220)}`);
+    }
+  }
+
+  return callOneBotDirectAction(env, payload, timeoutMs);
 }
 
 export { PERMISSIONS, appendIndex, buildLongGroupConversationContext, callOneBotAction, checkRuntimeRateLimit, enrichAuditLogsForPortal, explicitProgramPermissionIndexKey, getEffectivePermissions, getRuntimeRateLimitSeconds, isKnownOutboundMessage, listAiDecisionLogs, listExplicitPrivateAccess, listExplicitProgramPermissions, markOutboundPending, markRuntimeRateLimitCompletion, modelCapabilityLabel, modelHealthStatusLabel, modelHealthStatusRank, modelPreferenceLabel, normalizeFingerprintText, normalizeMemoryItems, normalizeModelPreference, normalizePermissionName, outboundFingerprint, permissionLabel, removeFromIndex, runtimeRateLimitScope, setExplicitPermission, setPrivateAccessMode, updateAiDecisionLog, updateExplicitProgramPermissionIndex, writeAiDecisionLog, writeSystemAudit };

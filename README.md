@@ -456,7 +456,7 @@ Public `!codex` and ordinary AI chat use the same runtime path as OneBot. Develo
 QQ_OPEN_DEVELOPER_OPENIDS=<openid1>,<openid2>
 ```
 
-When a QQ Open event reaches the shared runtime, OneBot-style side effects are redirected to official QQ Open APIs where an equivalent exists: text/rich-media send, member info/list, mute, remove, recall and join-request review. Operations without an official QQ Open equivalent fail explicitly instead of falling back to NapCat.
+When a QQ Open event reaches the shared runtime, OneBot-style side effects first use official QQ Open APIs where an equivalent exists: text/rich-media send, member info/list, mute, remove, recall and join-request review. If the official path is explicitly unsupported or deterministically unavailable, the runtime may fall back to NapCat/OneBot only after resolving the confirmed numeric group mapping and verifying the legacy Bot is present with the role required by that action. Ambiguous mutating failures such as timeout/5xx are not cross-retried.
 
 QQ Open groups and C2C conversations do not reuse the old OneBot whitelist/private-access gate. Existing AI cooldown, short-term history, D1 settings, Vectorize memory, command parsing and public Codex quota still apply.
 
@@ -472,7 +472,7 @@ QQ Open groups and C2C conversations do not reuse the old OneBot whitelist/priva
 - 被動回覆使用單一序號分配器；群聊每個來源訊息最多 5 次／5 分鐘，單聊最多 4 次／60 分鐘。Thinking indicator、工具通知與最終回答共用同一 `msg_seq` 配額。
 - 圖片／影片／語音／文件一律先走場景對應的上傳 API，再以 `msg_type=7` 和 `media.file_info` 發送；群聊與單聊不共用上傳結果。
 - QQ Open 語音優先使用 `voice_wav_url`，可把 `asr_refer_text` 當作不可信的語音轉寫參考；ARK 卡片與 `msg_elements` 引用內容會轉成 AI 可讀上下文。
-- QQ Open 自己發出的群聊與單聊消息都可走對應官方撤回 API；無官方等價能力的舊 NapCat action 會明確報 `QQ_OPEN_LEGACY_ACTION_UNSUPPORTED`，不會偷偷回到 OneBot。
+- QQ Open 自己發出的群聊與單聊消息都可走對應官方撤回 API；其他 action 仍先走官方 API。只有官方明確不支援或確定不可用時，才會在確認群映射、舊 Bot 在群內且角色權限足夠後轉交 OneBot；權限不足會直接提示需補的權限，模糊的 timeout/5xx 寫入操作不跨通道重試。
 - 私聊可發 `!qqid` 查看自己的 OpenID；群聊使用會要求改到私聊，避免把 OpenID 公開在群內。開發者功能仍必須把該 OpenID 明確加入 `QQ_OPEN_DEVELOPER_OPENIDS`。
 
 正式環境設定：
@@ -495,10 +495,10 @@ QQ_OPEN_DISCOVERY_SYNC = "true"
 QQAIBOT V4 不会直接删除 NapCat/OneBot。生产目标是混合模式：
 
 - QQ Open 是官方主通道，负责官方支持的消息、AI/Codex 回答、富媒体、Interaction、群管理与主动推送。
-- NapCat/OneBot 保留为辅助观测与旧能力通道，补官方暂时无法提供的客户端级事件/资料。
+- NapCat/OneBot 保留为辅助观测与旧能力通道，补官方暂时无法提供的客户端级事件/资料；AIBot 动作明确不可用时，也可在群映射与权限检查通过后作为单次执行 fallback。
 - 私聊和明确 @ 机器人消息由 QQ Open 拥有；OneBot 对应消息只入库观察，不重复执行插件/AI/群管。
 - 普通群消息不会因为“计划使用官方全量”就直接禁用 OneBot。只有某个 `group_openid` 实际收到过 `GROUP_MESSAGE_CREATE` 后，才动态标记该群的官方全量已生效，并让映射群的 OneBot 普通消息降级为辅助观测。
-- 数字 QQ 群号和 `group_openid` 不做单次猜测。显式 `QQ_HYBRID_GROUP_MAP` 永远优先；若未配置，系统会把 OneBot 与 QQ Open 在短时间内看到的同一群消息做保守关联，只有同一候选群累计至少 3 个不同官方消息 ID 的一致证据才写入 D1 动态映射。内容过短/常见、同时命中多个群或出现映射冲突时不会学习。
+- 数字 QQ 群号和 `group_openid` 不做单次猜测。显式 `QQ_HYBRID_GROUP_MAP` 永远优先；若未配置，系统会把 OneBot 与 QQ Open 在短时间内看到的同一群消息做保守关联，只有同一候选群累计至少 3 个不同官方消息 ID 的一致证据才写入 D1 动态映射。内容过短/常见、同时命中多个群或出现映射冲突时不会学习。群映射确认后，同一条跨通道消息还可保守建立成员 OpenID ↔ 数字 QQ 关联，供需要 OneBot 的成员操作使用；冲突关联不会覆盖。
 - 自动映射可先借 `GROUP_AT_MESSAGE_CREATE` 学习；当同一 `group_openid` 后续真正出现 `GROUP_MESSAGE_CREATE`，才视为该群官方「接收所有消息」已实际生效，普通 OneBot 群消息才降为辅助观测。
 - 排程/主动插话：只要静态或已确认的动态群映射存在，且官方 `GROUP_MSG_RECEIVE` / 授权状态允许，就优先走 QQ Open；否则保留 OneBot fallback。含数字 QQ @mention 的旧排程仍走 OneBot，避免把数字 QQ 当成 OpenID。
 
