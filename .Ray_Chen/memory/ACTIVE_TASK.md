@@ -1,29 +1,46 @@
 # ACTIVE_TASK
 
 task_id: qqaibot-20260929-group-panel-slash-dispatch
-task_status: active
+task_status: completed
 goal_revision: 1
 
 ## Goal
 
-Repair live QQ group panel clicks that currently send `/!面板 ...` and produce no bot response.
+Repair live QQ group panel commands whose QQ-rendered `/!` prefix collided with the intentional `/!` AI-bypass syntax.
 
 ## Root Cause
 
-The QQ client displays/sends a leading slash for panel commands. Before command routing, group member input is passed through `stripGroupAiOptOutPrefix`, where every `/!` prefix is intentionally treated as "skip AI". Therefore `/!面板 基础` becomes plain `面板 基础` with `aiReplyOptOut=true`, and `resolveGroupPanelInput` never matches it.
+QQ group command-panel entries are displayed/sent with a leading slash, e.g. `/!面板 基础`. Group input previously reached `stripGroupAiOptOutPrefix` first, so the command was converted into plain `面板 基础` with `aiReplyOptOut=true` before the panel router ran.
 
-## Acceptance Criteria
+## Acceptance Results
 
-- Panel slash normalization happens before group AI opt-out stripping.
-- Only the reserved `/!面板` / `/！面板` route is normalized.
-- `/!普通内容` continues to opt out of AI exactly as before.
-- Category-only input returns child commands.
-- Category + child expands to the existing canonical command handler.
-- Existing direct commands and authorization paths are unchanged.
-- V3/V4/full regression, isolated deployment check and bundle pass.
+- VERIFIED: reserved panel slash input is normalized before `stripGroupAiOptOutPrefix`.
+- VERIFIED: only `/!面板` / `/！面板` (including full-width slash) receives this normalization.
+- VERIFIED: `/!普通内容` is unchanged and remains AI opt-out.
+- VERIFIED: CQ-at-prefixed panel commands are normalized without losing the CQ prefix.
+- VERIFIED: category-only panel input returns the child-command list.
+- VERIFIED: category + child expands to the existing canonical command and therefore uses existing permission/confirmation/handler logic.
+- VERIFIED: repository, V3, V4 QQ Open, isolated deployment and bundle checks pass on development and main.
+- VERIFIED: production Connected Build succeeds.
+
+## Product Revision
+
+`64513e94f6634921f0b1ee8f7c6d5d44a754a6f5`
+
+## Changed Product Files
+
+- `src/v4/commands/group-panel.js`
+- `worker.js`
+- `verify-v4-qqopen.mjs`
+
+## Verification Evidence
+
+- development CI: `36476322049` — success
+- main CI: `36476525721` — success
+- production build: `8aa6ab67-ad80-4ddd-b916-0b76e7bfcf3c` — success
 
 ## next_exact_action
 
-Implement reserved slash normalization in src/v4/commands/group-panel.js and worker.js, then add regression coverage.
+Live-test one group panel entry, preferably `/!面板 基础`, and confirm the bot returns the category child list.
 
-last_checkpoint_at: 2026-09-29T03:48:00+08:00
+last_checkpoint_at: 2026-09-29T04:08:00+08:00
