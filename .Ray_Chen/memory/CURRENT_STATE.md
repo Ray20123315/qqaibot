@@ -1,72 +1,38 @@
 # CURRENT_STATE
 
-## GitHub
+## Branch Isolation
 
-Production product head:
-`edeacf6cf8c215cc3987b86a4a0d5220c7f581d9`
+Development branch: `feature/v4-public-bot`
+Base main commit: `08ceeb725590d9efb0160ea38733d929e6e7d18c`
+Main modification by this task: none.
 
-Feature implementation:
-`535804857f530dd8bf16d221422a6ed095300fe8`
+## Existing V4 Foundation
 
-Verification:
-- feature product CI: success
-- regression CI `36366534308`: success
-- main CI `36366701774`: success
+Existing repository already contains:
+- `src/v4/qqopen/*`
+- `src/v4/hybrid/ownership.js`
+- `src/v4/portal/*`
+- QQ Open group/C2C send, deletion, group info/member, member removal, blacklist, join-request and restrict-chat API wrappers
+- OneBot/QQ Open hybrid mapping and duplicate-side-effect protections
+- V4 verification scripts
 
-## Cloudflare
+## New Product Direction
 
-Production Worker: `qqai`
-Production build: `2f3fa902-2e60-44a2-8355-7459a5ef9db4`
-Outcome: success
-Worker version: `4d8fff7e-5713-4e5c-83e2-7caa9bcbb633`
+- QQ Open becomes capability-first for both observation and moderation where permission/API support exists.
+- OneBot remains the automatic fallback and full-visibility supplement.
+- AI access is split between platform-limited quota and user-owned provider credentials.
+- AI Provider sharing is membership-bound to groups where the provider is currently a member.
+- User settings must be available from the authenticated web backend and AIBot private messages.
+- Normal UI must expose human concepts only; raw internals belong only in developer diagnostics.
+- Plugin execution must be tenant-isolated with forced termination/quarantine on global-risk behavior.
+- Legal consent and developer whitelist override are separate auditable states.
+- Political filtering starts with text rules before classifier escalation.
 
-Retained bindings:
-- OneBotHub
-- QqOpenGateway
-- D1
-- Vectorize
-- Workers AI
-- Rate Limiter
-- QQ Open Secret and all existing application Secrets
+## Cloudflare Constraint
 
-Production Intent remains `33554432`.
+Use the existing `qqai` Worker preview/version mechanism. Do not create another Worker and do not mutate production D1/KV/DO during preview tests.
 
-## Reply Fix
+## Verification State
 
-QQ Open ordinary AI responses:
-- do not prepend `reply_plan.mentionIds`;
-- do not serialize the source user OpenID into visible text;
-- continue to include source `msg_id` and allocated `msg_seq`;
-- rich media `msg_type=7` includes placeholder content.
-
-Current QQ group/C2C message reference/quote UI cannot be forced through an unsupported `message_reference` field.
-
-## Discovery Fix
-
-The deployed API now:
-- PUTs global menu as `{ menu }`;
-- lists panels with required `scope` separately for C2C and group;
-- supports panel-list `records` and pagination;
-- PUTs panel updates as `{ panel }`.
-
-Live Gateway discovery status has not yet been re-read from the authenticated Portal after deploy.
-
-## Hybrid Mapping Fix
-
-New D1 keys/data:
-- `hybrid_aux_recent`: OneBot observations
-- `hybrid_qqopen_recent`: QQ Open observations
-- `qqopen_group_map_evidence:<group_openid>:<numeric_group>`
-- `qqopen_group_map_candidates`
-- `qqopen_dynamic_group_map`
-
-Mapping behavior:
-- observations are recorded before ownership suppression;
-- either transport may arrive first;
-- correlation window is 12 seconds;
-- generic/low-information text is ignored;
-- ambiguous candidates are rejected;
-- 3 distinct official message IDs remain required;
-- Portal exposes pending candidates/progress.
-
-Pre-fix production D1 contained none of the learner rows, explaining the user's 0 mapping count.
+Task bootstrap verified.
+Product implementation: not started in this task yet.
