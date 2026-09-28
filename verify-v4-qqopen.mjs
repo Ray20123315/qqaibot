@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { buildConnectivityReply, createQqOpenActionDispatcher, createQqOpenApiClient, createGatewayState, createHeartbeatPayload, createIdentifyPayload, createResumePayload, fromQqOpenEvent, qqOpenClosePolicy, qqOpenDeliveryKey, qqOpenDeliverySequence, qqOpenIntents, qqOpenPassiveReplyPolicy, qqOpenReconnectDelay, qqOpenShard, reduceGatewayPayload, syncQqOpenDiscovery } from "./src/v4/index.js";
 import { createInitialCommandRegistry } from "./src/v4/commands/catalog.js";
+import { assertGroupPanelCoverage, buildGroupRootPanel, resolveGroupPanelInput } from "./src/v4/commands/group-panel.js";
 
 const group = fromQqOpenEvent({ t:"GROUP_MESSAGE_CREATE", s:42, d:{ id:"msg-1", group_openid:"group-A", timestamp:"2026-09-27T08:00:00Z", content:" hello ", author:{ member_openid:"member-A", member_role:"admin", username:"Ray" }, attachments:[{content_type:"image/png",url:"https://example.com/a.png",filename:"a.png"}] } });
 assert.equal(group.platform, "qq-open");
@@ -94,24 +95,23 @@ assert(groupPanels.every(panel => panel.panel.items.length <= 7));
 assert(groupPanels.flatMap(panel => panel.panel.items).some(item => item.name === "!禁言" && item.only_admin === true));
 
 const allPermissions = ["member", "group_ops", "ai_admin", "owner", "developer"];
-const categorizedGroupPanels = registry.buildCategorizedPanels("group", { permissions:allPermissions });
-assert(categorizedGroupPanels.length <= 10);
-assert(categorizedGroupPanels.every(panel => panel.panel.items.length <= 20));
-assert(categorizedGroupPanels.some(panel => /\[基础与多模态\]/.test(panel.panel.remark)));
-assert(categorizedGroupPanels.some(panel => /\[群聊整理与分析\]/.test(panel.panel.remark)));
-assert(categorizedGroupPanels.some(panel => /\[活动投票与排程\]/.test(panel.panel.remark)));
-assert(categorizedGroupPanels.some(panel => /\[AI 管理\]/.test(panel.panel.remark)));
-assert(categorizedGroupPanels.some(panel => /\[群操作\]/.test(panel.panel.remark)));
-assert(categorizedGroupPanels.some(panel => /\[开发者\]/.test(panel.panel.remark)));
-const groupPanelItems = categorizedGroupPanels.flatMap(panel => panel.panel.items);
-const groupPanelNames = new Set(groupPanelItems.map(item => item.name));
-for (const name of ["!help","!status","!codex","!模型","!群状态","!群规","!成员发言分析","!活动","!投票","!禁言","!关闭ai","!授权AI踢出","!群白名单","!授权","!撤销授权","!禁记忆"]) {
-  assert(groupPanelNames.has(name), `Group panel missing representative command ${name}`);
+assert.equal(assertGroupPanelCoverage(registry), true);
+const groupRootPanel = buildGroupRootPanel(registry);
+assert.equal(groupRootPanel.scope, "group");
+assert.equal(groupRootPanel.target_type, "all");
+assert(groupRootPanel.panel.items.length > 0 && groupRootPanel.panel.items.length <= 20);
+const groupRootNames = new Set(groupRootPanel.panel.items.map(item => item.name));
+for (const name of ["!面板 基础","!面板 群聊","!面板 记忆","!面板 活动","!面板 群规","!面板 AI管理","!面板 群操作","!面板 群主","!面板 开发者"]) {
+  assert(groupRootNames.has(name), `Group root panel missing ${name}`);
 }
-assert(groupPanelItems.some(item => item.name === "!禁言" && item.only_admin === true));
-for (const command of registry.list({ scope:"group" }).filter(command => command.panel.enabled)) {
-  assert(groupPanelNames.has(command.panel.command), `Group discovery missing ${command.id}`);
-}
+assert.equal(resolveGroupPanelInput("!面板 基础 help", registry)?.expanded, "!help");
+assert.equal(resolveGroupPanelInput("！面板 群操作 禁言 @123456 10分钟", registry)?.expanded, "!禁言 @123456 10分钟");
+assert.equal(resolveGroupPanelInput("!面板 开发者 codexwork --export 测试", registry)?.expanded, "!codexwork --export 测试");
+const groupRootHelp = resolveGroupPanelInput("!面板 基础", registry);
+assert.equal(groupRootHelp?.matched, true);
+assert.equal(groupRootHelp?.expanded, "");
+assert.match(groupRootHelp?.message || "", /help/);
+assert.match(groupRootHelp?.message || "", /status/);
 
 const developerPanels = registry.buildCategorizedPanels("c2c", {
   permissions:allPermissions,
@@ -248,16 +248,19 @@ assert(discoveryCalls.some(row => row[0] === "listPanels" && row[1] === "c2c"));
 assert(discoveryCalls.some(row => row[0] === "listPanels" && row[1] === "group"));
 assert(firstDiscovery.panels <= 20);
 assert(firstDiscovery.categories.includes("basic"));
-assert(firstDiscovery.categories.includes("group-ops"));
+assert(firstDiscovery.categories.includes("group-root"));
 assert(firstDiscovery.categories.includes("ai-admin"));
 assert(firstDiscovery.categories.includes("developer"));
 const groupSyncPanels = discoveryCalls
   .filter(row => row[0] === "createPanel" && row[1] === "group" && row[2]?.target_type === "all")
   .map(row => row[2]);
-const groupSyncNames = new Set(groupSyncPanels.flatMap(panel => panel.panel.items).map(item => item.name));
-for (const name of ["!help","!codex","!群状态","!活动","!禁言","!群白名单","!授权"]) {
-  assert(groupSyncNames.has(name), `Synced group panels missing ${name}`);
+assert.equal(groupSyncPanels.length, 1, "QQ client must receive one managed group panel");
+const groupSyncNames = new Set(groupSyncPanels[0].panel.items.map(item => item.name));
+for (const name of ["!面板 基础","!面板 群聊","!面板 记忆","!面板 活动","!面板 群规","!面板 AI管理","!面板 群操作","!面板 群主","!面板 开发者"]) {
+  assert(groupSyncNames.has(name), `Synced group root panel missing ${name}`);
 }
+assert(!groupSyncNames.has("!群白名单"), "raw Developer commands must not replace the group root panel");
+
 const developerSyncPanels = discoveryCalls
   .filter(row => row[0] === "createPanel" && row[2]?.target_type === "specific" && row[2]?.user_openids?.includes("dev-openid"))
   .map(row => row[2]);
