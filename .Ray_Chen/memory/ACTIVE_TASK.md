@@ -1,46 +1,43 @@
 # ACTIVE_TASK
 
-task_id: qqaibot-20260929-group-panel-slash-dispatch
-task_status: completed
+task_id: qqaibot-20260929-group-panel-keyboard
+task_status: active
 goal_revision: 1
 
 ## Goal
 
-Repair live QQ group panel commands whose QQ-rendered `/!` prefix collided with the intentional `/!` AI-bypass syntax.
+Deploy clickable QQ button cards for group command categories while preserving the newer Portal temporary-admin security fix already present on main.
 
-## Root Cause
+## Implemented Keyboard Behavior
 
-QQ group command-panel entries are displayed/sent with a leading slash, e.g. `/!面板 基础`. Group input previously reached `stripGroupAiOptOutPrefix` first, so the command was converted into plain `面板 基础` with `aiReplyOptOut=true` before the panel router ran.
+- two command buttons per row;
+- at most five rows;
+- categories over ten commands paginate;
+- command buttons send canonical existing ! commands;
+- page navigation uses the same !面板 router;
+- QQ Open passive replies and interaction replies can carry inline keyboard payloads;
+- deterministic 4xx keyboard capability failures may fall back to text;
+- ambiguous 5xx/timeouts are not resent through a fallback write.
 
-## Acceptance Results
+## Integration Checkpoint
 
-- VERIFIED: reserved panel slash input is normalized before `stripGroupAiOptOutPrefix`.
-- VERIFIED: only `/!面板` / `/！面板` (including full-width slash) receives this normalization.
-- VERIFIED: `/!普通内容` is unchanged and remains AI opt-out.
-- VERIFIED: CQ-at-prefixed panel commands are normalized without losing the CQ prefix.
-- VERIFIED: category-only panel input returns the child-command list.
-- VERIFIED: category + child expands to the existing canonical command and therefore uses existing permission/confirmation/handler logic.
-- VERIFIED: repository, V3, V4 QQ Open, isolated deployment and bundle checks pass on development and main.
-- VERIFIED: production Connected Build succeeds.
+- newest main before merge: `4865c7c6c9f381916082e70063be78aaaba8e6d6`
+- keyboard branch before merge: `d4ae8580ff28c7cc7a88d888b2ea0a65c6a55f0f`
+- integration commit: `af4b743fec796cc071aafce3559f66c2ae7c9a50`
+- merge is non-destructive and has two parents
+- Portal temporary-admin and D1 auth-rate-limit fallback from main are preserved
+- integration CI: pending
 
-## Product Revision
+## Acceptance Criteria
 
-`64513e94f6634921f0b1ee8f7c6d5d44a754a6f5`
-
-## Changed Product Files
-
-- `src/v4/commands/group-panel.js`
-- `worker.js`
-- `verify-v4-qqopen.mjs`
-
-## Verification Evidence
-
-- development CI: `36476322049` — success
-- main CI: `36476525721` — success
-- production build: `8aa6ab67-ad80-4ddd-b916-0b76e7bfcf3c` — success
+- system-admin auth tests still pass;
+- keyboard V4 regression still passes;
+- repository/V3/V4/isolation/bundle checks all pass;
+- main updates without force;
+- production Connected Build succeeds.
 
 ## next_exact_action
 
-Live-test one group panel entry, preferably `/!面板 基础`, and confirm the bot returns the category child list.
+Validate integration commit `af4b743fec796cc071aafce3559f66c2ae7c9a50` on v4-qqopen-native.
 
-last_checkpoint_at: 2026-09-29T04:08:00+08:00
+last_checkpoint_at: 2026-09-29T04:47:00+08:00
