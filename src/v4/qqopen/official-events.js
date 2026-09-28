@@ -25,6 +25,15 @@ const PUSH_PERMISSION_EVENTS = Object.freeze(new Set([
   "GROUP_MSG_REJECT"
 ]));
 
+const LIFECYCLE_EVENTS = Object.freeze(new Set([
+  "FRIEND_ADD",
+  "FRIEND_DEL",
+  "GROUP_ADD_ROBOT",
+  "GROUP_DEL_ROBOT",
+  "GROUP_MEMBER_ADD",
+  "GROUP_MEMBER_REMOVE"
+]));
+
 function normalizePushPermissionEvent(payload = {}) {
   const type = eventType(payload);
   if (!PUSH_PERMISSION_EVENTS.has(type)) return null;
@@ -41,6 +50,40 @@ function normalizePushPermissionEvent(payload = {}) {
     allowed: type.endsWith("_RECEIVE"),
     updatedAt: toTimestampMs(data.timestamp)
   });
+}
+
+function normalizeLifecycleEvent(payload = {}) {
+  const type = eventType(payload);
+  if (!LIFECYCLE_EVENTS.has(type)) return null;
+  const data = eventData(payload);
+  const friend = type.startsWith("FRIEND_");
+  const robotGroup = type === "GROUP_ADD_ROBOT" || type === "GROUP_DEL_ROBOT";
+  const memberGroup = type === "GROUP_MEMBER_ADD" || type === "GROUP_MEMBER_REMOVE";
+  const groupId = clean(data.group_openid);
+  const memberId = clean(data.member_openid);
+  const userId = clean(friend ? data.openid : data.user_openid);
+  const author = data.author && typeof data.author === "object" ? data.author : {};
+  return Object.freeze({
+    kind: "lifecycle",
+    eventType: type,
+    scope: friend ? "c2c" : "group",
+    groupId,
+    memberId,
+    userId,
+    unionOpenid: clean(author.union_openid),
+    operatorId: clean(data.op_member_openid),
+    scene: Number(data.scene || 0),
+    sceneParam: clean(data.scene_param),
+    active: type === "FRIEND_ADD" || type === "GROUP_ADD_ROBOT" || type === "GROUP_MEMBER_ADD",
+    subject: friend ? "friend" : robotGroup ? "bot_group_membership" : memberGroup ? "group_member" : "unknown",
+    updatedAt: toTimestampMs(data.timestamp)
+  });
+}
+
+function lifecycleDeliveryKey(record) {
+  if (!record) return "";
+  const target = clean(record.groupId || record.userId || record.memberId);
+  return [record.eventType, target, clean(record.memberId || record.userId), Number(record.updatedAt || 0)].join("|");
 }
 
 function interactionRequiresAck(typeValue) {
@@ -158,12 +201,15 @@ function interactionControlAction(interaction) {
 }
 
 export {
+  LIFECYCLE_EVENTS,
   PUSH_PERMISSION_EVENTS,
   commandFromCallback,
   interactionControlAction,
   interactionDeliveryKey,
+  lifecycleDeliveryKey,
   interactionRequiresAck,
   normalizeInteractionEvent,
+  normalizeLifecycleEvent,
   normalizePushPermissionEvent,
   parseFeatureCommandMap
 };

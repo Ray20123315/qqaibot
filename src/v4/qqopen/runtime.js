@@ -5,7 +5,7 @@ import { fromQqOpenEvent } from "./events.js";
 import { qqOpenJoinRequestToLegacyBody, qqOpenLegacyAction, qqOpenMessageToLegacyBody, sendQqOpenLegacyMessage } from "./legacy-bridge.js";
 import { syncQqOpenDiscovery } from "./discovery.js";
 import { qqOpenClosePolicy, qqOpenDeliveryKey, qqOpenPassiveReplyPolicy, qqOpenShard } from "./protocol.js";
-import { interactionControlAction, interactionDeliveryKey, normalizeInteractionEvent, normalizePushPermissionEvent, parseFeatureCommandMap } from "./official-events.js";
+import { interactionControlAction, interactionDeliveryKey, lifecycleDeliveryKey, normalizeInteractionEvent, normalizeLifecycleEvent, normalizePushPermissionEvent, parseFeatureCommandMap } from "./official-events.js";
 import {
   QQ_OPEN_OPCODE,
   createGatewayState,
@@ -105,6 +105,8 @@ function defaultPersistedState() {
     interactionCount: 0,
     interactionAckCount: 0,
     lastInteraction: null,
+    lifecycleCount: 0,
+    lastLifecycleEvent: null,
     lastOfficialStateEvent: null,
     recentDeliveries: [],
     replyUsage: [],
@@ -219,6 +221,10 @@ export class QqOpenGateway {
         count: Number(this.persisted.interactionCount || 0),
         ackCount: Number(this.persisted.interactionAckCount || 0),
         last: this.persisted.lastInteraction || null
+      },
+      lifecycle: {
+        count: Number(this.persisted.lifecycleCount || 0),
+        last: this.persisted.lastLifecycleEvent || null
       },
       lastOfficialStateEvent: this.persisted.lastOfficialStateEvent || null,
       gatewayMeta: this.persisted.gatewayMeta || {},
@@ -604,6 +610,42 @@ export class QqOpenGateway {
     };
   }
 
+  async handleLifecycleEvent(payload) {
+    const record = normalizeLifecycleEvent(payload);
+    if (!record) return false;
+    const key = lifecycleDeliveryKey(record);
+    if (key && this.deliverySeen(key)) {
+      this.persisted.duplicateDropCount = Number(this.persisted.duplicateDropCount || 0) + 1;
+      await this.persist();
+      return true;
+    }
+    this.persisted.lifecycleCount = Number(this.persisted.lifecycleCount || 0) + 1;
+    this.persisted.lastLifecycleEvent = {
+      eventType: String(record.eventType || ""),
+      subject: String(record.subject || ""),
+      groupId: String(record.groupId || ""),
+      memberId: String(record.memberId || ""),
+      userId: String(record.userId || ""),
+      active: Boolean(record.active),
+      at: Number(record.updatedAt || Date.now())
+    };
+    this.persisted.lastOfficialStateEvent = {
+      kind: "lifecycle",
+      eventType: String(record.eventType || ""),
+      groupId: String(record.groupId || ""),
+      userId: String(record.userId || record.memberId || ""),
+      active: Boolean(record.active),
+      at: Number(record.updatedAt || Date.now())
+    };
+    await this.forwardControl({
+      action: "lifecycle",
+      ...record
+    }).catch(error => this.recordError(error));
+    if (key) await this.rememberDelivery(key);
+    await this.persist();
+    return true;
+  }
+
   async handlePushPermissionEvent(payload) {
     const record = normalizePushPermissionEvent(payload);
     if (!record) return false;
@@ -861,6 +903,7 @@ export class QqOpenGateway {
   }
 
   async handleDispatch(payload) {
+    if (await this.handleLifecycleEvent(payload)) return;
     if (await this.handlePushPermissionEvent(payload)) return;
     if (await this.handleInteractionEvent(payload)) return;
 
