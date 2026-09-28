@@ -1,5 +1,6 @@
-import { aiReplyPromisesFutureSearch, aiReplySignalsUncertainty, appendSearchSources, buildDeepSeekContextSummary, callDeepSeekSummaryTask, callGoogleDecision, decideReplyMentionRouting, deepSeekApiKeys, effectiveRuntimeModels, enforceExecutedSearchForReply, generateHybridReply, googleApiKeysFor, imageInspectionEnabled, isLightweightAcknowledgement, isLowContextInterjectionFragment, mergeAbortSignal, notifyDeveloper, roundRobinKeys, searchRequirement, stripBotMentionFromConversation } from "./src/ai/runtime.js";
+import { aiReplyPromisesFutureSearch, aiReplySignalsUncertainty, appendSearchSources, buildDeepSeekContextSummary, callDeepSeekSummaryTask, callGemmaDecision, callGoogleDecision, decideReplyMentionRouting, deepSeekApiKeys, effectiveRuntimeModels, enforceExecutedSearchForReply, generateHybridReply, googleApiKeysFor, imageInspectionEnabled, isLightweightAcknowledgement, isLowContextInterjectionFragment, mergeAbortSignal, notifyDeveloper, roundRobinKeys, searchRequirement, stripBotMentionFromConversation } from "./src/ai/runtime.js";
 import { providerRegistryState } from "./src/ai/provider-registry.js";
+import { callUserProviderRoute } from "./src/ai/provider-client.js";
 import { buildImmediateConversationContext, splitOutboundText } from "./src/ai/conversation-quality.js";
 import { AI_MEDIA_LIMITS, DEFAULTS, VERSION, classifyOperationalFailure } from "./src/config/runtime.js";
 import { publicBaseUrl } from "./src/config/deployment.js";
@@ -37,17 +38,43 @@ import { getQqOpenGateway, qqOpenConfigured, qqOpenEnabled } from "./src/v4/qqop
 import { hybridObservationRow, hybridPrimaryTransport, hybridRuntimeStatus, isAuxiliaryOneBotMessage, recordOneBotHybridObservation, recordQqOpenHybridGroupObservation, resolveQqOpenGroupForOneBot } from "./src/v4/hybrid/ownership.js";
 import { handleV4QqOpenPortalApi } from "./src/v4/portal/api.js";
 import { injectV4LeanPortalClient } from "./src/v4/portal/lean-dashboard.js";
+import { handleV4ResourcePortalApi } from "./src/v4/portal/resources-api.js";
+import { resourceConnectPage } from "./src/v4/portal/resource-page.js";
+import { politicalGuardDecision, politicalTextPrefilter } from "./src/v4/public/politics.js";
+import { resolveCanonicalPrincipal } from "./src/v4/public/resource-tickets.js";
+import { createLiveGroupMembershipResolver } from "./src/v4/public/membership.js";
+import { allowPlatformUserContentPersistence, canonicalQqOpenPrincipal, clearQqOpenPrivateHistory, isQqOpenEvent, persistQqOpenPrivateHistory, readQqOpenPrivateHistory } from "./src/v4/public/chat-persistence.js";
+import { deleteUserSetting, readUserSetting, writeUserSetting } from "./src/v4/public/user-settings.js";
+import { deleteUserMemoryList, readUserMemoryList, writeUserMemoryList } from "./src/v4/public/user-memory.js";
 import { handleV3PluginManagerApi, injectV3PluginManagerClient } from "./src/v3/portal/plugin-manager.js";
 import { handleV3PackageManagerApi, injectV3PackageManagerClient } from "./src/v3/portal/package-manager.js";
 import { handleV3PluginSecurityPublic, runV3PluginSecurityScheduled } from "./src/v3/public/plugin-security.js";
-import { withV3TestDatabaseNamespace } from "./src/v3/testing/db-namespace.js";
+import { withConfiguredDatabaseNamespace } from "./src/data/db-namespace.js";
 import { oneBotReadOnlyMode } from "./src/onebot/read-only.js";
 
 
 const POLITICAL_TOPIC_PATTERN = /(?:政治|政党|政黨|选举|選舉|总统|總統|主席|国会|國會|立法院|立法委员|立法委員|立委|议员|議員|首相|总理|總理|内阁|內閣|政府|政权|政權|执政|執政|在野|政治人物|政治制度|公共政策|外交|制裁|领土争议|領土爭議|两岸|兩岸|统一|統一|台独|台獨|罢免|罷免|公投|意识形态|意識形態|民进党|民進黨|国民党|國民黨|共产党|共產黨|民主党|民主黨|共和党|共和黨|\b(?:politics|political|election|government|parliament|congress|president|prime minister)\b)/i;
 
 function isPoliticalTopicText(value) {
-  return POLITICAL_TOPIC_PATTERN.test(String(value || "").normalize("NFKC"));
+  return politicalTextPrefilter(value).decision === "block";
+}
+
+async function classifyPoliticalWithGemma(env, text) {
+  const result = await callGemmaDecision(env, {
+    system: "你是內容分類器。只輸出 POLITICAL 或 NON_POLITICAL。政治人物、政黨、選舉、政治立場、政治制度、地緣政治與政治事件為 POLITICAL。單純的隱私、資料保護、服務條款、API 或平台合規問題若不要求政治評價，為 NON_POLITICAL。不得回答原問題。",
+    prompt: String(text || "").slice(0, 12000),
+    maxOutputTokens: 16,
+    deadlineAt: Date.now() + 7000,
+    maxAttempts: 2
+  });
+  return String(result?.text || "UNCERTAIN").trim();
+}
+
+async function layeredPoliticalGuard(env, text, stage = "input") {
+  return politicalGuardDecision(text, {
+    stage,
+    classify: value => classifyPoliticalWithGemma(env, value)
+  });
 }
 
 function normalizeShortReplyFingerprint(value) {
@@ -175,7 +202,7 @@ async function checkPortalAuthRateLimit(env, scope, principal, request) {
 
 const QQAIWorker = {
   async fetch(request, env, ctx) {
-    env = withV3TestDatabaseNamespace(env);
+    env = withConfiguredDatabaseNamespace(env);
     env = await portalEnvironmentWithManagedDeveloperIds(env);
     const url = new URL(request.url); // 👈 保留此行，避免後續代碼崩潰！
 
@@ -283,6 +310,20 @@ const QQAIWorker = {
       }
     }
 
+    if (request.method === 'GET' && url.pathname === '/connect-resource') {
+      return new Response(resourceConnectPage(), {
+        headers: {
+          "Content-Type": "text/html; charset=utf-8",
+          "Cache-Control": "no-store",
+          "Strict-Transport-Security": "max-age=31536000",
+          "X-Content-Type-Options": "nosniff",
+          "X-Frame-Options": "DENY",
+          "Referrer-Policy": "no-referrer",
+          "Permissions-Policy": "camera=(), geolocation=(), microphone=()"
+        }
+      });
+    }
+
     // ==========================================
     // 🌌 公共首頁與記憶矩陣中心
     // ==========================================
@@ -325,6 +366,9 @@ const QQAIWorker = {
       if (!session) return jsonResponse({ ok: false, message: '请先登录 Portal。' }, 401);
       return jsonResponse(await getDeploymentStatusForViewer(env, session));
     }
+
+    const v4ResourcePortalResponse = await handleV4ResourcePortalApi(request, env, url);
+    if (v4ResourcePortalResponse) return v4ResourcePortalResponse;
 
     const v4QqOpenPortalResponse = await handleV4QqOpenPortalApi(request, env, url);
     if (v4QqOpenPortalResponse) return v4QqOpenPortalResponse;
@@ -837,16 +881,36 @@ const QQAIWorker = {
       
       // 🎯 【就在這裡補上這行宣告！】
       const sessionKey = isGroup ? `chat:group:${currentGroupId}` : `chat:private:${userId}`;
+      const isQqOpenV4 = isQqOpenEvent(body);
+      const allowPlatformUserContent = allowPlatformUserContentPersistence(body);
+      const qqOpenContentPrincipal = isQqOpenV4 ? await canonicalQqOpenPrincipal(env, body) : "";
+
+      const qqOpenSettingScope = String(currentGroupId || "private");
+      const qqOpenTargetPrincipal = async targetUserId => {
+        const target = String(targetUserId || "").trim();
+        if (!target) return "";
+        if (target === String(userId || "")) return qqOpenContentPrincipal;
+        return resolveCanonicalPrincipal(env, `qqopen:${target}`);
+      };
 
       // ==========================================
-      // 💬 D1 歷史紀錄讀取 (維持上下文記憶)
+      // 💬 對話歷史：QQ Open 私訊只走使用者自己的 Storage Connector；
+      // QQ Open 群聊在尚未指定群資料擁有者前不建立平台長期歷史。
+      // OneBot 維持既有平台儲存行為。
       // ==========================================
       let history = [];
       try {
-        history = await readChatHistory(env, sessionKey, DEFAULTS.conversationHistoryItems);
+        if (isQqOpenV4 && isPrivate) {
+          const state = await readQqOpenPrivateHistory(env, body, sessionKey, DEFAULTS.conversationHistoryItems);
+          history = [...(state.history || [])];
+        } else if (isQqOpenV4 && isGroup) {
+          history = [];
+        } else {
+          history = await readChatHistory(env, sessionKey, DEFAULTS.conversationHistoryItems);
+        }
         if (history.length) console.log(`🧠 成功加载历史记忆，当前记忆条数: ${history.length}`);
       } catch (historyError) {
-        console.error("读取 D1 历史记录失败:", historyError);
+        console.error("读取历史记录失败:", historyError);
         history = [];
       }
       
@@ -1076,6 +1140,23 @@ const QQAIWorker = {
         return new Response(null, { status: 204 });
       }
 
+      if (!isCommandMessage && politicalTextPrefilter(cleanMessage).decision === "review") {
+        const politicalGate = await layeredPoliticalGuard(env, cleanMessage, "input");
+        if (politicalGate.blocked) {
+          await clearThinkingIndicator();
+          ctx.waitUntil(writeSystemAudit(env, {
+            type: "political_topic_silent_drop",
+            groupId: currentGroupId,
+            actorId: userId,
+            action: "silent_drop",
+            messageId: replyMessageId,
+            detector: politicalGate.source,
+            reason: politicalGate.reason
+          }).catch(() => {}));
+          return new Response(null, { status: 204 });
+        }
+      }
+
       // 自我禁言只能由本人私讯解除。该命令独立于私聊 AI 开关，成功或失败都不发送聊天提示。
       const privateSelfUnmuteCommand = isPrivate && cleanMessage.match(/^[!！](?:解除禁言|解禁)(?:\s+(\d{5,}))?$/i);
       if (privateSelfUnmuteCommand) {
@@ -1282,7 +1363,7 @@ const QQAIWorker = {
       // /! 是群友明确要求“只作为普通群聊，不进入任何 AI 流程”。
       // 除了不生成聊天回复，也跳过群规分类、插话判断、摘要與向量检索。
       if (aiReplyOptOut) {
-        if (isGroup) {
+        if (isGroup && allowPlatformUserContent) {
           await recordStructuredMessage(env, {
             groupId: currentGroupId,
             userId,
@@ -1379,10 +1460,12 @@ const QQAIWorker = {
 
       // 同號人工普通發言只納入上下文，不觸發 AI；人工命令與 ?? 提問可繼續。
       if (sameQqHumanOnly) {
-        await recordStructuredMessage(env, {
-          groupId: currentGroupId, userId, senderName: senderCard, messageId: replyMessageId,
-          text: cleanMessage, mentions: mentionedQqs, replyId: quotedMessageId, source: 'owner-human'
-        });
+        if (allowPlatformUserContent) {
+          await recordStructuredMessage(env, {
+            groupId: currentGroupId, userId, senderName: senderCard, messageId: replyMessageId,
+            text: cleanMessage, mentions: mentionedQqs, replyId: quotedMessageId, source: 'owner-human'
+          });
+        }
         return new Response(null, { status: 204 });
       }
 
@@ -1863,6 +1946,21 @@ const QQAIWorker = {
         }).catch(() => {}));
         return new Response(null, { status: 204 });
       }
+
+      if (politicalTextPrefilter(conversationText).decision === "review") {
+        const politicalGate = await layeredPoliticalGuard(env, conversationText, "context");
+        if (politicalGate.blocked) {
+          ctx.waitUntil(writeAiDecisionLog(env, {
+            ...aiDecisionBase,
+            decision: "skipped",
+            reason: "political_topic_classifier_silence",
+            triggerType: botMentioned ? "mention" : repliedToBot ? "reply_to_ai" : sameQqSelfAsk ? "self_ask" : isPrivate ? "private" : "none",
+            generatedReply: "",
+            detector: politicalGate.source
+          }).catch(() => {}));
+          return new Response(null, { status: 204 });
+        }
+      }
       const explicitTimeQuestion = isExplicitCurrentTimeQuestion(conversationText);
       const standaloneTimeQuestion = isStandaloneCurrentTimeQuestion(conversationText);
       const explicitRoleplayRequest = isExplicitRoleplayRequest(conversationText);
@@ -1976,22 +2074,34 @@ const QQAIWorker = {
       if (/^[!！](?:模型|model)(?:\s|$)/i.test(cleanMessage)) {
         const raw = cleanMessage.replace(/^[!！](?:模型|model)/i, '').trim();
         if (!raw) {
-          let pref = await dbGet(env, `model_pref:${currentGroupId || 'private'}:${userId}`) || 'auto';
+          let prefState = isQqOpenV4
+            ? await readUserSetting(env, qqOpenContentPrincipal, "model_preference", "auto")
+            : { available: true, value: await dbGet(env, `model_pref:${currentGroupId || 'private'}:${userId}`) || 'auto' };
+          let pref = normalizeModelPreference(prefState.value) || 'auto';
           if (!isDeveloper && String(pref).startsWith('deepseek')) {
             pref = 'auto';
-            await dbPut(env, `model_pref:${currentGroupId || 'private'}:${userId}`, pref);
+            if (isQqOpenV4) await writeUserSetting(env, qqOpenContentPrincipal, "model_preference", pref);
+            else await dbPut(env, `model_pref:${currentGroupId || 'private'}:${userId}`, pref);
           }
           const options = isDeveloper
             ? '自动、Gemma 26B、Gemma 31B、Gemini、DeepSeek、DeepSeek High、DeepSeek Max'
             : '自动、Gemma 26B、Gemma 31B、Gemini（DeepSeek 仅在免费模型连续失败后临时开放）';
-          return jsonReply(`${atSender}当前模型偏好：${modelPreferenceLabel(pref)}\n可选：${options}`);
+          const storageHint = isQqOpenV4 && prefState.available !== true ? '\n长期保存：未启用（请先连接自己的 D1 / KV）' : '';
+          return jsonReply(`${atSender}当前模型偏好：${modelPreferenceLabel(pref)}\n可选：${options}${storageHint}`);
         }
         const pref = normalizeModelPreference(raw);
         if (!pref) return jsonReply(`${atSender}可选：!模型 自动／Gemma 26B／Gemma 31B／Gemini${isDeveloper ? '／DeepSeek／DeepSeek High／DeepSeek Max' : ''}`);
         if (!isDeveloper && String(pref).startsWith('deepseek')) {
-          return jsonReply(`${atSender}DeepSeek 暂不对普通成员开放。Google 免费模型连续失败达到门槛时，系统会自动为当前会话临时开放并永久记录开放时段与实际调用时间。`);
+          return jsonReply(`${atSender}DeepSeek 暂不对普通成员开放。Google 免费模型连续失败达到门槛时，系统会自动为当前会话临时开放。`);
         }
-        await dbPut(env, `model_pref:${currentGroupId || 'private'}:${userId}`, pref);
+        if (isQqOpenV4) {
+          const saved = await writeUserSetting(env, qqOpenContentPrincipal, "model_preference", pref);
+          if (!saved.saved) {
+            return jsonReply(`${atSender}这个模型偏好没有保存。若要保存个人设置，请先在「AI 与资料」连接自己的 D1 或 KV。`);
+          }
+        } else {
+          await dbPut(env, `model_pref:${currentGroupId || 'private'}:${userId}`, pref);
+        }
         return jsonReply(`${atSender}模型偏好已保存：${modelPreferenceLabel(pref)}`);
       }
 
@@ -2663,55 +2773,119 @@ const QQAIWorker = {
       // 第四段到此完美結束，準備進入第五段的專屬记忆管理與人設切換模組...
 
       // ==========================================
-      // 🧠 专属记忆管理 (D1 数据库重构版)
+      // 🧠 专属记忆管理
+      // QQ Open：只保存到使用者自己的 Storage Connector，不写平台 D1 / Vectorize。
+      // OneBot：维持既有平台 D1 + Vectorize 行为。
       // ==========================================
-      // !记住：普通成员只能修改自己；AI 管理员可用 @ 指定成员。
       if (['!记住', '!記住', '!remember', '！记住', '！記住', '！remember'].some(p => msgLower.startsWith(p))) {
         const prefix = ['!记住', '!記住', '!remember', '！记住', '！記住', '！remember'].find(p => msgLower.startsWith(p));
         const { targetQq, restText } = parseArgs(userMessage, prefix);
-        const memoryOwner = targetQq || userId;
-        const targetMem = targetQq ? restText : cleanMessage.slice(prefix.length).replace(/\[CQ:[^\]]+\]/g, '').trim();
+        const mentionedTarget = (targetMentionQqs || []).map(String).find(id => id && id !== String(botId || ""));
+        const memoryOwner = targetQq || mentionedTarget || userId;
+        const targetMem = (targetQq || mentionedTarget) ? restText : cleanMessage.slice(prefix.length).replace(/\[CQ:[^\]]+\]/g, '').trim();
         if (!targetMem) return jsonReply(`${atSender}请输入要记住的内容。`);
         if (memoryOwner !== userId && !hasAdminAuth) return jsonReply(`${atSender}你只能修改自己的私人记忆。`);
         if (await isMemoryBanned(env, memoryOwner)) return jsonReply(`${atSender}【操作失败：该账号的记忆编辑权限已被冻结】`);
-        const kvKey = `user_memo:${currentGroupId}:${memoryOwner}`;
-        const memos = normalizeMemoryItems(await readJson(env, kvKey, []), memoryOwner);
+
+        let memos = [];
+        let memoryPrincipal = "";
+        if (isQqOpenV4) {
+          memoryPrincipal = await qqOpenTargetPrincipal(memoryOwner);
+          const state = await readUserMemoryList(env, memoryPrincipal, qqOpenSettingScope);
+          if (!state.available) {
+            return jsonReply(`${atSender}${memoryOwner === userId ? "你的" : "目标成员的"}长期记忆没有保存。若要使用此功能，请先连接自己的 D1 或 KV，并启用「记忆」用途。`);
+          }
+          memos = normalizeMemoryItems(state.memories || [], memoryOwner);
+        } else {
+          memos = normalizeMemoryItems(await readJson(env, `user_memo:${currentGroupId}:${memoryOwner}`, []), memoryOwner);
+        }
+
         if (!hasAdminAuth && memos.length >= 100) return jsonReply(`${atSender}专属记忆已达 100 条上限，请先删除部分内容。`);
         let item = { id: crypto.randomUUID(), text: targetMem, scope: 'private', owner: memoryOwner, subjectQq: memoryOwner, creator: userId, at: new Date().toISOString() };
-        item = await upsertMemoryVector(env, item, currentGroupId).catch(error => { console.warn("指令记忆向量写入失败", error); return item; });
+        if (!isQqOpenV4) {
+          item = await upsertMemoryVector(env, item, currentGroupId).catch(error => { console.warn("指令记忆向量写入失败", error); return item; });
+        }
         memos.push(item);
-        await dbPut(env, kvKey, JSON.stringify(memos));
-        await writeMemoryAudit(env, { groupId: currentGroupId, userId, action: `新增记忆:${memoryOwner}`, before: null, after: targetMem });
-        return jsonReply(`${atSender}已记住${memoryOwner === userId ? '' : `关于 QQ:${memoryOwner} 的内容`}：${targetMem}`);
+
+        if (isQqOpenV4) {
+          const saved = await writeUserMemoryList(env, memoryPrincipal, qqOpenSettingScope, memos);
+          if (!saved.saved) return jsonReply(`${atSender}长期记忆没有保存，请检查自己的 D1 / KV 连接。`);
+          ctx.waitUntil(writeSystemAudit(env, {
+            type: "qqopen_user_memory_changed",
+            groupId: String(currentGroupId || ""),
+            actorId: String(userId || ""),
+            targetId: String(memoryOwner || ""),
+            action: "add",
+            itemId: String(item.id || "")
+          }).catch(() => {}));
+        } else {
+          await dbPut(env, `user_memo:${currentGroupId}:${memoryOwner}`, JSON.stringify(memos));
+          await writeMemoryAudit(env, { groupId: currentGroupId, userId, action: `新增记忆:${memoryOwner}`, before: null, after: targetMem });
+        }
+        return jsonReply(`${atSender}已记住${memoryOwner === userId ? '' : `关于 ${memoryOwner} 的内容`}：${targetMem}`);
       }
 
-      // !忘记：只删除 D1 手动记忆，不删除 Vectorize 历史向量。
       if (['!忘记', '!忘記', '!forget', '！忘记', '！忘記', '！forget'].some(p => msgLower.startsWith(p))) {
         const prefix = ['!忘记', '!忘記', '!forget', '！忘记', '！忘記', '！forget'].find(p => msgLower.startsWith(p));
         const { targetQq, restText } = parseArgs(userMessage, prefix);
-        const memoryOwner = targetQq || userId;
-        const query = targetQq ? restText : cleanMessage.slice(prefix.length).replace(/\[CQ:[^\]]+\]/g, '').trim();
+        const mentionedTarget = (targetMentionQqs || []).map(String).find(id => id && id !== String(botId || ""));
+        const memoryOwner = targetQq || mentionedTarget || userId;
+        const query = (targetQq || mentionedTarget) ? restText : cleanMessage.slice(prefix.length).replace(/\[CQ:[^\]]+\]/g, '').trim();
         if (!query) return jsonReply(`${atSender}格式：!忘记 [@成员] 关键词`);
         if (memoryOwner !== userId && !hasAdminAuth) return jsonReply(`${atSender}你只能删除自己的私人记忆。`);
         if (await isMemoryBanned(env, memoryOwner)) return jsonReply(`${atSender}【操作失败：该账号的记忆编辑权限已被冻结】`);
-        const kvKey = `user_memo:${currentGroupId}:${memoryOwner}`;
-        const memos = normalizeMemoryItems(await readJson(env, kvKey, []), memoryOwner);
+
+        let memos = [];
+        let memoryPrincipal = "";
+        if (isQqOpenV4) {
+          memoryPrincipal = await qqOpenTargetPrincipal(memoryOwner);
+          const state = await readUserMemoryList(env, memoryPrincipal, qqOpenSettingScope);
+          if (!state.available) return jsonReply(`${atSender}长期记忆未启用；请先连接自己的 D1 或 KV。`);
+          memos = normalizeMemoryItems(state.memories || [], memoryOwner);
+        } else {
+          memos = normalizeMemoryItems(await readJson(env, `user_memo:${currentGroupId}:${memoryOwner}`, []), memoryOwner);
+        }
+
         const removed = memos.filter(m => m.text.includes(query));
         const next = memos.filter(m => !m.text.includes(query));
         if (!removed.length) return jsonReply(`${atSender}没找到包含「${query}」的记忆。`);
-        if (next.length) await dbPut(env, kvKey, JSON.stringify(next)); else await dbDel(env, kvKey);
-        for (const item of removed) await deleteMemoryVector(env, item).catch(error => console.warn("指令记忆向量删除失败", error));
-        await writeMemoryAudit(env, { groupId: currentGroupId, userId, action: `删除记忆与向量:${memoryOwner}`, before: removed.map(x => x.text).join(' | '), after: null });
-        return jsonReply(`${atSender}已删除 ${removed.length} 条长期记忆，并同步删除对应 Vectorize 向量。`);
+
+        if (isQqOpenV4) {
+          const result = next.length
+            ? await writeUserMemoryList(env, memoryPrincipal, qqOpenSettingScope, next)
+            : await deleteUserMemoryList(env, memoryPrincipal, qqOpenSettingScope);
+          const ok = next.length ? result.saved : result.deleted;
+          if (!ok) return jsonReply(`${atSender}长期记忆没有更新，请检查自己的 D1 / KV 连接。`);
+          ctx.waitUntil(writeSystemAudit(env, {
+            type: "qqopen_user_memory_changed",
+            groupId: String(currentGroupId || ""),
+            actorId: String(userId || ""),
+            targetId: String(memoryOwner || ""),
+            action: "delete",
+            count: removed.length
+          }).catch(() => {}));
+        } else {
+          if (next.length) await dbPut(env, `user_memo:${currentGroupId}:${memoryOwner}`, JSON.stringify(next)); else await dbDel(env, `user_memo:${currentGroupId}:${memoryOwner}`);
+          for (const item of removed) await deleteMemoryVector(env, item).catch(error => console.warn("指令记忆向量删除失败", error));
+          await writeMemoryAudit(env, { groupId: currentGroupId, userId, action: `删除记忆与向量:${memoryOwner}`, before: removed.map(x => x.text).join(' | '), after: null });
+        }
+        return jsonReply(`${atSender}已删除 ${removed.length} 条长期记忆${isQqOpenV4 ? "。" : "，并同步删除对应 Vectorize 向量。"}`);
       }
 
-      // !你记住了什么：支持 @，但查看他人私人记忆需要 AI 管理权。
       if (/^[!！]你(?:记住|記住)了(?:什么|什麼)(?:\s|$)/.test(cleanMessage)) {
-        const memoryOwner = targetMentionQqs[0] || userId;
+        const memoryOwner = (targetMentionQqs || []).map(String).find(id => id && id !== String(botId || "")) || userId;
         if (memoryOwner !== userId && !hasAdminAuth) return jsonReply(`${atSender}你没有查看他人私人记忆的权限。`);
-        const memos = normalizeMemoryItems(await readJson(env, `user_memo:${currentGroupId}:${memoryOwner}`, []), memoryOwner);
-        if (!memos.length) return jsonReply(`${atSender}目前没有${memoryOwner === userId ? '你的' : ` QQ:${memoryOwner} 的`}专属记忆。`);
-        return jsonReply(`${atSender}【${memoryOwner === userId ? '你的' : `QQ:${memoryOwner}`}专属记忆】\n` + memos.slice(-30).map((m, i) => `${i + 1}. ${m.text}`).join('\n'));
+        let memos = [];
+        if (isQqOpenV4) {
+          const memoryPrincipal = await qqOpenTargetPrincipal(memoryOwner);
+          const state = await readUserMemoryList(env, memoryPrincipal, qqOpenSettingScope);
+          if (!state.available) return jsonReply(`${atSender}${memoryOwner === userId ? "你的" : "目标成员的"}长期记忆未启用；请先连接自己的 D1 或 KV。`);
+          memos = normalizeMemoryItems(state.memories || [], memoryOwner);
+        } else {
+          memos = normalizeMemoryItems(await readJson(env, `user_memo:${currentGroupId}:${memoryOwner}`, []), memoryOwner);
+        }
+        if (!memos.length) return jsonReply(`${atSender}目前没有${memoryOwner === userId ? '你的' : ` ${memoryOwner} 的`}专属记忆。`);
+        return jsonReply(`${atSender}【${memoryOwner === userId ? '你的' : memoryOwner}专属记忆】\n` + memos.slice(-30).map((m, i) => `${i + 1}. ${m.text}`).join('\n'));
       }
 
       if (['!群规', '!群規', '!rules', '！群规', '！群規'].includes(msgLower)) {
@@ -2763,40 +2937,48 @@ const QQAIWorker = {
       if (['!set人格', '!set風格', '!setpersonality', '！set人格', '！set風格'].some(p => msgLower.startsWith(p))) {
         const prefix = ['!set人格', '!set風格', '!setpersonality', '！set人格', '！set風格'].find(p => msgLower.startsWith(p));
         const { targetQq, restText } = parseArgs(userMessage, prefix);
-        const targetUserId = targetQq || userId;
+        const mentionedTarget = (targetMentionQqs || []).map(String).find(id => id && id !== String(botId || ""));
+        const targetUserId = targetQq || mentionedTarget || userId;
         const isSettingOthers = targetUserId !== userId;
 
         if (isSettingOthers && !hasAdminAuth) return jsonReply(`${atSender}⚠️ 权限不足。您无法帮他人设置专属人格。`);
         if (!restText) return jsonReply(`${atSender}⚠️ 风格内容不能为空哦！格式：!set人格 [@成员] 傲娇妹妹`);
-
-        // 🔒 【最高核心锁】绝对防御：禁止任何人更改开发者的个人设定
-        if (isDeveloperId(env, targetUserId)) {
-           if (!isOnlyMe) return jsonReply(`${atSender}❌ 安全警告：拒绝访问！您无权修改最高核心开发者的专属个人设定！`);
+        if (isDeveloperId(env, targetUserId) && !isOnlyMe) {
+          return jsonReply(`${atSender}❌ 安全警告：拒绝访问！您无权修改最高核心开发者的专属个人设定！`);
         }
 
-        await dbPut(env, `custom_style:${currentGroupId}:${targetUserId}`, restText);
-        if (isSettingOthers) {
-          return jsonReply(`${atSender}✨ 已成功为 QQ:${targetUserId} 设定专属外挂人格！`);
+        if (isQqOpenV4) {
+          const targetPrincipal = await qqOpenTargetPrincipal(targetUserId);
+          const saved = await writeUserSetting(env, targetPrincipal, `custom_style.${qqOpenSettingScope}`, restText);
+          if (!saved.saved) return jsonReply(`${atSender}${isSettingOthers ? "目标成员" : "你的"}专属人格没有保存。请先连接自己的 D1 或 KV。`);
+        } else {
+          await dbPut(env, `custom_style:${currentGroupId}:${targetUserId}`, restText);
         }
+
+        if (isSettingOthers) return jsonReply(`${atSender}✨ 已成功为 ${targetUserId} 设定专属人格！`);
         return jsonReply(`${atSender}✨ 专属人格定制成功！以后我单独回你时会切换成这种风格。`);
       }
 
-      // !del人格 [@成员/QQ号]
       if (['!del人格', '!del風格', '!clear人格', '！del人格', '！del風格'].some(p => msgLower.startsWith(p))) {
         const prefix = ['!del人格', '!del風格', '!clear人格', '！del人格', '！del風格'].find(p => msgLower.startsWith(p));
         const { targetQq } = parseArgs(userMessage, prefix);
-        const targetUserId = targetQq || userId;
+        const mentionedTarget = (targetMentionQqs || []).map(String).find(id => id && id !== String(botId || ""));
+        const targetUserId = targetQq || mentionedTarget || userId;
         const isSettingOthers = targetUserId !== userId;
 
         if (isSettingOthers && !hasAdminAuth) return jsonReply(`${atSender}⚠️ 权限不足。您无法帮他人清除人格。`);
-
-        // 🔒 【最高核心锁】绝对防御：禁止任何人删除开发者的个人设定
-        if (isDeveloperId(env, targetUserId)) {
-           if (!isOnlyMe) return jsonReply(`${atSender}❌ 安全警告：拒绝访问！您无权删除最高核心开发者的专属个人设定！`);
+        if (isDeveloperId(env, targetUserId) && !isOnlyMe) {
+          return jsonReply(`${atSender}❌ 安全警告：拒绝访问！您无权删除最高核心开发者的专属个人设定！`);
         }
 
-        await dbDel(env, `custom_style:${currentGroupId}:${targetUserId}`);
-        return jsonReply(`${atSender}🗑️ 已清除 QQ:${targetUserId} 的专属外挂人格。`);
+        if (isQqOpenV4) {
+          const targetPrincipal = await qqOpenTargetPrincipal(targetUserId);
+          const deleted = await deleteUserSetting(env, targetPrincipal, `custom_style.${qqOpenSettingScope}`);
+          if (!deleted.deleted && deleted.reason === "user_storage_required") return jsonReply(`${atSender}没有可删除的长期专属人格；请先连接自己的 D1 或 KV。`);
+        } else {
+          await dbDel(env, `custom_style:${currentGroupId}:${targetUserId}`);
+        }
+        return jsonReply(`${atSender}🗑️ 已清除 ${targetUserId} 的专属人格。`);
       }
 
       // ==========================================
@@ -2805,35 +2987,39 @@ const QQAIWorker = {
       if (['!免打扰', '!免打擾', '!noat', '！免打扰', '！免打擾'].some(p => msgLower.startsWith(p))) {
         const prefix = ['!免打扰', '!免打擾', '!noat', '！免打扰', '！免打擾'].find(p => msgLower.startsWith(p));
         const { targetQq } = parseArgs(userMessage, prefix);
-        const targetUserId = targetQq || userId;
+        const mentionedTarget = (targetMentionQqs || []).map(String).find(id => id && id !== String(botId || ""));
+        const targetUserId = targetQq || mentionedTarget || userId;
         const isSettingOthers = targetUserId !== userId;
-
         if (isSettingOthers && !hasAdminAuth) return jsonReply(`${atSender}⚠️ 权限不足。您无法帮他人开启免打扰。`);
+        if (isDeveloperId(env, targetUserId) && !isOnlyMe) return jsonReply(`${atSender}❌ 安全警告：您无权修改核心开发者的免打扰状态！`);
 
-        // 🔒 【最高核心锁】保护开发者
-        if (isDeveloperId(env, targetUserId)) {
-           if (!isOnlyMe) return jsonReply(`${atSender}❌ 安全警告：您无权修改核心开发者的免打扰状态！`);
+        if (isQqOpenV4) {
+          const targetPrincipal = await qqOpenTargetPrincipal(targetUserId);
+          const saved = await writeUserSetting(env, targetPrincipal, `dnd.${qqOpenSettingScope}`, true);
+          if (!saved.saved) return jsonReply(`${atSender}${isSettingOthers ? "目标成员" : "你的"}免打扰状态没有保存。请先连接自己的 D1 或 KV。`);
+        } else {
+          await dbPut(env, `dnd:${currentGroupId}:${targetUserId}`, "true");
         }
-
-        await dbPut(env, `dnd:${currentGroupId}:${targetUserId}`, "true");
-        return jsonReply(`${atSender}🤫 已为 QQ:${targetUserId} 开启免打扰，我回复时将不再 @ 提醒。`);
+        return jsonReply(`${atSender}🤫 已为 ${targetUserId} 开启免打扰，我回复时将不再 @ 提醒。`);
       }
 
       if (['!取消免打扰', '!取消免打擾', '!cancelnoat', '！取消免打扰', '！取消免打擾'].some(p => msgLower.startsWith(p))) {
         const prefix = ['!取消免打扰', '!取消免打擾', '!cancelnoat', '！取消免打扰', '！取消免打擾'].find(p => msgLower.startsWith(p));
         const { targetQq } = parseArgs(userMessage, prefix);
-        const targetUserId = targetQq || userId;
+        const mentionedTarget = (targetMentionQqs || []).map(String).find(id => id && id !== String(botId || ""));
+        const targetUserId = targetQq || mentionedTarget || userId;
         const isSettingOthers = targetUserId !== userId;
-
         if (isSettingOthers && !hasAdminAuth) return jsonReply(`${atSender}⚠️ 权限不足。您无法帮他人取消免打扰。`);
+        if (isDeveloperId(env, targetUserId) && !isOnlyMe) return jsonReply(`${atSender}❌ 安全警告：您无权修改核心开发者的免打扰状态！`);
 
-        // 🔒 【最高核心锁】保护开发者
-        if (isDeveloperId(env, targetUserId)) {
-           if (!isOnlyMe) return jsonReply(`${atSender}❌ 安全警告：您无权修改核心开发者的免打扰状态！`);
+        if (isQqOpenV4) {
+          const targetPrincipal = await qqOpenTargetPrincipal(targetUserId);
+          const deleted = await deleteUserSetting(env, targetPrincipal, `dnd.${qqOpenSettingScope}`);
+          if (!deleted.deleted && deleted.reason === "user_storage_required") return jsonReply(`${atSender}免打扰状态没有长期保存；请先连接自己的 D1 或 KV。`);
+        } else {
+          await dbDel(env, `dnd:${currentGroupId}:${targetUserId}`);
         }
-
-        await dbDel(env, `dnd:${currentGroupId}:${targetUserId}`);
-        return jsonReply(`${atSender}🔔 已为 QQ:${targetUserId} 取消免打扰，欢迎回来！`);
+        return jsonReply(`${atSender}🔔 已为 ${targetUserId} 取消免打扰，欢迎回来！`);
       }
 
       // 第五段到此完美結束，準備進入第六段的全局開關、黑白名單防禦與模仿竊取模組...
@@ -2901,7 +3087,12 @@ const QQAIWorker = {
 
       if (['!clear', '!重置', '！clear', '！重置'].some(p => msgLower === p)) {
         if (!hasAdminAuth) return jsonReply(`${atSender}⚠️ 权限不足。仅限管理员、群主或开发者操作。`);
-        await dbDel(env, sessionKey);
+        if (isQqOpenV4 && isPrivate) {
+          await clearQqOpenPrivateHistory(env, body, sessionKey).catch(() => null);
+          await dbDel(env, sessionKey).catch(() => null); // legacy privacy cleanup only
+        } else if (!isQqOpenV4) {
+          await dbDel(env, sessionKey);
+        }
         await dbDel(env, `mimic:${currentGroupId}`);
         await dbDel(env, `mimic_target:${currentGroupId}`);
         return jsonReply(`${atSender}♻️ 已清空当前会话上下文与模仿状态。`);
@@ -3037,7 +3228,7 @@ const QQAIWorker = {
       // ==========================================
       // 只有群聊且「非指令」的普通对话，才纳入系统语料库
       let groupConversationLogs = [];
-      if (isGroup && !msgLower.startsWith('!') && !msgLower.startsWith('！')) {
+      if (isGroup && allowPlatformUserContent && !msgLower.startsWith('!') && !msgLower.startsWith('！')) {
          const logKey = `recent_logs:${currentGroupId}`;
          let recentLogs = [];
 
@@ -3152,7 +3343,10 @@ const QQAIWorker = {
 // 🌟 获取群组全局人格（持续基底）与个人／模仿覆盖层
       const mimicTargetQq = await dbGet(env, `mimic_target:${currentGroupId}`);
       const groupPersona = await dbGet(env, `group_persona:${currentGroupId}`);
-      const userCustomStyle = await dbGet(env, `custom_style:${currentGroupId}:${userId}`);
+      const userCustomStyleState = isQqOpenV4
+        ? await readUserSetting(env, qqOpenContentPrincipal, `custom_style.${qqOpenSettingScope}`, "")
+        : { value: await dbGet(env, `custom_style:${currentGroupId}:${userId}`) || "" };
+      const userCustomStyle = String(userCustomStyleState.value || "");
       const personaLayers = [];
 
       // 群组人格是管理员保存的持续基底，不能因为启用模仿或个人风格而消失。
@@ -3227,8 +3421,11 @@ ${String(userCustomStyle).slice(0, 2000)}`);
         ctx.waitUntil(dbDel(env, `emotion_buff:${currentGroupId}:${userId}`));
       }
 
-      // 🧠 注入统一格式的专属记忆。删除 D1 记忆不会删除 Vectorize。
-      const parsedMemos = normalizeMemoryItems(await readJson(env, `user_memo:${currentGroupId}:${userId}`, []), userId);
+      // 🧠 注入专属记忆：QQ Open 只读使用者自己的 Storage Connector。
+      const userMemoryState = isQqOpenV4
+        ? await readUserMemoryList(env, qqOpenContentPrincipal, qqOpenSettingScope)
+        : { memories: await readJson(env, `user_memo:${currentGroupId}:${userId}`, []) };
+      const parsedMemos = normalizeMemoryItems(userMemoryState.memories || [], userId);
       if (parsedMemos.length > 0) {
         finalStylePrompt += `\n\n【📖 专属记忆库】：
 关于当前用户（QQ:${userId}）的已保存记忆：
@@ -3313,7 +3510,10 @@ ${profileLines.join("\n")}
       if (!shouldReply && body.__qqai_suppress_optional_ai === true) {
         noReplyReason = "explicit_chat_priority";
       } else if (!shouldReply && !aiReplyOptOut && isGroup && interjectChance > 0 && !msgLower.startsWith('!') && !msgLower.startsWith('！')) {
-        const targetDnd = await dbGet(env, `dnd:${currentGroupId}:${userId}`);
+        const targetDndState = isQqOpenV4
+          ? await readUserSetting(env, qqOpenContentPrincipal, `dnd.${qqOpenSettingScope}`, false)
+          : { value: await dbGet(env, `dnd:${currentGroupId}:${userId}`) === "true" };
+        const targetDnd = targetDndState.value === true || targetDndState.value === "true";
         if (targetDnd === "true") {
           noReplyReason = "sender_dnd";
         } else if (lowContextFragment && !socialDecision.allowLowContextInterject) {
@@ -3363,7 +3563,7 @@ ${profileLines.join("\n")}
       // ==========================================
       let memoryContext = "";
 
-      if (env.VECTORIZE && cleanMessage && await dbGet(env, `memo:${currentGroupId}`) !== "false") {
+      if (!isQqOpenV4 && env.VECTORIZE && cleanMessage && await dbGet(env, `memo:${currentGroupId}`) !== "false") {
         try {
           const queryVec = await getVector(conversationText);
           if (queryVec && typeof queryVec !== 'string') {
@@ -3537,7 +3737,10 @@ ${deepseekContextSummary}`;
       let usedProvider = "";
       let generationError = null;
       let searchInfo = { required: false, attempted: false, performed: false, query: "", context: "", sources: [], queries: [], provider: "", model: "", error: "" };
-      const modelPref = await dbGet(env, `model_pref:${currentGroupId || 'private'}:${userId}`) || 'auto';
+      const modelPrefState = isQqOpenV4
+        ? await readUserSetting(env, qqOpenContentPrincipal, "model_preference", "auto")
+        : { value: await dbGet(env, `model_pref:${currentGroupId || 'private'}:${userId}`) || 'auto' };
+      const modelPref = normalizeModelPreference(modelPrefState.value) || 'auto';
       if (standaloneTimeQuestion) {
         baseText = `【Asia/Taipei/Shanghai（亚洲/台北/上海时间）是：${currentTime}】`;
         usedModel = "deterministic-clock";
@@ -3545,14 +3748,44 @@ ${deepseekContextSummary}`;
         success = true;
       } else {
         try {
-          const generated = await generateHybridReply(env, {
-            modelPref, chatModels, finalStylePrompt, contents, cleanText: conversationText,
-            fastChat: isFastAcknowledgement,
-            hasMedia: Boolean(loadedImage || voiceUrl || voiceFile || videoUrl || videoFile),
-            visionRequest: loadedImage,
-            userId, groupId: currentGroupId, isDeveloper, signal: request.signal,
-            onSearchStatus: replaceThinkingStatus
-          });
+          let generated = null;
+          const hasProviderMedia = Boolean(loadedImage || voiceUrl || voiceFile || videoUrl || videoFile);
+          if (!hasProviderMedia) {
+            const transport = body.__qqai_platform === "qq-open" ? "qq-open" : "onebot";
+            const rawPrincipal = transport === "qq-open"
+              ? `qqopen:${String(body.__qqai_principal_id || userId || "")}`
+              : `qq:${String(userId || "")}`;
+            const principalId = await resolveCanonicalPrincipal(env, rawPrincipal);
+            const membershipResolver = createLiveGroupMembershipResolver(env, {
+              platform: transport,
+              groupId: currentGroupId,
+              currentPrincipalId: principalId
+            });
+            generated = await callUserProviderRoute(env, "chat", {
+              system: finalStylePrompt,
+              contents,
+              text: conversationText,
+              maxOutputTokens: DEFAULTS.replyHardChars
+            }, {
+              principalId,
+              groupId: isGroup ? currentGroupId : "",
+              privateChat: isPrivate,
+              membershipResolver
+            }).catch(error => {
+              console.warn("User AI provider route failed:", String(error?.message || error).slice(0, 240));
+              return null;
+            });
+          }
+          if (!generated?.text) {
+            generated = await generateHybridReply(env, {
+              modelPref, chatModels, finalStylePrompt, contents, cleanText: conversationText,
+              fastChat: isFastAcknowledgement,
+              hasMedia: hasProviderMedia,
+              visionRequest: loadedImage,
+              userId, groupId: currentGroupId, isDeveloper, signal: request.signal,
+              onSearchStatus: replaceThinkingStatus
+            });
+          }
           baseText = String(generated?.text || '').trim();
           usedModel = generated?.model || 'unknown';
           usedProvider = generated?.provider || 'unknown';
@@ -3687,6 +3920,22 @@ ${deepseekContextSummary}`;
           : "这个问题需要查证，但本轮没有成功取得可验证的联网检索结果。我不会假装稍后还会继续处理，请稍后重新提问。";
       }
 
+      const politicalOutputGate = await layeredPoliticalGuard(env, replyText, "output");
+      if (politicalOutputGate.blocked) {
+        await clearThinkingIndicator();
+        ctx.waitUntil(writeAiDecisionLog(env, {
+          ...aiDecisionBase,
+          decision: "skipped",
+          reason: "political_output_blocked",
+          triggerType,
+          provider: usedProvider,
+          model: usedModel,
+          generatedReply: "",
+          detector: politicalOutputGate.source
+        }).catch(() => {}));
+        return new Response(null, { status: 204 });
+      }
+
       if (isAutoInterject && await shouldSuppressRepeatedShortReply(env, {
         isGroup,
         groupId: currentGroupId,
@@ -3710,7 +3959,13 @@ ${deepseekContextSummary}`;
       const modelHistoryItem = { role: 'model', parts: [{ text: replyText }] };
       history.push(userHistoryItem, modelHistoryItem);
       if (history.length > DEFAULTS.conversationHistoryItems) history = history.slice(-DEFAULTS.conversationHistoryItems);
-      if (isGroup) {
+      if (isQqOpenV4 && isPrivate) {
+        ctx.waitUntil(persistQqOpenPrivateHistory(env, body, sessionKey, history).catch(error => {
+          console.error("QQ Open 私訊歷史寫入使用者儲存失敗:", String(error?.message || error).slice(0, 240));
+        }));
+      } else if (isQqOpenV4 && isGroup) {
+        // 群資料庫尚未有明確擁有者／授權前，不保存 QQ Open 群聊長期歷史。
+      } else if (isGroup) {
         ctx.waitUntil(appendChatHistoryTurn(env, sessionKey, [userHistoryItem, modelHistoryItem], {
           createdAt: Number(body.time || 0) > 0 ? Number(body.time) * 1000 : Date.now(),
           messageId: replyMessageId,
@@ -3725,7 +3980,10 @@ ${deepseekContextSummary}`;
       // ==========================================
       const generatedMentionIds = [...new Set([...extractTextMentionIds(replyText), ...(socialDecision.managerMentionId ? [String(socialDecision.managerMentionId)] : [])])];
       const visibleReplyText = removeTextMentionTokens(replyText);
-      const senderDndCheck = await dbGet(env, `dnd:${currentGroupId}:${userId}`) === "true";
+      const senderDndState = isQqOpenV4
+        ? await readUserSetting(env, qqOpenContentPrincipal, `dnd.${qqOpenSettingScope}`, false)
+        : { value: await dbGet(env, `dnd:${currentGroupId}:${userId}`) === "true" };
+      const senderDndCheck = senderDndState.value === true || senderDndState.value === "true";
       const mentionRouting = await decideReplyMentionRouting(env, {
         isGroup, isAutoInterject, botMentioned, quotedMessageId, userId, selfId: botId,
         quotedSenderId: String(quotedMessage?.senderId || ""), targetMentionQqs, generatedMentionIds,
@@ -3810,7 +4068,7 @@ ${deepseekContextSummary}`;
   }, // 结束 fetch 函式
 
   async scheduled(controller, env, ctx) {
-    env = withV3TestDatabaseNamespace(env);
+    env = withConfiguredDatabaseNamespace(env);
     const cronMode = scheduledCronMode(controller?.cron);
     if (cronMode === "cleanup") {
       const now = Number(controller?.scheduledTime || Date.now());
@@ -3850,7 +4108,7 @@ export { QqOpenGateway } from "./src/v4/qqopen/runtime.js";
 export class OneBotHub {
   constructor(state, env) {
     this.state = state;
-    this.env = withV3TestDatabaseNamespace(env);
+    this.env = withConfiguredDatabaseNamespace(env);
     this.activeSocket = null;
     this.connectionId = "";
     this.connectedAt = null;
@@ -4276,9 +4534,17 @@ export class OneBotHub {
           await dbAppendJsonArrayCapped(this.env, "qqopen_clear_session_events", record, 200);
           return Response.json({ ok: true, cleared: false, reason: record.reason });
         }
-        await clearChatSessionHistory(this.env, `chat:private:${userId}`);
-        await dbAppendJsonArrayCapped(this.env, "qqopen_clear_session_events", { scene, userId, at, cleared: true }, 200);
-        return Response.json({ ok: true, cleared: true });
+        const principalId = await resolveCanonicalPrincipal(this.env, `qqopen:${userId}`);
+        const userStorageResult = await clearQqOpenPrivateHistory(this.env, principalId, `chat:private:${userId}`).catch(error => ({
+          cleared: false,
+          reason: String(error?.message || error).slice(0, 120)
+        }));
+        // 清除舊版曾寫入平台 D1 的私訊歷史，只做資料刪除，不再新增平台內容。
+        await clearChatSessionHistory(this.env, `chat:private:${userId}`).catch(() => {});
+        await dbAppendJsonArrayCapped(this.env, "qqopen_clear_session_events", {
+          scene, userId, at, cleared: true, userStorage: userStorageResult.reason || "unknown"
+        }, 200);
+        return Response.json({ ok: true, cleared: true, userStorage: userStorageResult });
       }
 
       if (action === "switch_model") {
@@ -4290,7 +4556,11 @@ export class OneBotHub {
         if (!isDeveloperId(qqOpenEnv, userId) && String(preference).startsWith("deepseek")) {
           return Response.json({ ok: true, changed: false, reason: "MODEL_NOT_AVAILABLE_FOR_MEMBER" });
         }
-        await dbPut(this.env, `model_pref:${groupId || "private"}:${userId}`, preference);
+        const principalId = await resolveCanonicalPrincipal(this.env, `qqopen:${userId}`);
+        const saved = await writeUserSetting(this.env, principalId, "model_preference", preference);
+        if (!saved.saved) {
+          return Response.json({ ok: true, changed: false, reason: "USER_STORAGE_REQUIRED", preference: "auto" });
+        }
         return Response.json({ ok: true, changed: true, preference });
       }
 

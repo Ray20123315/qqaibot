@@ -1,3 +1,4 @@
+import { pluginRuntimeViolationFromError } from "./runtime-guard.js";
 import { definePlugin } from "./api.js";
 import { PLUGIN_EVENT_HOOKS } from "./constants.js";
 import { createPluginStorage } from "./storage.js";
@@ -102,7 +103,7 @@ function pluginSurfaceDescriptor(plugin) {
   });
 }
 
-function createPluginHost({ services = {}, storageAdapter = null, logger = console, capabilityGrants = null } = {}) {
+function createPluginHost({ services = {}, storageAdapter = null, logger = console, capabilityGrants = null, runtimeBoundary = null } = {}) {
   const registry = new Map();
   const commandIndex = new Map();
   const activePluginIds = new Set();
@@ -136,6 +137,32 @@ function createPluginHost({ services = {}, storageAdapter = null, logger = conso
     const fn = services?.[name];
     if (typeof fn !== "function") throw new Error(`PLUGIN_SERVICE_UNAVAILABLE:${name}`);
     return fn;
+  }
+
+  async function handleRuntimeFailure(plugin, error, stage = "runtime", eventContext = {}) {
+    const violation = pluginRuntimeViolationFromError(error);
+    if (!violation) return Object.freeze({ blocked: false, violation: null });
+    let result = Object.freeze({ blocked: true, finding: null, securityRecord: null });
+    if (typeof runtimeBoundary === "function") {
+      try {
+        const evaluated = await runtimeBoundary({
+          plugin: plugin.manifest,
+          error,
+          violation,
+          stage,
+          eventContext
+        });
+        if (evaluated && typeof evaluated === "object") result = evaluated;
+      } catch (boundaryError) {
+        logger?.error?.("[plugin-host] runtime security boundary failed", plugin.manifest.id, String(boundaryError?.message || boundaryError).slice(0, 240));
+        result = Object.freeze({ blocked: true, finding: null, securityRecord: null });
+      }
+    }
+    if (result.blocked !== false) {
+      activePluginIds.delete(plugin.manifest.id);
+      logger?.error?.("[plugin-host] plugin force-stopped by runtime security boundary", plugin.manifest.id, violation.code);
+    }
+    return result;
   }
 
   function makeContext(plugin, eventName, payload, eventContext = {}) {
@@ -338,11 +365,16 @@ function createPluginHost({ services = {}, storageAdapter = null, logger = conso
     const ctx = makeContext(plugin, eventName, payload, eventContext);
     const hookPayload = messageEvent ? ctx.message : payload;
     const results = [];
-    if (eventName !== "message" && ["group_message", "private_message"].includes(eventName) && typeof plugin.onMessage === "function") {
-      results.push(await plugin.onMessage(ctx, hookPayload));
+    try {
+      if (eventName !== "message" && ["group_message", "private_message"].includes(eventName) && typeof plugin.onMessage === "function") {
+        results.push(await plugin.onMessage(ctx, hookPayload));
+      }
+      if (typeof plugin[specificHook] === "function") results.push(await plugin[specificHook](ctx, hookPayload));
+      return { handled: results.length > 0, pluginId: plugin.manifest.id, eventName, results };
+    } catch (error) {
+      await handleRuntimeFailure(plugin, error, "event:" + eventName, eventContext);
+      throw error;
     }
-    if (typeof plugin[specificHook] === "function") results.push(await plugin[specificHook](ctx, hookPayload));
-    return { handled: results.length > 0, pluginId: plugin.manifest.id, eventName, results };
   }
 
   async function dispatch(eventName, payload, eventContext = {}) {
@@ -363,8 +395,13 @@ function createPluginHost({ services = {}, storageAdapter = null, logger = conso
     if (!entry) return { handled: false };
     if (!activePluginIds.has(entry.plugin.manifest.id)) return { handled: false, inactive: true, pluginId: entry.plugin.manifest.id };
     const ctx = makeContext(entry.plugin, "command", input, eventContext);
-    const result = await entry.command.run(ctx, input);
-    return { handled: true, pluginId: entry.plugin.manifest.id, command: entry.command.name, result };
+    try {
+      const result = await entry.command.run(ctx, input);
+      return { handled: true, pluginId: entry.plugin.manifest.id, command: entry.command.name, result };
+    } catch (error) {
+      await handleRuntimeFailure(entry.plugin, error, "command:" + entry.command.name, eventContext);
+      throw error;
+    }
   }
 
   async function stop() {
@@ -431,8 +468,13 @@ function createPluginHost({ services = {}, storageAdapter = null, logger = conso
     if (typeof plugin.surface?.updateSettings !== "function") throw new Error("PLUGIN_SETTINGS_READ_ONLY:" + plugin.manifest.id);
     const payload = boundedSurfaceValue(input, "settings_update");
     const ctx = makeContext(plugin, "surface", payload, eventContext);
-    await plugin.surface.updateSettings(ctx, payload);
-    return getPluginSurface(plugin.manifest.id, eventContext);
+    try {
+      await plugin.surface.updateSettings(ctx, payload);
+      return getPluginSurface(plugin.manifest.id, eventContext);
+    } catch (error) {
+      await handleRuntimeFailure(plugin, error, "surface:update_settings", eventContext);
+      throw error;
+    }
   }
 
   return Object.freeze({ activate, deactivate, dispatch, dispatchTo, getPluginPublicStatus, getPluginSurface, isActive, listPlugins, register, runCommand, setCapabilityGrants, start, stop, updatePluginSettings });

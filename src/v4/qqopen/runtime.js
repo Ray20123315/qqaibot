@@ -1,3 +1,4 @@
+import { withConfiguredDatabaseNamespace } from "../../data/db-namespace.js";
 import { createQqOpenActionDispatcher } from "../platform/actions.js";
 import { createInitialCommandRegistry } from "../commands/catalog.js";
 import { createQqOpenApiClient } from "./api.js";
@@ -6,6 +7,7 @@ import { qqOpenJoinRequestToLegacyBody, qqOpenLegacyAction, qqOpenMessageToLegac
 import { syncQqOpenDiscovery } from "./discovery.js";
 import { qqOpenClosePolicy, qqOpenDeliveryKey, qqOpenPassiveReplyPolicy, qqOpenShard } from "./protocol.js";
 import { interactionControlAction, interactionDeliveryKey, lifecycleDeliveryKey, normalizeInteractionEvent, normalizeLifecycleEvent, normalizePushPermissionEvent, parseFeatureCommandMap } from "./official-events.js";
+import { handleV4PrivateSettingsMessage } from "../public/private-settings.js";
 import {
   QQ_OPEN_OPCODE,
   createGatewayState,
@@ -129,7 +131,7 @@ function defaultPersistedState() {
 export class QqOpenGateway {
   constructor(state, env) {
     this.state = state;
-    this.env = env;
+    this.env = withConfiguredDatabaseNamespace(env);
     this.socket = null;
     this.socketGeneration = 0;
     this.accessToken = "";
@@ -946,6 +948,30 @@ export class QqOpenGateway {
         this.persisted.lastInboundUserId = String(message.userId || "");
         this.registerPassiveOrigin(message);
         await this.persist();
+
+        const privateSettings = await handleV4PrivateSettingsMessage(this.env, message).catch(error => {
+          this.recordError(error);
+          return null;
+        });
+        if (privateSettings?.handled) {
+          const content = String(privateSettings.reply || "").trim();
+          let result = null;
+          if (content) {
+            const reservation = await this.reserveReplySequences(message.messageId, message.scope, 1);
+            result = await this.actionDispatcher().dispatch("message.reply", {
+              message,
+              content,
+              msgSeq: reservation.start
+            });
+          }
+          await this.rememberDelivery(deliveryKey);
+          this.persisted.lastApplicationAt = Date.now();
+          this.persisted.lastApplicationKind = "private_settings";
+          this.persisted.lastReplyAt = content ? Date.now() : this.persisted.lastReplyAt;
+          this.persisted.lastReplyId = String(result?.data?.id || result?.data?.message_id || this.persisted.lastReplyId || "");
+          await this.persist();
+          return;
+        }
 
         const reply = buildConnectivityReply(message);
         if (reply) {

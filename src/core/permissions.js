@@ -10,6 +10,7 @@ import { getOneBotHub, readJson, sha256Hex } from "../portal/auth.js";
 import { numericId } from "../security/network.js";
 import { oneBotReadOnlyActionAllowed, oneBotReadOnlyMode } from "../onebot/read-only.js";
 import { resolveOneBotGroupForQqOpen, resolveOneBotUserForQqOpen } from "../v4/hybrid/ownership.js";
+import { classifyOfficialCapabilityError, prepareOneBotFallbackPayload, shouldFallbackToOneBot } from "../v4/hybrid/capability-router.js";
 
 
 
@@ -617,6 +618,8 @@ function oneBotActionIsReadOnly(action) {
 }
 
 function qqOpenFallbackEligible(action, error) {
+  const capability = classifyOfficialCapabilityError(error);
+  if (shouldFallbackToOneBot(capability)) return true;
   const message = String(error?.message || error || "");
   if (/QQ_OPEN_LEGACY_ACTION_UNSUPPORTED/i.test(message)) return true;
   if (/QQ_OPEN_GATEWAY_NOT_BOUND|QQ_OPEN_NOT_CONFIGURED|QQ_OPEN_DISABLED|QQ_OPEN_SUSPENDED/i.test(message)) return true;
@@ -641,7 +644,7 @@ function actionNeedsGroupMapping(action, params = {}) {
   return Boolean(params.group_id || params.group || /^set_group_|^get_group_|^send_group_msg$/.test(name));
 }
 
-async function callOneBotDirectAction(env, actionPayload, timeoutMs = 15000) {
+async function callOneBotRpc(env, actionPayload, timeoutMs = 15000) {
   if (!env.ONEBOT_HUB) throw new Error("ONEBOT_HUB_NOT_BOUND");
   const payload = normalizedActionPayload(actionPayload);
   const action = String(payload?.action || "").trim();
@@ -693,10 +696,10 @@ async function mapQqOpenTargetForOneBot(env, mapped) {
     if ("qq" in params) params.qq = numericId(mappedUserId);
   }
 
-  if (action === "delete_msg") {
+  if (["delete_msg", "get_msg"].includes(action)) {
     const messageId = String(params.message_id || "").trim();
     if (messageId && !/^\d+$/.test(messageId)) {
-      throw new Error("AIBot 当前无法撤回该消息；旧 Bot 权限已确认，但 QQ Open 消息 ID 无法安全转换为 OneBot 消息 ID。");
+      throw new Error("AIBot 当前无法执行该消息操作；旧 Bot 权限已确认，但 QQ Open 消息 ID 无法安全转换为 OneBot 消息 ID。");
     }
   }
   if (action === "set_group_add_request") {
@@ -710,7 +713,7 @@ async function probeLegacyBotGroupPermission(env, action, oneBotGroupId, timeout
   if (!oneBotGroupId) return { role: "unknown", userId: "" };
   let identity;
   try {
-    identity = await callOneBotDirectAction(env, { action: "get_login_info", params: {} }, Math.min(timeoutMs, 10000));
+    identity = await callOneBotRpc(env, { action: "get_login_info", params: {} }, Math.min(timeoutMs, 10000));
   } catch {
     throw new Error("AIBot 当前无法执行该操作；旧 Bot 目前未连接，无法接管。请先启动并连接旧 Bot。");
   }
@@ -721,7 +724,7 @@ async function probeLegacyBotGroupPermission(env, action, oneBotGroupId, timeout
 
   let member;
   try {
-    member = await callOneBotDirectAction(env, {
+    member = await callOneBotRpc(env, {
       action: "get_group_member_info",
       params: { group_id: numericId(oneBotGroupId), user_id: numericId(botUserId), no_cache: true }
     }, Math.min(timeoutMs, 10000));
@@ -775,6 +778,7 @@ async function callOneBotAction(env, actionPayload, timeoutMs = 15000) {
     }
 
     if (!qqOpenFallbackEligible(action, officialError)) throw officialError;
+    const officialCapability = classifyOfficialCapabilityError(officialError);
     if (oneBotReadOnlyMode(env) && !oneBotReadOnlyActionAllowed(action)) {
       throw new Error("AIBot 当前无法执行该操作；旧 Bot 处于只读模式，无法接管写入型群操作。");
     }
@@ -785,8 +789,16 @@ async function callOneBotAction(env, actionPayload, timeoutMs = 15000) {
     }
     const mapped = await mapQqOpenTargetForOneBot(env, mappedGroup);
 
+    const fallbackPayload = ["delete_msg", "get_msg"].includes(action)
+      ? { action, params: mapped.params }
+      : prepareOneBotFallbackPayload({ action, params: mapped.params }, {
+          oneBotGroupId: mapped.oneBotGroupId,
+          officialGroupId: mapped.qqOpenGroupId,
+          reason: officialCapability.kind
+        });
+
     try {
-      const data = await callOneBotDirectAction(env, { action, params: mapped.params }, timeoutMs);
+      const data = await callOneBotRpc(env, fallbackPayload, timeoutMs);
       await writeSystemAudit(env, {
         type: "hybrid_action_fallback",
         groupId: String(mapped.oneBotGroupId || ""),
@@ -804,7 +816,7 @@ async function callOneBotAction(env, actionPayload, timeoutMs = 15000) {
     }
   }
 
-  return callOneBotDirectAction(env, payload, timeoutMs);
+  return callOneBotRpc(env, payload, timeoutMs);
 }
 
 export { PERMISSIONS, appendIndex, buildLongGroupConversationContext, callOneBotAction, checkRuntimeRateLimit, enrichAuditLogsForPortal, explicitProgramPermissionIndexKey, getEffectivePermissions, getRuntimeRateLimitSeconds, isKnownOutboundMessage, listAiDecisionLogs, listExplicitPrivateAccess, listExplicitProgramPermissions, markOutboundPending, markRuntimeRateLimitCompletion, modelCapabilityLabel, modelHealthStatusLabel, modelHealthStatusRank, modelPreferenceLabel, normalizeFingerprintText, normalizeMemoryItems, normalizeModelPreference, normalizePermissionName, outboundFingerprint, permissionLabel, removeFromIndex, runtimeRateLimitScope, setExplicitPermission, setPrivateAccessMode, updateAiDecisionLog, updateExplicitProgramPermissionIndex, writeAiDecisionLog, writeSystemAudit };

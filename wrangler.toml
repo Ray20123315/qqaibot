@@ -114,3 +114,41 @@ GEMINI_LIVE_MODEL = "models/gemini-3.1-flash-live-preview"
 
 [observability]
 enabled = false
+
+
+# V4 branch Preview: same Worker and same physical D1, but a dedicated SQL table namespace.
+# Production continues to use kv_store because QQAI_DB_TABLE is not defined above.
+[previews.ai]
+binding = "AI"
+
+[[previews.durable_objects.bindings]]
+name = "ONEBOT_HUB"
+class_name = "OneBotHub"
+
+[[previews.durable_objects.bindings]]
+name = "QQ_OPEN_GATEWAY"
+class_name = "QqOpenGateway"
+
+[[previews.d1_databases]]
+binding = "DB"
+database_name = "qqaibot"
+database_id = "569a01fe-3297-40e1-832f-09c3793056ed"
+
+[[previews.ratelimits]]
+name = "MY_RATE_LIMITER"
+namespace_id = "1999"
+
+  [previews.ratelimits.simple]
+  limit = 1
+  period = 10
+
+[previews.vars]
+QQAI_DB_TABLE = "kv_store_v4public_preview"
+BOT_DISPLAY_NAME = "QQAI V4 Preview"
+QQ_OPEN_ENABLED = "false"
+QQ_OPEN_TRANSPORT = "websocket"
+QQ_HYBRID_PRIMARY = "qq-open"
+QQ_HYBRID_GROUP_MAP = "{}"
+DEPLOY_NOTIFY_WORKER_NAME = "qqai"
+DEPLOY_NOTIFY_BRANCH = "feature/v4-public-bot"
+DEPLOY_NOTIFY_SELF_GRACE_SECONDS = "90"

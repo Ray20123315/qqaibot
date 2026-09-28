@@ -47,6 +47,21 @@ function normalizeTaskKinds(value) {
   return [...new Set(source.map(v => String(v || "").trim().toLowerCase()).filter(v => AI_PROVIDER_TASKS.includes(v)))];
 }
 
+function normalizeProviderPrincipal(value) {
+  return String(value || "").trim().slice(0, 180);
+}
+
+function normalizeProviderGroupIds(value) {
+  const rows = Array.isArray(value) ? value : [];
+  return Object.freeze([...new Set(rows.map(item => String(item || "").trim()).filter(Boolean))].slice(0, 100));
+}
+
+function normalizeProviderScope(value, ownerPrincipalId = "") {
+  const raw = String(value || "").trim().toLowerCase();
+  if (ownerPrincipalId) return "user";
+  return raw === "user" ? "user" : "platform";
+}
+
 function normalizeQuota(input = {}) {
   const source = input && typeof input === "object" && !Array.isArray(input) ? input : {};
   return Object.freeze({
@@ -72,11 +87,20 @@ function normalizeProviderAccount(input = {}, previous = null) {
   const id = cleanId(source.id ?? old.id ?? generatedId);
   if (!id) throw new Error("AI_PROVIDER_ACCOUNT_ID_INVALID");
   const tasks = normalizeTaskKinds(source.tasks ?? old.tasks ?? []);
+  const ownerPrincipalId = normalizeProviderPrincipal(source.ownerPrincipalId ?? old.ownerPrincipalId);
+  const scope = normalizeProviderScope(source.scope ?? old.scope, ownerPrincipalId);
+  const sharedGroupIds = normalizeProviderGroupIds(source.sharedGroupIds ?? old.sharedGroupIds ?? []);
   return Object.freeze({
-    schemaVersion: 1,
+    schemaVersion: 2,
     id,
     provider,
     label: String(source.label ?? old.label ?? id).trim().slice(0, 120) || id,
+    scope,
+    ownerPrincipalId,
+    sharedGroupIds,
+    allowGroupMemberPrivateChat: source.allowGroupMemberPrivateChat === undefined
+      ? old.allowGroupMemberPrivateChat === true
+      : source.allowGroupMemberPrivateChat === true,
     enabled: source.enabled === undefined ? old.enabled !== false : source.enabled !== false,
     tasks: Object.freeze(tasks),
     endpoint: String(source.endpoint ?? old.endpoint ?? "").trim().slice(0, 1000),
@@ -321,6 +345,58 @@ async function providerRegistryState(env) {
   return Object.freeze({ schemaVersion: 1, accounts: Object.freeze(accounts), routes: Object.freeze(routes), quotaStates: Object.freeze(quotaStates) });
 }
 
+async function listProviderAccountsForPrincipal(env, principalId) {
+  const principal = normalizeProviderPrincipal(principalId);
+  if (!principal) return Object.freeze([]);
+  return Object.freeze((await listProviderAccounts(env)).filter(account => account.scope === "user" && account.ownerPrincipalId === principal));
+}
+
+async function providerGroupAccessDecision(account, {
+  principalId = "",
+  groupId = "",
+  membershipResolver = null,
+  privateChat = false
+} = {}) {
+  if (!account || account.enabled === false) return Object.freeze({ ok: false, reason: "provider_unavailable" });
+  if (account.scope !== "user") return Object.freeze({ ok: false, reason: "not_user_provider" });
+  const consumer = normalizeProviderPrincipal(principalId);
+  const owner = normalizeProviderPrincipal(account.ownerPrincipalId);
+  const group = String(groupId || "").trim();
+  if (!owner) return Object.freeze({ ok: false, reason: "provider_owner_missing" });
+  if (consumer && consumer === owner) return Object.freeze({ ok: true, reason: "provider_owner" });
+  if (!group || !account.sharedGroupIds?.includes(group)) return Object.freeze({ ok: false, reason: "group_not_shared" });
+  if (privateChat && account.allowGroupMemberPrivateChat !== true) return Object.freeze({ ok: false, reason: "private_chat_not_shared" });
+  if (typeof membershipResolver !== "function") return Object.freeze({ ok: false, reason: "membership_unverified" });
+  const [ownerMembership, consumerMembership] = await Promise.all([
+    membershipResolver({ principalId: owner, groupId: group, role: "provider_owner" }),
+    membershipResolver({ principalId: consumer, groupId: group, role: "consumer" })
+  ]);
+  if (ownerMembership !== true) return Object.freeze({ ok: false, reason: "provider_left_group" });
+  if (consumerMembership !== true) return Object.freeze({ ok: false, reason: "consumer_not_in_group" });
+  return Object.freeze({ ok: true, reason: "shared_group_member" });
+}
+
+async function updateProviderSharing(env, id, {
+  ownerPrincipalId,
+  sharedGroupIds = [],
+  allowGroupMemberPrivateChat = false
+} = {}) {
+  const key = cleanId(id);
+  const owner = normalizeProviderPrincipal(ownerPrincipalId);
+  if (!key || !owner) throw new Error("AI_PROVIDER_OWNER_REQUIRED");
+  const existing = await getProviderAccount(env, key, { includeSecret: false });
+  if (!existing) throw new Error("AI_PROVIDER_ACCOUNT_NOT_FOUND");
+  if (existing.scope !== "user" || existing.ownerPrincipalId !== owner) throw new Error("AI_PROVIDER_OWNER_MISMATCH");
+  return upsertProviderAccount(env, {
+    ...existing,
+    id: key,
+    ownerPrincipalId: owner,
+    scope: "user",
+    sharedGroupIds: normalizeProviderGroupIds(sharedGroupIds),
+    allowGroupMemberPrivateChat: allowGroupMemberPrivateChat === true
+  });
+}
+
 export {
   AI_PROVIDER_TASKS,
   AI_PROVIDER_TYPES,
@@ -329,17 +405,23 @@ export {
   encryptProviderSecret,
   getProviderAccount,
   listProviderAccounts,
+  listProviderAccountsForPrincipal,
   normalizeProviderAccount,
+  normalizeProviderGroupIds,
+  normalizeProviderPrincipal,
+  normalizeProviderScope,
   normalizeProviderType,
   normalizeQuota,
   normalizeTaskKinds,
   normalizeUsage,
+  providerGroupAccessDecision,
   providerQuotaState,
   providerRegistryState,
   quotaAllows,
   readProviderRoute,
   recordProviderUsage,
   safeProviderAccount,
+  updateProviderSharing,
   upsertProviderAccount,
   writeProviderRoute
 };
