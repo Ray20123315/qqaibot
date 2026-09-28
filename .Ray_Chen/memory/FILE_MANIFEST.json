@@ -1,16 +1,16 @@
 {
   "schema_version": 1,
-  "memory_version": "v0.0.27",
+  "memory_version": "v0.0.28",
   "task_id": "qqaibot-20260928-v4-public-bot",
   "goal_revision": 2,
-  "transaction": "portal_resources_dev_gate_20260928_008",
+  "transaction": "qqopen_user_persistence_20260928_009",
   "repository": "Ray20123315/qqaibot",
   "production_branch": "main",
   "development_branch": "feature/v4-public-bot",
-  "product_before_revision": "60574bf975bac24ad3b9c89a42eba43817430a88",
-  "product_after_revision": "af89a42aae1219224a2323fc69118ef6c2a94b4c",
+  "product_before_revision": "1d5a74f1dfbdcc1e60d3a53db1b75d2e14679a15",
+  "product_after_revision": "38b5cbac605e8add9c25e28a8375dea3d6052bb5",
   "verification": {
-    "github_actions_run": 36386417711,
+    "github_actions_run": 36387088840,
     "conclusion": "success",
     "production_cloudflare_mutation": "none"
   },
@@ -18,19 +18,28 @@
     {
       "location_type": "github",
       "provider": "GitHub",
-      "resource_id_or_path": "src/v4/portal/lean-dashboard.js",
-      "action": "modified",
+      "resource_id_or_path": "src/v4/public/chat-persistence.js",
+      "action": "created",
       "branch_or_container": "feature/v4-public-bot",
-      "after_revision": "af89a42aae1219224a2323fc69118ef6c2a94b4c",
+      "after_revision": "38b5cbac605e8add9c25e28a8375dea3d6052bb5",
       "verification": "CI success"
     },
     {
       "location_type": "github",
       "provider": "GitHub",
-      "resource_id_or_path": "src/v4/portal/resources-api.js;verify-v4-portal-lean.mjs",
+      "resource_id_or_path": "worker.js",
       "action": "modified",
       "branch_or_container": "feature/v4-public-bot",
-      "after_revision": "af89a42aae1219224a2323fc69118ef6c2a94b4c",
+      "after_revision": "38b5cbac605e8add9c25e28a8375dea3d6052bb5",
+      "verification": "CI success"
+    },
+    {
+      "location_type": "github",
+      "provider": "GitHub",
+      "resource_id_or_path": "verify-v4-user-persistence-routing.mjs;package.json",
+      "action": "modified_or_created",
+      "branch_or_container": "feature/v4-public-bot",
+      "after_revision": "38b5cbac605e8add9c25e28a8375dea3d6052bb5",
       "verification": "CI success"
     }
   ]

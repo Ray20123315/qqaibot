@@ -2,14 +2,14 @@
 
 ## Retained
 
-D-001 through D-064 remain in force.
+D-001 through D-066 remain in force.
 
-## D-065 Developer UI needs two gates
+## D-067 QQ Open private persistence is BYO-storage only
 status: accepted
 date: 2026-09-28
-Decision: Developer UI is not exposed merely because a user knows 00000. The server first confirms that the current session belongs to a developer/system-admin identity; only then is the hidden input rendered. 00000 only unlocks the already-authorized developer surface in the browser.
+Decision: QQ Open private chat history may be persisted only through the canonical user's Storage Connector with chat_history purpose. Absence of a connector means no durable chat history and no platform-D1 fallback.
 
-## D-066 Normal V4 Portal is human-readable
+## D-068 QQ Open group content is non-durable until group storage ownership exists
 status: accepted
 date: 2026-09-28
-Decision: Normal users see product concepts and resource state, not raw source/config/environment details. Raw QQ Open diagnostics and system internals remain developer-only.
+Decision: QQ Open group conversation content is not persisted into platform chat history, recent_logs, per-message snapshots or Vectorize. Long-term group storage remains disabled until QQAIBOT has an explicit group storage-owner/connector authorization model.

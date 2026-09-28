@@ -2,34 +2,31 @@
 
 ## Latest Verified Product
 
-`af89a42aae1219224a2323fc69118ef6c2a94b4c`
-GitHub Actions run `36386417711`: success.
+Commit: `38b5cbac605e8add9c25e28a8375dea3d6052bb5`
+GitHub Actions: `36387088840` success.
 
-## Portal
+## QQ Open User Content Persistence
 
-Normal V4 navigation now emphasizes:
-- 總覽
-- AI 與資料
-- AI / Codex
-- 插件
+Private:
+- canonical QQ Open/portal principal is resolved explicitly;
+- `chat_history` reads and writes use `User Persistence`;
+- no connector means no durable history, not platform-D1 fallback.
 
-Developer-only navigation remains hidden until both conditions are true:
-1. backend viewer state says developer;
-2. the developer enters hidden key `00000`.
+Group:
+- platform conversation history is disabled for QQ Open;
+- `recent_logs`, per-message D1 snapshots and Vectorize conversational archiving are skipped on QQ Open path;
+- group durable context remains disabled until an explicit group storage-owner/connector relationship exists.
 
-The hidden input progressively reveals `開發者模式`; the code itself is not an authorization credential.
+Legacy cleanup:
+- QQ Open clear-session removes user-storage chat history if configured;
+- old platform-D1 private history is deleted for backwards privacy cleanup.
 
-## Resource UI
-
-- AI cards show provider/model/share state, not raw API keys.
-- Storage cards show D1/KV and connection state, not API tokens or internal config names.
-- Add AI/storage actions create authenticated one-time tickets.
-- Sharing and delete operations use custom V4 modal.
-- Gateway raw JSON diagnostics are developer-only.
+OneBot:
+- existing persistence behavior remains unchanged by this transaction.
 
 ## Verification
 
-Portal regression, V3, V4, isolated V4 dry-run and Worker bundle all passed.
+Passed base regression, V3, V4 including `verify-v4-user-persistence-routing.mjs`, V4 test dry-run and Worker bundle.
 
 ## Production
 

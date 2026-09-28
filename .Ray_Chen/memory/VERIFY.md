@@ -1,30 +1,31 @@
 # VERIFY
 
-## Portal / Developer Mode
+## QQ Open User Persistence
 
-Verified product commit: `af89a42aae1219224a2323fc69118ef6c2a94b4c`
-GitHub Actions run: `36386417711`
+Verified commit: `38b5cbac605e8add9c25e28a8375dea3d6052bb5`
+GitHub Actions run: `36387088840`
 Conclusion: success
 
 Passed:
-- base regression
-- V3 regression
-- V4 regression
-- isolated V4 test deployment dry-run
-- single Worker bundle
+- npm run check
+- npm run check:v3
+- npm run check:v4
+- npm run check:v4test
+- npm run check:bundle
 
-Portal assertions cover:
-- AI 與資料 navigation and resources endpoint
-- hidden developer input exists in generated V4 UI
-- progressive proxy string is 開發者模式
-- exact unlock key is 00000
-- developer-only class protects technical UI
-- custom resource actions do not use browser prompt/confirm
-- existing QQ Open / group management APIs remain present
+`verify-v4-user-persistence-routing.mjs` asserts:
+- QQ Open detection and canonical principal format;
+- private history module uses User Persistence read/write/delete;
+- USER_STORAGE_REQUIRED has no platform fallback;
+- worker reads QQ Open private history through user storage;
+- worker writes QQ Open private history through user storage;
+- QQ Open group chat-history branch has no appendChatHistoryTurn/dbPut;
+- platform group-content persistence block is disabled for QQ Open;
+- QQ Open clear-session routes through user storage.
 
 ## Pending
 
-- concrete QQ Open user persistence routing
-- plugin security-review UI modernization
-- same-Worker Cloudflare preview
+- plugin security center UI modernization
+- same-Worker Cloudflare Preview
+- remaining QQ Open persistent-setting audit
 - QQ self-test workbook
