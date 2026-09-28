@@ -22,20 +22,19 @@ Phase 1 — core policy/runtime
 - [x] Authenticated dual-entry AI/resource onboarding.
 - [x] Cloudflare D1/KV Storage Connector registry + low-volume REST client.
 - [x] QQ private settings interception before general chat bridge.
-- [x] Product resource integration CI/bundle gate for commit 678d6a1d1eb21637fb8c542d90da54c590bce6d0.
-- [x] Produce explicit User Persistence policy/facade with no platform fallback for user content.
-- [ ] Verify persistence-policy CI/bundle for commit fea78bf7604d388a6e0a4e9cc4d0f1a3044ddeea.
-- [ ] Integrate provider live membership resolver into actual AI routing.
-- [ ] Route concrete V4 memory/settings/chat/plugin data writers through User Persistence facade.
-- [ ] Integrate political classifier/output guard into AI path.
-- [ ] Integrate runtime plugin guard into active host.
+- [x] Explicit User Persistence policy/facade with no platform fallback for user content.
+- [x] User AI Provider real routing with live membership validation.
+- [x] Political classifier + output guard integrated into plugin AI and main Worker AI paths.
+- [x] AI Provider group/private-share controls exposed through QQ DM and Portal API.
+- [ ] Integrate runtime plugin guard into active host/quarantine flow.
+- [ ] Route concrete V4 memory/settings/chat/plugin writers through User Persistence facade.
 
 Phase 2 — user surfaces
 - [ ] Rebuild full V4 Portal with human-readable product UI.
 - [ ] Developer-only hidden 00000 progressive reveal.
 - [x] Standalone secure resource connection page with custom choices.
 - [ ] Integrate resource management cards into main V4 dashboard.
-- [ ] Plugin security review page.
+- [ ] Plugin security review page modernization.
 
 Phase 3 — Cloudflare/self-test
 - [ ] Same-Worker preview with production storage isolation.
@@ -43,16 +42,17 @@ Phase 3 — Cloudflare/self-test
 - [ ] Fill official 2023 QQ self-test workbook after implementation verification.
 
 current_phase: Phase 1
-current_step: Verify persistence-policy commit, then wire concrete V4 user-content writers through the facade.
+current_step: Commit and verify plugin runtime forced-stop/quarantine wiring.
 completed_steps:
-- product resource commit 678d6a1d1eb21637fb8c542d90da54c590bce6d0 passed CI run 36383716345
-- persistence policy commit fea78bf7604d388a6e0a4e9cc4d0f1a3044ddeea produced
+- c27821b247f3e8bdc35bf6987886b8c5855fcb60 passed GitHub Actions run 36385372063
 verification_results:
-- resource onboarding/regression/bundle: success
-- persistence-policy CI: pending
+- user AI route + live membership: success
+- layered political input/output guard: success
+- secure resource regression: success
+- V3/V4/bundle: success
 known_failures:
-- prior connector orchestration limit was recovered safely with no partial branch commit
+- none in current verified product state
 blockers: []
-next_exact_action: Inspect GitHub Actions for fea78bf7604d388a6e0a4e9cc4d0f1a3044ddeea and fix failures before further integration.
+next_exact_action: Commit prepared plugin runtime guard wiring, run full CI, then continue V4 Portal/resource UI.
 resume_rule: Continue only on feature/v4-public-bot; never touch main.
-last_checkpoint_at: 2026-09-28T14:10:00+08:00
+last_checkpoint_at: 2026-09-28T14:25:00+08:00

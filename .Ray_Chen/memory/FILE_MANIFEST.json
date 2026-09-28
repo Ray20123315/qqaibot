@@ -1,41 +1,64 @@
 {
   "schema_version": 1,
-  "memory_version": "v0.0.24",
+  "memory_version": "v0.0.25",
   "task_id": "qqaibot-20260928-v4-public-bot",
   "goal_revision": 2,
-  "transaction": "persistence_policy_20260928_v4_public_005",
+  "transaction": "user_ai_routing_20260928_v4_public_006",
   "repository": "Ray20123315/qqaibot",
   "production_branch": "main",
   "development_branch": "feature/v4-public-bot",
-  "product_before_revision": "b37b1b324ba83e05a3a7ab7ba942c34703a15946",
-  "product_after_revision": "fea78bf7604d388a6e0a4e9cc4d0f1a3044ddeea",
+  "product_before_revision": "6f030f1f71f3478da317ce89da6ab954a289b80f",
+  "product_after_revision": "c27821b247f3e8bdc35bf6987886b8c5855fcb60",
   "verification": {
-    "resource_product_commit": "678d6a1d1eb21637fb8c542d90da54c590bce6d0",
-    "resource_ci_run": 36383716345,
-    "resource_ci_conclusion": "success",
-    "persistence_policy_ci": "pending",
+    "github_actions_run": 36385372063,
+    "conclusion": "success",
+    "base_regression": "success",
+    "v3_regression": "success",
+    "v4_regression": "success",
+    "v4_test_dry_run": "success",
+    "single_worker_bundle": "success",
     "production_cloudflare_mutation": "none"
   },
   "changes": [
     {
       "location_type": "github",
       "provider": "GitHub",
-      "resource_id_or_path": "src/v4/public/user-persistence.js",
-      "action": "created",
+      "resource_id_or_path": "src/ai/provider-client.js;src/v4/public/membership.js;src/v4/public/resource-tickets.js",
+      "action": "modified_or_created",
       "branch_or_container": "feature/v4-public-bot",
-      "after_revision": "fea78bf7604d388a6e0a4e9cc4d0f1a3044ddeea",
-      "verification": "CI pending",
-      "changed_at": "2026-09-28T14:08:00+08:00"
+      "after_revision": "c27821b247f3e8bdc35bf6987886b8c5855fcb60",
+      "verification": "CI success",
+      "changed_at": "2026-09-28T14:13:10+08:00"
     },
     {
       "location_type": "github",
       "provider": "GitHub",
-      "resource_id_or_path": "src/v4/public/private-settings.js;src/v4/portal/resources-api.js;verify-v4-user-resources.mjs",
+      "resource_id_or_path": "src/v3/host/adapter.js;worker.js",
       "action": "modified",
       "branch_or_container": "feature/v4-public-bot",
-      "after_revision": "fea78bf7604d388a6e0a4e9cc4d0f1a3044ddeea",
-      "verification": "CI pending",
-      "changed_at": "2026-09-28T14:08:00+08:00"
+      "after_revision": "c27821b247f3e8bdc35bf6987886b8c5855fcb60",
+      "verification": "CI success",
+      "changed_at": "2026-09-28T14:13:10+08:00"
+    },
+    {
+      "location_type": "github",
+      "provider": "GitHub",
+      "resource_id_or_path": "src/v4/public/private-settings.js;src/v4/portal/resources-api.js;src/v4/portal/resource-page.js",
+      "action": "modified",
+      "branch_or_container": "feature/v4-public-bot",
+      "after_revision": "c27821b247f3e8bdc35bf6987886b8c5855fcb60",
+      "verification": "CI success",
+      "changed_at": "2026-09-28T14:13:10+08:00"
+    },
+    {
+      "location_type": "github",
+      "provider": "GitHub",
+      "resource_id_or_path": "verify-v4-user-ai-routing.mjs;verify-v4-user-resources.mjs;package.json",
+      "action": "modified_or_created",
+      "branch_or_container": "feature/v4-public-bot",
+      "after_revision": "c27821b247f3e8bdc35bf6987886b8c5855fcb60",
+      "verification": "CI success",
+      "changed_at": "2026-09-28T14:13:10+08:00"
     }
   ]
 }

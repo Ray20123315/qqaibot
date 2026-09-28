@@ -1,6 +1,6 @@
 # Ray_Chen Memory Entry
 
-- memory_version: v0.0.24
+- memory_version: v0.0.25
 - project: QQAIBOT
 - repository: Ray20123315/qqaibot
 - canonical_branch: main
@@ -9,20 +9,20 @@
 - task_status: active
 - goal_revision: 2
 - branch_base_commit: 08ceeb725590d9efb0160ea38733d929e6e7d18c
-- verified_resource_commit: 678d6a1d1eb21637fb8c542d90da54c590bce6d0
-- current_product_commit: fea78bf7604d388a6e0a4e9cc4d0f1a3044ddeea
+- latest_verified_product_commit: c27821b247f3e8bdc35bf6987886b8c5855fcb60
 - production_worker: qqai
-- updated_at: 2026-09-28T14:10:00+08:00
+- updated_at: 2026-09-28T14:25:00+08:00
 
-## Current Phase
+## Verified Through This Checkpoint
 
-V4 user-resource onboarding is verified at commit 678d6a1d1eb21637fb8c542d90da54c590bce6d0.
-A new persistence-policy commit fea78bf7604d388a6e0a4e9cc4d0f1a3044ddeea is produced and awaiting CI.
-
-The V4 persistence boundary is now explicit:
-- platform control-plane state stays in QQAIBOT D1;
-- user content persistence requires a user-owned Storage Connector;
-- there is no silent platform-D1 fallback for V4 user content.
+- user-owned AI providers are now in the real chat/provider route;
+- own provider is attempted before shared/group provider and before platform AI fallback;
+- shared provider use requires live membership validation;
+- QQ OpenID and numeric QQ identity remain separate unless explicitly linked;
+- political filtering is text-first, classifier-second for ambiguous input, with an output guard before persistence/send;
+- BYOK sharing controls exist in Portal API and QQ private settings;
+- secure AI onboarding supports model field and direct QQ-DM optional model;
+- all regression/V3/V4/V4-test/bundle checks passed for c27821b247f3e8bdc35bf6987886b8c5855fcb60.
 
 ## Hard Boundary
 
