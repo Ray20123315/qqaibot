@@ -1,13 +1,13 @@
 {
   "schema_version": 1,
-  "memory_version": "v0.0.24",
+  "memory_version": "v0.0.25",
   "task_id": "qqaibot-20260928-full-command-panels-portal",
-  "goal_revision": 2,
-  "transaction": "cumulative_permission_discovery_20260928_final",
+  "goal_revision": 3,
+  "transaction": "group_discovery_cumulative_checkpoint_20260928",
   "repository": "Ray20123315/qqaibot",
   "production_branch": "main",
   "development_branch": "v4-qqopen-native",
-  "product_before_revision": "b86f762000dc6f498340c54696123328d0328db6",
+  "product_before_revision": "f44c8118c83e57637a6b0f55f0013ff093b2f1fc",
   "product_after_revision": "f44c8118c83e57637a6b0f55f0013ff093b2f1fc",
   "verification": {
     "feature_product_ci_run": 36366445081,
@@ -24,8 +24,8 @@
     "discovery_sync_after_fix": "pending_authenticated_status",
     "live_mapping_after_fix": "pending_user_test",
     "command_fallback_implementation": "verified",
-    "development_ci": "success",
-    "main_update": "verified",
+    "development_ci": "pending",
+    "main_update": "pending",
     "development_ci_run": 36400632740,
     "main_ci": "success",
     "production_commit": "f44c8118c83e57637a6b0f55f0013ff093b2f1fc",
@@ -41,7 +41,9 @@
     "portal_full_navigation_restored": "verified",
     "cumulative_privileged_visibility": "verified",
     "developer_inherits_member_discovery": "verified",
-    "qq_discovery_panel_limit": 20
+    "qq_discovery_panel_limit": 20,
+    "group_full_command_discovery": "in_progress",
+    "developer_all_permissions_discovery": "in_progress"
   },
   "changes": [
     {
@@ -508,10 +510,21 @@
       "after_revision": "this_memory_commit",
       "verification": "read-back + archive SHA-256 required",
       "changed_at": "2026-09-28T17:02:00+08:00"
+    },
+    {
+      "location_type": "github",
+      "provider": "GitHub",
+      "resource_id_or_path": ".Ray_Chen/memory/{MEMORY_VERSION.txt,00_START_HERE.md,ACTIVE_TASK.md,FILE_MANIFEST.json}",
+      "action": "checkpoint_planned",
+      "branch_or_container": "v4-qqopen-native",
+      "before_revision": "f4944024f830e2ee2db532adb080ecc077d67fcc",
+      "after_revision": "this_checkpoint",
+      "verification": "goal revision 3 recorded before product patch",
+      "changed_at": "2026-09-28T17:10:00+08:00"
     }
   ],
   "internal_memory_transaction": {
-    "action": "fix cumulative privileged command discovery and bump memory to v0.0.24",
-    "note": "Higher privilege now adds commands instead of replacing ordinary command visibility."
+    "action": "start group discovery cumulative correction",
+    "note": "No product code changed in this memory checkpoint."
   }
 }
