@@ -1,14 +1,14 @@
 {
   "schema_version": 1,
-  "memory_version": "v0.0.19",
-  "task_id": "qqaibot-20260927-qqopen-v4-native",
-  "goal_revision": 5,
-  "transaction": "memory_correction_20260928_product_revision_001",
+  "memory_version": "v0.0.20",
+  "task_id": "qqaibot-20260928-command-capability-fallback",
+  "goal_revision": 1,
+  "transaction": "memory_checkpoint_20260928_command_fallback_plan_001",
   "repository": "Ray20123315/qqaibot",
   "production_branch": "main",
   "development_branch": "v4-qqopen-native",
-  "product_before_revision": "02ac0ca062571172c7ea7d7d5abedb3fdf9dd209",
-  "product_after_revision": "edeacf6cf8c215cc3987b86a4a0d5220c7f581d9",
+  "product_before_revision": "08ceeb725590d9efb0160ea38733d929e6e7d18c",
+  "product_after_revision": "08ceeb725590d9efb0160ea38733d929e6e7d18c",
   "verification": {
     "feature_product_ci_run": 36366445081,
     "regression_ci_run": 36366534308,
@@ -22,7 +22,10 @@
     "production_bindings_readback": "success",
     "live_reply_after_fix": "pending_user_test",
     "discovery_sync_after_fix": "pending_authenticated_status",
-    "live_mapping_after_fix": "pending_user_test"
+    "live_mapping_after_fix": "pending_user_test",
+    "command_fallback_implementation": "planned",
+    "development_ci": "pending",
+    "main_update": "pending"
   },
   "changes": [
     {
@@ -156,10 +159,21 @@
       "after_revision": "edeacf6cf8c215cc3987b86a4a0d5220c7f581d9",
       "verification": "matches deployed production product commit",
       "changed_at": "2026-09-28T09:43:00+08:00"
+    },
+    {
+      "location_type": "github",
+      "provider": "GitHub",
+      "resource_id_or_path": ".Ray_Chen/memory/{00_START_HERE.md,ACTIVE_TASK.md,MEMORY_VERSION.txt,FILE_MANIFEST.json}",
+      "action": "checkpoint_planned",
+      "branch_or_container": "v4-qqopen-native",
+      "before_revision": "08ceeb725590d9efb0160ea38733d929e6e7d18c",
+      "after_revision": "this_commit",
+      "verification": "task plan recorded before implementation",
+      "changed_at": "2026-09-28T12:25:00+08:00"
     }
   ],
   "internal_memory_transaction": {
-    "action": "correct PROJECT product revision and bump Ray_Chen memory to v0.0.19",
-    "note": "No product code or production Worker mutation. No secrets stored."
+    "action": "start command capability fallback task and bump Ray_Chen memory to v0.0.20",
+    "note": "No product code changed in this checkpoint. No secrets stored."
   }
 }
