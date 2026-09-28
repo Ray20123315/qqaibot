@@ -1,30 +1,36 @@
 # CURRENT_STATE
 
-## Branch
+## Latest Verified Product
 
-Development branch: `feature/v4-public-bot`
-Latest verified product commit: `d38b42137053db3781ff48e4fad0afd22b172a8a`
-Main modified by this task: no.
+`af89a42aae1219224a2323fc69118ef6c2a94b4c`
+GitHub Actions run `36386417711`: success.
 
-## Plugin Runtime Security
+## Portal
 
-The plugin host now accepts a runtime security boundary callback. High-impact runtime errors are classified only when they carry an explicit security violation object or match specific global-risk error codes.
+Normal V4 navigation now emphasizes:
+- 總覽
+- AI 與資料
+- AI / Codex
+- 插件
 
-When a non-overridable runtime violation is detected:
-1. the current plugin execution throws;
-2. the plugin is removed from the active runtime set;
-3. V3 lifecycle state is marked `blocked`;
-4. the plugin security center receives the finding;
-5. the event is available for dedicated security review.
+Developer-only navigation remains hidden until both conditions are true:
+1. backend viewer state says developer;
+2. the developer enters hidden key `00000`.
 
-Ordinary plugin exceptions remain ordinary failures and do not automatically quarantine the plugin.
+The hidden input progressively reveals `開發者模式`; the code itself is not an authorization credential.
+
+## Resource UI
+
+- AI cards show provider/model/share state, not raw API keys.
+- Storage cards show D1/KV and connection state, not API tokens or internal config names.
+- Add AI/storage actions create authenticated one-time tickets.
+- Sharing and delete operations use custom V4 modal.
+- Gateway raw JSON diagnostics are developer-only.
 
 ## Verification
 
-GitHub Actions run: `36385909059`
-Conclusion: success
-Passed: base regression, V3, V4 including `verify-v4-plugin-runtime-guard.mjs`, V4 test dry-run, bundle.
+Portal regression, V3, V4, isolated V4 dry-run and Worker bundle all passed.
 
 ## Production
 
-No Cloudflare production resource was changed.
+No production Cloudflare resource was changed. main remains untouched by this task.

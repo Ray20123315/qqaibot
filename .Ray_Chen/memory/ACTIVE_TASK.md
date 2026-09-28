@@ -5,43 +5,29 @@ task_status: active
 goal_revision: 2
 goal: Build isolated V4 public-bot architecture and UI on feature/v4-public-bot without touching main, including user-owned AI and persistence resources.
 
-## execution_plan
+## completed
+- capability-first official/OneBot runtime foundation
+- legal/role/whitelist foundations
+- dual BYOK AI + D1/KV onboarding
+- live membership AI sharing
+- layered political guard
+- runtime plugin quarantine
+- human-readable Portal resources
+- developer-only hidden 00000 progressive reveal
 
-Phase 0 — branch/recovery gate
-- [x] isolated branch and recovery gate.
+## remaining
+- route concrete QQ Open V4 private user content through User Persistence
+- prevent QQ Open group long-term chat-history fallback to platform D1 without explicit group storage owner
+- modernize plugin security-review surface
+- same-Worker Cloudflare preview and live verification
+- official QQ self-test workbook after implementation verification
 
-Phase 1 — core policy/runtime
-- [x] capability-first QQ Open -> OneBot safe fallback.
-- [x] roles/legal/whitelist state.
-- [x] dual-entry BYOK AI and D1/KV resource onboarding.
-- [x] user-persistence policy with no user-content fallback.
-- [x] live-membership-bound user AI routing.
-- [x] layered political input/output guard.
-- [x] runtime plugin forced-stop/quarantine flow.
-- [ ] route concrete V4 user-content writers through User Persistence facade.
-
-Phase 2 — user surfaces
-- [ ] apply and verify V4 Portal resource cards.
-- [ ] apply and verify developer-only hidden 00000 progressive reveal.
-- [ ] modernize plugin security review page.
-- [ ] complete remaining human-readable Portal cleanup.
-
-Phase 3 — Cloudflare/self-test
-- [ ] same-Worker preview with production storage isolation.
-- [ ] live preview validation.
-- [ ] fill official 2023 QQ self-test workbook after implementation verification.
-
-current_phase: Phase 2
-current_step: Apply prepared Portal resource/developer-mode transaction.
-completed_steps:
-- plugin runtime security commit d38b42137053db3781ff48e4fad0afd22b172a8a
-- GitHub Actions run 36385909059 success
+current_phase: Phase 1/2 integration
+current_step: Implement concrete QQ Open chat-history persistence boundary.
 verification_results:
-- plugin runtime guard regression: success
-- full repository regression: success
-- V3/V4/V4-test/bundle: success
-known_failures: []
+- Portal commit af89a42aae1219224a2323fc69118ef6c2a94b4c
+- GitHub Actions run 36386417711: success
 blockers: []
-next_exact_action: Commit Portal resource cards + developer 00000 gate and run CI.
+next_exact_action: Replace QQ Open private chat history platform-D1 read/write with User Persistence and disable QQ Open group history platform-D1 persistence unless an explicit group storage route exists.
 resume_rule: Continue only on feature/v4-public-bot; never touch main.
-last_checkpoint_at: 2026-09-28T14:32:00+08:00
+last_checkpoint_at: 2026-09-28T14:38:00+08:00

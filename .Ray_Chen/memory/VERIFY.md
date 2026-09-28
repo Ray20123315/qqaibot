@@ -1,28 +1,30 @@
 # VERIFY
 
-## Verified Product Commit
+## Portal / Developer Mode
 
-Commit: `d38b42137053db3781ff48e4fad0afd22b172a8a`
-GitHub Actions run: `36385909059`
-Conclusion: `success`
+Verified product commit: `af89a42aae1219224a2323fc69118ef6c2a94b4c`
+GitHub Actions run: `36386417711`
+Conclusion: success
 
 Passed:
-- npm run check
-- npm run check:v3
-- npm run check:v4
-- npm run check:v4test
-- npm run check:bundle
+- base regression
+- V3 regression
+- V4 regression
+- isolated V4 test deployment dry-run
+- single Worker bundle
 
-Plugin runtime security assertions verify:
-- explicit cross-tenant violation is classified;
-- core-secret violation is classified;
-- ordinary plugin error is not classified as security violation;
-- runtime security boundary callback executes;
-- a blocked violation removes the plugin from active runtime state.
+Portal assertions cover:
+- AI 與資料 navigation and resources endpoint
+- hidden developer input exists in generated V4 UI
+- progressive proxy string is 開發者模式
+- exact unlock key is 00000
+- developer-only class protects technical UI
+- custom resource actions do not use browser prompt/confirm
+- existing QQ Open / group management APIs remain present
 
 ## Pending
 
-- Portal resources/developer-mode transaction.
-- concrete V4 persistence writers.
-- same-Worker preview.
-- QQ self-test workbook.
+- concrete QQ Open user persistence routing
+- plugin security-review UI modernization
+- same-Worker Cloudflare preview
+- QQ self-test workbook
