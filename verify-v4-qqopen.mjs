@@ -130,7 +130,14 @@ const basicKeyboard = buildGroupCategoryKeyboard(registry, "basic");
 assert.equal(basicKeyboard.page, 1);
 assert.equal(basicKeyboard.totalPages, 1);
 const basicButtons = basicKeyboard.keyboard.content.rows.flatMap(row => row.buttons);
-assert(basicButtons.some(button => button.render_data.label === "help" && button.action.type === 1 && button.action.data === "!help"));
+assert(basicButtons.some(button =>
+  button.render_data.label === "help"
+  && button.action.type === 1
+  && button.action.data === "!help"
+  && button.action.permission?.type === 2
+  && button.action.click_limit === 1
+  && button.group_id
+));
 assert(basicButtons.some(button => button.render_data.label === "status" && button.action.data === "!status"));
 const aiAdminKeyboard = buildGroupCategoryKeyboard(registry, "ai-admin", { page:1 });
 assert(aiAdminKeyboard.totalPages >= 2);
@@ -151,12 +158,22 @@ const keyboardPost = requests.find(x => /\/v2\/groups\/group%2FA\/messages$/.tes
   && x.options.method === "POST"
   && JSON.parse(x.options.body || "{}")?.keyboard);
 assert(keyboardPost, "group keyboard payload must be sent through the QQ Open message endpoint");
-assert.equal(JSON.parse(keyboardPost.options.body).keyboard.content.rows[0].buttons[0].action.type, 1);
+const keyboardPostBody = JSON.parse(keyboardPost.options.body);
+assert.equal(keyboardPostBody.keyboard.content.rows[0].buttons[0].action.type, 1);
+assert.equal(keyboardPostBody.keyboard.content.rows[0].buttons[0].action.permission.type, 2);
+assert.equal(keyboardPostBody.keyboard.content.rows[0].buttons[0].action.click_limit, 1);
+assert(keyboardPostBody.keyboard.content.rows[0].buttons[0].group_id);
 
 const qqOpenRuntimeSource = fs.readFileSync("src/v4/qqopen/runtime.js", "utf8");
 assert.match(qqOpenRuntimeSource, /qq_inline_keyboard/);
 assert.match(qqOpenRuntimeSource, /normalizeInlineKeyboard/);
 assert.match(qqOpenRuntimeSource, /keyboardCapabilityError/);
+assert.match(qqOpenRuntimeSource, /msg_type:\s*2/);
+assert.match(qqOpenRuntimeSource, /markdown:\s*\{\s*content/);
+assert.match(qqOpenRuntimeSource, /permission:\s*\{\s*type/);
+assert.match(qqOpenRuntimeSource, /click_limit/);
+assert.match(qqOpenRuntimeSource, /group_id/);
+assert.match(qqOpenRuntimeSource, /recordKeyboardFallback/);
 assert.match(workerSource, /qq_inline_keyboard/);
 
 const developerPanels = registry.buildCategorizedPanels("c2c", {
