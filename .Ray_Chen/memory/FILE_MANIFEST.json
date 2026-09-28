@@ -1,22 +1,22 @@
 {
   "schema_version": 1,
-  "memory_version": "v0.0.37",
+  "memory_version": "v0.0.38",
   "task_id": "qqaibot-20260929-keyboard-payload-fix",
   "goal_revision": 1,
-  "transaction": "keyboard_payload_fix_checkpoint_20260929",
+  "transaction": "keyboard_payload_fix_final_20260929",
   "repository": "Ray20123315/qqaibot",
   "production_branch": "main",
   "development_branch": "hotfix/temp-system-admin-login-20260929",
   "product_before_revision": "f74d6ecec99c9dde04ef97ce0a7452b42ad6bcf7",
-  "product_after_revision": "f74d6ecec99c9dde04ef97ce0a7452b42ad6bcf7",
+  "product_after_revision": "0fa643433285df0879878441e846dcfc023054b7",
   "verification": {
     "feature_product_ci_run": 36366445081,
     "regression_ci_run": 36366534308,
-    "main_ci_run": 36479310886,
+    "main_ci_run": 36481292173,
     "github_ci": "success",
     "isolated_cloudflare_build": "e280d9fb-bb0d-4659-91e8-cb2db205e1a3",
     "isolated_cloudflare_outcome": "success",
-    "production_cloudflare_build": "09d6a646-a0b2-4e98-b73d-d9f2c74925c0",
+    "production_cloudflare_build": "0d835129-1a85-413b-9e0a-ec063da9e464",
     "production_cloudflare_outcome": "success",
     "production_worker_version": "2aa24e2a-b640-4ac2-83ae-07efb428b099",
     "production_bindings_readback": "success",
@@ -24,11 +24,11 @@
     "discovery_sync_after_fix": "pending_authenticated_status",
     "live_mapping_after_fix": "pending_user_test",
     "command_fallback_implementation": "verified",
-    "development_ci": "pending",
-    "main_update": "pending",
-    "development_ci_run": 36476322049,
+    "development_ci": "success",
+    "main_update": "verified",
+    "development_ci_run": 36481097113,
     "main_ci": "success",
-    "production_commit": "a78003cda6ef9b5d8b8b9d28dd2a798aa3d2424a",
+    "production_commit": "0fa643433285df0879878441e846dcfc023054b7",
     "main_readback": "success",
     "command_catalog_entries": 77,
     "full_command_panel_restoration": "verified",
@@ -106,10 +106,11 @@
     "v0035_package_run": 36479807508,
     "v0035_package": "success",
     "v0035_archive_sha256": "e0b14cef6dcbbb8411ded035428f6a842bc98c1d8cd5caa74bebba832cd09210",
-    "live_keyboard_render": "failed_text_fallback_observed",
-    "official_keyboard_shape": "to_implement",
-    "keyboard_markdown_body": "to_implement",
-    "keyboard_error_diagnostic": "to_implement"
+    "live_keyboard_render": "pending_retest_after_payload_fix",
+    "official_keyboard_shape": "verified",
+    "keyboard_markdown_body": "verified",
+    "keyboard_error_diagnostic": "verified",
+    "tencent_sdk_reference": "6163b5dc979a2f12379b1916805009075008c3c3"
   },
   "changes": [
     {
@@ -1440,10 +1441,77 @@
       "after_revision": "this_checkpoint",
       "verification": "live keyboard fallback failure recorded before product patch",
       "changed_at": "2026-09-29T05:25:00+08:00"
+    },
+    {
+      "location_type": "github",
+      "provider": "GitHub",
+      "resource_id_or_path": "src/v4/commands/group-panel.js",
+      "action": "modified",
+      "branch_or_container": "v4-qqopen-native -> main",
+      "before_revision": "f74d6ecec99c9dde04ef97ce0a7452b42ad6bcf7",
+      "after_revision": "0fa643433285df0879878441e846dcfc023054b7",
+      "verification": "official button DTO fields + development/main CI success",
+      "changed_at": "2026-09-29T05:48:00+08:00"
+    },
+    {
+      "location_type": "github",
+      "provider": "GitHub",
+      "resource_id_or_path": "src/v4/qqopen/runtime.js",
+      "action": "modified",
+      "branch_or_container": "v4-qqopen-native -> main",
+      "before_revision": "f74d6ecec99c9dde04ef97ce0a7452b42ad6bcf7",
+      "after_revision": "0fa643433285df0879878441e846dcfc023054b7",
+      "verification": "msg_type=2 Markdown keyboard transport + diagnostics + CI success",
+      "changed_at": "2026-09-29T05:48:00+08:00"
+    },
+    {
+      "location_type": "github",
+      "provider": "GitHub",
+      "resource_id_or_path": "verify-v4-qqopen.mjs",
+      "action": "modified",
+      "branch_or_container": "v4-qqopen-native -> main",
+      "before_revision": "f74d6ecec99c9dde04ef97ce0a7452b42ad6bcf7",
+      "after_revision": "0fa643433285df0879878441e846dcfc023054b7",
+      "verification": "official keyboard payload regression + CI success",
+      "changed_at": "2026-09-29T05:48:00+08:00"
+    },
+    {
+      "location_type": "github",
+      "provider": "GitHub",
+      "resource_id_or_path": "refs/heads/main",
+      "action": "fast_forward",
+      "branch_or_container": "main",
+      "before_revision": "f74d6ecec99c9dde04ef97ce0a7452b42ad6bcf7",
+      "after_revision": "0fa643433285df0879878441e846dcfc023054b7",
+      "verification": "non-force update + main CI 36481292173 success",
+      "changed_at": "2026-09-29T05:48:00+08:00"
+    },
+    {
+      "location_type": "cloudflare",
+      "provider": "Cloudflare",
+      "resource_id_or_path": "workers/scripts/qqai",
+      "action": "auto_deployed_by_connected_build",
+      "branch_or_container": "production",
+      "before_revision": "f74d6ecec99c9dde04ef97ce0a7452b42ad6bcf7",
+      "after_revision": "0fa643433285df0879878441e846dcfc023054b7",
+      "commit_or_hash": "0d835129-1a85-413b-9e0a-ec063da9e464",
+      "verification": "Connected Build outcome success",
+      "changed_at": "2026-09-29T05:48:00+08:00"
+    },
+    {
+      "location_type": "github",
+      "provider": "GitHub",
+      "resource_id_or_path": ".Ray_Chen/memory/*",
+      "action": "final_reconciliation",
+      "branch_or_container": "v4-qqopen-native -> main",
+      "before_revision": "0fa643433285df0879878441e846dcfc023054b7",
+      "after_revision": "this_memory_head",
+      "verification": "read-back + TAR.GZ extraction + SHA-256 required before final response",
+      "changed_at": "2026-09-29T05:48:00+08:00"
     }
   ],
   "internal_memory_transaction": {
-    "action": "start live keyboard payload repair and bump memory to v0.0.37",
-    "note": "No product code changed in this checkpoint."
+    "action": "complete live keyboard payload repair and bump memory to v0.0.38",
+    "note": "Product is deployed and verified; live QQ render retest remains the only external smoke check."
   }
 }
