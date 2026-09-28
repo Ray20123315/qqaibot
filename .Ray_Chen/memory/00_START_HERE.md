@@ -1,30 +1,30 @@
 # Ray_Chen Memory Entry
 
-- memory_version: v0.0.30
+- memory_version: v0.0.33
 - project: QQAIBOT
 - repository: Ray20123315/QQAIBOT
 - canonical_branch: main
 - development_branch: v4-qqopen-native
-- task_id: qqaibot-20260929-group-panel-slash-dispatch
-- task_status: completed
+- task_id: qqaibot-20260929-group-panel-keyboard
+- task_status: active
 - goal_revision: 1
-- product_revision: 64513e94f6634921f0b1ee8f7c6d5d44a754a6f5
-- updated_at: 2026-09-29T04:08:00+08:00
+- integration_commit: af4b743fec796cc071aafce3559f66c2ae7c9a50
+- integration_base_main: 4865c7c6c9f381916082e70063be78aaaba8e6d6
+- updated_at: 2026-09-29T04:47:00+08:00
 
-## Completed Goal
+## Current Goal
 
-Fixed live QQ group panel clicks that were sending a leading-slash command such as `/!面板 基础` and being swallowed by the existing `/!` AI-opt-out syntax.
+Validate the QQ inline-keyboard group-panel UX on a non-destructive merge that preserves the newer Portal temporary-admin security hotfix from main.
 
-## Verified Behavior
+## Integration State
 
-- `/!面板 基础` is normalized to `!面板 基础` before AI opt-out parsing and returns category child commands.
-- `/!面板 基础 help` expands to the existing `!help` handler.
-- `/!普通内容` remains the original group-member AI bypass and is not converted into a command.
-- Existing direct `!` commands, permissions, confirmations, cooldowns and Portal switches are unchanged.
-- Development CI 36476322049: success.
-- Main CI 36476525721: success.
-- Cloudflare production Connected Build 8aa6ab67-ad80-4ddd-b916-0b76e7bfcf3c: success.
+- keyboard implementation was already development-CI green before integration;
+- main advanced independently with temporary Portal admin + D1 auth-rate-limit fallback;
+- integration commit af4b743fec796cc071aafce3559f66c2ae7c9a50 has two parents: newest main first, keyboard branch second;
+- worker.js preserves main auth changes and adds only the keyboard import + structured group-panel reply hunk;
+- group-panel builder, QQ Open keyboard transport and keyboard regression come from the verified keyboard branch;
+- full integration CI is now required before main promotion.
 
-## Recovery Route
+## next_exact_action
 
-Treat 64513e94f6634921f0b1ee8f7c6d5d44a754a6f5 as the verified product revision. If a live QQ panel command still fails, capture the exact sent message text and QQ event type; do not change the category registry until the transport/input shape is known.
+Wait for CI on af4b743fec796cc071aafce3559f66c2ae7c9a50; repair only genuine integration regressions, then fast-forward main.
