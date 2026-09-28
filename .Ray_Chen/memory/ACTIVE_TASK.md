@@ -1,46 +1,26 @@
 # ACTIVE_TASK
 
-task_id: qqaibot-20260929-group-panel-slash-dispatch
-task_status: completed
+task_id: qqaibot-20260929-group-panel-keyboard
+task_status: active
 goal_revision: 1
 
 ## Goal
 
-Repair live QQ group panel commands whose QQ-rendered `/!` prefix collided with the intentional `/!` AI-bypass syntax.
+Make `!面板 <分类>` reply with a clickable QQ button grid rather than a plain child-command string.
 
-## Root Cause
+## Acceptance Criteria
 
-QQ group command-panel entries are displayed/sent with a leading slash, e.g. `/!面板 基础`. Group input previously reached `stripGroupAiOptOutPrefix` first, so the command was converted into plain `面板 基础` with `aiReplyOptOut=true` before the panel router ran.
-
-## Acceptance Results
-
-- VERIFIED: reserved panel slash input is normalized before `stripGroupAiOptOutPrefix`.
-- VERIFIED: only `/!面板` / `/！面板` (including full-width slash) receives this normalization.
-- VERIFIED: `/!普通内容` is unchanged and remains AI opt-out.
-- VERIFIED: CQ-at-prefixed panel commands are normalized without losing the CQ prefix.
-- VERIFIED: category-only panel input returns the child-command list.
-- VERIFIED: category + child expands to the existing canonical command and therefore uses existing permission/confirmation/handler logic.
-- VERIFIED: repository, V3, V4 QQ Open, isolated deployment and bundle checks pass on development and main.
-- VERIFIED: production Connected Build succeeds.
-
-## Product Revision
-
-`64513e94f6634921f0b1ee8f7c6d5d44a754a6f5`
-
-## Changed Product Files
-
-- `src/v4/commands/group-panel.js`
-- `worker.js`
-- `verify-v4-qqopen.mjs`
-
-## Verification Evidence
-
-- development CI: `36476322049` — success
-- main CI: `36476525721` — success
-- production build: `8aa6ab67-ad80-4ddd-b916-0b76e7bfcf3c` — success
+- Category-only group-panel command returns structured inline keyboard metadata.
+- Normal category pages use two buttons per row and at most five rows.
+- Categories over ten commands have previous/next page buttons without exceeding QQ keyboard limits.
+- Command buttons use callback data beginning with the existing canonical `!` command so INTERACTION_CREATE reuses the existing handler.
+- Group and C2C QQ Open send paths can attach the keyboard payload.
+- Keyboard send failures only fall back to text for deterministic client/capability errors, never ambiguous 5xx/timeouts.
+- Existing direct commands and `/!普通内容` semantics remain unchanged.
+- Full CI passes before promotion to main.
 
 ## next_exact_action
 
-Live-test one group panel entry, preferably `/!面板 基础`, and confirm the bot returns the category child list.
+Implement group category keyboard + QQ Open structured reply transport, then run regressions.
 
-last_checkpoint_at: 2026-09-29T04:08:00+08:00
+last_checkpoint_at: 2026-09-29T04:20:00+08:00
