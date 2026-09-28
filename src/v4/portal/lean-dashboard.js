@@ -110,6 +110,8 @@ function renderQqOpen(){
     '<div class="v4-card"><div class="v4-sub">重连</div><div id="v4QqReconnect" class="v4-big">0</div><div id="v4QqError" class="v4-sub">没有错误</div></div>'+
     '<div class="v4-card"><div class="v4-sub">Interaction</div><div id="v4QqInteractions" class="v4-big">0</div><div id="v4QqInteractionLast" class="v4-sub">尚无互动</div></div>'+
     '<div class="v4-card"><div class="v4-sub">主动推送授权</div><div id="v4QqPush" class="v4-big">0</div><div id="v4QqHybrid" class="v4-sub">Hybrid —</div></div>'+
+    '<div class="v4-card"><div class="v4-sub">生命周期事件</div><div id="v4QqLifecycle" class="v4-big">0</div><div id="v4QqLifecycleLast" class="v4-sub">尚无事件</div></div>'+
+    '<div class="v4-card"><div class="v4-sub">群映射</div><div id="v4QqMappings" class="v4-big">0</div><div id="v4QqMappingsDetail" class="v4-sub">静态 0 · 自动 0</div></div>'+
     '<div class="v4-card wide"><h3>消息 / 富媒体</h3><div class="v4-cap"><span>接收：文字、图片、影片、语音、文件、表情</span><b class="v4-tag">官方支持</b></div><div class="v4-cap"><span>发送：文字、Markdown、图片、影片、语音、文件</span><b class="v4-tag">官方支持</b></div><div class="v4-cap"><span>富媒体发送流程</span><b class="v4-tag pending">上传 → file_info → msg_type=7</b></div></div>'+
     '<div class="v4-card"><h3>群管理</h3><div class="v4-cap"><span>成员列表 / 资料</span><b class="v4-tag">支持</b></div><div class="v4-cap"><span>禁言 / 移出 / 黑名单</span><b class="v4-tag">支持</b></div><div class="v4-cap"><span>入群申请同意 / 拒绝 / 拉黑</span><b class="v4-tag">支持</b></div><div class="v4-sub" style="margin-top:10px">实际开放程度取决于当前 App 权限。</div></div>'+
     '<div class="v4-card full"><h3>Gateway 诊断</h3><div id="v4QqRaw" class="v4-console">读取中...</div></div></div></div>');
@@ -156,7 +158,9 @@ async function refreshStatus(){
     if(q('v4QqEvent'))q('v4QqEvent').textContent=g.lastEventType||'—';if(q('v4QqSeq'))q('v4QqSeq').textContent='seq '+(g.seq==null?'—':g.seq);
     if(q('v4QqReconnect'))q('v4QqReconnect').textContent=String(g.reconnectCount||0);if(q('v4QqError')){q('v4QqError').textContent=g.lastError||'没有错误';q('v4QqError').className='v4-sub '+(g.lastError?'v4-error':'v4-ok')}
     if(q('v4QqInteractions'))q('v4QqInteractions').textContent=String((g.interaction&&g.interaction.count)||0);if(q('v4QqInteractionLast')){var li=g.interaction&&g.interaction.last;q('v4QqInteractionLast').textContent=li?('type '+li.type+' · '+li.scene):'尚无互动'}
-    if(q('v4QqPush'))q('v4QqPush').textContent=String(Array.isArray(g.pushPermissions)?g.pushPermissions.length:0);if(q('v4QqHybrid'))q('v4QqHybrid').textContent='Hybrid '+String((r.hybrid&&r.hybrid.primary)||'—')+' · 映射 '+String((r.hybrid&&r.hybrid.mappedGroups)||0)
+    if(q('v4QqPush'))q('v4QqPush').textContent=String(Array.isArray(g.pushPermissions)?g.pushPermissions.length:0);if(q('v4QqHybrid'))q('v4QqHybrid').textContent='Hybrid '+String((r.hybrid&&r.hybrid.primary)||'—')+' · 映射 '+String((r.hybrid&&r.hybrid.totalMappedGroups)||0)
+    if(q('v4QqLifecycle'))q('v4QqLifecycle').textContent=String((g.lifecycle&&g.lifecycle.count)||0);if(q('v4QqLifecycleLast')){var ll=g.lifecycle&&g.lifecycle.last;q('v4QqLifecycleLast').textContent=ll?(String(ll.eventType||'事件')+' · '+(ll.active?'active':'inactive')):'尚无事件'}
+    if(q('v4QqMappings'))q('v4QqMappings').textContent=String((r.hybrid&&r.hybrid.totalMappedGroups)||0);if(q('v4QqMappingsDetail'))q('v4QqMappingsDetail').textContent='静态 '+String((r.hybrid&&r.hybrid.mappedGroups)||0)+' · 自动 '+String((r.hybrid&&r.hybrid.dynamicMappedGroups)||0)
     if(q('v4QqRaw'))q('v4QqRaw').textContent=JSON.stringify({enabled:r.enabled,configured:r.configured,hybrid:r.hybrid,gateway:g,media:r.media,groupManagement:r.groupManagement},null,2)
   }catch(e){if(q('v4HeroState'))q('v4HeroState').textContent='QQ Open 状态读取失败';if(q('v4QqRaw'))q('v4QqRaw').textContent=String(e.message||e)}
 }
