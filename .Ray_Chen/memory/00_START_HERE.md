@@ -1,35 +1,35 @@
 # Ray_Chen Memory Entry
 
-- memory_version: v0.0.41
+- memory_version: v0.0.43
 - project: QQAIBOT
 - repository: Ray20123315/QQAIBOT
 - canonical_branch: main
 - development_branch: v4-qqopen-native
 - task_id: qqaibot-20260929-keyboard-command-actions
-- task_status: active
+- task_status: completed
 - goal_revision: 1
-- base_revision: a033063e8564c6f71bd2c22724a9a6b2f4083f37
-- updated_at: 2026-09-29T10:20:00+08:00
+- product_revision: 719290878187f2230a5be10092cc4a9aa3ce1e34
+- deployed_main_head: e6824c0a7e825450526152da90b7b0d8fba3049c
+- updated_at: 2026-09-29T10:45:00+08:00
 
-## Current Goal
+## Completed Goal
 
-Change QQ child-command keyboards from one-shot callback buttons into repeatable official command buttons with per-command send/input behavior.
+QQ child-command keyboards are now reusable official command buttons rather than one-shot callback buttons.
 
-## User Requirement
+- Commands that need no additional data use action.type=2 + enter=true and send immediately.
+- Commands that need parameters, targets, or text use action.type=2 + enter=false and prefill the QQ input box with the canonical command plus a trailing space.
+- Normal command buttons omit click_limit, so they do not become unusable after one click.
+- Pagination buttons are also reusable type=2 command buttons and send page commands directly.
+- Existing handlers, permissions, confirmations, cooldowns, Portal switches, QQ Open primary routing and OneBot fallback remain unchanged.
+- Existing INTERACTION intent support remains available for unrelated callback-based features, but normal command keyboards no longer depend on callback ACKs.
 
-- Buttons must not become unusable after one click.
-- Commands that need no additional data should be sent immediately.
-- Commands that need parameters/targets/text should be inserted into the QQ message input for the user to complete, not sent immediately.
-- Existing direct ! commands, permissions, confirmations, cooldowns, Portal switches and transport safety remain unchanged.
+## Verification
 
-## Official QQ Semantics
+- product CI 36511639011: success
+- final development-head CI 36511690614: success
+- main CI 36511830433: success
+- Cloudflare production build 8da5b2da-5646-4e73-a34e-ba21844b020c: success
 
-Per current QQ official message-button documentation:
-- action.type=2 is a command button and inserts @bot + action.data into the input box;
-- action.enter=true auto-sends the command;
-- action.enter=false leaves it in the input box for editing;
-- action.click_limit is deprecated and defaults to unlimited when omitted.
+## Recovery Route
 
-## next_exact_action
-
-Add explicit per-command keyboard enter metadata, generate type=2 buttons, preserve enter/reply/unsupport fields through runtime normalization, remove click_limit, and run full CI.
+Treat 719290878187f2230a5be10092cc4a9aa3ce1e34 as the keyboard product revision and e6824c0a7e825450526152da90b7b0d8fba3049c as the deployed main head. If a button behaves incorrectly, inspect command.panel.enter metadata first; new commands default to prefill for safety.
