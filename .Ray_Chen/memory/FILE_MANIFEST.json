@@ -1,9 +1,9 @@
 {
   "schema_version": 1,
-  "memory_version": "v0.0.42",
+  "memory_version": "v0.0.43",
   "task_id": "qqaibot-20260929-keyboard-command-actions",
   "goal_revision": 1,
-  "transaction": "keyboard_command_actions_validating_20260929",
+  "transaction": "keyboard_command_actions_final_20260929",
   "repository": "Ray20123315/qqaibot",
   "production_branch": "main",
   "development_branch": "hotfix/temp-system-admin-login-20260929",
@@ -12,11 +12,11 @@
   "verification": {
     "feature_product_ci_run": 36366445081,
     "regression_ci_run": 36366534308,
-    "main_ci_run": 36510415265,
+    "main_ci_run": 36511830433,
     "github_ci": "success",
     "isolated_cloudflare_build": "e280d9fb-bb0d-4659-91e8-cb2db205e1a3",
     "isolated_cloudflare_outcome": "success",
-    "production_cloudflare_build": "16be6f33-cdd1-4e31-9a26-60036dc0f237",
+    "production_cloudflare_build": "8da5b2da-5646-4e73-a34e-ba21844b020c",
     "production_cloudflare_outcome": "success",
     "production_worker_version": "2aa24e2a-b640-4ac2-83ae-07efb428b099",
     "production_bindings_readback": "success",
@@ -24,11 +24,11 @@
     "discovery_sync_after_fix": "pending_authenticated_status",
     "live_mapping_after_fix": "pending_user_test",
     "command_fallback_implementation": "verified",
-    "development_ci": "pending",
-    "main_update": "pending",
-    "development_ci_run": 36510290690,
+    "development_ci": "success",
+    "main_update": "verified",
+    "development_ci_run": 36511639011,
     "main_ci": "success",
-    "production_commit": "2bbcca4dfcc2f7ce99c21df84bdc2dc2479a3bdf",
+    "production_commit": "e6824c0a7e825450526152da90b7b0d8fba3049c",
     "main_readback": "success",
     "command_catalog_entries": 77,
     "full_command_panel_restoration": "verified",
@@ -122,9 +122,14 @@
     "production_qq_open_intents_after": "100663296",
     "session_intent_reidentify": "verified",
     "live_keyboard_callback_after_intent_fix": "pending_user_test",
-    "keyboard_repeatable_buttons": "implemented",
-    "keyboard_type2_command_actions": "implemented",
-    "keyboard_prefill_vs_send": "implemented"
+    "keyboard_repeatable_buttons": "verified",
+    "keyboard_type2_command_actions": "verified",
+    "keyboard_prefill_vs_send": "verified",
+    "keyboard_no_click_limit": "verified",
+    "keyboard_default_prefill": "verified",
+    "final_dev_head_ci": "success",
+    "final_dev_head_ci_run": 36511690614,
+    "live_send_vs_prefill_smoke": "pending_user_test"
   },
   "changes": [
     {
@@ -1699,10 +1704,44 @@
       "after_revision": "v0.0.42",
       "verification": "archive + CI required",
       "changed_at": "2026-09-29T10:32:00+08:00"
+    },
+    {
+      "location_type": "github",
+      "provider": "GitHub",
+      "resource_id_or_path": "refs/heads/main",
+      "action": "fast_forward",
+      "branch_or_container": "main",
+      "before_revision": "a033063e8564c6f71bd2c22724a9a6b2f4083f37",
+      "after_revision": "e6824c0a7e825450526152da90b7b0d8fba3049c",
+      "verification": "main CI 36511830433 success",
+      "changed_at": "2026-09-29T10:45:00+08:00"
+    },
+    {
+      "location_type": "cloudflare",
+      "provider": "Cloudflare",
+      "resource_id_or_path": "workers/scripts/qqai",
+      "action": "auto_deployed_by_connected_build",
+      "branch_or_container": "production",
+      "before_revision": "2bbcca4dfcc2f7ce99c21df84bdc2dc2479a3bdf",
+      "after_revision": "e6824c0a7e825450526152da90b7b0d8fba3049c",
+      "commit_or_hash": "8da5b2da-5646-4e73-a34e-ba21844b020c",
+      "verification": "Connected Build outcome success",
+      "changed_at": "2026-09-29T10:45:00+08:00"
+    },
+    {
+      "location_type": "github",
+      "provider": "GitHub",
+      "resource_id_or_path": ".Ray_Chen/memory/*",
+      "action": "final_reconciliation",
+      "branch_or_container": "v4-qqopen-native -> main",
+      "before_revision": "v0.0.42",
+      "after_revision": "v0.0.43",
+      "verification": "read-back + TAR.GZ extraction + SHA-256 required",
+      "changed_at": "2026-09-29T10:45:00+08:00"
     }
   ],
   "internal_memory_transaction": {
-    "action": "record reusable type-2 command-button implementation and bump memory to v0.0.42",
-    "note": "Awaiting development CI before main promotion."
+    "action": "complete reusable type-2 command-button task and bump memory to v0.0.43",
+    "note": "Normal buttons are repeatable; no-argument commands auto-send, parameterized commands prefill."
   }
 }
