@@ -1,43 +1,35 @@
 # Ray_Chen Memory Entry
 
-- memory_version: v0.0.40
+- memory_version: v0.0.41
 - project: QQAIBOT
 - repository: Ray20123315/QQAIBOT
 - canonical_branch: main
 - development_branch: v4-qqopen-native
-- task_id: qqaibot-20260929-interaction-timeout-fix
-- task_status: completed
+- task_id: qqaibot-20260929-keyboard-command-actions
+- task_status: active
 - goal_revision: 1
-- verified_product_revision: 2bbcca4dfcc2f7ce99c21df84bdc2dc2479a3bdf
-- updated_at: 2026-09-29T10:05:00+08:00
+- base_revision: a033063e8564c6f71bd2c22724a9a6b2f4083f37
+- updated_at: 2026-09-29T10:20:00+08:00
 
-## Completed Goal
+## Current Goal
 
-Fixed QQ inline-keyboard buttons timing out because the production Gateway subscribed only to GROUP_MESSAGES and did not subscribe to INTERACTION_CREATE.
+Change QQ child-command keyboards from one-shot callback buttons into repeatable official command buttons with per-command send/input behavior.
 
-## Root Cause
+## User Requirement
 
-- old production binding: QQ_OPEN_INTENTS=33554432 = 1 << 25
-- required button callback bit: INTERACTION = 1 << 26
-- required combined mask: 100663296
-- without INTERACTION, buttons render but callback events never reach QqOpenGateway, so QQ cannot receive an ACK and shows request timeout.
+- Buttons must not become unusable after one click.
+- Commands that need no additional data should be sent immediately.
+- Commands that need parameters/targets/text should be inserted into the QQ message input for the user to complete, not sent immediately.
+- Existing direct ! commands, permissions, confirmations, cooldowns, Portal switches and transport safety remain unchanged.
 
-## Result
+## Official QQ Semantics
 
-- production/test/default intents are now 100663296;
-- Tencent INTERACTION callbacks are included;
-- stale sessions may resume only when their recorded sessionIntents match configuredIntents;
-- intent changes therefore force a fresh IDENTIFY instead of silently resuming the old subscription;
-- production binding read-back confirms QQ_OPEN_INTENTS=100663296;
-- keyboard payload/handlers/permissions/TEMP-admin work remain preserved.
-
-## Verification
-
-- development CI 36510290690: success
-- main CI 36510415265: success
-- Cloudflare Connected Build 16be6f33-cdd1-4e31-9a26-60036dc0f237: success
-- production binding read-back: 100663296
+Per current QQ official message-button documentation:
+- action.type=2 is a command button and inserts @bot + action.data into the input box;
+- action.enter=true auto-sends the command;
+- action.enter=false leaves it in the input box for editing;
+- action.click_limit is deprecated and defaults to unlimited when omitted.
 
 ## next_exact_action
 
-Click one inline-keyboard button in QQ. If it still reports timeout, inspect Gateway lastError for QQ close code 4014; that would mean the QQ application itself still lacks INTERACTION permission in the developer console.
+Add explicit per-command keyboard enter metadata, generate type=2 buttons, preserve enter/reply/unsupport fields through runtime normalization, remove click_limit, and run full CI.
