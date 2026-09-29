@@ -22,8 +22,21 @@ Make group category keyboard buttons reusable and context-appropriate:
 - Explicit metadata identifies direct-send commands; unknown/new commands default to input/prefill for safety.
 - Full development/main CI and production Connected Build succeed before completion.
 
+## Product Patch
+
+Current development revision: `719290878187f2230a5be10092cc4a9aa3ce1e34`
+
+Implemented:
+- registry panel metadata now carries explicit `enter` behavior;
+- catalog marks no-argument commands as direct-send;
+- group keyboard buttons use QQ official action.type=2 command-button semantics;
+- parameterized commands preserve a trailing space with `enter=false`;
+- no normal command button emits `click_limit`;
+- runtime normalization preserves type=2, enter/reply/unsupport_tips and only preserves click_limit when explicitly supplied by another feature;
+- regressions cover direct-send, prefill, pagination, and repeatability.
+
 ## next_exact_action
 
-Implement command-button metadata and payload changes, then run regressions.
+Run full development CI on `719290878187f2230a5be10092cc4a9aa3ce1e34`; fix only verified regressions before main promotion.
 
-last_checkpoint_at: 2026-09-29T10:20:00+08:00
+last_checkpoint_at: 2026-09-29T10:32:00+08:00
