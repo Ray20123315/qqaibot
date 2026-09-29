@@ -10,7 +10,7 @@ assert.match(config, /name\s*=\s*"QQ_OPEN_GATEWAY"[\s\S]*?class_name\s*=\s*"QqOp
 assert.match(config, /tag\s*=\s*"v4test_qqopen_gateway_v1"/);
 assert.match(config, /new_sqlite_classes\s*=\s*\["QqOpenGateway"\]/);
 assert.match(config, /QQ_OPEN_ENABLED\s*=\s*"true"/);
-assert.match(config, /QQ_OPEN_INTENTS\s*=\s*"33554432"/);
+assert.match(config, /QQ_OPEN_INTENTS\s*=\s*"100663296"/);
 assert.match(config, /workers_dev\s*=\s*true/);
 assert.match(config, /preview_urls\s*=\s*true/);
 assert.match(config, /keep_vars\s*=\s*true/);
