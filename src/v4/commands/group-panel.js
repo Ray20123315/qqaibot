@@ -63,10 +63,25 @@ function groupCategoryMeta(value) {
   return GROUP_PANEL_CATEGORY_META.find(meta => meta.key === token) || categoryMetaByToken(token);
 }
 
-function keyboardButton(id, label, data, { style = 1, enter = false } = {}) {
+function keyboardButton(id, label, data, { style = 1, immediate = false } = {}) {
   const text = clean(label).slice(0, 20) || "指令";
   const buttonId = clean(id).slice(0, 64) || "qqai_command";
   const payload = String(data ?? "").replace(/^\s+/, "").slice(0, 1000);
+  const action = immediate
+    ? Object.freeze({
+        type: 1,
+        data: payload,
+        permission: Object.freeze({ type:2 }),
+        unsupport_tips: "当前客户端不支持快捷执行，请直接发送指令。"
+      })
+    : Object.freeze({
+        type: 2,
+        data: payload,
+        permission: Object.freeze({ type:2 }),
+        enter: false,
+        reply: false,
+        unsupport_tips: "当前客户端不支持指令按钮，请直接发送指令。"
+      });
   return Object.freeze({
     id: buttonId,
     render_data: Object.freeze({
@@ -74,14 +89,7 @@ function keyboardButton(id, label, data, { style = 1, enter = false } = {}) {
       visited_label: text,
       style: Number(style || 0)
     }),
-    action: Object.freeze({
-      type: 2,
-      data: payload,
-      permission: Object.freeze({ type:2 }),
-      enter: Boolean(enter),
-      reply: false,
-      unsupport_tips: "当前客户端不支持指令按钮，请直接发送指令。"
-    }),
+    action,
     group_id: buttonId
   });
 }
@@ -109,7 +117,7 @@ function buildGroupCategoryKeyboard(registry, category, { page = 1 } = {}) {
           `qqai_${meta.key}_${currentPage}_${offset + index}`,
           commandToken(command.panel.command),
           data,
-          { style:1, enter:autoSend }
+          { style:1, immediate:autoSend }
         );
       }))
     }));
@@ -121,13 +129,13 @@ function buildGroupCategoryKeyboard(registry, category, { page = 1 } = {}) {
       `qqai_${meta.key}_prev_${currentPage}`,
       "上一页",
       `!面板 ${meta.label} --page=${currentPage - 1}`,
-      { style:0, enter:true }
+      { style:0, immediate:true }
     ));
     if (currentPage < totalPages) nav.push(keyboardButton(
       `qqai_${meta.key}_next_${currentPage}`,
       "下一页",
       `!面板 ${meta.label} --page=${currentPage + 1}`,
-      { style:0, enter:true }
+      { style:0, immediate:true }
     ));
     if (nav.length) rows.push(Object.freeze({ buttons:Object.freeze(nav) }));
   }
