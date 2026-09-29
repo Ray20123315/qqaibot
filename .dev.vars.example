@@ -47,7 +47,7 @@ QQ_OPEN_ENABLED=false
 QQ_OPEN_APP_ID=
 QQ_OPEN_CLIENT_SECRET=
 QQ_OPEN_TRANSPORT=websocket
-QQ_OPEN_INTENTS=33554432
+QQ_OPEN_INTENTS=100663296
 # No-sharding baseline. If /gateway/bot later recommends >1, deploy one connection per shard deliberately.
 QQ_OPEN_SHARD_ID=0
 QQ_OPEN_SHARD_TOTAL=1
@@ -67,5 +67,5 @@ QQ_HYBRID_PRIMARY=qq-open
 QQ_HYBRID_GROUP_MAP={}
 # Optional callback feature_id -> existing command, for INTERACTION type 12.
 QQ_OPEN_FEATURE_COMMAND_MAP={}
-# Keep QQ_OPEN_INTENTS=33554432 until INTERACTION permission is explicitly granted.
-# If granted later, GROUP_AND_C2C_EVENT | INTERACTION = 100663296.
+# Inline keyboard callbacks require GROUP_AND_C2C_EVENT | INTERACTION = 100663296.
+# If the QQ application lacks INTERACTION permission, the Gateway will reject the intent (typically 4014); enable that permission in the QQ developer console before using keyboard callbacks.
