@@ -85,10 +85,26 @@ function normalizeInlineKeyboard(value) {
     buttons: (Array.isArray(row?.buttons) ? row.buttons : []).slice(0, 5).map((button, buttonIndex) => {
       const label = String(button?.render_data?.label || "").trim().slice(0, 20) || `指令${rowIndex + 1}-${buttonIndex + 1}`;
       const visited = String(button?.render_data?.visited_label || label).trim().slice(0, 20) || label;
-      const data = String(button?.action?.data || "").trim().slice(0, 1000);
+      const data = String(button?.action?.data ?? "").replace(/^\s+/, "").slice(0, 1000);
       const id = String(button?.id || `qqai_${rowIndex}_${buttonIndex}`).trim().slice(0, 64);
       const permissionType = Number(button?.action?.permission?.type || 2);
-      const clickLimit = Math.max(1, Number(button?.action?.click_limit || 1));
+      const actionType = Number(button?.action?.type ?? 1);
+      const action = {
+        type: Number.isFinite(actionType) ? actionType : 1,
+        data,
+        permission: { type:Number.isFinite(permissionType) ? permissionType : 2 },
+        unsupport_tips: String(button?.action?.unsupport_tips || "当前客户端不支持此操作，请直接发送指令。").trim().slice(0, 80)
+      };
+      if (action.type === 2) {
+        action.enter = button?.action?.enter === true;
+        action.reply = button?.action?.reply === true;
+        const anchor = Number(button?.action?.anchor || 0);
+        if (Number.isFinite(anchor) && anchor > 0) action.anchor = anchor;
+      }
+      if (Object.prototype.hasOwnProperty.call(button?.action || {}, "click_limit")) {
+        const clickLimit = Number(button.action.click_limit);
+        if (Number.isFinite(clickLimit) && clickLimit > 0) action.click_limit = Math.floor(clickLimit);
+      }
       return {
         id,
         render_data: {
@@ -96,12 +112,7 @@ function normalizeInlineKeyboard(value) {
           visited_label: visited,
           style: Number(button?.render_data?.style || 0)
         },
-        action: {
-          type: Number(button?.action?.type || 1),
-          data,
-          permission: { type:Number.isFinite(permissionType) ? permissionType : 2 },
-          click_limit: Number.isFinite(clickLimit) ? clickLimit : 1
-        },
+        action,
         group_id: String(button?.group_id || id).trim().slice(0, 64) || id
       };
     }).filter(button => button.action.data)
