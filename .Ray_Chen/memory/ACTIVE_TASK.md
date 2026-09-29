@@ -1,35 +1,34 @@
 # ACTIVE_TASK
 
-task_id: qqaibot-20260929-keyboard-interaction-intent
+task_id: qqaibot-20260929-interaction-timeout-fix
 task_status: active
 goal_revision: 1
 
 ## Goal
 
-Stop every QQ keyboard button from timing out by subscribing the Gateway to INTERACTION_CREATE events.
+Stop all QQ inline-keyboard callbacks from timing out.
 
-## Root Cause Evidence
+## Confirmed Evidence
 
-- production wrangler.toml: QQ_OPEN_INTENTS=33554432
-- runtime default: 1<<25 only
-- verify-v4-hybrid-official explicitly rejects 100663296
-- Tencent official SDK defines INTERACTION as 1<<26 and includes it in its default intents
-- Tencent official keyboard callback flow: receive INTERACTION_CREATE -> promptly PUT /interactions/{id} with code 0
-- current QQAIBOT already implements that ACK path, but the event is never delivered under the current intent mask
+- production Worker binding read-back: `QQ_OPEN_INTENTS=33554432`;
+- Tencent SDK: `GROUP_MESSAGES=1<<25`, `INTERACTION=1<<26`;
+- current runtime default is also only `1<<25`;
+- button callback requires `INTERACTION_CREATE` and immediate `PUT /interactions/{id}` ACK.
 
 ## Acceptance Criteria
 
-- QQ_OPEN_INTENTS is 100663296 in production and V4 test configs.
-- Runtime default contains both 1<<25 and 1<<26.
-- Regression asserts INTERACTION intent is enabled.
-- Existing message ingress remains enabled.
-- Development/main CI pass.
-- Production Connected Build succeeds.
-- Live QQ Open Gateway reconnects successfully with the new intent mask.
-- No 4014 permission failure occurs; if 4014 occurs, task becomes blocked on QQ platform permission rather than falsely completed.
+- production/test/default intents are `100663296`;
+- regression tests assert `INTERACTION` is included;
+- previous tests that required interaction to remain opt-in are corrected;
+- runtime reports configured/connected intents;
+- a live socket created with stale intents is replaced when configured intents change;
+- callback ACK endpoint/body remains official `PUT /interactions/{id}` + `{"code":0}`;
+- keyboard payload fix remains intact;
+- full CI and production deployment pass;
+- production binding read-back shows `100663296`.
 
 ## next_exact_action
 
-Apply the intent-mask patch and validation updates.
+Implement intent mask + reconnect-on-intent-change and run CI.
 
 last_checkpoint_at: 2026-09-29T09:55:00+08:00
