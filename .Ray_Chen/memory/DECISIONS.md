@@ -2,30 +2,36 @@
 
 ## Retained
 
-D-001 through D-071 remain in force.
+D-001 through D-073 remain in force.
 
-## D-072 Interaction intent is mandatory for inline keyboard callbacks
-status: accepted
+## D-074 Normal child-command button split
+status: superseded
+superseded_by: D-077
 date: 2026-09-29
-Decision: production/test/default QQ Open intents include GROUP_MESSAGES (1<<25) and INTERACTION (1<<26), combined as 100663296. A keyboard without the Interaction intent is considered nonfunctional even if it renders.
-
-## D-073 Intent changes invalidate session resume
-status: accepted
-date: 2026-09-29
-Decision: QqOpenGateway records the intent mask used to identify a session. RESUME is allowed only when the stored sessionIntents equals the current configured intent mask; otherwise a fresh IDENTIFY is required.
-
-
-## D-074 Normal child-command buttons use QQ command-button semantics
-status: accepted
-date: 2026-09-29
-Decision: normal group child-command buttons use action.type=2. Commands explicitly marked panel.enter=true auto-send; all others prefill the input box for user completion.
+Previous decision: use action.type=2 for all normal child-command buttons and panel.enter=true for direct send.
+Reason superseded: live QQ group clients can still place type=2 commands into the input box despite enter=true.
 
 ## D-075 Normal command buttons are reusable by default
 status: accepted
 date: 2026-09-29
-Decision: omit action.click_limit from normal command buttons. The QQ API documents click_limit as deprecated with unlimited default behavior. Callback click limits may still be preserved for unrelated features that explicitly set them.
+Decision: omit action.click_limit from normal child-command buttons. Unrelated features may still set an explicit limit if they truly need one.
 
 ## D-076 Unknown commands default to prefill
 status: accepted
 date: 2026-09-29
-Decision: new or unclassified commands default to enter=false so adding a command cannot accidentally create a one-click execution path.
+Decision: new or unclassified commands default to editable prefill so a new command cannot accidentally become a one-click execution path.
+
+## D-077 Direct commands use reusable callbacks
+status: accepted
+date: 2026-09-29
+Decision: group keyboard commands explicitly marked direct use action.type=1 reusable callbacks. QqOpenGateway ACKs INTERACTION_CREATE first, then dispatches the existing canonical command handler. This guarantees immediate execution independently of QQ group type=2 enter behavior.
+
+## D-078 Parameterized commands stay command-button prefills
+status: accepted
+date: 2026-09-29
+Decision: commands needing parameters, targets or content use action.type=2 with enter=false and a trailing-space canonical command. Existing handler authorization remains unchanged.
+
+## D-079 Every active group category is regression-owned
+status: accepted
+date: 2026-09-29
+Decision: tests enumerate every non-empty GROUP_PANEL_CATEGORY_META category and every keyboard page, requiring full command coverage and valid row/button limits. Single-category success is not sufficient evidence.

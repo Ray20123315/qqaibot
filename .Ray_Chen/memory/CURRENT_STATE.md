@@ -2,38 +2,37 @@
 
 ## GitHub
 
-- keyboard product revision: `719290878187f2230a5be10092cc4a9aa3ce1e34`
-- deployed main/dev head before final memory reconciliation: `e6824c0a7e825450526152da90b7b0d8fba3049c`
-- development product CI `36511639011`: success
-- final development-head CI `36511690614`: success
-- main CI `36511830433`: success
+- verified product revision on main/dev: `dea8ae5448382830262399aa3ee3773d5e4e030f`
+- development CI `36522596708`: success
+- main CI `36522715591`: success
 
 ## Cloudflare Production
 
 - Worker: `qqai`
-- Connected Build: `8da5b2da-5646-4e73-a34e-ba21844b020c`
-- commit: `e6824c0a7e825450526152da90b7b0d8fba3049c`
+- Connected Build: `ce40accb-f1f3-4824-b299-411e130e2573`
+- commit: `dea8ae5448382830262399aa3ee3773d5e4e030f`
 - branch: `main`
 - outcome: success
 
-## QQ Keyboard Command Behavior
+## QQ Group Keyboard Behavior
 
-- normal group child-command buttons use action.type=2 command semantics.
-- `enter=true`: immediate send for explicitly marked no-argument commands.
-- `enter=false`: prefill input for commands that require or commonly accept parameters/targets/content.
-- prefill data keeps a trailing space after the canonical command.
-- normal command buttons do not carry click_limit, so they are reusable.
-- pagination uses reusable type=2 command buttons with enter=true.
-- unknown/new commands default to prefill rather than immediate execution.
+- direct/no-argument commands: action.type=1 callback, no click_limit, immediate ACK + canonical handler execution;
+- parameterized/target/content commands: action.type=2, enter=false, trailing-space command prefill;
+- navigation buttons: reusable callback actions;
+- every non-empty group command category renders a keyboard;
+- every category page stays within 5 rows and 2 command columns;
+- all enabled group-scoped panel commands are included by regression coverage;
+- new/unclassified commands remain prefill by default unless explicitly marked direct.
 
 ## Preserved State
 
-- QQ_OPEN_INTENTS remains 100663296; Interaction callbacks remain available for other features.
+- QQ_OPEN_INTENTS remains 100663296, so callback delivery remains available.
 - QQ Open/AIBot remains primary.
 - OneBot remains controlled fallback only.
-- direct commands, permissions, confirmations, cooldowns and Portal switches are unchanged.
+- direct command handlers, permissions, confirmations, cooldowns and Portal switches are unchanged.
+- `/!普通内容` remains AI bypass.
 - TEMP-admin and prior Portal security work remain preserved.
 
 ## Remaining Live Verification
 
-Click one known direct-send button and one parameterized button in the real QQ client to confirm UX rendering/input behavior.
+Only real-client UX confirmation remains: direct button should execute immediately, parameterized button should stay editable, and non-basic categories should render buttons.

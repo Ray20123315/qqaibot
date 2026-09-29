@@ -9,11 +9,12 @@
 - Developer is the top cumulative permission level for commands available in the current scope.
 - QQ group discovery must work in the actual client, not merely create API resources successfully.
 - Use one managed group category-root panel because QQ group PanelItem has no nested submenu.
-- Selecting a category should return a clickable two-column QQ button card similar to the user's reference UX; plain text is fallback, not the primary UX.
+- Selecting any non-empty category must return a clickable two-column QQ button card; this applies to 基础、群聊、记忆、活动、群规、AI管理、群操作、群主、开发者.
 - Large categories must paginate within QQ keyboard limits.
-- Keyboard child-command buttons must be reusable; normal command buttons must not use one-shot click limits.
-- Keyboard commands that need no extra data should send immediately; commands that need parameters/targets/text should prefill the QQ message input and wait for user completion.
-- Keyboard command buttons must reuse the existing canonical ! commands and existing handlers.
+- Keyboard child-command buttons must be reusable and must not use one-shot click limits.
+- Commands that need no additional data must execute immediately without being left in the input box.
+- Commands that require parameters/targets/text must prefill the QQ message input and wait for user completion.
+- Keyboard buttons must reuse existing canonical ! commands and existing handlers.
 - QQ-rendered `/!面板 ...` is reserved for panel routing.
 - Ordinary manual `/!普通内容` must continue to bypass AI.
 - Existing server-side permission checks, confirmations, cooldowns and Portal switches remain authoritative.

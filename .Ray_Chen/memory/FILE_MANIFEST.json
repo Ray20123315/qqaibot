@@ -1,22 +1,22 @@
 {
   "schema_version": 1,
-  "memory_version": "v0.0.44",
+  "memory_version": "v0.0.45",
   "task_id": "qqaibot-20260929-keyboard-all-categories-direct-callback",
   "goal_revision": 1,
-  "transaction": "keyboard_all_categories_direct_callback_checkpoint_20260929",
+  "transaction": "keyboard_all_categories_direct_callback_final_20260929",
   "repository": "Ray20123315/qqaibot",
   "production_branch": "main",
   "development_branch": "hotfix/temp-system-admin-login-20260929",
   "product_before_revision": "6fc678c266e514ee6daad4fd40ea33e9225c0120",
-  "product_after_revision": "6fc678c266e514ee6daad4fd40ea33e9225c0120",
+  "product_after_revision": "dea8ae5448382830262399aa3ee3773d5e4e030f",
   "verification": {
     "feature_product_ci_run": 36366445081,
     "regression_ci_run": 36366534308,
-    "main_ci_run": 36511830433,
+    "main_ci_run": 36522715591,
     "github_ci": "success",
     "isolated_cloudflare_build": "e280d9fb-bb0d-4659-91e8-cb2db205e1a3",
     "isolated_cloudflare_outcome": "success",
-    "production_cloudflare_build": "8da5b2da-5646-4e73-a34e-ba21844b020c",
+    "production_cloudflare_build": "ce40accb-f1f3-4824-b299-411e130e2573",
     "production_cloudflare_outcome": "success",
     "production_worker_version": "2aa24e2a-b640-4ac2-83ae-07efb428b099",
     "production_bindings_readback": "success",
@@ -24,11 +24,11 @@
     "discovery_sync_after_fix": "pending_authenticated_status",
     "live_mapping_after_fix": "pending_user_test",
     "command_fallback_implementation": "verified",
-    "development_ci": "pending",
-    "main_update": "pending",
-    "development_ci_run": 36511639011,
+    "development_ci": "success",
+    "main_update": "verified",
+    "development_ci_run": 36522596708,
     "main_ci": "success",
-    "production_commit": "e6824c0a7e825450526152da90b7b0d8fba3049c",
+    "production_commit": "dea8ae5448382830262399aa3ee3773d5e4e030f",
     "main_readback": "success",
     "command_catalog_entries": 77,
     "full_command_panel_restoration": "verified",
@@ -130,9 +130,13 @@
     "final_dev_head_ci": "success",
     "final_dev_head_ci_run": 36511690614,
     "live_send_vs_prefill_smoke": "pending_user_test",
-    "live_help_direct_send": "failed_type2_enter_prefill_observed",
-    "all_categories_keyboard": "in_progress",
-    "direct_command_callback_mode": "in_progress"
+    "live_help_direct_send": "superseded_type2_enter_by_direct_callback",
+    "all_categories_keyboard": "verified",
+    "direct_command_callback_mode": "verified",
+    "parameterized_command_prefill_mode": "verified",
+    "all_category_pages_covered": "verified",
+    "all_group_panel_commands_covered": "verified",
+    "live_final_keyboard_smoke": "pending_user"
   },
   "changes": [
     {
@@ -1752,10 +1756,77 @@
       "after_revision": "this_checkpoint",
       "verification": "live help-prefill + missing-category-buttons report recorded before product patch",
       "changed_at": "2026-09-29T12:31:00+08:00"
+    },
+    {
+      "location_type": "github",
+      "provider": "GitHub",
+      "resource_id_or_path": "src/v4/commands/group-panel.js",
+      "action": "modified",
+      "branch_or_container": "v4-qqopen-native -> main",
+      "before_revision": "6fc678c266e514ee6daad4fd40ea33e9225c0120",
+      "after_revision": "dea8ae5448382830262399aa3ee3773d5e4e030f",
+      "verification": "direct callback + parameterized prefill + development/main CI success",
+      "changed_at": "2026-09-29T12:48:00+08:00"
+    },
+    {
+      "location_type": "github",
+      "provider": "GitHub",
+      "resource_id_or_path": "src/v4/commands/catalog.js",
+      "action": "modified",
+      "branch_or_container": "v4-qqopen-native -> main",
+      "before_revision": "6fc678c266e514ee6daad4fd40ea33e9225c0120",
+      "after_revision": "dea8ae5448382830262399aa3ee3773d5e4e030f",
+      "verification": "direct-command metadata completion + CI success",
+      "changed_at": "2026-09-29T12:48:00+08:00"
+    },
+    {
+      "location_type": "github",
+      "provider": "GitHub",
+      "resource_id_or_path": "verify-v4-qqopen.mjs",
+      "action": "modified",
+      "branch_or_container": "v4-qqopen-native -> main",
+      "before_revision": "6fc678c266e514ee6daad4fd40ea33e9225c0120",
+      "after_revision": "dea8ae5448382830262399aa3ee3773d5e4e030f",
+      "verification": "all-category/all-page keyboard coverage + CI success",
+      "changed_at": "2026-09-29T12:48:00+08:00"
+    },
+    {
+      "location_type": "github",
+      "provider": "GitHub",
+      "resource_id_or_path": "refs/heads/main",
+      "action": "fast_forward",
+      "branch_or_container": "main",
+      "before_revision": "6fc678c266e514ee6daad4fd40ea33e9225c0120",
+      "after_revision": "dea8ae5448382830262399aa3ee3773d5e4e030f",
+      "verification": "main CI 36522715591 success",
+      "changed_at": "2026-09-29T12:48:00+08:00"
+    },
+    {
+      "location_type": "cloudflare",
+      "provider": "Cloudflare",
+      "resource_id_or_path": "workers/scripts/qqai",
+      "action": "auto_deployed_by_connected_build",
+      "branch_or_container": "production",
+      "before_revision": "e6824c0a7e825450526152da90b7b0d8fba3049c",
+      "after_revision": "dea8ae5448382830262399aa3ee3773d5e4e030f",
+      "commit_or_hash": "ce40accb-f1f3-4824-b299-411e130e2573",
+      "verification": "Connected Build outcome success",
+      "changed_at": "2026-09-29T12:48:00+08:00"
+    },
+    {
+      "location_type": "github",
+      "provider": "GitHub",
+      "resource_id_or_path": ".Ray_Chen/memory/*",
+      "action": "final_reconciliation",
+      "branch_or_container": "v4-qqopen-native -> main",
+      "before_revision": "v0.0.44",
+      "after_revision": "v0.0.45",
+      "verification": "read-back + TAR.GZ extraction + SHA-256 required",
+      "changed_at": "2026-09-29T12:48:00+08:00"
     }
   ],
   "internal_memory_transaction": {
-    "action": "start all-category keyboard completion with direct callback actions; bump memory to v0.0.44",
-    "note": "Supersedes type=2 enter=true for commands that must execute immediately."
+    "action": "complete all-category keyboard behavior and bump memory to v0.0.45",
+    "note": "Direct commands use reusable callbacks; parameterized commands remain editable type=2 prefills."
   }
 }
