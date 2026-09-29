@@ -1,9 +1,9 @@
 {
   "schema_version": 1,
   "memory_version": "v0.0.39",
-  "task_id": "qqaibot-20260929-keyboard-interaction-intent",
+  "task_id": "qqaibot-20260929-interaction-timeout-fix",
   "goal_revision": 1,
-  "transaction": "keyboard_interaction_intent_checkpoint_20260929",
+  "transaction": "interaction_timeout_fix_checkpoint_20260929",
   "repository": "Ray20123315/qqaibot",
   "production_branch": "main",
   "development_branch": "hotfix/temp-system-admin-login-20260929",
@@ -114,7 +114,11 @@
     "keyboard_timeout_root_cause": "interaction_intent_disabled",
     "production_intents_before": 33554432,
     "target_intents": 100663296,
-    "live_gateway_after_intent_change": "pending"
+    "live_gateway_after_intent_change": "pending",
+    "production_qq_open_intents_before": "33554432",
+    "interaction_intent_required": "67108864",
+    "required_combined_intents": "100663296",
+    "interaction_timeout_root_cause": "confirmed"
   },
   "changes": [
     {
@@ -1523,10 +1527,21 @@
       "after_revision": "this_checkpoint",
       "verification": "interaction-intent root cause recorded before product patch",
       "changed_at": "2026-09-29T09:55:00+08:00"
+    },
+    {
+      "location_type": "github",
+      "provider": "GitHub",
+      "resource_id_or_path": ".Ray_Chen/memory/{MEMORY_VERSION.txt,00_START_HERE.md,ACTIVE_TASK.md,FILE_MANIFEST.json}",
+      "action": "checkpoint_planned",
+      "branch_or_container": "v4-qqopen-native",
+      "before_revision": "882970c516c7a753d65896c5135c6cac844fcdfd",
+      "after_revision": "this_checkpoint",
+      "verification": "production binding + Tencent SDK root cause recorded before patch",
+      "changed_at": "2026-09-29T09:55:00+08:00"
     }
   ],
   "internal_memory_transaction": {
-    "action": "start keyboard interaction-intent repair and bump memory to v0.0.39",
+    "action": "start interaction intent timeout repair and bump memory to v0.0.39",
     "note": "No product code changed in this checkpoint."
   }
 }
