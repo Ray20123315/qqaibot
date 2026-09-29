@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import { buildConnectivityReply, createQqOpenActionDispatcher, createQqOpenApiClient, createGatewayState, createHeartbeatPayload, createIdentifyPayload, createResumePayload, fromQqOpenEvent, qqOpenClosePolicy, qqOpenDeliveryKey, qqOpenDeliverySequence, qqOpenIntents, qqOpenPassiveReplyPolicy, qqOpenReconnectDelay, qqOpenShard, reduceGatewayPayload, syncQqOpenDiscovery } from "./src/v4/index.js";
 import { createInitialCommandRegistry } from "./src/v4/commands/catalog.js";
-import { assertGroupPanelCoverage, buildGroupCategoryKeyboard, buildGroupRootPanel, normalizeGroupPanelSlashInvocation, resolveGroupPanelInput } from "./src/v4/commands/group-panel.js";
+import { GROUP_PANEL_CATEGORY_META, assertGroupPanelCoverage, buildGroupCategoryKeyboard, buildGroupRootPanel, normalizeGroupPanelSlashInvocation, resolveGroupPanelInput } from "./src/v4/commands/group-panel.js";
 
 const group = fromQqOpenEvent({ t:"GROUP_MESSAGE_CREATE", s:42, d:{ id:"msg-1", group_openid:"group-A", timestamp:"2026-09-27T08:00:00Z", content:" hello ", author:{ member_openid:"member-A", member_role:"admin", username:"Ray" }, attachments:[{content_type:"image/png",url:"https://example.com/a.png",filename:"a.png"}] } });
 assert.equal(group.platform, "qq-open");
@@ -130,19 +130,21 @@ const basicKeyboard = buildGroupCategoryKeyboard(registry, "basic");
 assert.equal(basicKeyboard.page, 1);
 assert.equal(basicKeyboard.totalPages, 1);
 const basicButtons = basicKeyboard.keyboard.content.rows.flatMap(row => row.buttons);
+
 const helpButton = basicButtons.find(button => button.render_data.label === "help");
 assert(helpButton);
-assert.equal(helpButton.action.type, 2);
+assert.equal(helpButton.action.type, 1);
 assert.equal(helpButton.action.data, "!help");
 assert.equal(helpButton.action.permission?.type, 2);
-assert.equal(helpButton.action.enter, true);
-assert.equal(helpButton.action.reply, false);
+assert(!Object.prototype.hasOwnProperty.call(helpButton.action, "enter"));
 assert(!Object.prototype.hasOwnProperty.call(helpButton.action, "click_limit"));
 assert(helpButton.action.unsupport_tips);
 assert(helpButton.group_id);
 
 const statusButton = basicButtons.find(button => button.render_data.label === "status");
-assert(statusButton && statusButton.action.enter === true && statusButton.action.data === "!status");
+assert(statusButton);
+assert.equal(statusButton.action.type, 1);
+assert.equal(statusButton.action.data, "!status");
 
 const codexButton = basicButtons.find(button => button.render_data.label === "codex");
 assert(codexButton);
@@ -152,15 +154,69 @@ assert.equal(codexButton.action.data, "!codex ");
 assert(!Object.prototype.hasOwnProperty.call(codexButton.action, "click_limit"));
 
 const modelButton = basicButtons.find(button => button.render_data.label === "模型");
-assert(modelButton && modelButton.action.enter === false && modelButton.action.data === "!模型 ");
+assert(modelButton);
+assert.equal(modelButton.action.type, 2);
+assert.equal(modelButton.action.enter, false);
+assert.equal(modelButton.action.data, "!模型 ");
+
+const allCategoryCommands = new Set();
+let nonEmptyCategoryCount = 0;
+for (const meta of GROUP_PANEL_CATEGORY_META) {
+  const commands = registry.list({ scope:"group" })
+    .filter(command => command.panel.enabled && String(command.discoveryCategory || "other") === meta.key);
+  if (!commands.length) continue;
+  nonEmptyCategoryCount += 1;
+  const first = buildGroupCategoryKeyboard(registry, meta.key, { page:1 });
+  assert(first, `Category ${meta.label} must build a keyboard`);
+  assert(first.keyboard.content.rows.length > 0 && first.keyboard.content.rows.length <= 5);
+  assert(first.keyboard.content.rows.every(row => row.buttons.length > 0 && row.buttons.length <= 2));
+  const seen = new Set();
+  for (let page = 1; page <= first.totalPages; page += 1) {
+    const view = buildGroupCategoryKeyboard(registry, meta.key, { page });
+    assert(view, `Category ${meta.label} page ${page} missing`);
+    assert.equal(view.page, page);
+    assert(view.keyboard.content.rows.length <= 5);
+    assert(view.keyboard.content.rows.every(row => row.buttons.length > 0 && row.buttons.length <= 2));
+    const buttons = view.keyboard.content.rows.flatMap(row => row.buttons);
+    for (const command of view.commands) {
+      assert(!seen.has(command.id), `Duplicate command ${command.id} in category ${meta.label}`);
+      seen.add(command.id);
+      allCategoryCommands.add(command.id);
+      const label = command.panel.command.replace(/^[!！]/, "");
+      const button = buttons.find(item => item.render_data.label === label);
+      assert(button, `Missing button for ${command.id} in ${meta.label}`);
+      assert.equal(button.action.permission?.type, 2);
+      assert(!Object.prototype.hasOwnProperty.call(button.action, "click_limit"));
+      if (command.panel.enter === true) {
+        assert.equal(button.action.type, 1, `Direct command ${command.id} must use callback`);
+        assert.equal(button.action.data, command.panel.command);
+        assert(!Object.prototype.hasOwnProperty.call(button.action, "enter"));
+      } else {
+        assert.equal(button.action.type, 2, `Parameterized command ${command.id} must prefill`);
+        assert.equal(button.action.enter, false);
+        assert.equal(button.action.data, `${command.panel.command} `);
+      }
+    }
+    for (const button of buttons.filter(item => /^!面板\s/.test(item.action.data))) {
+      assert.equal(button.action.type, 1, "Pagination must use immediate callback");
+      assert(!Object.prototype.hasOwnProperty.call(button.action, "click_limit"));
+    }
+  }
+  assert.equal(seen.size, commands.length, `Category ${meta.label} did not expose every command`);
+}
+assert(nonEmptyCategoryCount >= 9, "Expected all group command categories to be represented");
+const expectedGroupCommandIds = registry.list({ scope:"group" })
+  .filter(command => command.panel.enabled)
+  .map(command => command.id);
+assert.equal(allCategoryCommands.size, expectedGroupCommandIds.length);
+for (const id of expectedGroupCommandIds) assert(allCategoryCommands.has(id), `All-category keyboard coverage missing ${id}`);
+
 const aiAdminKeyboard = buildGroupCategoryKeyboard(registry, "ai-admin", { page:1 });
 assert(aiAdminKeyboard.totalPages >= 2);
-assert(aiAdminKeyboard.keyboard.content.rows.length <= 5);
 const nextPageButton = aiAdminKeyboard.keyboard.content.rows.flatMap(row => row.buttons)
   .find(button => button.action.data === "!面板 AI管理 --page=2");
 assert(nextPageButton);
-assert.equal(nextPageButton.action.type, 2);
-assert.equal(nextPageButton.action.enter, true);
+assert.equal(nextPageButton.action.type, 1);
 assert(!Object.prototype.hasOwnProperty.call(nextPageButton.action, "click_limit"));
 const aiAdminPage2 = resolveGroupPanelInput("!面板 AI管理 --page=2", registry);
 assert.equal(aiAdminPage2?.matched, true);
@@ -168,21 +224,35 @@ assert.equal(aiAdminPage2?.expanded, "");
 assert.equal(aiAdminPage2?.page, 2);
 assert(aiAdminPage2?.keyboard?.content?.rows?.length > 0);
 
-await api.sendGroupMessage("group/A", {
-  content:"【基础】请选择子指令",
-  msg_type:0,
-  keyboard:basicKeyboard.keyboard
-});
-const keyboardPost = requests.find(x => /\/v2\/groups\/group%2FA\/messages$/.test(x.url)
+const requestCountBeforeCategoryPayloads = requests.length;
+for (const meta of GROUP_PANEL_CATEGORY_META) {
+  const view = buildGroupCategoryKeyboard(registry, meta.key, { page:1 });
+  if (!view) continue;
+  await api.sendGroupMessage("group/A", {
+    msg_type:2,
+    markdown:{content:`【${meta.label}】请选择子指令`},
+    keyboard:view.keyboard
+  });
+}
+const categoryKeyboardPosts = requests.slice(requestCountBeforeCategoryPayloads).filter(x =>
+  /\/v2\/groups\/group%2FA\/messages$/.test(x.url)
   && x.options.method === "POST"
-  && JSON.parse(x.options.body || "{}")?.keyboard);
-assert(keyboardPost, "group keyboard payload must be sent through the QQ Open message endpoint");
-const keyboardPostBody = JSON.parse(keyboardPost.options.body);
-assert.equal(keyboardPostBody.keyboard.content.rows[0].buttons[0].action.type, 2);
-assert.equal(keyboardPostBody.keyboard.content.rows[0].buttons[0].action.permission.type, 2);
-assert.equal(keyboardPostBody.keyboard.content.rows[0].buttons[0].action.enter, true);
-assert(!Object.prototype.hasOwnProperty.call(keyboardPostBody.keyboard.content.rows[0].buttons[0].action, "click_limit"));
-assert(keyboardPostBody.keyboard.content.rows[0].buttons[0].group_id);
+  && JSON.parse(x.options.body || "{}")?.keyboard
+);
+assert.equal(categoryKeyboardPosts.length, nonEmptyCategoryCount);
+for (const post of categoryKeyboardPosts) {
+  const body = JSON.parse(post.options.body);
+  assert.equal(body.msg_type, 2);
+  assert(body.markdown?.content);
+  assert(body.keyboard?.content?.rows?.length > 0);
+  assert(body.keyboard.content.rows.length <= 5);
+  assert(body.keyboard.content.rows.every(row => row.buttons.length > 0 && row.buttons.length <= 2));
+  for (const button of body.keyboard.content.rows.flatMap(row => row.buttons)) {
+    assert([1,2].includes(button.action.type));
+    assert.equal(button.action.permission.type, 2);
+    assert(!Object.prototype.hasOwnProperty.call(button.action, "click_limit"));
+  }
+}
 
 const qqOpenRuntimeSource = fs.readFileSync("src/v4/qqopen/runtime.js", "utf8");
 assert.match(qqOpenRuntimeSource, /qq_inline_keyboard/);
