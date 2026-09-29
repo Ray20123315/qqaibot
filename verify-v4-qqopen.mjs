@@ -225,8 +225,8 @@ const pingMessage = fromQqOpenEvent({ t:"C2C_MESSAGE_CREATE", d:{ id:"p1", conte
 const echoMessage = fromQqOpenEvent({ t:"GROUP_AT_MESSAGE_CREATE", d:{ id:"p2", group_openid:"g1", content:"<@!123> !qqecho hello", author:{ member_openid:"u2" } } });
 assert.equal(buildConnectivityReply(pingMessage), "QQ Open V4 已连接并可回话。");
 assert.equal(buildConnectivityReply(echoMessage), "QQ Open V4 echo：hello");
-assert.equal(qqOpenIntents({}), 1 << 25);
-assert.equal(qqOpenIntents({ QQ_OPEN_INTENTS:String(1 << 25) }), 1 << 25);
+assert.equal(qqOpenIntents({}), (1 << 25) | (1 << 26));
+assert.equal(qqOpenIntents({ QQ_OPEN_INTENTS:String((1 << 25) | (1 << 26)) }), (1 << 25) | (1 << 26));
 assert.throws(() => qqOpenIntents({ QQ_OPEN_INTENTS:"bad" }), /QQ_OPEN_INVALID_INTENTS/);
 assert.equal(qqOpenReconnectDelay(0), 5000);
 assert.equal(qqOpenReconnectDelay(1), 5000);
