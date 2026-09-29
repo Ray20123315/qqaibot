@@ -135,8 +135,8 @@ assert.match(portal,/dynamicMappedGroups/);
 assert.match(portal,/pendingMappingCandidates/);
 assert.match(portal,/学习/);
 assert.match(config,/QQ_HYBRID_PRIMARY\s*=\s*"qq-open"/);
-assert.match(config,/QQ_OPEN_INTENTS\s*=\s*"33554432"/);
-assert(!config.includes('QQ_OPEN_INTENTS = "100663296"'),"interaction intent must remain opt-in");
+assert.match(config,/QQ_OPEN_INTENTS\s*=\s*"100663296"/);
+assert(config.includes('QQ_OPEN_INTENTS = "100663296"'),"keyboard callbacks require INTERACTION intent");
 assert.match(config,/QQ_HYBRID_GROUP_MAP\s*=\s*"\{\}"/);
 
 console.log("verify-v4-hybrid-official: ok");
