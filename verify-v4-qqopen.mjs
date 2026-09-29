@@ -182,8 +182,7 @@ for (const meta of GROUP_PANEL_CATEGORY_META) {
       assert(!seen.has(command.id), `Duplicate command ${command.id} in category ${meta.label}`);
       seen.add(command.id);
       allCategoryCommands.add(command.id);
-      const label = command.panel.command.replace(/^[!！]/, "");
-      const button = buttons.find(item => item.render_data.label === label);
+      const button = buttons.find(item => String(item.action.data || "").trim() === command.panel.command);
       assert(button, `Missing button for ${command.id} in ${meta.label}`);
       assert.equal(button.action.permission?.type, 2);
       assert(!Object.prototype.hasOwnProperty.call(button.action, "click_limit"));
