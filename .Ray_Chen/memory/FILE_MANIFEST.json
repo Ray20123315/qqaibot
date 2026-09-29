@@ -1,14 +1,14 @@
 {
   "schema_version": 1,
-  "memory_version": "v0.0.43",
-  "task_id": "qqaibot-20260929-keyboard-command-actions",
+  "memory_version": "v0.0.44",
+  "task_id": "qqaibot-20260929-keyboard-all-categories-direct-callback",
   "goal_revision": 1,
-  "transaction": "keyboard_command_actions_final_20260929",
+  "transaction": "keyboard_all_categories_direct_callback_checkpoint_20260929",
   "repository": "Ray20123315/qqaibot",
   "production_branch": "main",
   "development_branch": "hotfix/temp-system-admin-login-20260929",
-  "product_before_revision": "a033063e8564c6f71bd2c22724a9a6b2f4083f37",
-  "product_after_revision": "719290878187f2230a5be10092cc4a9aa3ce1e34",
+  "product_before_revision": "6fc678c266e514ee6daad4fd40ea33e9225c0120",
+  "product_after_revision": "6fc678c266e514ee6daad4fd40ea33e9225c0120",
   "verification": {
     "feature_product_ci_run": 36366445081,
     "regression_ci_run": 36366534308,
@@ -24,8 +24,8 @@
     "discovery_sync_after_fix": "pending_authenticated_status",
     "live_mapping_after_fix": "pending_user_test",
     "command_fallback_implementation": "verified",
-    "development_ci": "success",
-    "main_update": "verified",
+    "development_ci": "pending",
+    "main_update": "pending",
     "development_ci_run": 36511639011,
     "main_ci": "success",
     "production_commit": "e6824c0a7e825450526152da90b7b0d8fba3049c",
@@ -129,7 +129,10 @@
     "keyboard_default_prefill": "verified",
     "final_dev_head_ci": "success",
     "final_dev_head_ci_run": 36511690614,
-    "live_send_vs_prefill_smoke": "pending_user_test"
+    "live_send_vs_prefill_smoke": "pending_user_test",
+    "live_help_direct_send": "failed_type2_enter_prefill_observed",
+    "all_categories_keyboard": "in_progress",
+    "direct_command_callback_mode": "in_progress"
   },
   "changes": [
     {
@@ -1738,10 +1741,21 @@
       "after_revision": "v0.0.43",
       "verification": "read-back + TAR.GZ extraction + SHA-256 required",
       "changed_at": "2026-09-29T10:45:00+08:00"
+    },
+    {
+      "location_type": "github",
+      "provider": "GitHub",
+      "resource_id_or_path": ".Ray_Chen/memory/{MEMORY_VERSION.txt,00_START_HERE.md,ACTIVE_TASK.md,FILE_MANIFEST.json}",
+      "action": "checkpoint_planned",
+      "branch_or_container": "v4-qqopen-native",
+      "before_revision": "6fc678c266e514ee6daad4fd40ea33e9225c0120",
+      "after_revision": "this_checkpoint",
+      "verification": "live help-prefill + missing-category-buttons report recorded before product patch",
+      "changed_at": "2026-09-29T12:31:00+08:00"
     }
   ],
   "internal_memory_transaction": {
-    "action": "complete reusable type-2 command-button task and bump memory to v0.0.43",
-    "note": "Normal buttons are repeatable; no-argument commands auto-send, parameterized commands prefill."
+    "action": "start all-category keyboard completion with direct callback actions; bump memory to v0.0.44",
+    "note": "Supersedes type=2 enter=true for commands that must execute immediately."
   }
 }
