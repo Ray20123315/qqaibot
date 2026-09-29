@@ -1,42 +1,23 @@
 # CURRENT_STATE
 
-## GitHub
+## Keyboard Command Actions
 
-- product revision on main: `2bbcca4dfcc2f7ce99c21df84bdc2dc2479a3bdf`
-- development CI `36510290690`: success
-- main CI `36510415265`: success
-
-## Cloudflare Production
-
-- Worker: `qqai`
-- Connected Build: `16be6f33-cdd1-4e31-9a26-60036dc0f237`
-- commit: `2bbcca4dfcc2f7ce99c21df84bdc2dc2479a3bdf`
-- branch: `main`
-- outcome: success
-- QQ_OPEN_ENABLED: `true`
-- QQ_OPEN_TRANSPORT: `websocket`
-- QQ_OPEN_INTENTS: `100663296` (read back from production settings)
-
-## Interaction / Keyboard
-
-- GROUP_MESSAGES: `1 << 25`
-- INTERACTION: `1 << 26`
-- combined configured mask: `100663296`
-- previous production mask `33554432` could never receive button callbacks.
-- QqOpenGateway now records `sessionIntents`.
-- RESUME requires session intent equality with the current configured mask.
-- intent mismatch uses a new IDENTIFY, so deploys cannot retain the old callback subscription.
-- callback ACK endpoint/body remains `PUT /interactions/{id}` + `{"code":0}`.
+- development product revision: `719290878187f2230a5be10092cc4a9aa3ce1e34`
+- CI: pending
+- normal group child-command buttons now use QQ action.type=2 instead of callback action.type=1
+- direct-send commands: `enter=true`
+- parameterized commands: `enter=false` with trailing-space prefill
+- `click_limit` is omitted for normal command buttons, so they are reusable
+- pagination buttons are type=2 + enter=true
+- unknown/new commands default to prefill rather than immediate execution
 
 ## Preserved State
 
-- keyboard official DTO/Markdown payload fix remains.
-- QQ Open/AIBot remains primary.
-- OneBot remains controlled fallback only.
-- direct commands and runtime authorization are unchanged.
-- `/!普通内容` still bypasses AI.
-- Portal TEMP-admin/D1 rate-limit hotfix remains preserved.
+- QQ_OPEN_INTENTS remains 100663296; Interaction support is preserved for unrelated callback features.
+- QQ Open remains primary; OneBot remains controlled fallback.
+- existing permissions, confirmations, cooldowns and Portal switches are unchanged.
+- TEMP-admin and prior Portal security work remain preserved.
 
-## Remaining Live Verification
+## Verification Pending
 
-Click one rendered child-command button. A remaining timeout would most likely mean QQ-side INTERACTION permission is not granted, typically surfaced as Gateway close 4014.
+Run repository/V3/V4/isolation/bundle CI, then promote to main and confirm Cloudflare production.
