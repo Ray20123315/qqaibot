@@ -72,6 +72,7 @@ function defineCommand(spec = {}) {
     panel: Object.freeze({
       enabled: spec.panel?.enabled !== false,
       onlyAdmin: Boolean(spec.panel?.onlyAdmin),
+      enter: spec.panel?.enter === true,
       command: panelCommand,
       desc: qqSlice(text(spec.panel?.desc || spec.description), 30)
     }),
