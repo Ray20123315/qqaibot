@@ -58,5 +58,5 @@ for (const name of retiredProdVars) {
 }
 assert(wrangler.includes('QQ_OPEN_ENABLED = "true"'), "QQ Open production vars missing: QQ_OPEN_ENABLED");
 assert(wrangler.includes('QQ_OPEN_APP_ID = "1905687174"'), "QQ Open production vars missing: QQ_OPEN_APP_ID");
-assert(wrangler.includes('QQ_OPEN_INTENTS = "33554432"'), "QQ Open production vars missing: QQ_OPEN_INTENTS");
+assert(wrangler.includes('QQ_OPEN_INTENTS = "100663296"'), "QQ Open production vars missing INTERACTION intent");
 assert(wrangler.includes('QQ_OPEN_TRANSPORT = "websocket"'), "QQ Open production vars missing: QQ_OPEN_TRANSPORT");
