@@ -18,7 +18,7 @@ import {
 } from "./gateway.js";
 
 const QQ_OPEN_GATEWAY_STORAGE_KEY = "v4:qqopen:gateway";
-const DEFAULT_QQ_OPEN_INTENTS = 1 << 25;
+const DEFAULT_QQ_OPEN_INTENTS = (1 << 25) | (1 << 26);
 const DEFAULT_RECONNECT_MS = 5000;
 const CONNECT_TIMEOUT_MS = 20000;
 const QQ_OPEN_COMMAND_REGISTRY = createInitialCommandRegistry();
