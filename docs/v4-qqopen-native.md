@@ -42,7 +42,7 @@ Configuration remains disabled by default:
 - `QQ_OPEN_ENABLED=true`
 - `QQ_OPEN_APP_ID=<app id>`
 - `QQ_OPEN_CLIENT_SECRET=<Cloudflare Secret>`
-- `QQ_OPEN_INTENTS=33554432` for the documented `GROUP_AND_C2C_EVENT (1 << 25)` baseline.
+- `QQ_OPEN_INTENTS=100663296` for `GROUP_AND_C2C_EVENT (1 << 25) | INTERACTION (1 << 26)`; keyboard callbacks require the Interaction bit.
 
 The existing minute cron calls the gateway `ensure` endpoint when enabled and configured. Gateway `session_id` and `seq` are persisted in Durable Object storage so a recreated instance can attempt Resume.
 
@@ -73,7 +73,7 @@ The production V4 runtime now treats QQ Open delivery semantics as authoritative
 - `!qqid` works only in C2C for OpenID diagnostics.
 - Optional `QQ_OPEN_DISCOVERY_SYNC=true` synchronizes the V4 global menu and C2C/group command panels after READY/RESUMED.
 
-The production baseline remains `QQ_OPEN_INTENTS=33554432`. Additional event intents are only enabled after the QQ application is confirmed to have those permissions.
+The production baseline is `QQ_OPEN_INTENTS=100663296` because inline-keyboard callbacks require `INTERACTION_CREATE`. If the QQ application lacks the Interaction event permission, the Gateway may close with 4014; enable the permission in the QQ developer console rather than removing the Interaction bit.
 
 
 ## Hybrid ownership
@@ -106,7 +106,7 @@ Otherwise the existing OneBot send path remains the fallback.
 
 ## Interaction
 
-`INTERACTION_CREATE` support is implemented but permission-gated.
+`INTERACTION_CREATE` support is implemented and enabled in the production intent mask for keyboard callbacks; the QQ application must have the corresponding platform permission.
 
 - types 11/12: ACK once, then decode known callback command and run the existing shared application runtime;
 - type 13: record feedback;
@@ -115,7 +115,7 @@ Otherwise the existing OneBot send path remains the fallback.
 - types 18/19/20: record authorization state/events;
 - unknown/unmapped callbacks are acknowledged/recorded but are never guessed into commands.
 
-The current default Intent remains `33554432`. Only after the QQ application is granted INTERACTION permission should it be changed to `100663296`.
+The current default Intent is `100663296`, combining message and Interaction events so button callbacks can be ACKed. A 4014 close indicates the QQ application still needs the Interaction permission enabled in the developer console.
 
 
 ## Official lifecycle state
