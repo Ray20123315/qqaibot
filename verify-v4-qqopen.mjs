@@ -130,19 +130,38 @@ const basicKeyboard = buildGroupCategoryKeyboard(registry, "basic");
 assert.equal(basicKeyboard.page, 1);
 assert.equal(basicKeyboard.totalPages, 1);
 const basicButtons = basicKeyboard.keyboard.content.rows.flatMap(row => row.buttons);
-assert(basicButtons.some(button =>
-  button.render_data.label === "help"
-  && button.action.type === 1
-  && button.action.data === "!help"
-  && button.action.permission?.type === 2
-  && button.action.click_limit === 1
-  && button.group_id
-));
-assert(basicButtons.some(button => button.render_data.label === "status" && button.action.data === "!status"));
+const helpButton = basicButtons.find(button => button.render_data.label === "help");
+assert(helpButton);
+assert.equal(helpButton.action.type, 2);
+assert.equal(helpButton.action.data, "!help");
+assert.equal(helpButton.action.permission?.type, 2);
+assert.equal(helpButton.action.enter, true);
+assert.equal(helpButton.action.reply, false);
+assert(!Object.prototype.hasOwnProperty.call(helpButton.action, "click_limit"));
+assert(helpButton.action.unsupport_tips);
+assert(helpButton.group_id);
+
+const statusButton = basicButtons.find(button => button.render_data.label === "status");
+assert(statusButton && statusButton.action.enter === true && statusButton.action.data === "!status");
+
+const codexButton = basicButtons.find(button => button.render_data.label === "codex");
+assert(codexButton);
+assert.equal(codexButton.action.type, 2);
+assert.equal(codexButton.action.enter, false);
+assert.equal(codexButton.action.data, "!codex ");
+assert(!Object.prototype.hasOwnProperty.call(codexButton.action, "click_limit"));
+
+const modelButton = basicButtons.find(button => button.render_data.label === "模型");
+assert(modelButton && modelButton.action.enter === false && modelButton.action.data === "!模型 ");
 const aiAdminKeyboard = buildGroupCategoryKeyboard(registry, "ai-admin", { page:1 });
 assert(aiAdminKeyboard.totalPages >= 2);
 assert(aiAdminKeyboard.keyboard.content.rows.length <= 5);
-assert(aiAdminKeyboard.keyboard.content.rows.flatMap(row => row.buttons).some(button => button.action.data === "!面板 AI管理 --page=2"));
+const nextPageButton = aiAdminKeyboard.keyboard.content.rows.flatMap(row => row.buttons)
+  .find(button => button.action.data === "!面板 AI管理 --page=2");
+assert(nextPageButton);
+assert.equal(nextPageButton.action.type, 2);
+assert.equal(nextPageButton.action.enter, true);
+assert(!Object.prototype.hasOwnProperty.call(nextPageButton.action, "click_limit"));
 const aiAdminPage2 = resolveGroupPanelInput("!面板 AI管理 --page=2", registry);
 assert.equal(aiAdminPage2?.matched, true);
 assert.equal(aiAdminPage2?.expanded, "");
@@ -159,9 +178,10 @@ const keyboardPost = requests.find(x => /\/v2\/groups\/group%2FA\/messages$/.tes
   && JSON.parse(x.options.body || "{}")?.keyboard);
 assert(keyboardPost, "group keyboard payload must be sent through the QQ Open message endpoint");
 const keyboardPostBody = JSON.parse(keyboardPost.options.body);
-assert.equal(keyboardPostBody.keyboard.content.rows[0].buttons[0].action.type, 1);
+assert.equal(keyboardPostBody.keyboard.content.rows[0].buttons[0].action.type, 2);
 assert.equal(keyboardPostBody.keyboard.content.rows[0].buttons[0].action.permission.type, 2);
-assert.equal(keyboardPostBody.keyboard.content.rows[0].buttons[0].action.click_limit, 1);
+assert.equal(keyboardPostBody.keyboard.content.rows[0].buttons[0].action.enter, true);
+assert(!Object.prototype.hasOwnProperty.call(keyboardPostBody.keyboard.content.rows[0].buttons[0].action, "click_limit"));
 assert(keyboardPostBody.keyboard.content.rows[0].buttons[0].group_id);
 
 const qqOpenRuntimeSource = fs.readFileSync("src/v4/qqopen/runtime.js", "utf8");
@@ -172,6 +192,8 @@ assert.match(qqOpenRuntimeSource, /msg_type:\s*2/);
 assert.match(qqOpenRuntimeSource, /markdown:\s*\{\s*content/);
 assert.match(qqOpenRuntimeSource, /permission:\s*\{\s*type/);
 assert.match(qqOpenRuntimeSource, /click_limit/);
+assert.match(qqOpenRuntimeSource, /unsupport_tips/);
+assert.match(qqOpenRuntimeSource, /action\.enter/);
 assert.match(qqOpenRuntimeSource, /group_id/);
 assert.match(qqOpenRuntimeSource, /recordKeyboardFallback/);
 assert.match(qqOpenRuntimeSource, /sessionIntents/);
