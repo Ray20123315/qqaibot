@@ -20,7 +20,7 @@ new_sqlite_classes = ["QqOpenGateway"]
 BOT_DISPLAY_NAME = "QQAI V4 Test"
 QQ_OPEN_ENABLED = "true"
 QQ_OPEN_APP_ID = "1905687174"
-QQ_OPEN_INTENTS = "33554432"
+QQ_OPEN_INTENTS = "100663296"
 QQ_OPEN_TRANSPORT = "websocket"
 
 [observability]
