@@ -479,7 +479,7 @@ QQ Open groups and C2C conversations do not reuse the old OneBot whitelist/priva
 
 ```toml
 QQ_OPEN_ENABLED = "true"
-QQ_OPEN_INTENTS = "33554432"
+QQ_OPEN_INTENTS = "100663296"
 QQ_OPEN_SHARD_ID = "0"
 QQ_OPEN_SHARD_TOTAL = "1"
 QQ_OPEN_DISCOVERY_SYNC = "true"
@@ -487,7 +487,7 @@ QQ_OPEN_DISCOVERY_SYNC = "true"
 
 `QQ_OPEN_DISCOVERY_SYNC=true` 時，Gateway 在 READY／RESUMED 後以 V4 Command Registry 同步全域自訂選單與 C2C／群聊指令面板。同步有 fingerprint 去重，且只清理由 QQAIBOT V4 自己建立、remark 以 `QQAIBOT V4` 開頭的面板，不會刪除其他應用面板。測試 Worker 預設不開此功能，避免和正式環境同時修改同一個 QQ Bot UI。
 
-目前 `QQ_OPEN_INTENTS=33554432` 保留已驗證的 C2C／群聊訊息基線。其他事件 Intent 必須先確認 QQ 開放平台已授權，再擴大 bitmask；避免因未授權 Intent 造成 Gateway 4014。
+目前 `QQ_OPEN_INTENTS=100663296` 保留已驗證的 C2C／群聊訊息基線。其他事件 Intent 必須先確認 QQ 開放平台已授權，再擴大 bitmask；避免因未授權 Intent 造成 Gateway 4014。
 
 
 ### Hybrid QQ Open + OneBot
@@ -513,21 +513,23 @@ QQ_HYBRID_GROUP_MAP={"808882936":"你的_group_openid"}
 Interaction 支持已经实现，但 Intent 不会自动打开。当前生产基线仍为：
 
 ```text
-QQ_OPEN_INTENTS=33554432
+QQ_OPEN_INTENTS=100663296
 ```
 
-只有 QQ 开放平台确认应用具有 `INTERACTION (1<<26)` 权限时，才改成：
+Keyboard 按钮回调依赖 `INTERACTION (1<<26)`，生产配置因此必须包含：
 
 ```text
 QQ_OPEN_INTENTS=100663296
 ```
+
+若 Gateway 返回 4014，请先在 QQ 开放平台为应用启用 Interaction 事件权限。
 
 按钮/快捷菜单 callback 可以直接使用 `!指令`、JSON/Base64 JSON 内的 `command`，或通过 `QQ_OPEN_FEATURE_COMMAND_MAP` 显式将 `feature_id` 映射到现有命令。未知 callback 只 ACK/记录，不猜测执行内容。
 
 
 ### QQ Open 官方生命周期事件
 
-目前基础 Intent `33554432 (1<<25)` 下，系统也会记录官方生命周期状态：
+目前 Intent `100663296 ((1<<25)|(1<<26))` 同时覆盖消息与按钮 Interaction；系统也会记录官方生命周期状态：
 
 - `FRIEND_ADD / FRIEND_DEL`：记录好友关系、来源 scene/scene_param 与可用的 union_openid。
 - `GROUP_ADD_ROBOT / GROUP_DEL_ROBOT`：记录机器人加入/退出官方群，以及操作成员 OpenID。
