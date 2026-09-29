@@ -174,6 +174,10 @@ assert.match(qqOpenRuntimeSource, /permission:\s*\{\s*type/);
 assert.match(qqOpenRuntimeSource, /click_limit/);
 assert.match(qqOpenRuntimeSource, /group_id/);
 assert.match(qqOpenRuntimeSource, /recordKeyboardFallback/);
+assert.match(qqOpenRuntimeSource, /sessionIntents/);
+assert.match(qqOpenRuntimeSource, /configuredIntents/);
+assert.match(qqOpenRuntimeSource, /Number\(this\.persisted\.sessionIntents \|\| 0\) === configuredIntents/);
+assert.match(qqOpenRuntimeSource, /if \(!canResume\) this\.persisted\.sessionIntents = configuredIntents/);
 assert.match(workerSource, /qq_inline_keyboard/);
 
 const developerPanels = registry.buildCategorizedPanels("c2c", {
