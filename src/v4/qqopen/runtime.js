@@ -127,6 +127,7 @@ function defaultPersistedState() {
     connecting: false,
     gatewayUrl: "",
     botUserId: "",
+    sessionIntents: 0,
     connectedAt: 0,
     lastEventAt: 0,
     lastEventType: "",
@@ -239,6 +240,8 @@ export class QqOpenGateway {
       connecting: socketConnecting(this.socket) || Boolean(this.persisted.connecting),
       ready: Boolean(this.persisted.gateway?.ready),
       resumeEligible: Boolean(this.persisted.gateway?.resumeEligible),
+      configuredIntents: qqOpenIntents(this.env),
+      sessionIntents: Number(this.persisted.sessionIntents || 0),
       seq: this.persisted.gateway?.seq ?? null,
       heartbeatInterval: Number(this.persisted.gateway?.heartbeatInterval || 0),
       botUserId: String(this.persisted.botUserId || ""),
@@ -449,10 +452,16 @@ export class QqOpenGateway {
     if (op === QQ_OPEN_OPCODE.HELLO) {
       this.persisted.gateway = reduceGatewayPayload(this.persisted.gateway, payload);
       this.startHeartbeat(this.persisted.gateway.heartbeatInterval);
-      const canResume = Boolean(this.persisted.gateway.sessionId && Number.isSafeInteger(this.persisted.gateway.seq));
+      const configuredIntents = qqOpenIntents(this.env);
+      const canResume = Boolean(
+        this.persisted.gateway.sessionId
+        && Number.isSafeInteger(this.persisted.gateway.seq)
+        && Number(this.persisted.sessionIntents || 0) === configuredIntents
+      );
       const authPayload = canResume
         ? createResumePayload({ accessToken: this.accessToken, sessionId: this.persisted.gateway.sessionId, seq: this.persisted.gateway.seq })
-        : createIdentifyPayload({ accessToken: this.accessToken, intents: qqOpenIntents(this.env), shard: qqOpenShard(this.env) });
+        : createIdentifyPayload({ accessToken: this.accessToken, intents:configuredIntents, shard: qqOpenShard(this.env) });
+      if (!canResume) this.persisted.sessionIntents = configuredIntents;
       socket.send(JSON.stringify(authPayload));
       await this.persist();
       return;
@@ -474,6 +483,7 @@ export class QqOpenGateway {
 
     if (op === QQ_OPEN_OPCODE.INVALID_SESSION) {
       this.persisted.gateway = createGatewayState();
+      this.persisted.sessionIntents = 0;
       await this.persist();
       await this.disconnect("invalid_session", { preserveSession: false, suspend: false });
       this.scheduleReconnect("invalid_session", 1500);
@@ -1166,6 +1176,7 @@ export class QqOpenGateway {
     this.persisted.gateway = policy.preserveSession
       ? createGatewayState({ ...this.persisted.gateway, ready: false })
       : createGatewayState();
+    if (!policy.preserveSession) this.persisted.sessionIntents = 0;
 
     if (!this.persisted.suspended) {
       this.persisted.reconnectCount = Number(this.persisted.reconnectCount || 0) + 1;
@@ -1238,6 +1249,7 @@ export class QqOpenGateway {
     this.persisted.gateway = preserveSession
       ? createGatewayState({ ...this.persisted.gateway, ready: false })
       : createGatewayState();
+    if (!preserveSession) this.persisted.sessionIntents = 0;
     await this.persist();
   }
 }
