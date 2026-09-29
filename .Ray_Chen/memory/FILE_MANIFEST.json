@@ -1,22 +1,22 @@
 {
   "schema_version": 1,
-  "memory_version": "v0.0.39",
+  "memory_version": "v0.0.40",
   "task_id": "qqaibot-20260929-interaction-timeout-fix",
   "goal_revision": 1,
-  "transaction": "interaction_timeout_fix_checkpoint_20260929",
+  "transaction": "interaction_timeout_fix_final_20260929",
   "repository": "Ray20123315/qqaibot",
   "production_branch": "main",
   "development_branch": "hotfix/temp-system-admin-login-20260929",
   "product_before_revision": "882970c516c7a753d65896c5135c6cac844fcdfd",
-  "product_after_revision": "882970c516c7a753d65896c5135c6cac844fcdfd",
+  "product_after_revision": "2bbcca4dfcc2f7ce99c21df84bdc2dc2479a3bdf",
   "verification": {
     "feature_product_ci_run": 36366445081,
     "regression_ci_run": 36366534308,
-    "main_ci_run": 36481292173,
+    "main_ci_run": 36510415265,
     "github_ci": "success",
     "isolated_cloudflare_build": "e280d9fb-bb0d-4659-91e8-cb2db205e1a3",
     "isolated_cloudflare_outcome": "success",
-    "production_cloudflare_build": "0d835129-1a85-413b-9e0a-ec063da9e464",
+    "production_cloudflare_build": "16be6f33-cdd1-4e31-9a26-60036dc0f237",
     "production_cloudflare_outcome": "success",
     "production_worker_version": "2aa24e2a-b640-4ac2-83ae-07efb428b099",
     "production_bindings_readback": "success",
@@ -24,11 +24,11 @@
     "discovery_sync_after_fix": "pending_authenticated_status",
     "live_mapping_after_fix": "pending_user_test",
     "command_fallback_implementation": "verified",
-    "development_ci": "pending",
-    "main_update": "pending",
-    "development_ci_run": 36481097113,
+    "development_ci": "success",
+    "main_update": "verified",
+    "development_ci_run": 36510290690,
     "main_ci": "success",
-    "production_commit": "0fa643433285df0879878441e846dcfc023054b7",
+    "production_commit": "2bbcca4dfcc2f7ce99c21df84bdc2dc2479a3bdf",
     "main_readback": "success",
     "command_catalog_entries": 77,
     "full_command_panel_restoration": "verified",
@@ -118,7 +118,10 @@
     "production_qq_open_intents_before": "33554432",
     "interaction_intent_required": "67108864",
     "required_combined_intents": "100663296",
-    "interaction_timeout_root_cause": "confirmed"
+    "interaction_timeout_root_cause": "missing_interaction_intent",
+    "production_qq_open_intents_after": "100663296",
+    "session_intent_reidentify": "verified",
+    "live_keyboard_callback_after_intent_fix": "pending_user_test"
   },
   "changes": [
     {
@@ -1538,10 +1541,88 @@
       "after_revision": "this_checkpoint",
       "verification": "production binding + Tencent SDK root cause recorded before patch",
       "changed_at": "2026-09-29T09:55:00+08:00"
+    },
+    {
+      "location_type": "github",
+      "provider": "GitHub",
+      "resource_id_or_path": "src/v4/qqopen/runtime.js",
+      "action": "modified",
+      "branch_or_container": "v4-qqopen-native -> main",
+      "before_revision": "882970c516c7a753d65896c5135c6cac844fcdfd",
+      "after_revision": "2bbcca4dfcc2f7ce99c21df84bdc2dc2479a3bdf",
+      "verification": "development CI 36510290690 + main CI 36510415265 success",
+      "changed_at": "2026-09-29T10:05:00+08:00"
+    },
+    {
+      "location_type": "github",
+      "provider": "GitHub",
+      "resource_id_or_path": "wrangler.toml;wrangler.v4test.toml;wrangler.example.toml;.dev.vars.example",
+      "action": "modified",
+      "branch_or_container": "v4-qqopen-native -> main",
+      "before_revision": "882970c516c7a753d65896c5135c6cac844fcdfd",
+      "after_revision": "2bbcca4dfcc2f7ce99c21df84bdc2dc2479a3bdf",
+      "verification": "QQ_OPEN_INTENTS=100663296 asserted and production binding read back",
+      "changed_at": "2026-09-29T10:05:00+08:00"
+    },
+    {
+      "location_type": "github",
+      "provider": "GitHub",
+      "resource_id_or_path": "verify-config.mjs;verify-v4-qqopen.mjs;verify-v4-hybrid-official.mjs;verify-v4-test-deployment.mjs",
+      "action": "modified",
+      "branch_or_container": "v4-qqopen-native -> main",
+      "before_revision": "882970c516c7a753d65896c5135c6cac844fcdfd",
+      "after_revision": "2bbcca4dfcc2f7ce99c21df84bdc2dc2479a3bdf",
+      "verification": "interaction intent + stale-session regression; CI success",
+      "changed_at": "2026-09-29T10:05:00+08:00"
+    },
+    {
+      "location_type": "github",
+      "provider": "GitHub",
+      "resource_id_or_path": "README.md;docs/v4-qqopen-native.md",
+      "action": "modified",
+      "branch_or_container": "v4-qqopen-native -> main",
+      "before_revision": "882970c516c7a753d65896c5135c6cac844fcdfd",
+      "after_revision": "2bbcca4dfcc2f7ce99c21df84bdc2dc2479a3bdf",
+      "verification": "documented required Interaction intent",
+      "changed_at": "2026-09-29T10:05:00+08:00"
+    },
+    {
+      "location_type": "github",
+      "provider": "GitHub",
+      "resource_id_or_path": "refs/heads/main",
+      "action": "fast_forward",
+      "branch_or_container": "main",
+      "before_revision": "882970c516c7a753d65896c5135c6cac844fcdfd",
+      "after_revision": "2bbcca4dfcc2f7ce99c21df84bdc2dc2479a3bdf",
+      "verification": "main CI 36510415265 success",
+      "changed_at": "2026-09-29T10:05:00+08:00"
+    },
+    {
+      "location_type": "cloudflare",
+      "provider": "Cloudflare",
+      "resource_id_or_path": "workers/scripts/qqai",
+      "action": "auto_deployed_by_connected_build",
+      "branch_or_container": "production",
+      "before_revision": "0fa643433285df0879878441e846dcfc023054b7",
+      "after_revision": "2bbcca4dfcc2f7ce99c21df84bdc2dc2479a3bdf",
+      "commit_or_hash": "16be6f33-cdd1-4e31-9a26-60036dc0f237",
+      "verification": "Connected Build success; QQ_OPEN_INTENTS read back as 100663296",
+      "changed_at": "2026-09-29T10:05:00+08:00"
+    },
+    {
+      "location_type": "github",
+      "provider": "GitHub",
+      "resource_id_or_path": ".Ray_Chen/memory/*",
+      "action": "final_reconciliation",
+      "branch_or_container": "main + v4-qqopen-native",
+      "before_revision": "v0.0.39",
+      "after_revision": "v0.0.40",
+      "verification": "package workflow + archive SHA-256 required",
+      "changed_at": "2026-09-29T10:05:00+08:00"
     }
   ],
   "internal_memory_transaction": {
-    "action": "start interaction intent timeout repair and bump memory to v0.0.39",
-    "note": "No product code changed in this checkpoint."
+    "action": "complete interaction timeout repair and bump memory to v0.0.40",
+    "note": "All code/config/deployment verification is complete; only one live QQ button click remains."
   }
 }

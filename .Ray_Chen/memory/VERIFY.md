@@ -2,48 +2,36 @@
 
 ## Verified Product Revision
 
-`0fa643433285df0879878441e846dcfc023054b7`
+`2bbcca4dfcc2f7ce99c21df84bdc2dc2479a3bdf`
 
-## Live Failure That Triggered This Fix
+## Root Cause Evidence
 
-The real QQ group displayed only the fallback text for a category and no buttons. That is treated as keyboard failure, not success.
+Production settings before the fix:
+- `QQ_OPEN_INTENTS=33554432`
+- this equals `GROUP_MESSAGES (1<<25)` only.
 
-## Tencent SDK Alignment
+Tencent's current SDK defines:
+- `INTERACTION = 1<<26`
+- inline keyboard clicks dispatch `INTERACTION_CREATE`
+- interaction ACK uses `PUT /interactions/{interaction_id}` with `{"code":0}`.
 
-Reference:
-`tencent-connect/qqbot-agent-sdk@6163b5dc979a2f12379b1916805009075008c3c3`
+Required combined mask:
+`100663296`.
 
-Verified outbound button fields:
-- `id`
-- `render_data.label`
-- `render_data.visited_label`
-- `render_data.style`
-- `action.type=1`
-- `action.data`
-- `action.permission.type=2`
-- `action.click_limit=1`
-- `group_id`
+## Regression Coverage
 
-Verified keyboard-bearing message fields:
-- `msg_type=2`
-- `markdown.content`
-- `keyboard.content.rows`
-- passive path keeps `msg_id` and `msg_seq`
-- interaction path keeps `event_id`
-
-## Diagnostics
-
-Runtime source and tests verify keyboard-specific fallback state:
-- `lastKeyboardErrorAt`
-- `lastKeyboardError`
-- `keyboardFallbackCount`
-
-Deterministic keyboard 4xx may fall back to plain text. Ambiguous 5xx/timeouts do not trigger a duplicate write.
+- default QQ Open intents include GROUP_MESSAGES + INTERACTION;
+- production wrangler config requires `100663296`;
+- isolated V4 test config requires `100663296`;
+- previous "interaction remains opt-in" assertions were removed;
+- runtime source verifies `sessionIntents`, `configuredIntents`, and intent-equality before RESUME;
+- stale intent sessions force IDENTIFY;
+- existing keyboard DTO/Markdown assertions remain.
 
 ## GitHub Actions
 
-- development run `36481097113`: SUCCESS
-- main run `36481292173`: SUCCESS
+- development run `36510290690`: SUCCESS
+- main run `36510415265`: SUCCESS
 
 Passed:
 - repository regression checks
@@ -51,15 +39,19 @@ Passed:
 - V4 QQ Open regression checks
 - isolated V4 test deployment checks
 - single Worker bundle
-- existing Portal/system-admin regressions
 
 ## Cloudflare Production
 
-Connected Build `0d835129-1a85-413b-9e0a-ec063da9e464`:
-- commit: `0fa643433285df0879878441e846dcfc023054b7`
+Connected Build `16be6f33-cdd1-4e31-9a26-60036dc0f237`:
+- commit: `2bbcca4dfcc2f7ce99c21df84bdc2dc2479a3bdf`
 - branch: `main`
 - outcome: success
 
+Production settings read-back:
+- QQ_OPEN_ENABLED = true
+- QQ_OPEN_TRANSPORT = websocket
+- QQ_OPEN_INTENTS = 100663296
+
 ## Remaining Live Verification
 
-Click one group category. Expected: QQ renders the two-column inline keyboard. If fallback text still appears, inspect QqOpenGateway `keyboard.lastError` before further payload changes.
+Click one keyboard button. If it still times out, inspect Gateway close/error state for 4014; that would indicate the QQ application itself lacks authorization for the INTERACTION intent.
