@@ -85,6 +85,12 @@ assert.equal(registry.resolve("!QQ语音角色").id, "qq.voice_roles");
 assert.equal(registry.resolve("!QQ语音 角色 测试").id, "qq.voice_reply");
 assert.equal(registry.resolve("!codexchat 测试").id, "ai.codexchat");
 assert.equal(registry.resolve("!codexwork --export 测试").id, "ai.codexwork");
+assert.equal(registry.resolve("!你记住了什么").id, "memory.list");
+assert.equal(registry.resolve("!活动通知 act_1").id, "event.notify");
+assert.equal(registry.resolve("!指令开").id, "commands.on");
+assert.equal(registry.resolve("!指令关").id, "commands.off");
+assert.equal(registry.resolve("!确认op").id, "group.confirm");
+assert.equal(registry.resolve("!取消op").id, "group.cancel");
 assert.equal(registry.get("ai.codexchat").discoveryCategory, "developer");
 assert.equal(registry.get("ai.codexwork").discoveryCategory, "developer");
 
