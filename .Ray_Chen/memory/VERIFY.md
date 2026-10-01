@@ -2,12 +2,12 @@
 
 ## Product Revision
 
-`262b019b3246ea9fba54975fc3f4954e6cfd432a`
+`d64126c8d39e2bfad23ea6355c8e764573bc0692`
 
 ## GitHub
 
 Final CI:
-- run: `36840520274`
+- run: `36843510857`
 - conclusion: SUCCESS
 - repository regression: success
 - V3 regression: success
@@ -15,54 +15,53 @@ Final CI:
 - isolated V4 deployment checks: success
 - single Worker bundle: success
 
-Login-specific regression:
-- requires `finishPortalLogin()` to call `location.reload()`
-- rejects QQ-code success path calling `await boot()`
-- rejects Preview-test success path calling `await boot()`
-- rejects password-login success path calling `await boot()`
-- requires all three paths to call `finishPortalLogin()`
+Integration coverage includes:
+- privileged remember-login remains persistent when requested while retaining privileged TTL caps;
+- unchecked remember-login remains non-persistent;
+- Preview login issues opaque resume token + expiry;
+- Preview resume succeeds without the original session cookie;
+- restored session cookie authenticates `/api/portal/me`;
+- used resume token cannot be reused;
+- logout revokes the rotated resume token;
+- same-page login handoff does not force `location.reload()`;
+- boot owns automatic Preview resume fallback.
 
 ## Cloudflare Feature Build
 
-- build UUID: `5d11ffad-1a68-48f6-8daa-630246f8c16b`
+- build UUID: `33170c85-6b09-4874-a6c5-8c870968db43`
 - branch: `feature/v4-public-bot`
-- commit: `262b019b3246ea9fba54975fc3f4954e6cfd432a`
+- commit: `d64126c8d39e2bfad23ea6355c8e764573bc0692`
 - outcome: SUCCESS
-- Worker version: 2171
-- Worker version id: `9c24fac6-664c-439e-b005-2f5496ffe81f`
+- Worker version: 2181
+- Worker version id: `a3644fc0-b524-40d4-8b33-51bd994f078b`
 
 ## Stable Preview
 
 - preview id: `068adb610f4d47daa65c1376e021787f`
 - URL: `https://feature-v4-public-bot-qqai.ray20123315.workers.dev/`
-- deployment: `97c695ee-b4f7-4bdd-b353-3b23ad5b56b4`
-- deployment number: 7
-- source annotation: `262b019b3246ea9fba54975fc3f4954e6cfd432a`
+- deployment: `7e284694-6e51-41f8-8d7f-443454af0b62`
+- deployment number: 9
+- source annotation: `d64126c8d39e2bfad23ea6355c8e764573bc0692`
 
 Read-back isolation:
 - `QQAI_DB_TABLE=kv_store_v4public_preview`
 - `QQ_OPEN_ENABLED=false`
 - `V4_PREVIEW_TEST_LOGIN=true`
-- production QQ client secret: absent
-- production OneBot token/DO: absent
-- Gemini/DeepSeek/Codex secrets: absent
-- Vectorize: absent
-- production Portal admin/auth secrets: absent
+- production QQ/OneBot/Gemini/DeepSeek/Codex/Vectorize/Portal-admin sensitive bindings: absent
 
-## Live Login Probe
+## Live Login / Resume
 
-Cloudflare Browser Rendering same-origin JavaScript probe:
-- first login API: HTTP 200, ok=true
-- immediately following `/api/portal/me`: HTTP 200, ok=true
-- session: systemAdmin=true
+Cloudflare Browser Rendering on stable Preview:
+- a single login click entered the app without reload;
+- app visible, login hidden, identity rendered as V4 Preview system admin;
+- Preview resume token was present in Preview client storage;
+- `POST /api/auth/preview-resume` returned HTTP 200, ok=true, and a new rotated resume token.
 
-This proves the first authentication request creates a valid session and the session is usable immediately by the backend/browser cookie jar.
-
-A separate DOM-click/navigation instrumentation attempt was inconclusive because the injected probe state disappeared across reload. It is not used as acceptance evidence.
+A forced reload Browser Rendering attempt returned to the login DOM, but the tool does not guarantee injected browser storage/context across its navigation boundary. This result is not treated as authoritative product failure or success. The server/client resume flow is integration-tested and live resume endpoint behavior is verified; real-browser reload remains manual user acceptance.
 
 ## Bot Verification Boundary
 
-No live Bot/group canary was run. Existing QQ group testing would create real user-visible messages. Bot verification remains limited to code and CI until an isolated Bot/canary route exists or the user explicitly authorizes a scoped live test.
+No live Bot/group canary was run. Existing QQ group testing would have user-visible side effects.
 
 ## Production
 

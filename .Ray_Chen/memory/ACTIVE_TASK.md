@@ -2,47 +2,61 @@
 
 task_id: qqaibot-20261001-v4-preview-user-acceptance
 task_status: active
-goal_revision: 3
+goal_revision: 4
 
 ## Goal
 
-Fix the V4 Portal double-login bug while preserving the already-verified V4 command/identity/whitelist work. Keep all work on `feature/v4-public-bot`; do not touch `main`; do not live-test the Bot in real QQ groups because there is no isolated Bot/canary environment.
+Fix V4 Portal login persistence without relying on a forced page reload. A successful login must enter the control panel in the same page, and the isolated Preview must be able to recover after session-cookie loss/reload without asking for credentials again. Preserve all earlier V4 command/identity/whitelist work, do not touch `main`, and do not live-test the Bot in existing QQ groups.
 
 ## Acceptance Criteria
 
-- One successful login attempt must establish the session and transition through a clean page reload instead of requiring the user to submit credentials again.
-- The fix must cover QQ code login, password login and Preview test login.
-- Backend session/cookie semantics must remain valid.
-- Full repository/V3/V4/isolated/bundle CI must pass.
-- Stable Preview must receive only the verified code while retaining Preview-safe bindings.
-- No live Bot messages or group-side canary testing in existing QQ groups.
+- One successful login submission enters the Portal.
+- Successful login does not require `location.reload()`.
+- QQ-code, password and Preview test login share the same same-page session handoff.
+- "Keep me signed in" is honored by privileged accounts within their existing security caps.
+- Preview can recover when the HttpOnly session cookie is unavailable after reload, without a second credential submission.
+- Resume tokens are Preview-only, opaque, server-hashed, short-lived/capped, rotated after use and revoked on logout.
+- Full repository/V3/V4/isolated/bundle CI passes.
+- Preview remains isolated from production credentials and QQ Open.
+- No live Bot/group canary testing.
 - No `main` merge before user acceptance.
 
 ## Completed Steps
 
-- VERIFIED: identified all three successful login paths as immediately calling `boot()` after `Set-Cookie`.
-- VERIFIED: added `finishPortalLogin()` to perform a full page reload after successful authentication.
-- VERIFIED: QQ code, password, and Preview login now all use the new completion path.
-- VERIFIED: regression assertions reject the old same-page `await boot()` pattern and require `finishPortalLogin()`.
-- VERIFIED: GitHub CI run `36840520274` succeeded across repository, V3, V4, isolated V4 deployment checks and bundle.
-- VERIFIED: Cloudflare Connected Build `5d11ffad-1a68-48f6-8daa-630246f8c16b` succeeded for `262b019b3246ea9fba54975fc3f4954e6cfd432a`.
-- VERIFIED: Worker version `2171` / `9c24fac6-664c-439e-b005-2f5496ffe81f` is the latest feature version used for Preview modules.
-- VERIFIED: stable Preview deployment #7 `97c695ee-b4f7-4bdd-b353-3b23ad5b56b4` was created from the verified feature modules.
-- VERIFIED: Preview bindings read back as isolated; no production-sensitive bindings were introduced.
-- VERIFIED LIVE BACKEND: same-origin Browser Rendering probe returned login 200/ok=true followed immediately by `/api/portal/me` 200/ok=true/systemAdmin=true.
-- NOT CLAIMED: Browser Rendering DOM-click/reload observation was inconclusive because injected-script state does not survive the navigation cleanly. It is not counted as live UI proof.
+- VERIFIED: removed forced post-login reload and introduced `enterAuthenticatedPortal(me)`.
+- VERIFIED: `finishPortalLogin(loginResult)` polls/reads `/api/portal/me` and enters the app in-page.
+- VERIFIED: QQ-code, password and Preview login pass the successful login result into the shared handoff.
+- VERIFIED: privileged remember-login can persist the browser cookie while privileged session TTL remains 30 minutes idle / 8 hours absolute.
+- VERIFIED: browser cookie Max-Age follows the actual absolute server-session lifetime.
+- VERIFIED: added Preview-only `POST /api/auth/preview-resume`.
+- VERIFIED: Preview login issues a separate resume token; server stores only a hash-keyed resume record.
+- VERIFIED: resume consumes and rotates its token; old token reuse returns unauthorized.
+- VERIFIED: logout revokes the current resume token.
+- VERIFIED: boot automatically attempts Preview resume if `/api/portal/me` is not authenticated.
+- VERIFIED: integration regression simulates missing original cookie, resumes, obtains a replacement HttpOnly cookie, then authenticates `/api/portal/me`.
+- VERIFIED: final GitHub CI run `36843510857` succeeded.
+- VERIFIED: Cloudflare Connected Build `33170c85-6b09-4874-a6c5-8c870968db43` succeeded for `d64126c8d39e2bfad23ea6355c8e764573bc0692`.
+- VERIFIED: Worker version `2181` / `a3644fc0-b524-40d4-8b33-51bd994f078b` was used as the Preview module source.
+- VERIFIED: stable Preview deployment #9 `7e284694-6e51-41f8-8d7f-443454af0b62` deployed with safe Preview bindings.
+- VERIFIED LIVE: a single Preview login click entered the app without reload.
+- VERIFIED LIVE: Preview resume token existed and `/api/auth/preview-resume` returned 200/ok=true and rotated a new token.
+- LIMITATION: Browser Rendering cross-navigation storage is not reliable enough to prove a full reload result. Real-browser refresh/reload is the remaining user acceptance check.
 
 ## Product Files Changed
 
 - `src/portal/runtime.js`
+- `src/portal/auth.js`
+- `worker.js`
+- `verify-system-admin-auth.mjs`
 - `verify-portal-auth-password.mjs`
 
 ## Hard Constraints
 
-- Do not merge or update `main`.
+- Do not merge/update `main`.
 - Do not live-test Bot behavior in existing QQ groups.
 - Do not enable QQ Open or production QQ/OneBot/AI secrets in the isolated Preview.
-- Do not claim a Browser Rendering DOM-click result as proof when navigation instrumentation is inconclusive.
+- Do not claim Browser Rendering cross-reload state as proof.
+- Preview resume is acceptance-only and must not silently become a production credential mechanism.
 
 ## Current Phase
 
@@ -50,6 +64,6 @@ user_acceptance
 
 ## next_exact_action
 
-User opens the stable V4 Preview and confirms that a single login attempt now enters the control panel. Bot live testing remains paused until an isolated test route exists or the user explicitly authorizes a specific real-group test.
+User logs in once on the stable V4 Preview, manually refreshes/reloads the browser, and confirms whether the control panel remains available without another login. Bot live testing remains paused.
 
-last_checkpoint_at: 2026-10-01T17:08:00+08:00
+last_checkpoint_at: 2026-10-01T17:36:00+08:00

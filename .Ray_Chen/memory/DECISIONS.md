@@ -83,13 +83,27 @@ Decision: !指令关 blocks group ! commands in the core Worker and V3 official 
 
 
 ## D-087 Successful login completes through full page navigation
-status: accepted
+status: superseded
+superseded_by: D-089
 date: 2026-10-01
-Decision: after a successful QQ-code, password, or Preview test login, the Portal must finish authentication with a full page reload instead of immediately invoking boot() in the same fetch chain.
-Reason: the reported UI required a second login attempt even though the first authentication already created a valid session. A clean navigation removes stale in-page authentication/bootstrap state and starts the normal session bootstrap path once.
+Previous decision: after successful authentication, finish with a full page reload.
+Reason superseded: the real browser does not reliably retain the Preview login session across reload, so reload itself became the failure trigger.
 
 ## D-088 Live Bot testing is paused without an isolated canary route
 status: accepted
 date: 2026-10-01
 Decision: do not send live Bot test messages into existing QQ groups until an isolated Bot/canary route exists or the user explicitly authorizes a narrowly scoped real-group test.
 Reason: current live testing would affect normal group chat and is not an isolated acceptance environment.
+
+
+## D-089 Successful login completes in-page
+status: accepted
+date: 2026-10-01
+Decision: successful QQ-code, password and Preview test login remain on the current page, confirm the new session through /api/portal/me, then call the shared authenticated Portal bootstrap. No forced reload is part of login completion.
+Reason: a single login already creates a valid server session; forcing navigation is unnecessary and can expose browser cookie-persistence problems.
+
+## D-090 V4 Preview uses a separate resumable acceptance session
+status: accepted
+date: 2026-10-01
+Decision: only on the isolated V4 Preview, login also issues a separate opaque resume token. The server stores only a hash-keyed resume record, the client stores the opaque token in localStorage when remember-login is selected or sessionStorage otherwise, and boot exchanges it for a replacement HttpOnly session cookie if the ordinary cookie is unavailable. Resume tokens rotate after use and are revoked on logout.
+Security boundary: exact Preview hostname, V4_PREVIEW_TEST_LOGIN=true, QQ_OPEN_ENABLED=false, Preview expiry and privileged-session absolute expiry remain authoritative. This mechanism is acceptance-only and must not silently become a production login credential.

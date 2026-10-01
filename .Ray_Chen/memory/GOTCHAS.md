@@ -44,9 +44,10 @@ Risk: adding a branch push trigger to the stable Preview workflow breaks `verify
 Mitigation: keep Preview deployment manual-only; when connector dispatch is unavailable, use the Workers Preview deployment API with code modules from a verified branch version and the existing Preview-safe environment.
 
 
-## G-079 Same-page post-login bootstrap can present as a double-login bug
-Risk: immediately calling boot() after the authentication fetch can leave the UI on the login screen even though the first login already created a valid server session.
-Mitigation: after successful authentication use one full page reload, then let normal page startup load /api/portal/me.
+## G-079 Post-login transition can present as a double-login bug
+status: superseded_by G-082
+Previous risk: same-page boot was suspected and full reload was used as mitigation.
+Why superseded: live testing showed a single login can enter the app in-page, while reload can lose the browser session. The accepted design now keeps login completion in-page and uses Preview-only resume recovery if a reload loses the cookie.
 
 ## G-080 Real QQ Bot tests have user-visible side effects
 Risk: without a separate Bot/canary transport, testing command and keyboard behavior sends real messages or performs actions in existing groups.
@@ -55,3 +56,12 @@ Mitigation: keep live Bot testing paused; rely on code/CI/isolated Preview for n
 ## G-081 Browser Rendering injected state is not reliable across navigation
 Risk: an injected browser probe can disappear when the page reloads, making post-navigation DOM instrumentation inconclusive.
 Mitigation: do not treat missing injected markers after navigation as product failure. Use same-origin API/session probes plus user manual UI acceptance for login navigation.
+
+
+## G-082 Preview reload can lose the ordinary HttpOnly session cookie
+Risk: the user's real Preview browser can authenticate and enter the app once, but a later refresh/reload may return to the login screen because the ordinary session cookie is not available to the next page load.
+Mitigation: do not force reload on successful login. On the isolated Preview, retain a separate short-lived opaque resume token and automatically exchange it for a replacement HttpOnly session cookie when boot sees no authenticated session. Rotate the resume token after use and revoke it on logout.
+
+## G-083 Remember-login UI and privileged server policy must agree
+Risk: presenting a checked "keep me signed in" option while the server forces developer/admin sessions to persistent=false makes the UI misleading and can create inconsistent cookie behavior.
+Mitigation: honor the persistence request for privileged accounts but keep their existing 30-minute idle and 8-hour absolute security caps; align cookie Max-Age with the actual server absolute expiry.

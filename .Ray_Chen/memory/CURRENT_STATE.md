@@ -2,47 +2,60 @@
 
 ## Production
 
-- `main` was not changed by this login-fix task.
+- `main` was not changed by this task.
 - Production Worker deployment was not intentionally modified.
-- No real QQ group Bot test messages were sent.
+- No real QQ-group Bot test messages were sent.
 
 ## Feature Source
 
 - branch: `feature/v4-public-bot`
-- product head: `262b019b3246ea9fba54975fc3f4954e6cfd432a`
-- login implementation commit: `3f0cce32f34ca33aabb8899feff173f491515f46`
-- login regression commit: `262b019b3246ea9fba54975fc3f4954e6cfd432a`
-- final GitHub CI: `36840520274` — SUCCESS
+- product head: `d64126c8d39e2bfad23ea6355c8e764573bc0692`
+- final GitHub CI: `36843510857` — SUCCESS
+- Cloudflare feature build: `33170c85-6b09-4874-a6c5-8c870968db43` — SUCCESS
+- Worker version: 2181
+- Worker version id: `a3644fc0-b524-40d4-8b33-51bd994f078b`
 
 ## Login State
 
-Before:
-- successful QQ code, password, and Preview test login immediately called `await boot()` in the same page/fetch chain.
+Successful authentication:
+- does not force a page reload;
+- confirms `/api/portal/me` in the current page;
+- calls `enterAuthenticatedPortal(me)` when the session is available.
 
-Now:
-- all successful login paths call `finishPortalLogin()`
-- `finishPortalLogin()` updates the login status and invokes `location.reload()`
-- normal page startup then performs the authenticated `/api/portal/me` load.
+Remember-login:
+- ordinary and privileged accounts can request persistence;
+- privileged accounts remain capped at 30-minute idle / 8-hour absolute session lifetimes;
+- browser cookie lifetime is aligned to server absolute expiry.
 
-Live backend evidence:
-- first `POST /api/auth/preview-test-login`: HTTP 200, ok=true
-- immediately following first `GET /api/portal/me`: HTTP 200, ok=true
-- returned session: systemAdmin=true
+V4 Preview recovery:
+- Preview login returns a separate opaque resume token and expiry.
+- Client stores it in localStorage when remember-login is checked, otherwise sessionStorage.
+- If boot finds no valid session cookie, Preview calls `/api/auth/preview-resume`.
+- Server validates exact Preview host, Preview enablement, `QQ_OPEN_ENABLED=false`, expiry and hashed resume record.
+- Successful resume rotates the resume token and sends a replacement HttpOnly session cookie.
+- logout revokes both the server session and supplied Preview resume token.
 
 ## Stable V4 Preview
 
 - URL: `https://feature-v4-public-bot-qqai.ray20123315.workers.dev/`
 - preview id: `068adb610f4d47daa65c1376e021787f`
-- deployment: `97c695ee-b4f7-4bdd-b353-3b23ad5b56b4`
-- deployment number: 7
-- source annotation: `262b019b3246ea9fba54975fc3f4954e6cfd432a`
+- deployment: `7e284694-6e51-41f8-8d7f-443454af0b62`
+- deployment number: 9
+- source: `d64126c8d39e2bfad23ea6355c8e764573bc0692`
 - D1 table: `kv_store_v4public_preview`
 - `QQ_OPEN_ENABLED=false`
 - production-sensitive bindings: absent
 
-## Bot Testing State
+## Live Evidence
 
-Live Bot testing is paused. There is currently no isolated Bot/canary route, and testing against the existing Bot would produce real group-chat side effects. Bot behavior remains code/CI verified only until an isolated route is available or the user authorizes a narrowly scoped live test.
+- One-click Preview login entered the app: app visible, login hidden, system-admin identity rendered.
+- Live client storage contained a Preview resume token.
+- Live `POST /api/auth/preview-resume`: HTTP 200 / ok=true and returned a rotated resume token.
+- Automated Browser Rendering cannot be used as authoritative proof of storage survival across full page navigation; manual browser refresh remains pending.
+
+## Bot Testing
+
+Live Bot testing is paused because there is no isolated Bot/canary route and testing the existing Bot would produce real group-chat side effects.
 
 ## Merge State
 
