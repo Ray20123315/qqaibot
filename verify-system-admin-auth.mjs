@@ -120,8 +120,12 @@ assert.equal(privilegedTemporary.absoluteTtlMs, 8 * 60 * 60 * 1000);
 
 const remember = await createPortalRememberToken(env, privilegedQqSession);
 assert.ok(String(remember?.token || "").length >= 40);
+env.DB.values.delete(`portal_session:${privilegedQqSession.token}`);
 const restoredRemember = await restorePortalRememberToken(env, remember.token);
 assert.equal(restoredRemember?.session?.qq, "11111");
+assert.notEqual(restoredRemember?.session?.token, privilegedQqSession.token, "remember credential must rebuild a new server session when the old session record is gone");
+assert.equal(restoredRemember?.session?.persistent, true);
+assert.ok(Number(restoredRemember?.session?.absoluteExpiresAt || 0) <= Number(remember.expiresAt || 0), "rebuilt session must not outlive the remember credential");
 assert.notEqual(restoredRemember?.rememberToken, remember.token, "remember token must rotate after restore");
 assert.equal(await restorePortalRememberToken(env, remember.token), null, "used remember token must not be reusable");
 assert.equal(await revokePortalRememberToken(env, restoredRemember.rememberToken), true);
