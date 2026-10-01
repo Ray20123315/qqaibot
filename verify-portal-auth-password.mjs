@@ -86,6 +86,7 @@ assert.match(runtime, /@keyframes qqaiModalInRef/);
 assert.match(runtime, /@keyframes qqaiNavPop/);
 assert.match(runtime, /\.nav button\[data-view\]\.click-pop/);
 assert.match(runtime, /@keyframes qqaiRipple/);
+assert.match(runtime, /#toast\.toast\{position:fixed;right:16px;bottom:16px;width:auto;max-width:min\(320px,calc\(100vw - 32px\)\)/);
 assert.match(runtime, /className='qqai-ripple'/);
 assert.match(runtime, /closest\('\.btn,\.action-card,#nav button\[data-view\]'\)/);
 assert.match(runtime, /@media\(prefers-reduced-motion:reduce\)/);
