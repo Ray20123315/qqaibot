@@ -2,37 +2,33 @@
 
 ## GitHub
 
-- verified product revision on main/dev: `dea8ae5448382830262399aa3ee3773d5e4e030f`
-- development CI `36522596708`: success
-- main CI `36522715591`: success
+- canonical branch: main
+- current main head at recovery: a1c19cf0d732fd576000c8ecb2753facf38c51e8
+- repair branch: chatgpt/fix-command-panel-message-send-20261001
+- main and former v4-qqopen-native branch were identical before this repair.
 
-## Cloudflare Production
+## Confirmed Defects
 
-- Worker: `qqai`
-- Connected Build: `ce40accb-f1f3-4824-b299-411e130e2573`
-- commit: `dea8ae5448382830262399aa3ee3773d5e4e030f`
-- branch: `main`
-- outcome: success
+1. Direct/no-argument group keyboard buttons currently use action.type=1 callbacks.
+2. That callback path ACKs INTERACTION_CREATE and invokes the canonical handler through a synthetic legacy body; it does not produce a normal user-authored QQ command message.
+3. The V4 command registry covers only its registered set and misses active runtime command families, so all-category coverage does not prove the panel is functionally complete.
 
-## QQ Group Keyboard Behavior
+## Target Behavior
 
-- direct/no-argument commands: action.type=1 callback, no click_limit, immediate ACK + canonical handler execution;
-- parameterized/target/content commands: action.type=2, enter=false, trailing-space command prefill;
-- navigation buttons: reusable callback actions;
-- every non-empty group command category renders a keyboard;
-- every category page stays within 5 rows and 2 command columns;
-- all enabled group-scoped panel commands are included by regression coverage;
-- new/unclassified commands remain prefill by default unless explicitly marked direct.
+- direct/no-argument: action.type=2, enter=true, exact canonical command;
+- parameterized/target/content: action.type=2, enter=false, canonical command plus trailing space;
+- pagination: action.type=2, enter=true;
+- active missing commands added to registry and covered by regression tests.
 
 ## Preserved State
 
-- QQ_OPEN_INTENTS remains 100663296, so callback delivery remains available.
-- QQ Open/AIBot remains primary.
-- OneBot remains controlled fallback only.
-- direct command handlers, permissions, confirmations, cooldowns and Portal switches are unchanged.
-- `/!普通内容` remains AI bypass.
-- TEMP-admin and prior Portal security work remain preserved.
+- QQ Open/AIBot stays primary.
+- OneBot stays controlled fallback only.
+- QQ_OPEN_INTENTS stays unchanged; Interaction support may still be used by unrelated features.
+- Server-side authorization and moderation confirmation remain authoritative.
+- /!普通内容 remains AI bypass.
 
-## Remaining Live Verification
+## Verification State
 
-Only real-client UX confirmation remains: direct button should execute immediately, parameterized button should stay editable, and non-basic categories should render buttons.
+Product changes: PLANNED.
+Live QQ client verification: pending after deployment.
