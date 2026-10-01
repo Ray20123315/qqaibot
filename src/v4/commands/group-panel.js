@@ -63,22 +63,22 @@ function groupCategoryMeta(value) {
   return GROUP_PANEL_CATEGORY_META.find(meta => meta.key === token) || categoryMetaByToken(token);
 }
 
-function keyboardButton(id, label, data, { style = 1, immediate = false } = {}) {
+function keyboardButton(id, label, data, { style = 1, enter = false, callback = false } = {}) {
   const text = clean(label).slice(0, 20) || "指令";
   const buttonId = clean(id).slice(0, 64) || "qqai_command";
   const payload = String(data ?? "").replace(/^\s+/, "").slice(0, 1000);
-  const action = immediate
+  const action = callback
     ? Object.freeze({
         type: 1,
         data: payload,
         permission: Object.freeze({ type:2 }),
-        unsupport_tips: "当前客户端不支持快捷执行，请直接发送指令。"
+        unsupport_tips: "当前客户端不支持面板导航，请重新打开指令面板。"
       })
     : Object.freeze({
         type: 2,
         data: payload,
         permission: Object.freeze({ type:2 }),
-        enter: false,
+        enter: Boolean(enter),
         reply: false,
         unsupport_tips: "当前客户端不支持指令按钮，请直接发送指令。"
       });
@@ -117,7 +117,7 @@ function buildGroupCategoryKeyboard(registry, category, { page = 1 } = {}) {
           `qqai_${meta.key}_${currentPage}_${offset + index}`,
           commandToken(command.panel.command),
           data,
-          { style:1, immediate:autoSend }
+          { style:1, enter:autoSend }
         );
       }))
     }));
@@ -129,13 +129,13 @@ function buildGroupCategoryKeyboard(registry, category, { page = 1 } = {}) {
       `qqai_${meta.key}_prev_${currentPage}`,
       "上一页",
       `!面板 ${meta.label} --page=${currentPage - 1}`,
-      { style:0, immediate:true }
+      { style:0, callback:true }
     ));
     if (currentPage < totalPages) nav.push(keyboardButton(
       `qqai_${meta.key}_next_${currentPage}`,
       "下一页",
       `!面板 ${meta.label} --page=${currentPage + 1}`,
-      { style:0, immediate:true }
+      { style:0, callback:true }
     ));
     if (nav.length) rows.push(Object.freeze({ buttons:Object.freeze(nav) }));
   }
