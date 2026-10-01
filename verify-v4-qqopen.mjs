@@ -104,7 +104,7 @@ assert.equal(groupRootPanel.scope, "group");
 assert.equal(groupRootPanel.target_type, "all");
 assert(groupRootPanel.panel.items.length > 0 && groupRootPanel.panel.items.length <= 20);
 const groupRootNames = new Set(groupRootPanel.panel.items.map(item => item.name));
-for (const name of ["!面板 基础","!面板 群聊","!面板 记忆","!面板 活动","!面板 群规","!面板 AI管理","!面板 群操作","!面板 群主","!面板 开发者"]) {
+for (const name of ["!面板 基础","!面板 群聊","!面板 关系","!面板 互动","!面板 记忆","!面板 活动","!面板 群规","!面板 AI管理","!面板 群操作","!面板 群主","!面板 开发者"]) {
   assert(groupRootNames.has(name), `Group root panel missing ${name}`);
 }
 assert.equal(resolveGroupPanelInput("!面板 基础 help", registry)?.expanded, "!help");
@@ -133,17 +133,20 @@ const basicButtons = basicKeyboard.keyboard.content.rows.flatMap(row => row.butt
 
 const helpButton = basicButtons.find(button => button.render_data.label === "help");
 assert(helpButton);
-assert.equal(helpButton.action.type, 1);
+assert.equal(helpButton.action.type, 2);
 assert.equal(helpButton.action.data, "!help");
 assert.equal(helpButton.action.permission?.type, 2);
-assert(!Object.prototype.hasOwnProperty.call(helpButton.action, "enter"));
+assert.equal(helpButton.action.enter, true);
+assert.equal(helpButton.action.reply, false);
 assert(!Object.prototype.hasOwnProperty.call(helpButton.action, "click_limit"));
 assert(helpButton.action.unsupport_tips);
 assert(helpButton.group_id);
 
 const statusButton = basicButtons.find(button => button.render_data.label === "status");
 assert(statusButton);
-assert.equal(statusButton.action.type, 1);
+assert.equal(statusButton.action.type, 2);
+assert.equal(statusButton.action.enter, true);
+assert.equal(statusButton.action.reply, false);
 assert.equal(statusButton.action.data, "!status");
 
 const codexButton = basicButtons.find(button => button.render_data.label === "codex");
@@ -187,9 +190,10 @@ for (const meta of GROUP_PANEL_CATEGORY_META) {
       assert.equal(button.action.permission?.type, 2);
       assert(!Object.prototype.hasOwnProperty.call(button.action, "click_limit"));
       if (command.panel.enter === true) {
-        assert.equal(button.action.type, 1, `Direct command ${command.id} must use callback`);
+        assert.equal(button.action.type, 2, `Direct command ${command.id} must use QQ command action`);
+        assert.equal(button.action.enter, true, `Direct command ${command.id} must auto-send`);
+        assert.equal(button.action.reply, false);
         assert.equal(button.action.data, command.panel.command);
-        assert(!Object.prototype.hasOwnProperty.call(button.action, "enter"));
       } else {
         assert.equal(button.action.type, 2, `Parameterized command ${command.id} must prefill`);
         assert.equal(button.action.enter, false);
@@ -197,25 +201,58 @@ for (const meta of GROUP_PANEL_CATEGORY_META) {
       }
     }
     for (const button of buttons.filter(item => /^!面板\s/.test(item.action.data))) {
-      assert.equal(button.action.type, 1, "Pagination must use immediate callback");
+      assert.equal(button.action.type, 2, "Pagination must send a normal QQ command");
+      assert.equal(button.action.enter, true);
+      assert.equal(button.action.reply, false);
       assert(!Object.prototype.hasOwnProperty.call(button.action, "click_limit"));
     }
   }
   assert.equal(seen.size, commands.length, `Category ${meta.label} did not expose every command`);
 }
-assert(nonEmptyCategoryCount >= 9, "Expected all group command categories to be represented");
+assert(nonEmptyCategoryCount >= 11, "Expected all active group command categories to be represented");
 const expectedGroupCommandIds = registry.list({ scope:"group" })
   .filter(command => command.panel.enabled)
   .map(command => command.id);
 assert.equal(allCategoryCommands.size, expectedGroupCommandIds.length);
 for (const id of expectedGroupCommandIds) assert(allCategoryCommands.has(id), `All-category keyboard coverage missing ${id}`);
+for (const id of [
+  "self.mute",
+  "community.sticker",
+  "community.whitelist_apply",
+  "community.bot_interaction",
+  "community.group_notice",
+  "community.group_todo",
+  "community.group_file",
+  "relationship.master_bind",
+  "relationship.master_take",
+  "relationship.status",
+  "relationship.unbind",
+  "relationship.master_features",
+  "relationship.master_mute",
+  "relationship.master_unmute",
+  "relationship.master_rename",
+  "relationship.master_recall",
+  "relationship.partner_bind",
+  "relationship.partner_status",
+  "relationship.partner_unbind",
+  "relationship.partner_mute",
+  "relationship.partner_unmute",
+  "ai.mimic",
+  "ai.interject_rate",
+  "dev.group_rate_limit",
+  "dev.global_rate_limit"
+]) assert(allCategoryCommands.has(id), `Restored runtime command missing from group panel: ${id}`);
+assert(registry.get("appeal.status"), "C2C appeal status command must be registered");
+assert(registry.get("self.unmute"), "C2C self-unmute command must be registered");
 
 const aiAdminKeyboard = buildGroupCategoryKeyboard(registry, "ai-admin", { page:1 });
 assert(aiAdminKeyboard.totalPages >= 2);
 const nextPageButton = aiAdminKeyboard.keyboard.content.rows.flatMap(row => row.buttons)
   .find(button => button.action.data === "!面板 AI管理 --page=2");
 assert(nextPageButton);
-assert.equal(nextPageButton.action.type, 1);
+assert.equal(nextPageButton.action.type, 2);
+assert.equal(nextPageButton.action.enter, true);
+assert.equal(nextPageButton.action.reply, false);
 assert(!Object.prototype.hasOwnProperty.call(nextPageButton.action, "click_limit"));
 const aiAdminPage2 = resolveGroupPanelInput("!面板 AI管理 --page=2", registry);
 assert.equal(aiAdminPage2?.matched, true);
