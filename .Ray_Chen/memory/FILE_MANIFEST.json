@@ -1,14 +1,14 @@
 {
   "schema_version": 1,
-  "memory_version": "v0.0.47",
+  "memory_version": "v0.0.48",
   "task_id": "qqaibot-20261001-v4-preview-user-acceptance",
-  "goal_revision": 1,
-  "transaction": "v4_preview_acceptance_login_packaged_20261001",
+  "goal_revision": 2,
+  "transaction": "v4_command_identity_whitelist_completion_20261001",
   "repository": "Ray20123315/qqaibot",
   "production_branch": "main",
   "development_branch": "feature/v4-public-bot",
-  "product_before_revision": "a1c19cf0d732fd576000c8ecb2753facf38c51e8",
-  "product_after_revision": "18f254cc18fe599ca27a89106fa4e87759776165",
+  "product_before_revision": "18f254cc18fe599ca27a89106fa4e87759776165",
+  "product_after_revision": "4893adbbb413d6c65f340ae44c80d153d1ddb7fe",
   "verification": {
     "feature_product_ci_run": 36366445081,
     "regression_ci_run": 36366534308,
@@ -156,7 +156,27 @@
     "v4_preview_user_acceptance": "pending",
     "v4_preview_memory_package_branch": "feature/v4-public-bot",
     "v4_preview_memory_package_version": "v0.0.47",
-    "v4_preview_memory_package": "pending_workflow"
+    "v4_preview_memory_package": "pending_workflow",
+    "current_feature_head": "4893adbbb413d6c65f340ae44c80d153d1ddb7fe",
+    "final_feature_ci_run": 36804510541,
+    "final_feature_ci": "success",
+    "command_runtime_owner_coverage": "77/77",
+    "direct_keyboard_semantics": "type2_enter_true_message_path",
+    "parameter_keyboard_semantics": "type2_enter_false_prefill",
+    "keyboard_click_limit": 10,
+    "hybrid_permission_mapping": "verified",
+    "whitelist_before_plugin_dispatch": "verified",
+    "group_command_gate_core_and_plugins": "verified",
+    "feature_cloudflare_build": "5d741839-2095-4ead-b741-461ce13a3aa2",
+    "feature_cloudflare_build_outcome": "success",
+    "feature_worker_version": 2168,
+    "feature_worker_version_id": "c6695790-ba16-4eab-97c1-9b1c46825118",
+    "stable_preview_deployment": "f2ba207c-3a7a-4bd3-a3e6-94150b8f83b4",
+    "stable_preview_deployment_number": 6,
+    "stable_preview_root_http": 200,
+    "stable_preview_browser_rendering": "success",
+    "stable_preview_qq_open_enabled": false,
+    "live_qq_client_acceptance": "pending_user_canary"
   },
   "changes": [
     {
@@ -1943,10 +1963,93 @@
       "after_revision": "v0.0.47",
       "verification": "GitHub Actions package artifact required",
       "changed_at": "2026-10-01T08:52:00+08:00"
+    },
+    {
+      "location_type": "github",
+      "provider": "GitHub",
+      "resource_id_or_path": "src/v4/commands/group-panel.js",
+      "action": "modified",
+      "branch_or_container": "feature/v4-public-bot",
+      "before_revision": "a1c19cf0d732fd576000c8ecb2753facf38c51e8",
+      "after_revision": "4893adbbb413d6c65f340ae44c80d153d1ddb7fe",
+      "commit_or_hash": "592e29ee5dbd6d22318251836151472ac5e17727;26a11d866511152ff181ec0e94b6f4a29bb00bc6",
+      "verification": "no-parameter message-send semantics + explicit click_limit=10; final CI 36804510541 success",
+      "changed_at": "2026-10-01T10:16:00+08:00"
+    },
+    {
+      "location_type": "github",
+      "provider": "GitHub",
+      "resource_id_or_path": "worker.js",
+      "action": "modified",
+      "branch_or_container": "feature/v4-public-bot",
+      "before_revision": "18f254cc18fe599ca27a89106fa4e87759776165",
+      "after_revision": "4893adbbb413d6c65f340ae44c80d153d1ddb7fe",
+      "commit_or_hash": "56e0ad714d034b9db31c52d5c8c6f1f0cc3350bc;c3aab4bbd796e6d8fd0cc70071caeb57b1981253;6d897a9094e8ac2b6593835c91d911b3f8a374ab",
+      "verification": "hybrid permission IDs + whitelist-safe mutations + memory list + command gate + whitelist-before-plugin; final CI success",
+      "changed_at": "2026-10-01T10:16:00+08:00"
+    },
+    {
+      "location_type": "github",
+      "provider": "GitHub",
+      "resource_id_or_path": "src/plugins/official/activity.js",
+      "action": "modified",
+      "branch_or_container": "feature/v4-public-bot",
+      "before_revision": "18f254cc18fe599ca27a89106fa4e87759776165",
+      "after_revision": "4893adbbb413d6c65f340ae44c80d153d1ddb7fe",
+      "commit_or_hash": "0e37f9a2905aaa49d8b3b181a29ac28ba9b23a0a",
+      "verification": "!活动通知 handler + CI 36803908513 success",
+      "changed_at": "2026-10-01T10:16:00+08:00"
+    },
+    {
+      "location_type": "github",
+      "provider": "GitHub",
+      "resource_id_or_path": "verify-v4-qqopen.mjs;verify-v4-runtime-bridge.mjs",
+      "action": "modified",
+      "branch_or_container": "feature/v4-public-bot",
+      "before_revision": "18f254cc18fe599ca27a89106fa4e87759776165",
+      "after_revision": "4893adbbb413d6c65f340ae44c80d153d1ddb7fe",
+      "commit_or_hash": "967a5d780a4d3e3613751f46403a7e791e562233;7b30cd06e6338418d884db74322dae562dd8a33f;fc1b285db3dd6e11fcebd30a9d5f34ef172f3851;827d9645815d114d72f867e87afa506afe0cd61e;00dd3cacf9aa9efcc7005535a605d80d1df4292a",
+      "verification": "keyboard/message/click-limit/handler/identity/plugin-whitelist regressions; final CI success",
+      "changed_at": "2026-10-01T10:16:00+08:00"
+    },
+    {
+      "location_type": "github",
+      "provider": "GitHub",
+      "resource_id_or_path": ".github/workflows/v4-preview-deploy.yml",
+      "action": "temporary_modified_then_restored",
+      "branch_or_container": "feature/v4-public-bot",
+      "before_revision": "manual-only",
+      "after_revision": "manual-only",
+      "commit_or_hash": "a2b1608baf69d9d0527f585dc8a88a6b3f11953b->4893adbbb413d6c65f340ae44c80d153d1ddb7fe",
+      "verification": "push trigger rejected by existing regression as designed; final workflow restored and CI 36804510541 success",
+      "changed_at": "2026-10-01T10:16:00+08:00"
+    },
+    {
+      "location_type": "cloudflare",
+      "provider": "Cloudflare",
+      "resource_id_or_path": "workers/workers/qqai/previews/068adb610f4d47daa65c1376e021787f/deployments/f2ba207c-3a7a-4bd3-a3e6-94150b8f83b4",
+      "action": "preview_deployed",
+      "branch_or_container": "feature/v4-public-bot Preview",
+      "before_revision": "df3e4ed6-59c5-4ece-9cd4-e711846525a2",
+      "after_revision": "f2ba207c-3a7a-4bd3-a3e6-94150b8f83b4",
+      "commit_or_hash": "4893adbbb413d6c65f340ae44c80d153d1ddb7fe",
+      "verification": "deployment read-back + safe env read-back + Browser Rendering root HTTP 200",
+      "changed_at": "2026-10-01T10:16:00+08:00"
+    },
+    {
+      "location_type": "github",
+      "provider": "GitHub",
+      "resource_id_or_path": ".Ray_Chen/memory/*",
+      "action": "final_reconciliation",
+      "branch_or_container": "feature/v4-public-bot",
+      "before_revision": "v0.0.47",
+      "after_revision": "v0.0.48",
+      "verification": "atomic memory commit; package workflow/archive SHA verification required before final response",
+      "changed_at": "2026-10-01T10:16:00+08:00"
     }
   ],
   "internal_memory_transaction": {
-    "action": "enable feature-branch Ray_Chen packaging and bump acceptance memory to v0.0.47",
-    "note": "No production merge. Generated archive/SHA/artifact do not recursively trigger a new memory transaction."
+    "action": "reconcile command/identity/whitelist completion and stable Preview deployment",
+    "note": "No production merge. Memory archive/hash/notification evidence do not recursively trigger another memory transaction."
   }
 }

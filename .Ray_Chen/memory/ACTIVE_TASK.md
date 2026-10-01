@@ -2,53 +2,71 @@
 
 task_id: qqaibot-20261001-v4-preview-user-acceptance
 task_status: active
-goal_revision: 1
+goal_revision: 2
 
 ## Goal
 
-Let the user enter the V4 Preview with highest privilege, inspect the implementation in real use, and only then decide what should be merged into production.
+Finish the remaining V4 command-panel and QQ identity/whitelist behavior before production. Login is deferred. Keep work on `feature/v4-public-bot`, deploy only to the isolated stable Preview, and require user acceptance before any main merge.
+
+## Acceptance Criteria
+
+- No-parameter keyboard commands send actual QQ messages.
+- Parameterized commands prefill the input and wait for user completion.
+- Buttons are reusable instead of one-shot.
+- All catalog commands shown in panels have a runtime owner.
+- QQ Open permissions and group whitelist can safely reuse old-Bot-verified numeric identity mappings without treating OpenIDs as QQ numbers.
+- Non-whitelist groups cannot bypass the gate through V3 official plugins.
+- Group command on/off affects both Worker and plugin command paths.
+- Feature CI and isolated Preview deployment remain safe and production remains untouched.
 
 ## Completed Steps
 
-- VERIFIED: feature branch was non-force fast-forwarded to current main before new Preview-only work.
-- VERIFIED: added `POST /api/auth/preview-test-login` only on the feature branch.
-- VERIFIED: login is restricted to the exact stable Preview hostname.
-- VERIFIED: login requires `V4_PREVIEW_TEST_LOGIN=true`.
-- VERIFIED: login expires at `2026-10-03T00:00:00+08:00`.
-- VERIFIED: login refuses when `QQ_OPEN_ENABLED` is not false.
-- VERIFIED: Portal login page shows a Preview-only highest-privilege test button only on the stable Preview hostname.
-- VERIFIED: feature CI `36797489597` passed all repository/V3/V4/isolated/bundle checks.
-- VERIFIED: Cloudflare branch build succeeded.
-- VERIFIED: stable Preview deployment uses only explicit safe bindings.
-- VERIFIED LIVE: Browser Rendering used the real Preview endpoint; login returned 200/systemAdmin=true and viewer returned developer=true/role=developer/systemAdmin=true.
+- VERIFIED: no-parameter group keyboard commands use message-send semantics; pagination alone keeps callback navigation.
+- VERIFIED: Tencent SDK evidence shows omitted `click_limit` defaults to 1/single-use; buttons now explicitly use `click_limit: 10`.
+- VERIFIED: parameterized commands remain editable prefills.
+- VERIFIED: QQ Open derives `permissionUserId` / `permissionGroupId` from confirmed old-Bot mapping when available and downgrades on identity conflict.
+- VERIFIED: `!群白名单` and `!删群白名单` only mutate a confirmed numeric group in QQ Open mode.
+- VERIFIED: whitelist gate runs before V3 plugin dispatch for OneBot and QQ Open.
+- VERIFIED: `!你记住了什么` implemented.
+- VERIFIED: `!活动通知` implemented in the official activity plugin.
+- VERIFIED: `!指令开` / `!指令关` implemented across Worker and plugin command paths.
+- VERIFIED: 77/77 catalog command aliases have a runtime owner in Worker/plugins/parser coverage scan.
+- VERIFIED: final GitHub CI run `36804510541` succeeded.
+- VERIFIED: Cloudflare Connected Build `5d741839-2095-4ead-b741-461ce13a3aa2` succeeded for commit `4893adbbb413d6c65f340ae44c80d153d1ddb7fe`.
+- VERIFIED: uploaded Worker version `2168` corresponds to commit `4893adbbb413d6c65f340ae44c80d153d1ddb7fe`.
+- VERIFIED: stable Preview deployment 6 (`f2ba207c-3a7a-4bd3-a3e6-94150b8f83b4`) uses the new modules with the prior isolated Preview env.
+- VERIFIED LIVE: stable Preview root returned HTTP 200 through Cloudflare Browser Rendering.
 
-## Changed Product Files
+## Product Files Changed
 
+- `src/v4/commands/group-panel.js`
 - `worker.js`
-- `src/portal/runtime.js`
-- `verify-system-admin-auth.mjs`
-- `wrangler.toml`
+- `src/plugins/official/activity.js`
+- `verify-v4-qqopen.mjs`
+- `verify-v4-runtime-bridge.mjs`
+- `.github/workflows/v4-preview-deploy.yml` was temporarily changed only to test a deployment trigger and then restored to manual-only; final content is back to the guarded design.
 
-## Cloudflare Preview
+## Failed / Changed Approaches
 
-- Preview id: `068adb610f4d47daa65c1376e021787f`
-- deployment: `df3e4ed6-59c5-4ece-9cd4-e711846525a2`
-- deployment number: 5
-- D1 table: `kv_store_v4public_preview`
-- production secret bindings: excluded
+- Local direct repository verification path was unavailable because the execution environment could not resolve GitHub; switched to GitHub Actions evidence.
+- Temporary Preview workflow `push` trigger was rejected by existing regression `verify-v4-preview-workflow.mjs`; immediately reverted to manual-only.
+- Cloudflare Builds Preview API did not own the existing stable Workers Preview; switched to copying modules from the verified feature Worker version into the existing Workers Preview deployment.
+- General web fetch could not access the workers.dev Preview; switched to Cloudflare Browser Rendering. Subsequent Browser Rendering requests hit rate limit after the successful root check and were not retried.
 
-## Failed/Changed Approaches
+## Hard Constraints
 
-- Copying production TEMP secrets into Preview was blocked by platform safety controls; abandoned.
-- Copying/storing password hashes into Preview D1 was blocked by platform safety controls; abandoned.
-- Final method: credential-free Preview-only test login with hostname, expiry and isolation checks.
+- Do not merge to `main` before user acceptance.
+- Do not enable production QQ/OneBot/AI secrets in the isolated Preview.
+- Do not treat QQ Open OpenIDs as numeric QQ IDs.
+- Do not reintroduce callback execution for ordinary direct commands.
+- Do not omit `click_limit` for reusable group keyboard buttons.
 
-## Hard Constraint
+## Current Phase
 
-Do not merge Preview-only test-login functionality into production before manual user acceptance. Before any eventual merge, remove or disable the Preview test-login path.
+acceptance
 
 ## next_exact_action
 
-User opens the stable V4 Preview URL, clicks “进入 V4 最高权限测试”, and reports whether the V4 interface and functions are usable.
+Run real-user/canary QQ-client validation for the updated keyboard and whitelist behavior; if accepted, prepare the production merge with Preview-only test-login functionality removed or disabled.
 
-last_checkpoint_at: 2026-10-01T08:47:00+08:00
+last_checkpoint_at: 2026-10-01T10:16:00+08:00

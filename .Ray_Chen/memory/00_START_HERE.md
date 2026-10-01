@@ -1,42 +1,48 @@
 # Ray_Chen Memory Entry
 
-- memory_version: v0.0.47
+- memory_version: v0.0.48
 - project: QQAIBOT
 - repository: Ray20123315/QQAIBOT
 - canonical_branch: main
 - development_branch: feature/v4-public-bot
 - task_id: qqaibot-20261001-v4-preview-user-acceptance
 - task_status: active
-- goal_revision: 1
-- product_revision: 18f254cc18fe599ca27a89106fa4e87759776165
-- updated_at: 2026-10-01T08:52:00+08:00
+- goal_revision: 2
+- product_revision: 4893adbbb413d6c65f340ae44c80d153d1ddb7fe
+- updated_at: 2026-10-01T10:16:00+08:00
 
 ## Current Goal
 
-Keep all new V4 acceptance work off production. Make the existing stable V4 Preview URL usable at highest privilege, verify it automatically, then wait for the user to manually accept it before any production merge.
+Keep all new V4 acceptance work off production. Login is not the current priority. Finish and verify the remaining QQ command-panel, identity, whitelist and missing-command behavior on the feature branch, deploy the verified code to the isolated stable Preview, then wait for real-user acceptance before any production merge.
 
-## Verified Preview State
+## Verified Product State
 
-- feature branch fast-forwarded to current main without force, then received Preview-only commit `18f254cc18fe599ca27a89106fa4e87759776165`.
-- GitHub CI run `36797489597`: success.
-- Cloudflare branch build `5fc78ebc-9f14-4f61-8f2c-a347252f09b2`: success.
-- stable Preview deployment: `df3e4ed6-59c5-4ece-9cd4-e711846525a2` / number 5.
-- stable URL: `https://feature-v4-public-bot-qqai.ray20123315.workers.dev/`.
-- Preview HTML shows the highest-privilege test-login button.
-- Browser-driven live probe: login HTTP 200, `systemAdmin=true`, `preview=true`; viewer API HTTP 200, `developer=true`, role `developer`, `systemAdmin=true`.
-- Preview D1 namespace: `kv_store_v4public_preview`.
-- Preview `QQ_OPEN_ENABLED=false`.
-- production QQ secret, OneBot secret/DO, Gemini secret, Vectorize and production admin secret are absent from the promoted Preview deployment.
+- Feature head: `4893adbbb413d6c65f340ae44c80d153d1ddb7fe`.
+- GitHub CI run `36804510541`: SUCCESS on the final product/workflow-restored head.
+- All 77 catalog commands have a runtime owner across Worker, official plugins or moderation parser.
+- No-parameter group keyboard commands now send real QQ messages; parameterized commands still prefill the input.
+- All group keyboard buttons and pagination buttons explicitly use `click_limit: 10`.
+- QQ Open permissions/whitelist use old-Bot-verified numeric QQ/group mappings when available; identity conflicts downgrade authorization.
+- Whitelist gating now runs before V3 official plugin dispatch.
+- `!你记住了什么`, `!活动通知`, `!指令开` and `!指令关` now have real runtime behavior.
+- The group command gate covers both core Worker commands and V3 plugin commands; `!指令开` remains the recovery path.
+
+## Stable Preview
+
+- URL: `https://feature-v4-public-bot-qqai.ray20123315.workers.dev/`
+- Preview id: `068adb610f4d47daa65c1376e021787f`
+- deployment: `f2ba207c-3a7a-4bd3-a3e6-94150b8f83b4`
+- deployment number: 6
+- source commit annotation: `4893adbbb413d6c65f340ae44c80d153d1ddb7fe`
+- isolated D1 table: `kv_store_v4public_preview`
+- `QQ_OPEN_ENABLED=false`
+- production QQ/OneBot/AI/Vectorize/admin sensitive bindings: absent
+- Browser Rendering live check: root HTTP 200, title `QQAIbot 控制台`.
 
 ## Acceptance Gate
 
-Do not merge this Preview-only test login into `main` until the user manually opens the stable Preview URL and confirms the V4 UI is usable.
+Do not merge this feature/Preview-only work into `main` until the user manually accepts it. The isolated Preview intentionally has QQ Open disabled, so actual QQ-client button/whitelist behavior remains a user/canary acceptance item even though code and CI are verified.
 
 ## Resume Rule
 
-Continue from feature commit `18f254cc18fe599ca27a89106fa4e87759776165`. The next exact action is user manual acceptance, not a production merge.
-
-
-## Feature Memory Packaging
-
-The existing Ray_Chen package workflow is enabled on `feature/v4-public-bot` so the exact acceptance-test memory tree can be exported without modifying `main`.
+Resume from v0.0.48. Do not revert to callback-based direct commands or omitted `click_limit`. The next exact action is real-user/canary validation of the updated QQ command panel and whitelist behavior before any main merge.

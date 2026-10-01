@@ -11,8 +11,8 @@
 - Use one managed group category-root panel because QQ group PanelItem has no nested submenu.
 - Selecting any non-empty category must return a clickable two-column QQ button card; this applies to 基础、群聊、记忆、活动、群规、AI管理、群操作、群主、开发者.
 - Large categories must paginate within QQ keyboard limits.
-- Keyboard child-command buttons must be reusable and must not use one-shot click limits.
-- Commands that need no additional data must execute immediately without being left in the input box.
+- Keyboard child-command buttons must be reusable; explicitly send a multi-click limit instead of relying on the QQ SDK default single-use limit.
+- Commands that need no additional data must be sent as real QQ messages immediately; ordinary direct commands must not depend on callback execution.
 - Commands that require parameters/targets/text must prefill the QQ message input and wait for user completion.
 - Keyboard buttons must reuse existing canonical ! commands and existing handlers.
 - QQ-rendered `/!面板 ...` is reserved for panel routing.
@@ -29,6 +29,10 @@
 - Public users should connect their own external AI/storage resources instead of relying on unrestricted shared credentials.
 - Public-user data and resources must remain principal/tenant isolated.
 - Preview/testing must not write to the production `kv_store` table.
+
+- Old-Bot-verified numeric identity mapping is the authoritative bridge for QQ Open permission/whitelist reuse; OpenIDs themselves are never treated as QQ numbers.
+- Group whitelist enforcement must apply before official plugin dispatch as well as before core AI handling.
+- `!指令开 / !指令关` must gate both core Worker commands and official plugin commands, while preserving `!指令开` as the recovery path.
 
 ## V4 Preview Acceptance Gate
 
