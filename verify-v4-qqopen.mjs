@@ -245,6 +245,7 @@ for (const id of [
 ]) assert(allCategoryCommands.has(id), `Restored runtime command missing from group panel: ${id}`);
 assert(registry.get("appeal.status"), "C2C appeal status command must be registered");
 assert(registry.get("self.unmute"), "C2C self-unmute command must be registered");
+assert.equal(registry.get("dev.global_rate_limit")?.panel.command, "!全局限速", "long global rate-limit command must use the QQ-safe alias");
 
 const aiAdminKeyboard = buildGroupCategoryKeyboard(registry, "ai-admin", { page:1 });
 assert(aiAdminKeyboard.totalPages >= 2);
