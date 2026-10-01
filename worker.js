@@ -18,7 +18,7 @@ import { MAX_MUTE_SECONDS as MUTE_LOCK_MAX_SECONDS, canUnlockMute, clearMuteLock
 import { MASTER_RELATIONSHIP_DEFAULTS, MASTER_RELATIONSHIP_MAX_LEVEL, clearPartnerBinding, createMasterBindingRequest, createPartnerBindingRequest, decidePartnerBindingRequest, getBindingRequest, getPartnerBinding } from "./src/moderation/partner-bindings.js";
 import { applyConversationOutputGuards, auditIgnoredRobotMessage, botInteractionAllowKey, buildReplyPlan, cacheBotSenderClassification, clearRegisteredThinkingIndicators, detectLiteralPseudoElementLabels, eventHasBotMention, eventMentionedQqs, eventPlainText, eventSenderDisplayName, eventSenderRobotHint, extractFileDescriptors, extractForwardIds, extractMediaDescriptor, extractMessageText, extractOutboundMediaTypes, extractTextMentionIds, filterRobotMentionIds, formatForwardContext, getForwardMessageSnapshot, getQuotedMessage, getTaipeiTimeContext, isExplicitCurrentTimeQuestion, isExplicitRoleplayRequest, isGroupRobotInteractionAllowed, isIgnoredGroupRobotSender, isStandaloneCurrentTimeQuestion, looksLikeRobotDisplayName, normalizeFileDescriptor, parseDurationSeconds, prepareConversationHistory, purgeLegacyBotRepliesFromRecentLogs, qqaiTruthyRobotFlag, recordStructuredMessage, registerThinkingIndicator, removeTextMentionTokens, resolveOneBotMediaAsBase64, runOneBotGroupOperation, sanitizeAiReply, sendThinkingIndicator, thinkingIndicatorRegistryKey } from "./src/onebot/messages.js";
 import { classifyNaturalLanguageCommandIntent, normalizeNaturalLanguageCommandText, opsGetGroupMember, opsGetSettings, opsHandleMemberLeave } from "./src/operations/runtime.js";
-import { authDbDelStrict, authDbGetStrict, authDbPutStrict, clearPasswordLoginGuard, commandChangesWebSettings, constantTimeEqual, createPortalPasswordRecord, createPortalSession, decryptPortalAuthSecret, encryptPortalAuthSecret, deleteMemoryVector, generateSixDigitCode, getOneBotHub, getPortalSession, getPublicNebulaSeed, hashBackupCode, isMemoryBanned, isValidPortalPasswordRecord, jsonResponse, markGroupMemberLeft, needsPortalPasswordRehash, normalizePortalAdminUsername, notePasswordLoginFailure, portalAdminCredentialConfig, portalAdminUsernameIsClaimed, portalEnvironmentWithManagedDeveloperIds, portalTemporaryAdminCredentialConfig, portalSessionCookie, readCookie, readJson, readPasswordLoginGuard, readPortalAuthJson, readPortalManagedDeveloperIds, rehashPortalPasswordIfNeeded, sendOneBotAction, sendOneBotHttpAction, sendPortalVerificationMessage, upsertGroupMember, upsertMemoryVector, validatePortalPassword, verifyPortalAdminCredentials, verifyPortalTemporaryAdminCredentials, verifyPortalPassword, verifyPortalVerificationCode, verifyTotpCode, writeMemoryAudit, writePortalManagedDeveloperIds, writeSystemError } from "./src/portal/auth.js";
+import { authDbDelStrict, authDbGetStrict, authDbPutStrict, clearPasswordLoginGuard, commandChangesWebSettings, constantTimeEqual, createPortalPasswordRecord, createPortalSession, decryptPortalAuthSecret, encryptPortalAuthSecret, deleteMemoryVector, generateSixDigitCode, getOneBotHub, getPortalSession, getPublicNebulaSeed, hashBackupCode, isMemoryBanned, isValidPortalPasswordRecord, jsonResponse, markGroupMemberLeft, needsPortalPasswordRehash, normalizePortalAdminUsername, notePasswordLoginFailure, portalAdminCredentialConfig, portalAdminUsernameIsClaimed, portalEnvironmentWithManagedDeveloperIds, portalTemporaryAdminCredentialConfig, portalSessionCookie, readCookie, readJson, readPasswordLoginGuard, readPortalAuthJson, readPortalManagedDeveloperIds, rehashPortalPasswordIfNeeded, sha256Hex, sendOneBotAction, sendOneBotHttpAction, sendPortalVerificationMessage, upsertGroupMember, upsertMemoryVector, validatePortalPassword, verifyPortalAdminCredentials, verifyPortalTemporaryAdminCredentials, verifyPortalPassword, verifyPortalVerificationCode, verifyTotpCode, writeMemoryAudit, writePortalManagedDeveloperIds, writeSystemError } from "./src/portal/auth.js";
 import { getPortalHomePage, handlePortalApi } from "./src/portal/runtime.js";
 import { handlePortalDiagnosticsApi, injectPortalDiagnosticsClient } from "./src/portal/diagnostics.js";
 import { handlePortalMaintenanceApi, handlePortalMaintenanceGate } from "./src/portal/maintenance.js";
@@ -56,6 +56,43 @@ import { oneBotReadOnlyMode } from "./src/onebot/read-only.js";
 
 
 const QQAI_GROUP_PANEL_REGISTRY = createInitialCommandRegistry();
+
+async function createV4PreviewResumeToken(env, session, previewExpiresAt, persistent = true) {
+  const resumeToken = crypto.randomUUID() + crypto.randomUUID();
+  const resumeKey = `portal_preview_resume:${await sha256Hex(resumeToken)}`;
+  const expiresAt = Math.min(
+    Number(session?.absoluteExpiresAt || 0) || Number(previewExpiresAt || 0),
+    Number(previewExpiresAt || session?.absoluteExpiresAt || 0)
+  );
+  await authDbPutStrict(env, resumeKey, JSON.stringify({
+    sessionToken: String(session?.token || ""),
+    persistent: persistent === true,
+    expiresAt,
+    createdAt: Date.now()
+  }));
+  return { resumeToken, expiresAt };
+}
+
+async function restoreV4PreviewSession(env, resumeToken, previewExpiresAt) {
+  const token = String(resumeToken || "").trim();
+  if (token.length < 40 || token.length > 200) return null;
+  const resumeKey = `portal_preview_resume:${await sha256Hex(token)}`;
+  const record = await readPortalAuthJson(env, resumeKey, null);
+  if (!record) return null;
+  const expiresAt = Math.min(Number(record.expiresAt || 0), Number(previewExpiresAt || 0));
+  if (!Number.isFinite(expiresAt) || Date.now() >= expiresAt) {
+    await authDbDelStrict(env, resumeKey).catch(() => {});
+    return null;
+  }
+  const session = await getPortalSession(env, String(record.sessionToken || ""), { touch: true }).catch(() => null);
+  if (!session || session.systemAdmin !== true || session.authMethod !== "v4_preview_test") {
+    await authDbDelStrict(env, resumeKey).catch(() => {});
+    return null;
+  }
+  const next = await createV4PreviewResumeToken(env, session, expiresAt, record.persistent === true);
+  await authDbDelStrict(env, resumeKey).catch(() => {});
+  return { session, resumeToken: next.resumeToken, expiresAt: next.expiresAt, persistent: record.persistent === true };
+}
 
 const POLITICAL_TOPIC_PATTERN = /(?:政治|政党|政黨|选举|選舉|总统|總統|主席|国会|國會|立法院|立法委员|立法委員|立委|议员|議員|首相|总理|總理|内阁|內閣|政府|政权|政權|执政|執政|在野|政治人物|政治制度|公共政策|外交|制裁|领土争议|領土爭議|两岸|兩岸|统一|統一|台独|台獨|罢免|罷免|公投|意识形态|意識形態|民进党|民進黨|国民党|國民黨|共产党|共產黨|民主党|民主黨|共和党|共和黨|\b(?:politics|political|election|government|parliament|congress|president|prime minister)\b)/i;
 
@@ -586,17 +623,54 @@ const QQAIWorker = {
           action: "v4_preview_test_login",
           expiresAt
         }).catch(() => {});
+        const resume = await createV4PreviewResumeToken(env, session, expiresAt, session.persistent === true);
         return jsonResponse({
           ok: true,
           systemAdmin: true,
           preview: true,
           expiresAt,
+          resumeToken: resume.resumeToken,
+          resumeExpiresAt: resume.expiresAt,
           message: "V4 Preview 最高權限測試登入成功。"
         }, 200, { "Set-Cookie": portalSessionCookie(session.token, session.persistent
           ? Math.max(1, Math.floor((Math.min(Number(session.absoluteExpiresAt || 0), expiresAt) - Date.now()) / 1000))
           : null) });
       } catch {
         return jsonResponse({ ok: false, code: "PREVIEW_TEST_LOGIN_STORAGE_UNAVAILABLE", message: "Preview 測試工作階段暫時無法建立，請稍後再試。" }, 503);
+      }
+    }
+
+    if (request.method === 'POST' && url.pathname === '/api/auth/preview-resume') {
+      const previewHost = "feature-v4-public-bot-qqai.ray20123315.workers.dev";
+      const requestHost = String(url.hostname || "").toLowerCase();
+      const enabled = String(env.V4_PREVIEW_TEST_LOGIN || "").trim().toLowerCase() === "true";
+      const previewExpiresAt = Date.parse(String(env.V4_PREVIEW_TEST_EXPIRES_AT || "").trim());
+      if (!enabled || requestHost !== previewHost || String(env.QQ_OPEN_ENABLED || "").trim().toLowerCase() !== "false") {
+        return jsonResponse({ ok: false, code: "PREVIEW_RESUME_DISABLED", message: "Preview 工作階段恢復不可用。" }, 404);
+      }
+      if (!Number.isFinite(previewExpiresAt) || Date.now() >= previewExpiresAt) {
+        return jsonResponse({ ok: false, code: "PREVIEW_TEST_LOGIN_EXPIRED", message: "V4 Preview 測試登入已到期。" }, 403);
+      }
+      let payload = {};
+      try { payload = await request.json(); } catch (e) {}
+      const rate = await checkPortalAuthRateLimit(env, "preview-resume", previewHost, request);
+      if (!rate.ok) {
+        return jsonResponse({ ok: false, code: rate.unavailable ? "AUTH_RATE_LIMIT_UNAVAILABLE" : "AUTH_RATE_LIMITED", message: rate.unavailable ? "Preview 工作階段恢復暫時不可用。" : "工作階段恢復過於頻繁，請稍後再試。" }, rate.unavailable ? 503 : 429);
+      }
+      try {
+        const restored = await restoreV4PreviewSession(env, payload.resumeToken, previewExpiresAt);
+        if (!restored) return jsonResponse({ ok: false, code: "PREVIEW_RESUME_INVALID", message: "Preview 工作階段已失效，請重新登入。" }, 401);
+        return jsonResponse({
+          ok: true,
+          preview: true,
+          resumeToken: restored.resumeToken,
+          resumeExpiresAt: restored.expiresAt,
+          message: "Preview 工作階段已恢復。"
+        }, 200, { "Set-Cookie": portalSessionCookie(restored.session.token, restored.persistent
+          ? Math.max(1, Math.floor((restored.expiresAt - Date.now()) / 1000))
+          : null) });
+      } catch {
+        return jsonResponse({ ok: false, code: "PREVIEW_RESUME_STORAGE_UNAVAILABLE", message: "Preview 工作階段暫時無法恢復。" }, 503);
       }
     }
 
@@ -759,8 +833,15 @@ const QQAIWorker = {
     }
 
     if (request.method === 'POST' && url.pathname === '/api/auth/logout') {
+      let payload = {};
+      try { payload = await request.json(); } catch (e) {}
       const token = readCookie(request, "qqai_session");
       if (token) await authDbDelStrict(env, `portal_session:${token}`).catch(() => {});
+      const previewResumeToken = String(payload.previewResumeToken || "").trim();
+      if (previewResumeToken) {
+        const previewResumeKey = `portal_preview_resume:${await sha256Hex(previewResumeToken)}`;
+        await authDbDelStrict(env, previewResumeKey).catch(() => {});
+      }
       return jsonResponse({ ok: true, message: "已退出登录。" }, 200, { "Set-Cookie": portalSessionCookie("", 0) });
     }
 
