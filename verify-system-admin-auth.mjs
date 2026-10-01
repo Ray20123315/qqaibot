@@ -1,8 +1,12 @@
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import { webcrypto } from "node:crypto";
+import { DEFAULTS } from "./src/config/runtime.js";
 import {
   createPortalSession,
+  createPortalRememberToken,
+  restorePortalRememberToken,
+  revokePortalRememberToken,
   bytesToBase64Url,
   createPortalPasswordRecord,
   derivePortalPassword,
@@ -99,18 +103,29 @@ assert.equal(session.systemAdmin, true);
 assert.equal(session.qq, "system-admin");
 assert.equal(session.role, "developer");
 assert.equal(session.persistent, true);
-assert.equal(session.idleTtlMs, 30 * 60 * 1000);
-assert.equal(session.absoluteTtlMs, 8 * 60 * 60 * 1000);
+assert.equal(session.idleTtlMs, DEFAULTS.portalSessionTtlMs);
+assert.equal(session.absoluteTtlMs, DEFAULTS.portalSessionAbsoluteTtlMs);
 assert.equal(JSON.stringify(session).includes(password), false);
 const restored = await getPortalSession(env, session.token, { touch: false });
 assert.equal(restored?.systemAdmin, true);
 const privilegedQqSession = await createPortalSession(env, { qq: "11111", persistent: true });
 assert.equal(privilegedQqSession.role, "developer");
 assert.equal(privilegedQqSession.persistent, true, "remember-login must persist the cookie even for developer sessions");
-assert.equal(privilegedQqSession.idleTtlMs, 30 * 60 * 1000);
-assert.equal(privilegedQqSession.absoluteTtlMs, 8 * 60 * 60 * 1000);
+assert.equal(privilegedQqSession.idleTtlMs, DEFAULTS.portalSessionTtlMs);
+assert.equal(privilegedQqSession.absoluteTtlMs, DEFAULTS.portalSessionAbsoluteTtlMs);
 const privilegedTemporary = await createPortalSession(env, { qq: "11111", persistent: false });
 assert.equal(privilegedTemporary.persistent, false, "unchecked remember-login must remain a browser-session cookie");
+assert.equal(privilegedTemporary.idleTtlMs, 30 * 60 * 1000);
+assert.equal(privilegedTemporary.absoluteTtlMs, 8 * 60 * 60 * 1000);
+
+const remember = await createPortalRememberToken(env, privilegedQqSession);
+assert.ok(String(remember?.token || "").length >= 40);
+const restoredRemember = await restorePortalRememberToken(env, remember.token);
+assert.equal(restoredRemember?.session?.qq, "11111");
+assert.notEqual(restoredRemember?.rememberToken, remember.token, "remember token must rotate after restore");
+assert.equal(await restorePortalRememberToken(env, remember.token), null, "used remember token must not be reusable");
+assert.equal(await revokePortalRememberToken(env, restoredRemember.rememberToken), true);
+assert.equal(await restorePortalRememberToken(env, restoredRemember.rememberToken), null, "revoked remember token must stay invalid");
 
 const { default: worker } = await import("./worker.js");
 const portalEnv = {
@@ -233,13 +248,29 @@ const previewUnsafe = await worker.fetch(previewLoginRequest, previewUnsafeEnv, 
 assert.equal(previewUnsafe.status, 403);
 assert.equal((await previewUnsafe.json()).code, "PREVIEW_TEST_LOGIN_UNSAFE");
 
-const loginResponse = await worker.fetch(postJson("/api/auth/login-password", { username: "ops.root", password }), portalEnv, {});
+const loginResponse = await worker.fetch(postJson("/api/auth/login-password", { username: "ops.root", password, remember: true }), portalEnv, {});
 const login = await loginResponse.json();
 assert.equal(loginResponse.status, 200);
 assert.equal(login.systemAdmin, true);
+assert.ok(String(login.rememberToken || "").length >= 40, "remembered admin login must issue a remember token");
+assert.ok(Number(login.rememberExpiresAt || 0) > Date.now());
 assert.match(loginResponse.headers.get("Set-Cookie") || "", /HttpOnly/);
 assert.match(loginResponse.headers.get("Set-Cookie") || "", /Max-Age=/, "system admin remember-login must persist the cookie");
-const adminCookie = loginResponse.headers.get("Set-Cookie").split(";")[0];
+
+const restoreResponse = await worker.fetch(postJson("/api/auth/restore-session", { rememberToken: login.rememberToken }), portalEnv, {});
+const restoreBody = await restoreResponse.json();
+assert.equal(restoreResponse.status, 200, JSON.stringify(restoreBody));
+assert.equal(restoreBody.restored, true);
+assert.ok(String(restoreBody.rememberToken || "").length >= 40);
+assert.notEqual(restoreBody.rememberToken, login.rememberToken, "restore-session must rotate remember token");
+assert.match(restoreResponse.headers.get("Set-Cookie") || "", /HttpOnly/);
+assert.match(restoreResponse.headers.get("Set-Cookie") || "", /Max-Age=/);
+const adminCookie = restoreResponse.headers.get("Set-Cookie").split(";")[0];
+const restoredAdminMe = await worker.fetch(new Request("https://qqai.test/api/portal/me", { headers: { Cookie: adminCookie } }), portalEnv, {});
+assert.equal(restoredAdminMe.status, 200, "restored remembered session must authenticate portal me");
+assert.equal((await restoredAdminMe.json()).session.systemAdmin, true);
+const reusedRememberResponse = await worker.fetch(postJson("/api/auth/restore-session", { rememberToken: login.rememberToken }), portalEnv, {});
+assert.equal(reusedRememberResponse.status, 401, "rotated remember token must not be reusable");
 assert.equal(portalEnv.DB.values.get("portal_auth_password:55555"), "existing-user-password-record", "admin sign-in must not replace another account's password data");
 assert.equal([...portalEnv.DB.values.keys()].some(key => /PORTAL_ADMIN_PASSWORD|Ops\.Root/.test(key)), false, "admin credentials must not be stored in D1");
 
