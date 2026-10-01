@@ -3,11 +3,14 @@ import fs from "node:fs";
 
 const worker = fs.readFileSync("worker.js", "utf8");
 const help = fs.readFileSync("src/help/commands.js", "utf8");
+const catalog = fs.readFileSync("src/v4/commands/catalog.js", "utf8");
 const readme = fs.readFileSync("README.md", "utf8");
 const config = fs.readFileSync("src/config/runtime.js", "utf8");
 
 assert.doesNotMatch(worker, /handleBilibiliWebhook|\/api\/integrations\/bilibili\/webhook\//);
 assert.doesNotMatch(worker, /(?:会议纪要|會議紀要|吃瓜|好感度|affinity|狼人杀|狼人殺)/i);
+assert.doesNotMatch(help, /狼人杀|狼人殺/i);
+assert.doesNotMatch(catalog, /狼人杀|狼人殺/i);
 assert.doesNotMatch(worker, /语音智能对答|語音智能對答/);
 assert.match(worker, /standalone Gemini Live page was removed/);
 assert.match(worker, /\[\'\/live\'\]\.includes\(url\.pathname\)[\s\S]{0,180}status:\s*404/);
