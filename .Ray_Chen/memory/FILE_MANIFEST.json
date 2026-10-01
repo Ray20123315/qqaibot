@@ -1,13 +1,13 @@
 {
   "schema_version": 1,
-  "memory_version": "v0.0.50",
+  "memory_version": "v0.0.51",
   "task_id": "qqaibot-20261001-panel-complete-real-message-send",
-  "goal_revision": 2,
-  "transaction": "native_group_real_commands_final_20261001",
+  "goal_revision": 3,
+  "transaction": "category_panel_retire_relationship_checkpoint_20261001",
   "repository": "Ray20123315/qqaibot",
   "production_branch": "main",
   "development_branch": "v4-qqopen-native",
-  "product_before_revision": "6cb891571bdb2744b13bd11e3731c2a267fdf1ed",
+  "product_before_revision": "9f78fc66547d278a72858bbd25a22f00dda7ba2a",
   "product_after_revision": "9f78fc66547d278a72858bbd25a22f00dda7ba2a",
   "verification": {
     "feature_product_ci_run": 36366445081,
@@ -24,10 +24,10 @@
     "discovery_sync_after_fix": "pending_authenticated_status",
     "live_mapping_after_fix": "pending_user_test",
     "command_fallback_implementation": "verified",
-    "development_ci": "success",
-    "main_update": "success",
+    "development_ci": "pending",
+    "main_update": "pending",
     "development_ci_run": 36871773623,
-    "main_ci": "success",
+    "main_ci": "pending",
     "production_commit": "9f78fc66547d278a72858bbd25a22f00dda7ba2a",
     "main_readback": "success",
     "command_catalog_entries": 77,
@@ -58,7 +58,7 @@
     "hotfix_ci": "success",
     "final_main_ci_run": 36447663272,
     "final_main_ci": "success",
-    "production_deployment": "success",
+    "production_deployment": "pending",
     "production_version_number": 2129,
     "production_preview_table_override": "absent",
     "live_health_http": 200,
@@ -137,7 +137,7 @@
     "all_category_pages_covered": "verified",
     "all_group_panel_commands_covered": "verified",
     "live_final_keyboard_smoke": "pending_user",
-    "current_repair": "completed_native_group_real_commands",
+    "current_repair": "category_launcher_and_relationship_retirement_in_progress",
     "direct_callback_live_semantics": "superseded_rejected_by_user",
     "target_direct_button_semantics": "type2_enter_true_real_message",
     "registry_runtime_reconciliation": "verified",
@@ -148,7 +148,10 @@
     "native_group_root_only_live_evidence": "confirmed",
     "native_group_real_commands": "verified",
     "live_native_group_panel": "pending_user_refresh",
-    "v0050_package": "pending_post_commit_workflow"
+    "v0050_package": "pending_post_commit_workflow",
+    "native_panel_strategy": "category_root_plus_paginated_keyboard",
+    "relationship_public_feature": "retiring",
+    "werewolf_runtime": "already_absent"
   },
   "changes": [
     {
@@ -2013,10 +2016,21 @@
       "after_revision": "v0.0.50",
       "verification": "package workflow + archive extraction + SHA-256 required after commit",
       "changed_at": "2026-10-01T22:02:00+08:00"
+    },
+    {
+      "location_type": "github",
+      "provider": "GitHub",
+      "resource_id_or_path": ".Ray_Chen/memory/*",
+      "action": "checkpoint_planned",
+      "branch_or_container": "v4-qqopen-native",
+      "before_revision": "v0.0.50",
+      "after_revision": "v0.0.51",
+      "verification": "Goal revision 3 recorded before product patch",
+      "changed_at": "2026-10-01T22:12:00+08:00"
     }
   ],
   "internal_memory_transaction": {
-    "action": "finalize native group real-command discovery repair; bump memory to v0.0.50",
-    "note": "Only live QQ UI refresh remains user-verifiable."
+    "action": "start category-launcher + relationship-retirement repair; bump memory to v0.0.51",
+    "note": "No product files changed in this checkpoint."
   }
 }

@@ -1,35 +1,33 @@
 # Ray_Chen Memory Entry
 
-- memory_version: v0.0.50
+- memory_version: v0.0.51
 - project: QQAIBOT
 - repository: Ray20123315/QQAIBOT
 - canonical_branch: main
+- development_branch: v4-qqopen-native
 - task_id: qqaibot-20261001-panel-complete-real-message-send
-- task_status: completed
-- goal_revision: 2
-- base_revision: 5b7f3c5e1c75d98150d794b2d2c689c77a145bfc
+- task_status: active
+- goal_revision: 3
+- base_revision: 8beea65b514484e6ed5ec352640492693b4d4901
 - verified_product_revision: 9f78fc66547d278a72858bbd25a22f00dda7ba2a
-- updated_at: 2026-10-01T22:02:00+08:00
+- updated_at: 2026-10-01T22:12:00+08:00
 
-## Completed Goal
+## Current Goal
 
-QQ native group discovery now exposes the real canonical commands directly instead of only category placeholders.
+Return QQ native group discovery to category-entry mode because the native panel has hard visibility/item limits, while keeping the custom inline-keyboard category panels as the complete command surface.
 
-- Global group discovery uses categorized panels generated from the command registry.
-- Every enabled group command is represented by a native QQ PanelItem.
-- Panels are split at 20 items and the total panel count stays within the implementation limit.
-- Native discovery no longer substitutes `!面板 <分类>` entries for the actual commands.
-- Manual `!面板 <分类>` still returns the existing inline keyboard as an additional/fallback entry point.
-- Direct inline-keyboard child commands still use normal QQ message send semantics from goal revision 1.
+At the same time remove user-rejected features from the public bot surface:
+- master/partner relationship system (主人／对象);
+- werewolf game (狼人杀／狼人殺) must remain absent.
 
-## Verified Evidence
+## Required Architecture
 
-- development product commit: `9f78fc66547d278a72858bbd25a22f00dda7ba2a`
-- development CI: `36871773623` — success
-- main CI: `36872340755` — success
-- production Cloudflare Connected Build: `521ccfd8-bc55-4aff-9fdb-f0515f5ebcea` — success
-- production branch/commit: `main` / `9f78fc66547d278a72858bbd25a22f00dda7ba2a`
+- QQ native group panel: category entries only.
+- Sending a category entry returns the custom two-column paginated keyboard containing all commands in that category.
+- Direct child commands keep normal QQ send semantics; parameterized child commands keep editable prefill.
+- Relationship commands/category/handlers/Portal management are removed.
+- Legacy relationship data cleanup and old relationship mute-lock compatibility may remain only to safely retire historical state.
 
-## Remaining User-Side Check
+## next_exact_action
 
-PENDING_USER: reopen/refresh the QQ native command panel and confirm concrete commands such as `!help`, `!status`, `!详细资料`, `!主人功能`, `!戳戳`, `!群公告`, and `!全局限速` are visible instead of only the category placeholder rows.
+Patch discovery, command registry/catalog/group panel, worker relationship handlers, Portal relationship surfaces, and regression tests on v4-qqopen-native.

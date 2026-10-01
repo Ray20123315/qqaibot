@@ -3,29 +3,37 @@
 ## Current Repair
 
 Task: qqaibot-20261001-panel-complete-real-message-send
-Goal revision: 2
-Product commit: 9f78fc66547d278a72858bbd25a22f00dda7ba2a
+Goal revision: 3
+Base main: 8beea65b514484e6ed5ec352640492693b4d4901
 
-## Native Group Discovery
+## Native Panel Requirements
 
-- categorized real-command group panels: VERIFIED
-- <=20 items per panel: VERIFIED
-- total discovery panels <=20: VERIFIED
-- native group item union equals all enabled group commands: VERIFIED
-- no `!面板 <分类>` placeholders in native group panels: VERIFIED
-- manual category inline keyboards preserved: VERIFIED
-- developer C2C discovery preserved: VERIFIED
+- exactly one managed global group category-root panel;
+- category entries cover every retained non-empty command category;
+- category command sends route to the existing paginated inline keyboard;
+- inline keyboard covers every enabled retained group command;
+- direct child button: type=2 + enter=true;
+- parameterized child button: type=2 + enter=false;
+- reusable buttons omit click_limit.
 
-## Evidence
+## Removed Feature Requirements
 
-- development GitHub Actions: `36871773623` — success
-- main GitHub Actions: `36872340755` — success
-- Cloudflare Connected Build: `521ccfd8-bc55-4aff-9fdb-f0515f5ebcea` — success
-- deployed commit: `9f78fc66547d278a72858bbd25a22f00dda7ba2a`
+- no relationship category in GROUP_PANEL_CATEGORY_META;
+- no relationship commands in INITIAL_COMMANDS;
+- no executable 主人/对象 relationship command handler in worker.js;
+- no Portal relationship policy GET/POST endpoints;
+- no Portal relationship policy/client management controls;
+- no 狼人杀/狼人殺 command/runtime/help/catalog surface.
 
-## User Smoke
+## Compatibility Allowed
 
-1. Reopen/refresh the QQ native bot command list.
-2. Confirm concrete commands appear, not only `/!面板 群聊`, `/!面板 关系`, etc.
-3. Representative expected commands: `!help`, `!status`, `!详细资料`, `!主人功能`, `!戳戳`, `!群公告`, `!全局限速`.
-4. Manual `!面板 群聊` may still be sent explicitly and should return the inline-keyboard view.
+- old partner_binding rows may be deleted on member leave;
+- old master/partner mute-lock sources may remain recognized until expiration/unlock.
+
+## Gates
+
+- product patch: PENDING
+- development CI: PENDING
+- main CI: PENDING
+- Cloudflare Connected Build: PENDING
+- live QQ smoke: PENDING_USER

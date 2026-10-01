@@ -1,39 +1,34 @@
 # CURRENT_STATE
 
-## Production
+## Production Before Goal Revision 3
 
-- canonical branch: `main`
-- verified product commit: `9f78fc66547d278a72858bbd25a22f00dda7ba2a`
-- development CI: `36871773623` — success
-- main CI: `36872340755` — success
-- Cloudflare Worker: `qqai`
-- production Connected Build: `521ccfd8-bc55-4aff-9fdb-f0515f5ebcea` — success
-- production deployed commit: `9f78fc66547d278a72858bbd25a22f00dda7ba2a`
+- main head: `8beea65b514484e6ed5ec352640492693b4d4901`
+- deployed product revision: `9f78fc66547d278a72858bbd25a22f00dda7ba2a`
+- previous main CI: `36872340755` — success
+- previous production Connected Build: `521ccfd8-bc55-4aff-9fdb-f0515f5ebcea` — success
 
-## Native Group Discovery
+## Live User Evidence
 
-Global group discovery now:
-- uses `registry.buildCategorizedPanels("group", ...)`;
-- publishes actual canonical command PanelItems;
-- partitions commands by discovery category;
-- caps each panel at 20 items;
-- keeps the combined global-group + developer-C2C panel set within 20;
-- omits category placeholder commands such as `!面板 基础` from native group discovery.
+The native QQ panel still demonstrates why publishing every concrete command directly is the wrong UX: the client only shows a constrained subset. The intended solution is category-entry discovery plus the bot's own paginated inline keyboard.
 
-Regression requires the native group item union to equal every enabled group command in the registry and explicitly checks representative commands including `!help`, `!status`, `!详细资料`, `!主人功能`, `!戳戳`, `!群公告`, and `!全局限速`.
+## Confirmed Unwanted Feature State
 
-## Preserved Behavior
+- 狼人杀/狼人殺 is already absent from worker runtime and has an existing transition-cleanup assertion.
+- 主人/对象 relationship functionality is still active in worker handlers and still has Portal backend/client surfaces.
+- Relationship command registrations and a relationship panel category are still present.
 
-- Manual `!面板 <分类>` still produces the inline-keyboard category view.
-- Direct child buttons still send normal QQ command messages.
-- Parameterized child buttons still prefill without auto-send.
-- QQ Open/AIBot remains primary; OneBot remains controlled fallback.
-- Runtime authorization remains server-side authoritative.
+## Target State
+
+- restore one managed group category-root native panel;
+- remove relationship category/commands/handlers/Portal controls;
+- keep old relationship data cleanup and old lock compatibility only;
+- strengthen regressions so removed features do not return.
 
 ## Verification State
 
-- product patch: VERIFIED
-- development CI: VERIFIED
-- main CI: VERIFIED
-- production Connected Build: VERIFIED
-- live QQ native-panel refresh: PENDING_USER
+- product patch: PLANNED
+- development CI: PENDING
+- main update: PENDING
+- main CI: PENDING
+- production Connected Build: PENDING
+- live QQ smoke: PENDING_USER

@@ -51,3 +51,15 @@ status: accepted
 date: 2026-10-01
 Decision: QQ native group discovery uses categorized real-command panels generated from the canonical registry. The manual `!面板 <分类>` inline keyboard remains a supplemental/fallback UI, but native discovery must not be reduced to category placeholder commands.
 Reason: live QQ client evidence showed that a root-only panel made the concrete commands appear missing.
+
+
+## D-082 Native group discovery is a category launcher
+status: accepted
+date: 2026-10-01
+supersedes: D-081
+Decision: QQ native group discovery uses a compact category-root panel. Sending a category command returns the bot-managed paginated inline keyboard for that category. This avoids native QQ panel visibility/item limits while preserving complete command access.
+
+## D-083 Relationship feature retired
+status: accepted
+date: 2026-10-01
+Decision: master/partner relationship commands, handlers, categories and Portal management surfaces are removed. Legacy stored bindings and legacy relationship mute-lock types may remain only for safe cleanup/expiry compatibility and must not provide a path to create or manage new relationships.

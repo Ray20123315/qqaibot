@@ -8,7 +8,7 @@
 - Group discovery must expose ordinary functions as well as management/developer functions.
 - Developer is the top cumulative permission level for commands available in the current scope.
 - QQ group discovery must work in the actual client, not merely create API resources successfully.
-- QQ native group discovery must expose the concrete commands directly across categorized panels; category placeholder commands must not replace the real commands.
+- QQ native group discovery must use compact category entries; each category must open the bot-managed paginated inline keyboard so QQ native item limits cannot hide commands.
 - Selecting any non-empty category must return a clickable two-column QQ button card; this applies to 基础、群聊、关系、互动、记忆、活动、群规、AI管理、群操作、群主、开发者.
 - Large categories must paginate within QQ keyboard limits.
 - Keyboard child-command buttons must be reusable and must not use one-shot click limits.
@@ -23,6 +23,9 @@
 - Never retry ambiguous mutating timeout/5xx results across transports.
 - Keep `ONEBOT_READ_ONLY` authoritative.
 - Secrets must not be stored in Git or Ray_Chen memory.
+
+- Remove relationship/master/partner functionality from the public command and Portal surfaces.
+- Werewolf commands/features must remain removed.
 
 ## Public-Service Requirements
 
