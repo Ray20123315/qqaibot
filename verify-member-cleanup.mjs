@@ -103,6 +103,10 @@ assert(cleanupModule.includes('get_group_member_info') && cleanupModule.includes
 assert(cleanupModule.includes('UPDATE kv_store SET value = ? WHERE key = ? AND value = ?'), 'Each preview or continuation token must be claimed atomically before use');
 assert(cleanupModule.includes('await dbDel(env, key)'), 'Claimed cleanup tokens must be removed before execution');
 assert(cleanupModule.includes('liveHonors.get(userId)'), 'Execution must refresh group honors before the final cleanup decision');
+for (const removed of ['listGroupBindings','protectRelationships','cleanupProtectRelationships','hasRelationship','关系成员默认保留']) {
+  assert(!cleanupModule.includes(removed), 'Cleanup must stay independent of retired relationships: '+removed);
+}
+assert(!html.includes('cleanupProtectRelationships'), 'Cleanup UI must not expose retired relationship protection');
 const cleanupSource = fs.readFileSync('src/portal/member-cleanup.js', 'utf8');
 assert(!cleanupSource.includes('EXECUTE_BATCH_LIMIT'), 'Legacy 20-member hard limit must be removed');
 assert(cleanupSource.includes('continuationToken') && cleanupSource.includes('while(token)'), 'Unlimited cleanup must continue automatically across internal chunks');
