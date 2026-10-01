@@ -295,15 +295,24 @@ assert.notEqual(rotatedRememberCookie, originalRememberCookie, "server-side /me 
 
 const recoveredAdminToken = decodeURIComponent(adminCookie.split("=")[1] || "");
 portalEnv.DB.values.delete(`portal_session:${recoveredAdminToken}`);
-const groupsAfterSessionLoss = await worker.fetch(new Request("https://qqai.test/api/portal/groups", {
+const groupsBeforeRecovery = await worker.fetch(new Request("https://qqai.test/api/portal/groups", {
   headers: { Cookie: [adminCookie, rotatedRememberCookie].join("; ") }
 }), portalEnv, {});
-assert.equal(groupsAfterSessionLoss.status, 200, "ordinary Portal APIs must restore from remember instead of racing the UI back to login");
-assert.deepEqual((await groupsAfterSessionLoss.clone().json()).groups.map(group => group.groupId), ["12345"]);
-const raceRecoveredSessionCookie = cookiePair(groupsAfterSessionLoss, "qqai_session");
-const raceRotatedRememberCookie = cookiePair(groupsAfterSessionLoss, "qqai_remember");
+assert.equal(groupsBeforeRecovery.status, 401, "non-/me Portal APIs must not consume/rotate the remember credential on their own");
+const meAfterSessionLoss = await worker.fetch(new Request("https://qqai.test/api/portal/me", {
+  headers: { Cookie: [adminCookie, rotatedRememberCookie].join("; ") }
+}), portalEnv, {});
+assert.equal(meAfterSessionLoss.status, 200, "shared /me recovery must rebuild the session after the old server session disappears");
+assert.equal((await meAfterSessionLoss.clone().json()).session.systemAdmin, true);
+const raceRecoveredSessionCookie = cookiePair(meAfterSessionLoss, "qqai_session");
+const raceRotatedRememberCookie = cookiePair(meAfterSessionLoss, "qqai_remember");
 assert.match(raceRecoveredSessionCookie, /^qqai_session=/);
 assert.match(raceRotatedRememberCookie, /^qqai_remember=/);
+const groupsAfterRecovery = await worker.fetch(new Request("https://qqai.test/api/portal/groups", {
+  headers: { Cookie: [raceRecoveredSessionCookie, raceRotatedRememberCookie].join("; ") }
+}), portalEnv, {});
+assert.equal(groupsAfterRecovery.status, 200, "original Portal request must succeed after the shared /me recovery completes");
+assert.deepEqual((await groupsAfterRecovery.json()).groups.map(group => group.groupId), ["12345"]);
 adminCookie = raceRecoveredSessionCookie;
 rotatedRememberCookie = raceRotatedRememberCookie;
 
