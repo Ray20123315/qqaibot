@@ -177,6 +177,8 @@ const previewLogin = await previewLoginResponse.json();
 assert.equal(previewLoginResponse.status, 200, JSON.stringify(previewLogin));
 assert.equal(previewLogin.systemAdmin, true);
 assert.equal(previewLogin.preview, true);
+assert.ok(String(previewLogin.resumeToken || "").length >= 40, "Preview login must issue a separate resume token");
+assert.ok(Number(previewLogin.resumeExpiresAt) > Date.now());
 assert.match(previewLoginResponse.headers.get("Set-Cookie") || "", /HttpOnly/);
 assert.match(previewLoginResponse.headers.get("Set-Cookie") || "", /Max-Age=/, "Preview remember-login must create a persistent cookie");
 const previewToken = decodeURIComponent((previewLoginResponse.headers.get("Set-Cookie") || "").split(";")[0].split("=")[1] || "");
@@ -184,6 +186,39 @@ const previewSession = await getPortalSession(previewLoginEnv, previewToken, { t
 assert.equal(previewSession?.systemAdmin, true);
 assert.equal(previewSession?.role, "developer");
 assert.equal(previewSession?.authMethod, "v4_preview_test");
+
+const previewResumeRequest = new Request("https://feature-v4-public-bot-qqai.ray20123315.workers.dev/api/auth/preview-resume", {
+  method: "POST",
+  headers: { "Content-Type": "application/json", Origin: "https://feature-v4-public-bot-qqai.ray20123315.workers.dev" },
+  body: JSON.stringify({ resumeToken: previewLogin.resumeToken })
+});
+const previewResumeResponse = await worker.fetch(previewResumeRequest, previewLoginEnv, {});
+const previewResume = await previewResumeResponse.json();
+assert.equal(previewResumeResponse.status, 200, JSON.stringify(previewResume));
+assert.equal(previewResume.preview, true);
+assert.ok(String(previewResume.resumeToken || "").length >= 40);
+assert.notEqual(previewResume.resumeToken, previewLogin.resumeToken, "Preview resume token must rotate after use");
+assert.match(previewResumeResponse.headers.get("Set-Cookie") || "", /HttpOnly/);
+const resumedCookie = previewResumeResponse.headers.get("Set-Cookie").split(";")[0];
+const resumedMeResponse = await worker.fetch(new Request("https://feature-v4-public-bot-qqai.ray20123315.workers.dev/api/portal/me", { headers: { Cookie: resumedCookie } }), previewLoginEnv, {});
+assert.equal(resumedMeResponse.status, 200, "Restored Preview session cookie must authenticate /api/portal/me");
+assert.equal((await resumedMeResponse.json()).session.systemAdmin, true);
+
+const reusedPreviewResume = await worker.fetch(previewResumeRequest, previewLoginEnv, {});
+assert.equal(reusedPreviewResume.status, 401, "Rotated Preview resume token must not be reusable");
+
+const previewLogout = await worker.fetch(new Request("https://feature-v4-public-bot-qqai.ray20123315.workers.dev/api/auth/logout", {
+  method: "POST",
+  headers: { "Content-Type": "application/json", Origin: "https://feature-v4-public-bot-qqai.ray20123315.workers.dev", Cookie: resumedCookie },
+  body: JSON.stringify({ previewResumeToken: previewResume.resumeToken })
+}), previewLoginEnv, {});
+assert.equal(previewLogout.status, 200);
+const revokedPreviewResume = await worker.fetch(new Request("https://feature-v4-public-bot-qqai.ray20123315.workers.dev/api/auth/preview-resume", {
+  method: "POST",
+  headers: { "Content-Type": "application/json", Origin: "https://feature-v4-public-bot-qqai.ray20123315.workers.dev" },
+  body: JSON.stringify({ resumeToken: previewResume.resumeToken })
+}), previewLoginEnv, {});
+assert.equal(revokedPreviewResume.status, 401, "Logout must revoke the Preview resume token");
 
 const previewWrongHost = await worker.fetch(new Request("https://aibot.ray2025.com/api/auth/preview-test-login", { method: "POST" }), previewLoginEnv, {});
 assert.equal(previewWrongHost.status, 404, "Preview test login must not work on production host");
