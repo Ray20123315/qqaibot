@@ -6,11 +6,12 @@
 
 ## Final Keyboard Behavior
 
-- direct/no-argument command: reusable action.type=1 callback, no click_limit;
+Current test-branch target:
+- direct/no-argument command: action.type=2, enter=true, canonical command data, no click_limit;
 - parameterized/target/content command: action.type=2, enter=false, canonical command plus trailing space;
-- pagination: reusable callback;
-- callback path: INTERACTION_CREATE is ACKed before canonical command execution;
-- parameterized buttons do not invoke a handler until the user completes and sends the input.
+- pagination: action.type=2, enter=true;
+- direct buttons must generate the ordinary QQ message path; callback-only execution is not accepted;
+- parameterized buttons do not send until the user completes the input.
 
 ## All-Category Regression Coverage
 
@@ -30,8 +31,8 @@ For every category/page it verifies:
 - <=5 rows;
 - <=2 buttons per row;
 - every enabled group-scoped command appears exactly once across category coverage;
-- direct metadata maps to type=1 callback;
-- non-direct metadata maps to type=2 editable prefill;
+- direct metadata maps to type=2 + enter=true normal command message;
+- non-direct metadata maps to type=2 + enter=false editable prefill;
 - click_limit is absent;
 - transport serialization succeeds for every non-empty category.
 
@@ -60,3 +61,13 @@ Confirm in the QQ client:
 1. help/status executes immediately and does not remain in the input box;
 2. codex/翻译/禁言 prefills the input box;
 3. at least one non-basic category renders its button card.
+
+## 2026-10-01 Branch Verification
+
+- branch: `fix/qq-panel-message-send-20261001`
+- base main: `a1c19cf0d732fd576000c8ecb2753facf38c51e8`
+- product patch commit: `821373fc1c7e32116b8f15cca69a38bc5a81545d`
+- GitHub Actions run `36796984396`: SUCCESS
+- passed: repository regression, V3 regression, V4 QQ Open regression, isolated V4 test-deployment checks, single Worker bundle
+- main update: NOT PERFORMED
+- live QQ send/reply smoke: PENDING

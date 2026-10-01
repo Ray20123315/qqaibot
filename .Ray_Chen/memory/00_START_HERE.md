@@ -1,34 +1,36 @@
 # Ray_Chen Memory Entry
 
-- memory_version: v0.0.45
+- memory_version: v0.0.46
 - project: QQAIBOT
 - repository: Ray20123315/QQAIBOT
 - canonical_branch: main
-- development_branch: v4-qqopen-native
-- task_id: qqaibot-20260929-keyboard-all-categories-direct-callback
-- task_status: completed
+- development_branch: fix/qq-panel-message-send-20261001
+- task_id: qqaibot-20261001-panel-normal-message-send
+- task_status: active
 - goal_revision: 1
-- product_revision: dea8ae5448382830262399aa3ee3773d5e4e030f
-- updated_at: 2026-09-29T12:48:00+08:00
+- product_revision: 821373fc1c7e32116b8f15cca69a38bc5a81545d
+- base_main_revision: a1c19cf0d732fd576000c8ecb2753facf38c51e8
+- updated_at: 2026-10-01T08:37:00+08:00
 
-## Completed Goal
+## Current Goal
 
-The QQ group keyboard UX is complete across all active categories.
+Correct QQ group keyboard behavior without touching main:
 
-- Direct/no-argument commands no longer rely on QQ group action.type=2 + enter=true. They use reusable callback buttons, are ACKed immediately, and execute the existing canonical command handler.
-- Commands that need parameters/targets/content remain action.type=2 + enter=false and prefill the input with the canonical command plus a trailing space.
-- Pagination buttons are reusable callbacks.
-- Normal buttons do not carry click_limit.
-- Every non-empty group category and every page is regression-tested; all group-scoped panel commands are covered exactly once.
-- Existing permissions, confirmations, cooldowns, slash-panel routing, Portal switches, QQ Open primary routing and OneBot fallback remain unchanged.
+- direct/no-argument commands such as `!help` and `!status` must create a normal QQ command message event;
+- direct commands must not rely on callback-only execution;
+- parameterized commands such as `!codex` and `!模型` remain editable input prefills;
+- pagination must also travel through the normal command-message path;
+- main remains unchanged while the latest main build is under user testing.
 
-## Verification
+## Current Result
 
-- development CI 36522596708: success
-- main CI 36522715591: success
-- Cloudflare production build ce40accb-f1f3-4824-b299-411e130e2573: success
-- production commit: dea8ae5448382830262399aa3ee3773d5e4e030f
+- PRODUCED: `src/v4/commands/group-panel.js` now emits action.type=2 for keyboard command buttons.
+- PRODUCED: direct/no-argument and pagination buttons use `enter=true`; parameterized buttons use `enter=false`.
+- PRODUCED: `verify-v4-qqopen.mjs` now asserts normal-message semantics instead of callback semantics.
+- VERIFIED: GitHub Actions run 36796984396 passed repository, V3, V4 QQ Open, isolated V4 test-deployment, and bundle checks.
+- VERIFIED: main was not updated; work is isolated on `fix/qq-panel-message-send-20261001`.
+- NEEDS_REVIEW: live QQ client behavior still requires a real client smoke test because historical clients have sometimes ignored `enter=true`.
 
 ## Recovery Route
 
-Treat dea8ae5448382830262399aa3ee3773d5e4e030f as the verified product revision. If a direct button behaves incorrectly, inspect INTERACTION_CREATE delivery/ACK. If a parameterized button behaves incorrectly, inspect action.type=2 prefill data. Do not revert to type=2 enter=true for commands that must execute immediately.
+Resume from branch `fix/qq-panel-message-send-20261001`. Do not fast-forward or merge main until live QQ confirms that `help/status` are actually sent as user messages and Bot replies through the ordinary message handler. If a client only prefills despite `enter=true`, keep the normal-message requirement and investigate client/platform behavior rather than reverting to callback-only execution.

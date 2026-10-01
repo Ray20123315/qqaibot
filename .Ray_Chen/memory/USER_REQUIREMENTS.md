@@ -13,6 +13,7 @@
 - Large categories must paginate within QQ keyboard limits.
 - Keyboard child-command buttons must be reusable and must not use one-shot click limits.
 - Commands that need no additional data must execute immediately without being left in the input box.
+- Direct/no-argument keyboard commands must produce a normal QQ message event; callback-only execution is not an acceptable substitute.
 - Commands that require parameters/targets/text must prefill the QQ message input and wait for user completion.
 - Keyboard buttons must reuse existing canonical ! commands and existing handlers.
 - QQ-rendered `/!面板 ...` is reserved for panel routing.

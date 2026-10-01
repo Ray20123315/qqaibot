@@ -1,38 +1,70 @@
 # ACTIVE_TASK
 
-task_id: qqaibot-20260929-keyboard-all-categories-direct-callback
-task_status: completed
+task_id: qqaibot-20261001-panel-normal-message-send
+task_status: active
 goal_revision: 1
 
 ## Goal
 
-Deliver complete group keyboard behavior:
-- direct/no-argument commands execute immediately;
-- parameterized commands prefill the input and wait for user data;
-- every active group category renders buttons.
+Make QQ group keyboard direct commands generate normal QQ message events while keeping parameterized commands editable, without touching main during the user's current main-line testing.
 
-## Acceptance Results
+## Acceptance Criteria
 
-- VERIFIED: help/status and other explicitly direct commands use reusable callback buttons.
-- VERIFIED: direct buttons omit click_limit and do not depend on QQ group type=2 enter behavior.
-- VERIFIED: parameterized commands use type=2 + enter=false + trailing-space data.
-- VERIFIED: pagination buttons are reusable callbacks.
-- VERIFIED: all non-empty categories in GROUP_PANEL_CATEGORY_META build keyboard pages.
-- VERIFIED: every enabled group-scoped panel command is present in exactly one category coverage set.
-- VERIFIED: every page has <=5 rows and <=2 command columns.
-- VERIFIED: test transport serializes a keyboard payload for every non-empty category.
-- VERIFIED: existing permissions, confirmations, cooldowns, slash-panel normalization, Portal switches and transport safety are unchanged.
-- VERIFIED: development CI, main CI and production Connected Build succeeded.
+- VERIFIED: direct/no-argument buttons use action.type=2 with enter=true.
+- VERIFIED: parameterized/target/content buttons use action.type=2 with enter=false and preserve trailing-space prefill.
+- VERIFIED: pagination uses action.type=2 with enter=true.
+- VERIFIED: click_limit remains absent from normal buttons.
+- VERIFIED: existing command metadata remains the source of direct-vs-parameterized classification.
+- VERIFIED: repository, V3, V4 QQ Open, isolated V4 test-deployment and bundle checks pass.
+- VERIFIED: main is unchanged.
+- NEEDS_REVIEW: live QQ client smoke test confirms direct buttons are actually sent and produce normal Bot replies.
 
-## Evidence
+## Hard Constraints
 
-- product revision: `dea8ae5448382830262399aa3ee3773d5e4e030f`
-- development CI: `36522596708` — success
-- main CI: `36522715591` — success
-- production build: `ce40accb-f1f3-4824-b299-411e130e2573` — success
+- Do not use callback-only execution as a substitute for direct commands.
+- Do not merge or fast-forward main while the user is testing latest main.
+- Preserve existing permissions, confirmations, cooldowns, routing and fallback behavior.
+- Do not convert parameterized commands into immediate sends.
 
-## next_exact_action
+## Current Phase
 
-Live-test one direct button (help/status) and one parameterized button (codex/翻译/禁言), then open at least one non-basic category to confirm the rendered keyboard.
+live_validation
 
-last_checkpoint_at: 2026-09-29T12:48:00+08:00
+## Current Step
+
+Product patch and automated verification are complete on `fix/qq-panel-message-send-20261001`; live QQ behavior is the remaining gate.
+
+## Execution Plan
+
+1. PRODUCED: replace callback direct buttons with type=2 normal-command buttons.
+2. PRODUCED: update regression expectations.
+3. VERIFIED: run full GitHub validation.
+4. IN_PROGRESS: package updated Ray_Chen memory and notify the user.
+5. NEEDS_REVIEW: run a real QQ client smoke test before any main update.
+
+## Files Modified
+
+- src/v4/commands/group-panel.js
+- verify-v4-qqopen.mjs
+- .github/workflows/validate.yml
+- .github/workflows/ray-chen-memory-package.yml
+- .Ray_Chen/memory/*
+
+## Verification Results
+
+- GitHub Actions run 36796984396: success.
+- Main branch base remains `a1c19cf0d732fd576000c8ecb2753facf38c51e8`.
+- Local sandbox clone attempt was blocked by sandbox DNS; GitHub Actions supplied the authoritative automated verification instead.
+
+## Known Risks
+
+- Some QQ group clients historically ignored `enter=true` and only inserted the command into the input box.
+- Callback execution is intentionally not accepted as a fallback for direct commands because it does not produce the normal user-message event required by the Bot path.
+
+## Next Exact Action
+
+Smoke-test `help` and `status` on a real QQ client using this branch's test deployment/path; only after that should main be considered for update.
+
+## Resume Rule
+
+Read 00_START_HERE.md, ACTIVE_TASK.md, CURRENT_STATE.md and FILE_MANIFEST.json, then verify the branch head and GitHub Actions status before modifying anything.
