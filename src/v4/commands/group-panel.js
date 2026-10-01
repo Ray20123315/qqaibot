@@ -1,6 +1,8 @@
 const GROUP_PANEL_CATEGORY_META = Object.freeze([
   Object.freeze({ key:"basic", label:"基础", aliases:Object.freeze(["基础","基礎","basic"]) }),
   Object.freeze({ key:"group-analysis", label:"群聊", aliases:Object.freeze(["群聊","群聊分析","群聊整理","group"]) }),
+  Object.freeze({ key:"relationship", label:"关系", aliases:Object.freeze(["关系","關係","主人","对象","對象","relationship"]) }),
+  Object.freeze({ key:"community", label:"互动", aliases:Object.freeze(["互动","互動","群务","群務","community"]) }),
   Object.freeze({ key:"memory-personal", label:"记忆", aliases:Object.freeze(["记忆","記憶","人格","设置","設定","memory"]) }),
   Object.freeze({ key:"activity-schedule", label:"活动", aliases:Object.freeze(["活动","活動","投票","排程","schedule"]) }),
   Object.freeze({ key:"rules", label:"群规", aliases:Object.freeze(["群规","群規","规则","規則","rules"]) }),
@@ -67,21 +69,16 @@ function keyboardButton(id, label, data, { style = 1, immediate = false } = {}) 
   const text = clean(label).slice(0, 20) || "指令";
   const buttonId = clean(id).slice(0, 64) || "qqai_command";
   const payload = String(data ?? "").replace(/^\s+/, "").slice(0, 1000);
-  const action = immediate
-    ? Object.freeze({
-        type: 1,
-        data: payload,
-        permission: Object.freeze({ type:2 }),
-        unsupport_tips: "当前客户端不支持快捷执行，请直接发送指令。"
-      })
-    : Object.freeze({
-        type: 2,
-        data: payload,
-        permission: Object.freeze({ type:2 }),
-        enter: false,
-        reply: false,
-        unsupport_tips: "当前客户端不支持指令按钮，请直接发送指令。"
-      });
+  const action = Object.freeze({
+    type: 2,
+    data: payload,
+    permission: Object.freeze({ type:2 }),
+    enter: immediate,
+    reply: false,
+    unsupport_tips: immediate
+      ? "当前客户端不支持直接发送，请手动发送指令。"
+      : "当前客户端不支持指令按钮，请手动输入指令。"
+  });
   return Object.freeze({
     id: buttonId,
     render_data: Object.freeze({
