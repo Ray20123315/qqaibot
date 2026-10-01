@@ -143,6 +143,8 @@ namespace_id = "1999"
   period = 10
 
 [previews.vars]
+V4_PREVIEW_TEST_LOGIN = "true"
+V4_PREVIEW_TEST_EXPIRES_AT = "2026-10-03T00:00:00+08:00"
 QQAI_DB_TABLE = "kv_store_v4public_preview"
 BOT_DISPLAY_NAME = "QQAI V4 Preview"
 QQ_OPEN_ENABLED = "false"

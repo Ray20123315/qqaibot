@@ -547,6 +547,53 @@ const QQAIWorker = {
       }
     }
 
+    if (request.method === 'POST' && url.pathname === '/api/auth/preview-test-login') {
+      const previewHost = "feature-v4-public-bot-qqai.ray20123315.workers.dev";
+      const requestHost = String(url.hostname || "").toLowerCase();
+      const enabled = String(env.V4_PREVIEW_TEST_LOGIN || "").trim().toLowerCase() === "true";
+      const expiresAt = Date.parse(String(env.V4_PREVIEW_TEST_EXPIRES_AT || "").trim());
+      if (!enabled || requestHost !== previewHost) {
+        return jsonResponse({ ok: false, code: "PREVIEW_TEST_LOGIN_DISABLED", message: "此登入方式只供 V4 Preview 測試。" }, 404);
+      }
+      if (!Number.isFinite(expiresAt) || Date.now() >= expiresAt) {
+        return jsonResponse({ ok: false, code: "PREVIEW_TEST_LOGIN_EXPIRED", message: "V4 Preview 測試登入已到期。" }, 403);
+      }
+      if (String(env.QQ_OPEN_ENABLED || "").trim().toLowerCase() !== "false") {
+        return jsonResponse({ ok: false, code: "PREVIEW_TEST_LOGIN_UNSAFE", message: "Preview 隔離條件不符合，已拒絕測試登入。" }, 403);
+      }
+      const rate = await checkPortalAuthRateLimit(env, "preview-test-login", previewHost, request);
+      if (!rate.ok) {
+        return jsonResponse({
+          ok: false,
+          code: rate.unavailable ? "AUTH_RATE_LIMIT_UNAVAILABLE" : "AUTH_RATE_LIMITED",
+          message: rate.unavailable ? "Preview 登入服務目前無法安全啟動，請稍後再試。" : "登入嘗試過於頻繁，請 10 秒後再試。"
+        }, rate.unavailable ? 503 : 429);
+      }
+      try {
+        const session = await createPortalSession(env, {
+          systemAdmin: true,
+          username: "v4-preview-test",
+          persistent: false,
+          authMethod: "v4_preview_test"
+        });
+        await writeSystemAudit(env, {
+          type: "portal_auth_security",
+          actorId: "v4-preview-test",
+          action: "v4_preview_test_login",
+          expiresAt
+        }).catch(() => {});
+        return jsonResponse({
+          ok: true,
+          systemAdmin: true,
+          preview: true,
+          expiresAt,
+          message: "V4 Preview 最高權限測試登入成功。"
+        }, 200, { "Set-Cookie": portalSessionCookie(session.token, 30 * 60) });
+      } catch {
+        return jsonResponse({ ok: false, code: "PREVIEW_TEST_LOGIN_STORAGE_UNAVAILABLE", message: "Preview 測試工作階段暫時無法建立，請稍後再試。" }, 503);
+      }
+    }
+
     if (request.method === 'POST' && url.pathname === '/api/auth/login-password') {
       let payload = {};
       try { payload = await request.json(); } catch (e) {}

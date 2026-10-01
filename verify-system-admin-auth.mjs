@@ -159,6 +159,42 @@ const expiredTempResponse = await worker.fetch(postJson("/api/auth/login-passwor
 assert.equal(expiredTempResponse.status, 403);
 assert.equal((await expiredTempResponse.json()).code, "TEMP_ADMIN_EXPIRED");
 
+const previewLoginEnv = {
+  DB: new MemoryD1(),
+  V4_PREVIEW_TEST_LOGIN: "true",
+  V4_PREVIEW_TEST_EXPIRES_AT: new Date(Date.now() + 60 * 60 * 1000).toISOString(),
+  QQ_OPEN_ENABLED: "false",
+  MY_RATE_LIMITER: { limit: async () => ({ success: true }) }
+};
+const previewLoginRequest = new Request("https://feature-v4-public-bot-qqai.ray20123315.workers.dev/api/auth/preview-test-login", {
+  method: "POST",
+  headers: { Origin: "https://feature-v4-public-bot-qqai.ray20123315.workers.dev" }
+});
+const previewLoginResponse = await worker.fetch(previewLoginRequest, previewLoginEnv, {});
+const previewLogin = await previewLoginResponse.json();
+assert.equal(previewLoginResponse.status, 200, JSON.stringify(previewLogin));
+assert.equal(previewLogin.systemAdmin, true);
+assert.equal(previewLogin.preview, true);
+assert.match(previewLoginResponse.headers.get("Set-Cookie") || "", /HttpOnly/);
+const previewToken = decodeURIComponent((previewLoginResponse.headers.get("Set-Cookie") || "").split(";")[0].split("=")[1] || "");
+const previewSession = await getPortalSession(previewLoginEnv, previewToken, { touch: false });
+assert.equal(previewSession?.systemAdmin, true);
+assert.equal(previewSession?.role, "developer");
+assert.equal(previewSession?.authMethod, "v4_preview_test");
+
+const previewWrongHost = await worker.fetch(new Request("https://aibot.ray2025.com/api/auth/preview-test-login", { method: "POST" }), previewLoginEnv, {});
+assert.equal(previewWrongHost.status, 404, "Preview test login must not work on production host");
+
+const previewExpiredEnv = { ...previewLoginEnv, DB: new MemoryD1(), V4_PREVIEW_TEST_EXPIRES_AT: new Date(Date.now() - 1000).toISOString() };
+const previewExpired = await worker.fetch(previewLoginRequest, previewExpiredEnv, {});
+assert.equal(previewExpired.status, 403);
+assert.equal((await previewExpired.json()).code, "PREVIEW_TEST_LOGIN_EXPIRED");
+
+const previewUnsafeEnv = { ...previewLoginEnv, DB: new MemoryD1(), QQ_OPEN_ENABLED: "true" };
+const previewUnsafe = await worker.fetch(previewLoginRequest, previewUnsafeEnv, {});
+assert.equal(previewUnsafe.status, 403);
+assert.equal((await previewUnsafe.json()).code, "PREVIEW_TEST_LOGIN_UNSAFE");
+
 const loginResponse = await worker.fetch(postJson("/api/auth/login-password", { username: "ops.root", password }), portalEnv, {});
 const login = await loginResponse.json();
 assert.equal(loginResponse.status, 200);
