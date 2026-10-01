@@ -1196,7 +1196,10 @@ const QQAIWorker = {
           const keyboard = groupPanelRoute.keyboard
             || buildGroupCategoryKeyboard(QQAI_GROUP_PANEL_REGISTRY, groupPanelRoute.category, { page:groupPanelRoute.page || 1 })?.keyboard
             || null;
-          return jsonReply(groupPanelRoute.message, keyboard ? { qq_inline_keyboard:keyboard } : {});
+          return jsonReply(groupPanelRoute.message, keyboard ? {
+            qq_inline_keyboard:keyboard,
+            qq_inline_keyboard_fallback:groupPanelRoute.fallbackMessage || groupPanelRoute.message
+          } : {});
         }
         cleanMessage = String(groupPanelRoute.expanded || "").trim();
         userMessage = cleanMessage.replace(/(^|\s)@(\d{5,12})(?=\s|$)/g, "$1[CQ:at,qq=$2]");
