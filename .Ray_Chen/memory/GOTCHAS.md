@@ -65,3 +65,20 @@ Mitigation: do not force reload on successful login. On the isolated Preview, re
 ## G-083 Remember-login UI and privileged server policy must agree
 Risk: presenting a checked "keep me signed in" option while the server forces developer/admin sessions to persistent=false makes the UI misleading and can create inconsistent cookie behavior.
 Mitigation: honor the persistence request for privileged accounts but keep their existing 30-minute idle and 8-hour absolute security caps; align cookie Max-Age with the actual server absolute expiry.
+
+
+## G-084 Preview-only resume is not sufficient for persistent login
+Risk: a recovery mechanism limited to the V4 Preview can make acceptance login appear more robust while normal QQ/password/admin persistent sessions still fail after their cookie is unavailable.
+Mitigation: use one generic remember-device protocol for all persistent Portal sessions; keep the old Preview resume only as a legacy acceptance fallback.
+
+## G-085 Privileged TTL caps can contradict the keep-signed-in UI
+Risk: forcing developer/admin/system-admin sessions to 30-minute idle / 8-hour absolute expiry even when the user selects a UI promising up to 180 days makes persistent login semantically false.
+Mitigation: persistent=true uses the configured 30-day idle / 180-day absolute lifetime even for privileged sessions. persistent=false retains the short privileged limits.
+
+## G-086 Remember tokens are authentication credentials
+Risk: storing plaintext remember tokens server-side, allowing reuse, or failing to revoke them would create a durable bearer credential.
+Mitigation: server records are keyed by SHA-256(token); token restore rotates and deletes the old token; logout revokes the supplied current token; Preview/TEMP credentials are externally expiry-capped.
+
+## G-087 Motion effects must respect reduced-motion preference
+Risk: aurora, view transitions, hover movement and page-entry animation can cause accessibility problems or unnecessary GPU work.
+Mitigation: gate JS motion with prefers-reduced-motion and disable nonessential CSS animation/transition in the reduced-motion media query.

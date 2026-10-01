@@ -1,14 +1,14 @@
 {
   "schema_version": 1,
-  "memory_version": "v0.0.50",
+  "memory_version": "v0.0.51",
   "task_id": "qqaibot-20261001-v4-preview-user-acceptance",
-  "goal_revision": 4,
-  "transaction": "v4_preview_reload_safe_login_resume_20261001",
+  "goal_revision": 5,
+  "transaction": "portal_persistent_login_and_reference_motion_20261001",
   "repository": "Ray20123315/qqaibot",
   "production_branch": "main",
   "development_branch": "feature/v4-public-bot",
-  "product_before_revision": "b967bd47573b5f7cb57d1f537da84e5fc781f9a8",
-  "product_after_revision": "d64126c8d39e2bfad23ea6355c8e764573bc0692",
+  "product_before_revision": "df6a00859c456f8592444c32a38227e46beda66b",
+  "product_after_revision": "654d340be94559ba3409a9b6e4de3f8a2eb2c849",
   "verification": {
     "feature_product_ci_run": 36366445081,
     "regression_ci_run": 36366534308,
@@ -157,7 +157,7 @@
     "v4_preview_memory_package_branch": "feature/v4-public-bot",
     "v4_preview_memory_package_version": "v0.0.47",
     "v4_preview_memory_package": "pending_workflow",
-    "current_feature_head": "d64126c8d39e2bfad23ea6355c8e764573bc0692",
+    "current_feature_head": "654d340be94559ba3409a9b6e4de3f8a2eb2c849",
     "final_feature_ci_run": 36804510541,
     "final_feature_ci": "success",
     "command_runtime_owner_coverage": "77/77",
@@ -167,12 +167,12 @@
     "hybrid_permission_mapping": "verified",
     "whitelist_before_plugin_dispatch": "verified",
     "group_command_gate_core_and_plugins": "verified",
-    "feature_cloudflare_build": "33170c85-6b09-4874-a6c5-8c870968db43",
+    "feature_cloudflare_build": "4fe5a3b8-9f83-46ff-8c31-767f15ab8531",
     "feature_cloudflare_build_outcome": "success",
-    "feature_worker_version": 2181,
-    "feature_worker_version_id": "a3644fc0-b524-40d4-8b33-51bd994f078b",
-    "stable_preview_deployment": "7e284694-6e51-41f8-8d7f-443454af0b62",
-    "stable_preview_deployment_number": 9,
+    "feature_worker_version": 2187,
+    "feature_worker_version_id": "dad31f97-15a0-482f-b31b-b73008ca1684",
+    "stable_preview_deployment": "b821dd63-d777-405f-b60c-2ce8d2e76fc0",
+    "stable_preview_deployment_number": 10,
     "stable_preview_root_http": 200,
     "stable_preview_browser_rendering": "success",
     "stable_preview_qq_open_enabled": false,
@@ -198,7 +198,19 @@
     "live_one_click_login": "verified",
     "live_preview_resume": "verified_200_ok_rotated",
     "live_reload_browser_rendering": "inconclusive_tool_navigation_context",
-    "manual_reload_user_acceptance": "pending"
+    "manual_reload_user_acceptance": "pending",
+    "final_persistent_motion_ci_run": 36846206642,
+    "final_persistent_motion_ci": "success",
+    "persistent_session_idle_ms": 2592000000,
+    "persistent_session_absolute_ms": 15552000000,
+    "privileged_temporary_idle_ms": 1800000,
+    "privileged_temporary_absolute_ms": 28800000,
+    "generic_remember_device": "verified",
+    "generic_restore_without_cookie": "verified_200_ok_rotated",
+    "generic_remember_rotation": "verified",
+    "generic_remember_logout_revocation": "verified",
+    "live_motion_payload": "aurora_page_enter_view_transition_present",
+    "manual_browser_persistence_acceptance": "pending"
   },
   "changes": [
     {
@@ -2186,10 +2198,81 @@
       "after_revision": "v0.0.50",
       "verification": "atomic memory commit; package archive extraction and SHA-256 required before final response",
       "changed_at": "2026-10-01T17:36:00+08:00"
+    },
+    {
+      "location_type": "github",
+      "provider": "GitHub",
+      "resource_id_or_path": "src/portal/auth.js",
+      "action": "modified",
+      "branch_or_container": "feature/v4-public-bot",
+      "before_revision": "df6a00859c456f8592444c32a38227e46beda66b",
+      "after_revision": "654d340be94559ba3409a9b6e4de3f8a2eb2c849",
+      "commit_or_hash": "16bb1e487bf0b825ffe457bf616d84e6c9ada686",
+      "verification": "persistent privileged sessions now use 30d idle / 180d absolute; generic hashed remember-token create/restore/revoke; final CI success",
+      "changed_at": "2026-10-01T18:04:00+08:00"
+    },
+    {
+      "location_type": "github",
+      "provider": "GitHub",
+      "resource_id_or_path": "worker.js",
+      "action": "modified",
+      "branch_or_container": "feature/v4-public-bot",
+      "before_revision": "df6a00859c456f8592444c32a38227e46beda66b",
+      "after_revision": "654d340be94559ba3409a9b6e4de3f8a2eb2c849",
+      "commit_or_hash": "2ebef5bcfff43082b166b4bc814bd1a1416b03e5",
+      "verification": "all persistent login modes issue generic remember credentials where allowed; /api/auth/restore-session + logout revocation; final CI success",
+      "changed_at": "2026-10-01T18:04:00+08:00"
+    },
+    {
+      "location_type": "github",
+      "provider": "GitHub",
+      "resource_id_or_path": "src/portal/runtime.js",
+      "action": "modified",
+      "branch_or_container": "feature/v4-public-bot",
+      "before_revision": "df6a00859c456f8592444c32a38227e46beda66b",
+      "after_revision": "654d340be94559ba3409a9b6e4de3f8a2eb2c849",
+      "commit_or_hash": "405ca8263b3eea26d74da292da541d404a3f29e6",
+      "verification": "generic localStorage remember restore + reference-inspired aurora/glass/view-transition motion; final CI and live payload probe success",
+      "changed_at": "2026-10-01T18:04:00+08:00"
+    },
+    {
+      "location_type": "github",
+      "provider": "GitHub",
+      "resource_id_or_path": "verify-system-admin-auth.mjs;verify-portal-auth-password.mjs",
+      "action": "modified",
+      "branch_or_container": "feature/v4-public-bot",
+      "before_revision": "df6a00859c456f8592444c32a38227e46beda66b",
+      "after_revision": "654d340be94559ba3409a9b6e4de3f8a2eb2c849",
+      "commit_or_hash": "48a185e5ee76b3da01c0ca9361ec10bbb0f8cc31;654d340be94559ba3409a9b6e4de3f8a2eb2c849",
+      "verification": "durable remember token rotation/revocation/cookieless restore + motion/static regressions; CI 36846206642 success",
+      "changed_at": "2026-10-01T18:04:00+08:00"
+    },
+    {
+      "location_type": "cloudflare",
+      "provider": "Cloudflare",
+      "resource_id_or_path": "workers/workers/qqai/previews/068adb610f4d47daa65c1376e021787f/deployments/b821dd63-d777-405f-b60c-2ce8d2e76fc0",
+      "action": "preview_deployed",
+      "branch_or_container": "feature/v4-public-bot Preview",
+      "before_revision": "7e284694-6e51-41f8-8d7f-443454af0b62",
+      "after_revision": "b821dd63-d777-405f-b60c-2ce8d2e76fc0",
+      "commit_or_hash": "654d340be94559ba3409a9b6e4de3f8a2eb2c849",
+      "verification": "safe binding read-back; one-click login; generic remember token; credentials-omit restore 200/ok=true; motion markers present",
+      "changed_at": "2026-10-01T18:04:00+08:00"
+    },
+    {
+      "location_type": "github",
+      "provider": "GitHub",
+      "resource_id_or_path": ".Ray_Chen/memory/*",
+      "action": "final_reconciliation",
+      "branch_or_container": "feature/v4-public-bot",
+      "before_revision": "v0.0.50",
+      "after_revision": "v0.0.51",
+      "verification": "atomic memory commit; package archive extraction and SHA-256 required",
+      "changed_at": "2026-10-01T18:04:00+08:00"
     }
   ],
   "internal_memory_transaction": {
-    "action": "record reload-safe Preview login/resume design and user acceptance boundary",
-    "note": "No main merge and no live QQ group Bot testing. Archive/hash/notification evidence do not recursively trigger another memory transaction."
+    "action": "record generic persistent-login architecture and reference motion/background",
+    "note": "No main merge and no live QQ-group Bot testing. User-provided reference was used as design/auth behavior guidance but was not copied into the repository. Archive/hash/notification evidence do not recursively trigger another memory transaction."
   }
 }

@@ -2,12 +2,12 @@
 
 ## Product Revision
 
-`d64126c8d39e2bfad23ea6355c8e764573bc0692`
+`654d340be94559ba3409a9b6e4de3f8a2eb2c849`
 
 ## GitHub
 
 Final CI:
-- run: `36843510857`
+- run: `36846206642`
 - conclusion: SUCCESS
 - repository regression: success
 - V3 regression: success
@@ -15,33 +15,41 @@ Final CI:
 - isolated V4 deployment checks: success
 - single Worker bundle: success
 
-Integration coverage includes:
-- privileged remember-login remains persistent when requested while retaining privileged TTL caps;
-- unchecked remember-login remains non-persistent;
-- Preview login issues opaque resume token + expiry;
-- Preview resume succeeds without the original session cookie;
-- restored session cookie authenticates `/api/portal/me`;
-- used resume token cannot be reused;
-- logout revokes the rotated resume token;
-- same-page login handoff does not force `location.reload()`;
-- boot owns automatic Preview resume fallback.
+Persistent-login regression coverage:
+- remembered system-admin session uses `DEFAULTS.portalSessionTtlMs` and `DEFAULTS.portalSessionAbsoluteTtlMs`;
+- remembered developer session uses the same persistent limits;
+- unchecked privileged session remains 30m idle / 8h absolute;
+- remember token creation succeeds only for persistent sessions;
+- restore rotates the token;
+- used token cannot be reused;
+- revoked token remains invalid;
+- worker `/api/auth/restore-session` returns a replacement HttpOnly cookie;
+- replacement cookie authenticates `/api/portal/me`;
+- runtime stores generic `qqai_portal_remember`, attempts generic restore during boot, and sends the token on logout.
+
+Motion/background regression coverage:
+- `qqai-reference-motion-v1` marker;
+- aurora and page-enter keyframes;
+- radial-gradient background layer;
+- View Transition support;
+- motion sweep helper.
 
 ## Cloudflare Feature Build
 
-- build UUID: `33170c85-6b09-4874-a6c5-8c870968db43`
+- build UUID: `4fe5a3b8-9f83-46ff-8c31-767f15ab8531`
 - branch: `feature/v4-public-bot`
-- commit: `d64126c8d39e2bfad23ea6355c8e764573bc0692`
+- commit: `654d340be94559ba3409a9b6e4de3f8a2eb2c849`
 - outcome: SUCCESS
-- Worker version: 2181
-- Worker version id: `a3644fc0-b524-40d4-8b33-51bd994f078b`
+- Worker version: 2187
+- Worker version id: `dad31f97-15a0-482f-b31b-b73008ca1684`
 
 ## Stable Preview
 
 - preview id: `068adb610f4d47daa65c1376e021787f`
 - URL: `https://feature-v4-public-bot-qqai.ray20123315.workers.dev/`
-- deployment: `7e284694-6e51-41f8-8d7f-443454af0b62`
-- deployment number: 9
-- source annotation: `d64126c8d39e2bfad23ea6355c8e764573bc0692`
+- deployment: `b821dd63-d777-405f-b60c-2ce8d2e76fc0`
+- deployment number: 10
+- source annotation: `654d340be94559ba3409a9b6e4de3f8a2eb2c849`
 
 Read-back isolation:
 - `QQAI_DB_TABLE=kv_store_v4public_preview`
@@ -49,19 +57,29 @@ Read-back isolation:
 - `V4_PREVIEW_TEST_LOGIN=true`
 - production QQ/OneBot/Gemini/DeepSeek/Codex/Vectorize/Portal-admin sensitive bindings: absent
 
-## Live Login / Resume
+## Live Persistent Login Probe
 
 Cloudflare Browser Rendering on stable Preview:
-- a single login click entered the app without reload;
-- app visible, login hidden, identity rendered as V4 Preview system admin;
-- Preview resume token was present in Preview client storage;
-- `POST /api/auth/preview-resume` returned HTTP 200, ok=true, and a new rotated resume token.
+- a single Preview login entered the app;
+- generic remember token was saved;
+- `POST /api/auth/restore-session` was explicitly called with `credentials:'omit'`, so the original session cookie was not sent;
+- restore response: HTTP 200, ok=true;
+- response contained a newly rotated remember token.
 
-A forced reload Browser Rendering attempt returned to the login DOM, but the tool does not guarantee injected browser storage/context across its navigation boundary. This result is not treated as authoritative product failure or success. The server/client resume flow is integration-tested and live resume endpoint behavior is verified; real-browser reload remains manual user acceptance.
+This verifies the server/client persistent recovery path does not depend on the original session cookie. Full browser refresh/close/reopen still requires the user's real-browser acceptance because the automation environment is not treated as authoritative for browser storage persistence across navigation/restart.
+
+## Live Visual Payload Probe
+
+Stable Preview HTML:
+- `qqai-reference-motion-v1`: present
+- aurora keyframes: present
+- page-enter keyframes: present
+- `document.startViewTransition`: present
+- generic remember storage key: present
 
 ## Bot Verification Boundary
 
-No live Bot/group canary was run. Existing QQ group testing would have user-visible side effects.
+No live Bot/group canary was run.
 
 ## Production
 

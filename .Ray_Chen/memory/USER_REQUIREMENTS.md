@@ -35,7 +35,8 @@
 - `!指令开 / !指令关` must gate both core Worker commands and official plugin commands, while preserving `!指令开` as the recovery path.
 
 - Do not live-test Bot behavior in existing QQ groups while there is no isolated Bot/canary route; such tests create real group-chat side effects.
-- Portal login must complete with a single credential submission without requiring a page reload. In the isolated V4 Preview, if the HttpOnly session cookie is unavailable after refresh/reload, the Preview must recover the session automatically without asking for credentials again.
+- Portal login must complete with a single credential submission without requiring a page reload. When "keep me signed in" is selected, persistent login must work across all supported Portal login modes, including privileged accounts, and must recover from a missing HttpOnly session cookie without asking for credentials again.
+- The V4 Portal background and transition motion should follow the user-provided dark glass / purple-cyan aurora reference: moving blurred light fields, glass surfaces, button sheen, card hover glow/lift, smooth page/view entry, and View Transition when available; preserve reduced-motion accessibility.
 
 ## V4 Preview Acceptance Gate
 

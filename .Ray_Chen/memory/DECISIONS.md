@@ -103,7 +103,22 @@ Decision: successful QQ-code, password and Preview test login remain on the curr
 Reason: a single login already creates a valid server session; forcing navigation is unnecessary and can expose browser cookie-persistence problems.
 
 ## D-090 V4 Preview uses a separate resumable acceptance session
-status: accepted
+status: superseded
+superseded_by: D-091
 date: 2026-10-01
 Decision: only on the isolated V4 Preview, login also issues a separate opaque resume token. The server stores only a hash-keyed resume record, the client stores the opaque token in localStorage when remember-login is selected or sessionStorage otherwise, and boot exchanges it for a replacement HttpOnly session cookie if the ordinary cookie is unavailable. Resume tokens rotate after use and are revoked on logout.
 Security boundary: exact Preview hostname, V4_PREVIEW_TEST_LOGIN=true, QQ_OPEN_ENABLED=false, Preview expiry and privileged-session absolute expiry remain authoritative. This mechanism is acceptance-only and must not silently become a production login credential.
+
+
+## D-091 Persistent login uses a generic remember-device credential
+status: accepted
+date: 2026-10-01
+Decision: every supported persistent Portal login may issue a separate opaque remember-device token in addition to the HttpOnly session cookie. The server stores only a SHA-256-keyed record, restore rotates the token and sets a replacement HttpOnly cookie, and logout revokes the active token.
+Reason: Preview-only recovery did not satisfy the user's persistent-login requirement. Persistent login must survive loss of the ordinary session cookie across all supported login modes, not only the acceptance login.
+Security: persistent sessions use the existing 30-day idle / 180-day absolute project limits. Unchecked privileged sessions retain the short 30-minute idle / 8-hour absolute limits. Preview and temporary-admin remember credentials remain capped by their external expiry.
+
+## D-092 Portal motion follows the supplied dark aurora/glass reference
+status: accepted
+date: 2026-10-01
+Decision: preserve the existing Portal information architecture while adding the supplied reference's visual language: dark layered radial background, purple/cyan moving blurred light fields, glass panels, hover glow/lift, button sheen, page-entry motion, topbar sweep and View Transition where supported.
+Accessibility: nonessential motion is disabled under prefers-reduced-motion.
