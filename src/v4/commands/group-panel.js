@@ -72,12 +72,14 @@ function keyboardButton(id, label, data, { style = 1, enter = false, callback = 
         type: 1,
         data: payload,
         permission: Object.freeze({ type:2 }),
+        click_limit: 10,
         unsupport_tips: "当前客户端不支持面板导航，请重新打开指令面板。"
       })
     : Object.freeze({
         type: 2,
         data: payload,
         permission: Object.freeze({ type:2 }),
+        click_limit: 10,
         enter: Boolean(enter),
         reply: false,
         unsupport_tips: "当前客户端不支持指令按钮，请直接发送指令。"
