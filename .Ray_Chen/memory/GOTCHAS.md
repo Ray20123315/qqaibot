@@ -15,3 +15,8 @@ Mitigation: enumerate every non-empty group category, every page and every enabl
 ## G-072 Display labels are not canonical identifiers
 Risk: UI labels can normalize case, e.g. QQ语音 -> qq语音, causing false coverage failures.
 Mitigation: match keyboard coverage using canonical action.data rather than render_data.label.
+
+
+## G-073 Server-side callback execution is not equivalent to sending a QQ message
+Risk: a type=1 interaction callback can execute a handler and make the bot reply while never creating the command as a normal QQ message in the conversation. This violates the requested panel UX and makes the message history misleading.
+Mitigation: use type=2 command buttons with enter=true for direct panel commands; reserve callbacks for interaction-only features.
