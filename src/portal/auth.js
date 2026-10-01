@@ -832,8 +832,30 @@ async function getPortalSession(env, token, { touch = true } = {}) {
 
 
 
+function portalRememberSessionSeed(session = {}) {
+  if (session.systemAdmin === true) {
+    return {
+      systemAdmin: true,
+      username: String(session.username || "admin").slice(0, 64),
+      persistent: true,
+      authMethod: String(session.authMethod || "environment_admin_password").slice(0, 96)
+    };
+  }
+  const qq = String(session.qq || "").replace(/\D/g, "");
+  if (!qq) return null;
+  return {
+    qq,
+    group: String(session.group || "").slice(0, 160),
+    groupId: String(session.groupId || "").replace(/\D/g, "").slice(0, 32),
+    persistent: true,
+    authMethod: String(session.authMethod || "qq_code").slice(0, 96)
+  };
+}
+
 async function createPortalRememberToken(env, session, { maxExpiresAt = 0 } = {}) {
   if (!session?.persistent || !session?.token) return null;
+  const sessionSeed = portalRememberSessionSeed(session);
+  if (!sessionSeed) throw authStorageError("Portal remember session seed is invalid");
   const token = bytesToBase64Url(randomBytes(48));
   const now = Date.now();
   const sessionExpiry = Number(session.absoluteExpiresAt || 0);
@@ -843,6 +865,7 @@ async function createPortalRememberToken(env, session, { maxExpiresAt = 0 } = {}
   const key = PORTAL_REMEMBER_TOKEN_PREFIX + await sha256Hex(token);
   const record = {
     sessionToken: String(session.token),
+    sessionSeed,
     expiresAt,
     createdAt: now,
     rotatedAt: now
@@ -850,6 +873,30 @@ async function createPortalRememberToken(env, session, { maxExpiresAt = 0 } = {}
   await authDbPutStrict(env, key, JSON.stringify(record));
   if (!(await authDbGetStrict(env, key))) throw authStorageError("Portal remember token write could not be verified");
   return { token, expiresAt };
+}
+
+async function recreatePortalSessionFromRemember(env, record, expiresAt) {
+  const seed = record?.sessionSeed;
+  if (!seed || seed.persistent !== true) return null;
+  const now = Date.now();
+  const remainingMs = Math.max(0, Number(expiresAt || 0) - now);
+  if (remainingMs <= 0) return null;
+  const session = await createPortalSession(env, {
+    systemAdmin: seed.systemAdmin === true,
+    username: String(seed.username || ""),
+    qq: String(seed.qq || ""),
+    group: String(seed.group || ""),
+    groupId: String(seed.groupId || ""),
+    persistent: true,
+    authMethod: String(seed.authMethod || "remember_restore")
+  });
+  session.absoluteExpiresAt = Math.min(Number(session.absoluteExpiresAt || 0), Number(expiresAt || 0));
+  session.absoluteTtlMs = Math.max(1, session.absoluteExpiresAt - now);
+  session.lastActivityAt = now;
+  session.expiresAt = Math.min(now + Number(session.idleTtlMs || DEFAULTS.portalSessionTtlMs), session.absoluteExpiresAt);
+  await authDbPutStrict(env, `portal_session:${session.token}`, JSON.stringify(session));
+  const confirmed = await getPortalSession(env, session.token, { touch: false });
+  return confirmed?.persistent ? confirmed : null;
 }
 
 async function restorePortalRememberToken(env, rememberToken, { maxExpiresAt = 0 } = {}) {
@@ -867,7 +914,10 @@ async function restorePortalRememberToken(env, rememberToken, { maxExpiresAt = 0
     await authDbDelStrict(env, key).catch(() => {});
     return null;
   }
-  const session = await getPortalSession(env, String(record.sessionToken || ""), { touch: true });
+  let session = await getPortalSession(env, String(record.sessionToken || ""), { touch: true });
+  if (!session?.persistent && record.sessionSeed) {
+    session = await recreatePortalSessionFromRemember(env, record, expiresAt);
+  }
   if (!session?.persistent) {
     await authDbDelStrict(env, key).catch(() => {});
     return null;
