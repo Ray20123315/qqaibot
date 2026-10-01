@@ -1,39 +1,31 @@
-import fs from 'node:fs';
-import { canUnlockMute } from './src/moderation/mute-locks.js';
+import fs from "node:fs";
 
 function assert(condition, message) { if (!condition) throw new Error(message); }
-const env = { DEVELOPER_ID: '999999999' };
-const masterLock = { active: true, groupId: '10001', userId: '20002', source: 'master', masterId: '30003', createdBy: '30003', expiresAt: Date.now() + 60000 };
-assert(canUnlockMute(env, masterLock, { actorId: '30003', masterCommand: true }).allowed, 'The matching master must release a master-source mute');
-assert(!canUnlockMute(env, masterLock, { actorId: '40004', masterCommand: true }).allowed, 'Another member must not release a master-source mute');
-assert(canUnlockMute(env, masterLock, { actorId: '50005', actorRole: 'admin' }).allowed, 'Native group management must retain authority over master-source mutes');
-assert(!canUnlockMute(env, { ...masterLock, source: 'manual', masterId: '' }, { actorId: '30003', masterCommand: true }).allowed, 'Master privilege must not release manual protected mutes');
 
-const bindings = fs.readFileSync('src/moderation/partner-bindings.js', 'utf8');
-assert(bindings.includes('mode === "master"'), 'Relationship storage must support master mode');
-assert(bindings.includes('masterId'), 'Master relationships must persist the master ID');
-assert(bindings.includes('memberId'), 'Master relationships must persist the subordinate member ID');
-assert(bindings.includes('createMasterBindingRequest'), 'Master relationship requests must use the consent request store');
-assert(bindings.includes('request.targetId'), 'Only the invited target may approve master binding');
+const worker = fs.readFileSync("worker.js", "utf8");
+for (const removed of [
+  "!绑定主人","!綁定主人","!同意主人绑定","!同意主人綁定",
+  "!主人功能","!主人权限","!主人權限","!主人禁言","!主人解除禁言",
+  "!主人改名","!主人撤回","!收为所属成员","!收為所屬成員"
+]) assert(!worker.includes(removed), `Worker must not expose retired master command: ${removed}`);
+assert(!worker.includes("createMasterMuteLock"), "Worker must not create new master-source mute locks");
+assert(!worker.includes("masterCommand: true"), "Retired master commands must not retain a privileged unlock path");
+assert(worker.includes("clearPartnerBinding(env, currentGroupId, leavingUserId)"), "Historical relationship rows must still be cleaned when a member leaves");
 
-const worker = fs.readFileSync('worker.js', 'utf8');
-assert(worker.includes('!同意主人绑定'), 'Master binding must require an explicit approval command');
-assert(worker.includes('所属成员必须是当前普通群成员'), 'Subordinate eligibility must exclude management and system accounts');
-assert(worker.includes('masterId === String(botId || "")'), 'The bot account must be rejected before a master relationship request is created');
-assert(worker.includes('no_cache: true'), 'Master relationship roles must use live OneBot checks');
-assert(worker.includes('createMasterMuteLock'), 'Master mute must use a distinct lock source');
-assert(worker.includes('masterCommand: true'), 'Master unmute must use the restricted master permission path');
-assert(worker.includes('主人关系任何等级都没有踢出权限'), 'Master kick commands must be permanently denied at every level');
-assert(worker.includes('!主人改名'), 'Master must be able to change the subordinate member card');
-assert(worker.includes('!主人撤回'), 'Master must be able to recall only the subordinate member messages');
-assert(worker.includes('binding.mode !== "partner"'), 'Symmetric partner commands must not operate on master relationships');
-assert(worker.includes('clearPartnerBinding(env, currentGroupId, leavingUserId)'), 'Leaving the group must clear either relationship mode');
+const bindings = fs.readFileSync("src/moderation/partner-bindings.js", "utf8");
+assert(bindings.includes("clearPartnerBinding"), "Legacy cleanup helper must remain");
+assert(!bindings.includes("createMasterBindingRequest"), "Master binding creation API must stay removed");
+assert(!bindings.includes("createDirectMasterBinding"), "Portal/direct master creation API must stay removed");
+assert(!bindings.includes("updateMasterBindingLevel"), "Master level mutation API must stay removed");
 
-const portal = fs.readFileSync('src/portal/members.js', 'utf8');
-assert(portal.includes('主人禁言锁'), 'Portal must label master-source locks');
-assert(portal.includes('if (!protect && previousLock)'), 'Normal Portal moderation must clear an old relationship lock after overriding it');
+const portal = fs.readFileSync("src/portal/members.js", "utf8") + "\n" + fs.readFileSync("src/portal/community-suite.js", "utf8");
+assert(!portal.includes("/members/relationships"), "Portal relationship routes must stay removed");
+assert(!portal.includes("主人关系等级"), "Portal master relationship UI must stay removed");
 
-const pkg = JSON.parse(fs.readFileSync('package.json', 'utf8'));
-assert(pkg.version === '2.7.12', 'Package version must be 2.5.2');
-assert(pkg.scripts.check.includes('verify-master-bindings.mjs'), 'Master relationship verification must run permanently');
-console.log('verify-master-bindings: ok');
+const locks = fs.readFileSync("src/moderation/mute-locks.js", "utf8");
+assert(locks.includes('source.source === "master"'), "Existing master-source mute locks must remain parseable for safe expiry/unlock");
+assert(locks.includes('source.source === "partner"'), "Existing partner-source mute locks must remain parseable for safe expiry/unlock");
+
+const pkg = JSON.parse(fs.readFileSync("package.json", "utf8"));
+assert(pkg.scripts.check.includes("verify-master-bindings.mjs"), "Master retirement regression must run permanently");
+console.log("verify-master-bindings retirement: ok");
