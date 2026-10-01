@@ -661,8 +661,9 @@ export class QqOpenGateway {
     return data || { ok: true };
   }
 
-  async sendInteractionEventReply(interaction, value, keyboard = null) {
+  async sendInteractionEventReply(interaction, value, keyboard = null, fallbackValue = "") {
     const content = String(value || "").trim();
+    const fallbackContent = String(fallbackValue || content).trim();
     if (!content || !interaction?.id) return null;
     const keyboardBody = buildInlineKeyboardMessageBody(content, keyboard, {
       event_id: String(interaction.id)
@@ -687,7 +688,7 @@ export class QqOpenGateway {
       if (!keyboardBody || !keyboardCapabilityError(error)) throw error;
       await this.recordKeyboardFallback(error);
       return send({
-        content,
+        content: fallbackContent || content,
         msg_type: 0,
         event_id: String(interaction.id)
       });
@@ -815,7 +816,8 @@ export class QqOpenGateway {
         : result?.reply ? [result.reply] : [];
       const reply = chunks.map(value => String(value || "").trim()).filter(Boolean).join("\n\n").slice(0, 3800);
       const keyboard = normalizeInlineKeyboard(result?.qq_inline_keyboard);
-      if (reply) await this.sendInteractionEventReply(interaction, reply, keyboard);
+      const keyboardFallback = String(result?.qq_inline_keyboard_fallback || "").trim();
+      if (reply) await this.sendInteractionEventReply(interaction, reply, keyboard, keyboardFallback);
       this.persisted.lastApplicationAt = Date.now();
       this.persisted.lastApplicationKind = "interaction_command";
     } else if (action === "feedback") {
@@ -972,6 +974,7 @@ export class QqOpenGateway {
     const rawChunks = Array.isArray(result?.reply_chunks) && result.reply_chunks.length
       ? result.reply_chunks
       : result?.reply ? [result.reply] : [];
+    let keyboardFallbackContent = "";
     const keyboard = normalizeInlineKeyboard(result?.qq_inline_keyboard);
     const keyboardContent = String(result?.reply || rawChunks[0] || "").trim().slice(0, 3800);
     if (keyboard && keyboardContent && (message.scope === "group" || message.scope === "private")) {
@@ -994,10 +997,11 @@ export class QqOpenGateway {
       } catch (error) {
         if (!keyboardCapabilityError(error)) throw error;
         await this.recordKeyboardFallback(error);
+        keyboardFallbackContent = String(result?.qq_inline_keyboard_fallback || keyboardContent).trim();
       }
     }
     const policy = qqOpenPassiveReplyPolicy(message.scope);
-    const chunks = rawChunks.slice(0, policy.maxReplies);
+    const chunks = (keyboardFallbackContent ? [keyboardFallbackContent] : rawChunks).slice(0, policy.maxReplies);
     let lastMessageId = "";
     for (let index = 0; index < chunks.length; index += 1) {
       const reservation = await this.reserveReplySequences(message.messageId, message.scope, 1);
