@@ -679,6 +679,21 @@ const QQAIWorker = {
       });
     }
 
+    if (request.method === 'POST' && url.pathname === '/api/auth/preview-invalidate-session') {
+      const previewHost = "feature-v4-public-bot-qqai.ray20123315.workers.dev";
+      const enabled = String(env.V4_PREVIEW_TEST_LOGIN || "").trim().toLowerCase() === "true";
+      if (!enabled || String(url.hostname || "").toLowerCase() !== previewHost || String(env.QQ_OPEN_ENABLED || "").trim().toLowerCase() !== "false") {
+        return jsonResponse({ ok: false, code: "PREVIEW_SESSION_DIAGNOSTIC_DISABLED" }, 404);
+      }
+      if (String(request.headers.get("Origin") || "") !== url.origin) {
+        return jsonResponse({ ok: false, code: "ORIGIN_NOT_ALLOWED" }, 403);
+      }
+      const sessionCookie = readCookie(request, "qqai_session");
+      if (!sessionCookie) return jsonResponse({ ok: false, code: "SESSION_COOKIE_MISSING" }, 400);
+      await authDbDelStrict(env, `portal_session:${sessionCookie}`);
+      return jsonResponse({ ok: true, invalidated: true });
+    }
+
     if (request.method === 'POST' && url.pathname === '/api/auth/restore-session') {
       const origin = String(request.headers.get("Origin") || "");
       if (origin && origin !== url.origin) {
