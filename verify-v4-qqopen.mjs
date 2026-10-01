@@ -137,14 +137,15 @@ assert.equal(helpButton.action.type, 2);
 assert.equal(helpButton.action.enter, true);
 assert.equal(helpButton.action.data, "!help");
 assert.equal(helpButton.action.permission?.type, 2);
-assert(!Object.prototype.hasOwnProperty.call(helpButton.action, "enter"));
+assert.equal(helpButton.action.enter, true);
 assert(!Object.prototype.hasOwnProperty.call(helpButton.action, "click_limit"));
 assert(helpButton.action.unsupport_tips);
 assert(helpButton.group_id);
 
 const statusButton = basicButtons.find(button => button.render_data.label === "status");
 assert(statusButton);
-assert.equal(statusButton.action.type, 1);
+assert.equal(statusButton.action.type, 2);
+assert.equal(statusButton.action.enter, true);
 assert.equal(statusButton.action.data, "!status");
 
 const codexButton = basicButtons.find(button => button.render_data.label === "codex");
@@ -188,9 +189,9 @@ for (const meta of GROUP_PANEL_CATEGORY_META) {
       assert.equal(button.action.permission?.type, 2);
       assert(!Object.prototype.hasOwnProperty.call(button.action, "click_limit"));
       if (command.panel.enter === true) {
-        assert.equal(button.action.type, 1, `Direct command ${command.id} must use callback`);
+        assert.equal(button.action.type, 2, `No-parameter command ${command.id} must send a QQ message`);
+        assert.equal(button.action.enter, true);
         assert.equal(button.action.data, command.panel.command);
-        assert(!Object.prototype.hasOwnProperty.call(button.action, "enter"));
       } else {
         assert.equal(button.action.type, 2, `Parameterized command ${command.id} must prefill`);
         assert.equal(button.action.enter, false);
