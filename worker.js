@@ -1564,6 +1564,38 @@ const QQAIWorker = {
       const hasGroupOpsAuth = permissionSet.groupOps;
       const isOnlyMe = isDeveloper;
 
+      const commandToggle = isGroup
+        ? cleanMessage.match(/^[!！](指令开|指令開|指令关|指令關)$/i)
+        : null;
+      if (commandToggle) {
+        if (!hasAdminAuth) return jsonReply(`${atSender}只有群主、QQ 管理员或开发者可以开启或关闭群指令。`);
+        const enabled = /开|開/.test(commandToggle[1]);
+        const commandGateKeys = [...new Set([
+          `commands_disabled:${String(permissionGroupId || currentGroupId)}`,
+          `commands_disabled:${String(currentGroupId || permissionGroupId)}`
+        ])].filter(key => !key.endsWith(":"));
+        for (const key of commandGateKeys) {
+          if (enabled) await dbDel(env, key);
+          else await dbPut(env, key, "true");
+        }
+        await writeSystemAudit(env, {
+          type: "group_command_gate",
+          groupId: String(permissionGroupId || currentGroupId || ""),
+          actorId: String(permissionUserId || userId || ""),
+          action: enabled ? "enabled" : "disabled",
+          qqOpenGroupId: isQqOpenV4 ? String(currentGroupId || "") : ""
+        }).catch(() => {});
+        return jsonReply(`${atSender}本群指令已${enabled ? "开启" : "关闭"}。${enabled ? "所有 ! 指令与插件指令已恢复。" : "普通聊天不受影响；管理员仍可发送 !指令开 恢复。"}`);
+      }
+
+      if (isGroup && isCommandMessage) {
+        const commandsDisabled = await dbGet(env, `commands_disabled:${String(permissionGroupId || currentGroupId)}`) === "true"
+          || (isQqOpenV4 && await dbGet(env, `commands_disabled:${String(currentGroupId || "")}`) === "true");
+        if (commandsDisabled) {
+          return jsonReply(`${atSender}本群指令目前已关闭。请由群主、QQ 管理员或开发者发送 !指令开 恢复。`);
+        }
+      }
+
       const codexCommand =
         parseCodexWorkCommand(cleanMessage)
         || parseCodexChatCommand(cleanMessage)
@@ -2953,6 +2985,31 @@ const QQAIWorker = {
       // QQ Open：只保存到使用者自己的 Storage Connector，不写平台 D1 / Vectorize。
       // OneBot：维持既有平台 D1 + Vectorize 行为。
       // ==========================================
+      if (['!你记住了什么', '!你記住了什麼', '！你记住了什么', '！你記住了什麼'].includes(msgLower)) {
+        let memos = [];
+        if (isQqOpenV4) {
+          const state = await readUserMemoryList(env, qqOpenContentPrincipal, qqOpenSettingScope);
+          if (!state.available) {
+            return jsonReply(`${atSender}长期记忆未启用。请先连接自己的 D1 或 KV，并启用「记忆」用途。`);
+          }
+          memos = normalizeMemoryItems(state.memories || [], userId);
+        } else {
+          memos = normalizeMemoryItems(await readJson(env, `user_memo:${currentGroupId}:${userId}`, []), userId);
+        }
+        if (!memos.length) return jsonReply(`${atSender}我目前没有保存你的专属记忆。`);
+        const visible = memos.slice(-20);
+        const lines = visible.map((item, index) => {
+          const absoluteIndex = memos.length - visible.length + index + 1;
+          return `${absoluteIndex}. ${String(item?.text || item || "").slice(0, 300)}`;
+        });
+        const more = memos.length > visible.length ? `\n仅显示最近 ${visible.length} 条，共 ${memos.length} 条。` : `\n共 ${memos.length} 条。`;
+        return jsonReplyChunks(splitOutboundText(`${atSender}【我记住的内容】\n${lines.join("\n")}${more}`, {
+          maxChars: 1400,
+          maxParts: 8,
+          hardTotalChars: 9000
+        }), { reply_kind: "memory_list" });
+      }
+
       if (['!记住', '!記住', '!remember', '！记住', '！記住', '！remember'].some(p => msgLower.startsWith(p))) {
         const prefix = ['!记住', '!記住', '!remember', '！记住', '！記住', '！remember'].find(p => msgLower.startsWith(p));
         const { targetQq, restText } = parseArgs(userMessage, prefix);
@@ -4790,7 +4847,12 @@ export class OneBotHub {
           writable: false
         });
       }
-      const pluginEvent = body.__qqai_skip_plugins === true ? null : await dispatchV3RuntimeEvent(pluginEnv, pluginBody).catch(async error => {
+      const pluginCommandText = eventPlainText(body).trim();
+      const pluginCommandBlocked = body?.message_type === "group"
+        && /^[!！]/.test(pluginCommandText)
+        && !/^[!！](?:指令开|指令開)$/i.test(pluginCommandText)
+        && await dbGet(this.env, `commands_disabled:${String(body?.group_id || "")}`) === "true";
+      const pluginEvent = body.__qqai_skip_plugins === true || pluginCommandBlocked ? null : await dispatchV3RuntimeEvent(pluginEnv, pluginBody).catch(async error => {
         await writeSystemAudit(this.env, {
           type: "v3_plugin_qqopen_event_failed",
           groupId: String(body?.group_id || ""),
@@ -5365,7 +5427,12 @@ export class OneBotHub {
       && body?.message_type === "group"
       && /^[!！](?:成員發言分析|成员发言分析|發言分析|发言分析)(?:\\s|$)/i.test(eventPlainText(body).trim());
     let v3PluginFailure = "";
-    const v3PluginEvent = await dispatchV3RuntimeEvent(this.env, v3PluginBody).catch(async error => {
+    const v3PluginCommandText = eventPlainText(body).trim();
+    const v3PluginCommandBlocked = body?.message_type === "group"
+      && /^[!！]/.test(v3PluginCommandText)
+      && !/^[!！](?:指令开|指令開)$/i.test(v3PluginCommandText)
+      && await dbGet(this.env, `commands_disabled:${String(body?.group_id || "")}`) === "true";
+    const v3PluginEvent = v3PluginCommandBlocked ? null : await dispatchV3RuntimeEvent(this.env, v3PluginBody).catch(async error => {
       v3PluginFailure = String(error?.message || error).slice(0, 240);
       await writeSystemAudit(this.env, {
         type: "v3_plugin_event_failed",
