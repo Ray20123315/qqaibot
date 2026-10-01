@@ -1,7 +1,6 @@
 const GROUP_PANEL_CATEGORY_META = Object.freeze([
   Object.freeze({ key:"basic", label:"基础", aliases:Object.freeze(["基础","基礎","basic"]) }),
   Object.freeze({ key:"group-analysis", label:"群聊", aliases:Object.freeze(["群聊","群聊分析","群聊整理","group"]) }),
-  Object.freeze({ key:"relationship", label:"关系", aliases:Object.freeze(["关系","關係","主人","对象","對象","relationship"]) }),
   Object.freeze({ key:"community", label:"互动", aliases:Object.freeze(["互动","互動","群务","群務","community"]) }),
   Object.freeze({ key:"memory-personal", label:"记忆", aliases:Object.freeze(["记忆","記憶","人格","设置","設定","memory"]) }),
   Object.freeze({ key:"activity-schedule", label:"活动", aliases:Object.freeze(["活动","活動","投票","排程","schedule"]) }),
