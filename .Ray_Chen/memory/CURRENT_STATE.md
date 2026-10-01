@@ -1,38 +1,42 @@
 # CURRENT_STATE
 
-## GitHub
+## Production
 
-- verified product revision on main/dev: `dea8ae5448382830262399aa3ee3773d5e4e030f`
-- development CI `36522596708`: success
-- main CI `36522715591`: success
+No new V4 Preview acceptance code from this task has been merged into `main`.
 
-## Cloudflare Production
+## V4 Preview Source
 
-- Worker: `qqai`
-- Connected Build: `ce40accb-f1f3-4824-b299-411e130e2573`
-- commit: `dea8ae5448382830262399aa3ee3773d5e4e030f`
-- branch: `main`
-- outcome: success
+- branch: `feature/v4-public-bot`
+- head: `18f254cc18fe599ca27a89106fa4e87759776165`
+- GitHub CI: `36797489597` success
+- Cloudflare Connected Build: `5fc78ebc-9f14-4f61-8f2c-a347252f09b2` success
 
-## QQ Group Keyboard Behavior
+## Stable V4 Preview
 
-- direct/no-argument commands: action.type=1 callback, no click_limit, immediate ACK + canonical handler execution;
-- parameterized/target/content commands: action.type=2, enter=false, trailing-space command prefill;
-- navigation buttons: reusable callback actions;
-- every non-empty group command category renders a keyboard;
-- every category page stays within 5 rows and 2 command columns;
-- all enabled group-scoped panel commands are included by regression coverage;
-- new/unclassified commands remain prefill by default unless explicitly marked direct.
+- URL: `https://feature-v4-public-bot-qqai.ray20123315.workers.dev/`
+- deployment: `df3e4ed6-59c5-4ece-9cd4-e711846525a2`
+- deployment number: 5
+- D1: shared physical database, isolated table `kv_store_v4public_preview`
+- Preview test login: enabled
+- test-login expiry: `2026-10-03T00:00:00+08:00`
+- QQ Open: disabled
+- production QQ/OneBot/Gemini/Vectorize/admin secrets: absent
 
-## Preserved State
+## Live Login Evidence
 
-- QQ_OPEN_INTENTS remains 100663296, so callback delivery remains available.
-- QQ Open/AIBot remains primary.
-- OneBot remains controlled fallback only.
-- direct command handlers, permissions, confirmations, cooldowns and Portal switches are unchanged.
-- `/!普通内容` remains AI bypass.
-- TEMP-admin and prior Portal security work remain preserved.
+A browser-side request on the stable Preview URL returned:
+- login HTTP 200
+- `systemAdmin=true`
+- `preview=true`
+- viewer HTTP 200
+- `developer=true`
+- role `developer`
+- `systemAdmin=true`
 
-## Remaining Live Verification
+## User Acceptance
 
-Only real-client UX confirmation remains: direct button should execute immediately, parameterized button should stay editable, and non-basic categories should render buttons.
+pending_user_manual_test
+
+## Merge State
+
+Blocked by acceptance gate. No production merge is authorized until the user confirms the V4 Preview is usable.

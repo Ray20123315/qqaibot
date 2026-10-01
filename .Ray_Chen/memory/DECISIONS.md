@@ -35,3 +35,14 @@ Decision: commands needing parameters, targets or content use action.type=2 with
 status: accepted
 date: 2026-09-29
 Decision: tests enumerate every non-empty GROUP_PANEL_CATEGORY_META category and every keyboard page, requiring full command coverage and valid row/button limits. Single-category success is not sufficient evidence.
+
+## D-080 V4 Preview uses an isolated credential-free acceptance login
+status: accepted
+date: 2026-10-01
+Decision: user acceptance testing uses a Preview-only highest-privilege login endpoint guarded by exact Preview hostname, `V4_PREVIEW_TEST_LOGIN=true`, an explicit expiry, and `QQ_OPEN_ENABLED=false`. It creates a temporary system-admin/developer session without copying production credentials. This path must not be enabled on the production hostname and must be removed or disabled before production merge.
+
+## D-081 Cloudflare branch versions are code sources, not trusted Preview configurations
+status: accepted
+date: 2026-10-01
+Decision: Connected Build branch versions may inherit production bindings/secrets. Before promoting code to the stable V4 Preview URL, copy only the code/module payload and construct an explicit Preview-safe binding set.
+

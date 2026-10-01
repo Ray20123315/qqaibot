@@ -1,34 +1,37 @@
 # Ray_Chen Memory Entry
 
-- memory_version: v0.0.45
+- memory_version: v0.0.46
 - project: QQAIBOT
 - repository: Ray20123315/QQAIBOT
 - canonical_branch: main
-- development_branch: v4-qqopen-native
-- task_id: qqaibot-20260929-keyboard-all-categories-direct-callback
-- task_status: completed
+- development_branch: feature/v4-public-bot
+- task_id: qqaibot-20261001-v4-preview-user-acceptance
+- task_status: active
 - goal_revision: 1
-- product_revision: dea8ae5448382830262399aa3ee3773d5e4e030f
-- updated_at: 2026-09-29T12:48:00+08:00
+- product_revision: 18f254cc18fe599ca27a89106fa4e87759776165
+- updated_at: 2026-10-01T08:47:00+08:00
 
-## Completed Goal
+## Current Goal
 
-The QQ group keyboard UX is complete across all active categories.
+Keep all new V4 acceptance work off production. Make the existing stable V4 Preview URL usable at highest privilege, verify it automatically, then wait for the user to manually accept it before any production merge.
 
-- Direct/no-argument commands no longer rely on QQ group action.type=2 + enter=true. They use reusable callback buttons, are ACKed immediately, and execute the existing canonical command handler.
-- Commands that need parameters/targets/content remain action.type=2 + enter=false and prefill the input with the canonical command plus a trailing space.
-- Pagination buttons are reusable callbacks.
-- Normal buttons do not carry click_limit.
-- Every non-empty group category and every page is regression-tested; all group-scoped panel commands are covered exactly once.
-- Existing permissions, confirmations, cooldowns, slash-panel routing, Portal switches, QQ Open primary routing and OneBot fallback remain unchanged.
+## Verified Preview State
 
-## Verification
+- feature branch fast-forwarded to current main without force, then received Preview-only commit `18f254cc18fe599ca27a89106fa4e87759776165`.
+- GitHub CI run `36797489597`: success.
+- Cloudflare branch build `5fc78ebc-9f14-4f61-8f2c-a347252f09b2`: success.
+- stable Preview deployment: `df3e4ed6-59c5-4ece-9cd4-e711846525a2` / number 5.
+- stable URL: `https://feature-v4-public-bot-qqai.ray20123315.workers.dev/`.
+- Preview HTML shows the highest-privilege test-login button.
+- Browser-driven live probe: login HTTP 200, `systemAdmin=true`, `preview=true`; viewer API HTTP 200, `developer=true`, role `developer`, `systemAdmin=true`.
+- Preview D1 namespace: `kv_store_v4public_preview`.
+- Preview `QQ_OPEN_ENABLED=false`.
+- production QQ secret, OneBot secret/DO, Gemini secret, Vectorize and production admin secret are absent from the promoted Preview deployment.
 
-- development CI 36522596708: success
-- main CI 36522715591: success
-- Cloudflare production build ce40accb-f1f3-4824-b299-411e130e2573: success
-- production commit: dea8ae5448382830262399aa3ee3773d5e4e030f
+## Acceptance Gate
 
-## Recovery Route
+Do not merge this Preview-only test login into `main` until the user manually opens the stable Preview URL and confirms the V4 UI is usable.
 
-Treat dea8ae5448382830262399aa3ee3773d5e4e030f as the verified product revision. If a direct button behaves incorrectly, inspect INTERACTION_CREATE delivery/ACK. If a parameterized button behaves incorrectly, inspect action.type=2 prefill data. Do not revert to type=2 enter=true for commands that must execute immediately.
+## Resume Rule
+
+Continue from feature commit `18f254cc18fe599ca27a89106fa4e87759776165`. The next exact action is user manual acceptance, not a production merge.

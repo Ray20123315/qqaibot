@@ -1,14 +1,14 @@
 {
   "schema_version": 1,
-  "memory_version": "v0.0.45",
-  "task_id": "qqaibot-20260929-keyboard-all-categories-direct-callback",
+  "memory_version": "v0.0.46",
+  "task_id": "qqaibot-20261001-v4-preview-user-acceptance",
   "goal_revision": 1,
-  "transaction": "keyboard_all_categories_direct_callback_final_20260929",
+  "transaction": "v4_preview_acceptance_login_20261001",
   "repository": "Ray20123315/qqaibot",
   "production_branch": "main",
-  "development_branch": "hotfix/temp-system-admin-login-20260929",
-  "product_before_revision": "6fc678c266e514ee6daad4fd40ea33e9225c0120",
-  "product_after_revision": "dea8ae5448382830262399aa3ee3773d5e4e030f",
+  "development_branch": "feature/v4-public-bot",
+  "product_before_revision": "a1c19cf0d732fd576000c8ecb2753facf38c51e8",
+  "product_after_revision": "18f254cc18fe599ca27a89106fa4e87759776165",
   "verification": {
     "feature_product_ci_run": 36366445081,
     "regression_ci_run": 36366534308,
@@ -136,7 +136,24 @@
     "parameterized_command_prefill_mode": "verified",
     "all_category_pages_covered": "verified",
     "all_group_panel_commands_covered": "verified",
-    "live_final_keyboard_smoke": "pending_user"
+    "live_final_keyboard_smoke": "pending_user",
+    "v4_preview_acceptance_ci_run": 36797489597,
+    "v4_preview_acceptance_ci": "success",
+    "v4_preview_cloudflare_build": "5fc78ebc-9f14-4f61-8f2c-a347252f09b2",
+    "v4_preview_cloudflare_build_outcome": "success",
+    "v4_preview_deployment": "df3e4ed6-59c5-4ece-9cd4-e711846525a2",
+    "v4_preview_deployment_number": 5,
+    "v4_preview_url": "https://feature-v4-public-bot-qqai.ray20123315.workers.dev/",
+    "v4_preview_db_table": "kv_store_v4public_preview",
+    "v4_preview_test_login": true,
+    "v4_preview_test_login_expires_at": "2026-10-03T00:00:00+08:00",
+    "v4_preview_qq_open_enabled": false,
+    "v4_preview_production_secrets_present": false,
+    "v4_preview_live_login_http": 200,
+    "v4_preview_live_system_admin": true,
+    "v4_preview_live_developer": true,
+    "v4_preview_live_role": "developer",
+    "v4_preview_user_acceptance": "pending"
   },
   "changes": [
     {
@@ -1823,10 +1840,88 @@
       "after_revision": "v0.0.45",
       "verification": "read-back + TAR.GZ extraction + SHA-256 required",
       "changed_at": "2026-09-29T12:48:00+08:00"
+    },
+    {
+      "location_type": "github",
+      "provider": "GitHub",
+      "resource_id_or_path": "worker.js",
+      "action": "modified",
+      "branch_or_container": "feature/v4-public-bot",
+      "before_revision": "a1c19cf0d732fd576000c8ecb2753facf38c51e8",
+      "after_revision": "18f254cc18fe599ca27a89106fa4e87759776165",
+      "verification": "GitHub CI 36797489597 success",
+      "changed_at": "2026-10-01T08:47:00+08:00"
+    },
+    {
+      "location_type": "github",
+      "provider": "GitHub",
+      "resource_id_or_path": "src/portal/runtime.js",
+      "action": "modified",
+      "branch_or_container": "feature/v4-public-bot",
+      "before_revision": "a1c19cf0d732fd576000c8ecb2753facf38c51e8",
+      "after_revision": "18f254cc18fe599ca27a89106fa4e87759776165",
+      "verification": "GitHub CI 36797489597 success",
+      "changed_at": "2026-10-01T08:47:00+08:00"
+    },
+    {
+      "location_type": "github",
+      "provider": "GitHub",
+      "resource_id_or_path": "verify-system-admin-auth.mjs",
+      "action": "modified",
+      "branch_or_container": "feature/v4-public-bot",
+      "before_revision": "a1c19cf0d732fd576000c8ecb2753facf38c51e8",
+      "after_revision": "18f254cc18fe599ca27a89106fa4e87759776165",
+      "verification": "GitHub CI 36797489597 success",
+      "changed_at": "2026-10-01T08:47:00+08:00"
+    },
+    {
+      "location_type": "github",
+      "provider": "GitHub",
+      "resource_id_or_path": "wrangler.toml",
+      "action": "modified",
+      "branch_or_container": "feature/v4-public-bot",
+      "before_revision": "a1c19cf0d732fd576000c8ecb2753facf38c51e8",
+      "after_revision": "18f254cc18fe599ca27a89106fa4e87759776165",
+      "verification": "GitHub CI 36797489597 success",
+      "changed_at": "2026-10-01T08:47:00+08:00"
+    },
+    {
+      "location_type": "github",
+      "provider": "GitHub",
+      "resource_id_or_path": "refs/heads/feature/v4-public-bot",
+      "action": "fast_forward_then_preview_only_commit",
+      "branch_or_container": "feature/v4-public-bot",
+      "before_revision": "f74d6ecec99c9dde04ef97ce0a7452b42ad6bcf7",
+      "after_revision": "18f254cc18fe599ca27a89106fa4e87759776165",
+      "verification": "non-force fast-forward to current main followed by Preview-only commit",
+      "changed_at": "2026-10-01T08:47:00+08:00"
+    },
+    {
+      "location_type": "cloudflare",
+      "provider": "Cloudflare",
+      "resource_id_or_path": "workers/workers/qqai/previews/068adb610f4d47daa65c1376e021787f/deployments/df3e4ed6-59c5-4ece-9cd4-e711846525a2",
+      "action": "preview_deployed",
+      "branch_or_container": "feature/v4-public-bot Preview",
+      "before_revision": "8758de79-43f7-4c14-b2a9-76f10739eae9",
+      "after_revision": "df3e4ed6-59c5-4ece-9cd4-e711846525a2",
+      "commit_or_hash": "18f254cc18fe599ca27a89106fa4e87759776165",
+      "verification": "binding read-back + Browser Rendering UI + live system-admin/developer login",
+      "changed_at": "2026-10-01T08:47:00+08:00"
+    },
+    {
+      "location_type": "github",
+      "provider": "GitHub",
+      "resource_id_or_path": ".Ray_Chen/memory/*",
+      "action": "preview_acceptance_checkpoint",
+      "branch_or_container": "feature/v4-public-bot",
+      "before_revision": "v0.0.45",
+      "after_revision": "v0.0.46",
+      "verification": "archive extraction + SHA-256 required; user acceptance still pending",
+      "changed_at": "2026-10-01T08:47:00+08:00"
     }
   ],
   "internal_memory_transaction": {
-    "action": "complete all-category keyboard behavior and bump memory to v0.0.45",
-    "note": "Direct commands use reusable callbacks; parameterized commands remain editable type=2 prefills."
+    "action": "record isolated V4 Preview highest-privilege test login and wait for user acceptance",
+    "note": "No new production merge. Preview test login must be removed/disabled before any eventual main merge."
   }
 }

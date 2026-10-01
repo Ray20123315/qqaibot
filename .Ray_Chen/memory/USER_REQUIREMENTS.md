@@ -29,3 +29,11 @@
 - Public users should connect their own external AI/storage resources instead of relying on unrestricted shared credentials.
 - Public-user data and resources must remain principal/tenant isolated.
 - Preview/testing must not write to the production `kv_store` table.
+
+## V4 Preview Acceptance Gate
+
+- V4 Preview must be manually accepted by the user before any Preview-only test-login change is merged into `main`.
+- Preview testing must remain isolated from production QQ, OneBot, AI provider secrets, Vectorize and production Portal admin secrets.
+- Preview-only highest-privilege test login must be removed or disabled before production merge.
+- During V4 Preview testing, report progress frequently and change method immediately when a path is blocked instead of repeatedly retrying the same unsafe approach.
+
