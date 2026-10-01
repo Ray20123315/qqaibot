@@ -1789,7 +1789,7 @@ const QQAIWorker = {
         await writeSystemAudit(env, { type: "rate_limit_setting", groupId: currentGroupId, actorId: userId, action: `group:${seconds}` });
         return jsonReply(`${atSender}本群调用速率限制已设为 ${seconds} 秒；0 代表关闭。`);
       }
-      const globalRateLimitCommand = cleanMessage.match(/^[!！](?:设置全局速率限制|設定全域速率限制)\s+(\d+)$/i);
+      const globalRateLimitCommand = cleanMessage.match(/^[!！](?:设置全局速率限制|設定全域速率限制|全局限速|全域限速)\s+(\d+)$/i);
       if (globalRateLimitCommand) {
         if (!isDeveloper) return jsonReply(`${atSender}只有开发者可以设置全局速率限制。`);
         const seconds = parseUnlimitedNonNegativeInteger(globalRateLimitCommand[1], DEFAULTS.runtimeRateLimitSeconds);
