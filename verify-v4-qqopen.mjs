@@ -133,7 +133,8 @@ const basicButtons = basicKeyboard.keyboard.content.rows.flatMap(row => row.butt
 
 const helpButton = basicButtons.find(button => button.render_data.label === "help");
 assert(helpButton);
-assert.equal(helpButton.action.type, 1);
+assert.equal(helpButton.action.type, 2);
+assert.equal(helpButton.action.enter, true);
 assert.equal(helpButton.action.data, "!help");
 assert.equal(helpButton.action.permission?.type, 2);
 assert(!Object.prototype.hasOwnProperty.call(helpButton.action, "enter"));
