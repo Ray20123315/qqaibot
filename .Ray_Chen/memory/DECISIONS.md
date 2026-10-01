@@ -44,3 +44,10 @@ date: 2026-10-01
 supersedes: D-077
 Decision: group panel commands that need no additional input use QQ command buttons with action.type=2 and enter=true so the client sends the canonical command as a normal QQ message. Commands needing parameters remain action.type=2 with enter=false. Interaction callbacks remain available for unrelated interaction features but are no longer the direct-command primitive.
 Reason: live user verification showed the callback path executes server-side without creating the required QQ message.
+
+
+## D-081 Native group discovery exposes real commands
+status: accepted
+date: 2026-10-01
+Decision: QQ native group discovery uses categorized real-command panels generated from the canonical registry. The manual `!面板 <分类>` inline keyboard remains a supplemental/fallback UI, but native discovery must not be reduced to category placeholder commands.
+Reason: live QQ client evidence showed that a root-only panel made the concrete commands appear missing.

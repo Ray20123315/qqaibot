@@ -1,46 +1,33 @@
 # CURRENT_STATE
 
-## GitHub / Production
+## Production Before Goal Revision 2
 
-- canonical branch: main
-- product revision: `6cb891571bdb2744b13bd11e3731c2a267fdf1ed`
-- development validation: GitHub Actions `36848544391` — success
-- main validation: GitHub Actions `36848826594` — success
-- Cloudflare Worker: `qqai`
-- production Connected Build: `d8abfda4-4595-427a-8fbf-7f0a5ffcd31f` — success
-- deployed branch/commit: `main` / `6cb891571bdb2744b13bd11e3731c2a267fdf1ed`
+- main head: `5b7f3c5e1c75d98150d794b2d2c689c77a145bfc`
+- deployed product revision: `6cb891571bdb2744b13bd11e3731c2a267fdf1ed`
+- previous production Connected Build: `d8abfda4-4595-427a-8fbf-7f0a5ffcd31f` — success
 
-## Command Panel Behavior
+## Confirmed Native Discovery Defect
 
-- Direct/no-argument: `action.type=2`, `enter=true`, `reply=false`, exact canonical command.
-- Parameterized/target/content: `action.type=2`, `enter=false`, canonical command plus trailing space.
-- Pagination: `action.type=2`, `enter=true`.
-- Normal buttons: reusable; no `click_limit`.
-- Direct group commands no longer use synthetic INTERACTION_CREATE callback dispatch.
+`src/v4/qqopen/discovery.js` currently builds:
+- one global group panel from `buildGroupRootPanel()`;
+- that root panel contains only `!面板 <分类>` placeholder commands;
+- actual group commands exist in the registry and inline keyboards, but are not registered directly into QQ native group panels.
 
-## Discovery Coverage
+The live QQ client screenshot confirms this exact state.
 
-New root categories:
-- 关系
-- 互动
+## Target State
 
-Restored standalone command families include self mute, relationship/master/partner operations, group announcement/todo/file entry points, bot-interaction allowlist, sticker/whitelist application, poke/reaction/favorite-face/mall-face plugin commands, TTS, mimic/interjection settings, developer rate limits and private appeal status.
-
-Intentional exclusions remain dynamic/non-standalone commands such as automatic check-in scheduling controls, relationship approval commands requiring request IDs, and the intentionally unavailable master-kick operation.
-
-## Preserved State
-
-- QQ Open/AIBot remains primary.
-- OneBot remains controlled fallback only.
-- QQ_OPEN_INTENTS stays `100663296`; Interaction support remains available for unrelated features.
-- Server-side authorization and moderation confirmation remain authoritative.
-- `/!普通内容` remains AI bypass.
+- global group discovery uses `registry.buildCategorizedPanels("group", ...)`;
+- each panel contains real canonical commands;
+- categories are represented by panel remarks/partitioning rather than placeholder commands;
+- `!面板 <分类>` inline keyboards remain available when invoked manually;
+- developer C2C panels remain specific-target panels.
 
 ## Verification State
 
-- product patch: VERIFIED
-- development CI: VERIFIED
-- main update: VERIFIED
-- main CI: VERIFIED
-- production Connected Build: VERIFIED
-- live QQ client direct-send/prefill smoke: PENDING_USER
+- product patch: PLANNED
+- development CI: PENDING
+- main update: PENDING
+- main CI: PENDING
+- production Connected Build: PENDING
+- native QQ resync smoke: PENDING_USER

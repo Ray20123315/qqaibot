@@ -1,46 +1,34 @@
 # ACTIVE_TASK
 
 task_id: qqaibot-20261001-panel-complete-real-message-send
-task_status: completed
-goal_revision: 1
+task_status: active
+goal_revision: 2
 
 ## Goal
 
-Fix both live defects reported against main:
-- command panel was incomplete;
-- direct panel actions executed through callbacks instead of creating a normal QQ command message.
+Make the QQ native group command panel directly contain the real commands instead of only category placeholders.
 
 ## Acceptance Criteria
 
-- VERIFIED: direct/no-argument buttons use QQ command action type=2 with enter=true.
-- VERIFIED: parameterized/target/content buttons use type=2 with enter=false and preserve a trailing-space prefill.
-- VERIFIED: pagination uses type=2 + enter=true.
-- VERIFIED: normal command buttons do not use click_limit.
-- VERIFIED: valid standalone runtime/plugin command families missing from the registry are exposed.
-- VERIFIED: every enabled group command is present in category/page regression coverage.
-- VERIFIED: existing permissions, confirmations, cooldowns, slash routing, Portal switches and QQ Open routing remain unchanged.
-- VERIFIED: development CI, main CI and production Connected Build succeeded.
-- PENDING_USER: final visual/behavioral smoke in a real QQ client.
+- Native group discovery contains every enabled group command from the canonical registry.
+- Group native panels are categorized and split at 20 items per panel.
+- No native group discovery item is merely `!面板 <分类>` in place of real commands.
+- The existing `!面板 <分类>` chat command and inline keyboard remain functional.
+- Developer-targeted C2C discovery remains cumulative and unchanged.
+- Total discovery panels stay within the QQ/Open implementation limit of 20.
+- Existing permission enforcement remains server-side authoritative.
+- Development CI, main CI and production Connected Build must pass before completion.
 
-## Completed Steps
+## Current Phase
 
-- Rejected the old direct-callback design using live user evidence.
-- Added `关系` and `互动` root categories.
-- Restored relationship/master/partner, self-mute, group-work, bot interaction, sticker, whitelist, QQ interaction, TTS, AI-admin and developer rate-limit commands to discovery.
-- Added the QQ-safe `!全局限速` alias while keeping long aliases compatible.
-- Updated regressions for normal-message direct send, parameterized prefill, pagination and restored command families.
-- Development CI 36848544391: success.
-- main CI 36848826594: success.
-- Cloudflare production build d8abfda4-4595-427a-8fbf-7f0a5ffcd31f: success.
+IN_PROGRESS — Recovery Gate complete; product patch pending.
 
-## Files Changed
+## Evidence
 
-- src/v4/commands/group-panel.js
-- src/v4/commands/registry.js
-- src/v4/commands/catalog.js
-- worker.js
-- verify-v4-qqopen.mjs
-- .Ray_Chen/memory/* canonical reconciliation files
+- VERIFIED: main = 5b7f3c5e1c75d98150d794b2d2c689c77a145bfc before this repair.
+- VERIFIED: product revision 6cb891571bdb2744b13bd11e3731c2a267fdf1ed is deployed successfully.
+- VERIFIED: current discovery.js creates exactly one global group root panel via buildGroupRootPanel().
+- VERIFIED: live QQ screenshot shows those category placeholder items and no concrete native commands.
 
 ## Blockers
 
@@ -48,6 +36,6 @@ None.
 
 ## next_exact_action
 
-User-side QQ smoke: open `!面板`; click `help` or `status` and verify the command appears as a normal chat message; then click a parameterized command such as `codex` and verify it only prefills the input box.
+Change group discovery to registry.buildCategorizedPanels("group", ...) and update regressions.
 
-last_checkpoint_at: 2026-10-01T18:28:00+08:00
+last_checkpoint_at: 2026-10-01T21:45:00+08:00
