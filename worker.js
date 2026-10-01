@@ -4848,11 +4848,16 @@ export class OneBotHub {
         });
       }
       const pluginCommandText = eventPlainText(body).trim();
+      const pluginMappedGroupId = body?.message_type === "group"
+        ? await resolveOneBotGroupForQqOpen(this.env, String(body?.group_id || "")).catch(() => "")
+        : "";
+      const pluginGroupAllowed = body?.message_type !== "group"
+        || Boolean(pluginMappedGroupId && await isGroupWhitelisted(this.env, pluginMappedGroupId));
       const pluginCommandBlocked = body?.message_type === "group"
         && /^[!！]/.test(pluginCommandText)
         && !/^[!！](?:指令开|指令開)$/i.test(pluginCommandText)
         && await dbGet(this.env, `commands_disabled:${String(body?.group_id || "")}`) === "true";
-      const pluginEvent = body.__qqai_skip_plugins === true || pluginCommandBlocked ? null : await dispatchV3RuntimeEvent(pluginEnv, pluginBody).catch(async error => {
+      const pluginEvent = body.__qqai_skip_plugins === true || !pluginGroupAllowed || pluginCommandBlocked ? null : await dispatchV3RuntimeEvent(pluginEnv, pluginBody).catch(async error => {
         await writeSystemAudit(this.env, {
           type: "v3_plugin_qqopen_event_failed",
           groupId: String(body?.group_id || ""),
@@ -5428,11 +5433,13 @@ export class OneBotHub {
       && /^[!！](?:成員發言分析|成员发言分析|發言分析|发言分析)(?:\\s|$)/i.test(eventPlainText(body).trim());
     let v3PluginFailure = "";
     const v3PluginCommandText = eventPlainText(body).trim();
+    const v3PluginGroupAllowed = body?.message_type !== "group"
+      || await isGroupWhitelisted(this.env, String(body?.group_id || ""));
     const v3PluginCommandBlocked = body?.message_type === "group"
       && /^[!！]/.test(v3PluginCommandText)
       && !/^[!！](?:指令开|指令開)$/i.test(v3PluginCommandText)
       && await dbGet(this.env, `commands_disabled:${String(body?.group_id || "")}`) === "true";
-    const v3PluginEvent = v3PluginCommandBlocked ? null : await dispatchV3RuntimeEvent(this.env, v3PluginBody).catch(async error => {
+    const v3PluginEvent = !v3PluginGroupAllowed || v3PluginCommandBlocked ? null : await dispatchV3RuntimeEvent(this.env, v3PluginBody).catch(async error => {
       v3PluginFailure = String(error?.message || error).slice(0, 240);
       await writeSystemAudit(this.env, {
         type: "v3_plugin_event_failed",
