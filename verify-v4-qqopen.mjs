@@ -132,8 +132,11 @@ assert.equal(resolveGroupPanelInput("!面板 开发者 codexwork --export 测试
 const groupRootHelp = resolveGroupPanelInput("!面板 基础", registry);
 assert.equal(groupRootHelp?.matched, true);
 assert.equal(groupRootHelp?.expanded, "");
-assert.match(groupRootHelp?.message || "", /help/);
-assert.match(groupRootHelp?.message || "", /status/);
+assert.equal(groupRootHelp?.message, "【基础】请选择子指令");
+assert.doesNotMatch(groupRootHelp?.message || "", /备用文字/);
+assert.match(groupRootHelp?.fallbackMessage || "", /备用文字/);
+assert.match(groupRootHelp?.fallbackMessage || "", /help/);
+assert.match(groupRootHelp?.fallbackMessage || "", /status/);
 assert(groupRootHelp?.keyboard?.content?.rows?.length > 0);
 assert(groupRootHelp.keyboard.content.rows.length <= 5);
 assert(groupRootHelp.keyboard.content.rows.every(row => row.buttons.length <= 2));
@@ -272,6 +275,7 @@ const basicReplyBody = buildInlineKeyboardMessageBody(
 assert(basicReplyBody);
 assert.equal(basicReplyBody.msg_type, 0, "inline keyboard replies must use plain text message type");
 assert.equal(basicReplyBody.content, "【基础】请选择子指令");
+assert.doesNotMatch(basicReplyBody.content, /备用文字/);
 assert.equal(basicReplyBody.msg_seq, 7);
 assert.equal(basicReplyBody.msg_id, "fixture-message");
 assert(!Object.prototype.hasOwnProperty.call(basicReplyBody, "markdown"), "inline keyboard replies must not require Markdown permission");
@@ -328,6 +332,8 @@ assert.match(qqOpenRuntimeSource, /keyboardCapabilityError/);
 assert.match(qqOpenRuntimeSource, /content,\s*\.\.\.extra,\s*msg_type:\s*0,\s*keyboard:/);
 assert.doesNotMatch(qqOpenRuntimeSource, /msg_type:\s*2,\s*markdown:\s*\{\s*content[^}]*\}[^}]*keyboard/s);
 assert.match(qqOpenRuntimeSource, /\[QQ_OPEN_KEYBOARD_FALLBACK\]/);
+assert.match(qqOpenRuntimeSource, /keyboardFallbackContent\s*=\s*String\(result\?\.qq_inline_keyboard_fallback/);
+assert.match(qqOpenRuntimeSource, /content:\s*fallbackContent\s*\|\|\s*content/);
 assert.match(qqOpenRuntimeSource, /permission:\s*\{\s*type/);
 assert.match(qqOpenRuntimeSource, /click_limit/);
 assert.match(qqOpenRuntimeSource, /unsupport_tips/);
@@ -339,6 +345,8 @@ assert.match(qqOpenRuntimeSource, /configuredIntents/);
 assert.match(qqOpenRuntimeSource, /Number\(this\.persisted\.sessionIntents \|\| 0\) === configuredIntents/);
 assert.match(qqOpenRuntimeSource, /if \(!canResume\) this\.persisted\.sessionIntents = configuredIntents/);
 assert.match(workerSource, /qq_inline_keyboard/);
+assert.match(workerSource, /qq_inline_keyboard_fallback/);
+assert.match(qqOpenRuntimeSource, /qq_inline_keyboard_fallback/);
 
 const developerPanels = registry.buildCategorizedPanels("c2c", {
   permissions:allPermissions,
