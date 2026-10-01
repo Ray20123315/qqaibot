@@ -2586,7 +2586,7 @@ body::after{content:"";position:fixed;inset:0;z-index:1;pointer-events:none;back
 .login,.app,.toast,.qqai-modal{position:relative;z-index:3}
 .login{overflow:hidden;background:rgba(5,8,22,.28)!important;backdrop-filter:blur(2px)}
 .login-card{position:relative;z-index:4;background:linear-gradient(180deg,rgba(17,24,39,.80),rgba(8,12,25,.70))!important;border-color:rgba(255,255,255,.15)!important;box-shadow:0 34px 120px rgba(0,0,0,.50),0 0 80px rgba(124,58,237,.10),inset 0 1px rgba(255,255,255,.06);backdrop-filter:blur(26px) saturate(145%);animation:qqaiAuthCardIn .72s var(--qqai-ease) both}
-:root[data-theme="light"] .qqai-aurora{opacity:.34;mix-blend-mode:multiply}
+:root[data-theme="light"] .qqai-aurora{opacity:.58;mix-blend-mode:normal}
 :root[data-theme="light"] .login-card{background:rgba(255,255,255,.82)!important}
 .sidebar{background:linear-gradient(180deg,rgba(13,19,34,.82),rgba(8,12,25,.72))!important;border-right:1px solid rgba(255,255,255,.09);box-shadow:20px 0 70px rgba(0,0,0,.22);backdrop-filter:blur(28px) saturate(135%)}
 .topbar{background:linear-gradient(180deg,rgba(5,8,22,.80),rgba(5,8,22,.50) 72%,transparent)!important;backdrop-filter:blur(22px) saturate(130%)}
