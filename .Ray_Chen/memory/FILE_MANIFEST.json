@@ -1,14 +1,14 @@
 {
   "schema_version": 1,
-  "memory_version": "v0.0.51",
+  "memory_version": "v0.0.52",
   "task_id": "qqaibot-20261001-panel-complete-real-message-send",
   "goal_revision": 3,
-  "transaction": "category_panel_retire_relationship_checkpoint_20261001",
+  "transaction": "category_panel_relationship_retirement_validation_20261001",
   "repository": "Ray20123315/qqaibot",
   "production_branch": "main",
   "development_branch": "v4-qqopen-native",
   "product_before_revision": "9f78fc66547d278a72858bbd25a22f00dda7ba2a",
-  "product_after_revision": "9f78fc66547d278a72858bbd25a22f00dda7ba2a",
+  "product_after_revision": "0c4cc0aa55f9e01212b2a39cb979ee8de1ace1fe",
   "verification": {
     "feature_product_ci_run": 36366445081,
     "regression_ci_run": 36366534308,
@@ -24,9 +24,9 @@
     "discovery_sync_after_fix": "pending_authenticated_status",
     "live_mapping_after_fix": "pending_user_test",
     "command_fallback_implementation": "verified",
-    "development_ci": "pending",
+    "development_ci": "success",
     "main_update": "pending",
-    "development_ci_run": 36871773623,
+    "development_ci_run": 36878357756,
     "main_ci": "pending",
     "production_commit": "9f78fc66547d278a72858bbd25a22f00dda7ba2a",
     "main_readback": "success",
@@ -137,7 +137,7 @@
     "all_category_pages_covered": "verified",
     "all_group_panel_commands_covered": "verified",
     "live_final_keyboard_smoke": "pending_user",
-    "current_repair": "category_launcher_and_relationship_retirement_in_progress",
+    "current_repair": "validated_development_category_launcher_relationship_retirement",
     "direct_callback_live_semantics": "superseded_rejected_by_user",
     "target_direct_button_semantics": "type2_enter_true_real_message",
     "registry_runtime_reconciliation": "verified",
@@ -150,8 +150,9 @@
     "live_native_group_panel": "pending_user_refresh",
     "v0050_package": "pending_post_commit_workflow",
     "native_panel_strategy": "category_root_plus_paginated_keyboard",
-    "relationship_public_feature": "retiring",
-    "werewolf_runtime": "already_absent"
+    "relationship_public_feature": "retired_verified_development",
+    "werewolf_runtime": "absent_verified",
+    "relationship_storage": "legacy_cleanup_only"
   },
   "changes": [
     {
@@ -2027,10 +2028,32 @@
       "after_revision": "v0.0.51",
       "verification": "Goal revision 3 recorded before product patch",
       "changed_at": "2026-10-01T22:12:00+08:00"
+    },
+    {
+      "location_type": "github",
+      "provider": "GitHub",
+      "resource_id_or_path": "src/v4/qqopen/discovery.js;src/v4/commands/group-panel.js;src/v4/commands/registry.js;src/v4/commands/catalog.js;worker.js;src/portal/community-suite.js;src/portal/members.js;src/portal/member-cleanup.js;src/members/details.js;src/moderation/partner-bindings.js;verify-v4-qqopen.mjs;verify-partner-bindings.mjs;verify-master-bindings.mjs;verify-portal-relationships.mjs;verify-community-suite.mjs;verify-member-details.mjs;verify-member-cleanup.mjs;verify-portal-members-client.mjs;verify-v3-transition-cleanup.mjs",
+      "action": "modified",
+      "branch_or_container": "v4-qqopen-native",
+      "before_revision": "dfbee0297c015949531bac38eb93cfc72600ea22",
+      "after_revision": "0c4cc0aa55f9e01212b2a39cb979ee8de1ace1fe",
+      "verification": "Development CI 36878357756 success; category-root discovery restored; relationship public feature retired; legacy storage cleanup only; werewolf absent",
+      "changed_at": "2026-10-01T22:44:00+08:00"
+    },
+    {
+      "location_type": "github",
+      "provider": "GitHub",
+      "resource_id_or_path": ".Ray_Chen/memory/*",
+      "action": "validation_checkpoint",
+      "branch_or_container": "v4-qqopen-native",
+      "before_revision": "v0.0.51",
+      "after_revision": "v0.0.52",
+      "verification": "Validated product state recorded before main promotion",
+      "changed_at": "2026-10-01T22:44:00+08:00"
     }
   ],
   "internal_memory_transaction": {
-    "action": "start category-launcher + relationship-retirement repair; bump memory to v0.0.51",
-    "note": "No product files changed in this checkpoint."
+    "action": "record validated category-launcher and relationship-retirement product state; bump memory to v0.0.52",
+    "note": "Main promotion and production deployment remain pending."
   }
 }

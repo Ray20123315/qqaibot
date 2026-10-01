@@ -1,6 +1,6 @@
 # Ray_Chen Memory Entry
 
-- memory_version: v0.0.51
+- memory_version: v0.0.52
 - project: QQAIBOT
 - repository: Ray20123315/QQAIBOT
 - canonical_branch: main
@@ -8,26 +8,29 @@
 - task_id: qqaibot-20261001-panel-complete-real-message-send
 - task_status: active
 - goal_revision: 3
-- base_revision: 8beea65b514484e6ed5ec352640492693b4d4901
-- verified_product_revision: 9f78fc66547d278a72858bbd25a22f00dda7ba2a
-- updated_at: 2026-10-01T22:12:00+08:00
+- base_revision: dfbee0297c015949531bac38eb93cfc72600ea22
+- verified_product_revision: 0c4cc0aa55f9e01212b2a39cb979ee8de1ace1fe
+- updated_at: 2026-10-01T22:44:00+08:00
 
-## Current Goal
+## Validated Product State
 
-Return QQ native group discovery to category-entry mode because the native panel has hard visibility/item limits, while keeping the custom inline-keyboard category panels as the complete command surface.
+QQ native group discovery is again a compact category launcher. Each retained category opens the bot-managed two-column paginated inline keyboard, so QQ native item limits cannot hide child commands.
 
-At the same time remove user-rejected features from the public bot surface:
-- master/partner relationship system (主人／对象);
-- werewolf game (狼人杀／狼人殺) must remain absent.
+Retired features:
+- master/partner relationship command category and command registrations removed;
+- relationship command handlers removed from worker.js;
+- Portal relationship data, controls, policies and cleanup protection removed;
+- partner-bindings module reduced to legacy row cleanup only;
+- old master/partner mute-lock source parsing retained only for safe historical unlock/expiry;
+- werewolf remains absent across worker, help and command catalog.
 
-## Required Architecture
+## Evidence
 
-- QQ native group panel: category entries only.
-- Sending a category entry returns the custom two-column paginated keyboard containing all commands in that category.
-- Direct child commands keep normal QQ send semantics; parameterized child commands keep editable prefill.
-- Relationship commands/category/handlers/Portal management are removed.
-- Legacy relationship data cleanup and old relationship mute-lock compatibility may remain only to safely retire historical state.
+- product head: `0c4cc0aa55f9e01212b2a39cb979ee8de1ace1fe`
+- development CI: `36878357756` — success
+- main promotion: pending
+- production deployment: pending
 
 ## next_exact_action
 
-Patch discovery, command registry/catalog/group panel, worker relationship handlers, Portal relationship surfaces, and regression tests on v4-qqopen-native.
+Fast-forward main to the validated product head, then verify main CI and Cloudflare production Connected Build.

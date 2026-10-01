@@ -1,34 +1,32 @@
 # CURRENT_STATE
 
-## Production Before Goal Revision 3
+## Development
 
-- main head: `8beea65b514484e6ed5ec352640492693b4d4901`
-- deployed product revision: `9f78fc66547d278a72858bbd25a22f00dda7ba2a`
-- previous main CI: `36872340755` — success
-- previous production Connected Build: `521ccfd8-bc55-4aff-9fdb-f0515f5ebcea` — success
+- branch: `v4-qqopen-native`
+- verified product head: `0c4cc0aa55f9e01212b2a39cb979ee8de1ace1fe`
+- GitHub Actions: `36878357756` — success
+- regression, V3, V4 QQ Open, isolated deployment checks and Worker bundle all passed.
 
-## Live User Evidence
+## Command Panel Architecture
 
-The native QQ panel still demonstrates why publishing every concrete command directly is the wrong UX: the client only shows a constrained subset. The intended solution is category-entry discovery plus the bot's own paginated inline keyboard.
+- QQ native group panel: category launcher only.
+- Child command surface: custom inline keyboard, two columns, max five rows, paginated.
+- Direct child command: `type=2 + enter=true`.
+- Parameterized child command: `type=2 + enter=false`.
+- Normal buttons remain reusable without `click_limit`.
 
-## Confirmed Unwanted Feature State
+## Retired Functionality
 
-- 狼人杀/狼人殺 is already absent from worker runtime and has an existing transition-cleanup assertion.
-- 主人/对象 relationship functionality is still active in worker handlers and still has Portal backend/client surfaces.
-- Relationship command registrations and a relationship panel category are still present.
+- relationship category removed;
+- master/partner commands removed from registry/catalog and worker handlers;
+- Portal relationship policy, display and cleanup coupling removed;
+- relationship storage reduced to historical cleanup only;
+- historical master/partner mute-lock sources remain parseable for safe cleanup;
+- werewolf remains absent.
 
-## Target State
+## Production
 
-- restore one managed group category-root native panel;
-- remove relationship category/commands/handlers/Portal controls;
-- keep old relationship data cleanup and old lock compatibility only;
-- strengthen regressions so removed features do not return.
-
-## Verification State
-
-- product patch: PLANNED
-- development CI: PENDING
-- main update: PENDING
+- main promotion: PENDING
 - main CI: PENDING
-- production Connected Build: PENDING
-- live QQ smoke: PENDING_USER
+- Cloudflare production build: PENDING
+- live QQ client smoke: PENDING_USER

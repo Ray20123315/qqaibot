@@ -6,24 +6,42 @@ goal_revision: 3
 
 ## Goal
 
-Use the native QQ command panel only as a category launcher so all commands remain reachable through custom paginated keyboards; remove unwanted relationship features and keep werewolf removed.
+Use QQ native group discovery only as a compact category launcher, keep the complete command surface in custom paginated inline keyboards, and retire unwanted relationship functionality while keeping werewolf removed.
 
 ## Acceptance Criteria
 
-- Native group discovery contains category entries rather than trying to publish every concrete command.
-- Every non-empty retained category resolves to a clickable paginated inline keyboard.
-- All retained group commands are covered across category pages.
-- Direct commands use type=2 + enter=true; parameterized commands use type=2 + enter=false.
-- No relationship category or relationship command appears in catalog/panel.
-- Relationship command handlers are not executable from worker.js.
-- Portal relationship policy endpoints and relationship display/control surfaces are removed.
-- Legacy relationship cleanup/mute-lock compatibility may remain but cannot create new relationship state.
-- Worker/catalog/help regressions assert 狼人杀/狼人殺 is absent.
-- Development CI, main CI and production Connected Build must pass before completion.
+- VERIFIED development: one managed native group category-root panel.
+- VERIFIED development: every retained non-empty category resolves to a paginated inline keyboard.
+- VERIFIED development: retained commands are fully covered across category pages.
+- VERIFIED development: direct child commands use type=2 + enter=true; parameterized commands use type=2 + enter=false.
+- VERIFIED development: no relationship category/commands/handlers/Portal controls remain.
+- VERIFIED development: relationship storage module can only clean historical rows.
+- VERIFIED development: old relationship mute-lock source parsing remains for safe compatibility only.
+- VERIFIED development: 狼人杀/狼人殺 absent from worker/help/catalog.
+- VERIFIED development CI: 36878357756 success.
+- PENDING: main CI, production build and live QQ client smoke.
 
-## Current Phase
+## Product Files Changed
 
-IN_PROGRESS — recovery/checkpoint completed; implementation next.
+- src/v4/qqopen/discovery.js
+- src/v4/commands/group-panel.js
+- src/v4/commands/registry.js
+- src/v4/commands/catalog.js
+- worker.js
+- src/portal/community-suite.js
+- src/portal/members.js
+- src/portal/member-cleanup.js
+- src/members/details.js
+- src/moderation/partner-bindings.js
+- verify-v4-qqopen.mjs
+- verify-partner-bindings.mjs
+- verify-master-bindings.mjs
+- verify-portal-relationships.mjs
+- verify-community-suite.mjs
+- verify-member-details.mjs
+- verify-member-cleanup.mjs
+- verify-portal-members-client.mjs
+- verify-v3-transition-cleanup.mjs
 
 ## Blockers
 
@@ -31,6 +49,6 @@ None.
 
 ## next_exact_action
 
-Implement the product changes on v4-qqopen-native, then run full CI.
+Promote `0c4cc0aa55f9e01212b2a39cb979ee8de1ace1fe` to main, then verify main CI and Cloudflare Connected Build.
 
-last_checkpoint_at: 2026-10-01T22:12:00+08:00
+last_checkpoint_at: 2026-10-01T22:44:00+08:00
