@@ -3,6 +3,7 @@ import fs from "node:fs";
 import { buildConnectivityReply, createQqOpenActionDispatcher, createQqOpenApiClient, createGatewayState, createHeartbeatPayload, createIdentifyPayload, createResumePayload, fromQqOpenEvent, qqOpenClosePolicy, qqOpenDeliveryKey, qqOpenDeliverySequence, qqOpenIntents, qqOpenPassiveReplyPolicy, qqOpenReconnectDelay, qqOpenShard, reduceGatewayPayload, syncQqOpenDiscovery } from "./src/v4/index.js";
 import { createInitialCommandRegistry } from "./src/v4/commands/catalog.js";
 import { GROUP_PANEL_CATEGORY_META, assertGroupPanelCoverage, buildGroupCategoryKeyboard, buildGroupRootPanel, normalizeGroupPanelSlashInvocation, resolveGroupPanelInput } from "./src/v4/commands/group-panel.js";
+import { buildInlineKeyboardMessageBody } from "./src/v4/qqopen/runtime.js";
 
 const group = fromQqOpenEvent({ t:"GROUP_MESSAGE_CREATE", s:42, d:{ id:"msg-1", group_openid:"group-A", timestamp:"2026-09-27T08:00:00Z", content:" hello ", author:{ member_openid:"member-A", member_role:"admin", username:"Ray" }, attachments:[{content_type:"image/png",url:"https://example.com/a.png",filename:"a.png"}] } });
 assert.equal(group.platform, "qq-open");
@@ -263,15 +264,39 @@ assert.equal(aiAdminPage2?.expanded, "");
 assert.equal(aiAdminPage2?.page, 2);
 assert(aiAdminPage2?.keyboard?.content?.rows?.length > 0);
 
+const basicReplyBody = buildInlineKeyboardMessageBody(
+  "【基础】请选择子指令",
+  basicKeyboard.keyboard,
+  { msg_seq:7, msg_id:"fixture-message" }
+);
+assert(basicReplyBody);
+assert.equal(basicReplyBody.msg_type, 0, "inline keyboard replies must use plain text message type");
+assert.equal(basicReplyBody.content, "【基础】请选择子指令");
+assert.equal(basicReplyBody.msg_seq, 7);
+assert.equal(basicReplyBody.msg_id, "fixture-message");
+assert(!Object.prototype.hasOwnProperty.call(basicReplyBody, "markdown"), "inline keyboard replies must not require Markdown permission");
+assert(basicReplyBody.keyboard?.content?.rows?.length > 0);
+
+const eventReplyBody = buildInlineKeyboardMessageBody(
+  "【基础】请选择子指令",
+  basicKeyboard.keyboard,
+  { event_id:"evt-fixture" }
+);
+assert.equal(eventReplyBody?.msg_type, 0);
+assert.equal(eventReplyBody?.event_id, "evt-fixture");
+assert(!Object.prototype.hasOwnProperty.call(eventReplyBody || {}, "markdown"));
+
 const requestCountBeforeCategoryPayloads = requests.length;
 for (const meta of GROUP_PANEL_CATEGORY_META) {
   const view = buildGroupCategoryKeyboard(registry, meta.key, { page:1 });
   if (!view) continue;
-  await api.sendGroupMessage("group/A", {
-    msg_type:2,
-    markdown:{content:`【${meta.label}】请选择子指令`},
-    keyboard:view.keyboard
-  });
+  const body = buildInlineKeyboardMessageBody(
+    `【${meta.label}】请选择子指令`,
+    view.keyboard,
+    { msg_seq:1, msg_id:"panel-fixture" }
+  );
+  assert(body);
+  await api.sendGroupMessage("group/A", body);
 }
 const categoryKeyboardPosts = requests.slice(requestCountBeforeCategoryPayloads).filter(x =>
   /\/v2\/groups\/group%2FA\/messages$/.test(x.url)
@@ -281,8 +306,10 @@ const categoryKeyboardPosts = requests.slice(requestCountBeforeCategoryPayloads)
 assert.equal(categoryKeyboardPosts.length, nonEmptyCategoryCount);
 for (const post of categoryKeyboardPosts) {
   const body = JSON.parse(post.options.body);
-  assert.equal(body.msg_type, 2);
-  assert(body.markdown?.content);
+  assert.equal(body.msg_type, 0);
+  assert.equal(typeof body.content, "string");
+  assert(body.content.includes("请选择子指令"));
+  assert(!Object.prototype.hasOwnProperty.call(body, "markdown"));
   assert(body.keyboard?.content?.rows?.length > 0);
   assert(body.keyboard.content.rows.length <= 5);
   assert(body.keyboard.content.rows.every(row => row.buttons.length > 0 && row.buttons.length <= 2));
@@ -296,9 +323,11 @@ for (const post of categoryKeyboardPosts) {
 const qqOpenRuntimeSource = fs.readFileSync("src/v4/qqopen/runtime.js", "utf8");
 assert.match(qqOpenRuntimeSource, /qq_inline_keyboard/);
 assert.match(qqOpenRuntimeSource, /normalizeInlineKeyboard/);
+assert.match(qqOpenRuntimeSource, /buildInlineKeyboardMessageBody/);
 assert.match(qqOpenRuntimeSource, /keyboardCapabilityError/);
-assert.match(qqOpenRuntimeSource, /msg_type:\s*2/);
-assert.match(qqOpenRuntimeSource, /markdown:\s*\{\s*content/);
+assert.match(qqOpenRuntimeSource, /content,\s*\.\.\.extra,\s*msg_type:\s*0,\s*keyboard:/);
+assert.doesNotMatch(qqOpenRuntimeSource, /msg_type:\s*2,\s*markdown:\s*\{\s*content[^}]*\}[^}]*keyboard/s);
+assert.match(qqOpenRuntimeSource, /\[QQ_OPEN_KEYBOARD_FALLBACK\]/);
 assert.match(qqOpenRuntimeSource, /permission:\s*\{\s*type/);
 assert.match(qqOpenRuntimeSource, /click_limit/);
 assert.match(qqOpenRuntimeSource, /unsupport_tips/);
