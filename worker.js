@@ -548,6 +548,8 @@ const QQAIWorker = {
     }
 
     if (request.method === 'POST' && url.pathname === '/api/auth/preview-test-login') {
+      let payload = {};
+      try { payload = await request.json(); } catch (e) {}
       const previewHost = "feature-v4-public-bot-qqai.ray20123315.workers.dev";
       const requestHost = String(url.hostname || "").toLowerCase();
       const enabled = String(env.V4_PREVIEW_TEST_LOGIN || "").trim().toLowerCase() === "true";
@@ -573,7 +575,7 @@ const QQAIWorker = {
         const session = await createPortalSession(env, {
           systemAdmin: true,
           username: "v4-preview-test",
-          persistent: false,
+          persistent: payload.remember !== false,
           authMethod: "v4_preview_test"
         });
         await writeSystemAudit(env, {
@@ -588,7 +590,9 @@ const QQAIWorker = {
           preview: true,
           expiresAt,
           message: "V4 Preview 最高權限測試登入成功。"
-        }, 200, { "Set-Cookie": portalSessionCookie(session.token, 30 * 60) });
+        }, 200, { "Set-Cookie": portalSessionCookie(session.token, session.persistent
+          ? Math.max(1, Math.floor((Math.min(Number(session.absoluteExpiresAt || 0), expiresAt) - Date.now()) / 1000))
+          : null) });
       } catch {
         return jsonResponse({ ok: false, code: "PREVIEW_TEST_LOGIN_STORAGE_UNAVAILABLE", message: "Preview 測試工作階段暫時無法建立，請稍後再試。" }, 503);
       }
@@ -620,7 +624,7 @@ const QQAIWorker = {
           const session = await createPortalSession(env, {
             systemAdmin: true,
             username: verifiedTemp.username,
-            persistent: false,
+            persistent: payload.remember !== false,
             authMethod: "temporary_environment_admin_password"
           });
           await writeSystemAudit(env, {
@@ -635,7 +639,9 @@ const QQAIWorker = {
             temporary: true,
             expiresAt: verifiedTemp.expiresAt,
             message: "TEMP 系統管理員登入成功。"
-          }, 200, { "Set-Cookie": portalSessionCookie(session.token, 30 * 60) });
+          }, 200, { "Set-Cookie": portalSessionCookie(session.token, session.persistent
+            ? Math.max(1, Math.floor((Math.min(Number(session.absoluteExpiresAt || 0), Number(verifiedTemp.expiresAt || 0)) - Date.now()) / 1000))
+            : null) });
         } catch {
           return jsonResponse({ ok: false, code: "ADMIN_AUTH_STORAGE_UNAVAILABLE", message: "TEMP 管理員登入暫時無法安全完成，請稍後重試。" }, 503);
         }
@@ -662,10 +668,12 @@ const QQAIWorker = {
           if (await portalAdminUsernameIsClaimed(env, adminConfig.normalizedUsername)) {
             return jsonResponse({ ok: false, code: "ADMIN_USERNAME_COLLISION", message: "這個管理員帳號名稱已被既有帳號使用，現有帳號資料已保留。請更改 PORTAL_ADMIN_USERNAME 後再登入。" }, 409);
           }
-          const session = await createPortalSession(env, { systemAdmin: true, username: verified.username, persistent: false, authMethod: "environment_admin_password" });
+          const session = await createPortalSession(env, { systemAdmin: true, username: verified.username, persistent: payload.remember !== false, authMethod: "environment_admin_password" });
           await clearPasswordLoginGuard(env, guardId);
           await writeSystemAudit(env, { type: "portal_auth_security", actorId: "system-admin", action: "environment_admin_login" }).catch(() => {});
-          return jsonResponse({ ok: true, systemAdmin: true, message: "系統管理員登入成功。" }, 200, { "Set-Cookie": portalSessionCookie(session.token, 30 * 60) });
+          return jsonResponse({ ok: true, systemAdmin: true, message: "系統管理員登入成功。" }, 200, { "Set-Cookie": portalSessionCookie(session.token, session.persistent
+            ? Math.max(1, Math.floor((Number(session.absoluteExpiresAt || 0) - Date.now()) / 1000))
+            : null) });
         } catch (error) {
           return jsonResponse({ ok: false, code: "ADMIN_AUTH_STORAGE_UNAVAILABLE", message: "管理員登入暫時無法安全完成，請稍後重試。" }, 503);
         }
