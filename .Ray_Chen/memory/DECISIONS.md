@@ -135,3 +135,21 @@ date: 2026-10-01
 Decision: a remember record stores a minimal sanitized session seed alongside the referenced session token. If the referenced persistent session no longer exists, restore creates a new persistent session from the seed, limits its absolute expiry to the remember credential expiry, then rotates the remember credential.
 Reason: a remember token that only points to the old server session cannot recover when that old session record itself is missing.
 
+## D-095 Authentication recovery precedes optional Portal bootstrap
+status: accepted
+date: 2026-10-01
+Decision: Portal boot establishes motion mode and authentication first. Only after /api/portal/me succeeds may optional R3 views, account-security, sidebar and dashboard-action setup run; optional bootstrap failures are isolated and cannot force the user back to the login screen.
+Reason: a stale handler for a removed DOM element stopped JavaScript before boot(), so refresh displayed the initial login screen even though the authentication cookies were valid.
+
+## D-096 Portal API 401 recovery is serialized through /api/portal/me
+status: accepted
+date: 2026-10-01
+Decision: only /api/portal/me consumes the remember credential. Other Portal API calls that receive 401 await one shared /me recovery promise and retry after it succeeds; they do not consume/rotate remember state independently.
+Reason: concurrent API requests must not race each other while rotating the remember credential or prematurely call showLogin().
+
+## D-097 Reference transitions run inside the View Transition update
+status: accepted
+date: 2026-10-01
+Decision: page activation, title/subtitle animation, page-enter class, stagger animation, motion bar and nav-indicator update execute inside the document.startViewTransition update callback. Motion mode defaults to full and is changed only through the Portal's explicit 完整/精簡 control.
+Reason: running page-enter outside the update callback can consume the animation while the new page is still hidden; the supplied reference performs its page render and page-enter work inside the transition update.
+

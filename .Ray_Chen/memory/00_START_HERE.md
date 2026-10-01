@@ -1,6 +1,6 @@
 # Ray_Chen Memory Entry
 
-- memory_version: v0.0.52
+- memory_version: v0.0.53
 - project: QQAIBOT
 - repository: Ray20123315/QQAIBOT
 - canonical_branch: main
@@ -8,57 +8,74 @@
 - task_id: qqaibot-20261001-v4-preview-user-acceptance
 - task_status: active
 - goal_revision: 5
-- product_revision: ca92f9a0628ac57a14ec8ffe505a79c79a01793c
-- updated_at: 2026-10-01T21:50:00+08:00
+- product_revision: aaa7cc3b3a846ea37dc6a7efbfc9db831add29ce
+- updated_at: 2026-10-01T23:02:00+08:00
 
 ## Current Goal
 
-Keep all V4 acceptance work off production. Make persistent Portal login survive refresh even if the ordinary server session record disappears, and make the Portal animation visibly match the supplied dark-glass purple/cyan aurora reference. Do not live-test Bot behavior in real QQ groups because there is no isolated Bot/canary path.
+Keep all V4 acceptance work off production. Make real-browser reload preserve Portal authentication and reproduce the user-provided reference's obvious transition system, not merely its animated background. Do not live-test Bot behavior in real QQ groups because there is no isolated Bot/canary path.
+
+## Root Causes Confirmed
+
+- Reload logout root cause #1: the Portal script still contained an unconditional `$('runSimulator').onclick=...` binding after the simulator DOM had been removed. That null dereference occurred before the final `boot();`, so a refreshed page never ran authentication restoration and stayed on the initial login screen.
+- Reload logout root cause #2: incidental Portal API 401 responses could call `showLogin()` while `/api/portal/me` was still restoring the remember session.
+- Transition root cause: page-enter/stagger work was triggered outside the View Transition update callback, allowing the animation to run before the new view became visible.
+- Motion mismatch: the supplied reference defaults to its own `full` motion mode; it does not silently disable the transition system based on OS reduced-motion preference.
 
 ## Verified Product State
 
-- Feature product head: `ca92f9a0628ac57a14ec8ffe505a79c79a01793c`.
-- Final GitHub CI run `36871158902`: SUCCESS across repository regression, V3, V4 QQ Open, isolated V4 deployment checks and single Worker bundle.
-- Persistent login now sets both `qqai_session` and a separate `qqai_remember` as HttpOnly, Secure, SameSite=Lax cookies.
-- Remember records are keyed by SHA-256 of the opaque remember credential and now carry only the minimum session seed needed to reconstruct a new persistent server session.
-- `GET /api/portal/me` automatically attempts remember-cookie recovery when the ordinary session is absent or invalid.
-- If the remember record still points to a server session that no longer exists, the server rebuilds a new session from the stored seed, caps it to the remember expiry, rotates the remember credential and returns replacement cookies.
-- Logout revokes the active remember credential and clears both session and remember cookies.
-- Persistent sessions use the configured 30-day idle / 180-day absolute limits; unchecked privileged sessions retain the short 30-minute idle / 8-hour absolute limits.
-- Successful login remains in-page; no forced reload is part of login completion.
-- The Portal now uses a real foreground aurora layer with three large moving orbs, a moving light ribbon, pointer-follow glow, stronger page transitions and glass effects. Light theme keeps the aurora at `opacity:.58` rather than suppressing it.
+- Feature head: `aaa7cc3b3a846ea37dc6a7efbfc9db831add29ce`.
+- Final GitHub CI run `36879734052`: SUCCESS across repository regression, V3, V4 QQ Open, isolated V4 deployment checks and single Worker bundle.
+- Cloudflare Connected Build `04d90ceb-db5a-4bab-b9eb-c1f573be583c`: SUCCESS.
+- Worker version 2217 / `a371d22a-5dd9-4e82-a9e0-f1cc64553406`.
+- Persistent auth still uses HttpOnly `qqai_session` + `qqai_remember`, remember rotation/revocation, and session reconstruction when the original server session is absent.
+- Portal boot now applies/binds motion mode, performs the shared `/api/portal/me` auth recovery, and only then runs optional UI bootstrap steps under failure isolation.
+- Non-/me Portal API 401s share one `portalAuthRecovery` promise and retry after /me succeeds.
+- The stale simulator bootstrap handler is removed.
+- Transition rendering now executes page activation, title/subtitle animation, page-enter, stagger, motion bar and nav indicator from inside the View Transition update callback.
+- Motion mode defaults to `full` and the topbar exposes `動效：完整／精簡`.
+- Numeric counters use reference-style easing.
 
 ## Stable Preview
 
 - URL: `https://feature-v4-public-bot-qqai.ray20123315.workers.dev/`
 - preview id: `068adb610f4d47daa65c1376e021787f`
-- deployment: `9e54bef0-0af0-47be-abd4-9f4841c70318`
-- deployment number: 16
-- source annotation: `ca92f9a0628ac57a14ec8ffe505a79c79a01793c`
-- Worker version: 2207 / `49b8b3d4-a907-49b0-9448-9fce34b99d74`
+- deployment: `3b66f8c8-bd9b-470b-83e7-9c41c3720004`
+- deployment number: 19
+- source annotation: `aaa7cc3b3a846ea37dc6a7efbfc9db831add29ce`
 - isolated D1 table: `kv_store_v4public_preview`
 - `QQ_OPEN_ENABLED=false`
 - production-sensitive bindings: absent
 
 ## Live Verification
 
-- Failure-injection Preview deployment #15 was used only to prove recovery and its temporary diagnostics were then removed.
-- Before invalidation: session cookie present/valid and remember cookie/record present.
-- After deliberately deleting the server session: the browser still had both cookies, the session was invalid, and the remember record was valid.
-- The next `/api/portal/me` returned HTTP 200 with `systemAdmin=true`; a new server session existed afterwards and the remember credential remained valid after rotation.
-- Final Preview #16: one-click Preview login shows the app and hides the login page; `/api/portal/me` returns HTTP 200 / ok=true / systemAdmin=true.
-- Final Chromium visual probe: `qqaiFloatOrbA` is running, light-theme aurora opacity is `0.58`, three orbs are present, and the orb transform changes over time.
+Transition probe on Preview #19:
+- `data-motion=full`
+- motion toggle bound = 1
+- destination: health/system diagnostics
+- View Transition invoked = 1
+- destination view active = true
+- destination had `qqai-view-enter` during the transition
+- 36 animations were running at the observation point
+- running animations included `qqaiPageInStrong`, multiple `qqaiRiseInStrong`, `qqaiMotionSweepStrong`, `qqaiVtOldStrong` and `qqaiVtNewStrong`
+- page title/subtitle changed to 系统诊断 / 快速检查连线、模型与服务状态
+- page-enter was removed after completion while the destination remained active
 
-## Bot Test Constraint
+Reload probe on Preview #19:
+- login once, then actual `location.reload()`
+- final app class: `app`
+- final login class: `login hidden`
+- final `data-motion=full`
+- identity remained `v4-preview-test 系统管理员`
+- final HTTP/origin status 200
 
-Do not send live Bot test messages or run real QQ-group canaries until an isolated Bot/canary route exists or the user explicitly authorizes a scoped live test.
+## Bot / Production Constraints
 
-## Production / Merge Gate
-
+- No live QQ-group Bot test was run.
 - `main` remains untouched.
-- Do not merge until the user accepts V4.
-- Preview-only highest-privilege test login and legacy Preview resume path must be removed or disabled before any production merge.
+- Do not merge until the user manually accepts V4.
+- Preview-only highest-privilege acceptance login must be removed or disabled before production merge.
 
 ## Resume Rule
 
-Resume from v0.0.52. The next exact action is the user's real-browser acceptance check on the stable Preview: sign in once, refresh the page, confirm it stays authenticated, and visually confirm the stronger aurora/page motion matches the supplied reference closely enough. Bot live testing remains paused.
+Resume from v0.0.53. The next exact action is user real-browser acceptance on Preview #19: login once, reload, and switch between multiple sidebar pages to confirm persistent login and the reference-style transitions are visibly correct.

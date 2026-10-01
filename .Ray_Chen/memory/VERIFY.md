@@ -2,12 +2,12 @@
 
 ## Product Revision
 
-`ca92f9a0628ac57a14ec8ffe505a79c79a01793c`
+`aaa7cc3b3a846ea37dc6a7efbfc9db831add29ce`
 
 ## GitHub
 
 Final CI:
-- run: `36871158902`
+- run: `36879734052`
 - conclusion: SUCCESS
 - repository regression: success
 - V3 regression: success
@@ -15,76 +15,66 @@ Final CI:
 - isolated V4 deployment checks: success
 - single Worker bundle: success
 
-Persistent-login regression coverage:
-- remembered system-admin/developer sessions use `DEFAULTS.portalSessionTtlMs` and `DEFAULTS.portalSessionAbsoluteTtlMs`;
-- unchecked privileged sessions remain 30m idle / 8h absolute;
-- persistent logins issue `qqai_session` and `qqai_remember` HttpOnly cookies;
-- remember records are SHA-256-keyed;
-- generic restore rotates the remember credential;
-- used/revoked remember credentials cannot be reused;
-- logout clears both cookies and revokes server-side remember state;
-- a remember record can reconstruct a fresh session after the original `portal_session:<token>` row is deliberately deleted;
-- rebuilt session is persistent and cannot outlive the remember credential;
-- runtime no longer depends on generic `qqai_portal_remember` localStorage state.
-
-Motion/background regression coverage:
-- `qqai-reference-motion-v2-strong` marker;
-- real `.qqai-aurora` DOM layer;
-- three orb animations `qqaiFloatOrbA/B/C`;
-- moving ribbon `qqaiRibbon`;
-- strong page-enter and View Transition keyframes;
-- pointer-follow page/card glow;
-- light-theme aurora opacity `.58`;
-- reduced-motion fallback retained.
+Regression coverage added in this round:
+- removed simulator handler cannot remain as an unguarded bootstrap binding;
+- boot authentication recovery must occur before optional UI bootstrap;
+- ordinary Portal API calls must not consume remember state directly;
+- when an ordinary API returns 401, the client shares a single /me recovery and retries;
+- reference transition sequencing requires title/subtitle, stagger, nav indicator and page-enter inside the View Transition update;
+- Portal motion defaults to `full` via the explicit motion setting, not OS preference.
 
 ## Cloudflare Feature Build
 
-- build UUID: `5b74a8a1-ef8c-4246-889a-4ee425e0017c`
+- build UUID: `04d90ceb-db5a-4bab-b9eb-c1f573be583c`
 - branch: `feature/v4-public-bot`
-- commit: `ca92f9a0628ac57a14ec8ffe505a79c79a01793c`
+- commit: `aaa7cc3b3a846ea37dc6a7efbfc9db831add29ce`
 - outcome: SUCCESS
-- Worker version: 2207
-- Worker version id: `49b8b3d4-a907-49b0-9448-9fce34b99d74`
+- Worker version: 2217
+- Worker version id: `a371d22a-5dd9-4e82-a9e0-f1cc64553406`
 
 ## Stable Preview
 
 - preview id: `068adb610f4d47daa65c1376e021787f`
 - URL: `https://feature-v4-public-bot-qqai.ray20123315.workers.dev/`
-- deployment: `9e54bef0-0af0-47be-abd4-9f4841c70318`
-- deployment number: 16
-- source annotation: `ca92f9a0628ac57a14ec8ffe505a79c79a01793c`
+- deployment: `3b66f8c8-bd9b-470b-83e7-9c41c3720004`
+- deployment number: 19
+- source annotation: `aaa7cc3b3a846ea37dc6a7efbfc9db831add29ce`
 
-Read-back isolation:
+Isolation read-back:
 - `QQAI_DB_TABLE=kv_store_v4public_preview`
 - `QQ_OPEN_ENABLED=false`
 - `V4_PREVIEW_TEST_LOGIN=true`
-- `V4_PREVIEW_TEST_EXPIRES_AT=2026-10-03T00:00:00+08:00`
-- production QQ/OneBot/AI/Codex/Portal-admin sensitive bindings: absent
+- production QQ/OneBot/AI/Vectorize/Portal-admin sensitive bindings: absent
 
-## Live Failure-Injection Proof
+## Live Transition Proof
 
-An isolated Preview-only diagnostic was temporarily added, used, then removed before final deployment.
+Chromium on Preview #19:
+- `data-motion=full`
+- `motionToggle.dataset.bound=1`
+- selected destination: health
+- View Transition invoked once
+- `updateCallbackDone=ok`, `finished=ok`
+- destination active=true
+- destination had `qqai-view-enter` during the observation
+- 36 animations running during the transition
+- observed: `qqaiPageInStrong`, multiple `qqaiRiseInStrong`, `qqaiMotionSweepStrong`, `qqaiVtOldStrong`, `qqaiVtNewStrong`
+- title/subtitle changed to 系统诊断 / 快速检查连线、模型与服务状态
+- destination remained active after animation cleanup
 
-Browser sequence:
-1. Login completed: session cookie present=true, sessionValid=true, remember cookie present=true, remember record present=true.
-2. Server-side session row was deliberately deleted.
-3. Diagnostic read-back: session cookie present=true, sessionValid=false, remember cookie present=true, remember record present=true.
-4. `GET /api/portal/me` returned HTTP 200, ok=true, systemAdmin=true.
-5. Diagnostic read-back after restore: sessionValid=true, remember record present=true after credential rotation.
+## Live Reload Proof
 
-This directly verifies remember recovery no longer depends on the old server session record.
+Chromium on Preview #19:
+1. Preview login button clicked once.
+2. App became visible.
+3. Browser executed actual `location.reload()`.
+4. Final DOM:
+   - app class: `app`
+   - login class: `login hidden`
+   - motion: `full`
+   - identity: `v4-preview-test 系统管理员`
+   - root/origin HTTP: 200
 
-## Final Preview Browser Smoke
-
-Cloudflare Browser Rendering on final Preview #16:
-- app visible after one Preview login: true
-- login page hidden: true
-- `GET /api/portal/me`: HTTP 200 / ok=true / systemAdmin=true
-- animation name: `qqaiFloatOrbA`
-- light-theme aurora opacity: `0.58`
-- orb transform changed during observation: true
-- three aurora orbs present: true
-- strong-motion marker present: true
+This is the first automated full-reload proof in this task that ends on the authenticated app rather than the login page.
 
 ## Bot Verification Boundary
 

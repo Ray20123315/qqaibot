@@ -91,3 +91,19 @@ Mitigation: persist a minimal sanitized session seed in the hash-keyed remember 
 Risk: negative stacking contexts, body backgrounds or low light-theme opacity can make a technically running aurora effectively invisible to the user.
 Mitigation: render a real `.qqai-aurora` DOM layer at foreground background z-order, use three large moving orbs plus a light ribbon, keep light-theme opacity visibly high, and verify computed animation name plus changing transform in a real Chromium render.
 
+## G-090 Removed DOM handlers can abort the entire Portal bootstrap
+Risk: an unconditional binding such as $('runSimulator').onclick throws when the corresponding removed UI no longer exists. Because boot() is called later in the same script, this can prevent authentication restoration and make refresh appear to log the user out.
+Mitigation: remove obsolete handlers or guard optional elements; keep authentication recovery ahead of optional UI bootstrap. Regression forbids the removed runSimulator binding.
+
+## G-091 Page-enter animation outside ViewTransition can be invisible
+Risk: calling animatePortalView() immediately after startViewTransition() can run the animation before the browser executes the transition update callback, so the class expires while the destination view is still hidden.
+Mitigation: activate the destination view and start page-enter/stagger/title/nav/motion-bar work inside the View Transition update callback, matching the supplied reference.
+
+## G-092 Concurrent 401 responses must not rotate remember credentials independently
+Risk: if multiple Portal APIs independently consume a one-time remember credential, one request can rotate it while another still holds the previous value, causing false logout/race behavior.
+Mitigation: only /api/portal/me performs remember recovery. All other API 401 paths await the same shared /me recovery promise and retry afterwards.
+
+## G-093 Motion preference is a Portal control, not an implicit OS override
+Risk: automatically honoring prefers-reduced-motion can make the user's requested obvious transitions disappear even though the Portal UI says nothing about reduced animation.
+Mitigation: follow the supplied reference: motion defaults to full and the user explicitly switches between 動效：完整 and 動效：精簡. Reduced mode remains available through that control.
+

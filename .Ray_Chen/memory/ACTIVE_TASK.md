@@ -6,21 +6,20 @@ goal_revision: 5
 
 ## Goal
 
-Make V4 Portal persistence survive refresh and missing server-session state across all persistent login paths, and align Portal motion with the user-provided dark glass / purple-cyan aurora reference. Keep all changes on `feature/v4-public-bot`; do not touch `main`; do not live-test the Bot in existing QQ groups.
+Make V4 Portal reload preserve authentication and implement the supplied reference's obvious transition behavior: View Transition, page-enter, stagger, title/subtitle motion, numeric easing, moving nav indicator and motion bar. Keep changes on `feature/v4-public-bot`; do not touch `main`; do not live-test the Bot in real QQ groups.
 
 ## Acceptance Criteria
 
-- One successful credential submission enters the Portal without a forced page reload.
-- Checking "keep me signed in" creates a persistent server session for ordinary and privileged accounts.
-- Persistent privileged sessions use the configured 30-day idle / 180-day absolute limits.
-- Unchecked privileged sessions retain the short 30-minute idle / 8-hour absolute limits.
-- Persistent login issues a separate opaque remember credential as an HttpOnly browser cookie.
-- Remember records are hash-keyed server-side, rotated after restore and revocable on logout.
-- Missing/invalid ordinary server session can be rebuilt from the remember record without another credential submission.
-- QQ-code, QQ-password, environment-admin, temporary-admin and Preview test login share the persistent-login behavior where allowed.
-- The Portal background visibly uses moving purple/cyan aurora fields and glass surfaces in both dark and light themes.
-- Page/view changes use visible enter transitions, button sheen, card hover glow/lift and View Transition when supported.
-- `prefers-reduced-motion` disables nonessential motion.
+- One successful credential submission enters the Portal.
+- Checking keep-signed-in persists authentication across actual page reload.
+- Persistent auth retains HttpOnly session/remember cookies, hashed remember records, rotation/revocation and missing-session reconstruction.
+- Portal boot performs authentication recovery before optional UI bootstrap.
+- Optional removed/missing UI cannot abort auth bootstrap.
+- Non-/me API 401s serialize through one /me recovery before retry and do not independently consume remember.
+- Motion defaults to `full` like the supplied reference; user can explicitly switch to `reduce`.
+- View activation and page-enter/stagger run inside the View Transition update callback.
+- Page title/subtitle animate; numeric counters ease; nav indicator moves; motion bar sweeps.
+- Strong purple/cyan aurora remains visible.
 - Full repository/V3/V4/isolated/bundle CI passes.
 - Preview remains isolated from production credentials and QQ Open.
 - No live Bot/group canary testing.
@@ -28,31 +27,26 @@ Make V4 Portal persistence survive refresh and missing server-session state acro
 
 ## Completed Steps
 
-- VERIFIED: persistent privileged/system-admin sessions use 30-day idle / 180-day absolute limits when remember-login is selected.
-- VERIFIED: non-persistent privileged sessions remain 30 minutes idle / 8 hours absolute.
-- VERIFIED: successful persistent login sets `qqai_session` and `qqai_remember` as HttpOnly/Secure/SameSite=Lax cookies.
-- VERIFIED: generic remember records are SHA-256-keyed; plaintext remember credentials are not stored server-side.
-- VERIFIED: remember records contain a minimal session seed so the server can reconstruct a fresh persistent session if the referenced session record disappears.
-- VERIFIED: `GET /api/portal/me` performs server-side remember recovery before returning SESSION_INVALID.
-- VERIFIED: remember restore rotates the credential, caps reconstructed session lifetime to remember expiry and returns replacement cookies.
-- VERIFIED: logout revokes remember state and clears both cookies.
-- VERIFIED: successful login remains same-page and confirms through `/api/portal/me`.
-- VERIFIED: strong aurora implementation uses an actual `.qqai-aurora` DOM layer with three moving orbs, moving ribbon and pointer-follow light.
-- VERIFIED: light theme aurora opacity is `.58`, not the previous low-visibility `.34`.
-- VERIFIED: final GitHub CI run `36871158902` succeeded.
-- VERIFIED: Cloudflare Connected Build `5b74a8a1-ef8c-4246-889a-4ee425e0017c` succeeded for `ca92f9a0628ac57a14ec8ffe505a79c79a01793c`.
-- VERIFIED: Worker version `2207` / `49b8b3d4-a907-49b0-9448-9fce34b99d74` was used as the final Preview module source.
-- VERIFIED: stable Preview deployment #16 `9e54bef0-0af0-47be-abd4-9f4841c70318` deployed with safe Preview bindings.
-- VERIFIED LIVE FAILURE INJECTION: deleting the active server session changed sessionValid true -> false while remember remained valid; the next `/api/portal/me` returned 200/systemAdmin=true and restored sessionValid=true.
-- VERIFIED: temporary Preview cookie diagnostic endpoints used for the fault injection were removed before final deployment.
-- VERIFIED LIVE FINAL: Preview #16 login enters the app; `/api/portal/me` is 200/systemAdmin=true.
-- VERIFIED LIVE MOTION: Chromium reports `qqaiFloatOrbA`, aurora opacity `0.58`, three orbs and a changing transform.
-- USER ACCEPTANCE PENDING: user real-browser refresh and visual review.
+- VERIFIED: removed stale `runSimulator` binding that threw before `boot();`.
+- VERIFIED: authentication is recovered before optional R3/sidebar/security/dashboard bootstrap.
+- VERIFIED: optional bootstrap steps are isolated by `safePortalBootstrapStep`.
+- VERIFIED: boot and incidental API 401 recovery share `recoverPortalApiSession()`.
+- VERIFIED: only /api/portal/me consumes/rotates the remember credential; ordinary APIs retry after shared /me recovery.
+- VERIFIED: persistent remember/session reconstruction from v0.0.52 remains intact.
+- VERIFIED: added manual motion mode using `qqai-motion-mode`, default `full`, with `動效：完整／精簡` topbar control.
+- VERIFIED: removed automatic OS prefers-reduced-motion authority in favor of the supplied reference's explicit motion setting.
+- VERIFIED: page title/subtitle animation, integer easing, stagger, nav indicator and motion bar are present.
+- VERIFIED: showView starts destination activation and all transition effects inside `document.startViewTransition` update.
+- VERIFIED: final GitHub CI `36879734052` SUCCESS.
+- VERIFIED: Cloudflare build `04d90ceb-db5a-4bab-b9eb-c1f573be583c` SUCCESS.
+- VERIFIED: Worker version 2217 / `a371d22a-5dd9-4e82-a9e0-f1cc64553406`.
+- VERIFIED: Preview #19 `3b66f8c8-bd9b-470b-83e7-9c41c3720004` deployed with safe Preview bindings.
+- VERIFIED LIVE TRANSITION: health navigation produced 1 View Transition, active destination view, `qqai-view-enter`, 36 concurrent animations and the expected strong transition animation names.
+- VERIFIED LIVE RELOAD: after Preview login then actual `location.reload()`, final DOM remained app-visible/login-hidden with the system-admin identity.
+- USER ACCEPTANCE PENDING: user real-browser confirmation.
 
-## Product Files Changed
+## Product Files Changed Since v0.0.52
 
-- `src/portal/auth.js`
-- `worker.js`
 - `src/portal/runtime.js`
 - `verify-system-admin-auth.mjs`
 - `verify-portal-auth-password.mjs`
@@ -62,9 +56,10 @@ Make V4 Portal persistence survive refresh and missing server-session state acro
 - Do not merge/update `main`.
 - Do not live-test Bot behavior in existing QQ groups.
 - Do not enable QQ Open or production QQ/OneBot/AI secrets in the isolated Preview.
-- Remember-device credentials are authentication credentials: never persist plaintext server-side; rotate and revoke them.
-- Preview fault-injection/diagnostic endpoints must not remain in the final acceptance deployment.
-- Keep reduced-motion accessibility behavior.
+- Authentication recovery must not depend on optional UI initialization.
+- Removed DOM features must not leave unguarded bootstrap bindings.
+- Remember credentials remain bearer credentials and must stay hash-keyed/rotated/revoked server-side.
+- Preview acceptance login is not production authentication.
 
 ## Current Phase
 
@@ -72,6 +67,6 @@ user_acceptance
 
 ## next_exact_action
 
-User signs in once on the stable V4 Preview, refreshes the page, confirms authentication survives, and checks whether the stronger purple/cyan aurora and page transitions are visually obvious enough. Bot live testing remains paused.
+User logs in once on Preview #19, reloads the page, then switches between several sidebar pages and confirms both persistent login and the visibly strong reference-style transitions.
 
-last_checkpoint_at: 2026-10-01T21:50:00+08:00
+last_checkpoint_at: 2026-10-01T23:02:00+08:00
