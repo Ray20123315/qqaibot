@@ -448,20 +448,39 @@ assert(discoveryCalls.some(row => row[0] === "deletePanel" && row[1] === "old-c2
 assert(!discoveryCalls.some(row => row[0] === "deletePanel" && row[1] === "foreign"));
 assert(discoveryCalls.some(row => row[0] === "listPanels" && row[1] === "c2c"));
 assert(discoveryCalls.some(row => row[0] === "listPanels" && row[1] === "group"));
+const expectedGlobalGroupPanels = registry.buildCategorizedPanels("group", {
+  remarkPrefix:"QQAIBOT V4 GROUP",
+  maxItemsPerPanel:20,
+  permissions:allPermissions,
+  targetType:"all"
+});
+assert(expectedGlobalGroupPanels.length > 1, "native group discovery must use categorized real-command panels");
 assert(firstDiscovery.panels <= 20);
+assert.equal(firstDiscovery.groupPanels, expectedGlobalGroupPanels.length);
 assert(firstDiscovery.categories.includes("basic"));
-assert(firstDiscovery.categories.includes("group-root"));
+assert(firstDiscovery.categories.includes("relationship"));
+assert(firstDiscovery.categories.includes("community"));
 assert(firstDiscovery.categories.includes("developer"));
-assert.equal(firstDiscovery.panels, 1 + developerPanels.length, "discovery must create one group root panel plus Developer C2C panels");
+assert(!firstDiscovery.categories.includes("group-root"));
+assert.equal(firstDiscovery.panels, expectedGlobalGroupPanels.length + developerPanels.length, "discovery must create categorized group panels plus Developer C2C panels");
 const groupSyncPanels = discoveryCalls
   .filter(row => row[0] === "createPanel" && row[1] === "group" && row[2]?.target_type === "all")
   .map(row => row[2]);
-assert.equal(groupSyncPanels.length, 1, "QQ client must receive one managed group panel");
-const groupSyncNames = new Set(groupSyncPanels[0].panel.items.map(item => item.name));
-for (const name of ["!面板 基础","!面板 群聊","!面板 记忆","!面板 活动","!面板 群规","!面板 AI管理","!面板 群操作","!面板 群主","!面板 开发者"]) {
-  assert(groupSyncNames.has(name), `Synced group root panel missing ${name}`);
+assert.equal(groupSyncPanels.length, expectedGlobalGroupPanels.length, "QQ client must receive every categorized native group panel");
+assert(groupSyncPanels.every(panel => panel.panel.items.length > 0 && panel.panel.items.length <= 20));
+const groupSyncNames = new Set(groupSyncPanels.flatMap(panel => panel.panel.items).map(item => item.name));
+const expectedNativeGroupCommands = registry.list({ scope:"group" })
+  .filter(command => command.panel.enabled && allPermissions.includes(command.permission));
+assert.equal(groupSyncNames.size, expectedNativeGroupCommands.length, "native group discovery command count must match the canonical registry");
+for (const command of expectedNativeGroupCommands) {
+  assert(groupSyncNames.has(command.panel.command), `Native group discovery missing real command ${command.id}: ${command.panel.command}`);
 }
-assert(!groupSyncNames.has("!群白名单"), "raw Developer commands must not replace the group root panel");
+for (const name of ["!面板 基础","!面板 群聊","!面板 关系","!面板 互动","!面板 记忆","!面板 活动","!面板 群规","!面板 AI管理","!面板 群操作","!面板 群主","!面板 开发者"]) {
+  assert(!groupSyncNames.has(name), `Native group discovery must not use category placeholder ${name}`);
+}
+for (const name of ["!help","!status","!详细资料","!主人功能","!戳戳","!群公告","!全局限速"]) {
+  assert(groupSyncNames.has(name), `Native group discovery missing expected command ${name}`);
+}
 
 const developerSyncPanels = discoveryCalls
   .filter(row => row[0] === "createPanel" && row[2]?.target_type === "specific" && row[2]?.user_openids?.includes("dev-openid"))

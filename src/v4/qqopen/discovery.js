@@ -1,4 +1,4 @@
-import { assertGroupPanelCoverage, buildGroupRootPanel } from "../commands/group-panel.js";
+import { assertGroupPanelCoverage } from "../commands/group-panel.js";
 
 function text(value) {
   return String(value == null ? "" : value);
@@ -57,7 +57,12 @@ async function syncQqOpenDiscovery(api, registry, {
   const menu = registry.buildMenu({ maxItems: 10, maxSubItems: 5 });
 
   assertGroupPanelCoverage(registry);
-  const globalGroup = [buildGroupRootPanel(registry, { remark:"QQAIBOT V4 GROUP ROOT" })];
+  const globalGroup = registry.buildCategorizedPanels("group", {
+    remarkPrefix: "QQAIBOT V4 GROUP",
+    maxItemsPerPanel: 20,
+    permissions: allPermissions,
+    targetType: "all"
+  });
   const developerC2C = developerIds.length
     ? registry.buildCategorizedPanels("c2c", {
         remarkPrefix: "QQAIBOT V4 DEV",
@@ -114,6 +119,7 @@ async function syncQqOpenDiscovery(api, registry, {
     deleted,
     created: created.length,
     categories: [...new Set(panels.map(item => item.discovery_category).filter(Boolean))],
+    groupPanels: globalGroup.length,
     developerPanels: developerC2C.length
   };
 }
