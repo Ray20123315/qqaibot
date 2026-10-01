@@ -202,7 +202,8 @@ function resolveGroupPanelInput(input, registry) {
   const pageSuffix = keyboardView && keyboardView.totalPages > 1
     ? `（${keyboardView.page}/${keyboardView.totalPages}）`
     : "";
-  const help = `【${meta.label}】请选择子指令${pageSuffix}\n备用文字：${compactChildList(rows)}\n原本的 ! 指令仍可直接使用。`;
+  const message = `【${meta.label}】请选择子指令${pageSuffix}`;
+  const fallbackMessage = `${message}\n备用文字：${compactChildList(rows)}\n原本的 ! 指令仍可直接使用。`;
   if (!tail || pageMatch) return Object.freeze({
     matched:true,
     expanded:"",
@@ -211,7 +212,8 @@ function resolveGroupPanelInput(input, registry) {
     page:keyboardView?.page || 1,
     totalPages:keyboardView?.totalPages || 1,
     keyboard:keyboardView?.keyboard || null,
-    message:help
+    message,
+    fallbackMessage
   });
 
   const tokenMatch = tail.match(/^([^\s]+)(?:\s+([\s\S]+))?$/);
@@ -227,7 +229,7 @@ function resolveGroupPanelInput(input, registry) {
       expanded:"",
       category:meta.key,
       rows:Object.freeze(rows),
-      message:`找不到「${clean(tokenMatch?.[1] || "")}」。\n${help}`
+      message:`找不到「${clean(tokenMatch?.[1] || "")}」。\n${fallbackMessage}`
     });
   }
   return Object.freeze({
