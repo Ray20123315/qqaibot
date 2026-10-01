@@ -209,15 +209,28 @@ assert.deepEqual(readFallbackOneBot.actions, ["get_login_info", "get_group_membe
 
 const commandAliases = new Set(INITIAL_COMMANDS.flatMap(item => item.aliases || []));
 assert(INITIAL_COMMANDS.length >= 70, "V4 command catalog should restore the documented command surface");
-for (const alias of ["!读网页", "!翻译", "!活动", "!投票", "!排程", "!关闭ai", "!改群名", "!改名片", "!确认op", "!群白名单"]) {
+for (const alias of ["!读网页", "!翻译", "!活动", "!活动通知", "!投票", "!排程", "!关闭ai", "!改群名", "!改名片", "!确认op", "!取消op", "!你记住了什么", "!指令开", "!指令关", "!QQ语音角色", "!群白名单"]) {
   assert(commandAliases.has(alias), "Missing restored V4 command alias: " + alias);
 }
 
 const worker = fs.readFileSync("worker.js", "utf8");
 const runtime = fs.readFileSync("src/v4/qqopen/runtime.js", "utf8");
 const hostAdapter = fs.readFileSync("src/v3/host/adapter.js", "utf8");
+const activityPlugin = fs.readFileSync("src/plugins/official/activity.js", "utf8");
+const qqInteractionsPlugin = fs.readFileSync("src/plugins/official/qq-interactions.js", "utf8");
+const moderationRuntime = fs.readFileSync("src/moderation/runtime.js", "utf8");
 assert.match(hostAdapter, /reply_to_message_id/);
 assert.match(hostAdapter, /replyToSource: true/);
+assert.match(worker, /你记住了什么/);
+assert.match(worker, /commands_disabled:/);
+assert.match(worker, /pluginCommandBlocked/);
+assert.match(worker, /v3PluginCommandBlocked/);
+assert.match(activityPlugin, /活動通知|活动通知/);
+assert.match(activityPlugin, /activity_notified/);
+assert.match(qqInteractionsPlugin, /QQ語音角色|QQ语音角色/);
+assert.match(qqInteractionsPlugin, /voice_characters/);
+assert.match(moderationRuntime, /确认op／取消op/);
+assert.match(moderationRuntime, /parseModerationConfirmation/);
 
 const permissions = fs.readFileSync("src/core/permissions.js", "utf8");
 const deployment = fs.readFileSync("src/config/deployment.js", "utf8");
