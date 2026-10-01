@@ -104,9 +104,10 @@ assert.equal(groupRootPanel.scope, "group");
 assert.equal(groupRootPanel.target_type, "all");
 assert(groupRootPanel.panel.items.length > 0 && groupRootPanel.panel.items.length <= 20);
 const groupRootNames = new Set(groupRootPanel.panel.items.map(item => item.name));
-for (const name of ["!面板 基础","!面板 群聊","!面板 关系","!面板 互动","!面板 记忆","!面板 活动","!面板 群规","!面板 AI管理","!面板 群操作","!面板 群主","!面板 开发者"]) {
+for (const name of ["!面板 基础","!面板 群聊","!面板 互动","!面板 记忆","!面板 活动","!面板 群规","!面板 AI管理","!面板 群操作","!面板 群主","!面板 开发者"]) {
   assert(groupRootNames.has(name), `Group root panel missing ${name}`);
 }
+assert(!groupRootNames.has("!面板 关系"), "Retired relationship category must not return");
 assert.equal(resolveGroupPanelInput("!面板 基础 help", registry)?.expanded, "!help");
 assert.equal(resolveGroupPanelInput("！面板 群操作 禁言 @123456 10分钟", registry)?.expanded, "!禁言 @123456 10分钟");
 assert.deepEqual(normalizeGroupPanelSlashInvocation("/!面板 基础"), { matched:true, text:"!面板 基础" });
@@ -114,6 +115,15 @@ assert.deepEqual(normalizeGroupPanelSlashInvocation("／！面板 开发者 code
 assert.deepEqual(normalizeGroupPanelSlashInvocation("[CQ:at,qq=123] /!面板 群操作 禁言"), { matched:true, text:"[CQ:at,qq=123] !面板 群操作 禁言" });
 assert.deepEqual(normalizeGroupPanelSlashInvocation("/!普通内容"), { matched:false, text:"/!普通内容" });
 const workerSource = fs.readFileSync("worker.js", "utf8");
+const catalogSource = fs.readFileSync("src/v4/commands/catalog.js", "utf8");
+const helpSource = fs.readFileSync("src/help/commands.js", "utf8");
+assert(!registry.list().some(command => command.id.startsWith("relationship.")), "relationship commands must be retired from the registry");
+assert(!GROUP_PANEL_CATEGORY_META.some(meta => meta.key === "relationship"), "relationship category must be retired");
+for (const removed of ["!主人功能","!主人禁言","!主人改名","!主人撤回","!绑定主人","!绑定对象","!对象禁言","!同意主人绑定","!同意绑定对象"]) {
+  assert(!workerSource.includes(removed), `worker still exposes retired relationship command ${removed}`);
+  assert(!catalogSource.includes(removed), `catalog still exposes retired relationship command ${removed}`);
+}
+assert.doesNotMatch(workerSource + "\n" + catalogSource + "\n" + helpSource, /狼人杀|狼人殺/i, "werewolf feature must remain removed");
 const panelSlashIndex = workerSource.indexOf("normalizeGroupPanelSlashInvocation(userMessage)");
 const optOutIndex = workerSource.indexOf("stripGroupAiOptOutPrefix(userMessage, botId)");
 assert(panelSlashIndex >= 0 && optOutIndex > panelSlashIndex, "panel slash normalization must run before /! AI opt-out stripping");
@@ -210,7 +220,7 @@ for (const meta of GROUP_PANEL_CATEGORY_META) {
   }
   assert.equal(seen.size, commands.length, `Category ${meta.label} did not expose every command`);
 }
-assert(nonEmptyCategoryCount >= 11, "Expected all active group command categories to be represented");
+assert(nonEmptyCategoryCount >= 10, "Expected all retained group command categories to be represented");
 const expectedGroupCommandIds = registry.list({ scope:"group" })
   .filter(command => command.panel.enabled)
   .map(command => command.id);
@@ -229,20 +239,6 @@ for (const id of [
   "community.group_notice",
   "community.group_todo",
   "community.group_file",
-  "relationship.master_bind",
-  "relationship.master_take",
-  "relationship.status",
-  "relationship.unbind",
-  "relationship.master_features",
-  "relationship.master_mute",
-  "relationship.master_unmute",
-  "relationship.master_rename",
-  "relationship.master_recall",
-  "relationship.partner_bind",
-  "relationship.partner_status",
-  "relationship.partner_unbind",
-  "relationship.partner_mute",
-  "relationship.partner_unmute",
   "ai.mimic",
   "ai.interject_rate",
   "dev.group_rate_limit",
@@ -448,39 +444,24 @@ assert(discoveryCalls.some(row => row[0] === "deletePanel" && row[1] === "old-c2
 assert(!discoveryCalls.some(row => row[0] === "deletePanel" && row[1] === "foreign"));
 assert(discoveryCalls.some(row => row[0] === "listPanels" && row[1] === "c2c"));
 assert(discoveryCalls.some(row => row[0] === "listPanels" && row[1] === "group"));
-const expectedGlobalGroupPanels = registry.buildCategorizedPanels("group", {
-  remarkPrefix:"QQAIBOT V4 GROUP",
-  maxItemsPerPanel:20,
-  permissions:allPermissions,
-  targetType:"all"
-});
-assert(expectedGlobalGroupPanels.length > 1, "native group discovery must use categorized real-command panels");
 assert(firstDiscovery.panels <= 20);
-assert.equal(firstDiscovery.groupPanels, expectedGlobalGroupPanels.length);
-assert(firstDiscovery.categories.includes("basic"));
-assert(firstDiscovery.categories.includes("relationship"));
-assert(firstDiscovery.categories.includes("community"));
+assert.equal(firstDiscovery.groupPanels, 1, "native group discovery must use one compact category-root panel");
+assert(firstDiscovery.categories.includes("group-root"));
 assert(firstDiscovery.categories.includes("developer"));
-assert(!firstDiscovery.categories.includes("group-root"));
-assert.equal(firstDiscovery.panels, expectedGlobalGroupPanels.length + developerPanels.length, "discovery must create categorized group panels plus Developer C2C panels");
+assert(!firstDiscovery.categories.includes("relationship"));
+assert.equal(firstDiscovery.panels, 1 + developerPanels.length, "discovery must create one group category launcher plus Developer C2C panels");
 const groupSyncPanels = discoveryCalls
   .filter(row => row[0] === "createPanel" && row[1] === "group" && row[2]?.target_type === "all")
   .map(row => row[2]);
-assert.equal(groupSyncPanels.length, expectedGlobalGroupPanels.length, "QQ client must receive every categorized native group panel");
-assert(groupSyncPanels.every(panel => panel.panel.items.length > 0 && panel.panel.items.length <= 20));
-const groupSyncNames = new Set(groupSyncPanels.flatMap(panel => panel.panel.items).map(item => item.name));
-const expectedNativeGroupCommands = registry.list({ scope:"group" })
-  .filter(command => command.panel.enabled && allPermissions.includes(command.permission));
-assert.equal(groupSyncNames.size, expectedNativeGroupCommands.length, "native group discovery command count must match the canonical registry");
-for (const command of expectedNativeGroupCommands) {
-  assert(groupSyncNames.has(command.panel.command), `Native group discovery missing real command ${command.id}: ${command.panel.command}`);
+assert.equal(groupSyncPanels.length, 1, "QQ client must receive one compact managed group panel");
+assert(groupSyncPanels[0].panel.items.length > 0 && groupSyncPanels[0].panel.items.length <= 20);
+const groupSyncNames = new Set(groupSyncPanels[0].panel.items.map(item => item.name));
+for (const name of ["!面板 基础","!面板 群聊","!面板 互动","!面板 记忆","!面板 活动","!面板 群规","!面板 AI管理","!面板 群操作","!面板 群主","!面板 开发者"]) {
+  assert(groupSyncNames.has(name), `Native group category launcher missing ${name}`);
 }
-for (const name of ["!面板 基础","!面板 群聊","!面板 关系","!面板 互动","!面板 记忆","!面板 活动","!面板 群规","!面板 AI管理","!面板 群操作","!面板 群主","!面板 开发者"]) {
-  assert(!groupSyncNames.has(name), `Native group discovery must not use category placeholder ${name}`);
-}
-for (const name of ["!help","!status","!详细资料","!主人功能","!戳戳","!群公告","!全局限速"]) {
-  assert(groupSyncNames.has(name), `Native group discovery missing expected command ${name}`);
-}
+assert(!groupSyncNames.has("!面板 关系"), "retired relationship category must not be published");
+assert(!groupSyncNames.has("!help"), "raw child commands belong in paginated inline keyboards, not the constrained native root panel");
+assert(!groupSyncNames.has("!主人功能"), "retired relationship command must not be published");
 
 const developerSyncPanels = discoveryCalls
   .filter(row => row[0] === "createPanel" && row[2]?.target_type === "specific" && row[2]?.user_openids?.includes("dev-openid"))
