@@ -287,11 +287,25 @@ const originalRememberCookie = cookiePair(loginResponse, "qqai_remember");
 const cookieOnlyMe = await worker.fetch(new Request("https://qqai.test/api/portal/me", { headers: { Cookie: originalRememberCookie } }), portalEnv, {});
 assert.equal(cookieOnlyMe.status, 200, "server-side /me must restore a remembered admin without the original session cookie");
 assert.equal((await cookieOnlyMe.clone().json()).session.systemAdmin, true);
-const adminCookie = cookiePair(cookieOnlyMe, "qqai_session");
-const rotatedRememberCookie = cookiePair(cookieOnlyMe, "qqai_remember");
+let adminCookie = cookiePair(cookieOnlyMe, "qqai_session");
+let rotatedRememberCookie = cookiePair(cookieOnlyMe, "qqai_remember");
 assert.match(adminCookie, /^qqai_session=/);
 assert.match(rotatedRememberCookie, /^qqai_remember=/);
 assert.notEqual(rotatedRememberCookie, originalRememberCookie, "server-side /me restore must rotate the remember cookie");
+
+const recoveredAdminToken = decodeURIComponent(adminCookie.split("=")[1] || "");
+portalEnv.DB.values.delete(`portal_session:${recoveredAdminToken}`);
+const groupsAfterSessionLoss = await worker.fetch(new Request("https://qqai.test/api/portal/groups", {
+  headers: { Cookie: [adminCookie, rotatedRememberCookie].join("; ") }
+}), portalEnv, {});
+assert.equal(groupsAfterSessionLoss.status, 200, "ordinary Portal APIs must restore from remember instead of racing the UI back to login");
+assert.deepEqual((await groupsAfterSessionLoss.clone().json()).groups.map(group => group.groupId), ["12345"]);
+const raceRecoveredSessionCookie = cookiePair(groupsAfterSessionLoss, "qqai_session");
+const raceRotatedRememberCookie = cookiePair(groupsAfterSessionLoss, "qqai_remember");
+assert.match(raceRecoveredSessionCookie, /^qqai_session=/);
+assert.match(raceRotatedRememberCookie, /^qqai_remember=/);
+adminCookie = raceRecoveredSessionCookie;
+rotatedRememberCookie = raceRotatedRememberCookie;
 
 const reusedRememberResponse = await worker.fetch(new Request("https://qqai.test/api/portal/me", { headers: { Cookie: originalRememberCookie } }), portalEnv, {});
 assert.equal(reusedRememberResponse.status, 401, "rotated remember cookie must not be reusable");
