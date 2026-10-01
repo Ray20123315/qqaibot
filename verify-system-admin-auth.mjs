@@ -143,6 +143,15 @@ const postJson = (path, body, origin = "https://qqai.test", cookie = "") => new 
   headers: { "Content-Type": "application/json", Origin: origin, ...(cookie ? { Cookie: cookie } : {}) },
   body: JSON.stringify(body)
 });
+const responseSetCookies = response => typeof response.headers.getSetCookie === "function"
+  ? response.headers.getSetCookie()
+  : [response.headers.get("Set-Cookie") || ""].filter(Boolean);
+const cookiePair = (response, name) => {
+  const prefix = `${name}=`;
+  const raw = responseSetCookies(response).find(value => String(value).startsWith(prefix)) || "";
+  return raw ? raw.split(";")[0] : "";
+};
+
 
 const tempPortalEnv = {
   DB: new MemoryD1(),
@@ -158,7 +167,7 @@ assert.equal(tempLogin.systemAdmin, true);
 assert.equal(tempLogin.temporary, true);
 assert.ok(Number(tempLogin.expiresAt) > Date.now());
 assert.match(tempLoginResponse.headers.get("Set-Cookie") || "", /HttpOnly/);
-const tempSessionToken = decodeURIComponent((tempLoginResponse.headers.get("Set-Cookie") || "").split(";")[0].split("=")[1] || "");
+const tempSessionToken = decodeURIComponent(cookiePair(tempLoginResponse, "qqai_session").split("=")[1] || "");
 const tempSession = await getPortalSession(tempPortalEnv, tempSessionToken, { touch: false });
 assert.equal(tempSession?.systemAdmin, true);
 assert.equal(tempSession?.role, "developer");
@@ -194,13 +203,27 @@ assert.equal(previewLogin.systemAdmin, true);
 assert.equal(previewLogin.preview, true);
 assert.ok(String(previewLogin.resumeToken || "").length >= 40, "Preview login must issue a separate resume token");
 assert.ok(Number(previewLogin.resumeExpiresAt) > Date.now());
-assert.match(previewLoginResponse.headers.get("Set-Cookie") || "", /HttpOnly/);
-assert.match(previewLoginResponse.headers.get("Set-Cookie") || "", /Max-Age=/, "Preview remember-login must create a persistent cookie");
-const previewToken = decodeURIComponent((previewLoginResponse.headers.get("Set-Cookie") || "").split(";")[0].split("=")[1] || "");
+const previewCookies = responseSetCookies(previewLoginResponse);
+assert.equal(previewCookies.some(value => /^qqai_session=/.test(value) && /HttpOnly/.test(value) && /Max-Age=/.test(value)), true, "Preview login must issue a persistent session cookie");
+assert.equal(previewCookies.some(value => /^qqai_remember=/.test(value) && /HttpOnly/.test(value) && /Max-Age=/.test(value)), true, "Preview login must issue a separate HttpOnly remember cookie");
+const previewSessionCookie = cookiePair(previewLoginResponse, "qqai_session");
+const previewRememberCookie = cookiePair(previewLoginResponse, "qqai_remember");
+const previewToken = decodeURIComponent(previewSessionCookie.split("=")[1] || "");
 const previewSession = await getPortalSession(previewLoginEnv, previewToken, { touch: false });
 assert.equal(previewSession?.systemAdmin, true);
 assert.equal(previewSession?.role, "developer");
 assert.equal(previewSession?.authMethod, "v4_preview_test");
+
+const previewCookieOnlyMe = await worker.fetch(new Request("https://feature-v4-public-bot-qqai.ray20123315.workers.dev/api/portal/me", {
+  headers: { Cookie: previewRememberCookie }
+}), previewLoginEnv, {});
+assert.equal(previewCookieOnlyMe.status, 200, "GET /api/portal/me must restore from the HttpOnly remember cookie when qqai_session is missing");
+assert.equal((await previewCookieOnlyMe.clone().json()).session.systemAdmin, true);
+const previewRotatedSessionCookie = cookiePair(previewCookieOnlyMe, "qqai_session");
+const previewRotatedRememberCookie = cookiePair(previewCookieOnlyMe, "qqai_remember");
+assert.match(previewRotatedSessionCookie, /^qqai_session=/);
+assert.match(previewRotatedRememberCookie, /^qqai_remember=/);
+assert.notEqual(previewRotatedRememberCookie, previewRememberCookie, "server-side /me restore must rotate the remember cookie");
 
 const previewResumeRequest = new Request("https://feature-v4-public-bot-qqai.ray20123315.workers.dev/api/auth/preview-resume", {
   method: "POST",
@@ -214,7 +237,7 @@ assert.equal(previewResume.preview, true);
 assert.ok(String(previewResume.resumeToken || "").length >= 40);
 assert.notEqual(previewResume.resumeToken, previewLogin.resumeToken, "Preview resume token must rotate after use");
 assert.match(previewResumeResponse.headers.get("Set-Cookie") || "", /HttpOnly/);
-const resumedCookie = previewResumeResponse.headers.get("Set-Cookie").split(";")[0];
+const resumedCookie = cookiePair(previewResumeResponse, "qqai_session");
 const resumedMeResponse = await worker.fetch(new Request("https://feature-v4-public-bot-qqai.ray20123315.workers.dev/api/portal/me", { headers: { Cookie: resumedCookie } }), previewLoginEnv, {});
 assert.equal(resumedMeResponse.status, 200, "Restored Preview session cookie must authenticate /api/portal/me");
 assert.equal((await resumedMeResponse.json()).session.systemAdmin, true);
@@ -252,25 +275,22 @@ const loginResponse = await worker.fetch(postJson("/api/auth/login-password", { 
 const login = await loginResponse.json();
 assert.equal(loginResponse.status, 200);
 assert.equal(login.systemAdmin, true);
-assert.ok(String(login.rememberToken || "").length >= 40, "remembered admin login must issue a remember token");
-assert.ok(Number(login.rememberExpiresAt || 0) > Date.now());
-assert.match(loginResponse.headers.get("Set-Cookie") || "", /HttpOnly/);
-assert.match(loginResponse.headers.get("Set-Cookie") || "", /Max-Age=/, "system admin remember-login must persist the cookie");
+const loginCookies = responseSetCookies(loginResponse);
+assert.equal(loginCookies.some(value => /^qqai_session=/.test(value) && /HttpOnly/.test(value) && /Max-Age=/.test(value)), true, "system admin remember-login must issue a persistent session cookie");
+assert.equal(loginCookies.some(value => /^qqai_remember=/.test(value) && /HttpOnly/.test(value) && /Max-Age=/.test(value)), true, "system admin remember-login must issue a separate HttpOnly remember cookie");
+const originalRememberCookie = cookiePair(loginResponse, "qqai_remember");
 
-const restoreResponse = await worker.fetch(postJson("/api/auth/restore-session", { rememberToken: login.rememberToken }), portalEnv, {});
-const restoreBody = await restoreResponse.json();
-assert.equal(restoreResponse.status, 200, JSON.stringify(restoreBody));
-assert.equal(restoreBody.restored, true);
-assert.ok(String(restoreBody.rememberToken || "").length >= 40);
-assert.notEqual(restoreBody.rememberToken, login.rememberToken, "restore-session must rotate remember token");
-assert.match(restoreResponse.headers.get("Set-Cookie") || "", /HttpOnly/);
-assert.match(restoreResponse.headers.get("Set-Cookie") || "", /Max-Age=/);
-const adminCookie = restoreResponse.headers.get("Set-Cookie").split(";")[0];
-const restoredAdminMe = await worker.fetch(new Request("https://qqai.test/api/portal/me", { headers: { Cookie: adminCookie } }), portalEnv, {});
-assert.equal(restoredAdminMe.status, 200, "restored remembered session must authenticate portal me");
-assert.equal((await restoredAdminMe.json()).session.systemAdmin, true);
-const reusedRememberResponse = await worker.fetch(postJson("/api/auth/restore-session", { rememberToken: login.rememberToken }), portalEnv, {});
-assert.equal(reusedRememberResponse.status, 401, "rotated remember token must not be reusable");
+const cookieOnlyMe = await worker.fetch(new Request("https://qqai.test/api/portal/me", { headers: { Cookie: originalRememberCookie } }), portalEnv, {});
+assert.equal(cookieOnlyMe.status, 200, "server-side /me must restore a remembered admin without the original session cookie");
+assert.equal((await cookieOnlyMe.clone().json()).session.systemAdmin, true);
+const adminCookie = cookiePair(cookieOnlyMe, "qqai_session");
+const rotatedRememberCookie = cookiePair(cookieOnlyMe, "qqai_remember");
+assert.match(adminCookie, /^qqai_session=/);
+assert.match(rotatedRememberCookie, /^qqai_remember=/);
+assert.notEqual(rotatedRememberCookie, originalRememberCookie, "server-side /me restore must rotate the remember cookie");
+
+const reusedRememberResponse = await worker.fetch(new Request("https://qqai.test/api/portal/me", { headers: { Cookie: originalRememberCookie } }), portalEnv, {});
+assert.equal(reusedRememberResponse.status, 401, "rotated remember cookie must not be reusable");
 assert.equal(portalEnv.DB.values.get("portal_auth_password:55555"), "existing-user-password-record", "admin sign-in must not replace another account's password data");
 assert.equal([...portalEnv.DB.values.keys()].some(key => /PORTAL_ADMIN_PASSWORD|Ops\.Root/.test(key)), false, "admin credentials must not be stored in D1");
 
