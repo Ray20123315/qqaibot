@@ -8,7 +8,6 @@ const DISCOVERY_CATEGORY_META = Object.freeze({
   interaction: Object.freeze({ key:"basic", label:"基础与多模态", menuLabel:"基础功能" }),
   group: Object.freeze({ key:"group-analysis", label:"群聊整理与分析", menuLabel:"群聊分析" }),
   member: Object.freeze({ key:"group-analysis", label:"群聊整理与分析", menuLabel:"群聊分析" }),
-  relationship: Object.freeze({ key:"relationship", label:"关系与绑定", menuLabel:"关系" }),
   community: Object.freeze({ key:"community", label:"群务与互动", menuLabel:"互动" }),
   memory: Object.freeze({ key:"memory-personal", label:"记忆人格与个人设置", menuLabel:"记忆人格" }),
   persona: Object.freeze({ key:"memory-personal", label:"记忆人格与个人设置", menuLabel:"记忆人格" }),
