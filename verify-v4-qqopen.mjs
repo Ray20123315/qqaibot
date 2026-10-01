@@ -219,6 +219,11 @@ for (const id of expectedGroupCommandIds) assert(allCategoryCommands.has(id), `A
 for (const id of [
   "self.mute",
   "community.sticker",
+  "community.poke",
+  "community.reaction",
+  "community.favorite_face",
+  "community.mall_face",
+  "tool.tts",
   "community.whitelist_apply",
   "community.bot_interaction",
   "community.group_notice",
