@@ -1,33 +1,35 @@
 # CURRENT_STATE
 
-## Production Before Goal Revision 2
+## Development
 
-- main head: `5b7f3c5e1c75d98150d794b2d2c689c77a145bfc`
-- deployed product revision: `6cb891571bdb2744b13bd11e3731c2a267fdf1ed`
-- previous production Connected Build: `d8abfda4-4595-427a-8fbf-7f0a5ffcd31f` — success
+- development branch: `v4-qqopen-native`
+- verified product commit: `9f78fc66547d278a72858bbd25a22f00dda7ba2a`
+- development CI: `36871773623` — success
 
-## Confirmed Native Discovery Defect
+## Native Group Discovery
 
-`src/v4/qqopen/discovery.js` currently builds:
-- one global group panel from `buildGroupRootPanel()`;
-- that root panel contains only `!面板 <分类>` placeholder commands;
-- actual group commands exist in the registry and inline keyboards, but are not registered directly into QQ native group panels.
+The previous root-only design is removed from discovery sync. Global group discovery now:
+- uses `registry.buildCategorizedPanels("group", ...)`;
+- publishes the actual canonical PanelItem commands;
+- partitions by discovery category;
+- caps each panel at 20 items;
+- keeps total group + developer C2C panels under the implementation limit;
+- does not publish `!面板 <分类>` placeholders as the native command list.
 
-The live QQ client screenshot confirms this exact state.
+Manual `!面板 <分类>` inline keyboards remain available separately.
 
-## Target State
+## Production
 
-- global group discovery uses `registry.buildCategorizedPanels("group", ...)`;
-- each panel contains real canonical commands;
-- categories are represented by panel remarks/partitioning rather than placeholder commands;
-- `!面板 <分类>` inline keyboards remain available when invoked manually;
-- developer C2C panels remain specific-target panels.
+- current main before promotion: `5b7f3c5e1c75d98150d794b2d2c689c77a145bfc`
+- current deployed product before promotion: `6cb891571bdb2744b13bd11e3731c2a267fdf1ed`
+- main promotion of `9f78fc...`: PENDING
+- production Connected Build: PENDING
 
 ## Verification State
 
-- product patch: PLANNED
-- development CI: PENDING
+- product patch: VERIFIED_DEVELOPMENT
+- development CI: VERIFIED
 - main update: PENDING
 - main CI: PENDING
 - production Connected Build: PENDING
-- native QQ resync smoke: PENDING_USER
+- live QQ native discovery: PENDING_USER

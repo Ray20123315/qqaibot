@@ -10,25 +10,30 @@ Make the QQ native group command panel directly contain the real commands instea
 
 ## Acceptance Criteria
 
-- Native group discovery contains every enabled group command from the canonical registry.
-- Group native panels are categorized and split at 20 items per panel.
-- No native group discovery item is merely `!面板 <分类>` in place of real commands.
-- The existing `!面板 <分类>` chat command and inline keyboard remain functional.
-- Developer-targeted C2C discovery remains cumulative and unchanged.
-- Total discovery panels stay within the QQ/Open implementation limit of 20.
-- Existing permission enforcement remains server-side authoritative.
-- Development CI, main CI and production Connected Build must pass before completion.
+- VERIFIED on development branch: native group discovery contains every enabled group command from the canonical registry.
+- VERIFIED: group native panels are categorized and split at 20 items per panel.
+- VERIFIED: native discovery rejects category placeholders such as `!面板 基础`.
+- VERIFIED: existing `!面板 <分类>` chat command and inline keyboard remain functional.
+- VERIFIED: developer-targeted C2C discovery remains cumulative.
+- VERIFIED: total discovery panels stay <= 20.
+- VERIFIED: development CI passed.
+- PENDING: main CI, production Connected Build and live QQ native resync.
 
 ## Current Phase
 
-IN_PROGRESS — Recovery Gate complete; product patch pending.
+IN_PROGRESS — development validation passed; main promotion next.
 
-## Evidence
+## Completed Steps
 
-- VERIFIED: main = 5b7f3c5e1c75d98150d794b2d2c689c77a145bfc before this repair.
-- VERIFIED: product revision 6cb891571bdb2744b13bd11e3731c2a267fdf1ed is deployed successfully.
-- VERIFIED: current discovery.js creates exactly one global group root panel via buildGroupRootPanel().
-- VERIFIED: live QQ screenshot shows those category placeholder items and no concrete native commands.
+- Recovery Gate and live screenshot diagnosis.
+- Checkpoint memory v0.0.48.
+- Product patch: `9f78fc66547d278a72858bbd25a22f00dda7ba2a`.
+- Development GitHub Actions `36871773623`: success.
+
+## Files Modified by Product Patch
+
+- src/v4/qqopen/discovery.js
+- verify-v4-qqopen.mjs
 
 ## Blockers
 
@@ -36,6 +41,6 @@ None.
 
 ## next_exact_action
 
-Change group discovery to registry.buildCategorizedPanels("group", ...) and update regressions.
+Fast-forward main to 9f78fc66547d278a72858bbd25a22f00dda7ba2a and verify production.
 
-last_checkpoint_at: 2026-10-01T21:45:00+08:00
+last_checkpoint_at: 2026-10-01T21:57:00+08:00

@@ -4,30 +4,21 @@
 
 Task: qqaibot-20261001-panel-complete-real-message-send
 Goal revision: 2
-Base main: 5b7f3c5e1c75d98150d794b2d2c689c77a145bfc
-Current deployed product: 6cb891571bdb2744b13bd11e3731c2a267fdf1ed
+Product commit: 9f78fc66547d278a72858bbd25a22f00dda7ba2a
 
 ## Native Group Discovery Requirements
 
-- use categorized group panels built from the canonical registry;
-- max 20 items per panel;
-- total group + developer C2C panels <= 20;
-- union of native group PanelItem names equals every enabled group command panel.command;
-- native group panels must not contain category placeholder names such as `!面板 基础`;
-- category labels may remain in panel remarks;
-- server-side permission checks remain authoritative.
+- categorized group panels from canonical registry: VERIFIED
+- max 20 items per panel: VERIFIED
+- total discovery panels <= 20: VERIFIED
+- native group item union matches all enabled group commands: VERIFIED
+- no `!面板 <分类>` placeholder items in native group panels: VERIFIED
+- category inline keyboards preserved: VERIFIED
+- developer C2C discovery preserved: VERIFIED
 
-## Inline Keyboard Requirements Preserved
+## Evidence
 
-- manual `!面板 <分类>` still resolves to the existing inline keyboard;
-- direct child commands remain type=2 + enter=true;
-- parameterized commands remain type=2 + enter=false;
-- pagination remains reusable.
-
-## Gates
-
-- product patch: PENDING
-- development CI: PENDING
+- development GitHub Actions: 36871773623 — success
 - main CI: PENDING
 - Cloudflare Connected Build: PENDING
-- live QQ native discovery: PENDING_USER
+- live QQ native panel: PENDING_USER
