@@ -77,7 +77,7 @@ const INITIAL_COMMANDS = Object.freeze([
   { id:"dev.memory_unban", aliases:["!解禁记忆","!解禁記憶"], scopes:["group"], permission:"developer", description:"解除记忆禁止", category:"developer" },
   { id:"dev.reset", aliases:["!重置","!clear"], scopes:["c2c","group"], permission:"developer", description:"重置当前上下文", category:"developer", panel:{enter:true} },
   { id:"dev.self_adjust", aliases:["!自我调整","!自我調整"], scopes:["c2c","group"], permission:"developer", description:"执行自我调整", category:"developer", panel:{enter:true} },
-  { id:"dev.self_correct", aliases:["!自我修正"], scopes:["c2c","group"], permission:"developer", description:"执行自我修正", category:"developer", panel:{enter:true} }
+  { id:"dev.self_correct", aliases:["!自我修正"], scopes:["c2c","group"], permission:"developer", description:"执行自我修正", category:"developer", panel:{enter:true} },
   { id:"self.mute", aliases:["!自我禁言","!禁言自己"], scopes:["group"], description:"将自己禁言指定时长", category:"community" },
   { id:"self.unmute", aliases:["!解除禁言"], scopes:["c2c"], description:"私聊解除自己的自我禁言", category:"community", panel:{enter:true} },
   { id:"community.sticker", aliases:["!表情","!表情包","!贴图","!貼圖"], scopes:["group"], description:"发送群表情库中的表情", category:"community" },
