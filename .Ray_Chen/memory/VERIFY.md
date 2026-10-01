@@ -1,30 +1,33 @@
 # VERIFY
 
-## Goal Revision 3 Final Evidence
+## Goal Revision 4
 
-Product code: `0c4cc0aa55f9e01212b2a39cb979ee8de1ace1fe`
+Live failure:
+- command: `/!面板 群聊`
+- observed at: 2026-10-01 23:09:35 +08
+- result: fallback text only, no clickable buttons
 
-- development CI `36878357756`: success
-- main CI `36878859974`: success
-- Cloudflare Connected Build `6f36a019-e50f-4907-af27-6197b5088e8b`: success
-- production build trigger commit: `aebde1ca3e43cc809645803456b639e659d56fc5`
+## Required Payload Invariant
 
-## Verified Invariants
+For a message reply carrying an inline keyboard:
+- `msg_type === 0`
+- `content` contains the panel text
+- `keyboard.content.rows` is present
+- do not require `markdown` for the panel keyboard path
+- preserve `msg_id` / `msg_seq` for ordinary message replies
+- preserve `event_id` for interaction replies
 
-- one native group category-root panel;
-- retained non-empty categories resolve to inline keyboards;
-- inline pages cover all retained commands;
-- direct/prefill behavior split preserved;
-- no relationship creation/approval/list/update API;
-- no relationship command/category/worker handler/Portal surface;
-- historical relationship rows only support deletion;
-- old relationship mute-lock sources only support safe expiry/unlock compatibility;
-- no 狼人杀/狼人殺 in worker/help/catalog.
+## Button Invariants
 
-## Final User Smoke
+- direct command: type=2, enter=true, reply=false
+- parameterized command: type=2, enter=false
+- reusable: no mandatory click_limit
+- pagination: clickable command action
 
-1. Reopen the QQ native bot command panel.
-2. Confirm it shows compact category entries rather than an incomplete concrete-command list.
-3. Send a category such as `!面板 群聊` or `!面板 互动`.
-4. Confirm the bot returns its own two-column paginated keyboard and retained commands are reachable.
-5. Confirm no 关系／主人／对象 or 狼人杀 entry appears.
+## Gates
+
+- product patch: PENDING
+- development CI: PENDING
+- main CI: PENDING
+- Cloudflare Connected Build: PENDING
+- live QQ render: PENDING

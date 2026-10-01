@@ -1,36 +1,35 @@
 # ACTIVE_TASK
 
 task_id: qqaibot-20261001-panel-complete-real-message-send
-task_status: completed
-goal_revision: 3
+task_status: active
+goal_revision: 4
 
 ## Goal
 
-Use the QQ native group panel only as a compact category launcher, render the complete retained command surface through custom paginated keyboards, and remove unwanted relationship functionality while keeping werewolf removed.
+Fix the live QQ category panel so `/!面板 <分类>` produces an actually clickable inline keyboard instead of only fallback text.
 
 ## Acceptance Criteria
 
-- VERIFIED: one compact native group category-root panel.
-- VERIFIED: every retained category resolves to a paginated inline keyboard.
-- VERIFIED: retained commands are fully covered across category pages.
-- VERIFIED: direct child commands use type=2 + enter=true.
-- VERIFIED: parameterized child commands use type=2 + enter=false.
-- VERIFIED: relationship category, commands, handlers and Portal controls are removed.
-- VERIFIED: relationship storage module only supports historical row cleanup.
-- VERIFIED: historical relationship mute-lock source parsing remains for safe compatibility only.
-- VERIFIED: 狼人杀/狼人殺 absent from worker/help/catalog.
-- VERIFIED: development CI, main CI and Cloudflare Connected Build succeeded.
-- PENDING_USER: live QQ visual/interaction smoke.
+- The live QQ client renders clickable buttons for retained categories.
+- The primary panel reply payload uses plain text `msg_type:0 + content + keyboard`, not forced Markdown.
+- Direct child commands remain `type=2 + enter=true`.
+- Parameterized child commands remain `type=2 + enter=false`.
+- Pagination remains clickable.
+- Plain text fallback remains only an emergency fallback after a real keyboard send failure.
+- Relationship and werewolf features remain retired.
+- Development CI, main CI and production Connected Build must pass.
+- Final live QQ retest is required before task completion.
 
-## Verification Evidence
+## Current Phase
 
-- development CI: 36878357756
-- main CI: 36878859974
-- Cloudflare production build: 6f36a019-e50f-4907-af27-6197b5088e8b
-- product code: 0c4cc0aa55f9e01212b2a39cb979ee8de1ace1fe
+IN_PROGRESS — live smoke failed; transport repair not yet implemented.
+
+## Blockers
+
+None.
 
 ## next_exact_action
 
-User reopens the QQ native panel and verifies category launchers plus complete child keyboards. If the client still displays stale commands, inspect discovery synchronization/cache rather than restoring concrete commands to the native root.
+Modify QQ Open keyboard send payloads and regression tests on `v4-qqopen-native`.
 
-last_checkpoint_at: 2026-10-01T22:48:00+08:00
+last_checkpoint_at: 2026-10-01T23:14:00+08:00

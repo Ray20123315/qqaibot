@@ -1,45 +1,28 @@
 # Ray_Chen Memory Entry
 
-- memory_version: v0.0.53
+- memory_version: v0.0.54
 - project: QQAIBOT
 - repository: Ray20123315/QQAIBOT
 - canonical_branch: main
+- development_branch: v4-qqopen-native
 - task_id: qqaibot-20261001-panel-complete-real-message-send
-- task_status: completed
-- goal_revision: 3
-- base_revision: dfbee0297c015949531bac38eb93cfc72600ea22
-- verified_product_revision: 0c4cc0aa55f9e01212b2a39cb979ee8de1ace1fe
-- production_main_revision: aebde1ca3e43cc809645803456b639e659d56fc5
-- updated_at: 2026-10-01T22:48:00+08:00
+- task_status: active
+- goal_revision: 4
+- base_revision: 2d861802c955cbae7224ee391b25abaf5ad39cd2
+- updated_at: 2026-10-01T23:14:00+08:00
 
-## Completed Result
+## Live Failure
 
-The QQ native group command panel is a compact category launcher again. It no longer tries to contain every concrete command, because the native client can hide items when its limits are exceeded.
+At 2026-10-01 23:09:35 +08, sending `/!面板 群聊` returned only:
 
-Each retained category opens the bot-managed two-column paginated inline keyboard, which is the complete command surface.
+`【群聊】请选择子指令 / 备用文字：... / 原本的 ! 指令仍可直接使用。`
 
-Removed:
-- master/partner relationship category and commands;
-- relationship command handlers;
-- Portal relationship display, policy, level and cleanup-protection controls;
-- relationship creation/approval/list/update APIs;
-- partner-bindings functionality except historical-row deletion;
-- werewolf remains absent across worker/help/catalog.
+No clickable inline keyboard rendered. This fails the user acceptance criterion.
 
-Preserved:
-- direct child commands send normal QQ messages with type=2 + enter=true;
-- parameterized child commands prefill with type=2 + enter=false;
-- legacy master/partner mute-lock source parsing only for safe historical unlock/expiry;
-- legacy binding-row deletion when a member leaves.
+## Current Root-Cause Direction
 
-## Evidence
+The runtime currently forces keyboard replies through `msg_type:2 + markdown + keyboard`. Tencent's official Node SDK supports `msg_type:0 + content + keyboard` when markdown support is not enabled. The next patch will make plain-text keyboard payloads the primary path for these command panels and strengthen tests so a keyboard payload cannot silently regress to forced Markdown.
 
-- development product code: `0c4cc0aa55f9e01212b2a39cb979ee8de1ace1fe`
-- development CI: `36878357756` — success
-- main CI: `36878859974` — success
-- Cloudflare Connected Build: `6f36a019-e50f-4907-af27-6197b5088e8b` — success
-- deployed main trigger commit: `aebde1ca3e43cc809645803456b639e659d56fc5`
+## next_exact_action
 
-## Remaining Check
-
-PENDING_USER: reopen the QQ native command panel, choose categories, and confirm the custom paginated child-command keyboard renders the full retained command set.
+Patch `src/v4/qqopen/runtime.js` and `verify-v4-qqopen.mjs` on `v4-qqopen-native`, run full CI, promote to main only after success, then retest in live QQ.

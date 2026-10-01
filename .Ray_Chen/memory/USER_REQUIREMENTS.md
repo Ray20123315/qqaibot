@@ -9,8 +9,9 @@
 - Developer is the top cumulative permission level for commands available in the current scope.
 - QQ group discovery must work in the actual client, not merely create API resources successfully.
 - QQ native group discovery must use compact category entries; each category must open the bot-managed paginated inline keyboard so QQ native item limits cannot hide commands.
-- Selecting any non-empty category must return a clickable two-column QQ button card; this applies to 基础、群聊、关系、互动、记忆、活动、群规、AI管理、群操作、群主、开发者.
+- Selecting any retained non-empty category must return a clickable two-column QQ button card; this applies to 基础、群聊、互动、记忆、活动、群规、AI管理、群操作、群主、开发者.
 - Large categories must paginate within QQ keyboard limits.
+- The live QQ client must actually render the inline keyboard; a plain-text fallback such as “备用文字” does not satisfy the panel requirement.
 - Keyboard child-command buttons must be reusable and must not use one-shot click limits.
 - Commands that need no additional data must execute immediately without being left in the input box.
 - Commands that require parameters/targets/text must prefill the QQ message input and wait for user completion.

@@ -1,39 +1,34 @@
 # CURRENT_STATE
 
-## Production
+## Production Before Repair
 
-- canonical branch: `main`
-- verified product code: `0c4cc0aa55f9e01212b2a39cb979ee8de1ace1fe`
-- deployed main trigger: `aebde1ca3e43cc809645803456b639e659d56fc5`
-- development CI: `36878357756` — success
-- main CI: `36878859974` — success
-- Cloudflare Worker: `qqai`
-- Connected Build: `6f36a019-e50f-4907-af27-6197b5088e8b` — success
+- main: `2d861802c955cbae7224ee391b25abaf5ad39cd2`
+- prior product code: `0c4cc0aa55f9e01212b2a39cb979ee8de1ace1fe`
+- prior main CI: `36879346744` — success
+- prior production Connected Build: `6f36a019-e50f-4907-af27-6197b5088e8b` — success
 
-## Panel Architecture
+## Live Evidence
 
-- native group panel = compact category launcher;
-- child commands = bot-managed paginated inline keyboards;
-- direct child = type=2 + enter=true;
-- parameterized child = type=2 + enter=false;
-- no one-shot click limits.
+- 2026-10-01 23:09:35 +08: `/!面板 群聊` returned only text fallback.
+- No clickable keyboard was visible.
+- Therefore the previous "keyboard inline card verified" state is invalid as a live acceptance claim.
 
-## Retired Relationship Feature
+## Code Evidence
 
-- no relationship category;
-- no relationship commands in catalog/registry;
-- no relationship command handlers in worker;
-- no Portal relationship list/policy/level controls;
-- no cleanup relationship protection;
-- no relationship state in member details;
-- partner-bindings module can only delete historical stored rows;
-- old master/partner mute-lock sources remain parseable only for safe historical handling.
+- worker returns `qq_inline_keyboard` for category routes.
+- QQ Open runtime receives and normalizes that keyboard.
+- runtime currently sends keyboard replies as `msg_type:2` with a `markdown` body.
+- on QQ API 4xx capability errors, runtime retries as plain text without keyboard.
+- Tencent official Node SDK supports text + inline keyboard using `msg_type:0 + content + keyboard` when Markdown support is disabled.
 
-## Werewolf
+## Target
 
-- no 狼人杀/狼人殺 in worker, help or command catalog;
-- permanent regression covers the absence.
+Use plain-text keyboard payloads for the panel path and verify the exact outbound body in tests.
 
-## Remaining
+## Verification
 
-- live QQ panel refresh/interaction: PENDING_USER
+- product patch: PENDING
+- development CI: PENDING
+- main CI: PENDING
+- production build: PENDING
+- live QQ retest: PENDING
