@@ -129,6 +129,24 @@ function createActivityPlugin(options = {}) {
         return { consume: true, action: "activity_roster", id: item.id };
       }
 
+      match = text.match(/^[!！](?:活動通知|活动通知)\s+(.+)$/i);
+      if (match) {
+        if (!roleCanManage(message, adminUserIds)) {
+          await ctx.reply("只有群主、管理員或插件管理者可以發送活動通知。");
+          return { consume: true, action: "activity_notify_denied" };
+        }
+        const item = await findActivity(ctx, groupId, match[1]);
+        if (!item) {
+          await ctx.reply("找不到這個活動。");
+          return { consume: true, action: "activity_notify_missing" };
+        }
+        const members = Array.isArray(item.members) ? item.members : [];
+        const state = item.closed ? "已結束" : "報名中";
+        const actionLine = item.closed ? "活動已結束，無法再報名。" : `報名方式：!報名 ${item.id}`;
+        await ctx.reply(`【活動通知】\n${item.title}\n編號：${item.id}\n狀態：${state}\n目前報名：${members.length} 人\n${actionLine}`);
+        return { consume: true, action: "activity_notified", id: item.id };
+      }
+
       if (/^[!！](?:活動|活动)\s*$/i.test(text)) {
         const ids = await readIndex(ctx, groupId);
         const rows = [];
