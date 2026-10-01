@@ -1,6 +1,5 @@
-import { isDeveloperId, recentConversationMessagesForUser } from "../core/identity.js";
+import { recentConversationMessagesForUser } from "../core/identity.js";
 import { canUnlockMute, clearMuteLock, createManualMuteLock, getMuteLock, listGroupMuteLocks, putMuteLock } from "../moderation/mute-locks.js";
-import { listGroupBindings } from "../moderation/partner-bindings.js";
 import { callOneBotAction, writeSystemAudit } from "../core/permissions.js";
 import { isVerifiedGroupOwner } from "../group/runtime.js";
 import { dbPut } from "../data/store.js";
@@ -23,46 +22,6 @@ function memberConsoleAllowed(authed) {
 }
 
 
-function publicRelationship(binding) {
-  if (!binding) return null;
-  return binding.mode === "master" ? {
-    mode: "master",
-    masterId: String(binding.masterId || ""),
-    memberId: String(binding.memberId || ""),
-    userIds: [String(binding.masterId || ""), String(binding.memberId || "")].filter(Boolean),
-    createdAt: Number(binding.createdAt || 0),
-    requestId: String(binding.requestId || ""),
-    permissions: binding.permissions || null
-  } : {
-    mode: "partner",
-    leftId: String(binding.leftId || binding.userIds?.[0] || ""),
-    rightId: String(binding.rightId || binding.userIds?.[1] || ""),
-    userIds: (Array.isArray(binding.userIds) ? binding.userIds : [binding.leftId, binding.rightId]).map(String).filter(Boolean),
-    createdAt: Number(binding.createdAt || 0),
-    requestId: String(binding.requestId || "")
-  };
-}
-
-async function resolveLiveRelationshipMember(env, groupId, qq) {
-  const userId = String(qq || "").replace(/\D/g, "");
-  if (!userId) return null;
-  try {
-    const response = await callOneBotAction(env, {
-      action: "get_group_member_info",
-      params: { group_id: numericId(groupId), user_id: numericId(userId), no_cache: true }
-    }, 12000);
-    const raw = response?.data && typeof response.data === "object" ? response.data : response;
-    const member = normalizeMember(raw);
-    if (!member.isRobot) {
-      const cached = await readJson(env, `group_members:${groupId}`, []);
-      const known = Array.isArray(cached) ? cached.find(item => String(item?.qq || item?.user_id || "") === userId) : null;
-      if (known?.isRobot || known?.is_robot) member.isRobot = true;
-    }
-    return member;
-  } catch {
-    return null;
-  }
-}
 
 async function getLiveBotId(env) {
   try {
@@ -174,7 +133,7 @@ async function handlePortalMemberApi(request, env, url, path, body, authed) {
   if (!memberConsoleAllowed(authed)) return jsonResponse({ ok: false, message: "群友列表、历史消息与禁言操作仅限本群 QQ 管理员、群主、获授群操作权限者或开发者。" }, 403);
   const suiteResponse = await handleCommunitySuiteApi(request, env, url, path, body, authed, { listPortalMembers });
   if (suiteResponse) return suiteResponse;
-  const cleanupResponse = await handleMemberCleanupApi(request, env, url, path, body, authed, { listPortalMembers, listMemberProfileSummaries, listGroupBindings, listGroupMuteLocks });
+  const cleanupResponse = await handleMemberCleanupApi(request, env, url, path, body, authed, { listPortalMembers, listMemberProfileSummaries, listGroupMuteLocks });
   if (cleanupResponse) return cleanupResponse;
 
   if (request.method === "GET" && path === "/members") {
@@ -182,19 +141,11 @@ async function handlePortalMemberApi(request, env, url, path, body, authed) {
       const listing = await listPortalMembers(env, groupId);
       const query = String(url.searchParams.get("q") || "").trim().toLowerCase();
       const locks = await listGroupMuteLocks(env, groupId);
-      const relationships = (await listGroupBindings(env, groupId)).map(publicRelationship);
       const profiles = await listMemberProfileSummaries(env, groupId);
-      const relationshipByUser = new Map();
-      for (const relationship of relationships) for (const qq of relationship.userIds || []) relationshipByUser.set(String(qq), relationship);
       const visibleMembers = listing.members.map(item => ({
         ...item,
         muteLock: locks[item.qq] ? { source: locks[item.qq].source, allowOwnerUnmute: locks[item.qq].allowOwnerUnmute, expiresAt: locks[item.qq].expiresAt, blockedAttempts: locks[item.qq].blockedAttempts } : null,
-        relationship: relationshipByUser.get(String(item.qq)) || null,
-        memberProfile: profiles[item.qq] || null,
-        relationshipEligibility: {
-          master: !item.isRobot,
-          member: !item.isRobot && item.role === "member" && !isDeveloperId(env, item.qq)
-        }
+        memberProfile: profiles[item.qq] || null
       }));
       const members = query
         ? visibleMembers.filter(item => [item.qq, item.name, item.nickname, item.card, item.role].some(value => String(value || "").toLowerCase().includes(query)))
@@ -202,7 +153,6 @@ async function handlePortalMemberApi(request, env, url, path, body, authed) {
       return jsonResponse({
         ok: true,
         members,
-        relationships,
         total: members.length,
         source: listing.source,
         stale: listing.stale,
@@ -356,12 +306,12 @@ function injectPortalMembersClient(html) {
   else source = source.replace("</main>", section + "</main>");
   const style = `<style id="qqai-member-console-style">
 #memberActionsNav::before,#memberDataNav::before{content:none!important;display:none!important}.qqai-nav-entry{display:flex!important;align-items:center!important;gap:10px!important}.qqai-nav-glyph{width:30px;height:30px;display:inline-grid;place-items:center;border-radius:9px;background:#151b35;color:#fff;font-size:13px;font-weight:800;flex:0 0 30px}
-.member-console-toolbar{display:grid;grid-template-columns:minmax(220px,1fr) minmax(260px,1.4fr);gap:14px;align-items:end;margin-bottom:12px}.member-console-filters{display:grid;grid-template-columns:repeat(4,minmax(135px,1fr)) auto auto;gap:10px;align-items:end;margin-bottom:16px}.member-console-filters .field{margin:0}.member-directory-row{display:grid;grid-template-columns:minmax(200px,1.3fr) minmax(160px,.7fr) auto;gap:12px;align-items:center}.member-action-row{display:grid;grid-template-columns:minmax(190px,1fr) minmax(150px,.7fr) minmax(320px,1.5fr);gap:12px;align-items:center}.member-main{min-width:0}.member-name{font-weight:800;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.member-meta{font-size:12px;color:var(--muted);margin-top:4px}.member-actions{display:flex;gap:8px;flex-wrap:wrap;align-items:center}.member-actions input[type="number"]{width:112px;min-height:40px}.member-toggle{display:inline-flex;align-items:center;gap:5px;font-size:12px;color:var(--muted);white-space:nowrap}.member-toggle input{width:auto;min-height:auto}.member-lock{font-size:12px;font-weight:800;color:#b45309}.member-history-message{white-space:pre-wrap;word-break:break-word}.member-history-time{font-size:12px;color:var(--muted);margin-bottom:6px}.member-role-owner{font-weight:800}.member-role-admin{font-weight:700}.member-muted{color:#b45309;font-weight:800}.relationship-console{margin-bottom:16px}.relationship-direct{display:grid;grid-template-columns:minmax(180px,1fr) minmax(180px,1fr) auto auto;gap:12px;align-items:end;margin:14px 0}.relationship-direct .field{margin:0}.relationship-replace{align-self:center}.relationship-row{display:grid;grid-template-columns:minmax(220px,1fr) auto;gap:12px;align-items:center}.relationship-actions{display:flex;gap:8px;justify-content:flex-end}.member-relationship{font-size:12px;font-weight:800;color:#6d28d9;margin-left:6px}@media(max-width:900px){.member-console-toolbar,.member-console-filters,.member-directory-row,.member-action-row,.relationship-direct,.relationship-row{grid-template-columns:1fr}.member-actions input{width:100%}.member-actions .btn{flex:1 1 120px}.relationship-actions{justify-content:stretch}.relationship-actions .btn{width:100%}}
+.member-console-toolbar{display:grid;grid-template-columns:minmax(220px,1fr) minmax(260px,1.4fr);gap:14px;align-items:end;margin-bottom:12px}.member-console-filters{display:grid;grid-template-columns:repeat(4,minmax(135px,1fr)) auto auto;gap:10px;align-items:end;margin-bottom:16px}.member-console-filters .field{margin:0}.member-directory-row{display:grid;grid-template-columns:minmax(200px,1.3fr) minmax(160px,.7fr) auto;gap:12px;align-items:center}.member-action-row{display:grid;grid-template-columns:minmax(190px,1fr) minmax(150px,.7fr) minmax(320px,1.5fr);gap:12px;align-items:center}.member-main{min-width:0}.member-name{font-weight:800;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.member-meta{font-size:12px;color:var(--muted);margin-top:4px}.member-actions{display:flex;gap:8px;flex-wrap:wrap;align-items:center}.member-actions input[type="number"]{width:112px;min-height:40px}.member-toggle{display:inline-flex;align-items:center;gap:5px;font-size:12px;color:var(--muted);white-space:nowrap}.member-toggle input{width:auto;min-height:auto}.member-lock{font-size:12px;font-weight:800;color:#b45309}.member-history-message{white-space:pre-wrap;word-break:break-word}.member-history-time{font-size:12px;color:var(--muted);margin-bottom:6px}.member-role-owner{font-weight:800}.member-role-admin{font-weight:700}.member-muted{color:#b45309;font-weight:800}@media(max-width:900px){.member-console-toolbar,.member-console-filters,.member-directory-row,.member-action-row{grid-template-columns:1fr}.member-actions input{width:100%}.member-actions .btn{flex:1 1 120px}}
 </style>`;
   source = source.includes("</head>") ? source.replace("</head>", style + "\n</head>") : style + source;
   const script = `<script id="qqai-member-console-client">
 (function(){
-  var cachedMembers=[],cachedRelationships=[];
+  var cachedMembers=[];
   function el(id){return document.getElementById(id)}
   function safe(value){return typeof esc==='function'?esc(value):String(value==null?'':value).replace(/[&<>"']/g,function(c){return({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'})[c]})}
   function notify(message){if(typeof toast==='function')toast(message);else window.alert(message)}
@@ -371,16 +321,13 @@ function injectPortalMembersClient(html) {
   function dateText(value){var time=Number(value||0);return time?new Date(time).toLocaleString():'未提供'}
   async function copyText(value){var text=String(value||'');try{if(navigator.clipboard&&navigator.clipboard.writeText)await navigator.clipboard.writeText(text);else{var input=document.createElement('textarea');input.value=text;document.body.appendChild(input);input.select();document.execCommand('copy');input.remove()}notify('已复制 QQ：'+text)}catch(error){notify('复制失败：'+String(error&&error.message||error))}}
   function csvCell(value){var text=String(value==null?'':value);return '"'+text.replace(/"/g,'""')+'"'}
-  function relationshipMemberName(qq){var member=cachedMembers.find(function(item){return String(item.qq)===String(qq)});return member?(member.name||member.qq):String(qq||'未知成员')}
-  function relationshipText(item){if(!item)return'';if(item.mode==='master')return relationshipMemberName(item.masterId)+'（主人） → '+relationshipMemberName(item.memberId)+'（所属成员）';var ids=item.userIds||[item.leftId,item.rightId];return relationshipMemberName(ids[0])+' ↔ '+relationshipMemberName(ids[1])+'（对象）'}
-  function relationshipFor(qq){return cachedRelationships.find(function(item){return (item.userIds||[]).map(String).indexOf(String(qq))>=0})||null}
-  function memberState(member){var lock=member.muteLock,lockText=lock?(lock.source==='self'?'自我禁言锁':lock.source==='partner'?'对象禁言锁':lock.source==='master'?'主人禁言锁':(lock.allowOwnerUnmute?'防解除：开发者或群主':'防解除：仅开发者')):'';var state=member.muted?'<span class="member-muted">禁言中，剩余 '+safe(secondsText(member.muteRemainingSeconds))+'</span>':'<span class="status ok">可发言</span>';if(lockText)state+=' <span class="member-lock">'+safe(lockText)+'</span>';var relation=relationshipFor(member.qq);if(relation)state+=' <span class="member-relationship">'+safe(relation.mode==='master'?(String(relation.masterId)===String(member.qq)?'主人':'所属成员'):'对象')+'</span>';return state}
+  function memberState(member){var lock=member.muteLock,lockText=lock?(lock.source==='self'?'自我禁言锁':(lock.source==='partner'||lock.source==='master')?'旧版关系禁言锁':(lock.allowOwnerUnmute?'防解除：开发者或群主':'防解除：仅开发者')):'';var state=member.muted?'<span class="member-muted">禁言中，剩余 '+safe(secondsText(member.muteRemainingSeconds))+'</span>':'<span class="status ok">可发言</span>';if(lockText)state+=' <span class="member-lock">'+safe(lockText)+'</span>';return state}
   function filteredMembers(searchId,roleId,muteId){var query=String(el(searchId)&&el(searchId).value||'').trim().toLowerCase(),role=String(el(roleId)&&el(roleId).value||''),mute=String(el(muteId)&&el(muteId).value||'');return cachedMembers.filter(function(m){if(query&&![m.qq,m.name,m.nickname,m.card,m.role].some(function(v){return String(v||'').toLowerCase().indexOf(query)>=0}))return false;if(role&&String(m.role)!==role)return false;if(mute==='muted'&&!m.muted)return false;if(mute==='active'&&m.muted)return false;return true})}
   function directoryRows(){var rows=filteredMembers('memberSearch','memberRoleFilter','memberMuteFilter'),sort=String(el('memberSort')&&el('memberSort').value||'role');rows.sort(function(a,b){if(sort==='name')return String(a.name||a.qq).localeCompare(String(b.name||b.qq),'zh-CN');if(sort==='recent')return Number(b.lastSentTime||0)-Number(a.lastSentTime||0);if(sort==='mute')return Number(b.muteRemainingSeconds||0)-Number(a.muteRemainingSeconds||0);return ({owner:0,admin:1,member:2}[a.role]??3)-({owner:0,admin:1,member:2}[b.role]??3)||String(a.name||a.qq).localeCompare(String(b.name||b.qq),'zh-CN')});return rows}
   function renderMembers(){var root=el('memberList');if(!root)return;root.innerHTML=directoryRows().map(function(member){var activity='入群 '+dateText(member.joinTime)+'｜最近发言 '+dateText(member.lastSentTime);return'<div class="item member-directory-row"><div class="member-main"><div class="member-name member-role-'+safe(member.role)+'">'+safe(member.name||member.qq)+'</div><div class="member-meta">QQ '+safe(member.qq)+'｜'+safe(roleText(member.role))+(member.title?'｜'+safe(member.title):'')+'</div><div class="member-meta">'+safe(activity)+'</div></div><div>'+memberState(member)+'</div><div class="member-actions"><button class="btn ghost member-copy" data-qq="'+safe(member.qq)+'">复制 QQ</button><button class="btn member-history" data-qq="'+safe(member.qq)+'">历史消息</button></div></div>'}).join('')||'<div class="empty">没有符合条件的群友</div>'}
   function renderMemberActions(){var root=el('memberActionList');if(!root)return;var rows=filteredMembers('memberActionSearch','memberActionRole','memberActionMute');root.innerHTML=rows.map(function(member){return'<div class="item member-action-row"><div class="member-main"><div class="member-name member-role-'+safe(member.role)+'">'+safe(member.name||member.qq)+'</div><div class="member-meta">QQ '+safe(member.qq)+'｜'+safe(roleText(member.role))+'</div></div><div>'+memberState(member)+'</div><div class="member-actions"><input class="member-seconds" type="number" min="1" max="2592000" value="60" aria-label="禁言秒数"><label class="member-toggle"><input class="member-protect" type="checkbox">防解除</label><label class="member-toggle"><input class="member-owner-unlock" type="checkbox" disabled>群主可解除</label><label class="member-toggle"><input class="member-skip-confirm" type="checkbox">跳过确认</label><button class="btn danger member-mute" data-qq="'+safe(member.qq)+'">禁言（秒）</button><button class="btn member-unmute" data-qq="'+safe(member.qq)+'">解禁</button></div></div>'}).join('')||'<div class="empty">没有符合条件的成员</div>'}
-  function exportMembers(){var rows=[['QQ','名称','身份','禁言状态','剩余禁言秒数','关系身份','入群时间','最近发言时间']];cachedMembers.forEach(function(item){var relation=relationshipFor(item.qq),relationRole=relation?(relation.mode==='master'?(String(relation.masterId)===String(item.qq)?'主人':'所属成员'):'对象'):'';rows.push([item.qq,item.name||'',roleText(item.role),item.muted?'禁言中':'可发言',item.muteRemainingSeconds||0,relationRole,dateText(item.joinTime),dateText(item.lastSentTime)])});var csv='\\ufeff'+rows.map(function(row){return row.map(csvCell).join(',')}).join('\\r\\n');var blob=new Blob([csv],{type:'text/csv;charset=utf-8'}),url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download='群友名册-'+new Date().toISOString().slice(0,10)+'.csv';document.body.appendChild(a);a.click();a.remove();setTimeout(function(){URL.revokeObjectURL(url)},1000)}
-  async function loadMembers(){var status=el('memberConsoleStatus'),actionStatus=el('memberActionStatus');if(status)status.textContent='正在读取群友列表…';if(actionStatus)actionStatus.textContent='正在读取禁言状态…';var result=await call('/members');if(!result.ok){var message=result.message||'读取失败';if(status)status.textContent=message+'｜可点击刷新重试';if(actionStatus)actionStatus.textContent=message;cachedMembers=[];cachedRelationships=[];renderMembers();renderMemberActions();return}cachedMembers=result.members||[];cachedRelationships=result.relationships||[];renderMembers();renderMemberActions();var mutedCount=cachedMembers.filter(function(item){return item.muted}).length,adminCount=cachedMembers.filter(function(item){return item.role==='owner'||item.role==='admin'}).length;var summary='共 '+cachedMembers.length+' 位群友｜管理层 '+adminCount+'｜禁言中 '+mutedCount+'｜关系 '+cachedRelationships.length+(result.stale?'｜当前显示缓存资料':'｜即时资料')+(result.warning?'｜'+result.warning:'');if(status)status.textContent=summary;if(actionStatus)actionStatus.textContent=summary}
+  function exportMembers(){var rows=[['QQ','名称','身份','禁言状态','剩余禁言秒数','入群时间','最近发言时间']];cachedMembers.forEach(function(item){rows.push([item.qq,item.name||'',roleText(item.role),item.muted?'禁言中':'可发言',item.muteRemainingSeconds||0,dateText(item.joinTime),dateText(item.lastSentTime)])});var csv='\\ufeff'+rows.map(function(row){return row.map(csvCell).join(',')}).join('\\r\\n');var blob=new Blob([csv],{type:'text/csv;charset=utf-8'}),url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download='群友名册-'+new Date().toISOString().slice(0,10)+'.csv';document.body.appendChild(a);a.click();a.remove();setTimeout(function(){URL.revokeObjectURL(url)},1000)}
+  async function loadMembers(){var status=el('memberConsoleStatus'),actionStatus=el('memberActionStatus');if(status)status.textContent='正在读取群友列表…';if(actionStatus)actionStatus.textContent='正在读取禁言状态…';var result=await call('/members');if(!result.ok){var message=result.message||'读取失败';if(status)status.textContent=message+'｜可点击刷新重试';if(actionStatus)actionStatus.textContent=message;cachedMembers=[];renderMembers();renderMemberActions();return}cachedMembers=result.members||[];renderMembers();renderMemberActions();var mutedCount=cachedMembers.filter(function(item){return item.muted}).length,adminCount=cachedMembers.filter(function(item){return item.role==='owner'||item.role==='admin'}).length;var summary='共 '+cachedMembers.length+' 位群友｜管理层 '+adminCount+'｜禁言中 '+mutedCount+(result.stale?'｜当前显示缓存资料':'｜即时资料')+(result.warning?'｜'+result.warning:'');if(status)status.textContent=summary;if(actionStatus)actionStatus.textContent=summary}
   window.qqaiLoadMembers=loadMembers;
   async function showHistory(qq){var panel=el('memberHistoryPanel'),list=el('memberHistoryList'),title=el('memberHistoryTitle');if(!panel||!list)return;panel.classList.remove('hidden');list.innerHTML='<div class="empty">正在读取历史消息…</div>';var result=await call('/members/history?qq='+encodeURIComponent(qq)+'&limit=120');if(!result.ok){list.innerHTML='<div class="empty">'+safe(result.message||'读取失败')+'</div>';return}if(title)title.textContent=(result.member&&result.member.name||qq)+' 的历史消息';list.innerHTML=(result.records||[]).map(function(item){return'<div class="item"><div class="member-history-time">'+safe(item.createdAt?new Date(Number(item.createdAt)).toLocaleString():'时间未提供')+'｜消息 '+safe(item.messageId||item.id||'')+'</div><div class="member-history-message">'+safe(item.text||'[无文字内容]')+'</div></div>'}).join('')||'<div class="empty">没有已保存的历史消息</div>'}
   async function muteMember(button){var row=button.closest('.member-action-row'),input=row&&row.querySelector('.member-seconds'),seconds=Math.trunc(Number(input&&input.value||0)),qq=button.dataset.qq;var protect=!!(row&&row.querySelector('.member-protect')&&row.querySelector('.member-protect').checked),ownerUnlock=!!(row&&row.querySelector('.member-owner-unlock')&&row.querySelector('.member-owner-unlock').checked),skip=!!(row&&row.querySelector('.member-skip-confirm')&&row.querySelector('.member-skip-confirm').checked);if(!seconds||seconds<1){notify('请输入大于 0 的禁言秒数');return}if(!skip){var ok=typeof confirmModal==='function'?await confirmModal('确定禁言 QQ '+qq+' '+seconds+' 秒'+(protect?'并启用防解除':'')+'？','确认禁言'):window.confirm('确定禁言 QQ '+qq+' '+seconds+' 秒？');if(!ok)return}var result=await call('/members/mute','POST',{qq:qq,seconds:seconds,protect:protect,allowOwnerUnmute:ownerUnlock});notify(result.message||'操作完成');if(result.ok)loadMembers()}
