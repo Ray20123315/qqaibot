@@ -126,6 +126,7 @@ assert.match(groupRootHelp?.message || "", /status/);
 assert(groupRootHelp?.keyboard?.content?.rows?.length > 0);
 assert(groupRootHelp.keyboard.content.rows.length <= 5);
 assert(groupRootHelp.keyboard.content.rows.every(row => row.buttons.length <= 2));
+// Group-panel direct actions must be real QQ command messages (type=2 + enter=true), not synthetic callbacks.
 const basicKeyboard = buildGroupCategoryKeyboard(registry, "basic");
 assert.equal(basicKeyboard.page, 1);
 assert.equal(basicKeyboard.totalPages, 1);
