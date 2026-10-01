@@ -80,3 +80,16 @@ Reason: plugins run before the core Worker handler; without this gate, non-white
 status: accepted
 date: 2026-10-01
 Decision: !指令关 blocks group ! commands in the core Worker and V3 official plugins. !指令开 is always preserved as the authorized recovery path.
+
+
+## D-087 Successful login completes through full page navigation
+status: accepted
+date: 2026-10-01
+Decision: after a successful QQ-code, password, or Preview test login, the Portal must finish authentication with a full page reload instead of immediately invoking boot() in the same fetch chain.
+Reason: the reported UI required a second login attempt even though the first authentication already created a valid session. A clean navigation removes stale in-page authentication/bootstrap state and starts the normal session bootstrap path once.
+
+## D-088 Live Bot testing is paused without an isolated canary route
+status: accepted
+date: 2026-10-01
+Decision: do not send live Bot test messages into existing QQ groups until an isolated Bot/canary route exists or the user explicitly authorizes a narrowly scoped real-group test.
+Reason: current live testing would affect normal group chat and is not an isolated acceptance environment.

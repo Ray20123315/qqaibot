@@ -1,14 +1,14 @@
 {
   "schema_version": 1,
-  "memory_version": "v0.0.48",
+  "memory_version": "v0.0.49",
   "task_id": "qqaibot-20261001-v4-preview-user-acceptance",
-  "goal_revision": 2,
-  "transaction": "v4_command_identity_whitelist_completion_20261001",
+  "goal_revision": 3,
+  "transaction": "v4_single_login_fix_and_bot_live_test_pause_20261001",
   "repository": "Ray20123315/qqaibot",
   "production_branch": "main",
   "development_branch": "feature/v4-public-bot",
-  "product_before_revision": "18f254cc18fe599ca27a89106fa4e87759776165",
-  "product_after_revision": "4893adbbb413d6c65f340ae44c80d153d1ddb7fe",
+  "product_before_revision": "9d124607c2d640cfd04727774e55fc0e49a90753",
+  "product_after_revision": "262b019b3246ea9fba54975fc3f4954e6cfd432a",
   "verification": {
     "feature_product_ci_run": 36366445081,
     "regression_ci_run": 36366534308,
@@ -157,7 +157,7 @@
     "v4_preview_memory_package_branch": "feature/v4-public-bot",
     "v4_preview_memory_package_version": "v0.0.47",
     "v4_preview_memory_package": "pending_workflow",
-    "current_feature_head": "4893adbbb413d6c65f340ae44c80d153d1ddb7fe",
+    "current_feature_head": "262b019b3246ea9fba54975fc3f4954e6cfd432a",
     "final_feature_ci_run": 36804510541,
     "final_feature_ci": "success",
     "command_runtime_owner_coverage": "77/77",
@@ -167,16 +167,27 @@
     "hybrid_permission_mapping": "verified",
     "whitelist_before_plugin_dispatch": "verified",
     "group_command_gate_core_and_plugins": "verified",
-    "feature_cloudflare_build": "5d741839-2095-4ead-b741-461ce13a3aa2",
+    "feature_cloudflare_build": "5d11ffad-1a68-48f6-8daa-630246f8c16b",
     "feature_cloudflare_build_outcome": "success",
-    "feature_worker_version": 2168,
-    "feature_worker_version_id": "c6695790-ba16-4eab-97c1-9b1c46825118",
-    "stable_preview_deployment": "f2ba207c-3a7a-4bd3-a3e6-94150b8f83b4",
-    "stable_preview_deployment_number": 6,
+    "feature_worker_version": 2171,
+    "feature_worker_version_id": "9c24fac6-664c-439e-b005-2f5496ffe81f",
+    "stable_preview_deployment": "97c695ee-b4f7-4bdd-b353-3b23ad5b56b4",
+    "stable_preview_deployment_number": 7,
     "stable_preview_root_http": 200,
     "stable_preview_browser_rendering": "success",
     "stable_preview_qq_open_enabled": false,
-    "live_qq_client_acceptance": "pending_user_canary"
+    "live_qq_client_acceptance": "pending_user_canary",
+    "login_fix_ci_run": 36840520274,
+    "login_fix_ci": "success",
+    "login_completion_strategy": "full_page_reload",
+    "login_paths_covered": [
+      "qq_code",
+      "password",
+      "preview_test"
+    ],
+    "same_origin_login_probe": "login_200_then_me_200_system_admin_true",
+    "live_bot_group_testing": "paused_by_user_requirement",
+    "main_changed": false
   },
   "changes": [
     {
@@ -2046,10 +2057,57 @@
       "after_revision": "v0.0.48",
       "verification": "atomic memory commit; package workflow/archive SHA verification required before final response",
       "changed_at": "2026-10-01T10:16:00+08:00"
+    },
+    {
+      "location_type": "github",
+      "provider": "GitHub",
+      "resource_id_or_path": "src/portal/runtime.js",
+      "action": "modified",
+      "branch_or_container": "feature/v4-public-bot",
+      "before_revision": "9d124607c2d640cfd04727774e55fc0e49a90753",
+      "after_revision": "262b019b3246ea9fba54975fc3f4954e6cfd432a",
+      "commit_or_hash": "3f0cce32f34ca33aabb8899feff173f491515f46",
+      "verification": "successful login paths use finishPortalLogin/location.reload; final CI 36840520274 success",
+      "changed_at": "2026-10-01T17:08:00+08:00"
+    },
+    {
+      "location_type": "github",
+      "provider": "GitHub",
+      "resource_id_or_path": "verify-portal-auth-password.mjs",
+      "action": "modified",
+      "branch_or_container": "feature/v4-public-bot",
+      "before_revision": "3f0cce32f34ca33aabb8899feff173f491515f46",
+      "after_revision": "262b019b3246ea9fba54975fc3f4954e6cfd432a",
+      "commit_or_hash": "262b019b3246ea9fba54975fc3f4954e6cfd432a",
+      "verification": "regression rejects same-page await boot login completion and requires finishPortalLogin; CI success",
+      "changed_at": "2026-10-01T17:08:00+08:00"
+    },
+    {
+      "location_type": "cloudflare",
+      "provider": "Cloudflare",
+      "resource_id_or_path": "workers/workers/qqai/previews/068adb610f4d47daa65c1376e021787f/deployments/97c695ee-b4f7-4bdd-b353-3b23ad5b56b4",
+      "action": "preview_deployed",
+      "branch_or_container": "feature/v4-public-bot Preview",
+      "before_revision": "f2ba207c-3a7a-4bd3-a3e6-94150b8f83b4",
+      "after_revision": "97c695ee-b4f7-4bdd-b353-3b23ad5b56b4",
+      "commit_or_hash": "262b019b3246ea9fba54975fc3f4954e6cfd432a",
+      "verification": "safe binding read-back + same-origin login 200 then /api/portal/me 200 systemAdmin=true",
+      "changed_at": "2026-10-01T17:08:00+08:00"
+    },
+    {
+      "location_type": "github",
+      "provider": "GitHub",
+      "resource_id_or_path": ".Ray_Chen/memory/*",
+      "action": "final_reconciliation",
+      "branch_or_container": "feature/v4-public-bot",
+      "before_revision": "v0.0.48",
+      "after_revision": "v0.0.49",
+      "verification": "atomic memory commit; package archive and SHA verification required",
+      "changed_at": "2026-10-01T17:08:00+08:00"
     }
   ],
   "internal_memory_transaction": {
-    "action": "reconcile command/identity/whitelist completion and stable Preview deployment",
-    "note": "No production merge. Memory archive/hash/notification evidence do not recursively trigger another memory transaction."
+    "action": "record single-login fix and pause live Bot group testing",
+    "note": "No main merge. Archive/hash/notification evidence do not recursively trigger another memory transaction."
   }
 }

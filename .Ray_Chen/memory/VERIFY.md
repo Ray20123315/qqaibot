@@ -2,96 +2,68 @@
 
 ## Product Revision
 
-`4893adbbb413d6c65f340ae44c80d153d1ddb7fe`
+`262b019b3246ea9fba54975fc3f4954e6cfd432a`
 
-## GitHub Verification
+## GitHub
 
-Final branch CI:
-- run: `36804510541`
-- branch: `feature/v4-public-bot`
-- commit: `4893adbbb413d6c65f340ae44c80d153d1ddb7fe`
+Final CI:
+- run: `36840520274`
 - conclusion: SUCCESS
-- covers repository regression, V3 regression, full V4 checks, isolated V4 test deployment checks and single Worker bundle.
+- repository regression: success
+- V3 regression: success
+- V4 QQ Open regression: success
+- isolated V4 deployment checks: success
+- single Worker bundle: success
 
-Focused successful runs:
-- `36804280773`: whitelist-gated plugin dispatch
-- `36804100548`: reusable keyboard click limits
-- `36803958243`: restored panel command resolution
-- `36803953453`: completed panel command handlers
-- `36803908513`: activity notification
-- `36803887169`: memory list and group command gate
-- `36800446426`: send-message semantics for no-parameter keyboard commands
-
-Expected/understood intermediate failures:
-- `36804096124`: click_limit implementation landed before updated assertions; superseded by successful `36804100548`.
-- `36804331392` / `36804331377`: temporary push trigger was rejected by `verify-v4-preview-workflow.mjs`; trigger restored and final `36804510541` passed.
-
-## Catalog / Handler Coverage
-
-- catalog entries: 77
-- Worker/plugins/moderation parser/normalization coverage: 77/77 runtime owners
-- completed handlers: `!你记住了什么`, `!活动通知`, `!指令开`, `!指令关`
-
-## Keyboard Evidence
-
-- direct/no-parameter: `action.type=2`, `enter=true`
-- parameterized: `action.type=2`, `enter=false`
-- pagination: `action.type=1`
-- reusable buttons: `click_limit=10`
-- Tencent current SDK documents default `click_limit=1` as single-use; Tencent botpy example uses `click_limit=10`.
-
-## Identity / Whitelist Evidence
-
-- verified old-Bot group/user mapping feeds permission identity
-- `getEffectivePermissions` uses `permissionGroupId / permissionUserId`
-- QQ Open whitelist mutation refuses unverified numeric groups
-- OneBot and QQ Open plugin dispatch are whitelist-gated
-- identity conflicts downgrade authorization and are audited
+Login-specific regression:
+- requires `finishPortalLogin()` to call `location.reload()`
+- rejects QQ-code success path calling `await boot()`
+- rejects Preview-test success path calling `await boot()`
+- rejects password-login success path calling `await boot()`
+- requires all three paths to call `finishPortalLogin()`
 
 ## Cloudflare Feature Build
 
-- build UUID: `5d741839-2095-4ead-b741-461ce13a3aa2`
+- build UUID: `5d11ffad-1a68-48f6-8daa-630246f8c16b`
 - branch: `feature/v4-public-bot`
-- commit: `4893adbbb413d6c65f340ae44c80d153d1ddb7fe`
+- commit: `262b019b3246ea9fba54975fc3f4954e6cfd432a`
 - outcome: SUCCESS
-- uploaded Worker version: `2168`
-- version id: `c6695790-ba16-4eab-97c1-9b1c46825118`
+- Worker version: 2171
+- Worker version id: `9c24fac6-664c-439e-b005-2f5496ffe81f`
 
-## Stable Preview Deployment
+## Stable Preview
 
 - preview id: `068adb610f4d47daa65c1376e021787f`
 - URL: `https://feature-v4-public-bot-qqai.ray20123315.workers.dev/`
-- deployment: `f2ba207c-3a7a-4bd3-a3e6-94150b8f83b4`
-- deployment number: 6
-- source annotation: `4893adbbb413d6c65f340ae44c80d153d1ddb7fe`
-- created/deployed: `2026-10-01T02:13:52.753873Z`
+- deployment: `97c695ee-b4f7-4bdd-b353-3b23ad5b56b4`
+- deployment number: 7
+- source annotation: `262b019b3246ea9fba54975fc3f4954e6cfd432a`
 
-Deployment method:
-- modules copied from verified feature Worker version 2168
-- prior stable Preview safe environment reused
-- production secret bindings not copied
-
-Read-back:
+Read-back isolation:
 - `QQAI_DB_TABLE=kv_store_v4public_preview`
 - `QQ_OPEN_ENABLED=false`
 - `V4_PREVIEW_TEST_LOGIN=true`
-- production QQ/OneBot/Gemini/DeepSeek/Codex/Vectorize/Portal admin sensitive bindings: absent
+- production QQ client secret: absent
+- production OneBot token/DO: absent
+- Gemini/DeepSeek/Codex secrets: absent
+- Vectorize: absent
+- production Portal admin/auth secrets: absent
 
-## Live Preview
+## Live Login Probe
 
-Cloudflare Browser Rendering:
-- root origin HTTP 200
-- final URL is the stable Preview URL
-- title `QQAIbot 控制台`
-- rendered HTML ~384 KB
-- QQAI and V4/Preview content present
+Cloudflare Browser Rendering same-origin JavaScript probe:
+- first login API: HTTP 200, ok=true
+- immediately following `/api/portal/me`: HTTP 200, ok=true
+- session: systemAdmin=true
 
-Two subsequent Browser Rendering calls hit Cloudflare error 2001 (rate limit) and were not retried.
+This proves the first authentication request creates a valid session and the session is usable immediately by the backend/browser cookie jar.
 
-## Remaining Acceptance Limit
+A separate DOM-click/navigation instrumentation attempt was inconclusive because the injected probe state disappeared across reload. It is not used as acceptance evidence.
 
-The isolated Preview intentionally has `QQ_OPEN_ENABLED=false`, so actual QQ-client button/whitelist behavior remains a user/canary acceptance item. It is code/CI verified but not claimed as live QQ-platform verification.
+## Bot Verification Boundary
+
+No live Bot/group canary was run. Existing QQ group testing would create real user-visible messages. Bot verification remains limited to code and CI until an isolated Bot/canary route exists or the user explicitly authorizes a scoped live test.
 
 ## Production
 
-No merge to `main` and no production rollout is authorized by this checkpoint.
+No merge to `main`.

@@ -42,3 +42,16 @@ Mitigation: keep transport IDs as OpenIDs, use confirmed old-Bot mapping only fo
 ## G-078 Preview workflow intentionally rejects push triggers
 Risk: adding a branch push trigger to the stable Preview workflow breaks `verify-v4-preview-workflow.mjs`.
 Mitigation: keep Preview deployment manual-only; when connector dispatch is unavailable, use the Workers Preview deployment API with code modules from a verified branch version and the existing Preview-safe environment.
+
+
+## G-079 Same-page post-login bootstrap can present as a double-login bug
+Risk: immediately calling boot() after the authentication fetch can leave the UI on the login screen even though the first login already created a valid server session.
+Mitigation: after successful authentication use one full page reload, then let normal page startup load /api/portal/me.
+
+## G-080 Real QQ Bot tests have user-visible side effects
+Risk: without a separate Bot/canary transport, testing command and keyboard behavior sends real messages or performs actions in existing groups.
+Mitigation: keep live Bot testing paused; rely on code/CI/isolated Preview for non-Bot surfaces until an isolated Bot test route exists or a scoped live test is explicitly authorized.
+
+## G-081 Browser Rendering injected state is not reliable across navigation
+Risk: an injected browser probe can disappear when the page reloads, making post-navigation DOM instrumentation inconclusive.
+Mitigation: do not treat missing injected markers after navigation as product failure. Use same-origin API/session probes plus user manual UI acceptance for login navigation.

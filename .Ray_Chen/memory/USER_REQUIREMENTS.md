@@ -34,6 +34,9 @@
 - Group whitelist enforcement must apply before official plugin dispatch as well as before core AI handling.
 - `!指令开 / !指令关` must gate both core Worker commands and official plugin commands, while preserving `!指令开` as the recovery path.
 
+- Do not live-test Bot behavior in existing QQ groups while there is no isolated Bot/canary route; such tests create real group-chat side effects.
+- Portal login must complete with a single credential submission; successful authentication should transition through a clean page reload rather than requiring a second login attempt.
+
 ## V4 Preview Acceptance Gate
 
 - V4 Preview must be manually accepted by the user before any Preview-only test-login change is merged into `main`.
