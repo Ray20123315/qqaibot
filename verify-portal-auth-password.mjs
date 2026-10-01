@@ -94,4 +94,5 @@ assert.doesNotMatch(runtime, /!bearerToken && rememberCookie && \(!session/);
 const showViewBlock = runtime.slice(runtime.indexOf("function showView(name)"), runtime.indexOf("async function loadPlatformFeatures", runtime.indexOf("function showView(name)")));
 assert.match(showViewBlock, /portalWithViewTransition\(function\(\)\{[\s\S]*animatePortalText\(\$\('pageTitle'\)[\s\S]*animatePortalText\(\$\('pageSubtitle'\)[\s\S]*animatePortalView\(view\)[\s\S]*pulsePortalMotion\(\)[\s\S]*requestAnimationFrame\(updatePortalNavIndicator\)/);
 assert.doesNotMatch(showViewBlock, /\}\);animatePortalView\(view\)/);
+assert.doesNotMatch(runtime, /\$\('runSimulator'\)\.onclick/, "removed simulator DOM must not crash Portal bootstrap before boot()");
 console.log("verify-portal-auth-password: ok");
