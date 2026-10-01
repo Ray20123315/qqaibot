@@ -175,6 +175,26 @@ const PORTAL_MANAGED_DEVELOPER_IDS_KEY = "portal_system_developer_ids";
 const portalManagedDeveloperIdsCache = new WeakMap();
 const PORTAL_SYSTEM_ADMIN_IDLE_TTL_MS = 30 * 60 * 1000;
 const PORTAL_SYSTEM_ADMIN_ABSOLUTE_TTL_MS = 8 * 60 * 60 * 1000;
+const PORTAL_REMEMBER_TOKEN_PREFIX = "portal_remember:";
+
+function portalSessionLifetime({ persistent = false, privileged = false } = {}) {
+  if (persistent) {
+    return {
+      idleTtlMs: DEFAULTS.portalSessionTtlMs,
+      absoluteTtlMs: DEFAULTS.portalSessionAbsoluteTtlMs
+    };
+  }
+  if (privileged) {
+    return {
+      idleTtlMs: PORTAL_SYSTEM_ADMIN_IDLE_TTL_MS,
+      absoluteTtlMs: PORTAL_SYSTEM_ADMIN_ABSOLUTE_TTL_MS
+    };
+  }
+  return {
+    idleTtlMs: DEFAULTS.portalSessionTemporaryTtlMs,
+    absoluteTtlMs: DEFAULTS.portalSessionTemporaryAbsoluteTtlMs
+  };
+}
 
 function normalizePortalAdminUsername(value) {
   return String(value ?? "").normalize("NFKC").trim().toLowerCase();
@@ -724,15 +744,14 @@ async function createPortalSession(env, data) {
       role: "developer",
       permissions: { developer: true, nativeAdmin: false, aiAdmin: true, groupOps: true, scheduleReviewer: true, appealReviewer: true },
       persistent: data.persistent === true,
-      idleTtlMs: PORTAL_SYSTEM_ADMIN_IDLE_TTL_MS,
-      absoluteTtlMs: PORTAL_SYSTEM_ADMIN_ABSOLUTE_TTL_MS,
+      ...portalSessionLifetime({ persistent: data.persistent === true, privileged: true }),
       createdAt: now,
       lastActivityAt: now,
-      expiresAt: now + PORTAL_SYSTEM_ADMIN_IDLE_TTL_MS,
-      absoluteExpiresAt: now + PORTAL_SYSTEM_ADMIN_ABSOLUTE_TTL_MS,
       authenticatedAt: now,
       authMethod: String(data.authMethod || "environment_admin_password")
     };
+    session.expiresAt = now + session.idleTtlMs;
+    session.absoluteExpiresAt = now + session.absoluteTtlMs;
     const key = `portal_session:${token}`;
     await authDbPutStrict(env, key, JSON.stringify(session));
     if (!(await authDbGetStrict(env, key))) throw authStorageError("Portal system admin session write could not be verified");
@@ -747,8 +766,7 @@ async function createPortalSession(env, data) {
   const now = Date.now();
   const privileged = ["developer", "owner", "admin"].includes(role);
   const persistent = data.persistent !== false;
-  const idleTtlMs = privileged ? PORTAL_SYSTEM_ADMIN_IDLE_TTL_MS : (persistent ? DEFAULTS.portalSessionTtlMs : DEFAULTS.portalSessionTemporaryTtlMs);
-  const absoluteTtlMs = privileged ? PORTAL_SYSTEM_ADMIN_ABSOLUTE_TTL_MS : (persistent ? DEFAULTS.portalSessionAbsoluteTtlMs : DEFAULTS.portalSessionTemporaryAbsoluteTtlMs);
+  const { idleTtlMs, absoluteTtlMs } = portalSessionLifetime({ persistent, privileged });
   const session = {
     qq,
     group: data.group || "",
@@ -804,6 +822,61 @@ async function getPortalSession(env, token, { touch = true } = {}) {
   } catch (e) {
     return null;
   }
+}
+
+
+
+async function createPortalRememberToken(env, session, { maxExpiresAt = 0 } = {}) {
+  if (!session?.persistent || !session?.token) return null;
+  const token = bytesToBase64Url(randomBytes(48));
+  const now = Date.now();
+  const sessionExpiry = Number(session.absoluteExpiresAt || 0);
+  const requestedMax = Number(maxExpiresAt || 0);
+  const expiresAt = requestedMax > 0 ? Math.min(sessionExpiry, requestedMax) : sessionExpiry;
+  if (!Number.isFinite(expiresAt) || expiresAt <= now) throw authStorageError("Portal remember token expiry is invalid");
+  const key = PORTAL_REMEMBER_TOKEN_PREFIX + await sha256Hex(token);
+  const record = {
+    sessionToken: String(session.token),
+    expiresAt,
+    createdAt: now,
+    rotatedAt: now
+  };
+  await authDbPutStrict(env, key, JSON.stringify(record));
+  if (!(await authDbGetStrict(env, key))) throw authStorageError("Portal remember token write could not be verified");
+  return { token, expiresAt };
+}
+
+async function restorePortalRememberToken(env, rememberToken, { maxExpiresAt = 0 } = {}) {
+  const token = String(rememberToken || "").trim();
+  if (token.length < 40 || token.length > 512) return null;
+  const key = PORTAL_REMEMBER_TOKEN_PREFIX + await sha256Hex(token);
+  const raw = await authDbGetStrict(env, key);
+  if (!raw) return null;
+  let record;
+  try { record = JSON.parse(raw); } catch { record = null; }
+  const now = Date.now();
+  const requestedMax = Number(maxExpiresAt || 0);
+  const expiresAt = requestedMax > 0 ? Math.min(Number(record?.expiresAt || 0), requestedMax) : Number(record?.expiresAt || 0);
+  if (!record || !Number.isFinite(expiresAt) || expiresAt <= now) {
+    await authDbDelStrict(env, key).catch(() => {});
+    return null;
+  }
+  const session = await getPortalSession(env, String(record.sessionToken || ""), { touch: true });
+  if (!session?.persistent) {
+    await authDbDelStrict(env, key).catch(() => {});
+    return null;
+  }
+  const next = await createPortalRememberToken(env, session, { maxExpiresAt: expiresAt });
+  await authDbDelStrict(env, key);
+  return { session, rememberToken: next.token, rememberExpiresAt: next.expiresAt };
+}
+
+async function revokePortalRememberToken(env, rememberToken) {
+  const token = String(rememberToken || "").trim();
+  if (!token) return false;
+  const key = PORTAL_REMEMBER_TOKEN_PREFIX + await sha256Hex(token);
+  await authDbDelStrict(env, key);
+  return true;
 }
 
 
@@ -1183,4 +1256,4 @@ async function writePortalSettingValue(env, definition, groupId, targetQq, value
   }
 }
 
-export { BASE32_ALPHABET, PORTAL_SETTING_DEFINITIONS, authDbDelStrict, authDbGetStrict, authDbPutStrict, authDbRetry, authStorageError, base32Decode, base32Encode, base64UrlToBytes, buildGroupReplyMessage, bytesToBase64Url, bytesToHex, clearPasswordLoginGuard, commandChangesWebSettings, constantTimeEqual, createPortalPasswordRecord, createPortalSession, decryptPortalAuthSecret, deleteMemoryVector, derivePortalPassword, encryptPortalAuthSecret, extractGroupId, generateBackupCodes, generateSixDigitCode, generateTotpCode, getOneBotHub, getPortalSession, getPublicNebulaSeed, getUserQuota, hasAdminRole, hashBackupCode, isMemoryBanned, isValidPortalPasswordRecord, jsonResponse, markGroupMemberLeft, migratePortalMemories, needsPortalPasswordRehash, normalizeBackupCode, normalizePortalAdminUsername, normalizePortalManagedDeveloperIds, notePasswordLoginFailure, oneBotHttpActionUrl, portalAdminCredentialConfig, portalAdminUsernameIsClaimed, portalTemporaryAdminCredentialConfig, portalAuthEncryptionKey, portalAuthEncryptionMaterial, portalEnvironmentWithManagedDeveloperIds, portalRoleRank, portalSessionCookie, randomBytes, readCookie, readJson, readPasswordLoginGuard, readPortalAuthJson, readPortalManagedDeveloperIds, readPortalSettingValue, rehashPortalPasswordIfNeeded, resolvePortalRole, searchPortalVectors, sendOneBotAction, sendOneBotHttpAction, sendPortalVerificationMessage, sha256Hex, simplifyJsonValue, upsertGroupMember, upsertMemoryVector, validatePortalPassword, verifyPortalAdminCredentials, verifyPortalTemporaryAdminCredentials, verifyPortalPassword, verifyPortalVerificationCode, verifyTotpCode, writeMemoryAudit, writePortalManagedDeveloperIds, writePortalSettingValue, writeSystemError };
+export { BASE32_ALPHABET, PORTAL_SETTING_DEFINITIONS, authDbDelStrict, authDbGetStrict, authDbPutStrict, authDbRetry, authStorageError, base32Decode, base32Encode, base64UrlToBytes, buildGroupReplyMessage, bytesToBase64Url, bytesToHex, clearPasswordLoginGuard, commandChangesWebSettings, constantTimeEqual, createPortalPasswordRecord, createPortalRememberToken, createPortalSession, decryptPortalAuthSecret, deleteMemoryVector, derivePortalPassword, encryptPortalAuthSecret, extractGroupId, generateBackupCodes, generateSixDigitCode, generateTotpCode, getOneBotHub, getPortalSession, getPublicNebulaSeed, getUserQuota, hasAdminRole, hashBackupCode, isMemoryBanned, isValidPortalPasswordRecord, jsonResponse, markGroupMemberLeft, migratePortalMemories, needsPortalPasswordRehash, normalizeBackupCode, normalizePortalAdminUsername, normalizePortalManagedDeveloperIds, notePasswordLoginFailure, oneBotHttpActionUrl, portalAdminCredentialConfig, portalAdminUsernameIsClaimed, portalTemporaryAdminCredentialConfig, portalAuthEncryptionKey, portalAuthEncryptionMaterial, portalEnvironmentWithManagedDeveloperIds, portalRoleRank, portalSessionCookie, randomBytes, readCookie, readJson, readPasswordLoginGuard, readPortalAuthJson, readPortalManagedDeveloperIds, readPortalSettingValue, rehashPortalPasswordIfNeeded, resolvePortalRole, restorePortalRememberToken, revokePortalRememberToken, searchPortalVectors, sendOneBotAction, sendOneBotHttpAction, sendPortalVerificationMessage, sha256Hex, simplifyJsonValue, upsertGroupMember, upsertMemoryVector, validatePortalPassword, verifyPortalAdminCredentials, verifyPortalTemporaryAdminCredentials, verifyPortalPassword, verifyPortalVerificationCode, verifyTotpCode, writeMemoryAudit, writePortalManagedDeveloperIds, writePortalSettingValue, writeSystemError };
