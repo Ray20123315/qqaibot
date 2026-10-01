@@ -1,9 +1,9 @@
 {
   "schema_version": 1,
-  "memory_version": "v0.0.49",
+  "memory_version": "v0.0.50",
   "task_id": "qqaibot-20261001-panel-complete-real-message-send",
   "goal_revision": 2,
-  "transaction": "native_group_real_commands_validation_20261001",
+  "transaction": "native_group_real_commands_final_20261001",
   "repository": "Ray20123315/qqaibot",
   "production_branch": "main",
   "development_branch": "v4-qqopen-native",
@@ -12,11 +12,11 @@
   "verification": {
     "feature_product_ci_run": 36366445081,
     "regression_ci_run": 36366534308,
-    "main_ci_run": 36848826594,
+    "main_ci_run": 36872340755,
     "github_ci": "success",
     "isolated_cloudflare_build": "e280d9fb-bb0d-4659-91e8-cb2db205e1a3",
     "isolated_cloudflare_outcome": "success",
-    "production_cloudflare_build": "d8abfda4-4595-427a-8fbf-7f0a5ffcd31f",
+    "production_cloudflare_build": "521ccfd8-bc55-4aff-9fdb-f0515f5ebcea",
     "production_cloudflare_outcome": "success",
     "production_worker_version": "2aa24e2a-b640-4ac2-83ae-07efb428b099",
     "production_bindings_readback": "success",
@@ -25,10 +25,10 @@
     "live_mapping_after_fix": "pending_user_test",
     "command_fallback_implementation": "verified",
     "development_ci": "success",
-    "main_update": "pending",
+    "main_update": "success",
     "development_ci_run": 36871773623,
-    "main_ci": "pending",
-    "production_commit": "6cb891571bdb2744b13bd11e3731c2a267fdf1ed",
+    "main_ci": "success",
+    "production_commit": "9f78fc66547d278a72858bbd25a22f00dda7ba2a",
     "main_readback": "success",
     "command_catalog_entries": 77,
     "full_command_panel_restoration": "verified",
@@ -58,7 +58,7 @@
     "hotfix_ci": "success",
     "final_main_ci_run": 36447663272,
     "final_main_ci": "success",
-    "production_deployment": "pending",
+    "production_deployment": "success",
     "production_version_number": 2129,
     "production_preview_table_override": "absent",
     "live_health_http": 200,
@@ -137,7 +137,7 @@
     "all_category_pages_covered": "verified",
     "all_group_panel_commands_covered": "verified",
     "live_final_keyboard_smoke": "pending_user",
-    "current_repair": "native_group_discovery_real_commands_validated_development",
+    "current_repair": "completed_native_group_real_commands",
     "direct_callback_live_semantics": "superseded_rejected_by_user",
     "target_direct_button_semantics": "type2_enter_true_real_message",
     "registry_runtime_reconciliation": "verified",
@@ -146,8 +146,9 @@
     "qq_interaction_plugin_commands_in_panel": "verified",
     "v0047_package": "pending_post_commit_workflow",
     "native_group_root_only_live_evidence": "confirmed",
-    "native_group_real_commands": "verified_development",
-    "live_native_group_panel": "pending_user"
+    "native_group_real_commands": "verified",
+    "live_native_group_panel": "pending_user_refresh",
+    "v0050_package": "pending_post_commit_workflow"
   },
   "changes": [
     {
@@ -1978,10 +1979,44 @@
       "after_revision": "v0.0.49",
       "verification": "product patch and development CI success recorded before main promotion",
       "changed_at": "2026-10-01T21:57:00+08:00"
+    },
+    {
+      "location_type": "github",
+      "provider": "GitHub",
+      "resource_id_or_path": "refs/heads/main",
+      "action": "fast_forward",
+      "branch_or_container": "main",
+      "before_revision": "5b7f3c5e1c75d98150d794b2d2c689c77a145bfc",
+      "after_revision": "9f78fc66547d278a72858bbd25a22f00dda7ba2a",
+      "verification": "main CI 36872340755 success",
+      "changed_at": "2026-10-01T22:02:00+08:00"
+    },
+    {
+      "location_type": "cloudflare",
+      "provider": "Cloudflare",
+      "resource_id_or_path": "workers/scripts/qqai",
+      "action": "auto_deployed_by_connected_build",
+      "branch_or_container": "production",
+      "before_revision": "6cb891571bdb2744b13bd11e3731c2a267fdf1ed",
+      "after_revision": "9f78fc66547d278a72858bbd25a22f00dda7ba2a",
+      "commit_or_hash": "521ccfd8-bc55-4aff-9fdb-f0515f5ebcea",
+      "verification": "Connected Build stopped; outcome success",
+      "changed_at": "2026-10-01T22:02:00+08:00"
+    },
+    {
+      "location_type": "github",
+      "provider": "GitHub",
+      "resource_id_or_path": ".Ray_Chen/memory/*",
+      "action": "final_reconciliation",
+      "branch_or_container": "main",
+      "before_revision": "v0.0.49",
+      "after_revision": "v0.0.50",
+      "verification": "package workflow + archive extraction + SHA-256 required after commit",
+      "changed_at": "2026-10-01T22:02:00+08:00"
     }
   ],
   "internal_memory_transaction": {
-    "action": "record validated native group discovery patch; bump memory to v0.0.49",
-    "note": "Main and production still pending."
+    "action": "finalize native group real-command discovery repair; bump memory to v0.0.50",
+    "note": "Only live QQ UI refresh remains user-verifiable."
   }
 }

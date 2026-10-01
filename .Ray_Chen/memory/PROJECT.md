@@ -7,9 +7,9 @@ QQAIBOT is a Cloudflare Workers QQ AI bot using QQ Open/AIBot as the primary tra
 ## Current Production
 
 - branch: `main`
-- verified product revision: `6cb891571bdb2744b13bd11e3731c2a267fdf1ed`
+- verified product revision: `9f78fc66547d278a72858bbd25a22f00dda7ba2a`
 - Worker: `qqai`
-- Cloudflare Connected Build: `d8abfda4-4595-427a-8fbf-7f0a5ffcd31f`
+- Cloudflare Connected Build: `521ccfd8-bc55-4aff-9fdb-f0515f5ebcea`
 - outcome: `success`
 - QQ_OPEN_INTENTS: `100663296`
 - Hybrid primary: `qq-open`
@@ -17,15 +17,16 @@ QQAIBOT is a Cloudflare Workers QQ AI bot using QQ Open/AIBot as the primary tra
 ## Discovery / Command UX
 
 - C2C global custom menu uses QQ native submenu discovery.
-- Group discovery uses one managed category-root panel.
-- Selecting a group category returns a QQ inline-keyboard card.
-- Current group categories include 基础、群聊、关系、互动、记忆、活动、群规、AI管理、群操作、群主、开发者.
-- Keyboard pages use two command buttons per row, at most five rows, with pagination.
-- Direct/no-argument commands use QQ command buttons with `action.type=2`, `enter=true`, `reply=false`.
-- Parameter/target/content commands use `action.type=2`, `enter=false` and an editable trailing-space prefill.
-- Normal panel buttons omit `click_limit` and remain reusable.
-- Button command data reuses canonical existing `!` commands.
-- INTERACTION intent remains enabled for unrelated interaction features, but normal direct panel commands no longer depend on callback execution.
+- QQ native group discovery directly publishes concrete commands across categorized panels generated from the canonical registry.
+- Native group panels contain at most 20 items each and are kept within the overall discovery panel limit.
+- Category placeholder commands such as `!面板 群聊` do not replace the real native command list.
+- Manual `!面板 <分类>` remains available and returns the two-column inline-keyboard category view.
+- Large inline-keyboard categories paginate within QQ keyboard limits.
+- Direct/no-argument inline-keyboard child commands use `action.type=2`, `enter=true`, `reply=false`.
+- Parameter/target/content child commands use `action.type=2`, `enter=false` and an editable trailing-space prefill.
+- Normal inline-keyboard buttons omit `click_limit` and remain reusable.
+- Native and inline command data reuse canonical existing `!` commands.
+- INTERACTION intent remains enabled for unrelated interaction features.
 - Runtime authorization remains authoritative.
 
 ## Portal Authentication

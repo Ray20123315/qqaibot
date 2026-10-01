@@ -1,35 +1,39 @@
 # CURRENT_STATE
 
-## Development
+## Production
 
-- development branch: `v4-qqopen-native`
+- canonical branch: `main`
 - verified product commit: `9f78fc66547d278a72858bbd25a22f00dda7ba2a`
 - development CI: `36871773623` — success
+- main CI: `36872340755` — success
+- Cloudflare Worker: `qqai`
+- production Connected Build: `521ccfd8-bc55-4aff-9fdb-f0515f5ebcea` — success
+- production deployed commit: `9f78fc66547d278a72858bbd25a22f00dda7ba2a`
 
 ## Native Group Discovery
 
-The previous root-only design is removed from discovery sync. Global group discovery now:
+Global group discovery now:
 - uses `registry.buildCategorizedPanels("group", ...)`;
-- publishes the actual canonical PanelItem commands;
-- partitions by discovery category;
+- publishes actual canonical command PanelItems;
+- partitions commands by discovery category;
 - caps each panel at 20 items;
-- keeps total group + developer C2C panels under the implementation limit;
-- does not publish `!面板 <分类>` placeholders as the native command list.
+- keeps the combined global-group + developer-C2C panel set within 20;
+- omits category placeholder commands such as `!面板 基础` from native group discovery.
 
-Manual `!面板 <分类>` inline keyboards remain available separately.
+Regression requires the native group item union to equal every enabled group command in the registry and explicitly checks representative commands including `!help`, `!status`, `!详细资料`, `!主人功能`, `!戳戳`, `!群公告`, and `!全局限速`.
 
-## Production
+## Preserved Behavior
 
-- current main before promotion: `5b7f3c5e1c75d98150d794b2d2c689c77a145bfc`
-- current deployed product before promotion: `6cb891571bdb2744b13bd11e3731c2a267fdf1ed`
-- main promotion of `9f78fc...`: PENDING
-- production Connected Build: PENDING
+- Manual `!面板 <分类>` still produces the inline-keyboard category view.
+- Direct child buttons still send normal QQ command messages.
+- Parameterized child buttons still prefill without auto-send.
+- QQ Open/AIBot remains primary; OneBot remains controlled fallback.
+- Runtime authorization remains server-side authoritative.
 
 ## Verification State
 
-- product patch: VERIFIED_DEVELOPMENT
+- product patch: VERIFIED
 - development CI: VERIFIED
-- main update: PENDING
-- main CI: PENDING
-- production Connected Build: PENDING
-- live QQ native discovery: PENDING_USER
+- main CI: VERIFIED
+- production Connected Build: VERIFIED
+- live QQ native-panel refresh: PENDING_USER

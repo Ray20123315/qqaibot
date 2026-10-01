@@ -27,3 +27,8 @@ Mitigation: use type=2 command buttons with enter=true for direct panel commands
 ## G-074 Registry-only coverage can still be functionally incomplete
 Risk: tests that prove every registry command has a button do not prove every active runtime or plugin command is registered.
 Mitigation: when handlers/plugins add or rename standalone commands, reconcile them against src/v4/commands/catalog.js and keep explicit restored-family assertions in the panel regression.
+
+
+## G-075 Root-only native discovery can hide all real commands
+Risk: registering only `!面板 <分类>` entries makes QQ's native command list look complete by count while the actual canonical commands are absent from the native panel.
+Mitigation: sync categorized real-command panels from the canonical registry and regression-test the union of published PanelItem names against every enabled group command.
