@@ -22,9 +22,10 @@ date: 2026-09-29
 Decision: new or unclassified commands default to editable prefill so a new command cannot accidentally become a one-click execution path.
 
 ## D-077 Direct commands use reusable callbacks
-status: accepted
+status: superseded
+superseded_by: D-080
 date: 2026-09-29
-Decision: group keyboard commands explicitly marked direct use action.type=1 reusable callbacks. QqOpenGateway ACKs INTERACTION_CREATE first, then dispatches the existing canonical command handler. This guarantees immediate execution independently of QQ group type=2 enter behavior.
+Previous decision: group keyboard commands explicitly marked direct use action.type=1 reusable callbacks. QqOpenGateway ACKs INTERACTION_CREATE first, then dispatches the existing canonical command handler. This guarantees immediate execution independently of QQ group type=2 enter behavior.
 
 ## D-078 Parameterized commands stay command-button prefills
 status: accepted

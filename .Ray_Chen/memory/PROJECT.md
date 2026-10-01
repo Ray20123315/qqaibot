@@ -7,9 +7,9 @@ QQAIBOT is a Cloudflare Workers QQ AI bot using QQ Open/AIBot as the primary tra
 ## Current Production
 
 - branch: `main`
-- verified product revision: `2bbcca4dfcc2f7ce99c21df84bdc2dc2479a3bdf`
+- verified product revision: `6cb891571bdb2744b13bd11e3731c2a267fdf1ed`
 - Worker: `qqai`
-- Cloudflare Connected Build: `16be6f33-cdd1-4e31-9a26-60036dc0f237`
+- Cloudflare Connected Build: `d8abfda4-4595-427a-8fbf-7f0a5ffcd31f`
 - outcome: `success`
 - QQ_OPEN_INTENTS: `100663296`
 - Hybrid primary: `qq-open`
@@ -19,11 +19,13 @@ QQAIBOT is a Cloudflare Workers QQ AI bot using QQ Open/AIBot as the primary tra
 - C2C global custom menu uses QQ native submenu discovery.
 - Group discovery uses one managed category-root panel.
 - Selecting a group category returns a QQ inline-keyboard card.
+- Current group categories include 基础、群聊、关系、互动、记忆、活动、群规、AI管理、群操作、群主、开发者.
 - Keyboard pages use two command buttons per row, at most five rows, with pagination.
-- Button callback data reuses canonical existing `!` commands.
-- Keyboard-bearing replies follow Tencent's current SDK DTO/Markdown shape.
-- Button callbacks require both GROUP_MESSAGES (1<<25) and INTERACTION (1<<26).
-- Gateway sessions record sessionIntents; a stale intent mask cannot be resumed after configuration changes.
+- Direct/no-argument commands use QQ command buttons with `action.type=2`, `enter=true`, `reply=false`.
+- Parameter/target/content commands use `action.type=2`, `enter=false` and an editable trailing-space prefill.
+- Normal panel buttons omit `click_limit` and remain reusable.
+- Button command data reuses canonical existing `!` commands.
+- INTERACTION intent remains enabled for unrelated interaction features, but normal direct panel commands no longer depend on callback execution.
 - Runtime authorization remains authoritative.
 
 ## Portal Authentication

@@ -9,7 +9,7 @@
 - Developer is the top cumulative permission level for commands available in the current scope.
 - QQ group discovery must work in the actual client, not merely create API resources successfully.
 - Use one managed group category-root panel because QQ group PanelItem has no nested submenu.
-- Selecting any non-empty category must return a clickable two-column QQ button card; this applies to 基础、群聊、记忆、活动、群规、AI管理、群操作、群主、开发者.
+- Selecting any non-empty category must return a clickable two-column QQ button card; this applies to 基础、群聊、关系、互动、记忆、活动、群规、AI管理、群操作、群主、开发者.
 - Large categories must paginate within QQ keyboard limits.
 - Keyboard child-command buttons must be reusable and must not use one-shot click limits.
 - Commands that need no additional data must execute immediately without being left in the input box.

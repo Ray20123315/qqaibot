@@ -1,34 +1,46 @@
 # CURRENT_STATE
 
-## GitHub
+## GitHub / Production
 
 - canonical branch: main
-- current main head at recovery: a1c19cf0d732fd576000c8ecb2753facf38c51e8
-- repair branch: chatgpt/fix-command-panel-message-send-20261001
-- main and former v4-qqopen-native branch were identical before this repair.
+- product revision: `6cb891571bdb2744b13bd11e3731c2a267fdf1ed`
+- development validation: GitHub Actions `36848544391` — success
+- main validation: GitHub Actions `36848826594` — success
+- Cloudflare Worker: `qqai`
+- production Connected Build: `d8abfda4-4595-427a-8fbf-7f0a5ffcd31f` — success
+- deployed branch/commit: `main` / `6cb891571bdb2744b13bd11e3731c2a267fdf1ed`
 
-## Confirmed Defects
+## Command Panel Behavior
 
-1. Direct/no-argument group keyboard buttons currently use action.type=1 callbacks.
-2. That callback path ACKs INTERACTION_CREATE and invokes the canonical handler through a synthetic legacy body; it does not produce a normal user-authored QQ command message.
-3. The V4 command registry covers only its registered set and misses active runtime command families, so all-category coverage does not prove the panel is functionally complete.
+- Direct/no-argument: `action.type=2`, `enter=true`, `reply=false`, exact canonical command.
+- Parameterized/target/content: `action.type=2`, `enter=false`, canonical command plus trailing space.
+- Pagination: `action.type=2`, `enter=true`.
+- Normal buttons: reusable; no `click_limit`.
+- Direct group commands no longer use synthetic INTERACTION_CREATE callback dispatch.
 
-## Target Behavior
+## Discovery Coverage
 
-- direct/no-argument: action.type=2, enter=true, exact canonical command;
-- parameterized/target/content: action.type=2, enter=false, canonical command plus trailing space;
-- pagination: action.type=2, enter=true;
-- active missing commands added to registry and covered by regression tests.
+New root categories:
+- 关系
+- 互动
+
+Restored standalone command families include self mute, relationship/master/partner operations, group announcement/todo/file entry points, bot-interaction allowlist, sticker/whitelist application, poke/reaction/favorite-face/mall-face plugin commands, TTS, mimic/interjection settings, developer rate limits and private appeal status.
+
+Intentional exclusions remain dynamic/non-standalone commands such as automatic check-in scheduling controls, relationship approval commands requiring request IDs, and the intentionally unavailable master-kick operation.
 
 ## Preserved State
 
-- QQ Open/AIBot stays primary.
-- OneBot stays controlled fallback only.
-- QQ_OPEN_INTENTS stays unchanged; Interaction support may still be used by unrelated features.
+- QQ Open/AIBot remains primary.
+- OneBot remains controlled fallback only.
+- QQ_OPEN_INTENTS stays `100663296`; Interaction support remains available for unrelated features.
 - Server-side authorization and moderation confirmation remain authoritative.
-- /!普通内容 remains AI bypass.
+- `/!普通内容` remains AI bypass.
 
 ## Verification State
 
-Product changes: PLANNED.
-Live QQ client verification: pending after deployment.
+- product patch: VERIFIED
+- development CI: VERIFIED
+- main update: VERIFIED
+- main CI: VERIFIED
+- production Connected Build: VERIFIED
+- live QQ client direct-send/prefill smoke: PENDING_USER
