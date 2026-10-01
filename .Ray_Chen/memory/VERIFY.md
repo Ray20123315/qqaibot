@@ -73,3 +73,8 @@ Regression verifies:
 ## Pending
 
 User manual acceptance is still required. No production merge is authorized before that confirmation.
+
+## Feature Memory Package
+
+`.github/workflows/ray-chen-memory-package.yml` now also runs for `feature/v4-public-bot` when memory files change. The resulting artifact must contain the exact `v0.0.47` memory tree, required Canonical files, archive listing and SHA-256 evidence.
+

@@ -1,6 +1,6 @@
 # Ray_Chen Memory Entry
 
-- memory_version: v0.0.46
+- memory_version: v0.0.47
 - project: QQAIBOT
 - repository: Ray20123315/QQAIBOT
 - canonical_branch: main
@@ -9,7 +9,7 @@
 - task_status: active
 - goal_revision: 1
 - product_revision: 18f254cc18fe599ca27a89106fa4e87759776165
-- updated_at: 2026-10-01T08:47:00+08:00
+- updated_at: 2026-10-01T08:52:00+08:00
 
 ## Current Goal
 
@@ -35,3 +35,8 @@ Do not merge this Preview-only test login into `main` until the user manually op
 ## Resume Rule
 
 Continue from feature commit `18f254cc18fe599ca27a89106fa4e87759776165`. The next exact action is user manual acceptance, not a production merge.
+
+
+## Feature Memory Packaging
+
+The existing Ray_Chen package workflow is enabled on `feature/v4-public-bot` so the exact acceptance-test memory tree can be exported without modifying `main`.

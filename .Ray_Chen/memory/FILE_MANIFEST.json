@@ -1,9 +1,9 @@
 {
   "schema_version": 1,
-  "memory_version": "v0.0.46",
+  "memory_version": "v0.0.47",
   "task_id": "qqaibot-20261001-v4-preview-user-acceptance",
   "goal_revision": 1,
-  "transaction": "v4_preview_acceptance_login_20261001",
+  "transaction": "v4_preview_acceptance_login_packaged_20261001",
   "repository": "Ray20123315/qqaibot",
   "production_branch": "main",
   "development_branch": "feature/v4-public-bot",
@@ -153,7 +153,10 @@
     "v4_preview_live_system_admin": true,
     "v4_preview_live_developer": true,
     "v4_preview_live_role": "developer",
-    "v4_preview_user_acceptance": "pending"
+    "v4_preview_user_acceptance": "pending",
+    "v4_preview_memory_package_branch": "feature/v4-public-bot",
+    "v4_preview_memory_package_version": "v0.0.47",
+    "v4_preview_memory_package": "pending_workflow"
   },
   "changes": [
     {
@@ -1918,10 +1921,32 @@
       "after_revision": "v0.0.46",
       "verification": "archive extraction + SHA-256 required; user acceptance still pending",
       "changed_at": "2026-10-01T08:47:00+08:00"
+    },
+    {
+      "location_type": "github",
+      "provider": "GitHub",
+      "resource_id_or_path": ".github/workflows/ray-chen-memory-package.yml",
+      "action": "modified",
+      "branch_or_container": "feature/v4-public-bot",
+      "before_revision": "main-only package trigger",
+      "after_revision": "main + feature/v4-public-bot package trigger",
+      "verification": "feature push should produce exact v0.0.47 archive artifact",
+      "changed_at": "2026-10-01T08:52:00+08:00"
+    },
+    {
+      "location_type": "github",
+      "provider": "GitHub",
+      "resource_id_or_path": ".Ray_Chen/memory/{MEMORY_VERSION.txt,00_START_HERE.md,VERIFY.md,FILE_MANIFEST.json}",
+      "action": "memory_packaging_checkpoint",
+      "branch_or_container": "feature/v4-public-bot",
+      "before_revision": "v0.0.46",
+      "after_revision": "v0.0.47",
+      "verification": "GitHub Actions package artifact required",
+      "changed_at": "2026-10-01T08:52:00+08:00"
     }
   ],
   "internal_memory_transaction": {
-    "action": "record isolated V4 Preview highest-privilege test login and wait for user acceptance",
-    "note": "No new production merge. Preview test login must be removed/disabled before any eventual main merge."
+    "action": "enable feature-branch Ray_Chen packaging and bump acceptance memory to v0.0.47",
+    "note": "No production merge. Generated archive/SHA/artifact do not recursively trigger a new memory transaction."
   }
 }
