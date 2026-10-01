@@ -723,7 +723,7 @@ async function createPortalSession(env, data) {
       token,
       role: "developer",
       permissions: { developer: true, nativeAdmin: false, aiAdmin: true, groupOps: true, scheduleReviewer: true, appealReviewer: true },
-      persistent: false,
+      persistent: data.persistent === true,
       idleTtlMs: PORTAL_SYSTEM_ADMIN_IDLE_TTL_MS,
       absoluteTtlMs: PORTAL_SYSTEM_ADMIN_ABSOLUTE_TTL_MS,
       createdAt: now,
@@ -746,7 +746,7 @@ async function createPortalSession(env, data) {
   };
   const now = Date.now();
   const privileged = ["developer", "owner", "admin"].includes(role);
-  const persistent = privileged ? false : data.persistent !== false;
+  const persistent = data.persistent !== false;
   const idleTtlMs = privileged ? PORTAL_SYSTEM_ADMIN_IDLE_TTL_MS : (persistent ? DEFAULTS.portalSessionTtlMs : DEFAULTS.portalSessionTemporaryTtlMs);
   const absoluteTtlMs = privileged ? PORTAL_SYSTEM_ADMIN_ABSOLUTE_TTL_MS : (persistent ? DEFAULTS.portalSessionAbsoluteTtlMs : DEFAULTS.portalSessionTemporaryAbsoluteTtlMs);
   const session = {
