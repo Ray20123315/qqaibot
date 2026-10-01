@@ -1,34 +1,39 @@
 # Ray_Chen Memory Entry
 
-- memory_version: v0.0.45
+- memory_version: v0.0.46
 - project: QQAIBOT
 - repository: Ray20123315/QQAIBOT
 - canonical_branch: main
-- development_branch: v4-qqopen-native
-- task_id: qqaibot-20260929-keyboard-all-categories-direct-callback
-- task_status: completed
+- development_branch: chatgpt/fix-command-panel-message-send-20261001
+- task_id: qqaibot-20261001-panel-complete-real-message-send
+- task_status: active
 - goal_revision: 1
-- product_revision: dea8ae5448382830262399aa3ee3773d5e4e030f
-- updated_at: 2026-09-29T12:48:00+08:00
+- base_revision: a1c19cf0d732fd576000c8ecb2753facf38c51e8
+- updated_at: 2026-10-01T18:10:00+08:00
 
-## Completed Goal
+## Current Goal
 
-The QQ group keyboard UX is complete across all active categories.
+Repair the production command panel based on live QQ client evidence.
 
-- Direct/no-argument commands no longer rely on QQ group action.type=2 + enter=true. They use reusable callback buttons, are ACKed immediately, and execute the existing canonical command handler.
-- Commands that need parameters/targets/content remain action.type=2 + enter=false and prefill the input with the canonical command plus a trailing space.
-- Pagination buttons are reusable callbacks.
-- Normal buttons do not carry click_limit.
-- Every non-empty group category and every page is regression-tested; all group-scoped panel commands are covered exactly once.
-- Existing permissions, confirmations, cooldowns, slash-panel routing, Portal switches, QQ Open primary routing and OneBot fallback remain unchanged.
+- Complete the group command panel with active canonical commands that exist in the runtime but are absent from the V4 registry.
+- Direct/no-argument panel buttons must send a real QQ command message, not execute through an interaction callback.
+- Commands requiring target/text/parameters remain editable prefills.
+- Keep existing server-side permission, confirmation, cooldown and Portal controls authoritative.
 
-## Verification
+## Live Evidence
 
-- development CI 36522596708: success
-- main CI 36522715591: success
-- Cloudflare production build ce40accb-f1f3-4824-b299-411e130e2573: success
-- production commit: dea8ae5448382830262399aa3ee3773d5e4e030f
+- User reports main still has an incomplete command panel.
+- User reports current "direct send" behavior is not actually sending a QQ message.
+- main and v4-qqopen-native are identical at a1c19cf0d732fd576000c8ecb2753facf38c51e8, so this is a product-design defect rather than an unmerged branch.
 
-## Recovery Route
+## Execution Plan
 
-Treat dea8ae5448382830262399aa3ee3773d5e4e030f as the verified product revision. If a direct button behaves incorrectly, inspect INTERACTION_CREATE delivery/ACK. If a parameterized button behaves incorrectly, inspect action.type=2 prefill data. Do not revert to type=2 enter=true for commands that must execute immediately.
+1. Reconcile worker command handlers against the V4 command registry and add missing active canonical panel entries.
+2. Change direct buttons to QQ command actions (type=2, enter=true); keep parameterized buttons type=2, enter=false.
+3. Expand regressions for real-message semantics and newly exposed commands.
+4. Run repository CI, then fast-forward main only after verification.
+5. Reconcile memory, package it, verify production deployment if observable, and notify the user.
+
+## next_exact_action
+
+Patch group-panel command-button semantics and command catalog coverage on the development branch.
