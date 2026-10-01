@@ -20,7 +20,6 @@ const DEFAULT_POLICY = Object.freeze({
   dormantDays: 180,
   longDormantDays: 365,
   protectHonors: true,
-  protectRelationships: true,
   requireCompleteData: true,
   protectedTags: ["保留", "免清", "核心", "长期保留", "赞助", "贊助"]
 });
@@ -233,7 +232,6 @@ function normalizePolicy(value) {
     dormantDays: boundedInt(source.dormantDays, DEFAULT_POLICY.dormantDays, 30, 730),
     longDormantDays: boundedInt(source.longDormantDays, DEFAULT_POLICY.longDormantDays, 60, 1825),
     protectHonors: source.protectHonors !== false,
-    protectRelationships: source.protectRelationships !== false,
     requireCompleteData: source.requireCompleteData !== false,
     protectedTags: [...new Set((Array.isArray(source.protectedTags) ? source.protectedTags : DEFAULT_POLICY.protectedTags)
       .map(item => String(item || "").trim().slice(0, 30)).filter(Boolean))].slice(0, 30)
@@ -274,7 +272,6 @@ function classifyMemberForCleanup(member, context = {}, policyInput = DEFAULT_PO
   if (["owner", "admin"].includes(String(member?.role || ""))) protection.push("群主或管理员");
   if (member?.isRobot) protection.push("机器人账号");
   if (context.isDeveloper) protection.push("核心开发者");
-  if (policy.protectRelationships && context.hasRelationship) protection.push("存在对象或主人关系");
   const protectedTag = tags.find(tag => policy.protectedTags.includes(tag));
   if (protectedTag) protection.push(`管理标签：${protectedTag}`);
   if (policy.protectHonors && honors.length) protection.push(`群荣誉：${honors.map(item => item.type).join("、")}`);
@@ -530,39 +527,25 @@ async function deepSync(env, groupId, userIds) {
 }
 
 
-function relationshipUsers(relationships) {
-  const set = new Set();
-  for (const relationship of Array.isArray(relationships) ? relationships : []) {
-    for (const id of relationship?.userIds || [relationship?.masterId, relationship?.memberId, relationship?.leftId, relationship?.rightId]) {
-      const clean = cleanId(id);
-      if (clean) set.add(clean);
-    }
-  }
-  return set;
-}
-
 async function buildRecords(env, groupId, helpers, policy) {
   let snapshots = await listSnapshots(env, groupId);
   if (!snapshots.length && typeof helpers?.listPortalMembers === "function") {
     const listing = await helpers.listPortalMembers(env, groupId);
     snapshots = (listing?.members || []).map(item => ({ ...item, capturedAt: Date.now(), syncMode: "directory", rawFields: [], extra: {}, honors: [] }));
   }
-  const [profiles, relationships, locks] = await Promise.all([
+  const [profiles, locks] = await Promise.all([
     typeof helpers?.listMemberProfileSummaries === "function" ? helpers.listMemberProfileSummaries(env, groupId) : {},
-    typeof helpers?.listGroupBindings === "function" ? helpers.listGroupBindings(env, groupId) : [],
     typeof helpers?.listGroupMuteLocks === "function" ? helpers.listGroupMuteLocks(env, groupId) : {}
   ]);
-  const related = relationshipUsers(relationships);
   return snapshots.map(member => {
     const profile = profiles?.[member.qq] || null;
     const context = {
       profile,
       honors: member.honors || [],
-      hasRelationship: related.has(String(member.qq)),
       isDeveloper: isDeveloperId(env, member.qq)
     };
     return {
-      member: { ...member, relationship: context.hasRelationship, muteLock: locks?.[member.qq] || null, memberProfile: profile },
+      member: { ...member, muteLock: locks?.[member.qq] || null, memberProfile: profile },
       classification: classifyMemberForCleanup(member, context, policy),
       dataCompleteness: {
         joinTime: Boolean(member.joinTime),
@@ -636,12 +619,10 @@ async function executeCleanup(env, groupId, authed, body, helpers) {
   if (!claim.ok) return claim;
   const preview = claim.preview;
   const policy = await readPolicy(env, groupId);
-  const [profiles, relationships, liveHonors] = await Promise.all([
+  const [profiles, liveHonors] = await Promise.all([
     typeof helpers?.listMemberProfileSummaries === "function" ? helpers.listMemberProfileSummaries(env, groupId) : {},
-    typeof helpers?.listGroupBindings === "function" ? helpers.listGroupBindings(env, groupId) : [],
     fetchHonors(env, groupId)
   ]);
-  const related = relationshipUsers(relationships);
   const start = Math.max(0, Math.trunc(Number(preview.offset || 0)));
   const end = Math.min(preview.eligible.length, start + EXECUTE_CHUNK_SIZE);
   const chunk = preview.eligible.slice(start, end);
@@ -649,7 +630,7 @@ async function executeCleanup(env, groupId, authed, body, helpers) {
     const userId = cleanId(requested.userId);
     try {
       const member = await liveMember(env, groupId, userId);
-      const context = { profile: profiles?.[userId] || null, honors: liveHonors.get(userId) || [], hasRelationship: related.has(userId), isDeveloper: isDeveloperId(env, userId) };
+      const context = { profile: profiles?.[userId] || null, honors: liveHonors.get(userId) || [], isDeveloper: isDeveloperId(env, userId) };
       const classification = classifyMemberForCleanup(member, context, policy);
       if (classification.protected || member.role !== "member" || member.isRobot || !["cleanup_candidate", "review"].includes(classification.recommendation)) {
         throw new Error(`即时复核不通过：${classification.reasons.join("；") || classification.label}`);
@@ -772,7 +753,6 @@ function injectMemberCleanupClient(html) {
       <div class="field"><label>沉睡门槛</label><input id="cleanupDormantDays" type="number" min="30" max="730" value="180"></div>
       <div class="field"><label>超长期门槛</label><input id="cleanupLongDormantDays" type="number" min="60" max="1825" value="365"></div>
       <label class="member-toggle"><input id="cleanupProtectHonors" type="checkbox" checked>群荣誉默认保留</label>
-      <label class="member-toggle"><input id="cleanupProtectRelationships" type="checkbox" checked>关系成员默认保留</label>
       <button id="cleanupSavePolicy" class="btn ghost">保存阈值</button>
     </div>
     <div class="cleanup-filters"><div class="field"><label>分类</label><select id="cleanupCategory"><option value="">全部</option><option value="cleanup_candidate">清理候选</option><option value="review">人工复核</option><option value="watch">观察</option><option value="keep">保留</option><option value="protected">受保护</option><option value="sync_first">资料不足</option></select></div><div class="field"><label>搜索</label><input id="cleanupSearch" placeholder="昵称、群名片或 QQ"></div><label class="member-toggle"><input id="cleanupHideProtected" type="checkbox" checked>隐藏受保护成员</label><button id="cleanupSelectCandidates" class="btn ghost">选择全部候选</button><button id="cleanupPreview" class="btn danger">建立清理预览</button></div>
@@ -802,8 +782,8 @@ function injectMemberCleanupClient(html) {
   function unavailable(value,empty){return value?String(value):(empty||'平台未提供')}
   function cselected(){return Array.prototype.slice.call(document.querySelectorAll('.cleanup-select:checked')).map(function(n){return n.value})}
   function dataSelected(){return Array.prototype.slice.call(document.querySelectorAll('.member-data-select:checked')).map(function(n){return n.value})}
-  function policyFromInputs(){return{activeDays:Number(ce('cleanupActiveDays')&&ce('cleanupActiveDays').value||30),coolingDays:Number(ce('cleanupCoolingDays')&&ce('cleanupCoolingDays').value||90),dormantDays:Number(ce('cleanupDormantDays')&&ce('cleanupDormantDays').value||180),longDormantDays:Number(ce('cleanupLongDormantDays')&&ce('cleanupLongDormantDays').value||365),protectHonors:!!(ce('cleanupProtectHonors')&&ce('cleanupProtectHonors').checked),protectRelationships:!!(ce('cleanupProtectRelationships')&&ce('cleanupProtectRelationships').checked)}}
-  function applyPolicy(p){cleanupPolicy=p||{};if(ce('cleanupActiveDays'))ce('cleanupActiveDays').value=p.activeDays||30;if(ce('cleanupCoolingDays'))ce('cleanupCoolingDays').value=p.coolingDays||90;if(ce('cleanupDormantDays'))ce('cleanupDormantDays').value=p.dormantDays||180;if(ce('cleanupLongDormantDays'))ce('cleanupLongDormantDays').value=p.longDormantDays||365;if(ce('cleanupProtectHonors'))ce('cleanupProtectHonors').checked=p.protectHonors!==false;if(ce('cleanupProtectRelationships'))ce('cleanupProtectRelationships').checked=p.protectRelationships!==false}
+  function policyFromInputs(){return{activeDays:Number(ce('cleanupActiveDays')&&ce('cleanupActiveDays').value||30),coolingDays:Number(ce('cleanupCoolingDays')&&ce('cleanupCoolingDays').value||90),dormantDays:Number(ce('cleanupDormantDays')&&ce('cleanupDormantDays').value||180),longDormantDays:Number(ce('cleanupLongDormantDays')&&ce('cleanupLongDormantDays').value||365),protectHonors:!!(ce('cleanupProtectHonors')&&ce('cleanupProtectHonors').checked)}}
+  function applyPolicy(p){cleanupPolicy=p||{};if(ce('cleanupActiveDays'))ce('cleanupActiveDays').value=p.activeDays||30;if(ce('cleanupCoolingDays'))ce('cleanupCoolingDays').value=p.coolingDays||90;if(ce('cleanupDormantDays'))ce('cleanupDormantDays').value=p.dormantDays||180;if(ce('cleanupLongDormantDays'))ce('cleanupLongDormantDays').value=p.longDormantDays||365;if(ce('cleanupProtectHonors'))ce('cleanupProtectHonors').checked=p.protectHonors!==false}
   function renderSummary(summary){var root=ce('cleanupSummary');if(!root)return;var items=[['总人数',summary.total],['受保护',summary.protected],['保留',summary.keep],['观察',summary.watch],['人工复核',summary.review],['清理候选',summary.cleanupCandidates]];root.innerHTML=items.map(function(i){return'<div class="cleanup-stat"><span>'+cs(i[0])+'</span><b>'+cs(i[1]||0)+'</b></div>'}).join('')}
   function filtered(){var query=String(ce('cleanupSearch')&&ce('cleanupSearch').value||'').toLowerCase(),category=String(ce('cleanupCategory')&&ce('cleanupCategory').value||''),hide=!!(ce('cleanupHideProtected')&&ce('cleanupHideProtected').checked);return cleanupRecords.filter(function(r){var m=r.member||{},c=r.classification||{};if(query&&[m.qq,m.name,m.nickname,m.card].every(function(v){return String(v||'').toLowerCase().indexOf(query)<0}))return false;if(category&&String(c.recommendation)!==category&&String(c.category)!==category)return false;if(hide&&c.protected)return false;return true})}
   function renderCleanup(){var root=ce('cleanupList');if(!root)return;root.innerHTML=filtered().map(function(r){var m=r.member||{},c=r.classification||{};return'<div class="item cleanup-row"><label><input class="cleanup-select" type="checkbox" value="'+cs(m.qq)+'" '+((c.recommendation==='cleanup_candidate'||c.recommendation==='review')&&!c.protected?'':'disabled')+'></label><div><div class="member-name">'+cs(m.name||m.qq)+'</div><div class="member-meta">QQ '+cs(m.qq)+'｜'+cs(m.role||'member')+'｜入群 '+cs(cd(m.joinTime))+'｜最后发言 '+cs(cd(m.lastSentTime))+'</div></div><div><div class="cleanup-score">'+cs(c.score||0)+'</div><b>'+cs(c.label||c.category)+'</b><div class="member-meta">入群 '+cs(cdays(c.joinDays))+'｜未发言 '+cs(cdays(c.inactiveDays))+'</div></div><div class="cleanup-reasons">'+cs((c.reasons||[]).join('；')||'无分类理由')+'</div></div>'}).join('')||'<div class="empty">没有符合筛选条件的成员</div>'}
