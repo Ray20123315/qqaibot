@@ -2,6 +2,9 @@ name: Deploy V4 same-Worker Preview
 
 on:
   workflow_dispatch:
+  push:
+    branches:
+      - feature/v4-public-bot
 
 permissions:
   contents: read
