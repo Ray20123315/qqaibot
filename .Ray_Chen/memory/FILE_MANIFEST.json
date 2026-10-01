@@ -1,14 +1,14 @@
 {
   "schema_version": 1,
-  "memory_version": "v0.0.45",
-  "task_id": "qqaibot-20260929-keyboard-all-categories-direct-callback",
+  "memory_version": "v0.0.46",
+  "task_id": "qqaibot-20261001-panel-complete-real-message-send",
   "goal_revision": 1,
-  "transaction": "keyboard_all_categories_direct_callback_final_20260929",
+  "transaction": "panel_complete_real_message_checkpoint_20261001",
   "repository": "Ray20123315/qqaibot",
   "production_branch": "main",
-  "development_branch": "hotfix/temp-system-admin-login-20260929",
-  "product_before_revision": "6fc678c266e514ee6daad4fd40ea33e9225c0120",
-  "product_after_revision": "dea8ae5448382830262399aa3ee3773d5e4e030f",
+  "development_branch": "chatgpt/fix-command-panel-message-send-20261001",
+  "product_before_revision": "a1c19cf0d732fd576000c8ecb2753facf38c51e8",
+  "product_after_revision": "a1c19cf0d732fd576000c8ecb2753facf38c51e8",
   "verification": {
     "feature_product_ci_run": 36366445081,
     "regression_ci_run": 36366534308,
@@ -25,9 +25,9 @@
     "live_mapping_after_fix": "pending_user_test",
     "command_fallback_implementation": "verified",
     "development_ci": "success",
-    "main_update": "verified",
+    "main_update": "pending",
     "development_ci_run": 36522596708,
-    "main_ci": "success",
+    "main_ci": "pending",
     "production_commit": "dea8ae5448382830262399aa3ee3773d5e4e030f",
     "main_readback": "success",
     "command_catalog_entries": 77,
@@ -58,7 +58,7 @@
     "hotfix_ci": "success",
     "final_main_ci_run": 36447663272,
     "final_main_ci": "success",
-    "production_deployment": "15d74fcd-2514-48a1-8892-f44b4660d7ec",
+    "production_deployment": "pending",
     "production_version_number": 2129,
     "production_preview_table_override": "absent",
     "live_health_http": 200,
@@ -136,7 +136,12 @@
     "parameterized_command_prefill_mode": "verified",
     "all_category_pages_covered": "verified",
     "all_group_panel_commands_covered": "verified",
-    "live_final_keyboard_smoke": "pending_user"
+    "live_final_keyboard_smoke": "pending_user",
+    "current_repair": "in_progress",
+    "direct_callback_live_semantics": "rejected_by_user",
+    "target_direct_button_semantics": "type2_enter_true_real_message",
+    "registry_runtime_reconciliation": "in_progress",
+    "live_qq_smoke": "pending_user"
   },
   "changes": [
     {
@@ -1823,10 +1828,21 @@
       "after_revision": "v0.0.45",
       "verification": "read-back + TAR.GZ extraction + SHA-256 required",
       "changed_at": "2026-09-29T12:48:00+08:00"
+    },
+    {
+      "location_type": "github",
+      "provider": "GitHub",
+      "resource_id_or_path": ".Ray_Chen/memory/*",
+      "action": "checkpoint_planned",
+      "branch_or_container": "chatgpt/fix-command-panel-message-send-20261001",
+      "before_revision": "v0.0.45",
+      "after_revision": "v0.0.46",
+      "verification": "Recovery Gate complete; live defects and execution plan recorded before product patch",
+      "changed_at": "2026-10-01T18:10:00+08:00"
     }
   ],
   "internal_memory_transaction": {
-    "action": "complete all-category keyboard behavior and bump memory to v0.0.45",
-    "note": "Direct commands use reusable callbacks; parameterized commands remain editable type=2 prefills."
+    "action": "start command-panel completeness + real-message repair; bump memory to v0.0.46",
+    "note": "D-077 callback strategy superseded by live QQ evidence."
   }
 }
