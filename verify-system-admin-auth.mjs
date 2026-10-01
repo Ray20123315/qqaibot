@@ -336,6 +336,19 @@ assert.equal(unauthenticatedSystemAdminPage.headers.get("Location"), "https://qq
 const unauthenticatedDevelopers = await worker.fetch(new Request("https://qqai.test/api/system-admin/developers"), portalEnv, {});
 assert.equal(unauthenticatedDevelopers.status, 401);
 
+const rememberedLogout = await worker.fetch(postJson(
+  "/api/auth/logout",
+  {},
+  "https://qqai.test",
+  [adminCookie, rotatedRememberCookie].filter(Boolean).join("; ")
+), portalEnv, {});
+assert.equal(rememberedLogout.status, 200);
+const logoutCookies = responseSetCookies(rememberedLogout);
+assert.equal(logoutCookies.some(value => /^qqai_session=/.test(value) && /Max-Age=0/.test(value)), true, "logout must clear the session cookie");
+assert.equal(logoutCookies.some(value => /^qqai_remember=/.test(value) && /Max-Age=0/.test(value)), true, "logout must clear the remember cookie");
+const revokedCookieOnlyMe = await worker.fetch(new Request("https://qqai.test/api/portal/me", { headers: { Cookie: rotatedRememberCookie } }), portalEnv, {});
+assert.equal(revokedCookieOnlyMe.status, 401, "logout must revoke the current remember cookie server-side");
+
 const legacyPasswordEnv = {
   DB: new MemoryD1(),
   MY_RATE_LIMITER: { limit: async () => ({ success: true }) }
