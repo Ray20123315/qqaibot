@@ -2,7 +2,6 @@ import { isDeveloperId, recentConversationMessagesForUser } from "../core/identi
 import { callOneBotAction, writeSystemAudit } from "../core/permissions.js";
 import { dbGet } from "../data/store.js";
 import { getMuteLock } from "../moderation/mute-locks.js";
-import { getPartnerBinding } from "../moderation/partner-bindings.js";
 import { numericId } from "../security/network.js";
 
 const SENSITIVE_KEY_RE = /(?:authorization|api[_-]?key|access[_-]?token|refresh[_-]?token|token|cookie|password|passwd|secret|private[_-]?key|session(?:id|_id)?|credential|bearer)/i;
@@ -139,13 +138,12 @@ async function collectFullMemberDetails(env, { groupId, targetId, actorId, actor
     throw new Error("只能查询自己的完整资料；查询其他成员仅限本群管理员、群主、获授群操作权限者或开发者。");
   }
 
-  const [groupInfo, strangerInfo, honorResponse, stored, muteLock, relationship, records] = await Promise.all([
+  const [groupInfo, strangerInfo, honorResponse, stored, muteLock, records] = await Promise.all([
     getLiveDetailSource(env, "get_group_member_info", { group_id: numericId(group), user_id: numericId(target), no_cache: true }),
     getLiveDetailSource(env, "get_stranger_info", { user_id: numericId(target), no_cache: true }),
     getLiveDetailSource(env, "get_group_honor_info", { group_id: numericId(group), type: "all" }),
     readStoredMemberSources(env, group, target),
     getMuteLock(env, group, target).catch(error => ({ readError: String(error?.message || error).slice(0, 500) })),
-    getPartnerBinding(env, group, target).catch(error => ({ readError: String(error?.message || error).slice(0, 500) })),
     recentConversationMessagesForUser(env, group, target, 200).catch(() => [])
   ]);
 
@@ -183,11 +181,10 @@ async function collectFullMemberDetails(env, { groupId, targetId, actorId, actor
     storedSources: stored,
     operationalState: {
       muteLock: sanitizeMemberDetailValue(muteLock),
-      relationship: sanitizeMemberDetailValue(relationship),
       messageStats: buildMessageStats(records)
     },
     disclosure: {
-      includes: "QQ 仅显示整理后的成员资料、资料来源状态、管理／关系状态与留存消息统计。",
+      includes: "QQ 仅显示整理后的成员资料、资料来源状态、管理状态与留存消息统计。",
       excludes: "原始 OneBot／D1 结构化资料、密码、Token、Cookie、API Key、授权标头、Session、私钥不会在 QQ 回传；平台未返回的资料不会推测。",
       rawMessageBodiesIncluded: false,
       rawStructuredDataIncluded: false
@@ -267,8 +264,8 @@ function formatFullMemberDetailsReport(details) {
     `已保存消息统计：${Number(stats.retainedRecordCount || 0)} 条｜直接互动 ${Number(stats.directInteractionCount || 0)} 条｜图片 ${Number(stats.imageMessageCount || 0)} 条`,
     `统计范围：${dateText(stats.firstRetainedAt)} ～ ${dateText(stats.lastRetainedAt)}`,
     ``,
-    `【管理与关系状态】`,
-    `禁言锁：${stateStatus(state.muteLock)}｜关系记录：${stateStatus(state.relationship)}`,
+    `【管理状态】`,
+    `禁言锁：${stateStatus(state.muteLock)}`,
     ``,
     `【资料来源状态】`,
     `OneBot 群成员：${sourceStatus(live.groupMemberInfo)}｜陌生人资料：${sourceStatus(live.strangerInfo)}｜群荣誉：${sourceStatus(live.honors)}（${honorCount} 条）`,
