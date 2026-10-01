@@ -98,7 +98,7 @@ const session = await createPortalSession(env, { systemAdmin: true, username: "O
 assert.equal(session.systemAdmin, true);
 assert.equal(session.qq, "system-admin");
 assert.equal(session.role, "developer");
-assert.equal(session.persistent, false);
+assert.equal(session.persistent, true);
 assert.equal(session.idleTtlMs, 30 * 60 * 1000);
 assert.equal(session.absoluteTtlMs, 8 * 60 * 60 * 1000);
 assert.equal(JSON.stringify(session).includes(password), false);
@@ -106,9 +106,11 @@ const restored = await getPortalSession(env, session.token, { touch: false });
 assert.equal(restored?.systemAdmin, true);
 const privilegedQqSession = await createPortalSession(env, { qq: "11111", persistent: true });
 assert.equal(privilegedQqSession.role, "developer");
-assert.equal(privilegedQqSession.persistent, false, "developer sessions must not receive long-lived persistent cookies");
+assert.equal(privilegedQqSession.persistent, true, "remember-login must persist the cookie even for developer sessions");
 assert.equal(privilegedQqSession.idleTtlMs, 30 * 60 * 1000);
 assert.equal(privilegedQqSession.absoluteTtlMs, 8 * 60 * 60 * 1000);
+const privilegedTemporary = await createPortalSession(env, { qq: "11111", persistent: false });
+assert.equal(privilegedTemporary.persistent, false, "unchecked remember-login must remain a browser-session cookie");
 
 const { default: worker } = await import("./worker.js");
 const portalEnv = {
@@ -176,6 +178,7 @@ assert.equal(previewLoginResponse.status, 200, JSON.stringify(previewLogin));
 assert.equal(previewLogin.systemAdmin, true);
 assert.equal(previewLogin.preview, true);
 assert.match(previewLoginResponse.headers.get("Set-Cookie") || "", /HttpOnly/);
+assert.match(previewLoginResponse.headers.get("Set-Cookie") || "", /Max-Age=/, "Preview remember-login must create a persistent cookie");
 const previewToken = decodeURIComponent((previewLoginResponse.headers.get("Set-Cookie") || "").split(";")[0].split("=")[1] || "");
 const previewSession = await getPortalSession(previewLoginEnv, previewToken, { touch: false });
 assert.equal(previewSession?.systemAdmin, true);
@@ -200,6 +203,7 @@ const login = await loginResponse.json();
 assert.equal(loginResponse.status, 200);
 assert.equal(login.systemAdmin, true);
 assert.match(loginResponse.headers.get("Set-Cookie") || "", /HttpOnly/);
+assert.match(loginResponse.headers.get("Set-Cookie") || "", /Max-Age=/, "system admin remember-login must persist the cookie");
 const adminCookie = loginResponse.headers.get("Set-Cookie").split(";")[0];
 assert.equal(portalEnv.DB.values.get("portal_auth_password:55555"), "existing-user-password-record", "admin sign-in must not replace another account's password data");
 assert.equal([...portalEnv.DB.values.keys()].some(key => /PORTAL_ADMIN_PASSWORD|Ops\.Root/.test(key)), false, "admin credentials must not be stored in D1");
