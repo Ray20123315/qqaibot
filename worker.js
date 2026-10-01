@@ -521,7 +521,9 @@ const QQAIWorker = {
         role: session.role,
         permissions: session.permissions || {},
         passwordSetupAvailable: !(await authDbGetStrict(env, `portal_auth_password:${qq}`).catch(() => null))
-      }, 200, { "Set-Cookie": portalSessionCookie(session.token, session.persistent ? DEFAULTS.portalSessionCookieSeconds : null) });
+      }, 200, { "Set-Cookie": portalSessionCookie(session.token, session.persistent
+          ? Math.max(1, Math.floor((Number(session.absoluteExpiresAt || 0) - Date.now()) / 1000))
+          : null) });
     }
 
     if (request.method === 'POST' && url.pathname === '/api/auth/reset-password') {
@@ -747,7 +749,9 @@ const QQAIWorker = {
           await authDbDelStrict(env, `portal_auth_code:${qq}`);
         }
         await clearPasswordLoginGuard(env, qq);
-        return jsonResponse({ ok: true, message: "密码登录成功。", qq, role: session.role, permissions: session.permissions || {} }, 200, { "Set-Cookie": portalSessionCookie(session.token, session.persistent ? DEFAULTS.portalSessionCookieSeconds : null) });
+        return jsonResponse({ ok: true, message: "密码登录成功。", qq, role: session.role, permissions: session.permissions || {} }, 200, { "Set-Cookie": portalSessionCookie(session.token, session.persistent
+          ? Math.max(1, Math.floor((Number(session.absoluteExpiresAt || 0) - Date.now()) / 1000))
+          : null) });
       } catch (error) {
         const secretMissing = error?.code === "PORTAL_AUTH_SECRET_MISSING";
         return jsonResponse({ ok: false, code: secretMissing ? "TWO_FACTOR_CONFIGURATION_ERROR" : "AUTH_STORAGE_UNAVAILABLE", message: secretMissing ? "双因数验证密钥配置缺失，请管理员设置 PORTAL_AUTH_SECRET。" : "登录资料库暂时不可用，请稍后重试。" }, 503);
