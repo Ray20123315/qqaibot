@@ -6,19 +6,20 @@ goal_revision: 5
 
 ## Goal
 
-Make V4 Portal persistence real across all login paths and align the Portal's background and transition motion with the user-provided OneDrive Vault reference, while preserving earlier V4 command/identity/whitelist work. Keep all changes on `feature/v4-public-bot`; do not touch `main`; do not live-test the Bot in existing QQ groups.
+Make V4 Portal persistence survive refresh and missing server-session state across all persistent login paths, and align Portal motion with the user-provided dark glass / purple-cyan aurora reference. Keep all changes on `feature/v4-public-bot`; do not touch `main`; do not live-test the Bot in existing QQ groups.
 
 ## Acceptance Criteria
 
 - One successful credential submission enters the Portal without a forced page reload.
 - Checking "keep me signed in" creates a persistent server session for ordinary and privileged accounts.
-- Persistent privileged sessions use the configured 30-day idle / 180-day absolute limits instead of the old 30-minute / 8-hour privileged cap.
+- Persistent privileged sessions use the configured 30-day idle / 180-day absolute limits.
 - Unchecked privileged sessions retain the short 30-minute idle / 8-hour absolute limits.
-- Persistent login issues a separate opaque remember-device token that can restore a session when the original HttpOnly cookie is unavailable.
-- Remember tokens are hash-keyed server-side, rotated after restore and revocable on logout.
-- QQ-code, QQ-password, environment-admin, temporary-admin and Preview test login use the shared persistent-login behavior where allowed.
-- The Portal background uses moving purple/cyan aurora fields and glass surfaces inspired by the supplied reference.
-- Page/view changes use smooth enter transitions, button sheen, card hover glow/lift and View Transition when supported.
+- Persistent login issues a separate opaque remember credential as an HttpOnly browser cookie.
+- Remember records are hash-keyed server-side, rotated after restore and revocable on logout.
+- Missing/invalid ordinary server session can be rebuilt from the remember record without another credential submission.
+- QQ-code, QQ-password, environment-admin, temporary-admin and Preview test login share the persistent-login behavior where allowed.
+- The Portal background visibly uses moving purple/cyan aurora fields and glass surfaces in both dark and light themes.
+- Page/view changes use visible enter transitions, button sheen, card hover glow/lift and View Transition when supported.
 - `prefers-reduced-motion` disables nonessential motion.
 - Full repository/V3/V4/isolated/bundle CI passes.
 - Preview remains isolated from production credentials and QQ Open.
@@ -27,25 +28,26 @@ Make V4 Portal persistence real across all login paths and align the Portal's ba
 
 ## Completed Steps
 
-- VERIFIED: persistent privileged/system-admin sessions now use `DEFAULTS.portalSessionTtlMs` and `DEFAULTS.portalSessionAbsoluteTtlMs` (30 days idle / 180 days absolute).
+- VERIFIED: persistent privileged/system-admin sessions use 30-day idle / 180-day absolute limits when remember-login is selected.
 - VERIFIED: non-persistent privileged sessions remain 30 minutes idle / 8 hours absolute.
-- VERIFIED: added generic `createPortalRememberToken`, `restorePortalRememberToken`, and `revokePortalRememberToken`.
-- VERIFIED: generic remember token records are keyed by SHA-256 of the opaque token, not by plaintext token.
-- VERIFIED: all persistent login response paths can return `rememberToken` and `rememberExpiresAt`, with Preview/TEMP routes capped by their external expiry.
-- VERIFIED: added `POST /api/auth/restore-session`, including same-origin guard and auth rate limiting.
-- VERIFIED: restore rotates the remember token and returns a replacement HttpOnly session cookie.
-- VERIFIED: logout revokes the generic remember token.
-- VERIFIED: Portal client stores generic remember credentials in `localStorage`, restores before falling back to the legacy Preview-only path, and clears them when remember-login is unchecked or on logout.
-- VERIFIED: successful login remains same-page.
-- VERIFIED: reference-inspired motion/background CSS and JS were added to the existing Portal without removing existing feature structure.
-- VERIFIED: final GitHub CI run `36846206642` succeeded.
-- VERIFIED: Cloudflare Connected Build `4fe5a3b8-9f83-46ff-8c31-767f15ab8531` succeeded for `654d340be94559ba3409a9b6e4de3f8a2eb2c849`.
-- VERIFIED: Worker version `2187` / `dad31f97-15a0-482f-b31b-b73008ca1684` was used as the Preview module source.
-- VERIFIED: stable Preview deployment #10 `b821dd63-d777-405f-b60c-2ce8d2e76fc0` deployed with safe Preview bindings.
-- VERIFIED LIVE: a single Preview login entered the app and stored a generic remember token.
-- VERIFIED LIVE WITHOUT SESSION COOKIE: `/api/auth/restore-session` called with `credentials:'omit'` returned 200/ok=true and rotated a new remember token.
-- VERIFIED LIVE VISUAL PAYLOAD: stable Preview contains the aurora, page-enter, View Transition and remember-storage implementation markers.
-- USER ACCEPTANCE PENDING: refresh plus browser close/reopen on the user's real browser.
+- VERIFIED: successful persistent login sets `qqai_session` and `qqai_remember` as HttpOnly/Secure/SameSite=Lax cookies.
+- VERIFIED: generic remember records are SHA-256-keyed; plaintext remember credentials are not stored server-side.
+- VERIFIED: remember records contain a minimal session seed so the server can reconstruct a fresh persistent session if the referenced session record disappears.
+- VERIFIED: `GET /api/portal/me` performs server-side remember recovery before returning SESSION_INVALID.
+- VERIFIED: remember restore rotates the credential, caps reconstructed session lifetime to remember expiry and returns replacement cookies.
+- VERIFIED: logout revokes remember state and clears both cookies.
+- VERIFIED: successful login remains same-page and confirms through `/api/portal/me`.
+- VERIFIED: strong aurora implementation uses an actual `.qqai-aurora` DOM layer with three moving orbs, moving ribbon and pointer-follow light.
+- VERIFIED: light theme aurora opacity is `.58`, not the previous low-visibility `.34`.
+- VERIFIED: final GitHub CI run `36871158902` succeeded.
+- VERIFIED: Cloudflare Connected Build `5b74a8a1-ef8c-4246-889a-4ee425e0017c` succeeded for `ca92f9a0628ac57a14ec8ffe505a79c79a01793c`.
+- VERIFIED: Worker version `2207` / `49b8b3d4-a907-49b0-9448-9fce34b99d74` was used as the final Preview module source.
+- VERIFIED: stable Preview deployment #16 `9e54bef0-0af0-47be-abd4-9f4841c70318` deployed with safe Preview bindings.
+- VERIFIED LIVE FAILURE INJECTION: deleting the active server session changed sessionValid true -> false while remember remained valid; the next `/api/portal/me` returned 200/systemAdmin=true and restored sessionValid=true.
+- VERIFIED: temporary Preview cookie diagnostic endpoints used for the fault injection were removed before final deployment.
+- VERIFIED LIVE FINAL: Preview #16 login enters the app; `/api/portal/me` is 200/systemAdmin=true.
+- VERIFIED LIVE MOTION: Chromium reports `qqaiFloatOrbA`, aurora opacity `0.58`, three orbs and a changing transform.
+- USER ACCEPTANCE PENDING: user real-browser refresh and visual review.
 
 ## Product Files Changed
 
@@ -60,8 +62,8 @@ Make V4 Portal persistence real across all login paths and align the Portal's ba
 - Do not merge/update `main`.
 - Do not live-test Bot behavior in existing QQ groups.
 - Do not enable QQ Open or production QQ/OneBot/AI secrets in the isolated Preview.
-- Do not claim automated Browser Rendering proves storage survival across a full browser restart.
-- Remember-device tokens are authentication credentials: store no plaintext copy server-side and revoke/rotate them.
+- Remember-device credentials are authentication credentials: never persist plaintext server-side; rotate and revoke them.
+- Preview fault-injection/diagnostic endpoints must not remain in the final acceptance deployment.
 - Keep reduced-motion accessibility behavior.
 
 ## Current Phase
@@ -70,6 +72,6 @@ user_acceptance
 
 ## next_exact_action
 
-User signs in once with "keep me signed in" on the stable V4 Preview, refreshes the page, closes/reopens the browser, and confirms the Portal restores without another credential submission; user also reviews whether the new background and transition motion matches the supplied reference closely enough.
+User signs in once on the stable V4 Preview, refreshes the page, confirms authentication survives, and checks whether the stronger purple/cyan aurora and page transitions are visually obvious enough. Bot live testing remains paused.
 
-last_checkpoint_at: 2026-10-01T18:04:00+08:00
+last_checkpoint_at: 2026-10-01T21:50:00+08:00

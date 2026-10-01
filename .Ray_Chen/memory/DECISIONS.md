@@ -122,3 +122,16 @@ status: accepted
 date: 2026-10-01
 Decision: preserve the existing Portal information architecture while adding the supplied reference's visual language: dark layered radial background, purple/cyan moving blurred light fields, glass panels, hover glow/lift, button sheen, page-entry motion, topbar sweep and View Transition where supported.
 Accessibility: nonessential motion is disabled under prefers-reduced-motion.
+
+## D-093 Persistent remember state is an HttpOnly cookie
+status: accepted
+date: 2026-10-01
+Decision: persistent Portal login stores the generic remember-device credential in a separate HttpOnly, Secure, SameSite=Lax `qqai_remember` cookie. The normal page bootstrap does not depend on JavaScript/localStorage to make persistence work.
+Reason: real-browser refresh showed that an application-level localStorage restore path was not a reliable boundary for authentication persistence. Server-side cookie recovery runs before the Portal decides the user is logged out.
+
+## D-094 Remember credentials can reconstruct a missing server session
+status: accepted
+date: 2026-10-01
+Decision: a remember record stores a minimal sanitized session seed alongside the referenced session token. If the referenced persistent session no longer exists, restore creates a new persistent session from the seed, limits its absolute expiry to the remember credential expiry, then rotates the remember credential.
+Reason: a remember token that only points to the old server session cannot recover when that old session record itself is missing.
+

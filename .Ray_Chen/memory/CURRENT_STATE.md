@@ -9,70 +9,83 @@
 ## Feature Source
 
 - branch: `feature/v4-public-bot`
-- product head: `654d340be94559ba3409a9b6e4de3f8a2eb2c849`
-- final GitHub CI: `36846206642` — SUCCESS
-- Cloudflare feature build: `4fe5a3b8-9f83-46ff-8c31-767f15ab8531` — SUCCESS
-- Worker version: 2187
-- Worker version id: `dad31f97-15a0-482f-b31b-b73008ca1684`
+- product head: `ca92f9a0628ac57a14ec8ffe505a79c79a01793c`
+- final GitHub CI: `36871158902` — SUCCESS
+- Cloudflare feature build: `5b74a8a1-ef8c-4246-889a-4ee425e0017c` — SUCCESS
+- Worker version: 2207
+- Worker version id: `49b8b3d4-a907-49b0-9448-9fce34b99d74`
 
 ## Persistent Login State
 
 Persistent=true:
-- system-admin, developer/admin/owner and ordinary sessions use the configured persistent lifetime;
+- ordinary, developer/admin/owner and system-admin sessions use the configured persistent lifetime;
 - idle TTL: 30 days;
 - absolute TTL: 180 days;
-- browser cookie lifetime follows the actual server absolute expiry.
+- browser receives `qqai_session` and `qqai_remember` as HttpOnly, Secure, SameSite=Lax cookies.
 
 Persistent=false:
 - privileged session idle TTL: 30 minutes;
 - privileged absolute TTL: 8 hours;
-- no persistent remember-device credential is issued.
+- no persistent remember credential is issued.
 
 Remember-device recovery:
-- login returns an opaque `rememberToken` only for persistent sessions;
-- server stores a hash-keyed remember record that references the server session;
-- client stores `qqai_portal_remember` in localStorage;
-- boot first requests `/api/portal/me`; if unauthenticated, it calls `/api/auth/restore-session`;
-- restore rotates the remember token and sets a replacement HttpOnly session cookie;
-- logout revokes the supplied generic remember token;
-- Preview retains its previous Preview-only resume path only as a legacy fallback.
+- server stores only a SHA-256-keyed remember record;
+- remember record contains a minimal session seed, not the plaintext remember credential;
+- `GET /api/portal/me` first checks the ordinary session; if invalid, it can consume `qqai_remember`;
+- if the old server session record still exists, it is resumed;
+- if the old server session record is gone, a new persistent session is reconstructed from the remember seed;
+- reconstructed session expiry cannot exceed remember expiry;
+- successful restore rotates the remember credential and refreshes both browser cookies;
+- logout revokes remember state and clears both cookies.
+- Preview-only resume storage remains only as a legacy acceptance fallback and is not the primary persistent-login path.
 
 ## Portal Visual State
 
-The existing Portal structure remains intact. A reference-inspired motion/background layer was added:
-- multi-layer dark background with purple/cyan radial lighting;
-- animated blurred aurora blobs;
-- animated login light fields and glass login card;
-- glass/blur sidebar and topbar;
-- glass cards/items/status panels;
-- pointer-following card glow and hover lift;
+The existing Portal information architecture remains intact. Strong reference-inspired motion/background is active:
+- real foreground `.qqai-aurora` layer instead of a negative-z pseudo-element;
+- three large blurred purple/cyan/blue moving orbs;
+- moving light ribbon;
+- pointer-follow page glow and card glow;
+- glass sidebar/topbar/cards;
 - button sheen and press feedback;
-- animated page/view entry;
-- topbar motion sweep;
+- stronger page/view entry motion and topbar sweep;
 - `document.startViewTransition` when supported;
+- light theme aurora opacity `0.58`;
 - `prefers-reduced-motion` disables nonessential motion.
 
 ## Stable V4 Preview
 
 - URL: `https://feature-v4-public-bot-qqai.ray20123315.workers.dev/`
 - preview id: `068adb610f4d47daa65c1376e021787f`
-- deployment: `b821dd63-d777-405f-b60c-2ce8d2e76fc0`
-- deployment number: 10
-- source: `654d340be94559ba3409a9b6e4de3f8a2eb2c849`
+- deployment: `9e54bef0-0af0-47be-abd4-9f4841c70318`
+- deployment number: 16
+- source: `ca92f9a0628ac57a14ec8ffe505a79c79a01793c`
 - D1 table: `kv_store_v4public_preview`
 - `QQ_OPEN_ENABLED=false`
+- `V4_PREVIEW_TEST_LOGIN=true`
+- Preview test expiry: `2026-10-03T00:00:00+08:00`
 - production-sensitive bindings: absent
 
 ## Live Evidence
 
-- Preview one-click login: app visible and login hidden.
-- Generic remember token exists in localStorage after remembered login.
-- `POST /api/auth/restore-session` with `credentials:'omit'`: HTTP 200 / ok=true / new rotated token.
-- Stable Preview HTML contains the reference motion marker, aurora keyframes, page-enter keyframes, View Transition logic and remember storage key.
+Fault injection on isolated Preview before diagnostic cleanup:
+- before deletion: session cookie present=true, sessionValid=true, remember cookie present=true, remember record present=true;
+- deliberate server-session deletion: HTTP 200;
+- after deletion: session cookie still present=true, sessionValid=false, remember cookie present=true, remember record present=true;
+- next `GET /api/portal/me`: HTTP 200, ok=true, systemAdmin=true;
+- after restore: sessionValid=true and remember record remains valid after rotation.
+
+Final Preview #16:
+- one-click Preview login: app visible=true, login hidden=true;
+- `GET /api/portal/me`: HTTP 200, ok=true, systemAdmin=true;
+- Chromium animation name: `qqaiFloatOrbA`;
+- light-theme aurora opacity: `0.58`;
+- orb transform changes over time: true;
+- three-orb strong-motion marker present: true.
 
 ## Bot Testing
 
-Live Bot testing is paused because there is no isolated Bot/canary route and testing the existing Bot would produce real group-chat side effects.
+Live Bot testing is paused because there is no isolated Bot/canary route and testing the existing Bot would create real group-chat side effects.
 
 ## Merge State
 

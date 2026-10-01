@@ -82,3 +82,12 @@ Mitigation: server records are keyed by SHA-256(token); token restore rotates an
 ## G-087 Motion effects must respect reduced-motion preference
 Risk: aurora, view transitions, hover movement and page-entry animation can cause accessibility problems or unnecessary GPU work.
 Mitigation: gate JS motion with prefers-reduced-motion and disable nonessential CSS animation/transition in the reduced-motion media query.
+
+## G-088 A remember token that only references a session is not independent recovery
+Risk: if a remember record contains only `sessionToken`, deleting or losing that server session makes both the ordinary session cookie and remember credential fail together.
+Mitigation: persist a minimal sanitized session seed in the hash-keyed remember record. When the referenced persistent session is absent, rebuild a fresh session from the seed and cap it to the remember expiry before rotating the remember credential.
+
+## G-089 Motion can exist in CSS but still be visually invisible
+Risk: negative stacking contexts, body backgrounds or low light-theme opacity can make a technically running aurora effectively invisible to the user.
+Mitigation: render a real `.qqai-aurora` DOM layer at foreground background z-order, use three large moving orbs plus a light ribbon, keep light-theme opacity visibly high, and verify computed animation name plus changing transform in a real Chromium render.
+
