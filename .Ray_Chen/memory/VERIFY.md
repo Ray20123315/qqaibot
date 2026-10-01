@@ -1,32 +1,30 @@
 # VERIFY
 
-## Goal Revision 3
+## Goal Revision 3 Final Evidence
 
-Validated product commit: `0c4cc0aa55f9e01212b2a39cb979ee8de1ace1fe`
+Product code: `0c4cc0aa55f9e01212b2a39cb979ee8de1ace1fe`
 
-## Development Evidence
+- development CI `36878357756`: success
+- main CI `36878859974`: success
+- Cloudflare Connected Build `6f36a019-e50f-4907-af27-6197b5088e8b`: success
+- production build trigger commit: `aebde1ca3e43cc809645803456b639e659d56fc5`
 
-- GitHub Actions run `36878357756`: success.
-- regression checks: success.
-- V3 regression checks: success.
-- V4 QQ Open regression checks: success.
-- isolated V4 deployment checks: success.
-- single Worker bundle: success.
-
-## Required Invariants
+## Verified Invariants
 
 - one native group category-root panel;
-- no relationship category;
-- retained category keyboards cover all retained commands;
-- direct/prefill split preserved;
-- no relationship creation/approval/management API or handler;
-- legacy relationship rows only support deletion;
-- old relationship lock sources only support safe historical compatibility;
+- retained non-empty categories resolve to inline keyboards;
+- inline pages cover all retained commands;
+- direct/prefill behavior split preserved;
+- no relationship creation/approval/list/update API;
+- no relationship command/category/worker handler/Portal surface;
+- historical relationship rows only support deletion;
+- old relationship mute-lock sources only support safe expiry/unlock compatibility;
 - no 狼人杀/狼人殺 in worker/help/catalog.
 
-## Remaining Gates
+## Final User Smoke
 
-- main promotion: PENDING
-- main CI: PENDING
-- Cloudflare Connected Build: PENDING
-- live QQ smoke: PENDING_USER
+1. Reopen the QQ native bot command panel.
+2. Confirm it shows compact category entries rather than an incomplete concrete-command list.
+3. Send a category such as `!面板 群聊` or `!面板 互动`.
+4. Confirm the bot returns its own two-column paginated keyboard and retained commands are reachable.
+5. Confirm no 关系／主人／对象 or 狼人杀 entry appears.

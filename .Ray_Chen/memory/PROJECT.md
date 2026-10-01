@@ -7,9 +7,10 @@ QQAIBOT is a Cloudflare Workers QQ AI bot using QQ Open/AIBot as the primary tra
 ## Current Production
 
 - branch: `main`
-- verified product revision: `9f78fc66547d278a72858bbd25a22f00dda7ba2a`
+- verified product code revision: `0c4cc0aa55f9e01212b2a39cb979ee8de1ace1fe`
+- deployed main trigger revision: `aebde1ca3e43cc809645803456b639e659d56fc5`
 - Worker: `qqai`
-- Cloudflare Connected Build: `521ccfd8-bc55-4aff-9fdb-f0515f5ebcea`
+- Cloudflare Connected Build: `6f36a019-e50f-4907-af27-6197b5088e8b`
 - outcome: `success`
 - QQ_OPEN_INTENTS: `100663296`
 - Hybrid primary: `qq-open`
@@ -17,24 +18,20 @@ QQAIBOT is a Cloudflare Workers QQ AI bot using QQ Open/AIBot as the primary tra
 ## Discovery / Command UX
 
 - C2C global custom menu uses QQ native submenu discovery.
-- QQ native group discovery directly publishes concrete commands across categorized panels generated from the canonical registry.
-- Native group panels contain at most 20 items each and are kept within the overall discovery panel limit.
-- Category placeholder commands such as `!面板 群聊` do not replace the real native command list.
-- Manual `!面板 <分类>` remains available and returns the two-column inline-keyboard category view.
-- Large inline-keyboard categories paginate within QQ keyboard limits.
-- Direct/no-argument inline-keyboard child commands use `action.type=2`, `enter=true`, `reply=false`.
-- Parameter/target/content child commands use `action.type=2`, `enter=false` and an editable trailing-space prefill.
-- Normal inline-keyboard buttons omit `click_limit` and remain reusable.
-- Native and inline command data reuse canonical existing `!` commands.
-- INTERACTION intent remains enabled for unrelated interaction features.
+- QQ native group discovery uses one compact category-root panel because the native client cannot reliably display the full command surface.
+- Selecting a retained category sends `!面板 <分类>` and returns a bot-managed two-column paginated inline keyboard.
+- Inline keyboard pagination stays within QQ keyboard row/button limits.
+- Direct/no-argument child commands use `action.type=2`, `enter=true`, `reply=false`.
+- Parameter/target/content child commands use `action.type=2`, `enter=false` and a trailing-space prefill.
+- Normal buttons omit `click_limit` and remain reusable.
 - Runtime authorization remains authoritative.
 
-## Portal Authentication
+## Retired Features
 
-- normal production admin credential remains intact.
-- separate TEMP system-admin credentials are secret-backed and self-expiring.
-- Cloudflare Rate Limiter remains primary with atomic D1 fallback.
-- TEMP credential values are never stored in Git or memory.
+- master/partner relationship command and Portal functionality is retired.
+- Historical relationship rows can only be deleted for cleanup.
+- Historical master/partner mute-lock sources remain readable only to expire or unlock safely.
+- Werewolf functionality remains removed.
 
 ## Safety
 

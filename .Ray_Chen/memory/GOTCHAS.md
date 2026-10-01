@@ -32,3 +32,8 @@ Mitigation: when handlers/plugins add or rename standalone commands, reconcile t
 ## G-075 Root-only native discovery can hide all real commands
 Risk: registering only `!面板 <分类>` entries makes QQ's native command list look complete by count while the actual canonical commands are absent from the native panel.
 Mitigation: sync categorized real-command panels from the canonical registry and regression-test the union of published PanelItem names against every enabled group command.
+
+
+## G-076 QQ native group panel limits make it unsuitable as the complete command surface
+Risk: publishing every concrete command directly to QQ native group discovery can make the client show only a constrained subset, so valid commands appear missing.
+Mitigation: keep the native group panel compact with category launchers, then render the complete retained command set through the bot-managed paginated inline keyboard.
