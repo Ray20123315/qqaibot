@@ -104,7 +104,7 @@ const INITIAL_COMMANDS = Object.freeze([
   { id:"ai.mimic", aliases:["!模仿","!imitate"], scopes:["group"], permission:"ai_admin", description:"模仿指定成员的公开群聊语气", category:"ai_admin", panel:{onlyAdmin:true} },
   { id:"ai.interject_rate", aliases:["!设置插话率","!設定插話率","!設置插話率"], scopes:["group"], permission:"ai_admin", description:"查看主动插话暂停状态", category:"ai_admin", panel:{onlyAdmin:true} },
   { id:"dev.group_rate_limit", aliases:["!设置速率限制","!設定速率限制"], scopes:["group"], permission:"developer", description:"设置当前群调用速率限制", category:"developer" },
-  { id:"dev.global_rate_limit", aliases:["!设置全局速率限制","!設定全域速率限制"], scopes:["group"], permission:"developer", description:"设置全局调用速率限制", category:"developer" },
+  { id:"dev.global_rate_limit", aliases:["!全局限速","!全域限速","!设置全局速率限制","!設定全域速率限制"], scopes:["group"], permission:"developer", description:"设置全局调用速率限制", category:"developer" },
 ]);
 
 function createInitialCommandRegistry() { return createCommandRegistry(INITIAL_COMMANDS); }
