@@ -45,14 +45,15 @@ const report = formatFullMemberDetailsReport({
   groupId: "808882936",
   targetId: "10002",
   identitySummary: { nickname: "测试成员", role: "member", sex: "unknown", age: 0, groupLevel: "12", qqLevel: 34 },
-  operationalState: { muteLock: null, relationship: null, messageStats: { retainedRecordCount: 2, directInteractionCount: 1, imageMessageCount: 0 } },
+  operationalState: { muteLock: null, messageStats: { retainedRecordCount: 2, directInteractionCount: 1, imageMessageCount: 0 } },
   liveSources: { groupMemberInfo: { ok: true, value: { nickname: "raw-name" } }, strangerInfo: { ok: true, value: { uid: "raw-uid" } }, honors: { ok: true, rows: [] } },
   storedSources: { snapshot: { rawFields: ["nickname"] }, profile: null, cachedMember: { qq: "10002" } },
   disclosure: { includes: "仅显示整理后的资料。", excludes: "原始结构化资料不回传。" }
 });
+assert.match(report, /【管理状态】/);
 assert.match(report, /【资料来源状态】/);
 assert.match(report, /OneBot 群成员：已取得/);
-assert.doesNotMatch(report, /OneBot 即时原始资料|D1 已保存完整资料|raw-name|raw-uid|rawFields|\{\s*"/);
+assert.doesNotMatch(report, /OneBot 即时原始资料|D1 已保存完整资料|raw-name|raw-uid|rawFields|关系记录|管理与关系状态|\{\s*"/);
 
 const workerSource = fs.readFileSync("worker.js", "utf8");
 assert.match(workerSource, /fullMemberDetailsMatch/, "member_full_details command integration must exist");
