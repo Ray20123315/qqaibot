@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "memory_version": "v0.0.53",
+  "memory_version": "v0.0.54",
   "task_id": "qqaibot-20261001-v4-preview-user-acceptance",
   "goal_revision": 5,
   "transaction": "portal_bootstrap_reload_and_reference_transition_20261001",
@@ -2413,7 +2413,7 @@
       "action": "deployed",
       "repository_or_drive": "qqai",
       "branch_or_container": "V4 stable Preview",
-      "before_revision": "3b66? previous Preview #18 fb879067-2189-4b75-8048-829abbccfb66",
+      "before_revision": "fb879067-2189-4b75-8048-829abbccfb66",
       "after_revision": "3b66f8c8-bd9b-470b-83e7-9c41c3720004",
       "commit_or_hash": "aaa7cc3b3a846ea37dc6a7efbfc9db831add29ce",
       "verification": "Preview #19; safe env read-back; live transition proof; actual location.reload ends authenticated",
@@ -2430,6 +2430,18 @@
       "after_revision": "v0.0.53",
       "verification": "atomic memory commit; package archive extraction/SHA verification required",
       "changed_at": "2026-10-01T23:02:00+08:00"
+    },
+    {
+      "location_type": "github",
+      "provider": "GitHub",
+      "resource_id_or_path": ".Ray_Chen/memory/{MEMORY_VERSION.txt,00_START_HERE.md,FILE_MANIFEST.json}",
+      "action": "memory_metadata_correction",
+      "repository_or_drive": "Ray20123315/qqaibot",
+      "branch_or_container": "feature/v4-public-bot",
+      "before_revision": "v0.0.53",
+      "after_revision": "v0.0.54",
+      "verification": "corrected Preview #18 before_revision to exact deployment id; product/Preview state unchanged",
+      "changed_at": "2026-10-01T23:05:00+08:00"
     }
   ],
   "internal_memory_transaction": {
