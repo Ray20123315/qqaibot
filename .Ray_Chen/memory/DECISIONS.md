@@ -35,3 +35,11 @@ Decision: commands needing parameters, targets or content use action.type=2 with
 status: accepted
 date: 2026-09-29
 Decision: tests enumerate every non-empty GROUP_PANEL_CATEGORY_META category and every keyboard page, requiring full command coverage and valid row/button limits. Single-category success is not sufficient evidence.
+
+
+## D-080 Direct panel commands must be real QQ messages
+status: accepted
+date: 2026-10-01
+supersedes: D-077
+Decision: group panel commands that need no additional input use QQ command buttons with action.type=2 and enter=true so the client sends the canonical command as a normal QQ message. Commands needing parameters remain action.type=2 with enter=false. Interaction callbacks remain available for unrelated interaction features but are no longer the direct-command primitive.
+Reason: live user verification showed the callback path executes server-side without creating the required QQ message.
