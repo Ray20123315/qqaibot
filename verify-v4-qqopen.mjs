@@ -133,18 +133,19 @@ const basicButtons = basicKeyboard.keyboard.content.rows.flatMap(row => row.butt
 
 const helpButton = basicButtons.find(button => button.render_data.label === "help");
 assert(helpButton);
-assert.equal(helpButton.action.type, 1);
+assert.equal(helpButton.action.type, 2);
 assert.equal(helpButton.action.data, "!help");
 assert.equal(helpButton.action.permission?.type, 2);
-assert(!Object.prototype.hasOwnProperty.call(helpButton.action, "enter"));
+assert.equal(helpButton.action.enter, true);
 assert(!Object.prototype.hasOwnProperty.call(helpButton.action, "click_limit"));
 assert(helpButton.action.unsupport_tips);
 assert(helpButton.group_id);
 
 const statusButton = basicButtons.find(button => button.render_data.label === "status");
 assert(statusButton);
-assert.equal(statusButton.action.type, 1);
+assert.equal(statusButton.action.type, 2);
 assert.equal(statusButton.action.data, "!status");
+assert.equal(statusButton.action.enter, true);
 
 const codexButton = basicButtons.find(button => button.render_data.label === "codex");
 assert(codexButton);
@@ -187,9 +188,9 @@ for (const meta of GROUP_PANEL_CATEGORY_META) {
       assert.equal(button.action.permission?.type, 2);
       assert(!Object.prototype.hasOwnProperty.call(button.action, "click_limit"));
       if (command.panel.enter === true) {
-        assert.equal(button.action.type, 1, `Direct command ${command.id} must use callback`);
+        assert.equal(button.action.type, 2, `Direct command ${command.id} must send a normal command message`);
         assert.equal(button.action.data, command.panel.command);
-        assert(!Object.prototype.hasOwnProperty.call(button.action, "enter"));
+        assert.equal(button.action.enter, true);
       } else {
         assert.equal(button.action.type, 2, `Parameterized command ${command.id} must prefill`);
         assert.equal(button.action.enter, false);
@@ -197,7 +198,8 @@ for (const meta of GROUP_PANEL_CATEGORY_META) {
       }
     }
     for (const button of buttons.filter(item => /^!面板\s/.test(item.action.data))) {
-      assert.equal(button.action.type, 1, "Pagination must use immediate callback");
+      assert.equal(button.action.type, 2, "Pagination must send the page command as a normal message");
+      assert.equal(button.action.enter, true);
       assert(!Object.prototype.hasOwnProperty.call(button.action, "click_limit"));
     }
   }
@@ -215,7 +217,8 @@ assert(aiAdminKeyboard.totalPages >= 2);
 const nextPageButton = aiAdminKeyboard.keyboard.content.rows.flatMap(row => row.buttons)
   .find(button => button.action.data === "!面板 AI管理 --page=2");
 assert(nextPageButton);
-assert.equal(nextPageButton.action.type, 1);
+assert.equal(nextPageButton.action.type, 2);
+assert.equal(nextPageButton.action.enter, true);
 assert(!Object.prototype.hasOwnProperty.call(nextPageButton.action, "click_limit"));
 const aiAdminPage2 = resolveGroupPanelInput("!面板 AI管理 --page=2", registry);
 assert.equal(aiAdminPage2?.matched, true);
@@ -247,7 +250,7 @@ for (const post of categoryKeyboardPosts) {
   assert(body.keyboard.content.rows.length <= 5);
   assert(body.keyboard.content.rows.every(row => row.buttons.length > 0 && row.buttons.length <= 2));
   for (const button of body.keyboard.content.rows.flatMap(row => row.buttons)) {
-    assert([1,2].includes(button.action.type));
+    assert.equal(button.action.type, 2);
     assert.equal(button.action.permission.type, 2);
     assert(!Object.prototype.hasOwnProperty.call(button.action, "click_limit"));
   }
