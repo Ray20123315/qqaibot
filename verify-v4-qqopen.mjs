@@ -144,7 +144,7 @@ assert.equal(helpButton.action.enter, true);
 assert.equal(helpButton.action.data, "!help");
 assert.equal(helpButton.action.permission?.type, 2);
 assert.equal(helpButton.action.enter, true);
-assert(!Object.prototype.hasOwnProperty.call(helpButton.action, "click_limit"));
+assert.equal(helpButton.action.click_limit, 10);
 assert(helpButton.action.unsupport_tips);
 assert(helpButton.group_id);
 
@@ -159,7 +159,7 @@ assert(codexButton);
 assert.equal(codexButton.action.type, 2);
 assert.equal(codexButton.action.enter, false);
 assert.equal(codexButton.action.data, "!codex ");
-assert(!Object.prototype.hasOwnProperty.call(codexButton.action, "click_limit"));
+assert.equal(codexButton.action.click_limit, 10);
 
 const modelButton = basicButtons.find(button => button.render_data.label === "模型");
 assert(modelButton);
@@ -193,7 +193,7 @@ for (const meta of GROUP_PANEL_CATEGORY_META) {
       const button = buttons.find(item => String(item.action.data || "").trim() === command.panel.command);
       assert(button, `Missing button for ${command.id} in ${meta.label}`);
       assert.equal(button.action.permission?.type, 2);
-      assert(!Object.prototype.hasOwnProperty.call(button.action, "click_limit"));
+      assert.equal(button.action.click_limit, 10);
       if (command.panel.enter === true) {
         assert.equal(button.action.type, 2, `No-parameter command ${command.id} must send a QQ message`);
         assert.equal(button.action.enter, true);
@@ -206,7 +206,7 @@ for (const meta of GROUP_PANEL_CATEGORY_META) {
     }
     for (const button of buttons.filter(item => /^!面板\s/.test(item.action.data))) {
       assert.equal(button.action.type, 1, "Pagination must use immediate callback");
-      assert(!Object.prototype.hasOwnProperty.call(button.action, "click_limit"));
+      assert.equal(button.action.click_limit, 10);
     }
   }
   assert.equal(seen.size, commands.length, `Category ${meta.label} did not expose every command`);
@@ -224,7 +224,7 @@ const nextPageButton = aiAdminKeyboard.keyboard.content.rows.flatMap(row => row.
   .find(button => button.action.data === "!面板 AI管理 --page=2");
 assert(nextPageButton);
 assert.equal(nextPageButton.action.type, 1);
-assert(!Object.prototype.hasOwnProperty.call(nextPageButton.action, "click_limit"));
+assert.equal(nextPageButton.action.click_limit, 10);
 const aiAdminPage2 = resolveGroupPanelInput("!面板 AI管理 --page=2", registry);
 assert.equal(aiAdminPage2?.matched, true);
 assert.equal(aiAdminPage2?.expanded, "");
@@ -257,7 +257,7 @@ for (const post of categoryKeyboardPosts) {
   for (const button of body.keyboard.content.rows.flatMap(row => row.buttons)) {
     assert([1,2].includes(button.action.type));
     assert.equal(button.action.permission.type, 2);
-    assert(!Object.prototype.hasOwnProperty.call(button.action, "click_limit"));
+    assert.equal(button.action.click_limit, 10);
   }
 }
 
