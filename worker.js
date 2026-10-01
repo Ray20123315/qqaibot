@@ -37,7 +37,7 @@ import { executeCodexUserCommand } from "./src/v3/ai/codex-command-runtime.js";
 import { readPublicCodexQuota } from "./src/v3/ai/codex-policy.js";
 import { dispatchV3RuntimeEvent, handleV3RuntimeFetch, runV3RuntimeScheduled } from "./src/v3/runtime/bridge.js";
 import { getQqOpenGateway, qqOpenConfigured, qqOpenEnabled } from "./src/v4/qqopen/runtime.js";
-import { hybridObservationRow, hybridPrimaryTransport, hybridRuntimeStatus, isAuxiliaryOneBotMessage, recordOneBotHybridObservation, recordQqOpenHybridGroupObservation, resolveQqOpenGroupForOneBot } from "./src/v4/hybrid/ownership.js";
+import { hybridObservationRow, hybridPrimaryTransport, hybridRuntimeStatus, isAuxiliaryOneBotMessage, recordOneBotHybridObservation, recordQqOpenHybridGroupObservation, resolveOneBotGroupForQqOpen, resolveOneBotUserForQqOpen, resolveQqOpenGroupForOneBot } from "./src/v4/hybrid/ownership.js";
 import { handleV4QqOpenPortalApi } from "./src/v4/portal/api.js";
 import { injectV4LeanPortalClient } from "./src/v4/portal/lean-dashboard.js";
 import { handleV4ResourcePortalApi } from "./src/v4/portal/resources-api.js";
@@ -1006,6 +1006,34 @@ const QQAIWorker = {
       const isQqOpenV4 = isQqOpenEvent(body);
       const allowPlatformUserContent = allowPlatformUserContentPersistence(body);
       const qqOpenContentPrincipal = isQqOpenV4 ? await canonicalQqOpenPrincipal(env, body) : "";
+      const principalQqId = String(qqOpenContentPrincipal || "").startsWith("qq:")
+        ? String(qqOpenContentPrincipal).slice(3).replace(/\D/g, "")
+        : "";
+      let verifiedLegacyGroupId = "";
+      let verifiedLegacyUserId = "";
+      if (isQqOpenV4 && isGroup) {
+        verifiedLegacyGroupId = await resolveOneBotGroupForQqOpen(env, currentGroupId).catch(() => "");
+        if (verifiedLegacyGroupId) {
+          verifiedLegacyUserId = await resolveOneBotUserForQqOpen(env, currentGroupId, userId).catch(() => "");
+        }
+      }
+      const qqOpenIdentityConflict = Boolean(
+        principalQqId && verifiedLegacyUserId && principalQqId !== verifiedLegacyUserId
+      );
+      const permissionUserId = qqOpenIdentityConflict
+        ? userId
+        : (verifiedLegacyUserId || principalQqId || userId);
+      const permissionGroupId = verifiedLegacyGroupId || currentGroupId;
+      if (qqOpenIdentityConflict) {
+        ctx.waitUntil(writeSystemAudit(env, {
+          type: "qqopen_identity_conflict",
+          groupId: String(permissionGroupId || currentGroupId || ""),
+          actorId: String(userId || ""),
+          targetId: String(verifiedLegacyUserId || ""),
+          action: "permission_downgrade",
+          error: `principal=${principalQqId}; legacy=${verifiedLegacyUserId}`
+        }).catch(() => {}));
+      }
 
       const qqOpenSettingScope = String(currentGroupId || "private");
       const qqOpenTargetPrincipal = async targetUserId => {
@@ -1038,8 +1066,9 @@ const QQAIWorker = {
       
       // 精準提取群組身分
       const senderCard = body.sender?.card || body.sender?.nickname || userId;
-      const senderRole = body.sender?.role || "member"; 
-      const isDeveloper = isDeveloperId(env, userId);
+      const senderRole = body.sender?.role || "member";
+      const isDeveloper = isDeveloperId(env, userId)
+        || (!qqOpenIdentityConflict && permissionUserId !== userId && isDeveloperId(env, permissionUserId));
 
       // OneBot 偶尔可能漏掉 lift_ban 通知。自我禁言仍有效却能再次发言时，静默补禁；
       // 但允许「!禁言自己／!自我禁言」继续进入命令处理，以便刷新禁言时长。
@@ -1430,7 +1459,7 @@ const QQAIWorker = {
       }
 
       // 白名單是群 AI 的硬入口；非白名單群即使 @ 机器人也完全静默，不呼叫模型、不排队、不写入记忆。
-      if (isGroup && !(await isGroupWhitelisted(env, currentGroupId))) {
+      if (isGroup && !(await isGroupWhitelisted(env, permissionGroupId))) {
         const whitelistAdminCommand = isDeveloper && /^(群白名单|群白名單|删群白名单|刪群白名單|allowgroup|removegroup)(?:\s|$)/i.test(commandBody);
         const applicationCommand = /^(申请白名单|申請白名單)(?:\s|$)/i.test(commandBody);
         const helpCommand = /^(help|帮助|幫助)$/.test(commandBody.toLowerCase());
@@ -1529,7 +1558,7 @@ const QQAIWorker = {
       // 普通聊天不需要查询显式管理权限；自然语言命令在此前已正规化为命令。
       const needsExplicitPermissions = isCommandMessage || isDeveloper || senderRole === "owner" || senderRole === "admin";
       const permissionSet = needsExplicitPermissions
-        ? await getEffectivePermissions(env, currentGroupId, userId, senderRole, isDeveloper)
+        ? await getEffectivePermissions(env, permissionGroupId, permissionUserId, senderRole, isDeveloper)
         : { developer: false, nativeAdmin: false, aiAdmin: false, groupOps: false, scheduleReviewer: false, appealReviewer: false };
       const hasAdminAuth = permissionSet.aiAdmin;
       const hasGroupOpsAuth = permissionSet.groupOps;
@@ -2191,10 +2220,10 @@ const QQAIWorker = {
       if (/^[!！](?:申请白名单|申請白名單)(?:\s|$)/.test(cleanMessage)) {
         if (!isGroup) return jsonReply('该命令只能在群聊中使用。');
         const id = crypto.randomUUID();
-        const item = { id, groupId: currentGroupId, applicantId: userId, applicantName: senderCard, at: new Date().toISOString(), status: 'pending' };
+        const item = { id, groupId: permissionGroupId, qqOpenGroupId: isQqOpenV4 ? currentGroupId : "", applicantId: permissionUserId, qqOpenApplicantId: isQqOpenV4 ? userId : "", applicantName: senderCard, at: new Date().toISOString(), status: 'pending' };
         await dbPut(env, `whitelist_request:${id}`, JSON.stringify(item));
         await appendIndex(env, 'whitelist_request:index', id, 500);
-        await notifyDeveloper(env, `【群白名单申请】\n编号：${id}\n群号：${currentGroupId}\n申请人：${senderCard}（${userId}）`);
+        await notifyDeveloper(env, `【群白名单申请】\n编号：${id}\n群号：${permissionGroupId}${isQqOpenV4 && currentGroupId !== permissionGroupId ? `\nQQ Open 群ID：${currentGroupId}` : ""}\n申请人：${senderCard}（${permissionUserId}）`);
         return jsonReply(`${atSender}白名单申请已提交，编号：${id}`);
       }
 
@@ -2292,7 +2321,7 @@ const QQAIWorker = {
           const result = await skipScheduleOnce(env, skipMatch[1], userId, isDeveloper || hasAdminAuth, currentGroupId, isDeveloper);
           return jsonReply(`${atSender}${result.message}`);
         }
-        const scheduleGroupId = isGroup ? currentGroupId : (await dbGet(env, `private_default_group:${userId}`) || '');
+        const scheduleGroupId = isGroup ? permissionGroupId : (await dbGet(env, `private_default_group:${permissionUserId}`) || '');
         if (!scheduleGroupId) return jsonReply('请先在 Portal 选择默认群组，或在群聊中建立排程。');
         if (!(await isGroupWhitelisted(env, scheduleGroupId))) return jsonReply('目标群不在 AI 白名单中。');
         const parsedSchedule = parseScheduleRequest(scheduleText, Date.now());
@@ -3215,21 +3244,45 @@ const QQAIWorker = {
       if (['!群白名单', '!群白名單', '!allowgroup', '！群白名单', '！群白名單'].some(p => msgLower.startsWith(p))) {
         if (!isDeveloper) return jsonReply(`${atSender}只有开发者可以操作群白名单。`);
         const prefix = ['!群白名单', '!群白名單', '!allowgroup', '！群白名单', '！群白名單'].find(p => msgLower.startsWith(p));
-        const groupToAllow = cleanMessage.slice(prefix.length).trim() || currentGroupId;
-        if (!groupToAllow) return jsonReply(`${atSender}⚠️ 请提供群号，例如: !群白名单 123456`);
+        const requestedGroup = cleanMessage.slice(prefix.length).trim();
+        let groupToAllow = requestedGroup || permissionGroupId;
+        if (isQqOpenV4 && isGroup) {
+          if (!verifiedLegacyGroupId) {
+            return jsonReply(`${atSender}⚠️ 当前群尚未通过旧 Bot 验证出数字群号。请先让 AIBot 与旧 Bot 同时在线，并在本群发送几条正常消息完成安全映射后再试。`);
+          }
+          if (requestedGroup && requestedGroup !== verifiedLegacyGroupId && requestedGroup !== currentGroupId) {
+            return jsonReply(`${atSender}⚠️ QQ Open 模式只允许加入当前已由旧 Bot 验证的群号 ${verifiedLegacyGroupId}；不会把未验证的群号写入白名单。`);
+          }
+          groupToAllow = verifiedLegacyGroupId;
+        }
+        if (!/^\d{5,}$/.test(String(groupToAllow || ""))) {
+          return jsonReply(`${atSender}⚠️ 无法确认数字群号，请先完成旧 Bot 群映射。`);
+        }
         await dbPut(env, `group_whitelist:${groupToAllow}`, "true");
         await appendIndex(env, 'group_whitelist:index', groupToAllow, 2000);
-        return jsonReply(`${atSender}✅ 已将群 ${groupToAllow} 加入白名单。`);
+        return jsonReply(`${atSender}✅ 已将旧 Bot 验证的群 ${groupToAllow} 加入白名单。`);
       }
 
       if (['!删群白名单', '!刪群白名單', '!removegroup', '！删群白名单', '！刪群白名單'].some(p => msgLower.startsWith(p))) {
         if (!isDeveloper) return jsonReply(`${atSender}只有开发者可以操作群白名单。`);
         const prefix = ['!删群白名单', '!刪群白名單', '!removegroup', '！删群白名单', '！刪群白名單'].find(p => msgLower.startsWith(p));
-        const groupToRemove = cleanMessage.slice(prefix.length).trim() || currentGroupId;
-        if (!groupToRemove) return jsonReply(`${atSender}⚠️ 请提供群号，例如: !删群白名单 123456`);
+        const requestedGroup = cleanMessage.slice(prefix.length).trim();
+        let groupToRemove = requestedGroup || permissionGroupId;
+        if (isQqOpenV4 && isGroup) {
+          if (!verifiedLegacyGroupId) {
+            return jsonReply(`${atSender}⚠️ 当前群尚未通过旧 Bot 验证出数字群号，无法安全删除白名单。`);
+          }
+          if (requestedGroup && requestedGroup !== verifiedLegacyGroupId && requestedGroup !== currentGroupId) {
+            return jsonReply(`${atSender}⚠️ QQ Open 模式只允许操作当前已由旧 Bot 验证的群号 ${verifiedLegacyGroupId}。`);
+          }
+          groupToRemove = verifiedLegacyGroupId;
+        }
+        if (!/^\d{5,}$/.test(String(groupToRemove || ""))) {
+          return jsonReply(`${atSender}⚠️ 无法确认数字群号，请先完成旧 Bot 群映射。`);
+        }
         await dbDel(env, `group_whitelist:${groupToRemove}`);
         await removeFromIndex(env, 'group_whitelist:index', groupToRemove);
-        return jsonReply(`${atSender}🗑️ 已将群 ${groupToRemove} 移出白名单。`);
+        return jsonReply(`${atSender}🗑️ 已将旧 Bot 验证的群 ${groupToRemove} 移出白名单。`);
       }
 
       if (['!clear', '!重置', '！clear', '！重置'].some(p => msgLower === p)) {
