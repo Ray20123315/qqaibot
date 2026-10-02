@@ -38,3 +38,23 @@ BLOCKED/PENDING_USER:
 2. confirm visible clickable buttons;
 3. click one direct command and confirm the QQ message is actually sent;
 4. click one parameterized command and confirm it prefills instead of sending immediately.
+
+
+## Goal Revision 5 — Live Failure / Repair Gate
+
+Live failure evidence:
+- 2026-10-02T17:50:41+08:00: `/!面板 群聊`
+- reply text: `【群聊】请选择子指令`
+- visible buttons: none
+- explicit fallback copy: none
+
+Pre-implementation references:
+- Tencent current Node SDK: plain text message plus `keyboard` is supported.
+- Official button schema requires `render_data`, `action.type`, `action.permission`, and `action.data`; direct-send `action.enter` is optional and supported for command buttons.
+
+Repair gate:
+1. exact serializer tests must match the minimized shape;
+2. all category pages remain within QQ row/button limits;
+3. direct vs parameterized behavior remains distinct;
+4. development CI must pass before main promotion;
+5. final live QQ smoke remains required.

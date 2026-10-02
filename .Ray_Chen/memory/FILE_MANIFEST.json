@@ -1,9 +1,9 @@
 {
   "schema_version": 1,
-  "memory_version": "v0.0.56",
+  "memory_version": "v0.0.57",
   "task_id": "qqaibot-20261001-panel-complete-real-message-send",
-  "goal_revision": 4,
-  "transaction": "qq_keyboard_plain_text_production_checkpoint_20261002",
+  "goal_revision": 5,
+  "transaction": "qq_keyboard_live_blank_repair_start_20261002",
   "repository": "Ray20123315/qqaibot",
   "production_branch": "main",
   "development_branch": "v4-qqopen-native",
@@ -20,7 +20,7 @@
     "production_cloudflare_outcome": "success",
     "production_worker_version": "2aa24e2a-b640-4ac2-83ae-07efb428b099",
     "production_bindings_readback": "success",
-    "live_reply_after_fix": "pending_user_test",
+    "live_reply_after_fix": "failed_buttons_absent_2026-10-02T17:50:41+08:00",
     "discovery_sync_after_fix": "pending_authenticated_status",
     "live_mapping_after_fix": "pending_user_test",
     "command_fallback_implementation": "verified",
@@ -70,7 +70,7 @@
     "memory_packaging_workflow": "configured",
     "group_panel_slash_dispatch": "verified",
     "ordinary_slash_bang_opt_out_preserved": "verified",
-    "live_panel_click_after_fix": "pending_user_test",
+    "live_panel_click_after_fix": "failed_buttons_absent_2026-10-02T17:50:41+08:00",
     "temp_admin_hotfix_ci_run": 36477469841,
     "temp_admin_main_ci_run": 36477699417,
     "temp_admin_ci": "success",
@@ -169,7 +169,9 @@
     "gmail_notification": "failed",
     "gmail_notification_error": "eligible_linked_account_required",
     "gmail_notification_attempt_at": "2026-10-02T17:16:00+08:00",
-    "gmail_notification_retry": "not_attempted_per_project_rule"
+    "gmail_notification_retry": "not_attempted_per_project_rule",
+    "current_keyboard_hypothesis": "successful_message_with_client_silent_keyboard_omission",
+    "tencent_current_minimal_keyboard_reference": "verified"
   },
   "changes": [
     {
@@ -2182,5 +2184,23 @@
   "internal_memory_transaction": {
     "action": "record successful main CI and production deployment; bump memory to v0.0.56",
     "note": "Do not mark completed until live QQ renders and allows clicking the inline keyboard."
+  },
+  "latest_transaction": {
+    "changed_at": "2026-10-02T18:25:39+08:00",
+    "location_type": "github",
+    "provider": "GitHub",
+    "repository_or_drive": "Ray20123315/qqaibot",
+    "branch_or_container": "v4-qqopen-native",
+    "before_revision": "fe0492c254077e761dcc2902b56a841bc5cafa36",
+    "after_revision": "pending_commit",
+    "action": "memory_checkpoint",
+    "verification": "live QQ failure accepted; implementation not started",
+    "live_evidence": {
+      "observed_at": "2026-10-02T17:50:41+08:00",
+      "command": "/!面板 群聊",
+      "reply": "【群聊】请选择子指令",
+      "buttons_visible": false,
+      "explicit_fallback_visible": false
+    }
   }
 }

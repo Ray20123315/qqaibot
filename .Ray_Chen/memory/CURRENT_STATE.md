@@ -24,10 +24,26 @@
 - pagination: reusable command button
 - no mandatory `click_limit`
 
+## Live Result — 2026-10-02T17:50:41+08:00
+
+- category routing: VERIFIED
+- bot text reply: VERIFIED
+- inline keyboard visibility: FAILED
+- observed reply: `【群聊】请选择子指令` only
+- explicit API-error fallback: NOT OBSERVED
+- current inference: keyboard is being silently omitted after an otherwise successful message send
+
+## Current Repair Direction
+
+- Current Tencent Node SDK example uses `msg_type:0 + content + keyboard`.
+- Keep that transport.
+- Minimize per-button payload to documented/SDK fields; only retain direct-send fields where behavior requires them.
+- If the minimal payload still renders no buttons, treat QQ message-button application capability/approval as the blocking dependency rather than continuing blind JSON changes.
+
 ## Remaining State
 
-- code: VERIFIED
-- development CI: VERIFIED
-- main CI: VERIFIED
-- production deployment: VERIFIED
-- live QQ render/click: BLOCKED / PENDING_USER
+- code compatibility repair: IN_PROGRESS
+- development CI: pending
+- main CI: pending
+- production deployment: pending
+- live QQ render/click after repair: pending

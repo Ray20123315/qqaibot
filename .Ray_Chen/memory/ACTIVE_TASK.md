@@ -1,39 +1,56 @@
 # ACTIVE_TASK
 
 task_id: qqaibot-20261001-panel-complete-real-message-send
-task_status: blocked
-goal_revision: 4
+task_status: active
+goal_revision: 5
 
 ## Goal
 
-Fix the live QQ category panel so `/!面板 <分类>` renders an actually clickable inline keyboard instead of a plain-text fallback.
+Fix the live QQ category panel so `/!面板 <分类>` renders an actually clickable command keyboard in the QQ client. The live 2026-10-02 17:50 test proved that the current payload produces title text only.
 
 ## Acceptance Criteria
 
-- VERIFIED code/transport: keyboard card uses `msg_type:0 + content + keyboard`.
-- VERIFIED code/transport: successful card excludes `备用文字`.
-- VERIFIED code/transport: fallback copy is selected only after a keyboard capability rejection.
-- VERIFIED code/transport: direct child commands remain `type=2 + enter=true`.
-- VERIFIED code/transport: parameterized child commands remain `type=2 + enter=false`.
-- VERIFIED code/transport: pagination remains reusable/clickable.
-- VERIFIED: development CI `36883833197` success.
-- VERIFIED: main CI `36988176740` success.
-- VERIFIED: Cloudflare Connected Build `e33665d0-549a-4926-a797-2add410f2dca` success.
-- BLOCKED/PENDING_USER: live QQ must actually display and allow clicking the buttons.
+- PLANNED: keyboard serialization follows the current Tencent Node SDK minimum shape.
+- PLANNED: direct/no-argument commands still use `action.type=2` with `enter=true`.
+- PLANNED: parameterized commands use `action.type=2` without auto-send and remain editable.
+- PLANNED: pagination stays reusable and clickable.
+- PLANNED: every retained non-empty group category remains covered.
+- PLANNED: development CI passes.
+- PLANNED: main CI passes after verified promotion.
+- PLANNED: production deployment succeeds.
+- NEEDS_REVIEW: live QQ must show visible buttons after deployment.
 
-## Product Files Changed
+## Live Evidence
+
+- 2026-10-02T17:50:41+08:00: user sent `/!面板 群聊`.
+- Bot returned exactly the category prompt text but no visible keyboard.
+- No `备用文字` fallback appeared, so this is not the explicit keyboard-error fallback path.
+- Cloudflare account-level observability does not currently expose the `qqai` Worker dataset, so there is no usable centralized payload log for that event.
+
+## Current Phase
+
+Phase 1 — inline-keyboard compatibility repair.
+
+## Execution Plan
+
+1. Compare deployed keyboard JSON against current Tencent SDK/documented keyboard shape.
+2. Minimize optional button fields while preserving required direct-send/prefill semantics.
+3. Extend regression assertions for exact serialized payloads and all categories.
+4. Run development CI; repair any failure before promotion.
+5. Promote the verified revision to `main`, verify main CI/deployment, then require one live QQ smoke.
+
+## Product Files Expected
 
 - src/v4/commands/group-panel.js
 - src/v4/qqopen/runtime.js
-- worker.js
 - verify-v4-qqopen.mjs
 
-## Blocker
+## Known Risk
 
-The automated environment cannot observe the QQ mobile/desktop client's rendered keyboard. User live smoke is required.
+QQ custom inline keyboards are an application capability. If the minimal officially documented payload is still silently omitted by the client, the remaining blocker is the QQ application button capability/approval rather than command registry contents.
 
 ## next_exact_action
 
-User sends `/!面板 群聊` in QQ and reports whether clickable buttons render.
+Patch the keyboard serializer/generator to the minimal current Tencent SDK-compatible shape and add exact regression checks.
 
-last_checkpoint_at: 2026-10-02T17:12:00+08:00
+last_checkpoint_at: 2026-10-02T18:25:39+08:00

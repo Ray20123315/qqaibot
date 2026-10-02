@@ -1,16 +1,16 @@
 # Ray_Chen Memory Entry
 
-- memory_version: v0.0.56
+- memory_version: v0.0.57
 - project: QQAIBOT
 - repository: Ray20123315/QQAIBOT
 - canonical_branch: main
 - development_branch: v4-qqopen-native
 - task_id: qqaibot-20261001-panel-complete-real-message-send
-- task_status: blocked
-- goal_revision: 4
+- task_status: active
+- goal_revision: 5
 - verified_product_revision: 668525a1db65402c8428cfa03930c8c77f255240
 - deployed_main_revision: 5f40bf4ade906a0eae7aa555eac70225f054665e
-- updated_at: 2026-10-02T17:12:00+08:00
+- updated_at: 2026-10-02T18:25:39+08:00
 
 ## Production Repair State
 
@@ -31,10 +31,12 @@ The command-panel transport repair is deployed:
 - v0.0.55 archive extraction: success
 - v0.0.55 archive SHA-256: `34955b976e6ca788c3447d8e75bd6511e45c5df5ba784820bf4e20a52c6cdce1`
 
-## Blocker
+## Live Failure Evidence
 
-PENDING_USER: only the live QQ client can confirm that the deployed reply now renders visible clickable buttons. The task must not be marked completed before that smoke test.
+At 2026-10-02T17:50:41+08:00, the user sent `/!面板 群聊`. The bot replied only `【群聊】请选择子指令`; no clickable buttons rendered. This resolves the previous PENDING_USER gate as a live failure.
+
+Current diagnosis: the message send itself succeeds, but the QQ client does not render the attached custom inline keyboard. Tencent's current Node SDK documents plain-text + inline keyboard, while the deployed payload contains additional compatibility fields beyond the minimal SDK example.
 
 ## next_exact_action
 
-In QQ, send `/!面板 群聊` once. Verify that the reply shows clickable buttons rather than only text. If buttons still do not render, capture the returned text and the repair will continue from the logged `QQ_OPEN_KEYBOARD_FALLBACK` error.
+Reduce the generated keyboard payload to the current Tencent SDK-compatible minimum, preserve `enter=true` only where direct-send semantics require it, regression-test serialization for every category, deploy through the development branch, then repeat the live `/!面板 群聊` smoke test.
