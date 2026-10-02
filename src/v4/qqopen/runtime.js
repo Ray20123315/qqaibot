@@ -91,16 +91,10 @@ function normalizeInlineKeyboard(value) {
       const actionType = Number(button?.action?.type ?? 1);
       const action = {
         type: Number.isFinite(actionType) ? actionType : 1,
-        data,
         permission: { type:Number.isFinite(permissionType) ? permissionType : 2 },
-        unsupport_tips: String(button?.action?.unsupport_tips || "当前客户端不支持此操作，请直接发送指令。").trim().slice(0, 80)
+        data
       };
-      if (action.type === 2) {
-        action.enter = button?.action?.enter === true;
-        action.reply = button?.action?.reply === true;
-        const anchor = Number(button?.action?.anchor || 0);
-        if (Number.isFinite(anchor) && anchor > 0) action.anchor = anchor;
-      }
+      if (action.type === 2 && button?.action?.enter === true) action.enter = true;
       if (Object.prototype.hasOwnProperty.call(button?.action || {}, "click_limit")) {
         const clickLimit = Number(button.action.click_limit);
         if (Number.isFinite(clickLimit) && clickLimit > 0) action.click_limit = Math.floor(clickLimit);
@@ -112,8 +106,7 @@ function normalizeInlineKeyboard(value) {
           visited_label: visited,
           style: Number(button?.render_data?.style || 0)
         },
-        action,
-        group_id: String(button?.group_id || id).trim().slice(0, 64) || id
+        action
       };
     }).filter(button => button.action.data)
   })).filter(row => row.buttons.length);

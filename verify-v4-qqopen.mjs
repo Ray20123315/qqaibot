@@ -152,29 +152,33 @@ assert.equal(helpButton.action.type, 2);
 assert.equal(helpButton.action.data, "!help");
 assert.equal(helpButton.action.permission?.type, 2);
 assert.equal(helpButton.action.enter, true);
-assert.equal(helpButton.action.reply, false);
+assert(!Object.prototype.hasOwnProperty.call(helpButton.action, "reply"));
+assert(!Object.prototype.hasOwnProperty.call(helpButton.action, "unsupport_tips"));
 assert(!Object.prototype.hasOwnProperty.call(helpButton.action, "click_limit"));
-assert(helpButton.action.unsupport_tips);
-assert(helpButton.group_id);
+assert(!Object.prototype.hasOwnProperty.call(helpButton, "group_id"));
 
 const statusButton = basicButtons.find(button => button.render_data.label === "status");
 assert(statusButton);
 assert.equal(statusButton.action.type, 2);
 assert.equal(statusButton.action.enter, true);
-assert.equal(statusButton.action.reply, false);
+assert(!Object.prototype.hasOwnProperty.call(statusButton.action, "reply"));
 assert.equal(statusButton.action.data, "!status");
 
 const codexButton = basicButtons.find(button => button.render_data.label === "codex");
 assert(codexButton);
 assert.equal(codexButton.action.type, 2);
-assert.equal(codexButton.action.enter, false);
+assert(!Object.prototype.hasOwnProperty.call(codexButton.action, "enter"));
+assert(!Object.prototype.hasOwnProperty.call(codexButton.action, "reply"));
 assert.equal(codexButton.action.data, "!codex ");
+assert(!Object.prototype.hasOwnProperty.call(codexButton.action, "unsupport_tips"));
 assert(!Object.prototype.hasOwnProperty.call(codexButton.action, "click_limit"));
+assert(!Object.prototype.hasOwnProperty.call(codexButton, "group_id"));
 
 const modelButton = basicButtons.find(button => button.render_data.label === "模型");
 assert(modelButton);
 assert.equal(modelButton.action.type, 2);
-assert.equal(modelButton.action.enter, false);
+assert(!Object.prototype.hasOwnProperty.call(modelButton.action, "enter"));
+assert(!Object.prototype.hasOwnProperty.call(modelButton.action, "reply"));
 assert.equal(modelButton.action.data, "!模型 ");
 
 const allCategoryCommands = new Set();
@@ -207,11 +211,12 @@ for (const meta of GROUP_PANEL_CATEGORY_META) {
       if (command.panel.enter === true) {
         assert.equal(button.action.type, 2, `Direct command ${command.id} must use QQ command action`);
         assert.equal(button.action.enter, true, `Direct command ${command.id} must auto-send`);
-        assert.equal(button.action.reply, false);
+        assert(!Object.prototype.hasOwnProperty.call(button.action, "reply"));
         assert.equal(button.action.data, command.panel.command);
       } else {
         assert.equal(button.action.type, 2, `Parameterized command ${command.id} must prefill`);
-        assert.equal(button.action.enter, false);
+        assert(!Object.prototype.hasOwnProperty.call(button.action, "enter"));
+        assert(!Object.prototype.hasOwnProperty.call(button.action, "reply"));
         assert.equal(button.action.data, `${command.panel.command} `);
       }
     }
@@ -259,8 +264,10 @@ const nextPageButton = aiAdminKeyboard.keyboard.content.rows.flatMap(row => row.
 assert(nextPageButton);
 assert.equal(nextPageButton.action.type, 2);
 assert.equal(nextPageButton.action.enter, true);
-assert.equal(nextPageButton.action.reply, false);
+assert(!Object.prototype.hasOwnProperty.call(nextPageButton.action, "reply"));
+assert(!Object.prototype.hasOwnProperty.call(nextPageButton.action, "unsupport_tips"));
 assert(!Object.prototype.hasOwnProperty.call(nextPageButton.action, "click_limit"));
+assert(!Object.prototype.hasOwnProperty.call(nextPageButton, "group_id"));
 const aiAdminPage2 = resolveGroupPanelInput("!面板 AI管理 --page=2", registry);
 assert.equal(aiAdminPage2?.matched, true);
 assert.equal(aiAdminPage2?.expanded, "");
@@ -280,6 +287,11 @@ assert.equal(basicReplyBody.msg_seq, 7);
 assert.equal(basicReplyBody.msg_id, "fixture-message");
 assert(!Object.prototype.hasOwnProperty.call(basicReplyBody, "markdown"), "inline keyboard replies must not require Markdown permission");
 assert(basicReplyBody.keyboard?.content?.rows?.length > 0);
+
+const minimalParameterized = basicReplyBody.keyboard.content.rows.flatMap(row => row.buttons)
+  .find(button => button.action.data === "!codex ");
+assert.deepEqual(Object.keys(minimalParameterized.action).sort(), ["data","permission","type"]);
+assert.deepEqual(Object.keys(minimalParameterized).sort(), ["action","id","render_data"]);
 
 const eventReplyBody = buildInlineKeyboardMessageBody(
   "【基础】请选择子指令",
@@ -320,7 +332,10 @@ for (const post of categoryKeyboardPosts) {
   for (const button of body.keyboard.content.rows.flatMap(row => row.buttons)) {
     assert([1,2].includes(button.action.type));
     assert.equal(button.action.permission.type, 2);
+    assert(!Object.prototype.hasOwnProperty.call(button.action, "reply"));
+    assert(!Object.prototype.hasOwnProperty.call(button.action, "unsupport_tips"));
     assert(!Object.prototype.hasOwnProperty.call(button.action, "click_limit"));
+    assert(!Object.prototype.hasOwnProperty.call(button, "group_id"));
   }
 }
 
@@ -336,9 +351,9 @@ assert.match(qqOpenRuntimeSource, /keyboardFallbackContent\s*=\s*String\(result\
 assert.match(qqOpenRuntimeSource, /content:\s*fallbackContent\s*\|\|\s*content/);
 assert.match(qqOpenRuntimeSource, /permission:\s*\{\s*type/);
 assert.match(qqOpenRuntimeSource, /click_limit/);
-assert.match(qqOpenRuntimeSource, /unsupport_tips/);
 assert.match(qqOpenRuntimeSource, /action\.enter/);
-assert.match(qqOpenRuntimeSource, /group_id/);
+assert.doesNotMatch(qqOpenRuntimeSource, /unsupport_tips:/);
+assert.doesNotMatch(qqOpenRuntimeSource, /group_id:\s*String\(button/);
 assert.match(qqOpenRuntimeSource, /recordKeyboardFallback/);
 assert.match(qqOpenRuntimeSource, /sessionIntents/);
 assert.match(qqOpenRuntimeSource, /configuredIntents/);

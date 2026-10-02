@@ -68,16 +68,12 @@ function keyboardButton(id, label, data, { style = 1, immediate = false } = {}) 
   const text = clean(label).slice(0, 20) || "指令";
   const buttonId = clean(id).slice(0, 64) || "qqai_command";
   const payload = String(data ?? "").replace(/^\s+/, "").slice(0, 1000);
-  const action = Object.freeze({
+  const action = {
     type: 2,
-    data: payload,
     permission: Object.freeze({ type:2 }),
-    enter: immediate,
-    reply: false,
-    unsupport_tips: immediate
-      ? "当前客户端不支持直接发送，请手动发送指令。"
-      : "当前客户端不支持指令按钮，请手动输入指令。"
-  });
+    data: payload
+  };
+  if (immediate) action.enter = true;
   return Object.freeze({
     id: buttonId,
     render_data: Object.freeze({
@@ -85,8 +81,7 @@ function keyboardButton(id, label, data, { style = 1, immediate = false } = {}) 
       visited_label: text,
       style: Number(style || 0)
     }),
-    action,
-    group_id: buttonId
+    action: Object.freeze(action)
   });
 }
 
