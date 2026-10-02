@@ -76,3 +76,14 @@ Verification state:
 - source transformation guards: passed
 - exact regression assertions: added
 - GitHub workflow: no run returned on first lookup; NOT VERIFIED
+
+
+## Goal Revision 5 — CI Failure 36996070358
+
+- general regression checks: success
+- V3 regression checks: success
+- V4 QQ Open check: failed at `verify-v4-qqopen.mjs:226`
+- actual value: `undefined`
+- stale expected value: `false`
+- cause: pagination assertion still required explicit `action.reply=false` after the minimal-payload change intentionally removed the field
+- repair: replace the stale equality check with absence assertions for `reply`, `unsupport_tips`, and `group_id`

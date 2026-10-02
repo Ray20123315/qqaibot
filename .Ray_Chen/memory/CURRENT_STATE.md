@@ -46,7 +46,7 @@ Development commit `2dd39fc24d8d9d8c1d4a6402c6f716890bfa146e`:
 ## Remaining State
 
 - code compatibility repair: PRODUCED
-- development CI: PENDING (no workflow run observed immediately after commit)
+- development CI: FAILED run `36996070358`; failure isolated to stale pagination assertion expecting `reply:false`
 - main CI: pending
 - production deployment: pending
 - live QQ render/click after repair: pending

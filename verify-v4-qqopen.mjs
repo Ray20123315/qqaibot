@@ -223,8 +223,10 @@ for (const meta of GROUP_PANEL_CATEGORY_META) {
     for (const button of buttons.filter(item => /^!面板\s/.test(item.action.data))) {
       assert.equal(button.action.type, 2, "Pagination must send a normal QQ command");
       assert.equal(button.action.enter, true);
-      assert.equal(button.action.reply, false);
+      assert(!Object.prototype.hasOwnProperty.call(button.action, "reply"));
+      assert(!Object.prototype.hasOwnProperty.call(button.action, "unsupport_tips"));
       assert(!Object.prototype.hasOwnProperty.call(button.action, "click_limit"));
+      assert(!Object.prototype.hasOwnProperty.call(button, "group_id"));
     }
   }
   assert.equal(seen.size, commands.length, `Category ${meta.label} did not expose every command`);

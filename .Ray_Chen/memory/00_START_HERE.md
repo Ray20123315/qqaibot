@@ -1,6 +1,6 @@
 # Ray_Chen Memory Entry
 
-- memory_version: v0.0.58
+- memory_version: v0.0.59
 - project: QQAIBOT
 - repository: Ray20123315/QQAIBOT
 - canonical_branch: main
@@ -10,7 +10,7 @@
 - goal_revision: 5
 - verified_product_revision: 668525a1db65402c8428cfa03930c8c77f255240
 - deployed_main_revision: 5f40bf4ade906a0eae7aa555eac70225f054665e
-- updated_at: 2026-10-02T18:31:00+08:00
+- updated_at: 2026-10-02T18:36:00+08:00
 
 ## Production Repair State
 
@@ -46,7 +46,7 @@ Compatibility patch produced on development branch:
 - keeps `enter:true` only for direct-send/pagination buttons;
 - adds exact minimal-payload regression assertions.
 
-The first workflow lookup immediately after the commit returned no run yet; CI is not yet verified.
+CI run `36996070358` executed and failed only in `verify-v4-qqopen.mjs:226`: one stale pagination assertion still expected explicit `reply:false`. The product serializer change itself reached the V4 check; the stale assertion is now being corrected.
 
 ## next_exact_action
 

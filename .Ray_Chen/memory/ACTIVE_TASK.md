@@ -53,7 +53,7 @@ Product patch `2dd39fc24d8d9d8c1d4a6402c6f716890bfa146e` is PRODUCED on `v4-qqop
 
 - PRODUCED: development commit `2dd39fc24d8d9d8c1d4a6402c6f716890bfa146e`.
 - VERIFIED by source patch guards: only intended keyboard generator/normalizer/test blocks were replaced.
-- PENDING: GitHub Actions/V4 verification. Immediate workflow lookup returned no runs.
+- FAILED then REPAIRING: CI `36996070358` failed at `verify-v4-qqopen.mjs:226` because a pagination test still expected explicit `reply:false`; product code did not fail before that assertion.
 - PENDING: main promotion.
 - PENDING: production deployment.
 - PENDING: live QQ smoke.
@@ -64,6 +64,6 @@ QQ custom inline keyboards are an application capability. If the minimal officia
 
 ## next_exact_action
 
-Resolve/run development verification for `2dd39fc24d8d9d8c1d4a6402c6f716890bfa146e`; fix any failure before main promotion.
+Commit the stale pagination-assertion fix, then require a fully green development CI before main promotion.
 
-last_checkpoint_at: 2026-10-02T18:31:00+08:00
+last_checkpoint_at: 2026-10-02T18:36:00+08:00
