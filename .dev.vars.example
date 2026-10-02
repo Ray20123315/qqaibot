@@ -53,6 +53,8 @@ QQ_OPEN_SHARD_ID=0
 QQ_OPEN_SHARD_TOTAL=1
 # Auto-sync the global custom menu and QQAIBOT V4 command panels after READY/RESUMED.
 QQ_OPEN_DISCOVERY_SYNC=false
+# Only enable after QQ explicitly grants custom message-button / inline-keyboard capability.
+QQ_OPEN_CUSTOM_KEYBOARD_ENABLED=false
 
 # Exact QQ Open user/member OpenIDs allowed to use developer-only commands.
 # This is an authority allowlist, not a numeric QQ mapping.

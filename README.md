@@ -483,6 +483,7 @@ QQ_OPEN_INTENTS = "100663296"
 QQ_OPEN_SHARD_ID = "0"
 QQ_OPEN_SHARD_TOTAL = "1"
 QQ_OPEN_DISCOVERY_SYNC = "true"
+QQ_OPEN_CUSTOM_KEYBOARD_ENABLED = "false" # AppID 明确开通自定义消息按钮后再启用
 ```
 
 `QQ_OPEN_DISCOVERY_SYNC=true` 時，Gateway 在 READY／RESUMED 後以 V4 Command Registry 同步全域自訂選單與 C2C／群聊指令面板。同步有 fingerprint 去重，且只清理由 QQAIBOT V4 自己建立、remark 以 `QQAIBOT V4` 開頭的面板，不會刪除其他應用面板。測試 Worker 預設不開此功能，避免和正式環境同時修改同一個 QQ Bot UI。

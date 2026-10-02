@@ -127,3 +127,13 @@ The existing `GROUP_AND_C2C_EVENT (1<<25)` baseline also normalizes lifecycle ev
 - `GROUP_MEMBER_ADD` / `GROUP_MEMBER_REMOVE`
 
 Lifecycle records remain OpenID-native. They are stored separately from the legacy numeric QQ member tables so an OpenID is never mistaken for a QQ number. Gateway diagnostics expose lifecycle count/last event, while the Portal exposes lifecycle activity plus static/learned hybrid mapping counts.
+
+
+## Custom inline keyboard capability
+
+`QQ_OPEN_CUSTOM_KEYBOARD_ENABLED` is a capability gate.
+
+- Production defaults to `false` until the QQ AppID is explicitly approved for custom message buttons.
+- When disabled, category-panel replies use their text fallback and direct users to QQ's native `/` command panels.
+- Native group discovery publishes the compact category launcher plus categorized concrete-command panels, so clickable command discovery does not depend on custom-button approval.
+- Set the flag to `true` only after capability approval has been confirmed.
