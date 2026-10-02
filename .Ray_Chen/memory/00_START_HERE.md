@@ -1,16 +1,16 @@
 # Ray_Chen Memory Entry
 
-- memory_version: v0.0.60
+- memory_version: v0.0.61
 - project: QQAIBOT
 - repository: Ray20123315/QQAIBOT
 - canonical_branch: main
 - development_branch: v4-qqopen-native
 - task_id: qqaibot-20261001-panel-complete-real-message-send
 - task_status: blocked
-- goal_revision: 5
-- verified_product_revision: 232e2577558dd67fffab769ac474243956bf8435
-- deployed_main_revision: 232e2577558dd67fffab769ac474243956bf8435
-- updated_at: 2026-10-02T18:42:00+08:00
+- goal_revision: 6
+- verified_product_revision: 6927af12dab81a979a13db94c54924ffbce0f35e
+- deployed_main_revision: 6927af12dab81a979a13db94c54924ffbce0f35e
+- updated_at: 2026-10-02T19:08:00+08:00
 
 ## Production Repair State
 
@@ -60,3 +60,27 @@ PENDING_USER: automated tests prove the payload and deployment, but only the liv
 ## next_exact_action
 
 In QQ, send `/!面板 群聊` once. Report whether visible clickable child-command buttons appear. If they do, click one direct command and one parameterized command to confirm send-vs-prefill behavior.
+
+
+## Goal Revision 6 — Native Command Fallback
+
+Live evidence at 2026-10-02 18:47:52 +08:00:
+- `/!面板 基础` returned only `【基础】请选择子指令`;
+- custom inline buttons were still absent after the minimal-payload production repair.
+
+Verified platform finding:
+- Tencent documentation marks custom buttons as a gated / invite-only capability.
+- Production had no keyboard template binding and no proven custom-button grant.
+
+Production repair:
+- product revision: `6927af12dab81a979a13db94c54924ffbce0f35e`
+- development CI: `36998626039` success
+- main CI: `36998794211` success
+- Cloudflare build: `3f3ddb50-013a-4f1a-a4fb-74d045198704` success
+- production setting read-back: `QQ_OPEN_CUSTOM_KEYBOARD_ENABLED=false`
+- QQ native group discovery now publishes the compact category launcher plus categorized concrete group-command panels.
+- custom inline keyboard remains an optional enhancement only after the AppID capability is explicitly confirmed.
+
+## Current Blocker
+
+PENDING_USER: open the QQ native `/` command panel and verify concrete commands such as `!help` and `!status` are visible/clickable. The custom inline-keyboard path is intentionally not part of this acceptance gate.

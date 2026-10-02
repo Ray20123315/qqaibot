@@ -2,7 +2,7 @@
 
 task_id: qqaibot-20261001-panel-complete-real-message-send
 task_status: blocked
-goal_revision: 5
+goal_revision: 6
 
 ## Goal
 
@@ -67,3 +67,26 @@ QQ custom inline keyboards are an application capability. If the minimal officia
 User sends `/!面板 群聊` once in QQ and reports whether the child-command buttons are visible. If visible, verify one direct-send button and one parameterized prefill button.
 
 last_checkpoint_at: 2026-10-02T18:42:00+08:00
+
+
+## Goal Revision 6 — Current State
+
+current_phase: live native-command acceptance
+current_step: product and production deployment verified; waiting for QQ native `/` panel observation
+
+completed_steps:
+- recorded second live inline-keyboard failure at 2026-10-02 18:47:52 +08:00
+- verified official custom-button capability gate
+- added `QQ_OPEN_CUSTOM_KEYBOARD_ENABLED`
+- production sets the flag to `false`
+- native group discovery publishes root category launchers and categorized concrete commands
+- development CI `36998626039` passed
+- main CI `36998794211` passed
+- Cloudflare production build `3f3ddb50-013a-4f1a-a4fb-74d045198704` passed
+- production Worker binding read-back confirms custom keyboard false and discovery sync true
+
+blockers:
+- PENDING_USER: native QQ client visibility/click test
+
+next_exact_action: In the target QQ group, type `/` to open the native command panel and confirm concrete commands (at minimum `!help`, `!status`, and one parameterized command) are present and clickable.
+last_checkpoint_at: 2026-10-02T19:08:00+08:00

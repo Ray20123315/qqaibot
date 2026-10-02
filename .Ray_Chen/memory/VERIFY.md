@@ -106,3 +106,29 @@ Final acceptance gate:
 2. confirm buttons render;
 3. click a direct command and confirm QQ actually sends the command message;
 4. click a parameterized command and confirm it prefills for editing.
+
+
+## Goal Revision 6 — Native Fallback Verification
+
+Live failure evidence:
+- 2026-10-02 18:47:52 +08:00
+- `/!面板 基础` -> `【基础】请选择子指令`
+- inline buttons: absent
+
+Automated verification:
+- development CI `36998626039`: success
+- main CI `36998794211`: success
+- V4 regression verifies native group panel union contains every enabled concrete group command
+- V4 regression verifies managed panel count remains <= 20
+- Worker bundle: success
+- Cloudflare build `3f3ddb50-013a-4f1a-a4fb-74d045198704`: success for `6927af12dab81a979a13db94c54924ffbce0f35e`
+- production settings read-back:
+  - `QQ_OPEN_CUSTOM_KEYBOARD_ENABLED=false`
+  - `QQ_OPEN_DISCOVERY_SYNC=true`
+  - `QQ_OPEN_ENABLED=true`
+
+Remaining live gate:
+1. type `/` in the QQ group;
+2. confirm concrete commands including `!help` and `!status` are visible;
+3. click a direct command and verify it sends;
+4. click a parameterized command and verify QQ exposes the intended command input behavior.

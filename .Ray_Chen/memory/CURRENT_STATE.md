@@ -62,3 +62,17 @@ Development commit `2dd39fc24d8d9d8c1d4a6402c6f716890bfa146e`:
 - production deployment: VERIFIED
 - live QQ inline-keyboard visibility: BLOCKED / PENDING_USER
 - direct-send vs parameterized-click live behavior: BLOCKED / PENDING_USER
+
+
+## Goal Revision 6 — Verified Production State
+
+- latest failed custom-inline live test: 2026-10-02 18:47:52 +08:00, `/!面板 基础`, title only, no buttons
+- custom inline keyboard: production-disabled pending explicit AppID capability approval
+- production flag: `QQ_OPEN_CUSTOM_KEYBOARD_ENABLED=false` (read-back verified)
+- discovery sync: `QQ_OPEN_DISCOVERY_SYNC=true` (read-back verified)
+- native group discovery: category launcher + categorized real-command panels
+- development CI `36998626039`: success
+- main CI `36998794211`: success
+- Cloudflare Connected Build `3f3ddb50-013a-4f1a-a4fb-74d045198704`: success
+- deployed product revision: `6927af12dab81a979a13db94c54924ffbce0f35e`
+- remaining acceptance: live QQ native `/` panel visibility/click behavior
