@@ -1,9 +1,9 @@
 {
   "schema_version": 1,
-  "memory_version": "v0.0.57",
+  "memory_version": "v0.0.58",
   "task_id": "qqaibot-20261001-panel-complete-real-message-send",
   "goal_revision": 5,
-  "transaction": "qq_keyboard_live_blank_repair_start_20261002",
+  "transaction": "qq_keyboard_minimal_payload_patch_20261002",
   "repository": "Ray20123315/qqaibot",
   "production_branch": "main",
   "development_branch": "v4-qqopen-native",
@@ -24,7 +24,7 @@
     "discovery_sync_after_fix": "pending_authenticated_status",
     "live_mapping_after_fix": "pending_user_test",
     "command_fallback_implementation": "verified",
-    "development_ci": "success",
+    "development_ci": "pending_no_run_observed",
     "main_update": "success",
     "development_ci_run": 36883833197,
     "main_ci": "success",
@@ -171,7 +171,10 @@
     "gmail_notification_attempt_at": "2026-10-02T17:16:00+08:00",
     "gmail_notification_retry": "not_attempted_per_project_rule",
     "current_keyboard_hypothesis": "successful_message_with_client_silent_keyboard_omission",
-    "tencent_current_minimal_keyboard_reference": "verified"
+    "tencent_current_minimal_keyboard_reference": "verified",
+    "keyboard_minimal_payload_patch": "produced",
+    "keyboard_minimal_payload_commit": "2dd39fc24d8d9d8c1d4a6402c6f716890bfa146e",
+    "memory_archive_v0057": "failed_container_dns_github_unreachable"
   },
   "changes": [
     {
@@ -2186,21 +2189,16 @@
     "note": "Do not mark completed until live QQ renders and allows clicking the inline keyboard."
   },
   "latest_transaction": {
-    "changed_at": "2026-10-02T18:25:39+08:00",
+    "changed_at": "2026-10-02T18:31:00+08:00",
     "location_type": "github",
     "provider": "GitHub",
+    "resource_id_or_path": "src/v4/commands/group-panel.js; src/v4/qqopen/runtime.js; verify-v4-qqopen.mjs",
+    "action": "modify",
     "repository_or_drive": "Ray20123315/qqaibot",
     "branch_or_container": "v4-qqopen-native",
-    "before_revision": "fe0492c254077e761dcc2902b56a841bc5cafa36",
-    "after_revision": "pending_commit",
-    "action": "memory_checkpoint",
-    "verification": "live QQ failure accepted; implementation not started",
-    "live_evidence": {
-      "observed_at": "2026-10-02T17:50:41+08:00",
-      "command": "/!面板 群聊",
-      "reply": "【群聊】请选择子指令",
-      "buttons_visible": false,
-      "explicit_fallback_visible": false
-    }
+    "before_revision": "8630f00da9d701a45274142316068501920facf4",
+    "after_revision": "2dd39fc24d8d9d8c1d4a6402c6f716890bfa146e",
+    "commit_or_hash": "2dd39fc24d8d9d8c1d4a6402c6f716890bfa146e",
+    "verification": "source guards passed; CI pending"
   }
 }

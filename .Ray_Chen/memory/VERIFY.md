@@ -58,3 +58,21 @@ Repair gate:
 3. direct vs parameterized behavior remains distinct;
 4. development CI must pass before main promotion;
 5. final live QQ smoke remains required.
+
+
+## Goal Revision 5 — Development Patch
+
+Product commit: `2dd39fc24d8d9d8c1d4a6402c6f716890bfa146e`
+
+Expected serialized command-button shape:
+- parameterized: `{ type:2, permission:{type:2}, data }`
+- direct/pagination: same plus `enter:true`
+- no generated `reply`
+- no generated `unsupport_tips`
+- no generated `group_id`
+- no mandatory `click_limit`
+
+Verification state:
+- source transformation guards: passed
+- exact regression assertions: added
+- GitHub workflow: no run returned on first lookup; NOT VERIFIED

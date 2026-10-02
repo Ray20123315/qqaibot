@@ -33,17 +33,20 @@
 - explicit API-error fallback: NOT OBSERVED
 - current inference: keyboard is being silently omitted after an otherwise successful message send
 
-## Current Repair Direction
+## Current Repair Implementation
 
-- Current Tencent Node SDK example uses `msg_type:0 + content + keyboard`.
-- Keep that transport.
-- Minimize per-button payload to documented/SDK fields; only retain direct-send fields where behavior requires them.
-- If the minimal payload still renders no buttons, treat QQ message-button application capability/approval as the blocking dependency rather than continuing blind JSON changes.
+Development commit `2dd39fc24d8d9d8c1d4a6402c6f716890bfa146e`:
+- generated buttons now use the current Tencent SDK minimum fields: `id`, `render_data`, `action.type`, `action.permission`, `action.data`;
+- direct buttons add only `action.enter=true`;
+- parameterized buttons omit `enter` so the QQ default remains prefill/no auto-send;
+- generated `group_id`, `unsupport_tips`, `reply:false`, and `enter:false` are removed;
+- runtime normalization no longer re-injects those fields;
+- exact payload regression assertions were added.
 
 ## Remaining State
 
-- code compatibility repair: IN_PROGRESS
-- development CI: pending
+- code compatibility repair: PRODUCED
+- development CI: PENDING (no workflow run observed immediately after commit)
 - main CI: pending
 - production deployment: pending
 - live QQ render/click after repair: pending

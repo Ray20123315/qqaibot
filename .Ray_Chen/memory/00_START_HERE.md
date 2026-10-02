@@ -1,6 +1,6 @@
 # Ray_Chen Memory Entry
 
-- memory_version: v0.0.57
+- memory_version: v0.0.58
 - project: QQAIBOT
 - repository: Ray20123315/QQAIBOT
 - canonical_branch: main
@@ -10,7 +10,7 @@
 - goal_revision: 5
 - verified_product_revision: 668525a1db65402c8428cfa03930c8c77f255240
 - deployed_main_revision: 5f40bf4ade906a0eae7aa555eac70225f054665e
-- updated_at: 2026-10-02T18:25:39+08:00
+- updated_at: 2026-10-02T18:31:00+08:00
 
 ## Production Repair State
 
@@ -37,6 +37,17 @@ At 2026-10-02T17:50:41+08:00, the user sent `/!面板 群聊`. The bot replied o
 
 Current diagnosis: the message send itself succeeds, but the QQ client does not render the attached custom inline keyboard. Tencent's current Node SDK documents plain-text + inline keyboard, while the deployed payload contains additional compatibility fields beyond the minimal SDK example.
 
+## Current Implementation
+
+Compatibility patch produced on development branch:
+- commit: `2dd39fc24d8d9d8c1d4a6402c6f716890bfa146e`
+- removes generated `group_id`, `unsupport_tips`, explicit `reply:false`, and explicit `enter:false`;
+- keeps required `type + permission + data`;
+- keeps `enter:true` only for direct-send/pagination buttons;
+- adds exact minimal-payload regression assertions.
+
+The first workflow lookup immediately after the commit returned no run yet; CI is not yet verified.
+
 ## next_exact_action
 
-Reduce the generated keyboard payload to the current Tencent SDK-compatible minimum, preserve `enter=true` only where direct-send semantics require it, regression-test serialization for every category, deploy through the development branch, then repeat the live `/!面板 群聊` smoke test.
+Resolve the development CI execution path and run/observe the V4 verification for `2dd39fc24d8d9d8c1d4a6402c6f716890bfa146e`. Do not promote to main before verified success.
