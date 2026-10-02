@@ -57,7 +57,16 @@ async function syncQqOpenDiscovery(api, registry, {
   const menu = registry.buildMenu({ maxItems: 10, maxSubItems: 5 });
 
   assertGroupPanelCoverage(registry);
-  const globalGroup = [buildGroupRootPanel(registry, { remark:"QQAIBOT V4 GROUP ROOT" })];
+  const groupCommandPanels = registry.buildCategorizedPanels("group", {
+    remarkPrefix: "QQAIBOT V4 GROUP COMMANDS",
+    maxItemsPerPanel: 20,
+    permissions: allPermissions,
+    targetType: "all"
+  });
+  const globalGroup = [
+    buildGroupRootPanel(registry, { remark:"QQAIBOT V4 GROUP ROOT" }),
+    ...groupCommandPanels
+  ];
   const developerC2C = developerIds.length
     ? registry.buildCategorizedPanels("c2c", {
         remarkPrefix: "QQAIBOT V4 DEV",
@@ -115,6 +124,7 @@ async function syncQqOpenDiscovery(api, registry, {
     created: created.length,
     categories: [...new Set(panels.map(item => item.discovery_category).filter(Boolean))],
     groupPanels: globalGroup.length,
+    groupCommandPanels: groupCommandPanels.length,
     developerPanels: developerC2C.length
   };
 }

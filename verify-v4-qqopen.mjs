@@ -134,9 +134,8 @@ assert.equal(groupRootHelp?.matched, true);
 assert.equal(groupRootHelp?.expanded, "");
 assert.equal(groupRootHelp?.message, "【基础】请选择子指令");
 assert.doesNotMatch(groupRootHelp?.message || "", /备用文字/);
-assert.match(groupRootHelp?.fallbackMessage || "", /备用文字/);
-assert.match(groupRootHelp?.fallbackMessage || "", /help/);
-assert.match(groupRootHelp?.fallbackMessage || "", /status/);
+assert.doesNotMatch(groupRootHelp?.fallbackMessage || "", /备用文字/);
+assert.match(groupRootHelp?.fallbackMessage || "", /原生指令面板/);
 assert(groupRootHelp?.keyboard?.content?.rows?.length > 0);
 assert(groupRootHelp.keyboard.content.rows.length <= 5);
 assert(groupRootHelp.keyboard.content.rows.every(row => row.buttons.length <= 2));
@@ -346,6 +345,9 @@ assert.match(qqOpenRuntimeSource, /qq_inline_keyboard/);
 assert.match(qqOpenRuntimeSource, /normalizeInlineKeyboard/);
 assert.match(qqOpenRuntimeSource, /buildInlineKeyboardMessageBody/);
 assert.match(qqOpenRuntimeSource, /keyboardCapabilityError/);
+assert.match(qqOpenRuntimeSource, /QQ_OPEN_CUSTOM_KEYBOARD_ENABLED/);
+assert.match(qqOpenRuntimeSource, /customEnabled:\s*qqOpenCustomKeyboardEnabled/);
+assert.match(qqOpenRuntimeSource, /requestedKeyboard\s*&&\s*!keyboardEnabled/);
 assert.match(qqOpenRuntimeSource, /content,\s*\.\.\.extra,\s*msg_type:\s*0,\s*keyboard:/);
 assert.doesNotMatch(qqOpenRuntimeSource, /msg_type:\s*2,\s*markdown:\s*\{\s*content[^}]*\}[^}]*keyboard/s);
 assert.match(qqOpenRuntimeSource, /\[QQ_OPEN_KEYBOARD_FALLBACK\]/);
@@ -499,23 +501,36 @@ assert(!discoveryCalls.some(row => row[0] === "deletePanel" && row[1] === "forei
 assert(discoveryCalls.some(row => row[0] === "listPanels" && row[1] === "c2c"));
 assert(discoveryCalls.some(row => row[0] === "listPanels" && row[1] === "group"));
 assert(firstDiscovery.panels <= 20);
-assert.equal(firstDiscovery.groupPanels, 1, "native group discovery must use one compact category-root panel");
+const expectedNativeGroupCommandPanels = registry.buildCategorizedPanels("group", {
+  permissions:allPermissions,
+  targetType:"all"
+});
+assert(expectedNativeGroupCommandPanels.length > 0);
+assert.equal(firstDiscovery.groupCommandPanels, expectedNativeGroupCommandPanels.length);
+assert.equal(firstDiscovery.groupPanels, 1 + expectedNativeGroupCommandPanels.length, "native group discovery must publish category launcher plus real-command panels");
 assert(firstDiscovery.categories.includes("group-root"));
 assert(firstDiscovery.categories.includes("developer"));
 assert(!firstDiscovery.categories.includes("relationship"));
-assert.equal(firstDiscovery.panels, 1 + developerPanels.length, "discovery must create one group category launcher plus Developer C2C panels");
+assert.equal(firstDiscovery.panels, 1 + expectedNativeGroupCommandPanels.length + developerPanels.length);
 const groupSyncPanels = discoveryCalls
   .filter(row => row[0] === "createPanel" && row[1] === "group" && row[2]?.target_type === "all")
   .map(row => row[2]);
-assert.equal(groupSyncPanels.length, 1, "QQ client must receive one compact managed group panel");
-assert(groupSyncPanels[0].panel.items.length > 0 && groupSyncPanels[0].panel.items.length <= 20);
-const groupSyncNames = new Set(groupSyncPanels[0].panel.items.map(item => item.name));
+assert.equal(groupSyncPanels.length, 1 + expectedNativeGroupCommandPanels.length);
+const groupRootSyncPanel = groupSyncPanels.find(panel => panel.panel?.remark === "QQAIBOT V4 GROUP ROOT");
+assert(groupRootSyncPanel, "QQ native category launcher must remain available");
+const groupRootSyncNames = new Set(groupRootSyncPanel.panel.items.map(item => item.name));
 for (const name of ["!面板 基础","!面板 群聊","!面板 互动","!面板 记忆","!面板 活动","!面板 群规","!面板 AI管理","!面板 群操作","!面板 群主","!面板 开发者"]) {
-  assert(groupSyncNames.has(name), `Native group category launcher missing ${name}`);
+  assert(groupRootSyncNames.has(name), `Native group category launcher missing ${name}`);
 }
-assert(!groupSyncNames.has("!面板 关系"), "retired relationship category must not be published");
-assert(!groupSyncNames.has("!help"), "raw child commands belong in paginated inline keyboards, not the constrained native root panel");
-assert(!groupSyncNames.has("!主人功能"), "retired relationship command must not be published");
+assert(!groupRootSyncNames.has("!面板 关系"), "retired relationship category must not be published");
+const groupCommandSyncPanels = groupSyncPanels.filter(panel => panel !== groupRootSyncPanel);
+const groupCommandSyncNames = new Set(groupCommandSyncPanels.flatMap(panel => panel.panel.items).map(item => item.name));
+for (const command of registry.list({ scope:"group" }).filter(command => command.panel.enabled)) {
+  assert(groupCommandSyncNames.has(command.panel.command), `Native group real-command discovery missing ${command.id}`);
+}
+assert(groupCommandSyncNames.has("!help"));
+assert(groupCommandSyncNames.has("!status"));
+assert(!groupCommandSyncNames.has("!主人功能"), "retired relationship command must not be published");
 
 const developerSyncPanels = discoveryCalls
   .filter(row => row[0] === "createPanel" && row[2]?.target_type === "specific" && row[2]?.user_openids?.includes("dev-openid"))

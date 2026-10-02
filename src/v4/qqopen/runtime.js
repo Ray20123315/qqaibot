@@ -35,6 +35,11 @@ function qqOpenConfigured(env = {}) {
   return Boolean(String(env.QQ_OPEN_APP_ID || "").trim() && String(env.QQ_OPEN_CLIENT_SECRET || "").trim());
 }
 
+function qqOpenCustomKeyboardEnabled(env = {}) {
+  const raw = String(env.QQ_OPEN_CUSTOM_KEYBOARD_ENABLED ?? "").trim();
+  return raw ? truthy(raw) : true;
+}
+
 function qqOpenIntents(env = {}) {
   const raw = String(env.QQ_OPEN_INTENTS ?? "").trim();
   if (!raw) return DEFAULT_QQ_OPEN_INTENTS;
@@ -277,6 +282,8 @@ export class QqOpenGateway {
       lastErrorAt: Number(this.persisted.lastErrorAt || 0),
       lastError: String(this.persisted.lastError || ""),
       keyboard: {
+        customEnabled: qqOpenCustomKeyboardEnabled(this.env),
+        templateConfigured: Boolean(String(this.env.QQ_OPEN_KEYBOARD_TEMPLATE_ID || "").trim()),
         lastErrorAt: Number(this.persisted.lastKeyboardErrorAt || 0),
         lastError: String(this.persisted.lastKeyboardError || ""),
         fallbackCount: Number(this.persisted.keyboardFallbackCount || 0)
@@ -658,11 +665,12 @@ export class QqOpenGateway {
     const content = String(value || "").trim();
     const fallbackContent = String(fallbackValue || content).trim();
     if (!content || !interaction?.id) return null;
-    const keyboardBody = buildInlineKeyboardMessageBody(content, keyboard, {
+    const keyboardEnabled = qqOpenCustomKeyboardEnabled(this.env);
+    const keyboardBody = keyboardEnabled ? buildInlineKeyboardMessageBody(content, keyboard, {
       event_id: String(interaction.id)
-    });
+    }) : null;
     const body = keyboardBody || {
-      content,
+      content: keyboard && !keyboardEnabled ? (fallbackContent || content) : content,
       msg_type: 0,
       event_id: String(interaction.id)
     };
@@ -968,8 +976,16 @@ export class QqOpenGateway {
       ? result.reply_chunks
       : result?.reply ? [result.reply] : [];
     let keyboardFallbackContent = "";
-    const keyboard = normalizeInlineKeyboard(result?.qq_inline_keyboard);
+    const requestedKeyboard = normalizeInlineKeyboard(result?.qq_inline_keyboard);
+    const keyboardEnabled = qqOpenCustomKeyboardEnabled(this.env);
+    const keyboard = keyboardEnabled ? requestedKeyboard : null;
     const keyboardContent = String(result?.reply || rawChunks[0] || "").trim().slice(0, 3800);
+    if (requestedKeyboard && !keyboardEnabled) {
+      keyboardFallbackContent = String(
+        result?.qq_inline_keyboard_fallback
+        || (keyboardContent ? `${keyboardContent}\n请在输入框输入 /，从 QQ 原生指令面板直接选择指令。` : "")
+      ).trim();
+    }
     if (keyboard && keyboardContent && (message.scope === "group" || message.scope === "private")) {
       const reservation = await this.reserveReplySequences(message.messageId, message.scope, 1);
       const keyboardBody = buildInlineKeyboardMessageBody(keyboardContent, keyboard, {

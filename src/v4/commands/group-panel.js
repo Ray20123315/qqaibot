@@ -198,7 +198,7 @@ function resolveGroupPanelInput(input, registry) {
     ? `（${keyboardView.page}/${keyboardView.totalPages}）`
     : "";
   const message = `【${meta.label}】请选择子指令${pageSuffix}`;
-  const fallbackMessage = `${message}\n备用文字：${compactChildList(rows)}\n原本的 ! 指令仍可直接使用。`;
+  const fallbackMessage = `${message}\n此机器人目前停用自定义消息按钮。请在输入框输入 /，从 QQ 原生指令面板直接选择对应指令。`;
   if (!tail || pageMatch) return Object.freeze({
     matched:true,
     expanded:"",
