@@ -165,7 +165,11 @@
     "keyboard_fallback_copy": "separate_and_error_only",
     "keyboard_fallback_logging": "QQ_OPEN_KEYBOARD_FALLBACK",
     "v0055_package": "success",
-    "v0055_archive_sha256": "34955b976e6ca788c3447d8e75bd6511e45c5df5ba784820bf4e20a52c6cdce1"
+    "v0055_archive_sha256": "34955b976e6ca788c3447d8e75bd6511e45c5df5ba784820bf4e20a52c6cdce1",
+    "gmail_notification": "failed",
+    "gmail_notification_error": "eligible_linked_account_required",
+    "gmail_notification_attempt_at": "2026-10-02T17:16:00+08:00",
+    "gmail_notification_retry": "not_attempted_per_project_rule"
   },
   "changes": [
     {
@@ -2164,6 +2168,15 @@
       "after_revision": "v0.0.56",
       "verification": "Product deployed and CI passed; task intentionally remains blocked pending live QQ client retest",
       "changed_at": "2026-10-02T17:12:00+08:00"
+    },
+    {
+      "location_type": "gmail",
+      "provider": "Gmail",
+      "resource_id_or_path": "ray20123315@gmail.com",
+      "action": "notification_attempt_failed",
+      "branch_or_container": "notification_evidence",
+      "verification": "send_email failed: link_id must identify an eligible linked account; no retry attempted",
+      "changed_at": "2026-10-02T17:16:00+08:00"
     }
   ],
   "internal_memory_transaction": {
