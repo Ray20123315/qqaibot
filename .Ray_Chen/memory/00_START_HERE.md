@@ -1,16 +1,16 @@
 # Ray_Chen Memory Entry
 
-- memory_version: v0.0.59
+- memory_version: v0.0.60
 - project: QQAIBOT
 - repository: Ray20123315/QQAIBOT
 - canonical_branch: main
 - development_branch: v4-qqopen-native
 - task_id: qqaibot-20261001-panel-complete-real-message-send
-- task_status: active
+- task_status: blocked
 - goal_revision: 5
-- verified_product_revision: 668525a1db65402c8428cfa03930c8c77f255240
-- deployed_main_revision: 5f40bf4ade906a0eae7aa555eac70225f054665e
-- updated_at: 2026-10-02T18:36:00+08:00
+- verified_product_revision: 232e2577558dd67fffab769ac474243956bf8435
+- deployed_main_revision: 232e2577558dd67fffab769ac474243956bf8435
+- updated_at: 2026-10-02T18:42:00+08:00
 
 ## Production Repair State
 
@@ -37,17 +37,26 @@ At 2026-10-02T17:50:41+08:00, the user sent `/!面板 群聊`. The bot replied o
 
 Current diagnosis: the message send itself succeeds, but the QQ client does not render the attached custom inline keyboard. Tencent's current Node SDK documents plain-text + inline keyboard, while the deployed payload contains additional compatibility fields beyond the minimal SDK example.
 
-## Current Implementation
+## Production Repair State
 
-Compatibility patch produced on development branch:
-- commit: `2dd39fc24d8d9d8c1d4a6402c6f716890bfa146e`
-- removes generated `group_id`, `unsupport_tips`, explicit `reply:false`, and explicit `enter:false`;
-- keeps required `type + permission + data`;
-- keeps `enter:true` only for direct-send/pagination buttons;
-- adds exact minimal-payload regression assertions.
+The minimal Tencent-compatible inline-keyboard payload repair is deployed to production.
 
-CI run `36996070358` executed and failed only in `verify-v4-qqopen.mjs:226`: one stale pagination assertion still expected explicit `reply:false`. The product serializer change itself reached the V4 check; the stale assertion is now being corrected.
+- product/main revision: `232e2577558dd67fffab769ac474243956bf8435`
+- development validation run: `36996324380` — success
+- main validation run: `36996506963` — success
+- Cloudflare Connected Build: `18614133-1169-402a-a9b9-5d9c4b34f0bb` — success
+- prior package run: `36996507133` — success
+- prior package artifact: `11222360778` (`ray-chen-memory-v0.0.59`)
+
+Keyboard serialization now uses:
+- parameterized command: `type + permission + data`
+- direct/pagination command: same plus `enter:true`
+- generated `reply:false`, `enter:false`, `unsupport_tips`, and `group_id` are omitted.
+
+## Blocker
+
+PENDING_USER: automated tests prove the payload and deployment, but only the live QQ client can prove that the platform now renders the buttons. If the client still returns only the title text, the remaining dependency is most likely the QQ application message-button/custom-keyboard capability rather than missing category data.
 
 ## next_exact_action
 
-Resolve the development CI execution path and run/observe the V4 verification for `2dd39fc24d8d9d8c1d4a6402c6f716890bfa146e`. Do not promote to main before verified success.
+In QQ, send `/!面板 群聊` once. Report whether visible clickable child-command buttons appear. If they do, click one direct command and one parameterized command to confirm send-vs-prefill behavior.

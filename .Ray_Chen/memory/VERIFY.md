@@ -87,3 +87,22 @@ Verification state:
 - stale expected value: `false`
 - cause: pagination assertion still required explicit `action.reply=false` after the minimal-payload change intentionally removed the field
 - repair: replace the stale equality check with absence assertions for `reply`, `unsupport_tips`, and `group_id`
+
+
+## Goal Revision 5 — Production Verification
+
+- verified product/main revision: `232e2577558dd67fffab769ac474243956bf8435`
+- development validation `36996324380`: success
+- main validation `36996506963`: success
+- main validation steps: general regression, V3, V4 QQ Open, isolated V4 deployment checks, Worker bundle — all success
+- Cloudflare Connected Build `18614133-1169-402a-a9b9-5d9c4b34f0bb`: `status=stopped`, `build_outcome=success`
+- Cloudflare build metadata branch: `main`
+- Cloudflare build metadata commit: `232e2577558dd67fffab769ac474243956bf8435`
+- Ray_Chen package run `36996507133`: success
+- artifact `11222360778`: `ray-chen-memory-v0.0.59`
+
+Final acceptance gate:
+1. send `/!面板 群聊` in live QQ;
+2. confirm buttons render;
+3. click a direct command and confirm QQ actually sends the command message;
+4. click a parameterized command and confirm it prefills for editing.

@@ -1,7 +1,7 @@
 # ACTIVE_TASK
 
 task_id: qqaibot-20261001-panel-complete-real-message-send
-task_status: active
+task_status: blocked
 goal_revision: 5
 
 ## Goal
@@ -29,11 +29,11 @@ Fix the live QQ category panel so `/!面板 <分类>` renders an actually clicka
 
 ## Current Phase
 
-Phase 2 — development verification.
+Phase 4 — production live-client acceptance.
 
 ## Current Step
 
-Product patch `2dd39fc24d8d9d8c1d4a6402c6f716890bfa146e` is PRODUCED on `v4-qqopen-native`; CI result is pending.
+Product code is VERIFIED and DEPLOYED at `232e2577558dd67fffab769ac474243956bf8435`. Only the live QQ client rendering/click behavior remains unverified.
 
 ## Execution Plan
 
@@ -51,12 +51,12 @@ Product patch `2dd39fc24d8d9d8c1d4a6402c6f716890bfa146e` is PRODUCED on `v4-qqop
 
 ## Verification Results
 
-- PRODUCED: development commit `2dd39fc24d8d9d8c1d4a6402c6f716890bfa146e`.
-- VERIFIED by source patch guards: only intended keyboard generator/normalizer/test blocks were replaced.
-- FAILED then REPAIRING: CI `36996070358` failed at `verify-v4-qqopen.mjs:226` because a pagination test still expected explicit `reply:false`; product code did not fail before that assertion.
-- PENDING: main promotion.
-- PENDING: production deployment.
-- PENDING: live QQ smoke.
+- VERIFIED: development CI `36996324380` success, including V4 QQ Open checks and Worker bundle.
+- VERIFIED: main CI `36996506963` success.
+- VERIFIED: Cloudflare Connected Build `18614133-1169-402a-a9b9-5d9c4b34f0bb` for commit `232e2577558dd67fffab769ac474243956bf8435` finished with `build_outcome=success`.
+- VERIFIED: `main` points to `232e2577558dd67fffab769ac474243956bf8435`.
+- VERIFIED: Ray_Chen package run `36996507133` produced artifact `11222360778` for v0.0.59.
+- BLOCKED/PENDING_USER: live QQ rendering/click behavior after this production deployment.
 
 ## Known Risk
 
@@ -64,6 +64,6 @@ QQ custom inline keyboards are an application capability. If the minimal officia
 
 ## next_exact_action
 
-Commit the stale pagination-assertion fix, then require a fully green development CI before main promotion.
+User sends `/!面板 群聊` once in QQ and reports whether the child-command buttons are visible. If visible, verify one direct-send button and one parameterized prefill button.
 
-last_checkpoint_at: 2026-10-02T18:36:00+08:00
+last_checkpoint_at: 2026-10-02T18:42:00+08:00

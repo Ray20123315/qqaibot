@@ -43,10 +43,22 @@ Development commit `2dd39fc24d8d9d8c1d4a6402c6f716890bfa146e`:
 - runtime normalization no longer re-injects those fields;
 - exact payload regression assertions were added.
 
+## Production Verification — Goal Revision 5
+
+- deployed product revision: `232e2577558dd67fffab769ac474243956bf8435`
+- development CI: `36996324380` — success
+- main CI: `36996506963` — success
+- Cloudflare build: `18614133-1169-402a-a9b9-5d9c4b34f0bb` — success
+- production build source branch: `main`
+- production build commit: `232e2577558dd67fffab769ac474243956bf8435`
+- package workflow `36996507133`: success
+- package artifact `11222360778`: `ray-chen-memory-v0.0.59`
+
 ## Remaining State
 
-- code compatibility repair: PRODUCED
-- development CI: FAILED run `36996070358`; failure isolated to stale pagination assertion expecting `reply:false`
-- main CI: pending
-- production deployment: pending
-- live QQ render/click after repair: pending
+- code compatibility repair: VERIFIED
+- development CI: VERIFIED
+- main CI: VERIFIED
+- production deployment: VERIFIED
+- live QQ inline-keyboard visibility: BLOCKED / PENDING_USER
+- direct-send vs parameterized-click live behavior: BLOCKED / PENDING_USER
