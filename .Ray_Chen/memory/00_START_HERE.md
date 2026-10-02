@@ -1,6 +1,6 @@
 # Ray_Chen Memory Entry
 
-- memory_version: v0.0.54
+- memory_version: v0.0.55
 - project: QQAIBOT
 - repository: Ray20123315/QQAIBOT
 - canonical_branch: main
@@ -8,74 +8,62 @@
 - task_id: qqaibot-20261001-v4-preview-user-acceptance
 - task_status: active
 - goal_revision: 5
-- product_revision: aaa7cc3b3a846ea37dc6a7efbfc9db831add29ce
-- updated_at: 2026-10-01T23:02:00+08:00
+- product_revision: 95af14b3d66b0ac22ddc05f638e74186285f1601
+- updated_at: 2026-10-02T17:20:00+08:00
 
 ## Current Goal
 
-Keep all V4 acceptance work off production. Make real-browser reload preserve Portal authentication and reproduce the user-provided reference's obvious transition system, not merely its animated background. Do not live-test Bot behavior in real QQ groups because there is no isolated Bot/canary path.
+Keep all V4 acceptance work off production. Persistent login is user-accepted; current acceptance focus is making Portal page transitions visibly match the supplied reference without intrusive motion controls or layout-breaking notifications. Do not live-test Bot behavior in real QQ groups because there is no isolated Bot/canary path.
 
-## Root Causes Confirmed
+## User Acceptance State
 
-- Reload logout root cause #1: the Portal script still contained an unconditional `$('runSimulator').onclick=...` binding after the simulator DOM had been removed. That null dereference occurred before the final `boot();`, so a refreshed page never ran authentication restoration and stayed on the initial login screen.
-- Reload logout root cause #2: incidental Portal API 401 responses could call `showLogin()` while `/api/portal/me` was still restoring the remember session.
-- Transition root cause: page-enter/stagger work was triggered outside the View Transition update callback, allowing the animation to run before the new view became visible.
-- Motion mismatch: the supplied reference defaults to its own `full` motion mode; it does not silently disable the transition system based on OS reduced-motion preference.
+- User explicitly confirmed persistent login now works.
+- User rejected the visible motion-control/status placement shown in the screenshot and said the transition animation was still incomplete.
+- Current implementation removes the motion toggle from the Portal, keeps the animated background, and uses deterministic leave/enter/stagger/ripple transitions.
 
 ## Verified Product State
 
-- Feature head: `aaa7cc3b3a846ea37dc6a7efbfc9db831add29ce`.
-- Final GitHub CI run `36879734052`: SUCCESS across repository regression, V3, V4 QQ Open, isolated V4 deployment checks and single Worker bundle.
-- Cloudflare Connected Build `04d90ceb-db5a-4bab-b9eb-c1f573be583c`: SUCCESS.
-- Worker version 2217 / `a371d22a-5dd9-4e82-a9e0-f1cc64553406`.
-- Persistent auth still uses HttpOnly `qqai_session` + `qqai_remember`, remember rotation/revocation, and session reconstruction when the original server session is absent.
-- Portal boot now applies/binds motion mode, performs the shared `/api/portal/me` auth recovery, and only then runs optional UI bootstrap steps under failure isolation.
-- Non-/me Portal API 401s share one `portalAuthRecovery` promise and retry after /me succeeds.
-- The stale simulator bootstrap handler is removed.
-- Transition rendering now executes page activation, title/subtitle animation, page-enter, stagger, motion bar and nav indicator from inside the View Transition update callback.
-- Motion mode defaults to `full` and the topbar exposes `動效：完整／精簡`.
-- Numeric counters use reference-style easing.
+- Feature head: `95af14b3d66b0ac22ddc05f638e74186285f1601`.
+- Final GitHub CI run `36988519024`: SUCCESS across repository regression, V3, V4 QQ Open, isolated V4 deployment checks and single Worker bundle.
+- Cloudflare Connected Build `4e7b2549-b0c3-4c8c-bede-25f219b4ba98`: SUCCESS.
+- Worker version 2227 / `e9301249-0cd6-453f-951e-7a5e5ecee9d9`.
+- Persistent auth still uses HttpOnly `qqai_session` + `qqai_remember`, serialized /me recovery and missing-session reconstruction.
+- The separate motion-mode control is removed.
+- Browser View Transition code is removed from Portal view switching.
+- Current page switch sequence is deterministic: old view leaves for 0.22s; destination enters for 0.55s; card/content stagger runs after activation.
+- Ripple uses 0.55s ease-out.
+- Toast is fixed bottom-center, max width 360px, with 0.24s slide/fade; it does not affect layout.
+- Strong purple/cyan aurora, pointer glow, title/subtitle animation, numeric easing, nav indicator and motion bar remain.
 
 ## Stable Preview
 
 - URL: `https://feature-v4-public-bot-qqai.ray20123315.workers.dev/`
 - preview id: `068adb610f4d47daa65c1376e021787f`
-- deployment: `3b66f8c8-bd9b-470b-83e7-9c41c3720004`
-- deployment number: 19
-- source annotation: `aaa7cc3b3a846ea37dc6a7efbfc9db831add29ce`
+- deployment: `6ba45208-40af-44b4-b0fb-d0097ca96b56`
+- deployment number: 25
+- source annotation: `95af14b3d66b0ac22ddc05f638e74186285f1601`
 - isolated D1 table: `kv_store_v4public_preview`
 - `QQ_OPEN_ENABLED=false`
+- `V4_PREVIEW_TEST_LOGIN=true`
 - production-sensitive bindings: absent
 
 ## Live Verification
 
-Transition probe on Preview #19:
-- `data-motion=full`
-- motion toggle bound = 1
-- destination: health/system diagnostics
-- View Transition invoked = 1
-- destination view active = true
-- destination had `qqai-view-enter` during the transition
-- 36 animations were running at the observation point
-- running animations included `qqaiPageInStrong`, multiple `qqaiRiseInStrong`, `qqaiMotionSweepStrong`, `qqaiVtOldStrong` and `qqaiVtNewStrong`
-- page title/subtitle changed to 系统诊断 / 快速检查连线、模型与服务状态
-- page-enter was removed after completion while the destination remained active
-
-Reload probe on Preview #19:
-- login once, then actual `location.reload()`
-- final app class: `app`
-- final login class: `login hidden`
-- final `data-motion=full`
-- identity remained `v4-preview-test 系统管理员`
-- final HTTP/origin status 200
+Transition probe on Preview #25:
+- 80ms after navigation: old overview view had `qqai-view-leave=true`, destination health was not active, and one ripple existed.
+- after activation: health active=true, `qqai-view-enter=true`, 7 destination animations were running.
+- observed names included `qqaiPageInRef`, `qqaiCardInRef` and `qqaiContentFade`.
+- final title/subtitle: 系统诊断 / 快速检查连线、模型与服务状态.
+- toast live geometry: fixed, bottom 26px, width 360px, centered at viewport x=720 with full opacity.
+- final reload smoke: app class `app`, login class `login hidden`.
 
 ## Bot / Production Constraints
 
 - No live QQ-group Bot test was run.
 - `main` remains untouched.
-- Do not merge until the user manually accepts V4.
+- Do not merge until the user manually accepts V4 visual behavior.
 - Preview-only highest-privilege acceptance login must be removed or disabled before production merge.
 
 ## Resume Rule
 
-Resume from v0.0.54. The next exact action is user real-browser acceptance on Preview #19: login once, reload, and switch between multiple sidebar pages to confirm persistent login and the reference-style transitions are visibly correct.
+Resume from v0.0.55. The next exact action is user real-browser acceptance on Preview #25: switch between multiple sidebar pages and confirm the deterministic transition cadence now looks like the supplied reference. Persistence is already accepted; Bot live testing remains paused.

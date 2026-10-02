@@ -148,8 +148,21 @@ Decision: only /api/portal/me consumes the remember credential. Other Portal API
 Reason: concurrent API requests must not race each other while rotating the remember credential or prematurely call showLogin().
 
 ## D-097 Reference transitions run inside the View Transition update
-status: accepted
+status: superseded
+superseded_by: D-098
 date: 2026-10-01
 Decision: page activation, title/subtitle animation, page-enter class, stagger animation, motion bar and nav-indicator update execute inside the document.startViewTransition update callback. Motion mode defaults to full and is changed only through the Portal's explicit 完整/精簡 control.
 Reason: running page-enter outside the update callback can consume the animation while the new page is still hidden; the supplied reference performs its page render and page-enter work inside the transition update.
+
+## D-098 Deterministic reference transitions replace View Transition
+status: accepted
+date: 2026-10-02
+Decision: Portal page changes use an explicit deterministic sequence: current view leave -> delayed destination activation -> destination page/card/content enter animations. The current leave duration is 0.22s; destination page entry is 0.55s from translateY(18px) scale(.985); child cards/content stagger independently; ripple feedback uses 0.55s.
+Reason: the user reported that the prior View Transition implementation was visually incomplete. Browser View Transition scheduling made timing harder to reason about and could hide or consume custom page-enter effects. The deterministic sequence is directly observable and matches the supplied reference cadence more closely.
+
+## D-099 Motion controls do not occupy Portal layout
+status: accepted
+date: 2026-10-02
+Decision: do not expose a separate 動效：完整／精簡 control in the Portal topbar/content. Keep motion active by default and honor prefers-reduced-motion for accessibility. Toast feedback is a fixed bottom-center overlay with compact dimensions and does not participate in layout.
+Reason: user screenshot showed the motion-control/toast treatment visually intruding into the page and explicitly rejected that placement.
 

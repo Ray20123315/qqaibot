@@ -2,12 +2,12 @@
 
 ## Product Revision
 
-`aaa7cc3b3a846ea37dc6a7efbfc9db831add29ce`
+`95af14b3d66b0ac22ddc05f638e74186285f1601`
 
 ## GitHub
 
 Final CI:
-- run: `36879734052`
+- run: `36988519024`
 - conclusion: SUCCESS
 - repository regression: success
 - V3 regression: success
@@ -15,66 +15,69 @@ Final CI:
 - isolated V4 deployment checks: success
 - single Worker bundle: success
 
-Regression coverage added in this round:
-- removed simulator handler cannot remain as an unguarded bootstrap binding;
-- boot authentication recovery must occur before optional UI bootstrap;
-- ordinary Portal API calls must not consume remember state directly;
-- when an ordinary API returns 401, the client shares a single /me recovery and retries;
-- reference transition sequencing requires title/subtitle, stagger, nav indicator and page-enter inside the View Transition update;
-- Portal motion defaults to `full` via the explicit motion setting, not OS preference.
+Transition regression coverage:
+- no motionToggle/motion-mode control is rendered;
+- no document.startViewTransition path remains;
+- deterministic view leave/enter classes are required;
+- leave cadence is 0.22s;
+- page entry cadence is 0.55s and starts at translateY(18px) scale(.985);
+- card/content entry keyframes remain present;
+- view activation waits 220ms after leave begins;
+- ripple cadence is 0.55s ease-out;
+- toast must be bottom-center, max width 360px and slide/fade when visible;
+- auth/reload regressions from v0.0.54 remain intact.
 
 ## Cloudflare Feature Build
 
-- build UUID: `04d90ceb-db5a-4bab-b9eb-c1f573be583c`
+- build UUID: `4e7b2549-b0c3-4c8c-bede-25f219b4ba98`
 - branch: `feature/v4-public-bot`
-- commit: `aaa7cc3b3a846ea37dc6a7efbfc9db831add29ce`
+- commit: `95af14b3d66b0ac22ddc05f638e74186285f1601`
 - outcome: SUCCESS
-- Worker version: 2217
-- Worker version id: `a371d22a-5dd9-4e82-a9e0-f1cc64553406`
+- Worker version: 2227
+- Worker version id: `e9301249-0cd6-453f-951e-7a5e5ecee9d9`
 
 ## Stable Preview
 
 - preview id: `068adb610f4d47daa65c1376e021787f`
 - URL: `https://feature-v4-public-bot-qqai.ray20123315.workers.dev/`
-- deployment: `3b66f8c8-bd9b-470b-83e7-9c41c3720004`
-- deployment number: 19
-- source annotation: `aaa7cc3b3a846ea37dc6a7efbfc9db831add29ce`
+- deployment: `6ba45208-40af-44b4-b0fb-d0097ca96b56`
+- deployment number: 25
+- source annotation: `95af14b3d66b0ac22ddc05f638e74186285f1601`
 
 Isolation read-back:
 - `QQAI_DB_TABLE=kv_store_v4public_preview`
 - `QQ_OPEN_ENABLED=false`
 - `V4_PREVIEW_TEST_LOGIN=true`
-- production QQ/OneBot/AI/Vectorize/Portal-admin sensitive bindings: absent
+- production QQ/OneBot/AI/Codex/Portal-admin sensitive bindings: absent
 
 ## Live Transition Proof
 
-Chromium on Preview #19:
-- `data-motion=full`
-- `motionToggle.dataset.bound=1`
-- selected destination: health
-- View Transition invoked once
-- `updateCallbackDone=ok`, `finished=ok`
-- destination active=true
-- destination had `qqai-view-enter` during the observation
-- 36 animations running during the transition
-- observed: `qqaiPageInStrong`, multiple `qqaiRiseInStrong`, `qqaiMotionSweepStrong`, `qqaiVtOldStrong`, `qqaiVtNewStrong`
-- title/subtitle changed to 系统诊断 / 快速检查连线、模型与服务状态
-- destination remained active after animation cleanup
+Chromium on Preview #25:
+1. One Preview login completed; app visible.
+2. Health nav received pointerdown and click.
+3. At ~80ms: old overview had `qqai-view-leave=true`, health active=false, ripple count=1.
+4. After activation: health active=true, `qqai-view-enter=true`, 7 subtree animations running.
+5. Observed animation names included `qqaiPageInRef`, `qqaiCardInRef`, `qqaiContentFade`.
+6. Final title/subtitle changed correctly.
+
+## Live Toast Proof
+
+On 1440px viewport:
+- width: 360px
+- height: 64px
+- position: fixed
+- horizontal center: x=720 with translateX(-180px)
+- bottom: 26px
+- opacity: 1 while shown
+
+This fixes the screenshot issue where notification/control UI visually occupied a large content strip.
 
 ## Live Reload Proof
 
-Chromium on Preview #19:
-1. Preview login button clicked once.
-2. App became visible.
-3. Browser executed actual `location.reload()`.
-4. Final DOM:
-   - app class: `app`
-   - login class: `login hidden`
-   - motion: `full`
-   - identity: `v4-preview-test 系统管理员`
-   - root/origin HTTP: 200
-
-This is the first automated full-reload proof in this task that ends on the authenticated app rather than the login page.
+On Preview #25 after login then actual reload:
+- final app class: `app`
+- final login class: `login hidden`
+- HTTP/origin status: 200
 
 ## Bot Verification Boundary
 

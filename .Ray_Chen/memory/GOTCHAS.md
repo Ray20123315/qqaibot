@@ -96,6 +96,7 @@ Risk: an unconditional binding such as $('runSimulator').onclick throws when the
 Mitigation: remove obsolete handlers or guard optional elements; keep authentication recovery ahead of optional UI bootstrap. Regression forbids the removed runSimulator binding.
 
 ## G-091 Page-enter animation outside ViewTransition can be invisible
+status: superseded_by G-094
 Risk: calling animatePortalView() immediately after startViewTransition() can run the animation before the browser executes the transition update callback, so the class expires while the destination view is still hidden.
 Mitigation: activate the destination view and start page-enter/stagger/title/nav/motion-bar work inside the View Transition update callback, matching the supplied reference.
 
@@ -104,6 +105,19 @@ Risk: if multiple Portal APIs independently consume a one-time remember credenti
 Mitigation: only /api/portal/me performs remember recovery. All other API 401 paths await the same shared /me recovery promise and retry afterwards.
 
 ## G-093 Motion preference is a Portal control, not an implicit OS override
+status: superseded_by G-095
 Risk: automatically honoring prefers-reduced-motion can make the user's requested obvious transitions disappear even though the Portal UI says nothing about reduced animation.
 Mitigation: follow the supplied reference: motion defaults to full and the user explicitly switches between 動效：完整 and 動效：精簡. Reduced mode remains available through that control.
+
+## G-094 Browser View Transition can obscure custom transition timing
+Risk: mixing document.startViewTransition snapshots with independent page-enter/stagger animations can make effects technically run while remaining visually weak or out of phase.
+Mitigation: use a deterministic two-stage view switch: animate the active view out, activate the destination after the leave duration, then run page/card/content entry effects. Regression owns the exact timing and animation classes.
+
+## G-095 Motion-control UI can become the visual bug
+Risk: adding a dedicated motion toggle or large status notification to prove animations exist can itself overlap content, distract from the dashboard, or reproduce the user's screenshot complaint.
+Mitigation: no separate motion-mode control is rendered. Respect prefers-reduced-motion silently. Keep toast feedback fixed, compact and outside document layout.
+
+## G-096 Transition duration that is technically present can still be imperceptible
+Risk: short 0.16/0.34 second leave/enter timing was visible to automated animation inspection but still felt like no transition to the user.
+Mitigation: align the main cadence with the supplied reference: 0.22s leave, 0.55s page entry, 0.52s card entry, 0.46s content fade and 0.55s ripple, with visible stagger delays.
 

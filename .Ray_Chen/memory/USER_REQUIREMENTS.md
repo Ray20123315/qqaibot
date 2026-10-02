@@ -36,7 +36,9 @@
 
 - Do not live-test Bot behavior in existing QQ groups while there is no isolated Bot/canary route; such tests create real group-chat side effects.
 - Portal login must complete with a single credential submission without requiring a page reload. When "keep me signed in" is selected, persistent login must work across all supported Portal login modes, including privileged accounts, and must recover from a missing HttpOnly session cookie without asking for credentials again.
-- The V4 Portal background and transition motion should follow the user-provided dark glass / purple-cyan aurora reference, including its clearly visible View Transition, page-enter, stagger, title/subtitle motion, numeric easing, moving nav indicator and motion bar. Motion defaults to 完整; the Portal's explicit 完整／精簡 control is authoritative.
+- The V4 Portal background and transition motion should follow the user-provided dark glass / purple-cyan aurora reference. Page changes must be visibly obvious, including leave/enter, staggered content, title/subtitle motion, numeric easing, moving nav indicator, motion bar and ripple feedback.
+- Do not add a separate motion-mode control that occupies Portal content or overlaps the layout. Motion should work by default; accessibility reduction may follow the browser/OS reduced-motion preference.
+- Toast/status notifications must be compact, fixed-position overlays that do not affect page layout or cover large portions of the content.
 
 ## V4 Preview Acceptance Gate
 
