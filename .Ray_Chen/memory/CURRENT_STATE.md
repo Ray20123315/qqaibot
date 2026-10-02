@@ -1,30 +1,33 @@
 # CURRENT_STATE
 
-## Development
+## Production
 
-- branch: `v4-qqopen-native`
-- verified product revision: `668525a1db65402c8428cfa03930c8c77f255240`
-- CI: `36883833197` — success
+- main trigger revision: `5f40bf4ade906a0eae7aa555eac70225f054665e`
+- verified product code: `668525a1db65402c8428cfa03930c8c77f255240`
+- development CI: `36883833197` — success
+- main CI: `36988176740` — success
+- Cloudflare Connected Build: `e33665d0-549a-4926-a797-2add410f2dca` — success
 
-## Fixed Behavior
+## Deployed Keyboard Transport
 
-- inline keyboard card: `msg_type:0 + content + keyboard`
-- no Markdown dependency for command-panel keyboard cards
-- successful card body: title/prompt only
-- emergency fallback copy: separate metadata, used only after a QQ keyboard capability error
-- diagnostic marker on fallback: `QQ_OPEN_KEYBOARD_FALLBACK`
+- message type: `msg_type:0`
+- body: `content + keyboard`
+- no Markdown dependency
+- successful card body excludes fallback command list
+- fallback text is separate and used only after QQ rejects the keyboard
+- keyboard failures log `QQ_OPEN_KEYBOARD_FALLBACK`
 
-## Preserved Button Semantics
+## Preserved Semantics
 
 - direct command: `type=2 + enter=true + reply=false`
 - parameterized command: `type=2 + enter=false`
-- pagination remains reusable
+- pagination: reusable command button
 - no mandatory `click_limit`
 
-## Production
+## Remaining State
 
-- current main still at pre-repair checkpoint: `080bfe7f0a8e2b8fb6686515ea2a5c914a8fb183`
-- main promotion: PENDING
-- main CI: PENDING
-- Cloudflare production Connected Build: PENDING
-- live QQ retest: PENDING_USER
+- code: VERIFIED
+- development CI: VERIFIED
+- main CI: VERIFIED
+- production deployment: VERIFIED
+- live QQ render/click: BLOCKED / PENDING_USER

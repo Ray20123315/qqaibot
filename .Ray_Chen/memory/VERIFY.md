@@ -1,41 +1,40 @@
 # VERIFY
 
-## Goal Revision 4 — Development Evidence
+## Goal Revision 4 — Production Evidence
 
 - product revision: `668525a1db65402c8428cfa03930c8c77f255240`
-- development CI: `36883833197` — success
-- regression checks: success
-- V3 regression checks: success
-- V4 QQ Open regression checks: success
-- isolated deployment checks: success
-- Worker bundle: success
+- development CI `36883833197`: success
+- main CI `36988176740`: success
+- Cloudflare Connected Build `e33665d0-549a-4926-a797-2add410f2dca`: success
+- v0.0.55 archive SHA-256: `34955b976e6ca788c3447d8e75bd6511e45c5df5ba784820bf4e20a52c6cdce1`
 
 ## Payload Invariants
 
-For a keyboard card:
 - `msg_type === 0`
-- `content` is present
-- `keyboard.content.rows` is present
-- `markdown` is absent
-- ordinary message replies retain `msg_id` / `msg_seq`
-- interaction replies retain `event_id`
+- `content` present
+- `keyboard.content.rows` present
+- no required `markdown`
+- ordinary message reply preserves `msg_id` / `msg_seq`
+- interaction reply preserves `event_id`
 
 ## UX Invariants
 
-- normal successful card does not show `备用文字`
-- emergency fallback copy exists separately
-- fallback copy is selected only after a keyboard capability error
-- keyboard failure emits `QQ_OPEN_KEYBOARD_FALLBACK`
+- successful card does not contain `备用文字`
+- fallback copy exists separately
+- fallback copy is used only after keyboard capability error
+- keyboard fallback emits `QQ_OPEN_KEYBOARD_FALLBACK`
 
 ## Button Invariants
 
-- direct command: type=2, enter=true, reply=false
-- parameterized command: type=2, enter=false
+- direct: type=2, enter=true, reply=false
+- parameterized: type=2, enter=false
 - reusable: no mandatory click_limit
 - pagination: clickable command action
 
-## Remaining Gates
+## Final Gate
 
-- main CI: PENDING
-- Cloudflare Connected Build: PENDING
-- live QQ render/click smoke: PENDING_USER
+BLOCKED/PENDING_USER:
+1. send `/!面板 群聊` in QQ;
+2. confirm visible clickable buttons;
+3. click one direct command and confirm the QQ message is actually sent;
+4. click one parameterized command and confirm it prefills instead of sending immediately.

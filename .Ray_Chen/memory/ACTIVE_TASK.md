@@ -1,7 +1,7 @@
 # ACTIVE_TASK
 
 task_id: qqaibot-20261001-panel-complete-real-message-send
-task_status: active
+task_status: blocked
 goal_revision: 4
 
 ## Goal
@@ -10,17 +10,16 @@ Fix the live QQ category panel so `/!面板 <分类>` renders an actually clicka
 
 ## Acceptance Criteria
 
-- VERIFIED development: inline keyboard reply uses `msg_type:0 + content + keyboard`.
-- VERIFIED development: successful card copy excludes `备用文字`.
-- VERIFIED development: fallback text is only emitted after a keyboard capability rejection.
-- VERIFIED development: direct child commands remain `type=2 + enter=true`.
-- VERIFIED development: parameterized child commands remain `type=2 + enter=false`.
-- VERIFIED development: pagination remains a reusable clickable command.
-- VERIFIED development: relationship and werewolf features remain retired.
-- VERIFIED development CI: `36883833197` success.
-- PENDING: main CI.
-- PENDING: production Connected Build.
-- PENDING_USER: live QQ render/click smoke.
+- VERIFIED code/transport: keyboard card uses `msg_type:0 + content + keyboard`.
+- VERIFIED code/transport: successful card excludes `备用文字`.
+- VERIFIED code/transport: fallback copy is selected only after a keyboard capability rejection.
+- VERIFIED code/transport: direct child commands remain `type=2 + enter=true`.
+- VERIFIED code/transport: parameterized child commands remain `type=2 + enter=false`.
+- VERIFIED code/transport: pagination remains reusable/clickable.
+- VERIFIED: development CI `36883833197` success.
+- VERIFIED: main CI `36988176740` success.
+- VERIFIED: Cloudflare Connected Build `e33665d0-549a-4926-a797-2add410f2dca` success.
+- BLOCKED/PENDING_USER: live QQ must actually display and allow clicking the buttons.
 
 ## Product Files Changed
 
@@ -29,16 +28,12 @@ Fix the live QQ category panel so `/!面板 <分类>` renders an actually clicka
 - worker.js
 - verify-v4-qqopen.mjs
 
-## Current Phase
+## Blocker
 
-IN_PROGRESS — development repair validated; promotion to main is next.
-
-## Blockers
-
-None.
+The automated environment cannot observe the QQ mobile/desktop client's rendered keyboard. User live smoke is required.
 
 ## next_exact_action
 
-Promote the validated checkpoint to `main`, then verify main CI and Cloudflare Connected Build.
+User sends `/!面板 群聊` in QQ and reports whether clickable buttons render.
 
-last_checkpoint_at: 2026-10-02T17:08:00+08:00
+last_checkpoint_at: 2026-10-02T17:12:00+08:00
