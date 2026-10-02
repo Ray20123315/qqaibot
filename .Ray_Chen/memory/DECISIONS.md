@@ -63,3 +63,10 @@ Decision: QQ native group discovery uses a compact category-root panel. Sending 
 status: accepted
 date: 2026-10-01
 Decision: master/partner relationship commands, handlers, categories and Portal management surfaces are removed. Legacy stored bindings and legacy relationship mute-lock types may remain only for safe cleanup/expiry compatibility and must not provide a path to create or manage new relationships.
+
+
+## D-084 Inline keyboard cards use plain-text QQ messages
+status: accepted
+date: 2026-10-02
+Decision: QQ category-panel replies carrying an inline keyboard use `msg_type:0 + content + keyboard`. They must not require Markdown permission. The normal card copy contains only the panel title/prompt; fallback command text is stored separately and is sent only after a real keyboard capability rejection.
+Reason: live QQ evidence on 2026-10-01 showed the forced Markdown keyboard path falling back to plain text without buttons.

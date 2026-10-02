@@ -1,14 +1,14 @@
 {
   "schema_version": 1,
-  "memory_version": "v0.0.54",
+  "memory_version": "v0.0.55",
   "task_id": "qqaibot-20261001-panel-complete-real-message-send",
   "goal_revision": 4,
-  "transaction": "qq_keyboard_live_render_repair_checkpoint_20261001",
+  "transaction": "qq_keyboard_plain_text_validation_20261002",
   "repository": "Ray20123315/qqaibot",
   "production_branch": "main",
   "development_branch": "v4-qqopen-native",
-  "product_before_revision": "9f78fc66547d278a72858bbd25a22f00dda7ba2a",
-  "product_after_revision": "0c4cc0aa55f9e01212b2a39cb979ee8de1ace1fe",
+  "product_before_revision": "0c4cc0aa55f9e01212b2a39cb979ee8de1ace1fe",
+  "product_after_revision": "668525a1db65402c8428cfa03930c8c77f255240",
   "verification": {
     "feature_product_ci_run": 36366445081,
     "regression_ci_run": 36366534308,
@@ -24,9 +24,9 @@
     "discovery_sync_after_fix": "pending_authenticated_status",
     "live_mapping_after_fix": "pending_user_test",
     "command_fallback_implementation": "verified",
-    "development_ci": "pending",
-    "main_update": "success",
-    "development_ci_run": 36878357756,
+    "development_ci": "success",
+    "main_update": "pending",
+    "development_ci_run": 36883833197,
     "main_ci": "pending",
     "production_commit": "9f78fc66547d278a72858bbd25a22f00dda7ba2a",
     "main_readback": "success",
@@ -137,7 +137,7 @@
     "all_category_pages_covered": "verified",
     "all_group_panel_commands_covered": "verified",
     "live_final_keyboard_smoke": "pending_user",
-    "current_repair": "live_keyboard_render_failed_plain_text_fallback",
+    "current_repair": "plain_text_keyboard_payload_validated_development",
     "direct_callback_live_semantics": "superseded_rejected_by_user",
     "target_direct_button_semantics": "type2_enter_true_real_message",
     "registry_runtime_reconciliation": "verified",
@@ -159,7 +159,11 @@
     "observed_reply": "plain_text_fallback_without_buttons",
     "suspected_keyboard_transport": "forced_markdown_payload",
     "tencent_sdk_plain_text_keyboard_reference": "verified",
-    "live_retest": "pending"
+    "live_retest": "pending_user",
+    "keyboard_payload_msg_type": 0,
+    "keyboard_payload_markdown_required": false,
+    "keyboard_fallback_copy": "separate_and_error_only",
+    "keyboard_fallback_logging": "QQ_OPEN_KEYBOARD_FALLBACK"
   },
   "changes": [
     {
@@ -2102,10 +2106,32 @@
       "after_revision": "v0.0.54",
       "verification": "Live QQ smoke failed: category reply rendered only fallback text; repair plan recorded before product patch",
       "changed_at": "2026-10-01T23:14:00+08:00"
+    },
+    {
+      "location_type": "github",
+      "provider": "GitHub",
+      "resource_id_or_path": "src/v4/commands/group-panel.js;src/v4/qqopen/runtime.js;verify-v4-qqopen.mjs;worker.js",
+      "action": "modified",
+      "branch_or_container": "v4-qqopen-native",
+      "before_revision": "080bfe7f0a8e2b8fb6686515ea2a5c914a8fb183",
+      "after_revision": "668525a1db65402c8428cfa03930c8c77f255240",
+      "verification": "Development CI 36883833197 success; exact plain-text keyboard payload regression passed",
+      "changed_at": "2026-10-02T17:08:00+08:00"
+    },
+    {
+      "location_type": "github",
+      "provider": "GitHub",
+      "resource_id_or_path": ".Ray_Chen/memory/*",
+      "action": "validation_checkpoint",
+      "branch_or_container": "v4-qqopen-native",
+      "before_revision": "v0.0.54",
+      "after_revision": "v0.0.55",
+      "verification": "Development repair validated; main promotion pending",
+      "changed_at": "2026-10-02T17:08:00+08:00"
     }
   ],
   "internal_memory_transaction": {
-    "action": "reopen task after live keyboard render failure; bump memory to v0.0.54",
-    "note": "No product files changed in this checkpoint."
+    "action": "record validated plain-text keyboard transport repair; bump memory to v0.0.55",
+    "note": "Main CI, production Connected Build, and live QQ retest remain pending."
   }
 }

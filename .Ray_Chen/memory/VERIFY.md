@@ -1,21 +1,31 @@
 # VERIFY
 
-## Goal Revision 4
+## Goal Revision 4 — Development Evidence
 
-Live failure:
-- command: `/!面板 群聊`
-- observed at: 2026-10-01 23:09:35 +08
-- result: fallback text only, no clickable buttons
+- product revision: `668525a1db65402c8428cfa03930c8c77f255240`
+- development CI: `36883833197` — success
+- regression checks: success
+- V3 regression checks: success
+- V4 QQ Open regression checks: success
+- isolated deployment checks: success
+- Worker bundle: success
 
-## Required Payload Invariant
+## Payload Invariants
 
-For a message reply carrying an inline keyboard:
+For a keyboard card:
 - `msg_type === 0`
-- `content` contains the panel text
+- `content` is present
 - `keyboard.content.rows` is present
-- do not require `markdown` for the panel keyboard path
-- preserve `msg_id` / `msg_seq` for ordinary message replies
-- preserve `event_id` for interaction replies
+- `markdown` is absent
+- ordinary message replies retain `msg_id` / `msg_seq`
+- interaction replies retain `event_id`
+
+## UX Invariants
+
+- normal successful card does not show `备用文字`
+- emergency fallback copy exists separately
+- fallback copy is selected only after a keyboard capability error
+- keyboard failure emits `QQ_OPEN_KEYBOARD_FALLBACK`
 
 ## Button Invariants
 
@@ -24,10 +34,8 @@ For a message reply carrying an inline keyboard:
 - reusable: no mandatory click_limit
 - pagination: clickable command action
 
-## Gates
+## Remaining Gates
 
-- product patch: PENDING
-- development CI: PENDING
 - main CI: PENDING
 - Cloudflare Connected Build: PENDING
-- live QQ render: PENDING
+- live QQ render/click smoke: PENDING_USER

@@ -37,3 +37,8 @@ Mitigation: sync categorized real-command panels from the canonical registry and
 ## G-076 QQ native group panel limits make it unsuitable as the complete command surface
 Risk: publishing every concrete command directly to QQ native group discovery can make the client show only a constrained subset, so valid commands appear missing.
 Mitigation: keep the native group panel compact with category launchers, then render the complete retained command set through the bot-managed paginated inline keyboard.
+
+
+## G-077 A valid keyboard object can still fail if wrapped in the wrong QQ message type
+Risk: forcing `msg_type:2 + markdown + keyboard` can make the whole card fail on a bot/client path without Markdown capability even though the inline keyboard itself is valid; automatic fallback then hides the real failure by sending only text.
+Mitigation: send panel keyboards as `msg_type:0 + content + keyboard`, regression-test the exact outbound body, log `QQ_OPEN_KEYBOARD_FALLBACK` on rejection, and keep emergency fallback copy separate from the successful card.
