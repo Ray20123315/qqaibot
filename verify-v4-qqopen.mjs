@@ -3,7 +3,7 @@ import fs from "node:fs";
 import { buildConnectivityReply, createQqOpenActionDispatcher, createQqOpenApiClient, createGatewayState, createHeartbeatPayload, createIdentifyPayload, createResumePayload, fromQqOpenEvent, qqOpenClosePolicy, qqOpenDeliveryKey, qqOpenDeliverySequence, qqOpenIntents, qqOpenPassiveReplyPolicy, qqOpenReconnectDelay, qqOpenShard, reduceGatewayPayload, syncQqOpenDiscovery } from "./src/v4/index.js";
 import { createInitialCommandRegistry } from "./src/v4/commands/catalog.js";
 import { GROUP_PANEL_CATEGORY_META, assertGroupPanelCoverage, buildGroupCategoryKeyboard, buildGroupRootPanel, normalizeGroupPanelSlashInvocation, resolveGroupPanelInput } from "./src/v4/commands/group-panel.js";
-import { buildInlineKeyboardMessageBody } from "./src/v4/qqopen/runtime.js";
+import { QqOpenGateway, buildInlineKeyboardMessageBody } from "./src/v4/qqopen/runtime.js";
 
 const group = fromQqOpenEvent({ t:"GROUP_MESSAGE_CREATE", s:42, d:{ id:"msg-1", group_openid:"group-A", timestamp:"2026-09-27T08:00:00Z", content:" hello ", author:{ member_openid:"member-A", member_role:"admin", username:"Ray" }, attachments:[{content_type:"image/png",url:"https://example.com/a.png",filename:"a.png"}] } });
 assert.equal(group.platform, "qq-open");
@@ -346,6 +346,9 @@ assert.match(qqOpenRuntimeSource, /normalizeInlineKeyboard/);
 assert.match(qqOpenRuntimeSource, /buildInlineKeyboardMessageBody/);
 assert.match(qqOpenRuntimeSource, /keyboardCapabilityError/);
 assert.match(qqOpenRuntimeSource, /QQ_OPEN_CUSTOM_KEYBOARD_ENABLED/);
+assert.match(qqOpenRuntimeSource, /syncDiscoveryIfNeeded\(\{ reason:"ensure" \}\)/);
+assert.match(qqOpenRuntimeSource, /\/api\/v4\/qqopen\/discovery\/sync/);
+assert.match(qqOpenRuntimeSource, /previousFingerprint:\s*force\s*\?\s*""/);
 assert.match(qqOpenRuntimeSource, /customEnabled:\s*qqOpenCustomKeyboardEnabled/);
 assert.match(qqOpenRuntimeSource, /requestedKeyboard\s*&&\s*!keyboardEnabled/);
 assert.match(qqOpenRuntimeSource, /content,\s*\.\.\.extra,\s*msg_type:\s*0,\s*keyboard:/);
@@ -547,6 +550,70 @@ const callCountAfterFirst = discoveryCalls.length;
 const secondDiscovery = await syncQqOpenDiscovery(discoveryApi, registry, { previousFingerprint:firstDiscovery.fingerprint, developerOpenids:["dev-openid"] });
 assert.equal(secondDiscovery.changed, false);
 assert.equal(discoveryCalls.length, callCountAfterFirst);
+
+const runtimeDiscoveryCalls = [];
+const runtimeDiscoveryApi = {
+  putMenu: async menu => { runtimeDiscoveryCalls.push(["putMenu", menu]); return { ok:true }; },
+  listPanels: async ({scope,cursor,limit}) => {
+    runtimeDiscoveryCalls.push(["listPanels", scope, cursor, limit]);
+    return { records:[], next_cursor:"", is_end:true };
+  },
+  deletePanel: async id => { runtimeDiscoveryCalls.push(["deletePanel", id]); return { ok:true }; },
+  createPanel: async panel => { runtimeDiscoveryCalls.push(["createPanel", panel.scope, panel]); return { id:"runtime-" + runtimeDiscoveryCalls.length }; }
+};
+const runtimeGateway = new QqOpenGateway({}, {
+  QQ_OPEN_ENABLED:"true",
+  QQ_OPEN_APP_ID:"runtime-app",
+  QQ_OPEN_CLIENT_SECRET:"runtime-secret",
+  QQ_OPEN_DISCOVERY_SYNC:"true"
+});
+runtimeGateway.socket = { readyState:1 };
+runtimeGateway.apiClient = runtimeDiscoveryApi;
+const firstEnsureResponse = await runtimeGateway.fetch(new Request("https://qq-open-gateway/api/v4/qqopen/ensure", { method:"POST" }));
+assert.equal(firstEnsureResponse.status, 200);
+const firstEnsureStatus = await firstEnsureResponse.json();
+assert.equal(firstEnsureStatus.connected, true);
+assert.equal(firstEnsureStatus.discovery.lastError, "");
+assert.equal(firstEnsureStatus.discovery.lastReason, "ensure");
+assert.equal(firstEnsureStatus.discovery.lastChanged, true);
+assert(runtimeDiscoveryCalls.some(row => row[0] === "createPanel"), "connected ensure must reconcile discovery");
+const runtimeCallsAfterFirstEnsure = runtimeDiscoveryCalls.length;
+
+const secondEnsureResponse = await runtimeGateway.fetch(new Request("https://qq-open-gateway/api/v4/qqopen/ensure", { method:"POST" }));
+assert.equal(secondEnsureResponse.status, 200);
+const secondEnsureStatus = await secondEnsureResponse.json();
+assert.equal(secondEnsureStatus.discovery.lastChanged, false);
+assert.equal(runtimeDiscoveryCalls.length, runtimeCallsAfterFirstEnsure, "unchanged fingerprint must make minute ensure a no-op");
+
+const forceSyncResponse = await runtimeGateway.fetch(new Request("https://qq-open-gateway/api/v4/qqopen/discovery/sync", {
+  method:"POST",
+  headers:{ "content-type":"application/json" },
+  body:JSON.stringify({ force:true, reason:"regression" })
+}));
+assert.equal(forceSyncResponse.status, 200);
+const forceSyncStatus = await forceSyncResponse.json();
+assert.equal(forceSyncStatus.discoveryRun.force, true);
+assert.equal(forceSyncStatus.discoveryRun.reason, "regression");
+assert.equal(forceSyncStatus.discovery.lastForce, true);
+assert(runtimeDiscoveryCalls.length > runtimeCallsAfterFirstEnsure, "force sync must bypass the persisted fingerprint");
+
+const failedRuntimeGateway = new QqOpenGateway({}, {
+  QQ_OPEN_ENABLED:"true",
+  QQ_OPEN_APP_ID:"runtime-app",
+  QQ_OPEN_CLIENT_SECRET:"runtime-secret",
+  QQ_OPEN_DISCOVERY_SYNC:"true"
+});
+failedRuntimeGateway.socket = { readyState:1 };
+failedRuntimeGateway.apiClient = {
+  ...runtimeDiscoveryApi,
+  putMenu: async () => { throw new Error("QQ_OPEN_API_403:no panel permission"); }
+};
+const failedEnsureResponse = await failedRuntimeGateway.fetch(new Request("https://qq-open-gateway/api/v4/qqopen/ensure", { method:"POST" }));
+assert.equal(failedEnsureResponse.status, 200, "discovery failure must not drop a healthy gateway");
+const failedEnsureStatus = await failedEnsureResponse.json();
+assert.equal(failedEnsureStatus.connected, true);
+assert.match(failedEnsureStatus.discovery.lastError, /QQ_OPEN_API_403/);
+assert.equal(failedEnsureStatus.discovery.lastReason, "ensure");
 
 console.log("verify-v4-qqopen connectivity action dispatcher: ok");
 console.log("verify-v4-qqopen: ok");

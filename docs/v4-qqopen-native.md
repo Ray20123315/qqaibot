@@ -44,13 +44,14 @@ Configuration remains disabled by default:
 - `QQ_OPEN_CLIENT_SECRET=<Cloudflare Secret>`
 - `QQ_OPEN_INTENTS=100663296` for `GROUP_AND_C2C_EVENT (1 << 25) | INTERACTION (1 << 26)`; keyboard callbacks require the Interaction bit.
 
-The existing minute cron calls the gateway `ensure` endpoint when enabled and configured. Gateway `session_id` and `seq` are persisted in Durable Object storage so a recreated instance can attempt Resume.
+The existing minute cron calls the gateway `ensure` endpoint when enabled and configured. Each ensure pass also reconciles command/menu discovery against the current registry fingerprint, even when the Gateway WebSocket is already healthy; unchanged fingerprints are a no-op. Gateway `session_id` and `seq` are persisted in Durable Object storage so a recreated instance can attempt Resume.
 
 System-admin-only diagnostics:
 
 - `GET /api/v4/qqopen/status`
 - `POST /api/v4/qqopen/connect`
 - `POST /api/v4/qqopen/disconnect`
+- internal Durable Object recovery: `POST /api/v4/qqopen/discovery/sync` with `{"force":true}` bypasses the stored fingerprint and recreates managed discovery panels.
 
 For the first live end-to-end test, send `!qqping` in C2C or `@机器人 !qqping` in a group. A successful receive/send path replies `QQ Open V4 已连接并可回话。`. `!qqecho 内容` provides a second passive-reply test.
 

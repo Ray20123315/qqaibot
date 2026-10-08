@@ -173,6 +173,12 @@ function defaultPersistedState() {
     lastDiscoverySyncAt: 0,
     lastDiscoverySyncFingerprint: "",
     lastDiscoverySyncError: "",
+    lastDiscoverySyncReason: "",
+    lastDiscoverySyncChanged: false,
+    lastDiscoverySyncForce: false,
+    lastDiscoverySyncPanels: 0,
+    lastDiscoverySyncCreated: 0,
+    lastDiscoverySyncDeleted: 0,
     lastReplyAt: 0,
     lastReplyId: "",
     lastHeartbeatSentAt: 0,
@@ -200,6 +206,7 @@ export class QqOpenGateway {
     this.reconnectTimer = null;
     this.connectTimeoutTimer = null;
     this.connectPromise = null;
+    this.discoverySyncPromise = null;
     this.eventTasks = new Set();
     this.inflightDeliveries = new Set();
     this.persisted = defaultPersistedState();
@@ -311,7 +318,13 @@ export class QqOpenGateway {
         enabled: truthy(this.env.QQ_OPEN_DISCOVERY_SYNC),
         lastSyncAt: Number(this.persisted.lastDiscoverySyncAt || 0),
         fingerprint: String(this.persisted.lastDiscoverySyncFingerprint || ""),
-        lastError: String(this.persisted.lastDiscoverySyncError || "")
+        lastError: String(this.persisted.lastDiscoverySyncError || ""),
+        lastReason: String(this.persisted.lastDiscoverySyncReason || ""),
+        lastChanged: Boolean(this.persisted.lastDiscoverySyncChanged),
+        lastForce: Boolean(this.persisted.lastDiscoverySyncForce),
+        lastPanels: Number(this.persisted.lastDiscoverySyncPanels || 0),
+        lastCreated: Number(this.persisted.lastDiscoverySyncCreated || 0),
+        lastDeleted: Number(this.persisted.lastDiscoverySyncDeleted || 0)
       }
     });
   }
@@ -343,14 +356,27 @@ export class QqOpenGateway {
     if (request.method === "POST" && ["/connect", "/api/v4/qqopen/connect"].includes(path)) {
       this.persisted.suspended = false;
       await this.persist();
-      const status = await this.ensureConnected({ force: false });
-      return Response.json(status, { status: status.ok === false ? 503 : 200 });
+      const connection = await this.ensureConnected({ force: false });
+      if (connection.ok !== false) await this.syncDiscoveryIfNeeded({ reason:"connect" });
+      const status = this.status();
+      return Response.json(status, { status: connection.ok === false ? 503 : 200 });
     }
 
     if (request.method === "POST" && ["/ensure", "/api/v4/qqopen/ensure"].includes(path)) {
       if (this.persisted.suspended) return Response.json(this.status());
-      const status = await this.ensureConnected({ force: false });
-      return Response.json(status, { status: status.ok === false ? 503 : 200 });
+      const connection = await this.ensureConnected({ force: false });
+      if (connection.ok !== false) await this.syncDiscoveryIfNeeded({ reason:"ensure" });
+      const status = this.status();
+      return Response.json(status, { status: connection.ok === false ? 503 : 200 });
+    }
+
+    if (request.method === "POST" && ["/discovery/sync", "/api/v4/qqopen/discovery/sync"].includes(path)) {
+      const body = await request.json().catch(() => ({}));
+      const result = await this.syncDiscoveryIfNeeded({
+        force: body?.force !== false,
+        reason: String(body?.reason || "manual").trim().slice(0, 64) || "manual"
+      });
+      return Response.json({ ...this.status(), discoveryRun: result }, { status: result?.ok === false ? 502 : 200 });
     }
 
     if (request.method === "POST" && ["/legacy-action", "/api/v4/qqopen/legacy-action"].includes(path)) {
@@ -527,14 +553,14 @@ export class QqOpenGateway {
       this.persisted.failureStreak = 0;
       this.persisted.lastError = "";
       await this.persist();
-      this.track(this.syncDiscoveryIfNeeded());
+      this.track(this.syncDiscoveryIfNeeded({ reason:eventType.toLowerCase() }));
       return;
     }
 
     if (eventType === "RESUMED") {
       this.persisted.gateway = reduceGatewayPayload(this.persisted.gateway, payload);
       await this.persist();
-      this.track(this.syncDiscoveryIfNeeded());
+      this.track(this.syncDiscoveryIfNeeded({ reason:eventType.toLowerCase() }));
       return;
     }
 
@@ -605,25 +631,52 @@ export class QqOpenGateway {
     await this.persist();
   }
 
-  async syncDiscoveryIfNeeded() {
-    if (!truthy(this.env.QQ_OPEN_DISCOVERY_SYNC)) return;
-    try {
-      const result = await syncQqOpenDiscovery(this.api(), QQ_OPEN_COMMAND_REGISTRY, {
-        previousFingerprint: String(this.persisted.lastDiscoverySyncFingerprint || ""),
-        developerOpenids: String(this.env.QQ_OPEN_DEVELOPER_OPENIDS || "")
-          .split(/[\s,;]+/)
-          .map(value => value.trim())
-          .filter(Boolean)
-      });
-      this.persisted.lastDiscoverySyncAt = Date.now();
-      this.persisted.lastDiscoverySyncFingerprint = String(result?.fingerprint || "");
-      this.persisted.lastDiscoverySyncError = "";
-      await this.persist();
-    } catch (error) {
-      this.persisted.lastDiscoverySyncAt = Date.now();
-      this.persisted.lastDiscoverySyncError = safeError(error);
-      await this.persist();
+  async syncDiscoveryIfNeeded({ force = false, reason = "event" } = {}) {
+    if (!truthy(this.env.QQ_OPEN_DISCOVERY_SYNC)) {
+      return Object.freeze({ ok:true, changed:false, skipped:"disabled", force:Boolean(force), reason:String(reason || "event") });
     }
+    if (this.discoverySyncPromise) return this.discoverySyncPromise;
+
+    const run = (async () => {
+      const syncReason = String(reason || "event").trim().slice(0, 64) || "event";
+      try {
+        const result = await syncQqOpenDiscovery(this.api(), QQ_OPEN_COMMAND_REGISTRY, {
+          previousFingerprint: force ? "" : String(this.persisted.lastDiscoverySyncFingerprint || ""),
+          developerOpenids: String(this.env.QQ_OPEN_DEVELOPER_OPENIDS || "")
+            .split(/[\s,;]+/)
+            .map(value => value.trim())
+            .filter(Boolean)
+        });
+        this.persisted.lastDiscoverySyncAt = Date.now();
+        this.persisted.lastDiscoverySyncFingerprint = String(result?.fingerprint || "");
+        this.persisted.lastDiscoverySyncError = "";
+        this.persisted.lastDiscoverySyncReason = syncReason;
+        this.persisted.lastDiscoverySyncChanged = Boolean(result?.changed);
+        this.persisted.lastDiscoverySyncForce = Boolean(force);
+        this.persisted.lastDiscoverySyncPanels = Number(result?.panels || 0);
+        this.persisted.lastDiscoverySyncCreated = Number(result?.created || 0);
+        this.persisted.lastDiscoverySyncDeleted = Number(result?.deleted || 0);
+        await this.persist();
+        return Object.freeze({ ...result, force:Boolean(force), reason:syncReason });
+      } catch (error) {
+        const message = safeError(error);
+        this.persisted.lastDiscoverySyncAt = Date.now();
+        this.persisted.lastDiscoverySyncError = message;
+        this.persisted.lastDiscoverySyncReason = syncReason;
+        this.persisted.lastDiscoverySyncChanged = false;
+        this.persisted.lastDiscoverySyncForce = Boolean(force);
+        this.persisted.lastDiscoverySyncCreated = 0;
+        this.persisted.lastDiscoverySyncDeleted = 0;
+        await this.persist();
+        return Object.freeze({ ok:false, changed:false, error:message, force:Boolean(force), reason:syncReason });
+      }
+    })();
+
+    const wrapped = run.finally(() => {
+      if (this.discoverySyncPromise === wrapped) this.discoverySyncPromise = null;
+    });
+    this.discoverySyncPromise = wrapped;
+    return wrapped;
   }
 
   featureCommandMap() {
