@@ -1,8 +1,8 @@
 # ACTIVE_TASK
 
 task_id: qqaibot-20261001-panel-complete-real-message-send
-task_status: blocked
-goal_revision: 6
+task_status: active
+goal_revision: 7
 
 ## Goal
 
@@ -90,3 +90,25 @@ blockers:
 
 next_exact_action: In the target QQ group, type `/` to open the native command panel and confirm concrete commands (at minimum `!help`, `!status`, and one parameterized command) are present and clickable.
 last_checkpoint_at: 2026-10-02T19:08:00+08:00
+
+
+## Goal Revision 7
+
+current_phase: discovery reconciliation repair
+current_step: checkpoint root cause before modifying runtime
+
+acceptance_criteria:
+- `/ensure` reconciles discovery even if Gateway WebSocket is already connected.
+- unchanged fingerprint performs no destructive panel rewrite.
+- failed discovery sync is persisted and surfaced in status.
+- explicit internal force-sync route exists for recovery.
+- development CI and main CI pass.
+- Cloudflare production build succeeds.
+- production settings preserve `QQ_OPEN_DISCOVERY_SYNC=true`.
+- final QQ native `/` panel is usable.
+
+known_failure:
+- current minute watchdog only checks connection health; it does not reconcile discovery on an already-open socket.
+
+next_exact_action: patch src/v4/qqopen/runtime.js and V4 regressions so ensure performs discovery reconciliation.
+last_checkpoint_at: 2026-10-08T14:30:00+08:00

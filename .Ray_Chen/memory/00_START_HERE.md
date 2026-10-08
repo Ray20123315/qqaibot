@@ -1,16 +1,16 @@
 # Ray_Chen Memory Entry
 
-- memory_version: v0.0.61
+- memory_version: v0.0.62
 - project: QQAIBOT
 - repository: Ray20123315/QQAIBOT
 - canonical_branch: main
 - development_branch: v4-qqopen-native
 - task_id: qqaibot-20261001-panel-complete-real-message-send
-- task_status: blocked
-- goal_revision: 6
+- task_status: active
+- goal_revision: 7
 - verified_product_revision: 6927af12dab81a979a13db94c54924ffbce0f35e
 - deployed_main_revision: 6927af12dab81a979a13db94c54924ffbce0f35e
-- updated_at: 2026-10-02T19:08:00+08:00
+- updated_at: 2026-10-08T14:30:00+08:00
 
 ## Production Repair State
 
@@ -84,3 +84,27 @@ Production repair:
 ## Current Blocker
 
 PENDING_USER: open the QQ native `/` command panel and verify concrete commands such as `!help` and `!status` are visible/clickable. The custom inline-keyboard path is intentionally not part of this acceptance gate.
+
+
+## Goal Revision 7 — Native Panel Repair
+
+User report at 2026-10-08 14:24 +08:00: panel is unusable.
+
+Recovery Gate result:
+- main and v4-qqopen-native both point to `09750c6f8d972b8480f5bc03651cac7a89cb5cc1`;
+- production code still enables `QQ_OPEN_DISCOVERY_SYNC=true`;
+- minute cron calls the QQ Gateway `/ensure` endpoint;
+- `/ensure` only calls `ensureConnected()`;
+- when the WebSocket is already open or connecting, `ensureConnected()` returns immediately;
+- discovery synchronization still runs only on READY / RESUMED events.
+
+Most likely root cause:
+A deployment can change the desired panel fingerprint while the existing Gateway WebSocket remains connected. In that state, the minute watchdog never invokes discovery synchronization, so QQ can keep stale or missing panels indefinitely.
+
+Repair plan:
+1. make the minute `/ensure` path reconcile discovery even when the socket is already connected;
+2. add an internal force-sync endpoint and persistent sync-result diagnostics;
+3. regression-test connected-socket reconciliation and fingerprint no-op behavior;
+4. validate development CI, promote to main, verify production build/settings;
+5. wait at least one routine cron cycle and verify sync evidence where observable;
+6. require one final QQ client panel smoke.

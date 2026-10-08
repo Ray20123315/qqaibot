@@ -132,3 +132,20 @@ Remaining live gate:
 2. confirm concrete commands including `!help` and `!status` are visible;
 3. click a direct command and verify it sends;
 4. click a parameterized command and verify QQ exposes the intended command input behavior.
+
+
+## Goal Revision 7 — Pre-implementation Gate
+
+Recovery evidence:
+- main == v4-qqopen-native == `09750c6f8d972b8480f5bc03651cac7a89cb5cc1`
+- minute cron invokes QQ Gateway `/ensure`
+- connected `ensureConnected` path returns before discovery sync
+- `QQ_OPEN_DISCOVERY_SYNC=true` remains configured
+
+Required tests:
+1. connected `/ensure` invokes discovery reconciliation;
+2. same fingerprint returns no-op without deleting/recreating panels;
+3. changed fingerprint performs sync and persists the new fingerprint;
+4. failed sync persists error without disconnecting an otherwise healthy Gateway;
+5. force-sync endpoint bypasses previous fingerprint;
+6. existing Gateway, message, V3 and bundle regressions remain green.

@@ -76,3 +76,18 @@ Development commit `2dd39fc24d8d9d8c1d4a6402c6f716890bfa146e`:
 - Cloudflare Connected Build `3f3ddb50-013a-4f1a-a4fb-74d045198704`: success
 - deployed product revision: `6927af12dab81a979a13db94c54924ffbce0f35e`
 - remaining acceptance: live QQ native `/` panel visibility/click behavior
+
+
+## 2026-10-08 Panel Incident
+
+User reports the panel is unusable.
+
+Verified code path:
+- Worker routine cron calls Durable Object `POST /api/v4/qqopen/ensure` every minute.
+- `/ensure` invokes `ensureConnected({force:false})`.
+- `ensureConnected` returns immediately if its WebSocket is open/connecting.
+- discovery sync is not invoked from this path.
+- discovery sync remains tied to READY/RESUMED Gateway events.
+
+Most likely production failure mode:
+the panel desired state changed after a deploy, but the existing Gateway session stayed alive, so the new desired panel set was never pushed to QQ.

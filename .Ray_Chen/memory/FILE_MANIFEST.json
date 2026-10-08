@@ -1,9 +1,9 @@
 {
   "schema_version": 1,
-  "memory_version": "v0.0.61",
+  "memory_version": "v0.0.62",
   "task_id": "qqaibot-20261001-panel-complete-real-message-send",
-  "goal_revision": 6,
-  "transaction": "qq_native_command_fallback_after_inline_capability_failure_20261002",
+  "goal_revision": 7,
+  "transaction": "qq_panel_discovery_reconciliation_checkpoint_20261008",
   "repository": "Ray20123315/qqaibot",
   "production_branch": "main",
   "development_branch": "v4-qqopen-native",
@@ -2200,16 +2200,16 @@
     "note": "Do not mark completed until live QQ renders and allows clicking the inline keyboard."
   },
   "latest_transaction": {
-    "changed_at": "2026-10-02T19:08:00+08:00",
-    "location_type": "github+cloudflare",
-    "provider": "GitHub / Cloudflare",
-    "resource_id_or_path": "src/v4/qqopen/discovery.js; src/v4/qqopen/runtime.js; src/v4/commands/group-panel.js; verify-v4-qqopen.mjs; wrangler.toml; .dev.vars.example; README.md; docs/v4-qqopen-native.md",
-    "action": "modify_and_deploy",
+    "changed_at": "2026-10-08T14:30:00+08:00",
+    "location_type": "github",
+    "provider": "GitHub",
+    "resource_id_or_path": ".Ray_Chen/memory/**",
+    "action": "checkpoint",
     "repository_or_drive": "Ray20123315/qqaibot",
-    "branch_or_container": "v4-qqopen-native -> main -> production",
-    "before_revision": "78709253a5dde390f943ba3749349a7b2b839e1c",
-    "after_revision": "6927af12dab81a979a13db94c54924ffbce0f35e",
-    "commit_or_hash": "6927af12dab81a979a13db94c54924ffbce0f35e",
-    "verification": "dev CI 36998626039 success; main CI 36998794211 success; Cloudflare 3f3ddb50-013a-4f1a-a4fb-74d045198704 success; production flag read-back false; live native panel pending"
+    "branch_or_container": "v4-qqopen-native",
+    "before_revision": "09750c6f8d972b8480f5bc03651cac7a89cb5cc1",
+    "after_revision": "pending_commit",
+    "commit_or_hash": "pending_commit",
+    "verification": "Recovery Gate complete; discovery reconciliation bug identified from runtime code path"
   }
 }
