@@ -111,10 +111,15 @@ for (const name of ["!面板 基础","!面板 群聊","!面板 互动","!面板 
 assert(!groupRootNames.has("!面板 关系"), "Retired relationship category must not return");
 assert.equal(resolveGroupPanelInput("!面板 基础 help", registry)?.expanded, "!help");
 assert.equal(resolveGroupPanelInput("！面板 群操作 禁言 @123456 10分钟", registry)?.expanded, "!禁言 @123456 10分钟");
-assert.deepEqual(normalizeGroupPanelSlashInvocation("/!面板 基础"), { matched:true, text:"!面板 基础" });
-assert.deepEqual(normalizeGroupPanelSlashInvocation("／！面板 开发者 codexwork --export 测试"), { matched:true, text:"！面板 开发者 codexwork --export 测试" });
-assert.deepEqual(normalizeGroupPanelSlashInvocation("[CQ:at,qq=123] /!面板 群操作 禁言"), { matched:true, text:"[CQ:at,qq=123] !面板 群操作 禁言" });
-assert.deepEqual(normalizeGroupPanelSlashInvocation("/!普通内容"), { matched:false, text:"/!普通内容" });
+assert.deepEqual(normalizeGroupPanelSlashInvocation("/!面板 基础", registry), { matched:true, text:"!面板 基础" });
+assert.deepEqual(normalizeGroupPanelSlashInvocation("／！面板 开发者 codexwork --export 测试", registry), { matched:true, text:"!面板 开发者 codexwork --export 测试" });
+assert.deepEqual(normalizeGroupPanelSlashInvocation("[CQ:at,qq=123] /!面板 群操作 禁言", registry), { matched:true, text:"[CQ:at,qq=123] !面板 群操作 禁言" });
+assert.deepEqual(normalizeGroupPanelSlashInvocation("/!help", registry), { matched:true, text:"!help" });
+assert.deepEqual(normalizeGroupPanelSlashInvocation("／！status", registry), { matched:true, text:"!status" });
+assert.deepEqual(normalizeGroupPanelSlashInvocation("/!禁言 @123456 10分钟", registry), { matched:true, text:"!禁言 @123456 10分钟" });
+assert.deepEqual(normalizeGroupPanelSlashInvocation("[CQ:at,qq=123] /!翻译 hello", registry), { matched:true, text:"[CQ:at,qq=123] !翻译 hello" });
+assert.deepEqual(normalizeGroupPanelSlashInvocation("/!普通内容", registry), { matched:false, text:"/!普通内容" });
+assert.deepEqual(normalizeGroupPanelSlashInvocation("/!help"), { matched:false, text:"/!help" }, "registry is required for non-panel slash normalization");
 const workerSource = fs.readFileSync("worker.js", "utf8");
 const catalogSource = fs.readFileSync("src/v4/commands/catalog.js", "utf8");
 const helpSource = fs.readFileSync("src/help/commands.js", "utf8");
@@ -125,9 +130,10 @@ for (const removed of ["!主人功能","!主人禁言","!主人改名","!主人�
   assert(!catalogSource.includes(removed), `catalog still exposes retired relationship command ${removed}`);
 }
 assert.doesNotMatch(workerSource + "\n" + catalogSource + "\n" + helpSource, /狼人杀|狼人殺/i, "werewolf feature must remain removed");
-const panelSlashIndex = workerSource.indexOf("normalizeGroupPanelSlashInvocation(userMessage)");
+const panelSlashIndex = workerSource.indexOf("normalizeGroupPanelSlashInvocation(userMessage, QQAI_GROUP_PANEL_REGISTRY)");
 const optOutIndex = workerSource.indexOf("stripGroupAiOptOutPrefix(userMessage, botId)");
-assert(panelSlashIndex >= 0 && optOutIndex > panelSlashIndex, "panel slash normalization must run before /! AI opt-out stripping");
+assert(panelSlashIndex >= 0 && optOutIndex > panelSlashIndex, "native panel slash normalization must run before /! AI opt-out stripping");
+assert.match(workerSource, /known registered command or !面板 root/);
 assert.equal(resolveGroupPanelInput("!面板 开发者 codexwork --export 测试", registry)?.expanded, "!codexwork --export 测试");
 const groupRootHelp = resolveGroupPanelInput("!面板 基础", registry);
 assert.equal(groupRootHelp?.matched, true);

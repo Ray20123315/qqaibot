@@ -24,16 +24,25 @@ function commandToken(value) {
   return normalized(value).replace(/^[!！]+/, "");
 }
 
-function normalizeGroupPanelSlashInvocation(value) {
+function normalizeGroupPanelSlashInvocation(value, registry = null) {
   const source = String(value ?? "");
   const prefix = source.match(/^(\s*(?:\[CQ:(?:reply|at),[^\]]+\]\s*)*)/i)?.[1] || "";
   const rest = source.slice(prefix.length);
-  if (!/^[/／][!！]面板(?:\s|$)/i.test(rest)) {
-    return Object.freeze({ matched:false, text:source });
-  }
+  const match = rest.match(/^[/／]([!！][\s\S]*)$/);
+  if (!match) return Object.freeze({ matched:false, text:source });
+
+  const candidate = String(match[1] || "");
+  const canonicalCandidate = candidate.replace(/^！/, "!");
+  const panelRoot = /^[!！]面板(?:\s|$)/i.test(candidate);
+  const knownCommand = Boolean(
+    registry?.resolve?.(candidate)
+    || (canonicalCandidate !== candidate && registry?.resolve?.(canonicalCandidate))
+  );
+  if (!panelRoot && !knownCommand) return Object.freeze({ matched:false, text:source });
+
   return Object.freeze({
     matched:true,
-    text:`${prefix}${rest.replace(/^[/／](?=[!！]面板(?:\s|$))/i, "")}`
+    text:`${prefix}${canonicalCandidate}`
   });
 }
 

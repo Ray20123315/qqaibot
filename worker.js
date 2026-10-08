@@ -1097,7 +1097,12 @@ const QQAIWorker = {
       forwardIds = [...new Set(forwardIds.filter(Boolean))].slice(0, AI_MEDIA_LIMITS.forwardBundles);
       fileAttachments = fileAttachments.filter(item => item && (item.name || item.file || item.url)).slice(0, 20);
       mentionedQqs = [...new Set([...mentionedQqs, ...eventMentionedQqs(body)].filter(Boolean).map(String))];
-      const groupPanelSlash = isGroup ? normalizeGroupPanelSlashInvocation(userMessage) : null;
+      // QQ native "/" panels submit command items with a leading slash (for example /!help).
+      // Strip that slash only when the remainder is a known registered command or !面板 root,
+      // so the existing "/!" AI opt-out syntax remains intact for arbitrary user text.
+      const groupPanelSlash = isGroup
+        ? normalizeGroupPanelSlashInvocation(userMessage, QQAI_GROUP_PANEL_REGISTRY)
+        : null;
       if (groupPanelSlash?.matched) userMessage = groupPanelSlash.text;
 
       if (isSelfAccount) {
