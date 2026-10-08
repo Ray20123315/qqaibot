@@ -91,3 +91,34 @@ Verified code path:
 
 Most likely production failure mode:
 the panel desired state changed after a deploy, but the existing Gateway session stayed alive, so the new desired panel set was never pushed to QQ.
+
+
+## 2026-10-08 Panel Repair — Production Verified
+
+Product revision: `27052dfaac8ef6627a2fd75f60cbc12fbf142657`
+
+Root cause A — stale discovery:
+- prior routine cron called `/ensure`;
+- connected `ensureConnected()` short-circuited;
+- discovery sync only occurred on READY/RESUMED;
+- fixed by reconciling discovery from `/ensure` as well.
+
+Root cause B — native command prefix:
+- QQ native panel invocation has a leading `/`;
+- old normalization covered only `/!面板 ...`;
+- concrete panel commands could be consumed as `/!` AI opt-out text;
+- fixed by stripping the slash only when the remainder resolves to a registered command or `!面板`.
+
+Runtime safeguards:
+- unchanged discovery fingerprint is no-op;
+- force-sync bypasses persisted fingerprint;
+- discovery failure is persisted without dropping a healthy websocket;
+- unknown `/!text` is not converted into a command.
+
+Verification:
+- development CI `37738458422`: success
+- main CI `37738621298`: success
+- Cloudflare `77bcd624-84fd-4d1a-a419-c697cadfdeab`: success
+- production discovery sync setting: enabled
+- custom inline keyboard setting: disabled
+- live QQ acceptance: pending user smoke

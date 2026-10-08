@@ -149,3 +149,35 @@ Required tests:
 4. failed sync persists error without disconnecting an otherwise healthy Gateway;
 5. force-sync endpoint bypasses previous fingerprint;
 6. existing Gateway, message, V3 and bundle regressions remain green.
+
+
+## Goal Revision 7 — Verified Repair
+
+Automated tests added:
+- connected `POST /ensure` performs discovery synchronization;
+- second `/ensure` with same desired fingerprint performs no API mutations;
+- force-sync endpoint bypasses fingerprint and re-runs discovery;
+- discovery API failure persists an error while healthy Gateway response remains available;
+- native `/!help` -> `!help`;
+- native `/!status` -> `!status`;
+- native parameterized `/!禁言 @123456 10分钟` -> canonical command;
+- CQ mention prefix survives normalization;
+- unknown `/!普通内容` remains unchanged;
+- normalization runs before `stripGroupAiOptOutPrefix`.
+
+Evidence:
+- dev CI run `37738458422`: success
+- main CI run `37738621298`: success
+- Cloudflare Connected Build `77bcd624-84fd-4d1a-a419-c697cadfdeab`: success
+- production commit `27052dfaac8ef6627a2fd75f60cbc12fbf142657`
+- production settings read-back:
+  - `QQ_OPEN_DISCOVERY_SYNC=true`
+  - `QQ_OPEN_CUSTOM_KEYBOARD_ENABLED=false`
+  - `QQ_OPEN_ENABLED=true`
+  - `QQ_OPEN_INTENTS=100663296`
+
+Live acceptance still required:
+1. open QQ native `/` command panel;
+2. click `!help` and confirm the bot sends/handles the real command;
+3. click `!status`;
+4. click one parameterized command and confirm its input/send flow.

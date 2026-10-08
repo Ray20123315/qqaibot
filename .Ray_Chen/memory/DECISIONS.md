@@ -78,3 +78,16 @@ date: 2026-10-02
 supersedes: D-082 as the sole group discovery strategy
 Decision: retain the compact group category launcher, and also publish categorized concrete group-command panels generated from the canonical registry. Custom inline keyboards are optional enhancement only when `QQ_OPEN_CUSTOM_KEYBOARD_ENABLED=true` and the QQ AppID capability is explicitly confirmed.
 Reason: two production live tests rendered category reply text with no inline buttons, while Tencent documentation identifies custom buttons as a gated capability. The QQ native `/` command panel is therefore the primary clickable discovery surface.
+
+
+## D-086 Discovery must reconcile independently of Gateway reconnects
+status: accepted
+date: 2026-10-08
+Decision: the routine `/ensure` watchdog reconciles QQ menu/panel discovery even when the Gateway WebSocket is already healthy. The desired-state fingerprint prevents unnecessary destructive rewrites, while an internal force-sync path is available for recovery.
+Reason: deployments can change desired command panels without producing READY/RESUMED, leaving QQ discovery stale indefinitely.
+
+## D-087 Native / panel commands are normalized only when registered
+status: accepted
+date: 2026-10-08
+Decision: for group messages, a leading `/` before `!command` is removed before AI-opt-out handling only when the remainder is a known Command Registry command or a `!面板` root invocation.
+Reason: QQ native command panel clicks produce slash-prefixed command text, but the project also intentionally uses arbitrary `/!text` as an AI-opt-out syntax. Registry-gated normalization preserves both behaviors.

@@ -1,22 +1,22 @@
 {
   "schema_version": 1,
-  "memory_version": "v0.0.62",
+  "memory_version": "v0.0.63",
   "task_id": "qqaibot-20261001-panel-complete-real-message-send",
   "goal_revision": 7,
-  "transaction": "qq_panel_discovery_reconciliation_checkpoint_20261008",
+  "transaction": "qq_panel_discovery_and_native_slash_repair_20261008",
   "repository": "Ray20123315/qqaibot",
   "production_branch": "main",
   "development_branch": "v4-qqopen-native",
   "product_before_revision": "0c4cc0aa55f9e01212b2a39cb979ee8de1ace1fe",
-  "product_after_revision": "6927af12dab81a979a13db94c54924ffbce0f35e",
+  "product_after_revision": "27052dfaac8ef6627a2fd75f60cbc12fbf142657",
   "verification": {
     "feature_product_ci_run": 36366445081,
     "regression_ci_run": 36366534308,
-    "main_ci_run": 36998794211,
+    "main_ci_run": 37738621298,
     "github_ci": "success",
     "isolated_cloudflare_build": "e280d9fb-bb0d-4659-91e8-cb2db205e1a3",
     "isolated_cloudflare_outcome": "success",
-    "production_cloudflare_build": "3f3ddb50-013a-4f1a-a4fb-74d045198704",
+    "production_cloudflare_build": "77bcd624-84fd-4d1a-a419-c697cadfdeab",
     "production_cloudflare_outcome": "success",
     "production_worker_version": "2aa24e2a-b640-4ac2-83ae-07efb428b099",
     "production_bindings_readback": "success",
@@ -26,7 +26,7 @@
     "command_fallback_implementation": "verified",
     "development_ci": "success",
     "main_update": "success",
-    "development_ci_run": 36998626039,
+    "development_ci_run": 37738458422,
     "main_ci": "success",
     "production_commit": "6927af12dab81a979a13db94c54924ffbce0f35e",
     "main_readback": "success",
@@ -185,7 +185,13 @@
     "custom_keyboard_capability_strategy": "gated_optional",
     "production_custom_keyboard_enabled": false,
     "native_group_real_command_panels": "verified_by_ci",
-    "live_native_slash_panel": "pending_user_test"
+    "live_native_slash_panel": "pending_user_test",
+    "panel_repair_goal_revision": 7,
+    "discovery_reconcile_commit": "1542c415c18f8192bbd724b3d0d2240b5487b758",
+    "native_slash_routing_commit": "27052dfaac8ef6627a2fd75f60cbc12fbf142657",
+    "production_discovery_sync": true,
+    "production_custom_keyboard": false,
+    "live_native_panel_after_repair": "pending_user_test"
   },
   "changes": [
     {
@@ -2200,16 +2206,16 @@
     "note": "Do not mark completed until live QQ renders and allows clicking the inline keyboard."
   },
   "latest_transaction": {
-    "changed_at": "2026-10-08T14:30:00+08:00",
-    "location_type": "github",
-    "provider": "GitHub",
-    "resource_id_or_path": ".Ray_Chen/memory/**",
-    "action": "checkpoint",
+    "changed_at": "2026-10-08T14:41:00+08:00",
+    "location_type": "github+cloudflare",
+    "provider": "GitHub / Cloudflare",
+    "resource_id_or_path": "src/v4/qqopen/runtime.js; src/v4/commands/group-panel.js; worker.js; verify-v4-qqopen.mjs; docs/v4-qqopen-native.md",
+    "action": "modify_validate_promote_deploy",
     "repository_or_drive": "Ray20123315/qqaibot",
-    "branch_or_container": "v4-qqopen-native",
-    "before_revision": "09750c6f8d972b8480f5bc03651cac7a89cb5cc1",
-    "after_revision": "pending_commit",
-    "commit_or_hash": "pending_commit",
-    "verification": "Recovery Gate complete; discovery reconciliation bug identified from runtime code path"
+    "branch_or_container": "v4-qqopen-native -> main -> production",
+    "before_revision": "f78f31c71bc2ec504d1bfb0ddfb59da13a98f3a5",
+    "after_revision": "27052dfaac8ef6627a2fd75f60cbc12fbf142657",
+    "commit_or_hash": "27052dfaac8ef6627a2fd75f60cbc12fbf142657",
+    "verification": "dev CI 37738458422 success; main CI 37738621298 success; Cloudflare 77bcd624-84fd-4d1a-a419-c697cadfdeab success; production settings read-back verified; live QQ smoke pending"
   }
 }

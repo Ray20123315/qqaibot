@@ -1,16 +1,16 @@
 # Ray_Chen Memory Entry
 
-- memory_version: v0.0.62
+- memory_version: v0.0.63
 - project: QQAIBOT
 - repository: Ray20123315/QQAIBOT
 - canonical_branch: main
 - development_branch: v4-qqopen-native
 - task_id: qqaibot-20261001-panel-complete-real-message-send
-- task_status: active
+- task_status: blocked
 - goal_revision: 7
-- verified_product_revision: 6927af12dab81a979a13db94c54924ffbce0f35e
-- deployed_main_revision: 6927af12dab81a979a13db94c54924ffbce0f35e
-- updated_at: 2026-10-08T14:30:00+08:00
+- verified_product_revision: 27052dfaac8ef6627a2fd75f60cbc12fbf142657
+- deployed_main_revision: 27052dfaac8ef6627a2fd75f60cbc12fbf142657
+- updated_at: 2026-10-08T14:41:00+08:00
 
 ## Production Repair State
 
@@ -108,3 +108,31 @@ Repair plan:
 4. validate development CI, promote to main, verify production build/settings;
 5. wait at least one routine cron cycle and verify sync evidence where observable;
 6. require one final QQ client panel smoke.
+
+
+## Goal Revision 7 — Repair Deployed
+
+Two independent panel failures were identified and repaired.
+
+1. Discovery reconciliation gap
+- the minute watchdog called `/ensure`, but an already-healthy Gateway returned before discovery sync;
+- panel definitions could therefore remain stale after deployment until a future READY/RESUMED event;
+- `/ensure` now reconciles discovery every minute, using fingerprint no-op when unchanged;
+- an internal force-sync route and persistent discovery diagnostics were added.
+
+2. Native slash-command routing gap
+- live QQ native panel invocations include a leading slash, e.g. `/!面板 基础`;
+- only `/!面板 ...` was previously normalized, so concrete panel commands such as `/!help`, `/!status`, and parameterized commands could fall into the `/!` AI-opt-out path instead of the command parser;
+- known registry commands are now safely normalized from `/!command` to `!command` before opt-out handling;
+- arbitrary unknown `/!text` retains its original AI-opt-out meaning.
+
+Verified production:
+- discovery reconciliation patch: `1542c415c18f8192bbd724b3d0d2240b5487b758`
+- deployed product revision: `27052dfaac8ef6627a2fd75f60cbc12fbf142657`
+- development CI `37738458422`: success
+- main CI `37738621298`: success
+- Cloudflare build `77bcd624-84fd-4d1a-a419-c697cadfdeab`: success
+- production read-back: `QQ_OPEN_DISCOVERY_SYNC=true`, `QQ_OPEN_CUSTOM_KEYBOARD_ENABLED=false`, `QQ_OPEN_ENABLED=true`
+
+Current blocker:
+- PENDING_USER live QQ smoke of the native panel after deployment.

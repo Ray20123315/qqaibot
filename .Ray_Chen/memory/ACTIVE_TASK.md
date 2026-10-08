@@ -1,7 +1,7 @@
 # ACTIVE_TASK
 
 task_id: qqaibot-20261001-panel-complete-real-message-send
-task_status: active
+task_status: blocked
 goal_revision: 7
 
 ## Goal
@@ -112,3 +112,35 @@ known_failure:
 
 next_exact_action: patch src/v4/qqopen/runtime.js and V4 regressions so ensure performs discovery reconciliation.
 last_checkpoint_at: 2026-10-08T14:30:00+08:00
+
+
+## Goal Revision 7 — Deployment Result
+
+current_phase: live QQ acceptance
+current_step: implementation, CI and production deployment complete
+
+completed_steps:
+- fixed minute `/ensure` so discovery reconciles even when Gateway websocket is already healthy
+- added discovery fingerprint no-op and serialized sync
+- added internal force-sync endpoint
+- persisted discovery sync reason/change/error/panel/create/delete diagnostics
+- preserved healthy Gateway connectivity when discovery sync itself fails
+- fixed native `/!command` routing for registered commands before AI opt-out handling
+- preserved arbitrary unknown `/!text` as the existing AI opt-out syntax
+- development CI `37738458422` success
+- main CI `37738621298` success
+- Cloudflare build `77bcd624-84fd-4d1a-a419-c697cadfdeab` success
+- production setting read-back verified discovery sync enabled
+
+files_modified:
+- src/v4/qqopen/runtime.js
+- src/v4/commands/group-panel.js
+- worker.js
+- verify-v4-qqopen.mjs
+- docs/v4-qqopen-native.md
+
+blockers:
+- PENDING_USER: real QQ client must confirm native panel is now visible/current and clicked commands execute.
+
+next_exact_action: In the target QQ group, open the native `/` panel and click `!help`, then `!status`, then one parameterized command; report only if any of those still fails.
+last_checkpoint_at: 2026-10-08T14:41:00+08:00

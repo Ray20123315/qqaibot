@@ -42,3 +42,12 @@ Mitigation: keep the native group panel compact with category launchers, then re
 ## G-077 A valid keyboard object can still fail if wrapped in the wrong QQ message type
 Risk: forcing `msg_type:2 + markdown + keyboard` can make the whole card fail on a bot/client path without Markdown capability even though the inline keyboard itself is valid; automatic fallback then hides the real failure by sending only text.
 Mitigation: send panel keyboards as `msg_type:0 + content + keyboard`, regression-test the exact outbound body, log `QQ_OPEN_KEYBOARD_FALLBACK` on rejection, and keep emergency fallback copy separate from the successful card.
+
+
+## G-079 Healthy Gateway does not imply fresh QQ discovery
+Risk: a persistent websocket can survive a code deploy while the desired command-panel fingerprint changes. If discovery sync is bound only to READY/RESUMED, QQ keeps stale panels.
+Mitigation: reconcile discovery from the minute `/ensure` watchdog; fingerprint unchanged desired state to avoid rewrites; persist sync diagnostics.
+
+## G-080 QQ native panel clicks may prefix commands with /
+Risk: a panel item named `!help` can reach the bot as `/!help`. Treating all `/!` text as AI opt-out prevents panel commands from reaching the command parser.
+Mitigation: before opt-out handling, remove the slash only when the remainder resolves through the canonical Command Registry or is a `!面板` root. Unknown `/!text` must remain untouched.
