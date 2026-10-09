@@ -1,31 +1,30 @@
 {
-  "version": "v0.0.81",
-  "project": "qqaibot",
+  "version": "v0.0.82",
   "task_id": "qq-cross-group-bridge-20261009",
   "goal_revision": 8,
-  "changed_at": "2026-10-09T17:05:09.689Z",
-  "provider": "GitHub",
+  "changed_at": "2026-10-09T17:06:27.816Z",
   "repository": "Ray20123315/qqaibot",
+  "provider": "GitHub",
   "location_type": "remote",
   "branch": "feature/bbot-only-20261010",
-  "before_revision": "adcfcc8f8ba84281128473c63ff92686ba0ec8f1",
-  "after_revision": "pending_commit",
+  "before_revision": "467c6bf5e4a4aff9595dac52d33a3f0ea3db1980",
+  "after_revision": "pending",
   "verification": {
-    "ci1": 37963398835,
-    "ci2": 37963624474,
-    "ci2_outcome": "failed-one-mock",
-    "ci3": "pending",
+    "ci_previous": 37963768519,
+    "ci_passed_tests": 34,
+    "ci_failed_tests": 1,
+    "new_ci": "pending",
     "main_unchanged": true
   },
   "changes": [
     {
       "path": "tests/abot-disabled.test.mjs",
-      "action": "fix mock request argument",
-      "blob_sha": "cd270eeb2a6e3bf0bee32f1daca16df4ce8ecaa1"
+      "action": "fix fake Bbot URL object/string",
+      "sha": "1414481aa32e73a6d3980591434dfd983ad6d47c"
     },
     {
       "path": ".github/workflows/bridge-check.yml",
-      "action": "v0.0.81 archive"
+      "action": "memory package v0.0.82"
     },
     {
       "path": ".Ray_Chen/memory/*",

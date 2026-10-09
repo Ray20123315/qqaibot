@@ -31,7 +31,7 @@ test("scheduled worker never requests Abot gateway ensure or official API",async
  const calls=[];
  // Worker scheduled cron may attempt outbox only if authenticated Bbot is connected.
  const hub={idFromName:name=>name,get:()=>({fetch:async request=>{
-  calls.push(request.url);return new Response(JSON.stringify({connected:false}),{headers:{"content-type":"application/json"}});
+  calls.push(typeof request==="string"?request:request.url);return new Response(JSON.stringify({connected:false}),{headers:{"content-type":"application/json"}});
  }})};
  const db={prepare:sql=>({run:async()=>({meta:{changes:0}})})};
  const contexts=[];

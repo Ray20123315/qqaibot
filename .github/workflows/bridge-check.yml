@@ -19,16 +19,16 @@ jobs:
           test -r .Ray_Chen/memory/ACTIVE_TASK.md
           test -r .Ray_Chen/memory/CURRENT_STATE.md
           test -r .Ray_Chen/memory/FILE_MANIFEST.json
-          test "$(cat .Ray_Chen/memory/MEMORY_VERSION.txt)" = "v0.0.81"
-          tar -czf Ray_Chen_memory_v0.0.81.tar.gz .Ray_Chen/memory/
-          tar -tzf Ray_Chen_memory_v0.0.81.tar.gz > memory-list.txt
+          test "$(cat .Ray_Chen/memory/MEMORY_VERSION.txt)" = "v0.0.82"
+          tar -czf Ray_Chen_memory_v0.0.82.tar.gz .Ray_Chen/memory/
+          tar -tzf Ray_Chen_memory_v0.0.82.tar.gz > memory-list.txt
           grep -q ".Ray_Chen/memory/FILE_MANIFEST.json" memory-list.txt
           grep -q ".Ray_Chen/memory/ACTIVE_TASK.md" memory-list.txt
-          sha256sum Ray_Chen_memory_v0.0.81.tar.gz | tee Ray_Chen_memory_v0.0.81.sha256
+          sha256sum Ray_Chen_memory_v0.0.82.tar.gz | tee Ray_Chen_memory_v0.0.82.sha256
       - uses: actions/upload-artifact@v4
         with:
-          name: ray-chen-memory-v0.0.81
+          name: ray-chen-memory-v0.0.82
           path: |
-            Ray_Chen_memory_v0.0.81.tar.gz
-            Ray_Chen_memory_v0.0.81.sha256
+            Ray_Chen_memory_v0.0.82.tar.gz
+            Ray_Chen_memory_v0.0.82.sha256
           retention-days: 90

@@ -1,5 +1,5 @@
 # VERIFY
-- previous CI 37963398835 33/35; CI 37963624474 34/35 passed. Failures limited to mock test assertions.
-- latest test replacement captures either string or Request URL for mocked old DO shutdown. Expected gateway names and /shutdown validated.
-- next full npm run check and Wrangler dry-run required.
-- post-main: compare GitHub SHA with Cloudflare build, confirm no ABOT_GATEWAY_READY or official outbound send from new version, inspect Bbot health and QQ test.
+- CI 37963768519 34/35 tests pass. Single fake Bbot fetch request uses URL string; corrected this revision.
+- Full npm run check and Wrangler dry-run pending.
+- Confirm CI green before main update; after main update confirm Cloudflare connected build source SHA and Bbot-only health.
+- Old Gateway shutdown calls should stop historical Abot sessions, but must verify actual runtime.
