@@ -9,22 +9,27 @@
 
 **AI 聊天目前完全停用**；新 Worker 不載入任何 AI 模型或舊插件。
 
-## 指令
+
+## 指令（完全不依賴 QQ 舊快捷指令面板）
+
+在 QQ 群**直接輸入訊息**，不要點舊指令選單。主要格式為 `@AIBot /!use`，亦接受 `@AIBot !use` 與舊格式 `@AIBot /use`。
 
 | 指令 | 功能 |
 |---|---|
-| `@Abot /use` | 建立連線代碼及群組驗證碼 |
-| `@Abot /<代碼> <簡寫>` | 加入既有連線網路 |
-|  `@Abot /verify <驗證碼>` | Abot 和 Bbot 雙重驗證後綁定群號與 OpenID |
-| `/status` | 查看連線及運作狀態 |
-| `/stop`, `/resume` | 停止／恢復本群轉發 |
-| `/leave` | 本群退出連線 |
-| `/rename <簡寫>` | 更新顯示簡寫 |
-| `/revoke`, `/code` | 撤銷邀請代碼／建立新邀請代碼 |
-| `/grant <QQ號> manage\|stop\|both` | 授權本群其他成員 |
-| `/ungrant <QQ號>` | 取消授權 |
-| `@Abot /id`, `@Abot /verifyid <代碼>` | 配對 QQ ID 與成員 OpenID |
-| `/help` | 指令說明 |
+| `@AIBot /!use` | 建立連線代碼及群組驗證碼 |
+| `@AIBot /!<代碼> <簡寫>` | 將其他群加入同一個連線 |
+| `@AIBot /!verify <驗證碼>` | Abot、Bbot 分別核對群組，完成綁定 |
+| `@AIBot /!status` | 查詢目前連線與主動發言狀態 |
+| `/!stop`, `/!resume` | 停止／恢復本群轉發（Bbot 權限驗證） |
+| `/!leave`, `/!rename <簡寫>` | 退出與改名 |
+| `/!revoke`, `/!code` | 撤銷或換發連線代碼 |
+| `/!grant <QQ號> manage\|stop\|both`, `/!ungrant <QQ號>` | 授權／取消授權 |
+| `@AIBot /!id`, `@AIBot /!verifyid <驗證碼>` | QQ ID 與成員 OpenID 配對 |
+| `@AIBot /!help` | 指令說明 |
+
+**指令辨識：** `/!use`、`!use`、`/use` 都會解析為 `use`。**QQ 開放平台的群聊事件通常需要 @AIBot 才會交給 Abot**；單獨打 `!use` 僅 Bbot 可監聽，無法單方面取得 Group OpenID。
+
+**舊 QQ 指令面板：** 舊版 `/!设置插话率` 等選項存於 [QQ 開放平台](https://q.qq.com/) 的「指令配置」，與 Worker 程式碼無關；需要在官方管理端刪除。新 Worker 不再實作或依賴舊面板，也不支援舊 AI 指令。
 
 QQ 帳號 `3569028262`、`2681167798` 為受保護身分。群內有任一受保護帳號時，**未明確授權的群主／管理員**無權執行 stop、leave、revoke 等會停用連線的指令。只有受保護帳號可授予或撤銷委派權限。
 

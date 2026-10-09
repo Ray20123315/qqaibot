@@ -1,46 +1,58 @@
 {
-  "version": "v0.0.72",
+  "version": "v0.0.73",
   "task_id": "qq-cross-group-bridge-20261009",
-  "goal_revision": 5,
-  "changed_at": "2026-10-10T00:25:00+08:00",
+  "goal_revision": 6,
+  "changed_at": "2026-10-10T00:35:00+08:00",
   "provider": "GitHub",
   "location_type": "remote",
   "repository": "Ray20123315/qqaibot",
-  "branch": "main",
-  "before_revision": "906262b122796935bab5196328f7ae27e4729cfd",
-  "product_sha": "618cdd90ee10d7eeae8a76545d4b4d428d574dba",
+  "branch": "fix/qq-bang-commands-20261010",
+  "before_revision": "827921036139c3b24a8c6e1c1d9025655c45f399",
   "after_revision": "this-commit-see-git-head",
   "verification": {
-    "repair_ci": 37956722873,
-    "repair_ci_outcome": "success",
-    "cloudflare_deploy": "447dba41-d69d-460d-9e29-ae01bf7e554a",
-    "cloudflare_worker_version": "57508156-e5af-4b3d-a08d-46510b8120e1",
-    "deployment_outcome": "success",
-    "traffic_percent": 100,
-    "live_qq": "pending"
+    "tests": "pending",
+    "cloudflare_deploy": "not_yet",
+    "qq_live": "unknown",
+    "qq_command_menu_deletion": "requires_user_portal_action"
   },
   "changes": [
     {
-      "path": "src/bridge.js",
-      "action": "fix QQ 40034024 + /use pending recovery",
-      "commit": "618cdd90ee10d7eeae8a76545d4b4d428d574dba"
+      "path": "src/core.js",
+      "action": "updated_or_added",
+      "blob_sha": "3bc80aed02aec77d73ff5a575bd62b054e649c4e"
     },
     {
-      "path": "tests/qq-reply.test.mjs",
-      "action": "new regression tests",
-      "commit": "618cdd90ee10d7eeae8a76545d4b4d428d574dba"
+      "path": "worker.js",
+      "action": "updated_or_added",
+      "blob_sha": "b5147d2f6d803709294e7ed754307f1e206ef7ec"
+    },
+    {
+      "path": "src/bridge.js",
+      "action": "updated_or_added",
+      "blob_sha": "f4ea81a61976e0719ece8e23fda849852910c2eb"
+    },
+    {
+      "path": "README.md",
+      "action": "updated_or_added",
+      "blob_sha": "eafdfaa5e2d61a2bb8a190ac64a7c9cadb767436"
+    },
+    {
+      "path": "docs/DEPLOY.md",
+      "action": "updated_or_added",
+      "blob_sha": "24dc5b40052bea65147a8a9d7fc65da02ec59082"
+    },
+    {
+      "path": "tests/command-routing.test.mjs",
+      "action": "updated_or_added",
+      "blob_sha": "1a07a9d6779d93b45ab38e7ffff4499cc177af65"
     },
     {
       "path": ".github/workflows/bridge-check.yml",
-      "action": "update memory v0.0.72 packaging"
+      "action": "workflow_update"
     },
     {
       "path": ".Ray_Chen/memory/*",
-      "action": "update canonical state/version/verification"
+      "action": "canonical_updates"
     }
-  ],
-  "legacy_archive": {
-    "branch": "archive/legacy-main-20261009",
-    "sha": "6a22b06433cfaffcf13abe2b60a917305290b629"
-  }
+  ]
 }

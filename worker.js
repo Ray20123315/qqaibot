@@ -14,11 +14,19 @@ async function secretMatches(request,secret){
  return Array.from(new Uint8Array(x)).every((v,i)=>v===new Uint8Array(y)[i]);
 }
 const hub=env=>env.ONEBOT_HUB.get(env.ONEBOT_HUB.idFromName("bridge-bbot"));
-const gateway=env=>env.QQ_OPEN_GATEWAY.get(env.QQ_OPEN_GATEWAY.idFromName("bridge-abot"));
+// New Durable Object identity: supersedes the gateway instance left active across
+// the 2026-10-09 main cutover. Future revisions should keep this stable.
+const gateway=env=>env.QQ_OPEN_GATEWAY.get(env.QQ_OPEN_GATEWAY.idFromName("bridge-abot-commands-v2"));
 export default {
  async fetch(request,env){
   const path=new URL(request.url).pathname;
-  if(path==="/health"&&request.method==="GET")return json({service:"qq-cross-group-bridge",ai:false,configured:!!(env.ONEBOT_ACCESS_TOKEN&&env.QQ_OPEN_APP_ID&&env.QQ_OPEN_CLIENT_SECRET)});
+  if(path==="/health"&&request.method==="GET"){
+   const [b,g]=await Promise.allSettled([hub(env).fetch("https://internal/status"),gateway(env).fetch("https://internal/status")]);
+   const bbot=b.status==="fulfilled"&&b.value.ok?await b.value.json():{connected:false};
+   const abot=g.status==="fulfilled"&&g.value.ok?await g.value.json():{connected:false};
+   return json({service:"qq-cross-group-bridge",ai:false,configured:!!(env.ONEBOT_ACCESS_TOKEN&&env.QQ_OPEN_APP_ID&&env.QQ_OPEN_CLIENT_SECRET),
+    bbot:{connected:!!bbot.connected},abot:{connected:!!abot.connected,session_ready:!!abot.ready},command_prefix:"/! or !"});
+  }
   if(path==="/onebot" || path==="/onebot/roster"){
    if(!await secretMatches(request,env.ONEBOT_ACCESS_TOKEN))return json({error:"unauthorized"},401);
    if(path==="/onebot"&&request.headers.get("upgrade")?.toLowerCase()==="websocket")
@@ -44,6 +52,7 @@ export class OneBotHub {
  constructor(state,env){this.state=state;this.env=env;this.pending=new Map();this.inflight=new Map();this.lastRosterRequested=new Map();}
  async fetch(request){
   const pathname=new URL(request.url).pathname;
+  if(pathname==="/status" && request.method==="GET")return json({connected:!!this.socket()});
   if(pathname==="/send" && request.method==="POST"){
    let data;try{data=await request.json();}catch{return json({ok:false,reason:"invalid_payload"},400);}
    let outbound;
@@ -67,6 +76,7 @@ export class OneBotHub {
   for(const existing of this.state.getWebSockets())try{existing.close(1000,"reconnected");}catch{}
   const pair=new WebSocketPair(),[client,server]=Object.values(pair);
   this.state.acceptWebSocket(server);
+  console.log("BBOT_WS_CONNECTED");
   return new Response(null,{status:101,webSocket:client});
  }
  socket(){return this.state.getWebSockets().find(ws=>ws.readyState===1);}
@@ -129,8 +139,10 @@ export class OneBotHub {
 export class QqOpenGateway {
  constructor(state,env){this.state=state;this.env=env;this.ws=null;this.token="";this.seq=null;this.sessionId="";this.interval=30000;this.connecting=false;}
  async fetch(request){
-  if(new URL(request.url).pathname!=="/ensure")return json({error:"not_found"},404);
-  try{await this.ensure();return json({active:!!this.ws,connecting:this.connecting});}
+  const path=new URL(request.url).pathname;
+  if(path==="/status" && request.method==="GET")return json({connected:this.ws?.readyState===1,ready:!!this.sessionId});
+  if(path!=="/ensure")return json({error:"not_found"},404);
+  try{await this.ensure();return json({active:!!this.ws,connecting:this.connecting,ready:!!this.sessionId});}
   catch(e){console.error("QQ_OPEN_CONNECT_FAILED",String(e).slice(0,200));await this.state.storage.setAlarm(Date.now()+30000);return json({error:"gateway_failed"},503);}
  }
  async ensure(){
@@ -144,7 +156,7 @@ export class QqOpenGateway {
    const ws=new WebSocket(data.url);this.ws=ws;
    ws.addEventListener("open",()=>{this.connecting=false;});
    ws.addEventListener("message",event=>{this.handleMessage(event.data).catch(e=>console.error("QQ_OPEN_EVENT_FAILED",String(e).slice(0,250)));});
-   ws.addEventListener("close",event=>{if(this.ws===ws){this.ws=null;this.connecting=false;}this.state.storage.setAlarm(Date.now()+10000).catch(()=>{});});
+   ws.addEventListener("close",event=>{console.warn("ABOT_GATEWAY_CLOSED",event.code);if(this.ws===ws){this.ws=null;this.connecting=false;this.sessionId="";}this.state.storage.setAlarm(Date.now()+10000).catch(()=>{});});
    ws.addEventListener("error",()=>{this.connecting=false;});
    await this.state.storage.setAlarm(Date.now()+30000);
   }finally{this.connecting=false;}
@@ -159,9 +171,13 @@ export class QqOpenGateway {
    await this.state.storage.setAlarm(Date.now()+this.interval);
   }
   if(op===0){
-   if(payload.t==="READY")this.sessionId=payload.d?.session_id||"";
-   if(payload.t==="GROUP_AT_MESSAGE_CREATE"||payload.t==="GROUP_MESSAGE_CREATE")
-     await onOfficialEvent(this.env,payload);
+   if(payload.t==="READY"){this.sessionId=payload.d?.session_id||"";console.log("ABOT_GATEWAY_READY");}
+   if(payload.t==="GROUP_AT_MESSAGE_CREATE"||payload.t==="GROUP_MESSAGE_CREATE"){
+     // Log event type only; do not retain message content or QQ user data.
+     console.log("ABOT_GROUP_EVENT_RECEIVED",payload.t);
+     const outcome=await onOfficialEvent(this.env,payload);
+     console.log("ABOT_GROUP_COMMAND_RESULT",JSON.stringify({handled:!!outcome?.handled,ignored:!!outcome?.ignored,reply:outcome?.reply??null}));
+   }
   }
   if(op===7||op===9){try{this.ws?.close();}catch{}this.ws=null;await this.state.storage.setAlarm(Date.now()+10000);}
  }

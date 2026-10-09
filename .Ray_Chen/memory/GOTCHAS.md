@@ -1,7 +1,8 @@
 # GOTCHAS
 
-- Real 2026-10-09T16:01:12Z Cloudflare qqai error ABOT_RESPONSE_FAILED QQ_API_400:40034024:请求参数msg_id无效或越权. New group reply fallback only when explicit error code, not generic 400/5xx/timeout.
-- Cloudflare new code deployment may still temporarily show old Durable Object versions in telemetry, due globally eventually-consistent DO updates.
-- /use was previously able to allocate DB room before failed API reply; a repeat /use now regenerates pending credentials.
-- If group proactive reply permission is off, retry without msg_id may still be rejected, requiring group owner to enable QQ group bot proactive messages.
-- Bbot reverse WebSocket needs authenticated NapCat and connected service; no successful Bbot events observed in sampled Cloudflare logs.
+- QQ autocomplete menu /!设置插话率 comes from developer console command configuration, not from Worker. Deleting code won't delete the menu; QQ developer portal must remove old commands.
+- QQ official group bot only receives messages that match enabled group event subscription, generally @bot mention. Bare !use alone on NapCat does not produce group_openid on Abot.
+- Previous Abot QqOpenGateway DO persisted older source version after Worker deployment; use a new DO name to get current code. Potential competing old Gateway session could be kicked/reconnect; verify new READY and stop stale instance if it interferes.
+- NapCat reverse WebSocket Authorization: Bearer token must equal Cloudflare ONEBOT_ACCESS_TOKEN (secret, do not expose).
+- Bbot WS not known connected; /health reports limited live status so user can check without revealing secrets.
+- Avoid forwarding unrecognized /! or ! commands to other groups.

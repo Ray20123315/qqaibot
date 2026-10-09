@@ -11,8 +11,10 @@ export function qq(value) {
 }
 export function isProtected(value) { return PROTECTED_QQ.has(qq(value)); }
 export function parseCommand(input) {
+  // QQ's old slash menu is not used. OneBot and QQ Open Platform normalize
+  // /!use, !use and legacy /use to the same command.
   const value = String(input ?? "").replace(/\[CQ:at,[^\]]+\]/g, " ").replace(/<@!?[^>]+>/g, " ").replace(/^@(?:Abot|AIBot|QQBot)\s*/i,"").trim();
-  const match = value.match(/^\/(\S+)(?:\s+([\s\S]*))?$/);
+  const match = value.match(/^(?:\/!?|!)(\S+)(?:\s+([\s\S]*))?$/);
   if (!match) return null;
   const command = match[1].toLowerCase(), arg = clean(match[2] || "", 100);
   const known = new Set(["use","verify","status","leave","rename","revoke","stop","resume","grant","ungrant","id","verifyid","code","help"]);
@@ -85,6 +87,6 @@ export function formatForward(group, sender, parts, resolveMention = ()=>null) {
 export function isRelayable(msg) {
   if (!msg || !msg.parts.length) return false;
   if (msg.selfId && msg.senderQq===msg.selfId) return false;
-  if (parseCommand(msg.text) || /^\s*\//.test(msg.text)) return false;
+  if (parseCommand(msg.text) || /^\s*[!\/]/.test(msg.text)) return false;
   return msg.parts.some(p=>p.type==="at" || ["image","record","video","file","face","mface","reply","forward","json","xml","poke"].includes(p.type) || (p.type==="text" && p.text.trim()));
 }

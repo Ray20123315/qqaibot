@@ -1,12 +1,8 @@
 # USER_REQUIREMENTS
 
-- preserve old main in another Git branch; new main eventually becomes cross-group link service
-- group Abot QR Open default sender, Bbot NapCat numeric identity & all group messages observer
-- /use gives code; /code alias joins unlimited groups; text format [group alias]nickname: ...
-- true QQ mention in target where member present using verified group-scoped OpenID or Bbot QQ numeric native @
-- commands /status, /leave, /rename, /revoke, /stop, /resume, /grant, /ungrant, /code, /verify, /id, /verifyid
-- protect QQ identities 3569028262 and 2681167798 from unauthorized stop, admin allowed if protected not present
-- only protected users grant in protected groups
-- AI chat disabled for now, may later add back
-- NEW: media forwarding for as many forms as feasible; Abot proactive group permissions enable when group allows; Bbot sends only as a fallback to definitive failure or format unavailability
-- group binding must be verified by both Bot perspectives before forwarding
+- main must carry new Abot-first cross-group relay with Bbot backup when Abot definitively cannot send, preserving full legacy main under archive branch
+- normal chat across arbitrarily many groups, media best-effort, QQ native @ only with verified QQ ID/member OpenID
+- protected IDs 3569028262/2681167798 prevent unauthorized group stop; only protected IDs grant when present, otherwise admins/owners may grant
+- user now explicitly wants old QQ command panel unused/deleted, key commands /!use and !use (with legacy /use fallback), fix bot no-reply on main
+- NapCat WebSocket Client: name, URL, Array, Token, heartbeat and reconnect guidance
+- AI chat disabled, may be added later

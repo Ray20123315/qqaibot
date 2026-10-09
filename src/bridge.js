@@ -62,9 +62,9 @@ export async function onOfficialEvent(env,payload){
  const current=await groupByOpen(env.DB,groupOpenid);
  const msgId=clean(d.id,128);
  if(msgId)await run(env.DB,"INSERT INTO bridge_reply_context(group_openid,msg_id,expires_at) VALUES(?,?,?) ON CONFLICT(group_openid) DO UPDATE SET msg_id=excluded.msg_id,expires_at=excluded.expires_at",groupOpenid,msgId,now()+120000);
- if(command.name==="help")return {handled:true,reply:await answer(env,groupOpenid,"指令：/use /代碼 簡寫 /verify /status /stop /resume /leave /rename 名稱 /revoke /code /grant QQ號 manage|stop|both /ungrant QQ號 /id /verifyid",msgId)};
+ if(command.name==="help")return {handled:true,reply:await answer(env,groupOpenid,"指令：/!use /!代碼 簡寫 /!verify /!status /!stop /!resume /!leave /!rename 名稱 /!revoke /!code /!grant QQ號 manage|stop|both /!ungrant QQ號 /!id /!verifyid",msgId)};
  if(command.name==="use"){
-  if(current?.verified)return {handled:true,reply:await answer(env,groupOpenid,"本群已建立連線，請使用 /status。",msgId)};
+  if(current?.verified)return {handled:true,reply:await answer(env,groupOpenid,"本群已建立連線，請使用 /!status。",msgId)};
   const invite=makeCode(12),roomId=crypto.randomUUID(),nonce=makeCode(10);
   await run(env.DB,"INSERT INTO bridge_rooms(id,code_hash,created_at) VALUES(?,?,?)",roomId,await digest(invite),now());
   if(current){
@@ -76,15 +76,15 @@ export async function onOfficialEvent(env,payload){
   }else{
     await initialGroup(env,groupOpenid,roomId,"",nonce);
   }
-  const response="連線代碼："+invite+"\n待驗證：請本群群主或管理員在這個群送出 @Abot /verify "+nonce+"。\nAbot 和 Bbot 都收到後才會配對；請勿把驗證碼轉給其他群。";
+  const response="連線代碼："+invite+"\n待驗證：請本群群主或管理員在這個群送出 @AIBot /!verify "+nonce+"。\nAbot 和 Bbot 都收到後才會配對；請勿把驗證碼轉給其他群。";
   return {handled:true,reply:await answer(env,groupOpenid,response,msgId)};
  }
  if(command.name==="join"){
-  if(current)return {handled:true,reply:await answer(env,groupOpenid,"此群已有連線；請先使用 /leave。",msgId)};
+  if(current)return {handled:true,reply:await answer(env,groupOpenid,"此群已有連線；請先使用 /!leave。",msgId)};
   const room=await get(env.DB,"SELECT * FROM bridge_rooms WHERE code_hash=? AND active=1 AND revoked=0",await digest(command.code));
   if(!room)return {handled:true,reply:await answer(env,groupOpenid,"連線代碼無效、未驗證或已撤銷。",msgId)};
   const nonce=makeCode(10);await initialGroup(env,groupOpenid,room.id,command.arg,nonce);
-  return {handled:true,reply:await answer(env,groupOpenid,"加入待驗證，請本群群主或管理員在本群輸入 @Abot /verify "+nonce,msgId)};
+  return {handled:true,reply:await answer(env,groupOpenid,"加入待驗證，請本群群主或管理員在本群輸入 @AIBot /!verify "+nonce,msgId)};
  }
  if(command.name==="verify"){
   const hash=await digest(command.arg.toUpperCase());
@@ -99,7 +99,7 @@ export async function onOfficialEvent(env,payload){
   if(!current?.verified)return {handled:true};
   const nonce=makeCode(12);
   await run(env.DB,"INSERT INTO bridge_pending_ids(token_hash,group_openid,member_openid,expires_at) VALUES(?,?,?,?)",await digest(nonce),groupOpenid,memberOpenid,now()+180000);
-  return {handled:true,reply:await answer(env,groupOpenid,"身分配對：請由同一 QQ 帳號送出 @Abot /verifyid "+nonce+"（三分鐘內有效）。",msgId)};
+  return {handled:true,reply:await answer(env,groupOpenid,"身分配對：請由同一 QQ 帳號送出 @AIBot /!verifyid "+nonce+"（三分鐘內有效）。",msgId)};
  }
  if(command.name==="verifyid"){
   const hash=await digest(command.arg.toUpperCase());
@@ -175,7 +175,7 @@ async function verifyPair(env,msg,command){
 
 async function handleControl(env,group,msg,command){
  const name=command.name;
- if(name==="help")return answer(env,group.group_openid,"指令：/use /代碼 簡寫 /verify /status /stop /resume /leave /rename 名稱 /revoke /code /grant QQ號 manage|stop|both /ungrant QQ號 /id /verifyid");
+ if(name==="help")return answer(env,group.group_openid,"指令：/!use /!代碼 簡寫 /!verify /!status /!stop /!resume /!leave /!rename 名稱 /!revoke /!code /!grant QQ號 manage|stop|both /!ungrant QQ號 /!id /!verifyid");
  if(name==="status"){
   const room=await get(env.DB,"SELECT COUNT(*) AS total FROM bridge_groups WHERE room_id=? AND verified=1",group.room_id);
   return answer(env,group.group_openid,"群組："+(group.alias||group.display_name)+"\n狀態："+(group.stopped?"已停止":"運作中")+"\n連線群數："+room.total+"\nAI 聊天：已停用");
@@ -201,14 +201,14 @@ async function handleControl(env,group,msg,command){
   if(!exists)return answer(env,group.group_openid,"只能授權本群內、且已經 Bbot 驗證的成員");
   if(name==="ungrant")await run(env.DB,"DELETE FROM bridge_acl WHERE qq_group_id=? AND qq_id=?",msg.groupId,target);
   else {
-   if(!["manage","stop","both"].includes(scope))return answer(env,group.group_openid,"用法：/grant QQ號 manage|stop|both");
+   if(!["manage","stop","both"].includes(scope))return answer(env,group.group_openid,"用法：/!grant QQ號 manage|stop|both");
    await run(env.DB,"DELETE FROM bridge_acl WHERE qq_group_id=? AND qq_id=?",msg.groupId,target);
    for(const s of scope==="both"?["manage","stop"]:[scope])await run(env.DB,"INSERT INTO bridge_acl(qq_group_id,qq_id,scope) VALUES(?,?,?)",msg.groupId,target,s);
   }
   return answer(env,group.group_openid,"授權設定已更新");
  }
  if(name==="rename"){
-  if(!command.arg)return answer(env,group.group_openid,"用法：/rename 新簡寫");
+  if(!command.arg)return answer(env,group.group_openid,"用法：/!rename 新簡寫");
   await run(env.DB,"UPDATE bridge_groups SET alias=? WHERE group_openid=?",sanitizeAlias(command.arg),group.group_openid);
   return answer(env,group.group_openid,"簡寫已更新");
  }

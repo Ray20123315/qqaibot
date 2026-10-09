@@ -18,11 +18,11 @@ Bbot NapCat 反向 WebSocket 使用 `wss://aibot.ray2025.com/onebot`，授權標
 
 ## 安全配對
 
-1. Abot 收到 `@Abot /use` 建立暫存房間與驗證碼。
+1. Abot 收到 `@AIBot /!use` 建立暫存房間與驗證碼。
 2. Bbot 使用 OneBot `get_group_member_list` 取得可信數字 QQ ID 名單及身分；此名單僅兩分鐘有效。
-3. 同群管理員／群主輸入 `@Abot /verify <code>`，Abot 與 Bbot 必須各自觀測並提交相同代碼的證明，雙方核對成功後才將數字 QQ 群號綁定到 Abot `group_openid`。**只有 Bbot 收到驗證碼時不可以單獨綁定**。
-4. 新群以 `@Abot /<邀請代碼> <簡寫>` 加入，仍須獨立驗證。
-5. 要將 QQ ID 對應成 OpenID，先 `@Abot /id`，再由相同用戶發送 `@Abot /verifyid <code>`；Abot 與 Bbot 雙方看到驗證內容後才建立映射。
+3. 同群管理員／群主輸入 `@AIBot /!verify <code>`，Abot 與 Bbot 必須各自觀測並提交相同代碼的證明，雙方核對成功後才將數字 QQ 群號綁定到 Abot `group_openid`。**只有 Bbot 收到驗證碼時不可以單獨綁定**。
+4. 新群以 `@AIBot /!<邀請代碼> <簡寫>` 加入，仍須獨立驗證。
+5. 要將 QQ ID 對應成 OpenID，先 `@AIBot /!id`，再由相同用戶發送 `@AIBot /!verifyid <code>`；Abot 與 Bbot 雙方看到驗證內容後才建立映射。
 
 權限查核若 Bbot 名單逾期或不可使用，一律拒絕有風險的修改指令。不採信 Abot 任意推導的數字 QQ ID。
 
@@ -75,6 +75,27 @@ Bbot 會保存 OneBot 結構化的文字、@、圖片、語音、影片、檔案
 
 ## 雙向驗證與防循環（v0.0.69）
 
-- `/verify` 必須使用 `@Abot /verify <碼>`，讓兩個 Bot 在同一個 QQ 群看到這次訊息；不能只讓 Bbot 接收。
+- `/verify` 必須使用 `@AIBot /!verify <碼>`，讓兩個 Bot 在同一個 QQ 群看到這次訊息；不能只讓 Bbot 接收。
 - Abot 與 Bbot 的配對證明各自寫入資料庫；其中一側缺少證明、過期、群不匹配、未驗證群主身分或群員名單逾期，都不得完成映射。
 - Abot 發送的回覆及跨群訊息會加不可見的防循環標記，以減少 Bbot 再次轉發；若 QQ 客戶端清除該標記，應額外設定 `ABOT_QQ_ID`（需由 Bbot 驗證取得，不能猜測）以可靠排除 Abot 帳號本身。
+
+## 2026-10-10 — QQ 舊面板移除與 NapCat WebSocket Client
+
+**QQ 舊面板不是本 Worker 的功能。** 騰訊開放平台 [機器人指令配置文件](https://github.com/tencent-connect/bot-docs/blob/main/docs/README.md) 說明指令在管理端設定。請進入 QQ 開放平台管理端 → 選取 AIBot →「指令配置」，刪除原有 AI、插話率等舊版項目。舊清單可能在 QQ 客戶端快取一段時間，需關閉聊天重新開啟。程式只處理文字 `@AIBot /!use` 或 `@AIBot !use`，也保留舊相容的 `@AIBot /use`。
+
+**NapCat / OneBot WebSocket Client（反向 WebSocket）建議設定：**
+
+| 欄位 | 值 |
+|---|---|
+| 名稱 | `QQAIBOT-Bbot` |
+| URL | `wss://aibot.ray2025.com/onebot` |
+| 消息格式 | `Array` |
+| Token | 與 Cloudflare Worker Secret `ONEBOT_ACCESS_TOKEN` **完全相同**；不允許留空，也不可把 Token 寫入 Git |
+| 心跳間隔 | `30000` 毫秒 |
+| 重連間隔 | `5000` 毫秒 |
+| 上報自身消息 | 關閉（程式亦有去重與自發訊息判斷） |
+
+確認啟用 WebSocket Client；NapCat 必須能對外使用 TLS（wss），需要發送 `Authorization: Bearer <Token>`。如果收到 HTTP 401，核對 Token；WebSocket 握手不成功時檢查反向 WS 記錄。診斷入口 `GET https://aibot.ray2025.com/health` 回傳 Abot / Bbot 連線布林值，**不回傳 Secret**。
+
+**Gateway DO 更新：** 舊 `bridge-abot` Durable Object 在首次 main 切換後仍可能執行舊事件邏輯；新版以 `bridge-abot-commands-v2` 新實例啟動，防止舊實例一直使用過期程式。QQ 官方 Gateway 同一應用同 shard 是否允許平行連線仍須實測；如果有 gateway 連線互踢，應停用舊會話或改成單一活躍會話，不應重複開啟多個接入。
+
