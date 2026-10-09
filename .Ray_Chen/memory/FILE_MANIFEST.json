@@ -1,93 +1,92 @@
 {
-  "version": "v0.0.91",
+  "version": "v0.0.92",
   "task_id": "qqaibot-ai-rebuild-20261010",
   "goal_revision": 1,
-  "file_change_transaction": "ai-mvp-20261010",
-  "changed_at": "2026-10-09T18:26:04.585Z",
+  "changed_at": "2026-10-09T18:29:45.586Z",
+  "location_type": "remote",
   "provider": "GitHub",
   "repository": "Ray20123315/qqaibot",
-  "location_type": "remote",
-  "branch": "feature/ai-assistant-rebuild-20261010",
+  "branch": "main",
   "before_revision": "13b915d1d4451d4cb15ff91f70a498cede760d40",
-  "after_revision": "feature_commit_pending",
+  "product_sha": "9d19fd6ad19970290b2c4ee34259bf97fe30679e",
+  "after_revision": "memory-only-commit-pending",
   "verification": {
-    "ci": "pending",
-    "main": "unchanged",
-    "live_qq": "untested"
+    "feature_ci": 37973263797,
+    "main_ci": 37973472725,
+    "ci_outcome": "success",
+    "cloudflare_deployment": "5162563f-51b9-4ddc-a52e-888e46798fa7",
+    "cloudflare_version": "291e36cf-dbc6-4963-8984-db0f64bd90b6",
+    "build_outcome": "success",
+    "traffic_percent": 100,
+    "model_secrets": "names_types_verified_post_deploy",
+    "qq_live": "unknown"
   },
-  "changes": [
+  "files": [
     {
       "path": "src/model-client.js",
-      "action": "create_or_modify",
-      "blob_sha": "b6026faf4a8929ff2d65cc74fe48e175f4288b0f"
+      "action": "created_or_modified"
     },
     {
       "path": "src/assistant.js",
-      "action": "create_or_modify",
-      "blob_sha": "65e4624e73bc2cd4207197d107a59e8c66fd0b40"
+      "action": "created_or_modified"
     },
     {
       "path": "src/bbot-hub.js",
-      "action": "create_or_modify",
-      "blob_sha": "c74b45c1abc5a223146007c9244d40816de1f124"
+      "action": "created_or_modified"
     },
     {
       "path": "src/bridge.js",
-      "action": "create_or_modify",
-      "blob_sha": "969852c07017e1452a0b28c8eae04cb7dad87da0"
+      "action": "created_or_modified"
     },
     {
       "path": "worker.js",
-      "action": "create_or_modify",
-      "blob_sha": "8f8abf2c467a1b1ccdce1e14aec06c80c98ddb6e"
+      "action": "created_or_modified"
     },
     {
       "path": "wrangler.toml",
-      "action": "create_or_modify",
-      "blob_sha": "210a1fa58b9aa27f1f2b845f42a0f3d2cd109803"
+      "action": "created_or_modified"
     },
     {
       "path": "tests/assistant.test.mjs",
-      "action": "create_or_modify",
-      "blob_sha": "d52d852c8c76456f0d4080178b68bffc97e2c374"
+      "action": "created_or_modified"
     },
     {
       "path": "tests/command-routing.test.mjs",
-      "action": "create_or_modify",
-      "blob_sha": "e447eb687f747a66d15358916a5ac856542ee1eb"
+      "action": "created_or_modified"
     },
     {
       "path": "tests/hub-generation.test.mjs",
-      "action": "create_or_modify",
-      "blob_sha": "d1fcfedf804aef91d927b1cd80481878b9390baf"
+      "action": "created_or_modified"
     },
     {
       "path": "tests/abot-disabled.test.mjs",
-      "action": "create_or_modify",
-      "blob_sha": "d664f35576d66d4ba71993e0e64ff1fbe9dbcb55"
+      "action": "created_or_modified"
     },
     {
       "path": "README.md",
-      "action": "create_or_modify",
-      "blob_sha": "3e07f34572d0cd1e9f20a6b1681ae3ad5200332b"
+      "action": "created_or_modified"
     },
     {
       "path": "docs/DEPLOY.md",
-      "action": "create_or_modify",
-      "blob_sha": "40820dcfc7107d9bac5442cf3eb3dc9cb2e831f2"
+      "action": "created_or_modified"
     },
     {
       "path": ".github/workflows/bridge-check.yml",
-      "action": "update CI and memory version"
+      "action": "created_or_modified"
     },
     {
       "path": ".Ray_Chen/memory/*",
-      "action": "initialize new task"
+      "action": "created_or_modified"
     }
   ],
-  "archive": {
-    "branch": "archive/bbot-bridge-before-ai-20261010",
-    "sha": "13b915d1d4451d4cb15ff91f70a498cede760d40",
-    "earlier_original": "archive/legacy-main-20261009"
-  }
+  "backups": [
+    {
+      "branch": "archive/bbot-bridge-before-ai-20261010",
+      "sha": "13b915d1d4451d4cb15ff91f70a498cede760d40"
+    },
+    {
+      "branch": "archive/legacy-main-20261009",
+      "sha": "6a22b06433cfaffcf13abe2b60a917305290b629"
+    }
+  ]
 }

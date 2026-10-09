@@ -1,12 +1,12 @@
 # Ray_Chen Canonical Memory
-version: v0.0.91
+version: v0.0.92
 task_id: qqaibot-ai-rebuild-20261010
-task_status: active
+task_status: blocked
 goal_revision: 1
-canonical_branch: feature/ai-assistant-rebuild-20261010
-main_before: 13b915d1d4451d4cb15ff91f70a498cede760d40
-bridge_backup_branch: archive/bbot-bridge-before-ai-20261010
-original_legacy_backup: archive/legacy-main-20261009
-updated_at: 2026-10-09T18:26:04.585Z
+canonical_branch: main
+product_sha: 9d19fd6ad19970290b2c4ee34259bf97fe30679e
+bridge_backup_sha: 13b915d1d4451d4cb15ff91f70a498cede760d40
+legacy_original_sha: 6a22b06433cfaffcf13abe2b60a917305290b629
+updated_at: 2026-10-09T18:29:45.586Z
 
-New user goal: lean AI assistant and optional cross-group relay plugin disabled by default. Cloudflare deployed qqai already has Secret binding names GEMINI_API_KEYS, GEMINI_VISION_API_KEYS, DEEPSEEK_API_KEY, CODEX_BRIDGE_ACCESS_TOKEN. New AI uses existing Gemini and DeepSeek API Secrets, NOT Cloudflare Workers AI binding. Read ACTIVE_TASK, CURRENT_STATE, USER_REQUIREMENTS, DECISIONS, GOTCHAS, VERIFY, FILE_MANIFEST before any further change.
+Lean QQAIBOT Gemini/DeepSeek assistant deployed on main. NO new Workers AI binding required; existing GEMINI_API_KEYS and DEEPSEEK_API_KEY Secret bindings verified after deployment, not read. Existing bridge is OFF by default plugin. Tests, Wrangler dry run and Cloudflare build success; actual Gemini and QQ replies await operator's controlled live test after NapCat client reconnect. Read ACTIVE_TASK, CURRENT_STATE, USER_REQUIREMENTS, DECISIONS, GOTCHAS, VERIFY and FILE_MANIFEST before changes.
