@@ -1,10 +1,9 @@
 # DECISIONS
 
-- Original main preserved at archive/legacy-main-20261009
-- Abot-first, Bbot only if official API definitive failure; no fallback on ambiguous results
-- 2026-10-09 group binding requires BOTH Abot and Bbot seeing same one-time code, supersedes single-Bbot proof (security)
-- QQ ID and official group/member OpenID must never be silently interchanged
-- Protected group management fail closed, delegated scopes explicit
-- Official media upload via HTTPS then msg_type7; native Bbot on definitive unsupported/blocked
-- Outbound Abot includes invisible echo marker to reduce relay loops; also supports explicit ABOT_QQ_ID ignore where known
-- No main promotion without evidence of permission, runtime configuration and safe cutover
+- Historical main archived to archive/legacy-main-20261009 first, same original commit.
+- 2026-10-09 user explicitly approved immediate main switch despite no live QQ testing ("你不放我怎麼測試，放過去").
+- Executed nonforced fast-forward update of main from 6a22b06433cfaffcf13abe2b60a917305290b629 to 2beed0b762d07484fc8b7f201682504f429b5201.
+- Cloudflare connected build auto-deployed official source main 2beed0b762d07484fc8b7f201682504f429b5201, independently verified success.
+- Bbot numeric IDs authoritative for protected QQ group management; Abot official OpenID cannot be converted automatically.
+- Prefer Abot sender; Bbot only if Abot clearly rejected / unsupported. Ambiguous send never replayed automatically.
+- User must now do live QQ acceptance. No simulated success claim.
