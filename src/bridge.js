@@ -5,6 +5,7 @@ import {sendGroup,groupBotState} from "./qq-api.js";
 import {relayOperations} from "./relay.js";
 import {deliver} from "./delivery.js";
 import {pairCanFinalize} from "./pairing.js";
+import {handleNapcatCommand} from "./napcat-control.js";
 let extraReady=false;
 async function ready(env){
  await init(env.DB);
@@ -57,6 +58,11 @@ export async function onOfficialEvent(env,payload){
  if(!groupOpenid||!memberOpenid)return {ignored:true};
  const command=parseCommand(d.content);
  if(!command)return {ignored:true};
+ // Group linking and control is operated by verified numeric QQ IDs via NapCat.
+ // Do not process the same /!use on Abot and Bbot simultaneously.
+ if(String(env.BRIDGE_NAPCAT_COMMANDS||"true")==="true" &&
+    ["use","join","verify","status","help","code","rename","stop","resume","leave","revoke","grant","ungrant"].includes(command.name))
+    return {ignored:true,reason:"napcat_commands_primary"};
  await ready(env);
  // QQ official messages are trusted only for opaque OpenIDs; numeric IDs are never inferred.
  const current=await groupByOpen(env.DB,groupOpenid);
@@ -231,11 +237,13 @@ async function handleControl(env,group,msg,command){
   return answer(env,group.group_openid,"新連線代碼："+newCode);
  }
 }
-export async function onOnebotEvent(env,event){
+export async function onOnebotEvent(env,event,reply){
  const msg=parseOnebot(event);if(!msg)return {ignored:true};
  if(msg.senderQq===msg.selfId||msg.senderQq===qq(env.ABOT_QQ_ID)||msg.text.includes(BRIDGE_ECHO_MARKER))return {ignored:true};
  await ready(env);
  const command=parseCommand(msg.text);
+ if(command && String(env.BRIDGE_NAPCAT_COMMANDS||"true")==="true")
+   return handleNapcatCommand(env,msg,command,reply);
  if(command?.name==="verify")return {handled:await verifyPair(env,msg,command)};
  const group=await groupByQq(env.DB,msg.groupId);
  if(!group?.verified)return {ignored:true,reason:"group_not_paired"};
@@ -264,7 +272,8 @@ export async function onOnebotEvent(env,event){
    if(Number(result.meta?.changes||0))added++;
   }
  }
- if(added)await flushOutbox(env,3);
+ // DO websocket handler must not synchronously send via itself, otherwise a
+ // self-request can block its own ACK handler. OneBotHub schedules a fast alarm.
  return {forwarded:added,total:destinations.length};
 }
 export async function onOnebotRoster(env,groupId,members,groupName){

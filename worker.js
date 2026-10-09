@@ -25,7 +25,8 @@ export default {
    const bbot=b.status==="fulfilled"&&b.value.ok?await b.value.json():{connected:false};
    const abot=g.status==="fulfilled"&&g.value.ok?await g.value.json():{connected:false};
    return json({service:"qq-cross-group-bridge",ai:false,configured:!!(env.ONEBOT_ACCESS_TOKEN&&env.QQ_OPEN_APP_ID&&env.QQ_OPEN_CLIENT_SECRET),
-    bbot:{connected:!!bbot.connected},abot:{connected:!!abot.connected,session_ready:!!abot.ready},command_prefix:"/! or !"});
+    bbot:{connected:!!bbot.connected},abot:{connected:!!abot.connected,session_ready:!!abot.ready},command_prefix:"! or /!",
+    verification:"napcat",primary_command_transport:"bbot"});
   }
   if(path==="/onebot" || path==="/onebot/roster"){
    if(!await secretMatches(request,env.ONEBOT_ACCESS_TOKEN))return json({error:"unauthorized"},401);
@@ -55,22 +56,10 @@ export class OneBotHub {
   if(pathname==="/status" && request.method==="GET")return json({connected:!!this.socket()});
   if(pathname==="/send" && request.method==="POST"){
    let data;try{data=await request.json();}catch{return json({ok:false,reason:"invalid_payload"},400);}
-   let outbound;
-   try {outbound=outboundAction(String(data.id||""),data.groupId,data.segments);}
-   catch{return json({ok:false,reason:"invalid_action"},400);}
    const ws=this.socket();
    if(!ws)return json({ok:false,reason:"bbot_disconnected"},503);
-   if(this.inflight.has(outbound.echo))return json({ok:false,reason:"duplicate_inflight"},409);
-   // An ambiguous timeout can mean QQ received the event. Never automatically resend.
-   return await new Promise(resolve=>{
-    const timer=setTimeout(()=>{
-     this.inflight.delete(outbound.echo);
-     resolve(json({ok:false,reason:"ambiguous_timeout"},504));
-    },10000);
-    this.inflight.set(outbound.echo,{resolve,timer});
-    try{ws.send(JSON.stringify(outbound));}
-    catch{clearTimeout(timer);this.inflight.delete(outbound.echo);resolve(json({ok:false,reason:"bbot_socket_unavailable"},503));}
-   });
+   try{return await this.dispatch(ws,data.id,data.groupId,data.segments);}
+   catch{return json({ok:false,reason:"invalid_action"},400);}
   }
   if(pathname!=="/ws" || request.headers.get("upgrade")?.toLowerCase()!=="websocket")return json({error:"not_found"},404);
   for(const existing of this.state.getWebSockets())try{existing.close(1000,"reconnected");}catch{}
@@ -80,6 +69,31 @@ export class OneBotHub {
   return new Response(null,{status:101,webSocket:client});
  }
  socket(){return this.state.getWebSockets().find(ws=>ws.readyState===1);}
+ async dispatch(ws,id,groupId,segments){
+  const outbound=outboundAction(String(id||""),groupId,segments);
+  if(this.inflight.has(outbound.echo))return json({ok:false,reason:"duplicate_inflight"},409);
+  return await new Promise(resolve=>{
+   const timer=setTimeout(()=>{this.inflight.delete(outbound.echo);resolve(json({ok:false,reason:"ambiguous_timeout"},504));},10000);
+   this.inflight.set(outbound.echo,{resolve,timer});
+   try{ws.send(JSON.stringify(outbound));}
+   catch{clearTimeout(timer);this.inflight.delete(outbound.echo);resolve(json({ok:false,reason:"bbot_socket_unavailable"},503));}
+  });
+ }
+ async replyFromBbot(ws,groupId,text){
+  const segments=[{type:"text",data:{text:String(text).slice(0,1900)}}];
+  const result=await this.dispatch(ws,"cmd-"+crypto.randomUUID(),groupId,segments);
+  if(!result.ok)throw new Error("BBOT_COMMAND_SEND_"+result.status);
+  const obj=await result.json();
+  if(!obj.ok)throw new Error("BBOT_COMMAND_SEND_"+obj.reason);
+  console.log("BBOT_COMMAND_REPLY_OK");
+ }
+ async afterHandled(result){
+  if(result?.forwarded>0)await this.state.storage.setAlarm(Date.now()+1000);
+ }
+ async alarm(){
+  if(this.socket())try{await flushOutbox(this.env,12);}catch(e){console.error("BBOT_RELAY_FLUSH",String(e).slice(0,130));}
+ }
+
  requestRoster(ws,group){
   const current=Date.now();
   if(current-(this.lastRosterRequested.get(group)||0)<3000)return;
@@ -107,7 +121,11 @@ export class OneBotHub {
     const queued=(await this.state.storage.get(queueKey))||[];
     await this.state.storage.delete(queueKey);
     const name=(await this.state.storage.get("groupname:"+group))||"";
-    for(const evt of queued){evt.__bridge_group_name=name;await onOnebotEvent(this.env,evt);}
+    for(const evt of queued){
+     evt.__bridge_group_name=name;
+     const result=await onOnebotEvent(this.env,evt,text=>this.replyFromBbot(ws,group,text));
+     await this.afterHandled(result);
+    }
    }else{await this.state.storage.delete("queue:"+group);console.error("BBOT_ROSTER_FAILED",echo,String(data?.retcode||""));}
    return;
   }
@@ -131,7 +149,10 @@ export class OneBotHub {
    this.requestRoster(ws,msg.groupId);
    return;
   }
-  try{await onOnebotEvent(this.env,data);}catch(e){console.error("BBOT_EVENT_FAILED",String(e).slice(0,250));}
+  try{
+   const result=await onOnebotEvent(this.env,data,text=>this.replyFromBbot(ws,msg.groupId,text));
+   await this.afterHandled(result);
+  }catch(e){console.error("BBOT_EVENT_FAILED",String(e).slice(0,250));}
  }
  async webSocketClose(ws,code,reason){try{ws.close(code,reason);}catch{}}
  async webSocketError(ws,error){console.error("BBOT_SOCKET_ERROR",String(error).slice(0,150));}

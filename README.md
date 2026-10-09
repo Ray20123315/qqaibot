@@ -10,26 +10,26 @@
 **AI 聊天目前完全停用**；新 Worker 不載入任何 AI 模型或舊插件。
 
 
-## 指令（完全不依賴 QQ 舊快捷指令面板）
+## NapCat 原生跨群指令（主要操作方式）
 
-在 QQ 群**直接輸入訊息**，不要點舊指令選單。主要格式為 `@AIBot /!use`，亦接受 `@AIBot !use` 與舊格式 `@AIBot /use`。
+**QQ 群直接發送普通文字，不要 @AIBot，也不需點選 QQ 舊指令面板。** Bbot（NapCat）必須在該群並連線。
 
-| 指令 | 功能 |
+| 指令 | 用途 |
 |---|---|
-| `@AIBot /!use` | 建立連線代碼及群組驗證碼 |
-| `@AIBot /!<代碼> <簡寫>` | 將其他群加入同一個連線 |
-| `@AIBot /!verify <驗證碼>` | Abot、Bbot 分別核對群組，完成綁定 |
-| `@AIBot /!status` | 查詢目前連線與主動發言狀態 |
-| `/!stop`, `/!resume` | 停止／恢復本群轉發（Bbot 權限驗證） |
-| `/!leave`, `/!rename <簡寫>` | 退出與改名 |
-| `/!revoke`, `/!code` | 撤銷或換發連線代碼 |
-| `/!grant <QQ號> manage\|stop\|both`, `/!ungrant <QQ號>` | 授權／取消授權 |
-| `@AIBot /!id`, `@AIBot /!verifyid <驗證碼>` | QQ ID 與成員 OpenID 配對 |
-| `@AIBot /!help` | 指令說明 |
+| `!use` | 第一群建立連線並產生邀請碼 |
+| `!連線碼 群簡寫` | 其他群加入；NapCat 驗證真實 QQ 號及本群管理身分 |
+| `!status`、`!help` | 檢查連線和取得操作說明 |
+| `!code`、`!revoke` | 換發或撤銷邀請碼 |
+| `!rename 名稱`、`!stop`、`!resume`、`!leave` | 改名、停止、恢復或離開 |
+| `!grant QQ號 manage|stop|both`、`!ungrant QQ號` | 授權或取消授權 |
 
-**指令辨識：** `/!use`、`!use`、`/use` 都會解析為 `use`。**QQ 開放平台的群聊事件通常需要 @AIBot 才會交給 Abot**；單獨打 `!use` 僅 Bbot 可監聽，無法單方面取得 Group OpenID。
+`/!use`、`/!status` 及原有 `/use` 同樣支援，但**建議不加 @、直接打 `!use`**，以免觸發 QQ 官方舊 Gateway。
 
-**舊 QQ 指令面板：** 舊版 `/!设置插话率` 等選項存於 [QQ 開放平台](https://q.qq.com/) 的「指令配置」，與 Worker 程式碼無關；需要在官方管理端刪除。新 Worker 不再實作或依賴舊面板，也不支援舊 AI 指令。
+新的群建立和加入不依賴 Abot Group OpenID 或 `/!verify`；原本 Abot 的待驗證邀請資料不會被清除，但不能自動變成 NapCat 原生邀請，請由 Bbot `!use` 建立新的連線。
+
+**發送優先順序：**目的群有真實 Group OpenID 就使用 Abot，明確拒絕時由 Bbot 備援；只有 NapCat 群號、沒有 Group OpenID 時，Abot 無法尋址，由 Bbot 原生發送。
+
+**保護規則：** QQ `3569028262` 或 `2681167798` 在群內時，未獲授權的群主／管理員不能停止、退出或撤銷橋接，且只有受保護 QQ 號能授權其他人；但群主和管理員仍可建立／加入連線。
 
 QQ 帳號 `3569028262`、`2681167798` 為受保護身分。群內有任一受保護帳號時，**未明確授權的群主／管理員**無權執行 stop、leave、revoke 等會停用連線的指令。只有受保護帳號可授予或撤銷委派權限。
 

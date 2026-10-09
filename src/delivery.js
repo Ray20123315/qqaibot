@@ -12,6 +12,14 @@ export async function sendUsingBbot(env,id,groupId,segments){
 }
 export async function deliver(env,item,{sendBbot=sendUsingBbot,sendText=sendGroup,sendAttachment=sendMedia}={}){
  const operation=JSON.parse(item.payload||"{}");
+ if(String(item.target_group).startsWith("napcat:")){
+   // No target Group OpenID exists: Abot cannot address this QQ group.
+   // NapCat is the primary and only known transport for this destination.
+   try{
+     await sendBbot(env,item.id,item.target_qq_group_id,operation.segments);
+     return {status:"sent_bbot",path:"bbot"};
+   }catch(e){return {status:"failed_ambiguous",path:"bbot",error:String(e).slice(0,180)};}
+ }
  let abotError=null;
  try{
   if(operation.kind==="text"){

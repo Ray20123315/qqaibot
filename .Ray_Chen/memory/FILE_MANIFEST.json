@@ -1,64 +1,64 @@
 {
-  "version": "v0.0.74",
+  "version": "v0.0.75",
   "task_id": "qq-cross-group-bridge-20261009",
-  "goal_revision": 6,
-  "changed_at": "2026-10-10T00:28:00+08:00",
+  "goal_revision": 7,
+  "file_change_transaction": "napcat-native-link-20261010",
+  "changed_at": "2026-10-10T00:39:00+08:00",
   "provider": "GitHub",
   "location_type": "remote",
   "repository": "Ray20123315/qqaibot",
-  "branch": "main",
-  "before_revision": "827921036139c3b24a8c6e1c1d9025655c45f399",
-  "product_sha": "c641a11ad8cd03f74f6321091e01375eb0ce6a60",
-  "after_revision": "this-final-memory-commit",
-  "verification": {
-    "feature_ci": 37958408119,
-    "ci_outcome": "success",
-    "cloudflare_deployment_id": "20e8ce43-f056-4acf-9e89-1a04b006fd01",
-    "cloudflare_version_id": "9c690db5-2681-4586-9047-e200cf3090f6",
-    "cloudflare_build": "success",
-    "traffic_percent": 100,
-    "napcat_websocket": "HTTP 401 UNAUTHORIZED",
-    "qq_bot_commands_live": "not_verified",
-    "qq_platform_old_panel": "manual_portal_deletion_needed"
-  },
-  "changes": [
+  "branch": "feature/napcat-native-link-20261010",
+  "before_revision": "ff80b3d96e223b1663e7d2c5b5b578828b052410",
+  "after_revision": "feature_commit_pending",
+  "verification": "CI_pending",
+  "files": [
     {
-      "path": "src/core.js",
-      "action": "parser primary ! commands",
-      "commit": "c641a11ad8cd03f74f6321091e01375eb0ce6a60"
-    },
-    {
-      "path": "worker.js",
-      "action": "new DO & limited health/logging",
-      "commit": "c641a11ad8cd03f74f6321091e01375eb0ce6a60"
+      "path": "src/napcat-control.js",
+      "action": "add_or_modify",
+      "blob_sha": "3c793eebb6696f4bc1ac567356874d80bcb4aac3"
     },
     {
       "path": "src/bridge.js",
-      "action": "user-facing command hints /!",
-      "commit": "c641a11ad8cd03f74f6321091e01375eb0ce6a60"
+      "action": "add_or_modify",
+      "blob_sha": "9d0f8f5e5a48f97f3cef6f1f1d8ac805a2ddf7d8"
     },
     {
-      "path": "tests/command-routing.test.mjs",
-      "action": "added tests",
-      "commit": "c641a11ad8cd03f74f6321091e01375eb0ce6a60"
+      "path": "src/delivery.js",
+      "action": "add_or_modify",
+      "blob_sha": "69a18966c21cbe6327fc47f3aa7d98d2a446c42c"
+    },
+    {
+      "path": "worker.js",
+      "action": "add_or_modify",
+      "blob_sha": "61e62ca467656fca9601c5d63e3ee7e09dae29f2"
+    },
+    {
+      "path": "tests/napcat-control.test.mjs",
+      "action": "add_or_modify",
+      "blob_sha": "66ca6f8ca62c63a7dde3e57b25a6bdbc442034fa"
+    },
+    {
+      "path": "wrangler.toml",
+      "action": "add_or_modify",
+      "blob_sha": "a0a5ed2b92cce5882df5e34e43f096d0055e08ba"
     },
     {
       "path": "README.md",
-      "action": "user-facing updated command list",
-      "commit": "c641a11ad8cd03f74f6321091e01375eb0ce6a60"
+      "action": "add_or_modify",
+      "blob_sha": "faf73b2f4ea0822aa5186c4040bfe7796c2d0413"
     },
     {
       "path": "docs/DEPLOY.md",
-      "action": "NapCat setup & QQ panel removal",
-      "commit": "c641a11ad8cd03f74f6321091e01375eb0ce6a60"
+      "action": "add_or_modify",
+      "blob_sha": "2c94651f943c3d7b8bb38d23a91e7f620b1fb886"
     },
     {
       "path": ".github/workflows/bridge-check.yml",
-      "action": "new v0.0.74 memory workflow"
+      "action": "package_version_update"
     },
     {
       "path": ".Ray_Chen/memory/*",
-      "action": "new canonical checkpoint version"
+      "action": "canonical_update"
     }
   ],
   "legacy_archive": {

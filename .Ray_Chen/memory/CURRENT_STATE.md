@@ -1,13 +1,12 @@
 # CURRENT_STATE
 
-- main product code SHA c641a11ad8cd03f74f6321091e01375eb0ce6a60; this memory-only follow-up does not change command runtime source.
-- backup archive/legacy-main-20261009 SHA 6a22b06433cfaffcf13abe2b60a917305290b629
-- GitHub feature CI 37958408119 PASS, node tests & Wrangler dry-run
-- Cloudflare deployment 20e8ce43-f056-4acf-9e89-1a04b006fd01, version 9c690db5-2681-4586-9047-e200cf3090f6, sourced from main c641a11ad8cd03f74f6321091e01375eb0ce6a60, build outcome success, 100% traffic
-- commands: /!use, !use, /use normalized to use; unknown ! or / commands not relayed; old panel absent from Worker
-- QQ platform autocomplete menu old commands remain configured separately; deletion requires QQ developer console action
-- Bbot NapCat attempted reverse WebSocket GET https://aibot.ray2025.com/onebot repeatedly, received HTTP 401 in Cloudflare Worker Logs on new runtime. Not connected until Token matches secret.
-- Cloudflare qqai has ONEBOT_ACCESS_TOKEN binding (present; secret contents never read) and QQ_OPEN_CLIENT_SECRET
-- health /health gives Abot/Bbot connected booleans and command prefix; direct public health not tested after deploy due inspection network restriction
-- Abot group Gateway new DO identity; READY and QQ actual messages still require verification
-- AI chat disabled; protected account ACL unchanged
+- main prior to task: ff80b3d96e223b1663e7d2c5b5b578828b052410
+- legacy archive/legacy-main-20261009 original main SHA: 6a22b06433cfaffcf13abe2b60a917305290b629
+- prior working Abot replies observed in one QQ group; other QQ groups returned QQ_API 40034105 proactive no permission
+- Bbot prior authenticated WS observed by Cloudflare, but current persistent connection and QQ groups need validation
+- proposed new NapCat Bbot-only room group keys: napcat:<numericQQGroupID> in existing bridge_groups.group_openid column, actual target QQ Group OpenID unknown
+- new Bbot group commands !use and !CODE alias register and join without official Group OpenID and without Abot verification step
+- Abot official controls ignored under BRIDGE_NAPCAT_COMMANDS=true; Abot may still send if group OpenID has been verified in existing data
+- destination with napcat: marker uses OneBot send_group_msg directly, awaiting ACK; no call to Abot API with synthetic key
+- preserved D1 old data; no destructive data migrations planned
+- CI and real QQ test not run yet for this patch
