@@ -1,10 +1,13 @@
 # CURRENT_STATE
 
-- main before new fix: 827921036139c3b24a8c6e1c1d9025655c45f399, Cloudflare deployed; older QQ gateway DO observations still showed 40034024 on older versions
-- archived old application in archive/legacy-main-20261009 at SHA 6a22b06433cfaffcf13abe2b60a917305290b629
-- new code ready on fix/qq-bang-commands-20261010, CI not yet checked
-- commands now intended to accept @AIBot /!use, @AIBot !use, legacy @AIBot /use. Bare !use needs Bbot and does not independently provide Group OpenID to Abot
-- worker no custom keyboard or old QQ panel; existing QQ developer-console configured commands can persist until removed there
-- new named Abot Gateway Durable Object bridge-abot-commands-v2 to bypass old hot instance; actual session READY still UNKNOWN
-- GET /health intended to show Abot/Bbot connection booleans without leaking auth tokens
-- original QQ bot's Group OpenID mapping, rich media, protected identity logic unchanged
+- main product code SHA c641a11ad8cd03f74f6321091e01375eb0ce6a60; this memory-only follow-up does not change command runtime source.
+- backup archive/legacy-main-20261009 SHA 6a22b06433cfaffcf13abe2b60a917305290b629
+- GitHub feature CI 37958408119 PASS, node tests & Wrangler dry-run
+- Cloudflare deployment 20e8ce43-f056-4acf-9e89-1a04b006fd01, version 9c690db5-2681-4586-9047-e200cf3090f6, sourced from main c641a11ad8cd03f74f6321091e01375eb0ce6a60, build outcome success, 100% traffic
+- commands: /!use, !use, /use normalized to use; unknown ! or / commands not relayed; old panel absent from Worker
+- QQ platform autocomplete menu old commands remain configured separately; deletion requires QQ developer console action
+- Bbot NapCat attempted reverse WebSocket GET https://aibot.ray2025.com/onebot repeatedly, received HTTP 401 in Cloudflare Worker Logs on new runtime. Not connected until Token matches secret.
+- Cloudflare qqai has ONEBOT_ACCESS_TOKEN binding (present; secret contents never read) and QQ_OPEN_CLIENT_SECRET
+- health /health gives Abot/Bbot connected booleans and command prefix; direct public health not tested after deploy due inspection network restriction
+- Abot group Gateway new DO identity; READY and QQ actual messages still require verification
+- AI chat disabled; protected account ACL unchanged

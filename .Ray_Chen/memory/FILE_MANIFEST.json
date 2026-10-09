@@ -1,58 +1,68 @@
 {
-  "version": "v0.0.73",
+  "version": "v0.0.74",
   "task_id": "qq-cross-group-bridge-20261009",
   "goal_revision": 6,
-  "changed_at": "2026-10-10T00:35:00+08:00",
+  "changed_at": "2026-10-10T00:28:00+08:00",
   "provider": "GitHub",
   "location_type": "remote",
   "repository": "Ray20123315/qqaibot",
-  "branch": "fix/qq-bang-commands-20261010",
+  "branch": "main",
   "before_revision": "827921036139c3b24a8c6e1c1d9025655c45f399",
-  "after_revision": "this-commit-see-git-head",
+  "product_sha": "c641a11ad8cd03f74f6321091e01375eb0ce6a60",
+  "after_revision": "this-final-memory-commit",
   "verification": {
-    "tests": "pending",
-    "cloudflare_deploy": "not_yet",
-    "qq_live": "unknown",
-    "qq_command_menu_deletion": "requires_user_portal_action"
+    "feature_ci": 37958408119,
+    "ci_outcome": "success",
+    "cloudflare_deployment_id": "20e8ce43-f056-4acf-9e89-1a04b006fd01",
+    "cloudflare_version_id": "9c690db5-2681-4586-9047-e200cf3090f6",
+    "cloudflare_build": "success",
+    "traffic_percent": 100,
+    "napcat_websocket": "HTTP 401 UNAUTHORIZED",
+    "qq_bot_commands_live": "not_verified",
+    "qq_platform_old_panel": "manual_portal_deletion_needed"
   },
   "changes": [
     {
       "path": "src/core.js",
-      "action": "updated_or_added",
-      "blob_sha": "3bc80aed02aec77d73ff5a575bd62b054e649c4e"
+      "action": "parser primary ! commands",
+      "commit": "c641a11ad8cd03f74f6321091e01375eb0ce6a60"
     },
     {
       "path": "worker.js",
-      "action": "updated_or_added",
-      "blob_sha": "b5147d2f6d803709294e7ed754307f1e206ef7ec"
+      "action": "new DO & limited health/logging",
+      "commit": "c641a11ad8cd03f74f6321091e01375eb0ce6a60"
     },
     {
       "path": "src/bridge.js",
-      "action": "updated_or_added",
-      "blob_sha": "f4ea81a61976e0719ece8e23fda849852910c2eb"
-    },
-    {
-      "path": "README.md",
-      "action": "updated_or_added",
-      "blob_sha": "eafdfaa5e2d61a2bb8a190ac64a7c9cadb767436"
-    },
-    {
-      "path": "docs/DEPLOY.md",
-      "action": "updated_or_added",
-      "blob_sha": "24dc5b40052bea65147a8a9d7fc65da02ec59082"
+      "action": "user-facing command hints /!",
+      "commit": "c641a11ad8cd03f74f6321091e01375eb0ce6a60"
     },
     {
       "path": "tests/command-routing.test.mjs",
-      "action": "updated_or_added",
-      "blob_sha": "1a07a9d6779d93b45ab38e7ffff4499cc177af65"
+      "action": "added tests",
+      "commit": "c641a11ad8cd03f74f6321091e01375eb0ce6a60"
+    },
+    {
+      "path": "README.md",
+      "action": "user-facing updated command list",
+      "commit": "c641a11ad8cd03f74f6321091e01375eb0ce6a60"
+    },
+    {
+      "path": "docs/DEPLOY.md",
+      "action": "NapCat setup & QQ panel removal",
+      "commit": "c641a11ad8cd03f74f6321091e01375eb0ce6a60"
     },
     {
       "path": ".github/workflows/bridge-check.yml",
-      "action": "workflow_update"
+      "action": "new v0.0.74 memory workflow"
     },
     {
       "path": ".Ray_Chen/memory/*",
-      "action": "canonical_updates"
+      "action": "new canonical checkpoint version"
     }
-  ]
+  ],
+  "legacy_archive": {
+    "branch": "archive/legacy-main-20261009",
+    "sha": "6a22b06433cfaffcf13abe2b60a917305290b629"
+  }
 }
