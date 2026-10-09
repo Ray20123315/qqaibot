@@ -3,6 +3,7 @@ import {onOnebotEvent,onOnebotRoster,onOfficialEvent,flushOutbox} from "./src/br
 import {qqRequest,accessToken} from "./src/qq-api.js";
 import {qq,parseOnebot} from "./src/core.js";
 import {roster,init} from "./src/store.js";
+import {outboundAction} from "./src/relay.js";
 const json=(data,status=200)=>new Response(JSON.stringify(data),{status,headers:{"content-type":"application/json; charset=utf-8","cache-control":"no-store"}});
 async function secretMatches(request,secret){
  if(!secret)return false;
@@ -40,9 +41,29 @@ export default {
  }
 };
 export class OneBotHub {
- constructor(state,env){this.state=state;this.env=env;this.pending=new Map();this.lastRosterRequested=new Map();}
+ constructor(state,env){this.state=state;this.env=env;this.pending=new Map();this.inflight=new Map();this.lastRosterRequested=new Map();}
  async fetch(request){
-  if(new URL(request.url).pathname!=="/ws" || request.headers.get("upgrade")?.toLowerCase()!=="websocket")return json({error:"not_found"},404);
+  const pathname=new URL(request.url).pathname;
+  if(pathname==="/send" && request.method==="POST"){
+   let data;try{data=await request.json();}catch{return json({ok:false,reason:"invalid_payload"},400);}
+   let outbound;
+   try {outbound=outboundAction(String(data.id||""),data.groupId,data.segments);}
+   catch{return json({ok:false,reason:"invalid_action"},400);}
+   const ws=this.socket();
+   if(!ws)return json({ok:false,reason:"bbot_disconnected"},503);
+   if(this.inflight.has(outbound.echo))return json({ok:false,reason:"duplicate_inflight"},409);
+   // An ambiguous timeout can mean QQ received the event. Never automatically resend.
+   return await new Promise(resolve=>{
+    const timer=setTimeout(()=>{
+     this.inflight.delete(outbound.echo);
+     resolve(json({ok:false,reason:"ambiguous_timeout"},504));
+    },10000);
+    this.inflight.set(outbound.echo,{resolve,timer});
+    try{ws.send(JSON.stringify(outbound));}
+    catch{clearTimeout(timer);this.inflight.delete(outbound.echo);resolve(json({ok:false,reason:"bbot_socket_unavailable"},503));}
+   });
+  }
+  if(pathname!=="/ws" || request.headers.get("upgrade")?.toLowerCase()!=="websocket")return json({error:"not_found"},404);
   for(const existing of this.state.getWebSockets())try{existing.close(1000,"reconnected");}catch{}
   const pair=new WebSocketPair(),[client,server]=Object.values(pair);
   this.state.acceptWebSocket(server);
@@ -59,6 +80,15 @@ export class OneBotHub {
  async webSocketMessage(ws,message){
   let data;try{data=JSON.parse(typeof message==="string"?message:new TextDecoder().decode(message));}catch{return;}
   const echo=String(data?.echo||"");
+  if(echo.startsWith("bridge-send:")){
+   const pending=this.inflight.get(echo);
+   if(pending){
+    clearTimeout(pending.timer);this.inflight.delete(echo);
+    const success=data?.status==="ok" && Number(data?.retcode||0)===0;
+    pending.resolve(json(success?{ok:true}:{ok:false,reason:"qq_rejected_"+String(data?.retcode||"unknown")},success?200:422));
+   }
+   return;
+  }
   if(echo.startsWith("bridge-roster:")){
    const group=echo.slice(14);
    if(data?.status==="ok"&&Array.isArray(data.data)){

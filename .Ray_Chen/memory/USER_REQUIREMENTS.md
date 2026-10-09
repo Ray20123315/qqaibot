@@ -1,10 +1,10 @@
 # USER_REQUIREMENTS
 
-1. Move old main in entirety to separate Git branch; replace main only when safe and verified.
-2. Abot QQ Open Platform sends; Bbot personal account observes QQ group message and provides numeric identity.
-3. /use creates connection code; /<code> <alias> joins arbitrarily many groups; forward ordinary messages to all other joined groups with [group-or-alias]nickname: prefix.
-4. Cross-group @: if target belongs to receiving group, attempt true mention only with verified OpenID mapping; otherwise text fallback.
-5. Support /status /leave /rename /revoke and /stop /resume /grant /ungrant.
-6. If member 3569028262 or 2681167798 is present, ungranted admin/owner must not stop bridge. Only protected IDs can grant in protected groups. With neither present, owner/admin may manage/stop and grant.
-7. AI chat off now, modular possible later.
-8. Verify thoroughly; no false live-success reports.
+- Preserve original main in another Git branch and eventually make main new cross-group connector.
+- Bbot observes all normal QQ group messages and provides numeric QQ identities. Abot uses official API to send to linked other groups.
+- /use issues code, /<code> <alias> joins any number of groups, forward all ordinary messages as [group/alias]nickname: content.
+- Try real cross-group @ using verified QQ ID <-> group member OpenID; QQ user must be a member of target group.
+- Commands /status /leave /rename /revoke /stop /resume /grant /ungrant and persistent authorization.
+- QQ 3569028262 and 2681167798 protected: when present, ungranted admins/owners cannot stop; only protected IDs may grant other members. Without these members, admin/owner may administer.
+- AI chat disabled but may return later.
+- NEW 2026-10-09: enable proactive group sending when QQ group permits; forward as much media as possible, including image/voice/video/file/emoji; Bbot may send only when Abot truly cannot.

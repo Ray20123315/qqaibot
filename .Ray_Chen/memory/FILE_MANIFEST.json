@@ -1,97 +1,76 @@
 {
-  "version": "v0.0.66",
+  "version": "v0.0.67",
   "task_id": "qq-cross-group-bridge-20261009",
+  "goal_revision": 2,
+  "changed_at": "2026-10-09T23:30:00+08:00",
   "provider": "GitHub",
-  "location_type": "remote_repository",
+  "location_type": "remote",
   "repository": "Ray20123315/qqaibot",
-  "legacy_archive_branch": "archive/legacy-main-20261009",
-  "legacy_main_sha": "6a22b06433cfaffcf13abe2b60a917305290b629",
   "branch": "feature/qq-cross-group-bridge-20261009",
-  "latest_code_sha": "f5e7dc5fdb89de3db4708c7623bdbcc33be0f47d",
-  "action": "create-clean-bridge-worker-and-follow-up-regressions",
-  "before_revision": "6a22b06433cfaffcf13abe2b60a917305290b629",
-  "after_revision": "FINAL_MEMORY_COMMIT_PENDING",
-  "verification": {
-    "github_ci_runs": [
-      37946376223,
-      37946659489
-    ],
-    "unit": "passed",
-    "bundle": "passed",
-    "live_qq": "not_tested",
-    "main_updated": false
-  },
-  "changed_at": "2026-10-09T23:15:00+08:00",
+  "legacy_archive": "archive/legacy-main-20261009",
+  "before_revision": "6ada5f75f8542187a37b9ab98be611b98bcd2292",
+  "after_revision": "this-commit-see-git-head",
+  "verification": "PENDING_CI",
+  "file_change_transaction": "qq-cross-group-bridge-20261009-proactive-fallback",
   "files": [
     {
-      "path": "worker.js",
-      "change": "feature_clean_tree_or_update",
-      "status": "produced"
-    },
-    {
       "path": "src/core.js",
-      "change": "feature_clean_tree_or_update",
-      "status": "produced"
+      "action": "updated-or-added",
+      "blob_sha": "488532a8bb5edf991545dab9ae60428514b635d0"
     },
     {
-      "path": "src/store.js",
-      "change": "feature_clean_tree_or_update",
-      "status": "produced"
+      "path": "src/relay.js",
+      "action": "updated-or-added",
+      "blob_sha": "1fcd2d05375109ae24fafcd38af2a5a3645b22bf"
+    },
+    {
+      "path": "src/delivery.js",
+      "action": "updated-or-added",
+      "blob_sha": "d4d08f64ecba3b76fb7aa2d8585a43f8ba122388"
     },
     {
       "path": "src/qq-api.js",
-      "change": "feature_clean_tree_or_update",
-      "status": "produced"
+      "action": "updated-or-added",
+      "blob_sha": "96854d9268db5214b173f668a20df0de0a782fee"
     },
     {
       "path": "src/bridge.js",
-      "change": "feature_clean_tree_or_update",
-      "status": "produced"
+      "action": "updated-or-added",
+      "blob_sha": "b77472233b5918a9101bf6773dccfb8bcf1a6a04"
     },
     {
-      "path": "tests/core.test.mjs",
-      "change": "feature_clean_tree_or_update",
-      "status": "produced"
+      "path": "worker.js",
+      "action": "updated-or-added",
+      "blob_sha": "54c53df3cc4b5e7dd8ac9e35c9c05bc1c7f40636"
     },
     {
-      "path": "wrangler.toml",
-      "change": "feature_clean_tree_or_update",
-      "status": "produced"
-    },
-    {
-      "path": "package.json",
-      "change": "feature_clean_tree_or_update",
-      "status": "produced"
-    },
-    {
-      "path": "package-lock.json",
-      "change": "feature_clean_tree_or_update",
-      "status": "produced"
+      "path": "tests/relay.test.mjs",
+      "action": "updated-or-added",
+      "blob_sha": "fdb180f847fe8236ad0fd3d1e0162a3cfce7086c"
     },
     {
       "path": "README.md",
-      "change": "feature_clean_tree_or_update",
-      "status": "produced"
+      "action": "updated-or-added",
+      "blob_sha": "95f06d9993baa16a11882e78f8012bdc03c148b7"
     },
     {
       "path": "docs/DEPLOY.md",
-      "change": "feature_clean_tree_or_update",
-      "status": "produced"
+      "action": "updated-or-added",
+      "blob_sha": "2132c743ebe2bf3361597ff9cd3b41d26396aa64"
+    },
+    {
+      "path": "wrangler.toml",
+      "action": "updated-or-added",
+      "blob_sha": "1b08c275ac91ff059d8700dd359dc594d86d1f5d"
     },
     {
       "path": ".github/workflows/bridge-check.yml",
-      "change": "feature_clean_tree_or_update",
-      "status": "produced"
+      "action": "modified"
     },
     {
-      "path": ".gitignore",
-      "change": "feature_clean_tree_or_update",
-      "status": "produced"
-    },
-    {
-      "path": ".Ray_Chen/memory/*",
-      "change": "feature_clean_tree_or_update",
-      "status": "produced"
+      "path": ".Ray_Chen/memory/",
+      "action": "canonical-update",
+      "version": "v0.0.67"
     }
   ]
 }

@@ -32,7 +32,18 @@ export function parseOnebot(event) {
       if (target) {parts.push({type:"at",qq:target}); atIds.push(target);}
       else if (seg.data?.qq === "all") parts.push({type:"text",text:"@全體成員"});
     } else if (["image","record","video","file"].includes(seg?.type)) {
-      parts.push({type:"text",text:"[" + ({image:"圖片",record:"語音",video:"影片",file:"檔案"}[seg.type]) + "]"});
+      const data=seg.data||{};
+      parts.push({type:seg.type,data:{
+        file:String(data.file||"").slice(0,2048),
+        url:String(data.url||"").slice(0,2048),
+        name:clean(data.name||data.file_name||"",100),
+        fileSize:Number(data.file_size||0)||0
+      }});
+    } else if(["face","mface","reply","forward","json","xml","poke"].includes(seg?.type)){
+      const data=seg.data||{};
+      parts.push({type:seg.type,data:{
+        id:clean(data.id||"",100),file:clean(data.file||"",1024),data:clean(data.data||"",2000)
+      }});
     }
   }
   const text = parts.map(p=>p.type==="text"?p.text:"").join("").trim();
@@ -74,5 +85,5 @@ export function isRelayable(msg) {
   if (!msg || !msg.parts.length) return false;
   if (msg.selfId && msg.senderQq===msg.selfId) return false;
   if (parseCommand(msg.text) || /^\s*\//.test(msg.text)) return false;
-  return msg.parts.some(p=>p.type==="at" || (p.type==="text" && p.text.trim()));
+  return msg.parts.some(p=>p.type==="at" || ["image","record","video","file","face","mface","reply","forward","json","xml","poke"].includes(p.type) || (p.type==="text" && p.text.trim()));
 }

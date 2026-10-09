@@ -1,12 +1,14 @@
 
 import {clean,qq,isProtected,parseCommand,parseOnebot,authorize,formatForward,isRelayable} from "./core.js";
 import {init,get,all,run,digest,makeCode,groupByQq,groupByOpen,roster,recordRoster} from "./store.js";
-import {sendGroup} from "./qq-api.js";
+import {sendGroup,groupBotState} from "./qq-api.js";
+import {relayOperations} from "./relay.js";
+import {deliver} from "./delivery.js";
 let extraReady=false;
 async function ready(env){
  await init(env.DB);
  if(!extraReady){
-  await env.DB.prepare("CREATE TABLE IF NOT EXISTS bridge_outbox (id TEXT PRIMARY KEY, target_group TEXT NOT NULL, content TEXT NOT NULL, state TEXT NOT NULL, error TEXT NOT NULL DEFAULT '', created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL)").run();
+  await env.DB.prepare("CREATE TABLE IF NOT EXISTS bridge_outbox (id TEXT PRIMARY KEY, target_group TEXT NOT NULL, target_qq_group_id TEXT NOT NULL, content TEXT NOT NULL, payload TEXT NOT NULL, state TEXT NOT NULL, error TEXT NOT NULL DEFAULT '', created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL)").run();
   await env.DB.prepare("CREATE INDEX IF NOT EXISTS bridge_outbox_state_idx ON bridge_outbox(state,created_at)").run();
   await env.DB.prepare("CREATE TABLE IF NOT EXISTS bridge_id_proof (token_hash TEXT PRIMARY KEY, official_confirmed INTEGER NOT NULL DEFAULT 0, qq_id TEXT, verified_at INTEGER NOT NULL DEFAULT 0)").run();
   await env.DB.prepare("CREATE TABLE IF NOT EXISTS bridge_reply_context (group_openid TEXT PRIMARY KEY, msg_id TEXT NOT NULL, expires_at INTEGER NOT NULL)").run();
@@ -78,7 +80,11 @@ export async function onOfficialEvent(env,payload){
  if(command.name==="status"){
   const group=current;
   const status=!group?"未連線":group.verified?(group.stopped?"已停止":"運作中"):"待 Bbot 驗證";
-  return {handled:true,reply:await answer(env,groupOpenid,"跨群橋接："+status+(group?.alias?"\n簡寫："+group.alias:""),msgId)};
+  let proactive="未知（狀態 API 可能未開放）";
+  try {const state=await groupBotState(env,groupOpenid);
+    if(typeof state.allow_proactive_msg==="boolean")proactive=state.allow_proactive_msg?"已開啟":"未開啟（請群主在 QQ 群機器人設定開啟）";
+  }catch{};
+  return {handled:true,reply:await answer(env,groupOpenid,"跨群橋接："+status+(group?.alias?"\n簡寫："+group.alias:"")+"\nAbot 主動發言："+proactive,msgId)};
  }
  return {handled:false}; // Sensitive operations are authorized ONLY by trusted Bbot numeric IDs.
 }
@@ -192,14 +198,20 @@ export async function onOnebotEvent(env,event){
  let added=0;
  for(const target of destinations){
   const mapping=await all(env.DB,"SELECT qq_id,member_openid FROM bridge_identities WHERE group_openid=?",target.group_openid);
-  const map=new Map(mapping.map(m=>[m.qq_id,m.member_openid]));
-  const mode=String(env.BRIDGE_REAL_MENTIONS||"false")==="true";
-  const content=formatForward(group.alias||group.display_name||"QQ群 "+msg.groupId,msg.senderName,msg.parts,id=>mode?map.get(id):null);
-  const id=await digest(key+"|"+target.group_openid);
-  const result=await run(env.DB,"INSERT OR IGNORE INTO bridge_outbox(id,target_group,content,state,created_at,updated_at) VALUES(?,?,?,'pending',?,?)",id,target.group_openid,content,now(),now());
-  if(Number(result.meta?.changes||0))added++;
+  const idMap=Object.fromEntries(mapping.map(m=>[m.qq_id,m.member_openid]));
+  const memberRoster=target.qq_group_id?await roster(env.DB,target.qq_group_id):{fresh:false};
+  const members=memberRoster.fresh?await all(env.DB,"SELECT qq_id FROM bridge_members WHERE qq_group_id=?",target.qq_group_id):[];
+  const enabled=String(env.BRIDGE_REAL_MENTIONS||"false")==="true";
+  const ops=relayOperations(group.alias||group.display_name||"QQ群 "+msg.groupId,msg.senderName,msg.parts,idMap,{
+   realMentions:enabled,targetMembers:new Set(members.map(x=>x.qq_id))
+  });
+  for(const operation of ops){
+   const id=await digest(key+"|"+target.group_openid+"|"+operation.index);
+   const result=await run(env.DB,"INSERT OR IGNORE INTO bridge_outbox(id,target_group,target_qq_group_id,content,payload,state,created_at,updated_at) VALUES(?,?,?,?,?,'pending',?,?)",
+     id,target.group_openid,target.qq_group_id||"",operation.content,JSON.stringify(operation),now()+operation.index,now());
+   if(Number(result.meta?.changes||0))added++;
+  }
  }
- // Controlled release: proactive cross-group messaging is subject to Tencent policy.
  if(added)await flushOutbox(env,3);
  return {forwarded:added,total:destinations.length};
 }
@@ -214,23 +226,25 @@ export async function onOnebotRoster(env,groupId,members,groupName){
 export async function flushOutbox(env,limit=15){
  await ready(env);
  const pending=await all(env.DB,"SELECT * FROM bridge_outbox WHERE state='pending' ORDER BY created_at ASC LIMIT ?",limit);
- let sent=0,failed=0;
+ let sent=0,failed=0,bbot=0;
  for(const item of pending){
+  const active=await get(env.DB,"SELECT stopped,verified,qq_group_id FROM bridge_groups WHERE group_openid=?",item.target_group);
+  if(!active?.verified||active.stopped||active.qq_group_id!==item.target_qq_group_id){
+    await run(env.DB,"UPDATE bridge_outbox SET state='cancelled',content='',payload='',updated_at=? WHERE id=? AND state='pending'",now(),item.id);
+    continue;
+  }
   const claim=await run(env.DB,"UPDATE bridge_outbox SET state='sending',updated_at=? WHERE id=? AND state='pending'",now(),item.id);
   if(!Number(claim.meta?.changes||0))continue;
-  try{
-   await sendGroup(env,item.target_group,item.content);
-   await run(env.DB,"UPDATE bridge_outbox SET state='sent',content='',updated_at=? WHERE id=?",now(),item.id);
-   await logDelivery(env,item.id,item.target_group,"sent");sent++;
-  }catch(e){
-   // Ambiguous send failures are not automatically replayed.
-   const error=String(e).slice(0,220);
-   await run(env.DB,"UPDATE bridge_outbox SET state='failed',content='',error=?,updated_at=? WHERE id=?",error,now(),item.id);
-   await logDelivery(env,item.id,item.target_group,"failed",error);failed++;
-  }
+  const result=await deliver(env,item);
+  await run(env.DB,"UPDATE bridge_outbox SET state=?,content='',payload='',error=?,updated_at=? WHERE id=?",
+    result.status,result.error||"",now(),item.id);
+  await logDelivery(env,item.id,item.target_group,result.status,result.error||"");
+  if(result.status==="sent_abot")sent++;
+  else if(result.status==="sent_bbot"){sent++;bbot++;}
+  else failed++;
  }
  await run(env.DB,"DELETE FROM bridge_seen WHERE created_at<?",now()-86400000);
  await run(env.DB,"DELETE FROM bridge_deliveries WHERE created_at<?",now()-7*86400000);
  await run(env.DB,"DELETE FROM bridge_pending_ids WHERE expires_at<?",now());
- return {sent,failed};
+ return {sent,failed,bbot};
 }

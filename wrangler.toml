@@ -47,7 +47,8 @@ crons = ["* * * * *"]
 [vars]
 QQ_OPEN_APP_ID = "1905687174"
 QQ_OPEN_INTENTS = "100663296"
-BRIDGE_REAL_MENTIONS = "false"
+BRIDGE_REAL_MENTIONS = "true"
+BRIDGE_BBOT_FALLBACK = "on-rejection"
 
 [observability]
 enabled = true
