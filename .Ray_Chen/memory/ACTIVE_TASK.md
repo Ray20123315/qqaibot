@@ -2,18 +2,20 @@
 task_id: qq-cross-group-bridge-20261009
 task_status: active
 goal_revision: 8
-goal: temporarily disable all Abot application traffic and run entirely through Bbot/NapCat
-current_phase: CI repair and repeat
-current_step: verify next CI then fast-forward main with expected HEAD and observe Cloudflare
+goal: temporarily disable Abot, route all QQ cross-group operations exclusively via Bbot/NapCat
+current_phase: final feature verification
+current_step: rerun CI for mock URL argument fix then fast-forward main on green
 
-completed_steps:
-- branch feature/bbot-only-20261010, commit 30e423f716cddf23ed4aad397d024bb5dab482d6 stages Bbot-only routing and shutdown of historical Abot DOs
-- QQ Open API send and token calls removed from Worker entry and delivery/bridge; legacy QQ_OPEN_GATEWAY inert with shutdown and alarm closing sockets
-- Bbot-only health response and same authenticated Bbot DO, storage and group permissions retained
-- Bbot offline does not claim queued messages; connected Bbot alarm sends on existing WebSocket
-- CI 37963398835: 33 of 35 tests passed, failures ONLY in test expectations: mocked String URL treated as Request.url, extra reason returned for self-echo
-- corrected tests/abot-disabled.test.mjs and tests/pairing.test.mjs
+completed:
+- main base e02b5ecd94ef51a70a1299e3f28ea0a578dc4738 and archive preserved
+- new source branch feature/bbot-only-20261010 disables QQ Open event handling, outbound API and gateway connecting; legacy DO class inert and cron /shutdown old named instances
+- native Bbot-only send for all destination groups (including historical actual OpenIDs with numeric group); no invented group IDs
+- Bbot outbox offline holding and direct socket alarm ACK handling
+- tests cover no official API, no gateway activity, Bbot routing, ACL and media
+- CI 37963398835: 33/35 tests passed; 2 test-only expectations fixed
+- CI 37963624474: 34/35 tests passed; remaining fake gateway fetch argument was a string, so mock must normalize it before asserting URL. Fixed mock.
 
-verification: rerun CI pending; main unchanged as of checkpoint
-known risks: old active Abot DO may continue old connection until new class upgraded; shutdown requested on cron. Live QQ Bbot group send not yet verified.
-next_exact_action: verify CI, produce v0.0.80 archive and checksum, fast-forward main, verify Cloudflare source SHA, inspect Abot telemetry, Gmail once.
+verification: current rerun CI pending, main unchanged
+blockers: Cloudflare deployment and hot legacy Abot Gateway shutdown must be checked after main promotion; no live QQ smoke yet.
+next_exact_action: verify new CI; on success fast-forward main, check Cloudflare connected build, package final memory, email notification.
+checkpoint: 2026-10-09T17:05:09.689Z

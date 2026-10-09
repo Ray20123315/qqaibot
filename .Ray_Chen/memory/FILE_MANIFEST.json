@@ -1,38 +1,35 @@
 {
-  "version": "v0.0.80",
+  "version": "v0.0.81",
+  "project": "qqaibot",
   "task_id": "qq-cross-group-bridge-20261009",
   "goal_revision": 8,
-  "changed_at": "2026-10-09T17:03:59.171Z",
-  "repository": "Ray20123315/qqaibot",
+  "changed_at": "2026-10-09T17:05:09.689Z",
   "provider": "GitHub",
+  "repository": "Ray20123315/qqaibot",
   "location_type": "remote",
   "branch": "feature/bbot-only-20261010",
-  "before_revision": "30e423f716cddf23ed4aad397d024bb5dab482d6",
-  "after_revision": "new-feature-commit",
+  "before_revision": "adcfcc8f8ba84281128473c63ff92686ba0ec8f1",
+  "after_revision": "pending_commit",
   "verification": {
-    "previous_ci": 37963398835,
-    "previous_ci_status": "failed-two-test-expectations",
-    "new_ci": "pending",
-    "main_updated": false
+    "ci1": 37963398835,
+    "ci2": 37963624474,
+    "ci2_outcome": "failed-one-mock",
+    "ci3": "pending",
+    "main_unchanged": true
   },
-  "changed_files": [
+  "changes": [
     {
       "path": "tests/abot-disabled.test.mjs",
-      "sha": "e868f441eecad3a403389c7caff632e08209f3c6",
-      "action": "fix expectation"
-    },
-    {
-      "path": "tests/pairing.test.mjs",
-      "sha": "4285d8cc7d072fc5848b3cdc7ebb4096d68c33f2",
-      "action": "fix expectation"
+      "action": "fix mock request argument",
+      "blob_sha": "cd270eeb2a6e3bf0bee32f1daca16df4ce8ecaa1"
     },
     {
       "path": ".github/workflows/bridge-check.yml",
-      "action": "memory v0.0.80"
+      "action": "v0.0.81 archive"
     },
     {
       "path": ".Ray_Chen/memory/*",
-      "action": "checkpoint update"
+      "action": "checkpoint"
     }
   ]
 }

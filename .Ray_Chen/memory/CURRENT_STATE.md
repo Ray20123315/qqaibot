@@ -1,8 +1,7 @@
 # CURRENT_STATE
-- main e02b5ecd94ef51a70a1299e3f28ea0a578dc4738 at this feature checkpoint
-- legacy archive SHA 6a22b06433cfaffcf13abe2b60a917305290b629
-- feature Bbot-only source commit 30e423f716cddf23ed4aad397d024bb5dab482d6, no active Abot API use
-- CI 37963398835: 33/35 tests passed, two mock/assert mismatches; corrected this revision
-- src/qq-api.js retained dormant in repository for a future explicitly authorized re-enable
-- gateway DO binding and migration deliberately retained; no D1 wipe
-- new CI and live QQ validation pending
+- main not yet updated from e02b5ecd94ef51a70a1299e3f28ea0a578dc4738
+- archived historical main archive/legacy-main-20261009 at SHA 6a22b06433cfaffcf13abe2b60a917305290b629
+- Bbot-only code on feature branch feature/bbot-only-20261010, no QQ Open API in active entrypoints
+- CI 37963398835 failed two test mocks; CI 37963624474 passed 34/35, only test string-vs-Request URL mock problem
+- tests/abot-disabled.test.mjs normalization fixed; next full CI pending
+- no live QQ media/relay acceptance claims; historical Abot DO cessation unverified

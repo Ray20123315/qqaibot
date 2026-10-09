@@ -1,7 +1,5 @@
 # VERIFY
-- Previous feature CI 37963398835: 33/35 pass, failures only tests/abot-disabled String URL expectation and tests/pairing ignored reason
-- Fixed test expectations; rerun npm run check and Wrangler dry-run via GitHub CI
-- Check no QQ Open API import in worker.js, src/bridge.js or src/delivery.js. Gateway class inert; /shutdown deletes alarm
-- Check shutdown attempts from cron, Bbot-only health response, Bbot delivery to historical OpenID group
-- Require Cloudflare deployment evidence and real QQ group tests after main promotion
-- Original archive/legacy-main-20261009 intact
+- previous CI 37963398835 33/35; CI 37963624474 34/35 passed. Failures limited to mock test assertions.
+- latest test replacement captures either string or Request URL for mocked old DO shutdown. Expected gateway names and /shutdown validated.
+- next full npm run check and Wrangler dry-run required.
+- post-main: compare GitHub SHA with Cloudflare build, confirm no ABOT_GATEWAY_READY or official outbound send from new version, inspect Bbot health and QQ test.
