@@ -54,3 +54,14 @@ Cloudflare 原有 QQ_OPEN_GATEWAY 類別與 D1 不刪除（為了保護舊 migra
 Cloudflare 部署並不會強制中斷已經建立的 Durable Object WebSocket。觀察到 `bridge-bbot-napcat-v2` 仍執行舊程式（新 Cron 呼叫 `/flush` 得到 HTTP 404），因此新並行版使用獨立的 `bridge-bbot-parallel-v3`。**部署成功之後，請在 NapCat WebSocket Client 停用再啟用一次。** URL、Token、群組資料均不必改。
 
 新版 `GET /health` 會回報 `bbot.hub_generation="parallel-v3"`，而 `bbot.connected=true` 只在新 WebSocket 真正連上後出現；尚未重連時顯示 false 是預期的。若重連後仍 false，請查看新的 `last_connected_at`、`last_event_at` 和 `last_closed_at`，並檢查握手是否 101（而非 401）。舊 DO 可能繼續在幾分鐘內留下事件紀錄，但不再作為新路由。
+
+## 撤回、表情及加入模式（2026-10-10）
+
+- **同步撤回**：NapCat `group_recall`（使用者撤回或管理員撤回）會定位來源群及來源訊息 ID；只有收到 OneBot ACK 並有目的訊息 ID 的 Bot 轉發訊息，才會被呼叫 `delete_msg`。來源訊息先撤回時會取消 pending 轉發，已送出的對應訊息則在各群同步撤回。若 NapCat 不回報發送訊息 ID，無法安全定位，系統不會猜測。
+- **@ 成員**：若目標 QQ 號存在於目標群最新群員名單，使用原生 OneBot `at` 訊息段。若不在目標群，改為來源群暱稱（找不到則「@群友」），不公開貼數字 QQ 號；這不是跨群真正的通知。
+- **QQ 內建表情**維持 `face`，**QQ 商城／收藏表情**維持 `mface`（`emoji_id` 與 `emoji_package_id`），不把表情轉成圖片。格式不完整時退回文字表情說明。
+- **B站／QQ 分享卡片**只提取標題與可讀文字，網址轉成不會自動預覽的文字，不原樣轉發 JSON/XML 卡片。圖片仍用圖片 OneBot 訊息段。
+- **`!連線碼 --no`**：本群只接收已連線其他群訊息，不會向外轉發本群發言，也不向其他群發加入提示。可以在 `--no` 前後加上簡寫。
+- **一般加入**：加入時其他連線群會收到「新群加入」的通知，本群收到成功回覆。
+- **`!setting`／`!settings`**：列出本群連線模式、你的角色、受保護 QQ 是否在場、目前權限、授權與已連線群。**`!help`** 會說明全部指令。
+- 為避免新部署後舊的 WebSocket Durable Object 程式碼繼續運行，改用 `bridge-bbot-recall-v4`。**部署完成後需要把 NapCat WebSocket Client 停用再啟用一次**，URL、Token 不變。

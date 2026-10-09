@@ -16,8 +16,9 @@ export async function deliver(env,item,{sendBbot=sendUsingBbot}={}) {
  try{operation=JSON.parse(item.payload||"{}");}catch{return {status:"failed",path:"bbot",error:"INVALID_PAYLOAD"};}
  if(!Array.isArray(operation?.segments)||!operation.segments.length)return {status:"failed",path:"bbot",error:"NO_ONEBOT_SEGMENTS"};
  try{
-  await sendBbot(env,item.id,item.target_qq_group_id,operation.segments);
-  return {status:"sent_bbot",path:"bbot"};
+  const sendResult=await sendBbot(env,item.id,item.target_qq_group_id,operation.segments);
+  const ack=await Promise.resolve(sendResult);
+  return {status:"sent_bbot",path:"bbot",messageId:String(ack?.message_id||"")};
  }catch(e){
   // OneBot ACK timeout is ambiguous. Do not replay automatically.
   return {status:"failed_ambiguous",path:"bbot",error:String(e).slice(0,180)};

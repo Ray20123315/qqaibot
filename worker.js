@@ -1,6 +1,6 @@
 import {BBOT_HUB_ID} from "./src/bbot-hub.js";
 
-import {onOnebotEvent,onOnebotRoster,flushOutbox} from "./src/bridge.js";
+import {onOnebotEvent,onOnebotRoster,onOnebotNotice,flushOutbox,flushRecalls} from "./src/bridge.js";
 import {qq,parseOnebot} from "./src/core.js";
 import {roster,init} from "./src/store.js";
 import {outboundAction} from "./src/relay.js";
@@ -32,7 +32,7 @@ export default {
    const bbot=b?.ok?await b.json():{connected:false};
    return json({service:"qq-cross-group-bridge",ai:false,configured:!!env.ONEBOT_ACCESS_TOKEN,
     mode:"bbot-only",abot:{connected:false,session_ready:false,enabled:false},
-    bbot:{connected:!!bbot.connected,hub_generation:"parallel-v3",websocket_count:Number(bbot.websocket_count||0),
+    bbot:{connected:!!bbot.connected,hub_generation:"recall-v4",websocket_count:Number(bbot.websocket_count||0),
      last_connected_at:bbot.last_connected_at||null,last_event_at:bbot.last_event_at||null,
      last_closed_at:bbot.last_closed_at||null},
     command_prefix:"/! or !",relay:{mode:"parallel",max_parallel_groups:4},
@@ -49,6 +49,7 @@ export default {
      if(!data?.group_id||!Array.isArray(data?.members))return json({error:"invalid_roster"},400);
      return json(await onOnebotRoster(env,data.group_id,data.members,data.group_name));
     }
+    if(data?.post_type==="notice"&&data.notice_type==="group_recall")return json(await onOnebotNotice(env,data));
     return json(await onOnebotEvent(env,data));
    }catch(e){console.error("ONEBOT_HTTP_ERROR",String(e).slice(0,300));return json({error:"ingest_failed"},503);}
   }
@@ -78,6 +79,13 @@ export class OneBotHub {
    await this.state.storage.setAlarm(Date.now()+50);
    return json({scheduled:true});
   }
+  if(pathname==="/recall" && request.method==="POST"){
+   const data=await request.json().catch(()=>null);
+   if(!data||!/^-?[0-9]{1,16}$/.test(String(data.messageId||"")))return json({ok:false,reason:"invalid_message_id"},400);
+   const ws=this.socket();
+   if(!ws)return json({ok:false,reason:"bbot_disconnected"},503);
+   return this.dispatchAction(ws,"delete_msg",{message_id:Number(data.messageId)},"recall-"+crypto.randomUUID());
+  }
   if(pathname==="/send" && request.method==="POST"){
    let data;try{data=await request.json();}catch{return json({ok:false,reason:"invalid_payload"},400);}
    const ws=this.socket();
@@ -94,15 +102,26 @@ export class OneBotHub {
   return new Response(null,{status:101,webSocket:client});
  }
  socket(){return this.state.getWebSockets().find(ws=>ws.readyState===1);}
+ async dispatchAction(ws,action,params,id){
+  const echo="bridge-send:"+String(id||crypto.randomUUID());
+  if(this.inflight.has(echo))return json({ok:false,reason:"duplicate_inflight"},409);
+  return new Promise(resolve=>{
+   const timer=setTimeout(()=>{this.inflight.delete(echo);resolve(json({ok:false,reason:"ambiguous_timeout"},504));},10000);
+   this.inflight.set(echo,{resolve,timer});
+   try{ws.send(JSON.stringify({action,params,echo}));}
+   catch{clearTimeout(timer);this.inflight.delete(echo);resolve(json({ok:false,reason:"bbot_socket_unavailable"},503));}
+  });
+ }
  async dispatch(ws,id,groupId,segments){
   const outbound=outboundAction(String(id||""),groupId,segments);
-  if(this.inflight.has(outbound.echo))return json({ok:false,reason:"duplicate_inflight"},409);
-  return await new Promise(resolve=>{
-   const timer=setTimeout(()=>{this.inflight.delete(outbound.echo);resolve(json({ok:false,reason:"ambiguous_timeout"},504));},10000);
-   this.inflight.set(outbound.echo,{resolve,timer});
-   try{ws.send(JSON.stringify(outbound));}
-   catch{clearTimeout(timer);this.inflight.delete(outbound.echo);resolve(json({ok:false,reason:"bbot_socket_unavailable"},503));}
-  });
+  return this.dispatchAction(ws,outbound.action,outbound.params,id);
+ }
+ async recallMessage(ws,messageId){
+  if(!/^-?[0-9]{1,16}$/.test(String(messageId||"")))throw new Error("INVALID_RECALL_MESSAGE_ID");
+  const response=await this.dispatchAction(ws,"delete_msg",{message_id:Number(messageId)},"recall-"+crypto.randomUUID());
+  const result=await response.json();
+  if(!response.ok||!result.ok)throw new Error("RECALL_"+(result.reason||"FAILED"));
+  return result;
  }
  async replyFromBbot(ws,groupId,text){
   const segments=[{type:"text",data:{text:String(text).slice(0,1900)}}];
@@ -123,8 +142,9 @@ export class OneBotHub {
   if(!ws)return;
   if(this.flushing){this.needsFlush=true;return;}
   this.flushing=true;
-  let result=null;
+  let result=null,recalled=null;
   try{
+   recalled=await flushRecalls(this.env,id=>this.recallMessage(ws,id),20);
    result=await flushOutbox(this.env,20,{sendBbot:async (_env,id,group,segments)=>{
     const response=await this.dispatch(ws,id,group,segments);
     const ack=await response.json();
@@ -135,7 +155,7 @@ export class OneBotHub {
   }catch(e){console.error("BBOT_RELAY_FLUSH",String(e).slice(0,160));}
   finally{
    this.flushing=false;
-   if(this.needsFlush||result?.processed>=20){
+   if(this.needsFlush||result?.processed>=20||result?.lateRecalls>0||recalled?.processed>=20){
     this.needsFlush=false;
     await this.state.storage.setAlarm(Date.now()+50);
    }
@@ -162,7 +182,7 @@ export class OneBotHub {
    if(pending){
     clearTimeout(pending.timer);this.inflight.delete(echo);
     const success=data?.status==="ok" && Number(data?.retcode||0)===0;
-    pending.resolve(json(success?{ok:true}:{ok:false,reason:"qq_rejected_"+String(data?.retcode||"unknown")},success?200:422));
+    pending.resolve(json(success?{ok:true,message_id:data?.data?.message_id??null}:{ok:false,reason:"qq_rejected_"+String(data?.retcode||"unknown")},success?200:422));
    }
    return;
   }
@@ -188,6 +208,13 @@ export class OneBotHub {
     await this.state.storage.put("groupname:"+group,String(data.data.group_name).slice(0,60));
     await this.env.DB.prepare("UPDATE bridge_groups SET display_name=? WHERE qq_group_id=?").bind(String(data.data.group_name).slice(0,60),group).run();
    }
+   return;
+  }
+  if(data?.post_type==="notice"&&data.notice_type==="group_recall"){
+   try{
+    const result=await onOnebotNotice(this.env,data);
+    if(result?.recalls>0)await this.afterHandled({forwarded:result.recalls});
+   }catch(e){console.error("BBOT_RECALL_EVENT_FAILED",String(e).slice(0,180));}
    return;
   }
   const msg=parseOnebot(data);

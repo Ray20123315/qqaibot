@@ -27,11 +27,16 @@ class FakeD1 {
   throw Error("SQL_FIRST_UNHANDLED: "+q);
  }
  all(q,a){
+  if(q.startsWith("SELECT group_openid,qq_group_id FROM bridge_groups"))return this.groups.filter(x=>x.room_id===a[0]&&x.verified===1&&x.stopped===0&&x.qq_group_id!==a[1]);
+  if(q.startsWith("SELECT alias,qq_group_id,stopped,receive_only FROM bridge_groups"))return this.groups.filter(x=>x.room_id===a[0]);
+  if(q.startsWith("SELECT qq_id,nickname FROM bridge_members"))return this.members.filter(x=>x.qq_group_id===a[0]);
   if(q.startsWith("SELECT scope FROM bridge_acl"))return this.acl.filter(x=>x.qq_group_id===a[0]&&x.qq_id===a[1]);
   throw Error("SQL_ALL_UNHANDLED "+q);
  }
  run(q,a){
-  if(q.startsWith("CREATE "))return {meta:{changes:0}};
+  if(q.startsWith("CREATE ")||q.startsWith("ALTER TABLE"))return {meta:{changes:0}};
+  if(q.startsWith("UPDATE bridge_groups SET receive_only=1")){const row=this.groups.find(x=>x.qq_group_id===a[0]);row.receive_only=1;return {meta:{changes:1}};}
+  if(q.startsWith("INSERT OR IGNORE INTO bridge_outbox"))return {meta:{changes:1}};
   if(q.startsWith("INSERT INTO bridge_rooms")){
    this.rooms.push({id:a[0],code_hash:a[1],creator_qq:a[2],active:1,revoked:0,created_at:a[3]});return {meta:{changes:1}};
   }
@@ -110,4 +115,27 @@ test("Bbot group event /!use routes to NapCat admin verifier with no OpenID",asy
  const result=await onOnebotEvent({DB:db,BRIDGE_NAPCAT_COMMANDS:"true"},event,async text=>{sent=text});
  assert.equal(result.handled,true);assert.equal(db.groups[0].group_openid,"napcat:"+origin);
  assert.match(sent,/連線代碼/);
+});
+
+test("!CODE --no adds receive-only group with no join broadcast",async()=>{
+ const db=new FakeD1();
+ db.seed(origin,[{qq_id:"2681167798",role:"member"},{qq_id:"111111111",role:"owner"}]);
+ db.seed(dest,[{qq_id:"222222222",role:"admin"},{qq_id:"2681167798",role:"member"}]);
+ const msg=[],reply=t=>{msg.push(t);};
+ await handleNapcatCommand({DB:db},mkMsg(origin,"111111111"),parseCommand("!use"),reply);
+ const code=msg[0].match(/連線代碼：([A-Z0-9]+)/)?.[1];
+ const joined=await handleNapcatCommand({DB:db},mkMsg(dest,"222222222"),parseCommand("!"+code+" --no"),reply);
+ assert.equal(joined.handled,true);assert.equal(joined.forwarded,0);
+ assert.equal(db.groups[1].receive_only,1);
+ assert.match(msg[1],/僅接收/);
+});
+test("!setting displays mode, rights and joined groups",async()=>{
+ const db=new FakeD1();
+ db.seed(origin,[{qq_id:"111111111",role:"owner"},{qq_id:"2681167798",role:"member"}]);
+ const messages=[];
+ await handleNapcatCommand({DB:db},mkMsg(origin,"111111111"),parseCommand("!use"),t=>messages.push(t));
+ const output=await handleNapcatCommand({DB:db},mkMsg(origin,"111111111"),parseCommand("!setting"),t=>messages.push(t));
+ assert.equal(output.handled,true);assert.match(messages[1],/已連線群組/);
+ assert.match(messages[1],/可用指令/);
+ assert.match(messages[1],/受保護帳號在場：是/);
 });

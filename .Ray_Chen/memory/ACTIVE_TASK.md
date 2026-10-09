@@ -1,38 +1,36 @@
 # ACTIVE_TASK
 
 task_id: qq-cross-group-bridge-20261009
-task_status: blocked
-goal_revision: 9
-goal: parallelize Bbot-only QQ 3+ group forwarding and diagnose/recover false websocket-connected status
-current_phase: program and Cloudflare deployed, live NapCat reconnect and QQ acceptance pending
-current_step: user toggles NapCat WebSocket Client off and on, then checks /health bbot.hub_generation, connected, and sends one QQ cross-group test
-
+task_status: active
+goal_revision: 10
+goal: mirror source group message recall across linked groups; fix QQ @ rendering, Bilibili card, native QQ emojis; implement --no one-way join, !setting, !help and join notifications
+acceptance_criteria:
+- Authenticated OneBot group_recall notice triggers delete_msg ONLY for previously sent Bbot relay message IDs backed by successful OneBot ACK mapping; preserve group and source message ID in D1.
+- Pending sends from recalled source canceled; race between recall and send ACK triggers late recall; ambiguous send/delete results never blindly replayed.
+- Native at QQ member present destination sends OneBot at; absent dest member prints source nickname or @群友, never leaked bare QQ number.
+- QQ standard face kept face, QQ market sticker mface kept mface not image; image stays image, missing mface IDs become explanatory text.
+- Bilibili / QQ JSON/XML share card parsed into descriptive plain text, no raw card replay or auto-preview links.
+- !CODE --no [alias] creates receive-only group with no outgoing own-chat forwarding and NO join notice in other groups.
+- Normal !CODE alias join queues join notices to all other active linked QQ groups and confirms locally.
+- !setting / !settings displays current group status, mode, caller verified role/scopes/rights and linked groups; !help lists commands.
+- Bbot-only main, protected QQ 3569028262 and 2681167798 rules preserved, original branch archived.
+- Tests and dry-run passed; Cloudflare latest source version deployed, true QQ acceptance remains separate.
+current_phase: feature implementation staged
+current_step: run Github Actions for feature/recall-and-group-controls-20261010, fix any problems before main promotion
 completed_steps:
-- main before new task 9b97668ccb4bfa910b065ff9be386fe2022a8604, original archive still at 6a22b06433cfaffcf13abe2b60a917305290b629
-- src/batch.js fanoutByGroup provides bounded 4-target parallel actions, preserves each target message ordering
-- src/bridge.js parallelizes target preparations and outbox sends, logs BBOT_BATCH_RESULT count/groups/parallel/sent/failed/duration_ms
-- src/relay.js nativeBatch packages source text, picture, face/emoji, voice, video and file segments as one native send per target where practical
-- worker.js changes 1000ms alarm to 50ms, cron only wakes OneBotHub /flush and avoids competing with DO, reschedules next batch if needed
-- worker.js health includes websocket_count, last_connected_at, last_event_at, last_closed_at; history not equated to connected
-- tests/parallel-relay.test.mjs covers three QQ targets concurrent, same-group ordering, combined native message and health truthfulness
-- initial new feature 95057385c5822e6e355066c273f7475b06d32d87 CI 37965452837 PASS and main CI 37965524681 PASS, Cloudflare deployment e9f2e322-b3a8-4ba8-868e-d9656dfaf36e succeeded
-- observed live Cloudflare at 2026-10-09T17:21:04Z old Qq OneBotHub version ac768bc3-0d69-4eb7-9d18-f162cac90c5f returned 404 to GET /internal/flush despite latest Worker: old hot Durable Object websocket instance still running old source
-- fixed routing by adding src/bbot-hub.js with shared BBOT_HUB_ID='bridge-bbot-parallel-v3', updating worker/src/bridge/src/delivery in one commit and adding generation regression test
-- fix branch commit 5b36ddcd8106f4566fcc15f2c63706cd5febd8dc CI 37965979192 PASS and main CI 37966044948 PASS
-- main advanced nonforce to 5b36ddcd8106f4566fcc15f2c63706cd5febd8dc; Cloudflare qqai deploy 11d869b9-a305-4e0a-ad60-7be82a616293, version 77ce16ed-350d-4b7f-ad55-e8c2309f4d01, build success, 100% traffic and source 5b36ddcd8106f4566fcc15f2c63706cd5febd8dc
-- protected QQ permissions, Bbot-only mode, Abot disabled, D1 existing state and original archive unchanged
-- memory-only follow-up version v0.0.86 pending final CI and archive
-
-verification_results:
-- tests + Wrangler dry-run PASS on feature and main
-- Cloudflare build/deployment PASS for code revision
-- live WebSocket reconnect on new hub UNKNOWN pending user action; no 3-group measured speed claim
-- QQ composite media segments may need adaptation for NapCat specific formats
-
+- inspected main 24a33000916d239caa1b9fcac789213972a5d041, OneBot msg segments/ack and NapCat documentation for native face/mface and group_recall/delete_msg.
+- src/core.js preserves market emoji package fields; accepts !setting/!settings.
+- src/relay.js native @ with roster; absent targets show source nickname; mface never image; Bilibili card converted to plain text.
+- src/napcat-control.js handles !setting, --no one-way, join notifications to other linked active groups.
+- src/bridge.js additive D1 group receive_only migration, recall map and queue; only verified ACK target message IDs can be revoked.
+- src/recall.js stores recalled sources, message mapping, ordered recall queue, seven-day cleanup; late ACK recovers race.
+- worker.js direct OneBot delete_msg ACK handling and notice routing; alarm handles recall and normal sends; new hub ID recall-v4.
+- regression tests added/updated for recall notice, safe mappings, emojis, card, settings, --no and hub generation.
+verification_results: feature CI pending. Production / QQ live not tested.
 known_risks:
-- /health bbot.connected false cannot be repaired by pretending old socket counts; user must reconnect NapCat to new DO identity
-- QQ/NapCat rate limits/media types may still cause >5s, no SLA
-- old DO may still emit logs until underlying WS closes; new current routing always goes to parallel-v3
-
-next_exact_action: User goes to NapCat WebSocket Client and disables then enables QQAIBOT-Bbot once (same wss URL and token); checks GET https://aibot.ray2025.com/health has bbot.hub_generation parallel-v3, websocket_count >=1, connected true; test normal chat from first group to two other linked groups, report duration. If still false inspect last_connected_at/last_closed_at and NapCat HTTP 401/connection logs.
-checkpoint_at: 2026-10-09T17:26:06.060Z
+- Real NapCat response data.message_id must be present to revoke safely; no invented message ID.
+- QQ/NapCat can reject delete_msg after platform recall deadline, especially admin moderation.
+- Mixed native mface plus media may not be supported in all NapCat builds; no live guarantee.
+- v4 hot Durable Object requires operator to reconnect existing NapCat WebSocket Client once after deploy.
+next_exact_action: Run feature CI and fix failures; when green fast-forward main with expected SHA, confirm Cloudflare source and deployment, package v0.0.87 memory, email once, then user reconnects NapCat and tests /health + !setting + --no + recall.
+checkpoint_at: 2026-10-09T17:50:04.063Z

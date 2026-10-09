@@ -1,6 +1,30 @@
 import {clean,qq} from "./core.js";
 export function mediaType(kind) {return ({image:1,video:2,record:3,file:4})[kind]||0;}
 const textPart=(text)=>({type:"text",data:{text:String(text||"")}});
+export function readableCard(type,raw){
+ const text=String(raw||"").slice(0,16000);
+ let label="[分享卡片]";
+ let title="",link="";
+ if(type==="json"){
+  try{
+   const obj=JSON.parse(text);
+   const meta=obj.meta||{};
+   const detail=meta.detail_1||meta.news||meta.video||meta.music||meta.detail||{};
+   title=String(detail.title||obj.prompt||obj.desc||obj.title||"").slice(0,160);
+   link=String(detail.qqdocurl||detail.url||detail.jumpUrl||obj.url||"").slice(0,500);
+   if(/bilibili|b23\.tv|嗶哩嗶哩|哔哩哔哩/i.test(text))label="[B站分享]";
+  }catch{}
+ }else{
+  title=(text.match(/title=["']([^"']{1,160})["']/i)||[])[1]||"";
+  link=(text.match(/(?:url|jumpurl)=["']([^"']{1,500})["']/i)||[])[1]||"";
+  if(/bilibili|b23\.tv/i.test(text))label="[B站分享]";
+ }
+ // Prevent QQ client from automatically unfurling a new card from our text.
+ if(/^https?:\/\//i.test(link))link=link.replace(/^https?:\/\//i,m=>m.replace("://","[:]//"));
+ else link="";
+ return [label,title,link].filter(Boolean).join(" ").slice(0,650);
+}
+
 export function safeMediaUrl(value) {
   try {const u=new URL(String(value||""));return u.protocol==="https:"&&!u.username&&!u.password&&u.hostname.length>3&&!/^(localhost|127\.|10\.|192\.168\.|169\.254\.|0\.0\.0\.0|172\.(1[6-9]|2\d|3[01])\.)/i.test(u.hostname)&&!u.hostname.endsWith(".local")?u.href.slice(0,2000):"";}catch{return "";}
 }
@@ -18,8 +42,8 @@ export function relayOperations(groupName,sender,parts,mapping={},options={}) {
      const id=qq(part.qq);
      if(!id)continue;
      if(options.targetMembers?.has(id))segments.push({type:"at",data:{qq:id}});
-     else segments.push(textPart("@"+id));
-     readable+="@"+id;
+     else segments.push(textPart("@"+String(options.sourceMembers?.get(id)||"群友").slice(0,40)));
+     readable+="@"+String(options.sourceMembers?.get(id)||"群友").slice(0,40);
     }else if(mediaType(part.type)){
      const data=part.data||{};
      const file=clean(data.file||data.url||"",2048);
@@ -30,10 +54,15 @@ export function relayOperations(groupName,sender,parts,mapping={},options={}) {
     }else if(part.type==="face"&&/^\d+$/.test(String(part.data?.id||""))){
      segments.push({type:"face",data:{id:String(part.data.id)}});readable+="[表情]";
     }else if(part.type==="mface"){
-     const file=clean(part.data?.file||"",1024);
-     segments.push(file?{type:"image",data:{file}}:textPart("[表情]"));readable+="[表情]";
+     const data=part.data||{};
+     if(data.emoji_id&&data.emoji_package_id){
+      segments.push({type:"mface",data:{emoji_id:data.emoji_id,emoji_package_id:data.emoji_package_id,
+       ...(data.key?{key:data.key}:{}),...(data.summary?{summary:data.summary}:{})}});
+     }else segments.push(textPart(data.summary||"[商城表情]"));
+     readable+="[商城表情]";
     }else if(["reply","forward","json","xml","poke"].includes(part.type)){
-     const hint=part.type==="reply"?"[回覆]":part.type==="forward"?"[合併轉發]":part.type==="poke"?"[戳一戳]":"[卡片訊息]";
+     const hint=(part.type==="json"||part.type==="xml")?readableCard(part.type,part.data?.data):
+      part.type==="reply"?"[回覆]":part.type==="forward"?"[合併轉發]":"[戳一戳]";
      segments.push(textPart(hint));readable+=hint;
     }
    }
@@ -76,8 +105,10 @@ export function relayOperations(groupName,sender,parts,mapping={},options={}) {
       const data=part.data||{};const file=clean(data.file||"",1024);
       const segments=[textPart(label)];
       if(part.type==="face" && /^\d+$/.test(String(data.id||"")))segments.push({type:"face",data:{id:String(data.id)}});
-      else if(file)segments.push({type:"image",data:{file}});
-      else segments.push(textPart("[表情]"));
+      else if(part.type==="mface" && data.emoji_id && data.emoji_package_id){
+       segments.push({type:"mface",data:{emoji_id:data.emoji_id,emoji_package_id:data.emoji_package_id,
+        ...(data.key?{key:data.key}:{}),...(data.summary?{summary:data.summary}:{})}});
+      }else segments.push(textPart(data.summary||"[商城表情]"));
       operations.push({kind:"native",content:label+"[表情]",segments});
     }else if(part.type==="reply"){open();text+="[回覆]";segments.push(textPart("[回覆]"));}
     else if(part.type==="forward"){open();text+="[合併轉發]";segments.push(textPart("[合併轉發]"));}

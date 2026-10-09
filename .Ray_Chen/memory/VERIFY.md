@@ -1,9 +1,8 @@
 # VERIFY
 
-- Feature 37965452837 success: bounded fanout concurrency, nativeBatch message and diagnostic health tests, Wrangler dry-run.
-- Main CI for first parallel 37965524681 success.
-- Cloudflare observed stale OneBotHub /flush 404 on 2026-10-09T17:21:04Z after first parallel deploy; new hub key fix required.
-- Fix feature CI 37965979192 success, main CI 37966044948 success; new test/hub-generation ensures Worker health and delivery both use shared id bridge-bbot-parallel-v3.
-- Cloudflare latest deployed main SHA 5b36ddcd8106f4566fcc15f2c63706cd5febd8dc, build outcome SUCCESS, deployment 11d869b9-a305-4e0a-ad60-7be82a616293, version 77ce16ed-350d-4b7f-ad55-e8c2309f4d01, traffic 100%.
-- v0.0.86 archival CI, tar+SHA pending this final checkpoint.
-- Live NapCat /health hub_generation parallel-v3 and connected true requires operator reconnect; QQ 3-group real-time latency still unknown.
+- Code tests: npm run check; node --test tests/*.test.mjs and Wrangler deploy --dry-run.
+- New tests/recall-emoji.test.mjs for native at nickname, JSON card pure text, face/mface native, group recall validation, dual destination deletion and late map after source recall, send ACK message id.
+- tests/napcat-control.test.mjs includes --no join and !setting permission report, mock D1 adapts notices and additive table.
+- tests/hub-generation.test.mjs points Worker and outbound to bridge-bbot-recall-v4.
+- CI feature branch pending; no code promoted to main yet; after green fast-forward and verify Cloudflare.
+- Live QQ media/recall, no-mode and actual mapped deletes require user test after NapCat Client reconnect; do not claim proven.

@@ -5,6 +5,7 @@ import {relayOperations} from "./relay.js";
 import {deliver} from "./delivery.js";
 import {handleNapcatCommand} from "./napcat-control.js";
 import {fanoutByGroup} from "./batch.js";
+import {initRecall,handleRecallEvent,recordRelayMessage,drainRecalls} from "./recall.js";
 
 // No Abot event subscription or QQ Open Platform API use in Bbot-only mode.
 // Keep the original D1 tables and records intact for a possible future re-enable.
@@ -14,6 +15,9 @@ async function ready(env){
  if(!extraReady){
   await env.DB.prepare("CREATE TABLE IF NOT EXISTS bridge_outbox (id TEXT PRIMARY KEY, target_group TEXT NOT NULL, target_qq_group_id TEXT NOT NULL, content TEXT NOT NULL, payload TEXT NOT NULL, state TEXT NOT NULL, error TEXT NOT NULL DEFAULT '', created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL)").run();
   await env.DB.prepare("CREATE INDEX IF NOT EXISTS bridge_outbox_state_idx ON bridge_outbox(state,created_at)").run();
+  try{await env.DB.prepare("ALTER TABLE bridge_groups ADD COLUMN receive_only INTEGER NOT NULL DEFAULT 0").run();}
+  catch(e){if(!/duplicate column/i.test(String(e)))throw e;}
+  await initRecall(env.DB);
   extraReady=true;
  }
 }
@@ -32,11 +36,14 @@ export async function onOnebotEvent(env,event,reply){
  if(command)return handleNapcatCommand(env,msg,command,reply);
  const source=await groupByQq(env.DB,msg.groupId);
  if(!source?.verified)return {ignored:true,reason:"group_not_paired"};
- if(source.stopped||!isRelayable(msg))return {ignored:true,reason:"not_relayable"};
+ if(source.stopped||source.receive_only||!isRelayable(msg))return {ignored:true,reason:source.receive_only?"receive_only":"not_relayable"};
  if(!msg.messageId)return {ignored:true,reason:"missing_message_id"};
  const targets=await all(env.DB,
   "SELECT * FROM bridge_groups WHERE room_id=? AND verified=1 AND stopped=0 AND group_openid<>?",
   source.room_id,source.group_openid);
+ const sourceView=await roster(env.DB,msg.groupId);
+ const sourceMembers=sourceView.fresh?await all(env.DB,"SELECT qq_id,nickname FROM bridge_members WHERE qq_group_id=?",msg.groupId):[];
+ const sourceNames=new Map(sourceMembers.map(m=>[m.qq_id,m.nickname]).filter(([,v])=>v));
  let added=0;
  await fanoutByGroup(targets,async target=>{
   if(!qq(target.qq_group_id)){
@@ -52,17 +59,26 @@ export async function onOnebotEvent(env,event,reply){
    msg.senderName,msg.parts,{},{
     realMentions:false,
     nativeBatch:true,
+    sourceMembers:sourceNames,
     targetMembers:new Set(members.map(x=>x.qq_id))
    });
   for(const operation of operations){
    const id=await digest(msg.groupId+":"+msg.messageId+"|"+target.group_openid+"|"+operation.index);
    const result=await run(env.DB,
     "INSERT OR IGNORE INTO bridge_outbox(id,target_group,target_qq_group_id,content,payload,state,created_at,updated_at) VALUES(?,?,?,?,?,'pending',?,?)",
-    id,target.group_openid,target.qq_group_id,operation.content,JSON.stringify(operation),now()+operation.index,now());
+    id,target.group_openid,target.qq_group_id,operation.content,JSON.stringify({...operation,sourceGroupId:msg.groupId,sourceMessageId:msg.messageId}),now()+operation.index,now());
    if(Number(result.meta?.changes||0))added++;
   }
  },{key:target=>target.group_openid,concurrency:4});
  return {forwarded:added,total:targets.length};
+}
+export async function onOnebotNotice(env,event){
+ await ready(env);
+ return handleRecallEvent(env.DB,event);
+}
+export async function flushRecalls(env,deleteBbot,limit=20){
+ await ready(env);
+ return drainRecalls(env.DB,deleteBbot,limit);
 }
 export async function onOnebotRoster(env,groupId,members,groupName){
  await ready(env);
@@ -85,7 +101,7 @@ export async function flushOutbox(env,limit=15,deliveryOptions={}){
  }
  const pending=await all(env.DB,
   "SELECT * FROM bridge_outbox WHERE state='pending' ORDER BY created_at ASC LIMIT ?",limit);
- let sent=0,failed=0;
+ let sent=0,failed=0,lateRecalls=0;
  const started=now();
  const batch=await fanoutByGroup(pending,async item=>{
   const target=await get(env.DB,
@@ -101,11 +117,17 @@ export async function flushOutbox(env,limit=15,deliveryOptions={}){
   await run(env.DB,"UPDATE bridge_outbox SET state=?,content='',payload='',error=?,updated_at=? WHERE id=?",
    result.status,result.error||"",now(),item.id);
   await logDelivery(env,item.id,item.target_group,result.status,result.error);
-  if(result.status==="sent_bbot")sent++;else failed++;
+  if(result.status==="sent_bbot"){
+   sent++;
+   if(result.messageId){
+     if(await recordRelayMessage(env.DB,item,result.messageId))lateRecalls++;
+   }
+   else if(item.payload.includes('"sourceGroupId"'))console.warn("BBOT_RECALL_MAPPING_MISSING_ACK_MESSAGE_ID");
+  }else failed++;
  },{key:item=>item.target_group,concurrency:4});
  if(pending.length)console.log("BBOT_BATCH_RESULT",JSON.stringify({count:pending.length,groups:batch.groups,parallel:batch.parallel,sent,failed,duration_ms:now()-started}));
  await run(env.DB,"DELETE FROM bridge_seen WHERE created_at<?",now()-86400000);
  await run(env.DB,"DELETE FROM bridge_deliveries WHERE created_at<?",now()-7*86400000);
  await run(env.DB,"DELETE FROM bridge_pending_ids WHERE expires_at<?",now());
- return {sent,failed,processed:pending.length,groups:batch.groups,parallel:batch.parallel};
+ return {sent,failed,processed:pending.length,groups:batch.groups,parallel:batch.parallel,lateRecalls};
 }

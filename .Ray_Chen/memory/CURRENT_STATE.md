@@ -1,11 +1,11 @@
 # CURRENT_STATE
 
-- Active GitHub main code revision: 5b36ddcd8106f4566fcc15f2c63706cd5febd8dc
-- Original full legacy branch archive/legacy-main-20261009 revision 6a22b06433cfaffcf13abe2b60a917305290b629
-- Latest parallel-v3 Worker deployed Cloudflare qqai deployment 11d869b9-a305-4e0a-ad60-7be82a616293, Worker version 77ce16ed-350d-4b7f-ad55-e8c2309f4d01, 100%, main build success
-- Latest code main CI 37966044948 SUCCESS; feature CI 37965979192 SUCCESS; prior parallel core CI 37965452837 SUCCESS
-- Bbot-only: QQ Open Platform API and Abot remain disabled
-- OneBotHub canonical ID now bridge-bbot-parallel-v3 in shared src/bbot-hub.js, not bridge-bbot-napcat-v2
-- Inbound message relays to target groups in parallel up to 4 groups, preserved within-group FIFO, native OneBot segment message batches, ACK required, pending outbox retained offline
-- Old hot OneBotHub returned /flush 404 immediately following first parallel deployment. New hub ID fix is deployed, but old WS must be disconnected/reconnected by user.
-- Live bbot.connected state and QQ E2E 3-group timings UNKNOWN after new deployment.
+- main at start 24a33000916d239caa1b9fcac789213972a5d041, Cloudflare Bbot-only parallel-v3 code active.
+- archive/legacy-main-20261009 intact, commit 6a22b06433cfaffcf13abe2b60a917305290b629.
+- Feature branch feature/recall-and-group-controls-20261010: NapCat Bbot-only, recall mapping is additive D1 tables bridge_recall_map / bridge_recalled_sources / bridge_recall_queue.
+- bridge_groups.receive_only newly added with default 0. No old groups removed or changed; normal mode remains dual.
+- !CODE --no sets new joined group receive_only, no outward notifications; others can relay INTO this group.
+- !setting shows permissions and linked group list. Normal joins enqueue notices to other active groups.
+- Native at only if numeric target exists in fresh roster, otherwise nickname not QQ ID. face/mface keep types, JSON/XML card textualized.
+- Bbot hub generation recall-v4 is new; needs NapCat Client restart after production deploy.
+- CI not yet checked; live recall and QQ format verification UNKNOWN.

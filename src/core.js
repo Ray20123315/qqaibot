@@ -17,7 +17,7 @@ export function parseCommand(input) {
   const match = value.match(/^(?:\/!?|!)(\S+)(?:\s+([\s\S]*))?$/);
   if (!match) return null;
   const command = match[1].toLowerCase(), arg = clean(match[2] || "", 100);
-  const known = new Set(["use","verify","status","leave","rename","revoke","stop","resume","grant","ungrant","id","verifyid","code","help"]);
+  const known = new Set(["use","verify","status","leave","rename","revoke","stop","resume","grant","ungrant","id","verifyid","code","help","setting","settings"]);
   if (known.has(command)) return {name:command,arg};
   if (/^[a-z0-9]{10,16}$/i.test(command)) return {name:"join",code:command.toUpperCase(),arg};
   return null;
@@ -44,8 +44,15 @@ export function parseOnebot(event) {
       }});
     } else if(["face","mface","reply","forward","json","xml","poke"].includes(seg?.type)){
       const data=seg.data||{};
-      parts.push({type:seg.type,data:{
-        id:clean(data.id||"",100),file:clean(data.file||"",1024),data:clean(data.data||"",2000)
+      if(seg.type==="mface")parts.push({type:"mface",data:{
+       emoji_id:clean(data.emoji_id||"",120),emoji_package_id:clean(data.emoji_package_id||"",120),
+       key:clean(data.key||"",500),summary:clean(data.summary||"",120)
+      }});
+      else if(seg.type==="json"||seg.type==="xml")parts.push({type:seg.type,data:{
+       data:String(data.data||"").slice(0,16000)
+      }});
+      else parts.push({type:seg.type,data:{
+       id:clean(data.id||"",100),file:clean(data.file||"",1024),data:clean(data.data||"",2000)
       }});
     }
   }

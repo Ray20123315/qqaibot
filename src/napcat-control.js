@@ -5,7 +5,7 @@ import {sendUsingBbot} from "./delivery.js";
 export const NAPCAT_GROUP_PREFIX="napcat:";
 export function isNapcatGroup(openid){return String(openid||"").startsWith(NAPCAT_GROUP_PREFIX);}
 export function napcatGroupKey(groupId){const id=qq(groupId);if(!id)throw new Error("INVALID_GROUP");return NAPCAT_GROUP_PREFIX+id;}
-export const NAPCAT_HELP="跨群橋接（NapCat）\n!use 建立連線\n!連線碼 簡寫 加入連線\n!status 查看狀態\n!code 重設邀請碼\n!rename 名稱、!stop、!resume、!leave、!revoke\n!grant QQ號 manage|stop|both、!ungrant QQ號\n也支援 /! 前綴；不必使用 QQ 舊指令面板。";
+export const NAPCAT_HELP="跨群橋接（NapCat）\n!use 建立連線\n!連線碼 簡寫 加入連線\n!status 查看狀態\n!code 重設邀請碼\n!rename 名稱、!stop、!resume、!leave、!revoke\n!grant QQ號 manage|stop|both、!ungrant QQ號\n!setting 權限及已加入群\n!連線碼 --no 僅接收不轉出\n也支援 /! 前綴；不必使用 QQ 舊指令面板。";
 
 async function respond(env,msg,text,reply) {
   const body=String(text).slice(0,1700);
@@ -49,6 +49,29 @@ export async function handleNapcatCommand(env,msg,command,reply) {
     return {handled:true,reply:await respondText("跨群連線："+(group.stopped?"已停止":"運作中")+
       "\n群組："+clean(label,50)+"\n連線群數："+Number(count?.total||0)+"\n管理指令：!help\nAI 聊天：已停用")};
   }
+  if(name==="setting"||name==="settings"){
+    const view=await roster(env.DB,msg.groupId);
+    const member=await get(env.DB,"SELECT role FROM bridge_members WHERE qq_group_id=? AND qq_id=?",msg.groupId,msg.senderQq);
+    const scopes=await all(env.DB,"SELECT scope FROM bridge_acl WHERE qq_group_id=? AND qq_id=?",msg.groupId,msg.senderQq);
+    const rights=["status","help","setting"];
+    if(view.fresh&&member){
+      if(isProtected(msg.senderQq)||["owner","admin"].includes(member.role)||scopes.some(x=>x.scope==="manage"))rights.push("use","join");
+      for(const action of ["rename","stop","resume","leave","revoke","code","grant","ungrant"]){
+        if((await permission(env,msg,action)).ok)rights.push(action);
+      }
+    }
+    const linked=group?.verified?await all(env.DB,"SELECT alias,qq_group_id,stopped,receive_only FROM bridge_groups WHERE room_id=? AND verified=1 ORDER BY created_at",group.room_id):[];
+    const list=linked.map(x=>(x.receive_only?"[僅接收] ":"")+
+       clean(x.alias||"群組",32)+(x.stopped?" [已停止]":"")).join("、");
+    return {handled:true,reply:await respondText("【Bbot 設定】\n本群："+(group?.verified?(group.alias||group.display_name):"未連線")+
+      "\n連線模式："+(group?.receive_only?"僅接收 --no":"雙向轉發")+
+      "\n你的 QQ 身分："+(member?.role||"尚未驗證")+
+      "\n受保護帳號在場："+(view.protectedPresent?"是":"否")+
+      "\n名單已驗證："+(view.fresh?"是":"否")+
+      "\n授權："+(scopes.map(x=>x.scope).join("、")||"無")+
+      "\n可用指令："+rights.join("、")+
+      "\n已連線群組（"+linked.length+"）："+(list||"無"))};
+  }
   if(name==="verify")return {handled:true,reply:await respondText("目前採 NapCat 群主／管理員直接驗證，不必輸入 !verify。\n第一群輸入 !use，其他群輸入 !連線碼 簡寫。")};
   if(name==="id"||name==="verifyid")return {handled:true,reply:await respondText("目前使用 NapCat QQ 號識別，無需另外配對 OpenID。")};
   const modifying=new Set(["use","join","rename","stop","resume","leave","revoke","code","grant","ungrant"]);
@@ -76,10 +99,12 @@ export async function handleNapcatCommand(env,msg,command,reply) {
   }
   if(name==="join") {
     if(group?.verified)return {handled:true,reply:await respondText("本群已有連線，如需變更請先使用 !leave。")};
-    if(!command.arg)return {handled:true,reply:await respondText("請輸入群簡寫，例如：!"+command.code+" 遊戲群")};
+    const noMode=/(?:^|\s)--no(?:\s|$)/i.test(command.arg);
+    const aliasInput=command.arg.replace(/(?:^|\s)--no(?=\s|$)/gi," ").trim();
+    if(!aliasInput&&!noMode)return {handled:true,reply:await respondText("請輸入群簡寫，例如：!"+command.code+" 遊戲群 或 !"+command.code+" --no")};
     const room=await get(env.DB,"SELECT id FROM bridge_rooms WHERE code_hash=? AND active=1 AND revoked=0",await digest(command.code));
     if(!room)return {handled:true,reply:await respondText("連線碼無效、已撤銷或尚未啟用。請在第一個群使用 !code 取得新代碼。")};
-    const alias=cleanAlias(command.arg);
+    const alias=cleanAlias(aliasInput)||groupDisplay(msg);
     try{
       await run(env.DB,"INSERT INTO bridge_groups(group_openid,room_id,qq_group_id,alias,display_name,verified,stopped,created_at) VALUES(?,?,?,?,?,1,0,?)",
         napcatGroupKey(msg.groupId),room.id,msg.groupId,alias,groupDisplay(msg),Date.now());
@@ -87,7 +112,22 @@ export async function handleNapcatCommand(env,msg,command,reply) {
       console.warn("BBOT_JOIN_GROUP_ALREADY_LINKED");
       return {handled:true,reply:await respondText("此群可能已經連線；請使用 !status 確認。")};
     }
-    return {handled:true,reply:await respondText("加入成功！本群簡寫："+alias+"\n現在同一連線碼的群組可以跨群轉發。")};
+    if(noMode)await run(env.DB,"UPDATE bridge_groups SET receive_only=1 WHERE qq_group_id=?",msg.groupId);
+    let notices=0;
+    if(!noMode){
+     const otherGroups=await all(env.DB,"SELECT group_openid,qq_group_id FROM bridge_groups WHERE room_id=? AND verified=1 AND stopped=0 AND qq_group_id<>?",room.id,msg.groupId);
+     for(const target of otherGroups){
+      if(!qq(target.qq_group_id))continue;
+      const id="notice-"+crypto.randomUUID();
+      const text="【跨群連線】"+alias+" 已加入連線，共享群訊息。"+BRIDGE_ECHO_MARKER;
+      const payload={kind:"native",segments:[{type:"text",data:{text}}]};
+      const inserted=await run(env.DB,"INSERT OR IGNORE INTO bridge_outbox(id,target_group,target_qq_group_id,content,payload,state,created_at,updated_at) VALUES(?,?,?,?,?,'pending',?,?)",
+        id,target.group_openid,target.qq_group_id,text,JSON.stringify(payload),Date.now(),Date.now());
+      if(Number(inserted.meta?.changes||0))notices++;
+     }
+    }
+    return {handled:true,forwarded:notices,reply:await respondText("加入成功！本群簡寫："+alias+
+      (noMode?"\n本群為僅接收模式：不向其他群轉發或廣播加入提示。":"\n已通知其他連線群組（"+notices+" 群）。"))};
   }
   if(!group?.verified)return {handled:true,reply:await respondText("本群尚未連線，請先輸入 !use 或 !連線碼 簡寫。")};
   if(name==="code"){

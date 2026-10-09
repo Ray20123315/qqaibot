@@ -1,87 +1,101 @@
 {
-  "version": "v0.0.86",
+  "version": "v0.0.87",
   "task_id": "qq-cross-group-bridge-20261009",
-  "goal_revision": 9,
-  "changed_at": "2026-10-09T17:26:06.060Z",
+  "goal_revision": 10,
+  "file_change_transaction": "recall-controls-20261010",
+  "changed_at": "2026-10-09T17:50:04.063Z",
+  "repository": "Ray20123315/qqaibot",
   "provider": "GitHub",
   "location_type": "remote",
-  "repository": "Ray20123315/qqaibot",
-  "branch": "main",
-  "before_revision": "9b97668ccb4bfa910b065ff9be386fe2022a8604",
-  "product_sha": "5b36ddcd8106f4566fcc15f2c63706cd5febd8dc",
-  "after_revision": "final_memory_commit_pending",
+  "branch": "feature/recall-and-group-controls-20261010",
+  "before_revision": "24a33000916d239caa1b9fcac789213972a5d041",
+  "after_revision": "feature_commit_pending",
   "verification": {
-    "parallel_ci": 37965452837,
-    "parallel_main_ci": 37965524681,
-    "hub_fix_ci": 37965979192,
-    "hub_main_ci": 37966044948,
-    "all_ci": "success",
-    "cloudflare_deployment": "11d869b9-a305-4e0a-ad60-7be82a616293",
-    "cloudflare_version": "77ce16ed-350d-4b7f-ad55-e8c2309f4d01",
-    "cloudflare_source_sha": "5b36ddcd8106f4566fcc15f2c63706cd5febd8dc",
-    "cloudflare_percent": 100,
-    "live_qq": "not_verified",
-    "websocket_reconnect": "user_action_needed"
+    "ci": "pending",
+    "production": "not_updated",
+    "qq_live": "unknown"
   },
-  "files": [
+  "changes": [
     {
-      "path": "src/batch.js",
-      "action": "new_or_modified_on_main"
-    },
-    {
-      "path": "src/bridge.js",
-      "action": "new_or_modified_on_main"
+      "path": "src/core.js",
+      "action": "create_or_update",
+      "blob_sha": "cd3b55d1f133f82ded335ffdf3a1dd3e917c565b"
     },
     {
       "path": "src/relay.js",
-      "action": "new_or_modified_on_main"
+      "action": "create_or_update",
+      "blob_sha": "1f080a0c764e2fd844cb50d93a776077c8d1c04a"
     },
     {
-      "path": "src/bbot-hub.js",
-      "action": "new_or_modified_on_main"
+      "path": "src/recall.js",
+      "action": "create_or_update",
+      "blob_sha": "30291b7727e5a9874e642452f200aa7e71e758a9"
+    },
+    {
+      "path": "src/bridge.js",
+      "action": "create_or_update",
+      "blob_sha": "86fe1b8003742a523d1b63269c708614797dde28"
+    },
+    {
+      "path": "src/napcat-control.js",
+      "action": "create_or_update",
+      "blob_sha": "5d664389b7d6c787e992f1bfb8b54f3ded801313"
     },
     {
       "path": "src/delivery.js",
-      "action": "new_or_modified_on_main"
+      "action": "create_or_update",
+      "blob_sha": "6eece4aa5f8c93218b333a892890d3be9b16d409"
+    },
+    {
+      "path": "src/bbot-hub.js",
+      "action": "create_or_update",
+      "blob_sha": "2034c3d025a92f564b0177b2322f28586db231b7"
     },
     {
       "path": "worker.js",
-      "action": "new_or_modified_on_main"
+      "action": "create_or_update",
+      "blob_sha": "da7a85e432900ed3e6ffb4055cdd291d6546dfda"
     },
     {
-      "path": "tests/parallel-relay.test.mjs",
-      "action": "new_or_modified_on_main"
+      "path": "tests/napcat-control.test.mjs",
+      "action": "create_or_update",
+      "blob_sha": "943dc97d909235c06f05ab1c38ee962f2bf1d462"
+    },
+    {
+      "path": "tests/recall-emoji.test.mjs",
+      "action": "create_or_update",
+      "blob_sha": "a48f0d521fd3f2fa856e1bdec849526ce307611e"
     },
     {
       "path": "tests/hub-generation.test.mjs",
-      "action": "new_or_modified_on_main"
+      "action": "create_or_update",
+      "blob_sha": "3c7ef69ad7d6b431fd3087a91c756ceb841d8d67"
     },
     {
-      "path": "tests/abot-disabled.test.mjs",
-      "action": "new_or_modified_on_main"
-    },
-    {
-      "path": "tests/command-routing.test.mjs",
-      "action": "new_or_modified_on_main"
+      "path": "tests/relay.test.mjs",
+      "action": "create_or_update",
+      "blob_sha": "a59f6b42e19484f655427d6d66be98b6067b7990"
     },
     {
       "path": "README.md",
-      "action": "new_or_modified_on_main"
+      "action": "create_or_update",
+      "blob_sha": "c97500a222894e1a7e47a9a7eb08ce33b8ca183f"
     },
     {
       "path": "docs/DEPLOY.md",
-      "action": "new_or_modified_on_main"
+      "action": "create_or_update",
+      "blob_sha": "a2588245dc30ef6a9f4800428ac2ab6e8dfc2da0"
     },
     {
       "path": ".github/workflows/bridge-check.yml",
-      "action": "new_or_modified_on_main"
+      "action": "memory-version"
     },
     {
       "path": ".Ray_Chen/memory/*",
-      "action": "new_or_modified_on_main"
+      "action": "canonical-memory"
     }
   ],
-  "old_archive": {
+  "backup": {
     "branch": "archive/legacy-main-20261009",
     "sha": "6a22b06433cfaffcf13abe2b60a917305290b629"
   }

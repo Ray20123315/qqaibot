@@ -58,3 +58,13 @@ Worker 的 scheduled cron 不再打開 QQ Open Platform Gateway，只執行 Bbot
 - `bbot.last_connected_at` 是此次重連時刻，`last_event_at` 隨入站事件前進
 
 若 still false：NapCat 檢查 WebSocket 連線狀態、是否顯示 HTTP 401、Token 是否與 `ONEBOT_ACCESS_TOKEN` 一致；不要把密鑰張貼到公開群。重連後才測三群同時轉發與 `BBOT_BATCH_RESULT` 耗時。
+
+## 2026-10-10 完整 QQ 橋接功能
+
+新版 `bridge-bbot-recall-v4` 已實作 `group_recall` → DB 備查 → OneBot `delete_msg` 對應刪除（只刪 Bot 自己轉發且有 ACK message_id 的項目，原先訊息回溯 7 天）；管理員撤回也同樣處理。發送與撤回的多群佇列都經由 OneBotHub alarm 處理。注意 QQ／NapCat 平台端仍可能因超時／權限拒絕撤回。
+
+`!setting` 列出角色、權限、所有已加入群組及 receive-only 模式；`!help` 列出指令。加入 `!代碼 簡寫` 對其他群廣播加入提示；`!代碼 --no` 只接收，不向外轉發、也不對其他群廣播加入提示。既有群組預設雙向，資料庫添加 `bridge_groups.receive_only` 欄位，保留舊資料。
+
+QQ `face` 與商城 `mface` 保持原生型別，未包含必要 ID 的商城表情降為文字說明而非圖片；B站 JSON/XML 卡片抽取純文字描述而不轉原卡片；跨群 @ 在目標群有使用者 QQ ID 時送 OneBot 原生 at，否則顯示來源已知暱稱，不顯示 QQ 號。圖片等媒體保留 OneBot 原生類型。
+
+**需要 NapCat WebSocket Client 重新連線**至新 Hub `bridge-bbot-recall-v4`。原 URL `wss://aibot.ray2025.com/onebot`，原 Token 不變；`/health` 會顯示 `bbot.hub_generation=recall-v4`，可觀察是否連線。

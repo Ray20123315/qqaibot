@@ -95,5 +95,5 @@ test("DO Bbot adapter requires ACK before claiming sent",async()=>{
  const res=await hub.fetch(new Request("https://internal/send",{method:"POST",
    body:JSON.stringify({id:"m123",groupId:"808882936",segments:[{type:"text",data:{text:"hello"}}]})}));
  assert.equal(res.status,200);
- assert.deepEqual(await res.json(),{ok:true});
+ assert.deepEqual(await res.json(),{ok:true,message_id:null});
 });

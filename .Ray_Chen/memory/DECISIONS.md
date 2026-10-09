@@ -1,7 +1,8 @@
 # DECISIONS
 
-2026-10-10 revision 9: User demands batch/parallel relay; chosen bounded 4-group concurrency, no API invented for multi-destination OneBot action, same QQ group FIFO and ACK. Merge native OneBot segments per target where supported; do not promise <5 seconds without real measurement.
-2026-10-10: Shorten DO alarm to ~50ms, route cron through same DO /flush to prevent competing send/ordering races, and include pending next-batch self scheduling.
-2026-10-10: Health connected means current OPEN socket only; last activity/connected/disconnected metadata shown separately. Do not report online simply because earlier messages existed.
-2026-10-10: Live old DO /flush=404 proves hot OneBotHub stale code after deployment. Shared centralized hub ID bridge-bbot-parallel-v3 and one NapCat client restart chosen over risky force-close. Existing worker URL/token/D1 data unchanged.
-2026-10-10: Preserve Abot-off policy, protected QQ IDs and legacy archive.
+2026-10-10 goal revision 10: Cross-group recall supported only for copies that Bbot itself sent with confirmed message ID, mapped to source QQ group ID and source message ID. Unmapped sends not revoked by guess. User or administrator recalls authenticated through NapCat group_recall event. Pending canceled and late ACK mapping queues recall automatically.
+2026-10-10: --no is join-time receive-only mode, with local success reply and zero remote join notices; old groups default bidirectional. Regular joining announces to other linked active groups.
+2026-10-10: Native QQ face preserved face, market mface preserved mface if emoji_id and emoji_package_id provided; no fake image conversion.
+2026-10-10: Bilibili JSON/XML share card is descriptive text, with URLs rendered as non-preview text rather than forwarding card JSON.
+2026-10-10: Only true destination group member gets OneBot at. Others are represented by source nickname or @群友, rather than a misleading QQ ID pseudo-mention.
+2026-10-10: Use shared hub ID bridge-bbot-recall-v4 to avoid hot existing WS DO code continuing older logic. NapCat must reconnect once after deploy.
