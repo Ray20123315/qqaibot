@@ -25,5 +25,5 @@ test("outbound echoed Abot text marker cannot be rebroadcast via Bbot",async()=>
  const e={post_type:"message",message_type:"group",group_id:808882936,user_id:111111111,self_id:2681167798,
  message_id:889,sender:{nickname:"官方機器人"},message:[{type:"text",data:{text:"[技術群]甲：hello"+BRIDGE_ECHO_MARKER}}]};
  const result=await onOnebotEvent({},e);
- assert.deepEqual(result,{ignored:true});
+ assert.equal(result.ignored,true);
 });

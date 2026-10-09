@@ -1,8 +1,7 @@
 # VERIFY
-
-- npm run check: node --test tests/*.test.mjs && Wrangler deploy --dry-run.
-- Tests verify no Abot message transport even on former real OpenID destinations, no credentials loaded by new gateway, 2 historical gateway DO /shutdown signals, Bbot native ACK and group controls.
-- Verify GitHub Actions on feature/bbot-only-20261010 before main push, CI main after, and Cloudflare Worker source SHA and success.
-- Worker /health must return mode bbot-only, abot.enabled=false, bbot.connected boolean; no access to Abot tokens.
-- Monitor Cloudflare old ABOT_GATEWAY_READY / GROUP_EVENT telemetry after deployment; any continued events are a blocker.
-- Check real QQ !use, !CODE alias, !status and one normal cross-group message. No live QQ user result yet.
+- Previous feature CI 37963398835: 33/35 pass, failures only tests/abot-disabled String URL expectation and tests/pairing ignored reason
+- Fixed test expectations; rerun npm run check and Wrangler dry-run via GitHub CI
+- Check no QQ Open API import in worker.js, src/bridge.js or src/delivery.js. Gateway class inert; /shutdown deletes alarm
+- Check shutdown attempts from cron, Bbot-only health response, Bbot delivery to historical OpenID group
+- Require Cloudflare deployment evidence and real QQ group tests after main promotion
+- Original archive/legacy-main-20261009 intact

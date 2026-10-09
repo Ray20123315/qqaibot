@@ -1,83 +1,38 @@
 {
-  "version": "v0.0.79",
+  "version": "v0.0.80",
   "task_id": "qq-cross-group-bridge-20261009",
   "goal_revision": 8,
-  "changed_at": "2026-10-09T17:02:01.899Z",
-  "file_change_transaction": "bbot-only-20261010",
+  "changed_at": "2026-10-09T17:03:59.171Z",
+  "repository": "Ray20123315/qqaibot",
   "provider": "GitHub",
   "location_type": "remote",
-  "repository": "Ray20123315/qqaibot",
   "branch": "feature/bbot-only-20261010",
-  "before_revision": "e02b5ecd94ef51a70a1299e3f28ea0a578dc4738",
-  "after_revision": "feature_commit_pending",
+  "before_revision": "30e423f716cddf23ed4aad397d024bb5dab482d6",
+  "after_revision": "new-feature-commit",
   "verification": {
-    "ci": "pending",
-    "main": "unchanged",
-    "cloudflare": "pending",
-    "qq_live": "unverified"
+    "previous_ci": 37963398835,
+    "previous_ci_status": "failed-two-test-expectations",
+    "new_ci": "pending",
+    "main_updated": false
   },
-  "changes": [
-    {
-      "path": "worker.js",
-      "action": "created_or_modified",
-      "blob_sha": "2962c3d71171012b3092f8dc0449850f64efa17c"
-    },
-    {
-      "path": "src/delivery.js",
-      "action": "created_or_modified",
-      "blob_sha": "2734ba7da5b3acad0857eacc294119857908414b"
-    },
-    {
-      "path": "src/bridge.js",
-      "action": "created_or_modified",
-      "blob_sha": "592c054563066074f48a2eb13bf3a67f41024b4f"
-    },
-    {
-      "path": "wrangler.toml",
-      "action": "created_or_modified",
-      "blob_sha": "d0afbd5b51646776dcd17864d30a45191d81d49c"
-    },
-    {
-      "path": "README.md",
-      "action": "created_or_modified",
-      "blob_sha": "4c40416850c539349529703d7c8407d94092ea6a"
-    },
-    {
-      "path": "docs/DEPLOY.md",
-      "action": "created_or_modified",
-      "blob_sha": "6ed3aea5266e135517ed981996422f56af3b0d3d"
-    },
-    {
-      "path": "tests/command-routing.test.mjs",
-      "action": "created_or_modified",
-      "blob_sha": "a146211cebde9571e4ba90fca7ce37a5fd70eb52"
-    },
+  "changed_files": [
     {
       "path": "tests/abot-disabled.test.mjs",
-      "action": "created_or_modified",
-      "blob_sha": "362d23176af26ed39fcf2d9f111ed003048b9fa8"
+      "sha": "e868f441eecad3a403389c7caff632e08209f3c6",
+      "action": "fix expectation"
     },
     {
-      "path": "tests/relay.test.mjs",
-      "action": "created_or_modified",
-      "blob_sha": "3adbe9c3cd72a4715aed01c43ee96fa074a3a967"
-    },
-    {
-      "path": "tests/qq-reply.test.mjs",
-      "action": "created_or_modified",
-      "blob_sha": "5a2d474347d47402b315750cb33cc19f903c4e98"
+      "path": "tests/pairing.test.mjs",
+      "sha": "4285d8cc7d072fc5848b3cdc7ebb4096d68c33f2",
+      "action": "fix expectation"
     },
     {
       "path": ".github/workflows/bridge-check.yml",
-      "action": "update_archive_version"
+      "action": "memory v0.0.80"
     },
     {
       "path": ".Ray_Chen/memory/*",
-      "action": "update_canonical_memory"
+      "action": "checkpoint update"
     }
-  ],
-  "old_archive": {
-    "branch": "archive/legacy-main-20261009",
-    "sha": "6a22b06433cfaffcf13abe2b60a917305290b629"
-  }
+  ]
 }

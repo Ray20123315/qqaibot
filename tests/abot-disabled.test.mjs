@@ -39,7 +39,7 @@ test("scheduled worker never requests Abot gateway ensure or official API",async
  await worker.scheduled({}, {QQ_OPEN_GATEWAY:gateway,ONEBOT_HUB:hub,DB:db},ctx);
  await Promise.all(contexts);
  assert.deepEqual(gateways.map(x=>x.id).sort(),["bridge-abot","bridge-abot-commands-v2"]);
- assert.ok(gateways.every(x=>x.url.endsWith("/shutdown")));
+ assert.ok(gateways.every(x=>String(x.url).endsWith("/shutdown")));
  assert.equal(calls.some(x=>x.endsWith("/status")),true);
 });
 
