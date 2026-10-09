@@ -1,7 +1,6 @@
 # VERIFY
-- GitHub Actions npm run check: node --test tests/*.test.mjs and Wrangler dry-run.
-- New tests/parallel-relay.test.mjs checks three target groups start without serial waiting, same destination order, native text + image + face joined into one OneBot message, outgoing D1 outbox dispatch concurrently, health status never lies about socket connectivity.
-- Existing tests/abot-disabled.test.mjs adapted for scheduled internal /flush, tests/command-routing.test.mjs adapted for extra health diagnostics.
-- CI feature branch pending, production main SHA still 9b97668ccb4bfa910b065ff9be386fe2022a8604.
-- After promote, observe Cloudflare qqai source SHA, bbot.connected and bbot.last_event_at/last_closed_at, BBOT_BATCH_RESULT.duration_ms.
-- Live QQ 3-group latency test and rich-media acceptance still pending; do not claim sub-five-second SLA before observing it.
+- Prior parallel feature CI 37965452837 and main CI 37965524681 passed npm check (including 3-group concurrency tests) and Wrangler dry-run.
+- Cloudflare deployed previous main source 95057385c5822e6e355066c273f7475b06d32d87 successfully, but live log GET /internal/flush on old DO returned HTTP 404 at 2026-10-09T17:21:04Z.
+- New test/hub-generation.test.mjs asserts hub ID bridge-bbot-parallel-v3 and health route and OneBot send stub use same.
+- Feature CI pending, then fast-forward main and verify Cloudflare source sha, /health hub_generation parallel-v3.
+- User must disconnect/reconnect NapCat after deployment; live functional timing validation deferred to next QQ messages.

@@ -48,3 +48,9 @@ Cloudflare 原有 QQ_OPEN_GATEWAY 類別與 D1 不刪除（為了保護舊 migra
 - Cron 僅通知同一個 OneBotHub 排程，不直接搶送；避免 cron 與 alarm 對相同群的佇列造成順序競爭。
 - `/health` 提供 `bbot.connected`、`bbot.websocket_count`、`last_connected_at`、`last_event_at`、`last_closed_at`，便於追查你遇到的 `connected=false`。
 - 訊息經 NapCat／QQ 平台的實際速度仍受網路與平台限制，**不能保證**三群一定在 5 秒內完成；可看 Worker `BBOT_BATCH_RESULT.duration_ms` 找瓶頸。
+
+## 2026-10-10：舊 WebSocket 熱實例切換
+
+Cloudflare 部署並不會強制中斷已經建立的 Durable Object WebSocket。觀察到 `bridge-bbot-napcat-v2` 仍執行舊程式（新 Cron 呼叫 `/flush` 得到 HTTP 404），因此新並行版使用獨立的 `bridge-bbot-parallel-v3`。**部署成功之後，請在 NapCat WebSocket Client 停用再啟用一次。** URL、Token、群組資料均不必改。
+
+新版 `GET /health` 會回報 `bbot.hub_generation="parallel-v3"`，而 `bbot.connected=true` 只在新 WebSocket 真正連上後出現；尚未重連時顯示 false 是預期的。若重連後仍 false，請查看新的 `last_connected_at`、`last_event_at` 和 `last_closed_at`，並檢查握手是否 101（而非 401）。舊 DO 可能繼續在幾分鐘內留下事件紀錄，但不再作為新路由。

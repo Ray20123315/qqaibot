@@ -44,3 +44,17 @@ Worker 的 scheduled cron 不再打開 QQ Open Platform Gateway，只執行 Bbot
 - 新 `/health` 的 `bbot.connected` 僅表示當下存在 readyState=OPEN 的 WebSocket，`last_event_at` 只表示曾有最近訊息，**不能當作仍連線**。有 `last_event_at` 但 `connected=false` 時，檢查 `last_closed_at`、NapCat WebSocket Client 重新連線記錄及是否顯示 HTTP 401。
 - 詳細延遲由 `BBOT_BATCH_RESULT` 記錄總任務數、目的群數、並行度、成功失敗及 Worker batch 耗時（不寫入 QQ 訊息內容）。
 - **不要保證固定秒數**：QQ／NapCat 速率限制、網路與媒體上傳耗時可能仍導致大於 5 秒。若 QQ 拒絕複合媒體訊息，需依實際 OneBot 回傳代碼調整格式。
+
+## 必要：切換新 OneBotHub WebSocket 執行個體
+
+發現現有 `bridge-bbot-napcat-v2` 的舊 WebSocket Durable Object 在新 Worker 部署後仍持續執行過期程式，Cloudflare 日誌出現 `GET https://internal/flush` 回覆 404。新路由改成 `bridge-bbot-parallel-v3`，兩個路徑在程式內共用 `src/bbot-hub.js` 定義。
+
+**部署後務必至 NapCat WebSocket Client 停用，再啟用**，讓它斷開舊實例並向同一個 `wss://aibot.ray2025.com/onebot` 建立新 WebSocket。Token、URL、心跳、重連秒數保持不變；D1 群組連線及邀請碼不會清空。
+
+檢查 `/health`：
+- `bbot.hub_generation = "parallel-v3"`
+- `bbot.websocket_count >= 1`
+- `bbot.connected = true`
+- `bbot.last_connected_at` 是此次重連時刻，`last_event_at` 隨入站事件前進
+
+若 still false：NapCat 檢查 WebSocket 連線狀態、是否顯示 HTTP 401、Token 是否與 `ONEBOT_ACCESS_TOKEN` 一致；不要把密鑰張貼到公開群。重連後才測三群同時轉發與 `BBOT_BATCH_RESULT` 耗時。

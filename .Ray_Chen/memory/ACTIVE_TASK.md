@@ -2,32 +2,20 @@
 task_id: qq-cross-group-bridge-20261009
 task_status: active
 goal_revision: 9
-goal: reduce 3-group relay latency with bounded parallel OneBot sends and batching native message segments, investigate /health bbot.connected=false
-acceptance_criteria:
-- Different QQ target groups fan out in parallel with concurrency cap 4; same target preserves FIFO.
-- QQ OneBot text/image/emoji/at segments from one source message combined into one send per target where valid.
-- Alarm triggers near-immediately after enqueue (~50 ms), and a busy outbox schedules further batches without waiting for cron.
-- Cron only wakes OneBotHub alarm, avoiding direct cron/outbox racing with hub.
-- Bbot health reports actual socket status/count and last connected/event/close timestamps; historical activity does not count as connected.
-- OneBot ACK required, no speculative retries, no Abot API calls or role changes.
-- Automated tests and Cloudflare dry-run pass before main promotion.
-current_phase: feature staged
-current_step: commit feature/parallel-bbot-relay-20261010 and run GitHub Actions tests
+goal: fix slow group relay through parallel Bbot dispatch and reconcile false health status
+current_phase: resolve stale OneBotHub instance after deployment
+current_step: feature CI for new BbotHub generation, then main fast-forward if green
 completed_steps:
-- inspected live main 9b97668ccb4bfa910b065ff9be386fe2022a8604 and Cloudflare Observability; health GET and OneBotHub message event seen ~18 s apart, status false reported by user; cause of disconnect UNKNOWN
-- identified serial flushOutbox, 1000-ms minimum alarm, and fragmented media operations as cumulative delay sources
-- src/batch.js parallel per-destination concurrency 4 with same group sequential
-- src/bridge.js concurrently prepares different destinations, batches OneBot messages, and groups outgoing work by target
-- src/relay.js nativeBatch option combines multi-segment text/media/emojis per target
-- worker.js shorter alarm, main cron now wakes OneBotHub rather than claiming messages, next batch reschedule, concurrent flush protection
-- worker.js health includes socket count and connection/event/close timestamps without secrets or misleading inferred connectivity
-- tests/parallel-relay.test.mjs covers concurrency and grouping; modified existing health/cron expectations
-- docs and README updated; original branch and Bbot-only mode unchanged
-verification_results: pending new CI / real QQ test
-known_risks:
-- Native mixed-media OneBot message could be rejected for specific media types in QQ/NapCat; no live proof.
-- QQ/NapCat rate limits/network may still exceed 5 seconds; cannot promise hard SLA.
-- User's /health connected=false may reflect actual transient disconnect; new metadata needed to diagnose.
-- Existing Bbot OneBotHub socket must remain authenticated; old QQ platform/Abot intentionally disabled.
-next_exact_action: run CI; if green promote main with expected old sha, verify Cloudflare build and production health telemetry, archive memory and Gmail once.
-checkpoint_at: 2026-10-09T17:19:21.877Z
+- previous feature/parallel-bbot-relay-20261010 commit 95057385c5822e6e355066c273f7475b06d32d87 passed GitHub CI 37965452837 and main CI 37965524681; Cloudflare deployment e9f2e322-b3a8-4ba8-868e-d9656dfaf36e, version 64354e7a-aa3a-43d8-8695-3bbcf61d29f0, 100% traffic
+- new parallel send worker groups by target with max 4 concurrent groups, FIFO per group, ACK and no ambiguous replay, nativeBatch multi-segment delivery
+- new health exposes timestamps, active websocket count and non-misleading current connected
+- LIVE Cloudflare telemetry on 2026-10-09T17:21:04Z showed GET https://internal/flush returned HTTP 404 on old OneBotHub version ac768bc3-0d69-4eb7-9d18-f162cac90c5f, despite main new code deployed
+- diagnosed hot old Durable Object WebSocket preserving stale code
+- updated Worker, bridge and delivery to import one src/bbot-hub.js constant bridge-bbot-parallel-v3, using fresh identity
+- added tests/hub-generation.test.mjs to ensure health and delivery route same generation; new health displays hub_generation
+- documentation explains NapCat WebSocket Client disable/re-enable once after Cloudflare deployment; no Token/URL changes or D1 wipe
+files_changed: src/bbot-hub.js worker.js src/bridge.js src/delivery.js tests/hub-generation.test.mjs README.md docs/DEPLOY.md .github/workflows/bridge-check.yml .Ray_Chen/memory/*
+verification_results: new code CI pending; prior parallel code CI success, old DO rollout blocker confirmed in observability
+known_risks: Bbot remains bbot.connected=false until NapCat reconnects to new DO; actual 3-group elapsed time and mixed media success not proven.
+next_exact_action: run CI; if successful fast-forward main, verify source and Cloudflare build, download/package memory, notify Gmail once. Then ask user to toggle NapCat WebSocket Client and report new /health.
+checkpoint_at: 2026-10-09T17:23:47.498Z

@@ -1,3 +1,4 @@
+import {BBOT_HUB_ID} from "./bbot-hub.js";
 import {BRIDGE_ECHO_MARKER,qq,parseCommand,parseOnebot,isRelayable} from "./core.js";
 import {init,get,all,run,digest,roster,recordRoster,groupByQq} from "./store.js";
 import {relayOperations} from "./relay.js";
@@ -76,7 +77,7 @@ export async function flushOutbox(env,limit=15,deliveryOptions={}){
  // Do not claim and discard queued messages when Bbot's WebSocket is offline.
  // The cron can pick them up after reconnection.
  if(!deliveryOptions.sendBbot){
-  const hub=env.ONEBOT_HUB?.get(env.ONEBOT_HUB.idFromName("bridge-bbot-napcat-v2"));
+  const hub=env.ONEBOT_HUB?.get(env.ONEBOT_HUB.idFromName(BBOT_HUB_ID));
   if(!hub)return {sent:0,failed:0,offline:true};
   const status=await hub.fetch("https://internal/status").catch(()=>null);
   const connected=status?.ok&&((await status.json().catch(()=>({})))?.connected);

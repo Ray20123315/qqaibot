@@ -1,8 +1,9 @@
+import {BBOT_HUB_ID} from "./bbot-hub.js";
 // All bridge transmissions must use the authenticated NapCat/Bbot OneBot connection.
 // QQ Open Platform/Abot is deliberately disabled until the user opts back in.
 export async function sendUsingBbot(env,id,groupId,segments) {
  if(!groupId||!env.ONEBOT_HUB)throw new Error("BBOT_TARGET_UNAVAILABLE");
- const stub=env.ONEBOT_HUB.get(env.ONEBOT_HUB.idFromName("bridge-bbot-napcat-v2"));
+ const stub=env.ONEBOT_HUB.get(env.ONEBOT_HUB.idFromName(BBOT_HUB_ID));
  const response=await stub.fetch("https://internal/send",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({id,groupId,segments})});
  const info=await response.json();
  if(!response.ok||!info?.ok)throw new Error("BBOT_"+(info?.reason||"SEND_FAILED"));

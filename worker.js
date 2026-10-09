@@ -1,3 +1,4 @@
+import {BBOT_HUB_ID} from "./src/bbot-hub.js";
 
 import {onOnebotEvent,onOnebotRoster,flushOutbox} from "./src/bridge.js";
 import {qq,parseOnebot} from "./src/core.js";
@@ -12,7 +13,7 @@ async function secretMatches(request,secret){
  const [x,y]=await Promise.all([crypto.subtle.digest("SHA-256",a),crypto.subtle.digest("SHA-256",b)]);
  return Array.from(new Uint8Array(x)).every((v,i)=>v===new Uint8Array(y)[i]);
 }
-const hub=env=>env.ONEBOT_HUB.get(env.ONEBOT_HUB.idFromName("bridge-bbot-napcat-v2"));
+const hub=env=>env.ONEBOT_HUB.get(env.ONEBOT_HUB.idFromName(BBOT_HUB_ID));
 // Retain the legacy QQ_OPEN_GATEWAY binding and Durable Object migration, but
 // make the official gateway passive and ask both historical instances to close.
 const oldGatewayNames=["bridge-abot","bridge-abot-commands-v2"];
@@ -31,7 +32,7 @@ export default {
    const bbot=b?.ok?await b.json():{connected:false};
    return json({service:"qq-cross-group-bridge",ai:false,configured:!!env.ONEBOT_ACCESS_TOKEN,
     mode:"bbot-only",abot:{connected:false,session_ready:false,enabled:false},
-    bbot:{connected:!!bbot.connected,websocket_count:Number(bbot.websocket_count||0),
+    bbot:{connected:!!bbot.connected,hub_generation:"parallel-v3",websocket_count:Number(bbot.websocket_count||0),
      last_connected_at:bbot.last_connected_at||null,last_event_at:bbot.last_event_at||null,
      last_closed_at:bbot.last_closed_at||null},
     command_prefix:"/! or !",relay:{mode:"parallel",max_parallel_groups:4},

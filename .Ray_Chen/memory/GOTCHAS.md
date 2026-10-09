@@ -1,7 +1,6 @@
 # GOTCHAS
-- ACK waits added linearly under sequential outbox send; simple 3-group test can take >=5 seconds due 1s alarm plus multiple QQ RTTs. Parallelize across groups only, never reorder within a group.
-- Default relayOperations previously emits separate OneBot operations for text, image, face; nativeBatch combines OneBot segments for Bbot. Mixed video/file/record may still be rejected by NapCat or QQ, requiring live testing.
-- D1 outbox claim UPDATE guarded by pending state prevents identical row double-send. Cron and DO should share one Bbot hub scheduler to prevent interleaved groups across two separate workers.
-- Bbot DO WebSocket can have recent 'message' activity but no OPEN socket when /health executes. Do not infer current availability from last message; track last event/connected/closed separately.
-- Existing Bbot identity bridge-bbot-napcat-v2 and auth token unchanged. Check NapCat reconnection/HTTP 401 if health remains disconnected.
-- Abot remains fully disabled, old QQ command panel managed separately; no new official API traffic.
+- Cloudflare DO WebSocket hot instance can remain on old Worker code after auto-deploy. A new Cron calling /flush returned 404 because existing bridge-bbot-napcat-v2 was still running former version. Don't assume CI/build updates hot DO method handlers.
+- Rotate OneBotHub idFromName to bridge-bbot-parallel-v3 across Worker + bridge + delivery (shared constant), and require NapCat WS Client toggle off/on once. Do not change URL/Token, keep D1 state.
+- /health connected=false until new hub receives authenticated WS handshake; old DO message traffic does not count as current connected.
+- QQ Group send_onebot ACK and QQ rate limits may still constrain latency; do not promise hard 5 seconds.
+- Abot remains disabled and protected QQ IDs remain.

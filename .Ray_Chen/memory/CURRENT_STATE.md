@@ -1,7 +1,7 @@
 # CURRENT_STATE
-- Current production main before feature 9b97668ccb4bfa910b065ff9be386fe2022a8604; original entire old main archive/legacy-main-20261009 at 6a22b06433cfaffcf13abe2b60a917305290b629
-- Production currently Bbot-only, Abot disabled. QQ cross-group message outbox processing previously sequential with 1-second alarm.
-- Cloudflare logs show OneBotHub 'message' at 2026-10-09T17:12:15Z, /health at 17:12:33Z; user reports bbot.connected=false. No independent proof of connection at health instant. Diagnose with new timestamps.
-- Staged bounded parallel sends (4 different targets) while preserving within-group FIFO and OneBot ACK, combining native OneBot segments.
-- Cron wakes OneBotHub via internal /flush rather than independently consuming outbox; DO alarm resumes backlogs.
-- Feature branch CI pending; QQ latency not yet measured in real groups.
+- Production main at start 95057385c5822e6e355066c273f7475b06d32d87, Cloudflare parallel code deployed 100% after CI success
+- Observability 2026-10-09T17:21:04Z shows OneBotHub old DO version ac768bc3-0d69-4eb7-9d18-f162cac90c5f returned HTTP 404 to new /flush. This prevents new cron route from operating through existing old socket.
+- New feature branch fix/parallel-hub-reconnect-20261010 uses src/bbot-hub.js shared BBOT_HUB_ID bridge-bbot-parallel-v3 in worker, bridge and delivery, test pending.
+- New health reports bbot.hub_generation=parallel-v3, websocket_count/current connected, last event/connected/closed; cannot claim connected before client reconnect.
+- No changes to Abot-disabled state, protected QQ ACL, existing D1 or original archived code.
+- Original archive/legacy-main-20261009 at SHA 6a22b06433cfaffcf13abe2b60a917305290b629.
