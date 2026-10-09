@@ -1,9 +1,7 @@
 # GOTCHAS
-
-- Historical Abot DO instances can remain hot on old versions after a Worker deploy, so disabling cron alone is insufficient. New code sends legacy /shutdown; real cessation must be verified in Cloudflare logs. Cloudflare cannot delete QQ platform bot menu, separate QQ dashboard action.
-- Disabled QQ Open AppID / Secret kept for future user-authorized re-enable. Their mere existence is not a live request.
-- Synthetic napcat:<QQgroup> and historical Group OpenID are not native QQ group identifiers. Bbot sends only when verified numeric qq_group_id is known.
-- Bbot OneBot ACK timeout is ambiguous; never resend blindly, but Bbot confirmed offline should not consume pending messages.
-- Use same authenticated Bbot DO bridge-bbot-napcat-v2. Check /health bbot.connected before QQ tests.
-- Numeric QQ 3569028262 and 2681167798 grant/stop restrictions must remain.
-- User does not want Abot message replies; if old QQ platform command autocomplete is still shown, that is separate portal configuration.
+- Abot official 40034105 permission issues motivated Bbot-only mode; new code no longer calls official API. Old DO may have an old hot socket for a short interval; /shutdown requested.
+- QQ Open Platform slash autocomplete panel lives in developer account, separate from Worker and may remain visible despite disabled Abot code.
+- Bbot OneBot socket must authenticate via ONEBOT_ACCESS_TOKEN; 401 indicates token mismatch.
+- No QQ numeric group means Bbot cannot send, even if historical Group OpenID exists; do not synthesize an ID.
+- Bbot native ACK timeout is ambiguous and must not blindly resend. Offline outbox stays pending until reconnection.
+- QQ 3569028262 and 2681167798 protected, delegated ACL restrictions remain.

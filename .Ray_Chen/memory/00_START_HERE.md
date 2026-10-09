@@ -1,10 +1,11 @@
 # Ray_Chen Memory Entry
-version: v0.0.82
-task_id: qq-cross-group-bridge-20261009
-goal_revision: 8
-task_status: active
-canonical_branch: feature/bbot-only-20261010
-legacy_archive: archive/legacy-main-20261009
-updated_at: 2026-10-09T17:06:27.816Z
+- version: v0.0.83
+- task_id: qq-cross-group-bridge-20261009
+- task_status: blocked (pending QQ live test)
+- goal_revision: 8
+- canonical_branch: main
+- product_commit: 7d2dbac38f212dc23f735e3f8f3fa18c156ce89e
+- legacy_backup: archive/legacy-main-20261009
+- updated_at: 2026-10-09T17:10:03.717Z
 
-Read ACTIVE_TASK, CURRENT_STATE, USER_REQUIREMENTS, DECISIONS, GOTCHAS, VERIFY and FILE_MANIFEST. Bbot-only implementation staged; previous CI failure was a test-only fake URL mismatch, corrected in this revision.
+Abot application traffic disabled, Bbot only. Read ACTIVE_TASK, CURRENT_STATE, DECISIONS, GOTCHAS, VERIFY, USER_REQUIREMENTS and FILE_MANIFEST. The production code was verified by CI and Cloudflare; actual QQ group delivery must still be confirmed.
