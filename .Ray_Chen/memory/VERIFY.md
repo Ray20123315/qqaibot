@@ -1,7 +1,8 @@
 # VERIFY
 
-- Feature branch Github CI: npm run check = node --test tests/*.test.mjs AND npx wrangler deploy --dry-run --outdir dist --no-assets.
-- Test targets: protected QQ admin lock, slash parser, rich media normalization, explicit denial Bbot fallback, ambiguous timeout no fallback, OneBot send ACK, official media API.
-- Validate memory TAR.GZ contents and SHA256 via same CI workflow.
-- Required real QQ isolation tests: Abot proactive group permissions, QQ group OpenID linkage, Bbot reverse WS secured, JPEG / video / voice / file uploads, true group @, fallback send ACK and dedup.
-- main currently unchanged; old archive ref 6a22b06433cfaffcf13abe2b60a917305290b629 available for rollback.
+- github Actions command npm run check = node --test tests/*.test.mjs && Wrangler Worker deploy dry-run.
+- CI 37949966486 failed on test mock parameter order; 16 tests passed / 1 failed. Next commit changes test only and reruns.
+- verify github Actions result for this commit, archive tar can list and be extracted, check required memory files, verify sha256sum manifest.
+- Cloudflare settings binding presence verified read-only (secret values not accessed).
+- Real QQ sandbox: unverified. Must test proactive group state in QQ app and Abot send, Bbot NapCat live websocket echo ACK, image/video/voice/file, true mention and owner/admin permission with protected QQ.
+- Preserve old main archive for recovery. No main deploy until ready.

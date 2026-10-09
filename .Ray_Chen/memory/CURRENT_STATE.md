@@ -1,13 +1,12 @@
 # CURRENT_STATE
 
-- Production main unchanged at 6a22b06433cfaffcf13abe2b60a917305290b629 (last verified before commit)
-- Legacy archive branch same SHA
-- Feature baseline 6ada5f75f8542187a37b9ab98be611b98bcd2292 CI success, media extension STAGED
-- Target new feature revision: revision check after commit
-- Abot-first strategy; on explicit 400/401/403/404/405/415/422, 22009, 304082, 304083 -> Bbot fallback if target QQ group known. 5xx/timeout ambiguous -> no fallback
-- Bbot native send requires remote OneBot success ACK
-- Rich media: official /files -> msg_type 7, or Bbot OneBot native segment; unsupported source attachments may still fail
-- Official group OpenID mapping requires two-sided confirmation; true QQ mention tries <qqbot-at-user id="..."/> when mapped
-- Abot group bot_state may be 11253 forbidden; /status reports unknown
-- AI chat not loaded in new Worker
-- Live delivery not verified
+- main original sha (last checked): 6a22b06433cfaffcf13abe2b60a917305290b629
+- legacy archive: archive/legacy-main-20261009 same sha
+- new feature code first version: 6ada5f75f8542187a37b9ab98be611b98bcd2292
+- proactive-media fallback branch parent: 00b2187f5aad3a49f44456212d6ac674b279d089
+- failed CI 37949966486: 16/17 pass, mock signature mismatch caused one assertion; corrected mock new commit pending
+- Cloudflare current production bindings ONEBOT_ACCESS_TOKEN, QQ_OPEN_CLIENT_SECRET, QQ_OPEN_APP_ID exist (values not exported)
+- new main not deployed
+- QQ real Abot proactive group push, true @ and rich media: not independently verified
+- Abot-first; on definite denial Bbot onebot native fallback with confirmed ACK; uncertain responses must not trigger fallback
+- AI remains disabled in new Worker code

@@ -1,76 +1,34 @@
 {
-  "version": "v0.0.67",
+  "version": "v0.0.68",
   "task_id": "qq-cross-group-bridge-20261009",
   "goal_revision": 2,
-  "changed_at": "2026-10-09T23:30:00+08:00",
+  "changed_at": "2026-10-09T23:19:00+08:00",
   "provider": "GitHub",
-  "location_type": "remote",
   "repository": "Ray20123315/qqaibot",
   "branch": "feature/qq-cross-group-bridge-20261009",
-  "legacy_archive": "archive/legacy-main-20261009",
-  "before_revision": "6ada5f75f8542187a37b9ab98be611b98bcd2292",
+  "location_type": "remote",
+  "before_revision": "00b2187f5aad3a49f44456212d6ac674b279d089",
   "after_revision": "this-commit-see-git-head",
-  "verification": "PENDING_CI",
-  "file_change_transaction": "qq-cross-group-bridge-20261009-proactive-fallback",
-  "files": [
-    {
-      "path": "src/core.js",
-      "action": "updated-or-added",
-      "blob_sha": "488532a8bb5edf991545dab9ae60428514b635d0"
-    },
-    {
-      "path": "src/relay.js",
-      "action": "updated-or-added",
-      "blob_sha": "1fcd2d05375109ae24fafcd38af2a5a3645b22bf"
-    },
-    {
-      "path": "src/delivery.js",
-      "action": "updated-or-added",
-      "blob_sha": "d4d08f64ecba3b76fb7aa2d8585a43f8ba122388"
-    },
-    {
-      "path": "src/qq-api.js",
-      "action": "updated-or-added",
-      "blob_sha": "96854d9268db5214b173f668a20df0de0a782fee"
-    },
-    {
-      "path": "src/bridge.js",
-      "action": "updated-or-added",
-      "blob_sha": "b77472233b5918a9101bf6773dccfb8bcf1a6a04"
-    },
-    {
-      "path": "worker.js",
-      "action": "updated-or-added",
-      "blob_sha": "54c53df3cc4b5e7dd8ac9e35c9c05bc1c7f40636"
-    },
+  "verification": {
+    "previous_ci": 37949966486,
+    "previous_ci_outcome": "failed_due_to_test_mock_signature",
+    "new_ci": "pending",
+    "live_qq": "unknown",
+    "main_updated": false
+  },
+  "changes": [
     {
       "path": "tests/relay.test.mjs",
-      "action": "updated-or-added",
-      "blob_sha": "fdb180f847fe8236ad0fd3d1e0162a3cfce7086c"
+      "sha": "bf30a6c93226b903ab35c6828c52aceba53b37ab",
+      "action": "fix_mock"
     },
     {
-      "path": "README.md",
-      "action": "updated-or-added",
-      "blob_sha": "95f06d9993baa16a11882e78f8012bdc03c148b7"
-    },
-    {
-      "path": "docs/DEPLOY.md",
-      "action": "updated-or-added",
-      "blob_sha": "2132c743ebe2bf3361597ff9cd3b41d26396aa64"
-    },
-    {
-      "path": "wrangler.toml",
-      "action": "updated-or-added",
-      "blob_sha": "1b08c275ac91ff059d8700dd359dc594d86d1f5d"
+      "path": ".Ray_Chen/memory/*",
+      "action": "update"
     },
     {
       "path": ".github/workflows/bridge-check.yml",
-      "action": "modified"
-    },
-    {
-      "path": ".Ray_Chen/memory/",
-      "action": "canonical-update",
-      "version": "v0.0.67"
+      "action": "update"
     }
   ]
 }

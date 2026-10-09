@@ -69,7 +69,7 @@ test("Abot media upload fails with definite type error => Bbot sends native atta
    segments:[{type:"text",data:{text:"[群]甲："}},{type:"image",data:{file:"native-image.jpg"}}]})};
  const result=await deliver({BRIDGE_BBOT_FALLBACK:"on-rejection"},item,{
    sendAttachment:async()=>{throw Object.assign(new Error("No public URL"),{status:415});},
-   sendBbot:async(eid,group,segments)=>{fallback++;assert.equal(segments[1].type,"image");return {ok:true};}
+   sendBbot:async(env,eid,group,segments)=>{fallback++;assert.equal(group,"808882936");assert.equal(segments[1].type,"image");return {ok:true};}
  });
  assert.equal(result.status,"sent_bbot");assert.equal(fallback,1);
 });
