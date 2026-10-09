@@ -1,5 +1,5 @@
 # DECISIONS
 
-2026-10-10: Cloudflare error QQ_API_400:40034024 was observed on Abot group reply with msg_id. A definite platform rejection means this attempt did not deliver. Retry exactly once without msg_id when group allows proactive sends; do not retry on network timeout, ambiguous failure or 5xx. This is not permission to use Bbot for arbitrary unsolicited delivery.
-2026-10-10: Previous /use could leave a pending DB group after failed response; regenerate fresh pending invite/verification codes when /use is repeated, revoking old invite while leaving active verified rooms unchanged.
-2026-10-10: Stage fix branch then CI, promote main only on success, retain archive and recovery path.
+- 2026-10-10: user reported Abot no reply after main cutover. Evidence from Cloudflare Workers Observability showed QQ 40034024 invalid/unauthorized msg_id. On this explicit rejection only, retry once proactively with no msg_id; still obey QQ group permissions. No retry on timeout/5xx.
+- 2026-10-10: /use retries for verified group stay read-only; for incomplete pending group issue new random invite and nonce and revoke previous invite to permit safe recovery.
+- 2026-10-10: repair branch tested, fast-forwarded into main; Cloudflare connected deployment observed 100% on repair version. Do not claim live QQ success until user tests.

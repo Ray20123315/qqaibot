@@ -1,39 +1,46 @@
 {
-  "version": "v0.0.71",
+  "version": "v0.0.72",
   "task_id": "qq-cross-group-bridge-20261009",
   "goal_revision": 5,
-  "changed_at": "2026-10-10T00:15:00+08:00",
-  "repository": "Ray20123315/qqaibot",
+  "changed_at": "2026-10-10T00:25:00+08:00",
   "provider": "GitHub",
   "location_type": "remote",
-  "branch": "fix/qq-passive-reply-20261010",
+  "repository": "Ray20123315/qqaibot",
+  "branch": "main",
   "before_revision": "906262b122796935bab5196328f7ae27e4729cfd",
-  "after_revision": "fix_commit_pending",
-  "action": "repair-qq-invalid-msgid-and-pending-use",
-  "files": [
+  "product_sha": "618cdd90ee10d7eeae8a76545d4b4d428d574dba",
+  "after_revision": "this-commit-see-git-head",
+  "verification": {
+    "repair_ci": 37956722873,
+    "repair_ci_outcome": "success",
+    "cloudflare_deploy": "447dba41-d69d-460d-9e29-ae01bf7e554a",
+    "cloudflare_worker_version": "57508156-e5af-4b3d-a08d-46510b8120e1",
+    "deployment_outcome": "success",
+    "traffic_percent": 100,
+    "live_qq": "pending"
+  },
+  "changes": [
     {
       "path": "src/bridge.js",
-      "sha": "29c8a1c5490be037fcdc83f0f0fefbcb4f17d64e",
-      "action": "modify"
+      "action": "fix QQ 40034024 + /use pending recovery",
+      "commit": "618cdd90ee10d7eeae8a76545d4b4d428d574dba"
     },
     {
       "path": "tests/qq-reply.test.mjs",
-      "sha": "2b5e1a0b28e68d654e4dfe55b4579ea73e34280b",
-      "action": "add"
+      "action": "new regression tests",
+      "commit": "618cdd90ee10d7eeae8a76545d4b4d428d574dba"
     },
     {
       "path": ".github/workflows/bridge-check.yml",
-      "action": "modify"
+      "action": "update memory v0.0.72 packaging"
     },
     {
       "path": ".Ray_Chen/memory/*",
-      "action": "canonical-memory-update"
+      "action": "update canonical state/version/verification"
     }
   ],
-  "verification": {
-    "runtime_error": "QQ_API_400:40034024",
-    "repair_ci": "pending",
-    "qq_live": "pending",
-    "main_not_yet_updated": true
+  "legacy_archive": {
+    "branch": "archive/legacy-main-20261009",
+    "sha": "6a22b06433cfaffcf13abe2b60a917305290b629"
   }
 }

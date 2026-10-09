@@ -1,6 +1,7 @@
 # GOTCHAS
 
-- QQ group API can reject passive reply with 40034024 invalid/unauthorized msg_id even when Gateway event arrives. Send with msg_id first, then (only on explicit rejection) try a proactive no-msg-id send if group permission permits. Do not confuse this with a network timeout.
-- Code can initialize group room rows BEFORE the reply succeeds. Repeated /use for an unverified room must recover from this partial state.
-- Abot group proactive send toggles / group quotas still apply. Cloudflare CI/build passing does not establish QQ live reply behavior.
-- Keep QQAIBOT main archive/legacy-main-20261009 for recovery.
+- Real 2026-10-09T16:01:12Z Cloudflare qqai error ABOT_RESPONSE_FAILED QQ_API_400:40034024:请求参数msg_id无效或越权. New group reply fallback only when explicit error code, not generic 400/5xx/timeout.
+- Cloudflare new code deployment may still temporarily show old Durable Object versions in telemetry, due globally eventually-consistent DO updates.
+- /use was previously able to allocate DB room before failed API reply; a repeat /use now regenerates pending credentials.
+- If group proactive reply permission is off, retry without msg_id may still be rejected, requiring group owner to enable QQ group bot proactive messages.
+- Bbot reverse WebSocket needs authenticated NapCat and connected service; no successful Bbot events observed in sampled Cloudflare logs.
