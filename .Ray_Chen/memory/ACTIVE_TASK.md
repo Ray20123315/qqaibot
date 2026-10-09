@@ -1,36 +1,32 @@
 # ACTIVE_TASK
 
 task_id: qq-cross-group-bridge-20261009
-task_status: active
+task_status: blocked
 goal_revision: 10
-goal: mirror source group message recall across linked groups; fix QQ @ rendering, Bilibili card, native QQ emojis; implement --no one-way join, !setting, !help and join notifications
-acceptance_criteria:
-- Authenticated OneBot group_recall notice triggers delete_msg ONLY for previously sent Bbot relay message IDs backed by successful OneBot ACK mapping; preserve group and source message ID in D1.
-- Pending sends from recalled source canceled; race between recall and send ACK triggers late recall; ambiguous send/delete results never blindly replayed.
-- Native at QQ member present destination sends OneBot at; absent dest member prints source nickname or @群友, never leaked bare QQ number.
-- QQ standard face kept face, QQ market sticker mface kept mface not image; image stays image, missing mface IDs become explanatory text.
-- Bilibili / QQ JSON/XML share card parsed into descriptive plain text, no raw card replay or auto-preview links.
-- !CODE --no [alias] creates receive-only group with no outgoing own-chat forwarding and NO join notice in other groups.
-- Normal !CODE alias join queues join notices to all other active linked QQ groups and confirms locally.
-- !setting / !settings displays current group status, mode, caller verified role/scopes/rights and linked groups; !help lists commands.
-- Bbot-only main, protected QQ 3569028262 and 2681167798 rules preserved, original branch archived.
-- Tests and dry-run passed; Cloudflare latest source version deployed, true QQ acceptance remains separate.
-current_phase: feature implementation staged
-current_step: run Github Actions for feature/recall-and-group-controls-20261010, fix any problems before main promotion
+goal: mirror QQ message recalls and fix @, Bilibili card, face/mface and --no receive-only joining and settings on Bbot-only main
+current_phase: code deployed, waiting for user NapCat v4 WebSocket reconnect and real QQ acceptance tests
+current_step: operator disable/enables NapCat WebSocket Client once and tests in several linked QQ groups
 completed_steps:
-- inspected main 24a33000916d239caa1b9fcac789213972a5d041, OneBot msg segments/ack and NapCat documentation for native face/mface and group_recall/delete_msg.
-- src/core.js preserves market emoji package fields; accepts !setting/!settings.
-- src/relay.js native @ with roster; absent targets show source nickname; mface never image; Bilibili card converted to plain text.
-- src/napcat-control.js handles !setting, --no one-way, join notifications to other linked active groups.
-- src/bridge.js additive D1 group receive_only migration, recall map and queue; only verified ACK target message IDs can be revoked.
-- src/recall.js stores recalled sources, message mapping, ordered recall queue, seven-day cleanup; late ACK recovers race.
-- worker.js direct OneBot delete_msg ACK handling and notice routing; alarm handles recall and normal sends; new hub ID recall-v4.
-- regression tests added/updated for recall notice, safe mappings, emojis, card, settings, --no and hub generation.
-verification_results: feature CI pending. Production / QQ live not tested.
+- Baseline main at start 24a33000916d239caa1b9fcac789213972a5d041; full original archive/legacy-main-20261009 sha 6a22b06433cfaffcf13abe2b60a917305290b629 preserved.
+- Added src/recall.js D1 bridge_recalled_sources, bridge_recall_map, bridge_recall_queue, group_recall notice validation and best-effort OneBot delete_msg for verified Bbot-generated target message IDs.
+- worker.js now reports OneBot ACK data.message_id and processes group_recall events, flushes recall queue, schedules late recall when source was recalled before send ACK.
+- src/bridge.js adds only one additive bridge_groups.receive_only INTEGER NOT NULL DEFAULT 0, cancels pending source messages when recalled, persists source-to-sent target mapping, respects --no source outbound suppression.
+- src/napcat-control.js adds !setting/!settings rights/group listing, --no join only receive mode with no broadcast, ordinary join announcing to other existing active linked groups, while respecting protected ACL.
+- src/core.js/native relay.js preserve face/mface distinct classes and QQ sticker IDs, native at for verified destination member, source nickname or @群友 fallback, Bilibili/QQ JSON/XML card rendered as text.
+- New shared hub identity bridge-bbot-recall-v4 protects rollout from old hot OneBotHub WebSocket code.
+- tests/recall-emoji.test.mjs, tests/napcat-control.test.mjs, tests/hub-generation.test.mjs and tests/relay.test.mjs updated; all tests and Wrangler dry-run green on feature CI 37969072123 and main CI 37969193082.
+- Feature product commit 61666942ac971a4d52c88105a1970898a180f340 advanced to main without force; Cloudflare qqai deployment 7903d855-69bb-49d1-9d49-2c85ef5fd16a, version ed71a6b6-dbd6-4402-a4f2-e0a311e606d5, build success, 100% traffic, source 61666942ac971a4d52c88105a1970898a180f340.
+- Old Abot still disabled, existing D1 and protected QQ 3569028262/2681167798 unchanged.
+- Memory-only synchronization now v0.0.88; package CI pending.
+verification_results:
+- feature and main Node tests PASS, Wrangler dry-run PASS
+- Cloudflare program build and deployment PASS
+- Live QQ recall, market sticker send, Bilibili card and group notification NOT YET VERIFIED.
 known_risks:
-- Real NapCat response data.message_id must be present to revoke safely; no invented message ID.
-- QQ/NapCat can reject delete_msg after platform recall deadline, especially admin moderation.
-- Mixed native mface plus media may not be supported in all NapCat builds; no live guarantee.
-- v4 hot Durable Object requires operator to reconnect existing NapCat WebSocket Client once after deploy.
-next_exact_action: Run feature CI and fix failures; when green fast-forward main with expected SHA, confirm Cloudflare source and deployment, package v0.0.87 memory, email once, then user reconnects NapCat and tests /health + !setting + --no + recall.
-checkpoint_at: 2026-10-09T17:50:04.063Z
+- NapCat send_group_msg ACK must contain actual message_id to safely recall a copy; no guessed IDs.
+- QQ may reject delete_msg because recall time limit or client permissions; errors logged, not retried ambiguously.
+- Mixed market sticker/media segments may be rejected by actual QQ NapCat build.
+- New Bbot Hub v4 will appear disconnected until operator reconnects NapCat WebSocket Client; URL/Token unchanged.
+- Existing QQ group where Bbot does not receive messages cannot forward; verify bot is present and OneBot group events enabled.
+next_exact_action: user restarts NapCat WebSocket Client and checks https://aibot.ray2025.com/health for bbot.hub_generation='recall-v4', bbot.connected=true; then in one linked group send !setting, in another join with !CODE --no, test one native @ and one sticker and recall a forwarded message. If errors obtain Cloudflare logs for new version.
+checkpoint_at: 2026-10-09T17:53:01.621Z

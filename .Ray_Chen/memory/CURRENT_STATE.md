@@ -1,11 +1,11 @@
 # CURRENT_STATE
 
-- main at start 24a33000916d239caa1b9fcac789213972a5d041, Cloudflare Bbot-only parallel-v3 code active.
-- archive/legacy-main-20261009 intact, commit 6a22b06433cfaffcf13abe2b60a917305290b629.
-- Feature branch feature/recall-and-group-controls-20261010: NapCat Bbot-only, recall mapping is additive D1 tables bridge_recall_map / bridge_recalled_sources / bridge_recall_queue.
-- bridge_groups.receive_only newly added with default 0. No old groups removed or changed; normal mode remains dual.
-- !CODE --no sets new joined group receive_only, no outward notifications; others can relay INTO this group.
-- !setting shows permissions and linked group list. Normal joins enqueue notices to other active groups.
-- Native at only if numeric target exists in fresh roster, otherwise nickname not QQ ID. face/mface keep types, JSON/XML card textualized.
-- Bbot hub generation recall-v4 is new; needs NapCat Client restart after production deploy.
-- CI not yet checked; live recall and QQ format verification UNKNOWN.
+- Current product SHA on GitHub main 61666942ac971a4d52c88105a1970898a180f340
+- GitHub feature CI 37969072123 success and main CI 37969193082 success, Node tests and Wrangler dry-run.
+- Cloudflare qqai main build from 61666942ac971a4d52c88105a1970898a180f340 deployed 100%: ID 7903d855-69bb-49d1-9d49-2c85ef5fd16a, version ed71a6b6-dbd6-4402-a4f2-e0a311e606d5.
+- Original full main archived in archive/legacy-main-20261009 SHA 6a22b06433cfaffcf13abe2b60a917305290b629.
+- App mode remains Bbot-only, Abot disabled; OneBotHub identity bridge-bbot-recall-v4 must receive new socket connection before group commands work.
+- New source-to-target actual send_group_msg message_id mapping and recalled sources/queue D1 tables, additive receive_only group column.
+- --no group is receive-only; normal group broadcasts join notice, !setting reports rights and current link groups, !help lists commands.
+- Native at/mface/face supported as described; Bilibili card changed to descriptive text. QQ live validation unknown.
+- No D1 old data erased, no credentials changed, no forced Git push.

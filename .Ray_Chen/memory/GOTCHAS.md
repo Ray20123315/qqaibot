@@ -1,9 +1,9 @@
 # GOTCHAS
-
-- NapCat OneBot group_recall event includes original numeric group_id and message_id; delete_msg only applies to relay message IDs sent and ACKed by Bbot. QQ recall restrictions and message_id availability vary by adapter; never fabricate.
-- Recalls may happen while outbox is pending or waiting ACK; pending original payload canceled; late ack mapping must re-check recalled_sources and requeue delete.
-- D1 additive column receive_only defaults 0 for previously joined groups, preserves existing data.
-- QQ OneBot mface requires emoji_id and emoji_package_id, optional key and summary, do not convert to image.
-- QQ Bilibili JSON/XML card may contain signed tokens, never publish entire raw card; plain title/link with preview-prevention.
-- Protected QQ account logic unchanged. --no suppresses outbound but not local control reply or incoming other-group messages.
-- Hot Cloudflare Durable Object WebSocket may survive Worker deployment; new recall-v4 shared hub identity and user reconnect required.
+- Bbot OneBot send_group_msg ACK may omit message_id; safe mirrored recall requires this ID and cannot act without it. QQ delete_msg may be forbidden/expired.
+- Recall notice may race send ACK: record recalled source, cancel pending, queue late recall after confirmed send; don't blindly resend ambiguous ACK failure.
+- D1 bridge_groups.receive_only additive DEFAULT 0, old groups continue bidirectional.
+- QQ store emojis need mface emoji_id and emoji_package_id, not an image URL. Incomplete native fields fallback text, not image.
+- Bilibili JSON/XML card raw payload may be signed/private. Only extract title/safe URL text; do not copy original card JSON.
+- QQ at pings only true target member verified via fresh roster. If absent use source nickname or @群友 (not real notification).
+- Older Durable Object instance can continue old code; fresh identity bridge-bbot-recall-v4 requires disconnect/reconnect NapCat WebSocket Client.
+- Existing protected QQ ACL 3569028262/2681167798 and Bbot-only AI-disabled policy unchanged.

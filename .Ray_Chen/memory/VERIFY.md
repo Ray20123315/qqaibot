@@ -1,8 +1,7 @@
 # VERIFY
-
-- Code tests: npm run check; node --test tests/*.test.mjs and Wrangler deploy --dry-run.
-- New tests/recall-emoji.test.mjs for native at nickname, JSON card pure text, face/mface native, group recall validation, dual destination deletion and late map after source recall, send ACK message id.
-- tests/napcat-control.test.mjs includes --no join and !setting permission report, mock D1 adapts notices and additive table.
-- tests/hub-generation.test.mjs points Worker and outbound to bridge-bbot-recall-v4.
-- CI feature branch pending; no code promoted to main yet; after green fast-forward and verify Cloudflare.
-- Live QQ media/recall, no-mode and actual mapped deletes require user test after NapCat Client reconnect; do not claim proven.
+- Feature CI 37969072123 SUCCESS and production main CI 37969193082 SUCCESS with Node test suite and Wrangler dry-run.
+- New tests include card-as-text, native QQ face/mface, native destination at vs source nickname, group recall event parsing, two-target mapping, duplicate event and late recall, ACK returns message_id.
+- --no join, !setting roles and linked groups tested; historical protected ACL tests preserved.
+- Deployed qqai 7903d855-69bb-49d1-9d49-2c85ef5fd16a version ed71a6b6-dbd6-4402-a4f2-e0a311e606d5 100%, source 61666942ac971a4d52c88105a1970898a180f340.
+- v0.0.88 final memory archive CI pending for memory-only commit.
+- Real QQ two/three group relay, Bilibili card, mface sticker, original/admin recall must be observed after NapCat client reconnect; no premature claims.
