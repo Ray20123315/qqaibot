@@ -25,7 +25,7 @@ export default {
    const bbot=b.status==="fulfilled"&&b.value.ok?await b.value.json():{connected:false};
    const abot=g.status==="fulfilled"&&g.value.ok?await g.value.json():{connected:false};
    return json({service:"qq-cross-group-bridge",ai:false,configured:!!(env.ONEBOT_ACCESS_TOKEN&&env.QQ_OPEN_APP_ID&&env.QQ_OPEN_CLIENT_SECRET),
-    bbot:{connected:!!bbot.connected},abot:{connected:!!abot.connected,session_ready:!!abot.ready},command_prefix:"! or /!",
+    bbot:{connected:!!bbot.connected},abot:{connected:!!abot.connected,session_ready:!!abot.ready},command_prefix:"/! or !",
     verification:"napcat",primary_command_transport:"bbot"});
   }
   if(path==="/onebot" || path==="/onebot/roster"){

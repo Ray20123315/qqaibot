@@ -1,68 +1,34 @@
 {
-  "version": "v0.0.75",
+  "version": "v0.0.76",
   "task_id": "qq-cross-group-bridge-20261009",
   "goal_revision": 7,
-  "file_change_transaction": "napcat-native-link-20261010",
-  "changed_at": "2026-10-10T00:39:00+08:00",
+  "changed_at": "2026-10-10T00:44:00+08:00",
   "provider": "GitHub",
-  "location_type": "remote",
   "repository": "Ray20123315/qqaibot",
   "branch": "feature/napcat-native-link-20261010",
-  "before_revision": "ff80b3d96e223b1663e7d2c5b5b578828b052410",
-  "after_revision": "feature_commit_pending",
-  "verification": "CI_pending",
+  "location_type": "remote",
+  "before_revision": "06583523172de11413c409b9ffe63929479f2a9e",
+  "after_revision": "pending_new_commit",
+  "action": "fix-health-string-compat-and-update-memory",
+  "verification": {
+    "previous_ci": 37960815779,
+    "previous_result": "31/32; health-string mismatch",
+    "new_ci": "pending",
+    "live_qq": "not_tested"
+  },
   "files": [
     {
-      "path": "src/napcat-control.js",
-      "action": "add_or_modify",
-      "blob_sha": "3c793eebb6696f4bc1ac567356874d80bcb4aac3"
-    },
-    {
-      "path": "src/bridge.js",
-      "action": "add_or_modify",
-      "blob_sha": "9d0f8f5e5a48f97f3cef6f1f1d8ac805a2ddf7d8"
-    },
-    {
-      "path": "src/delivery.js",
-      "action": "add_or_modify",
-      "blob_sha": "69a18966c21cbe6327fc47f3aa7d98d2a446c42c"
-    },
-    {
       "path": "worker.js",
-      "action": "add_or_modify",
-      "blob_sha": "61e62ca467656fca9601c5d63e3ee7e09dae29f2"
-    },
-    {
-      "path": "tests/napcat-control.test.mjs",
-      "action": "add_or_modify",
-      "blob_sha": "66ca6f8ca62c63a7dde3e57b25a6bdbc442034fa"
-    },
-    {
-      "path": "wrangler.toml",
-      "action": "add_or_modify",
-      "blob_sha": "a0a5ed2b92cce5882df5e34e43f096d0055e08ba"
-    },
-    {
-      "path": "README.md",
-      "action": "add_or_modify",
-      "blob_sha": "faf73b2f4ea0822aa5186c4040bfe7796c2d0413"
-    },
-    {
-      "path": "docs/DEPLOY.md",
-      "action": "add_or_modify",
-      "blob_sha": "2c94651f943c3d7b8bb38d23a91e7f620b1fb886"
+      "action": "fix",
+      "blob_sha": "31695ccca6c78e35121b62bbd7a64028293dee7f"
     },
     {
       "path": ".github/workflows/bridge-check.yml",
-      "action": "package_version_update"
+      "action": "memory version update"
     },
     {
       "path": ".Ray_Chen/memory/*",
-      "action": "canonical_update"
+      "action": "canonical updates"
     }
-  ],
-  "legacy_archive": {
-    "branch": "archive/legacy-main-20261009",
-    "sha": "6a22b06433cfaffcf13abe2b60a917305290b629"
-  }
+  ]
 }

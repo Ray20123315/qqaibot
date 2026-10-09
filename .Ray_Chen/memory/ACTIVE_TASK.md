@@ -3,31 +3,20 @@
 task_id: qq-cross-group-bridge-20261009
 task_status: active
 goal_revision: 7
-goal: permit all Bbot/NapCat-accessible QQ groups to join and verify bridge without Abot OpenID, with direct native QQ replies
-current_phase: implement and validate new independent Bbot group registration / joining
-current_step: run GitHub CI on feature/napcat-native-link-20261010, repair failures, then promote to main and verify deployment
-
-acceptance_criteria:
-- first QQ group sends plain !use, trusted NapCat roster verifies actual QQ role, emits 12-letter invite by OneBot with ACK
-- other QQ group sends !CODE alias, validates admin member from fresh roster, binds numeric QQ group without Abot OpenID, replies by OneBot
-- !status !code !stop !resume !leave !rename !grant !ungrant work via Bbot; protected QQ 3569028262 / 2681167798 prevent ungranted stop or grants
-- unlinked target with synthetic napcat: group ID is sent only by Bbot, not Abot; official target with valid OpenID still Abot first + guarded Bbot fallback
-- multi-group messages stored in deduplicated outbox, delivered with OneBotHub short alarm, no synchronous OneBotHub self-dispatch when handling incoming WS event
-- Abot official control commands ignored while Bbot native controller enabled, no stale parallel room creation in current code
-- existing database tables and legacy backup unaffected; AI chat still off
-- tests, Wrangler dry-run, Cloudflare deployed build and limited actual QQ tests
+goal: replace Abot-only group linking with Bbot/NapCat-verified multi-group linking, preserve all user protection requirements and deploy to main
+current_phase: NapCat-native feature regression fix
+current_step: new commit CI, then main fast-forward if passed
 
 completed_steps:
-- cloudflare qqai logs show QQ GROUP event ack succeeded for only one group, other groups failed official proactive 40034105 no permission
-- Bbot websocket connection succeeded in a prior log on 2026-10-09 16:24 UTC (current connectivity subject to recheck)
-- new src/napcat-control.js handles room creation, code join, ACL and all relevant text commands
-- src/delivery.js routes synthetic napcat: target QQ groups directly to Bbot
-- src/bridge.js prioritizes Bbot controls and enqueues normal message operations, does not synchronously flush in Bbot DO
-- worker.js implements direct OneBot replies with ACK, alarm-based low-latency delivery
-- tests/napcat-control.test.mjs adds two-group and protected-management checks
-- README/docs/DEPLOY.md refreshed, wrangler.toml BRIDGE_NAPCAT_COMMANDS=true
+- initial feature commit 06583523172de11413c409b9ffe63929479f2a9e created on feature/napcat-native-link-20261010
+- CI 37960815779: 31/32 unit tests PASSED, failed only existing tests/command-routing.test.mjs public health expected prefix '/! or !' while new worker returned '! or /!'; no NapCat-native functional test failed
+- src/napcat-control.js: !use, !CODE alias, !status, !code, stop/resume/leave/revoke, ACL, Bbot direct replies
+- src/bridge.js: Bbot control handling primary, Abot control ignored in new mode, outgoing outbox enqueued only
+- src/delivery.js: synthetic napcat: target dispatched through Bbot instead of Abot
+- worker.js: OneBotHub direct ws reply awaiting ACK, short alarm flush, /health prefix fixed to maintain existing API response string
+- docs, wrangler, tests updated, main not yet changed
 
-verification: STAGED, CI pending; QQ end-to-end not verified
-blockers: NapCat needs active authenticated reverse WS and group member roster, users need to try plain !use and !CODE alias in two groups; old Abot pending invite codes are not auto-imported
-next_exact_action: Run CI and fix any code/test failures; after green promote to main with expected SHA, verify Cloudflare deployment, memory archive and Gmail once.
-last_checkpoint_at: 2026-10-10T00:39:00+08:00
+known_failures: first feature CI 37960815779 failed single health diagnostic string assertion, fixed this revision
+verification: CI pending; no real new QQ group test yet
+blockers: need NapCat live client in at least two groups for end-to-end confirmation, and Abot existing stale pending invite cannot be auto-imported
+next_exact_action: verify CI success and package, fast-forward main with lease check, verify Cloudflare connected build and D1 safe availability, deliver memory package and notify Gmail.
