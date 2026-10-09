@@ -1,40 +1,35 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import {answer} from "../src/bridge.js";
+import {OneBotHub} from "../worker.js";
 import {BRIDGE_ECHO_MARKER} from "../src/core.js";
-test("invalid passive reply msg_id 40034024 retries once without msg_id",async()=>{
- const calls=[];
- const send=async(env,group,text,id)=>{
-  calls.push({group,text,id});
-  if(calls.length===1)throw Object.assign(new Error("请求参数msg_id无效或越权"),{code:40034024,status:400});
-  return {id:"sent"};
- };
- const result=await answer({},"group_openid","代碼：123","bad_msg_id",send);
- assert.equal(result,true);
- assert.equal(calls.length,2);
- assert.equal(calls[0].id,"bad_msg_id");
- assert.equal(calls[1].id,undefined);
- assert.equal(calls[0].text,calls[1].text);
- assert.ok(calls[0].text.endsWith(BRIDGE_ECHO_MARKER));
+
+test("Bbot native group command reply requires OneBot ACK",async()=>{
+ let hub;
+ const sent=[];
+ const ws={readyState:1,send(payload){
+  const action=JSON.parse(payload);
+  sent.push(action);
+  queueMicrotask(()=>hub.webSocketMessage(ws,JSON.stringify({echo:action.echo,status:"ok",retcode:0})));
+ }};
+ hub=new OneBotHub({getWebSockets:()=>[ws]},{});
+ await hub.replyFromBbot(ws,"808882936","跨群已建立");
+ assert.equal(sent.length,1);
+ assert.equal(sent[0].action,"send_group_msg");
+ assert.equal(sent[0].params.group_id,808882936);
+ assert.equal(sent[0].params.message[0].data.text,"跨群已建立");
 });
-test("normal passive reply should send only once",async()=>{
- let count=0;
- const result=await answer({},"g","hello","good_msg_id",async()=>{count++;});
- assert.equal(result,true);assert.equal(count,1);
+
+test("Bbot command responses are marked and ignored as already forwarded",async()=>{
+ const {onOnebotEvent}=await import("../src/bridge.js");
+ const result=await onOnebotEvent({},{
+  post_type:"message",message_type:"group",group_id:808882936,
+  user_id:3569028262,self_id:2681167798,message_id:"993",
+  sender:{nickname:"reply"},message:[{type:"text",data:{text:"已建立"+BRIDGE_ECHO_MARKER}}]});
+ assert.equal(result.ignored,true);
 });
-test("network or server failure is ambiguous and must not trigger an extra send",async()=>{
- let count=0;
- const result=await answer({},"g","hello","msg_id",async()=>{
-  count++;throw Object.assign(new Error("gateway timeout"),{status:503});
- });
- assert.equal(result,false);assert.equal(count,1);
-});
-test("proactive fallback denied => fail once, not retry indefinitely",async()=>{
- let count=0;
- const result=await answer({},"g","hello","bad_msg_id",async()=>{
-  count++;
-  if(count===1)throw Object.assign(new Error("invalid id"),{code:40034024,status:400});
-  throw Object.assign(new Error("proactive denied"),{code:22009,status:403});
- });
- assert.equal(result,false);assert.equal(count,2);
+
+test("Abot official HTTP response handlers have no active route",async()=>{
+ const {default:worker}=await import("../worker.js");
+ const res=await worker.fetch(new Request("https://example.com/qq-open/events",{method:"POST"}),{});
+ assert.equal(res.status,404);
 });

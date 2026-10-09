@@ -1,50 +1,24 @@
-import {BRIDGE_ECHO_MARKER} from "./core.js";
-import {sendGroup,sendMedia} from "./qq-api.js";
-import {classifyAbotFailure,decideFallback} from "./relay.js";
-export async function sendUsingBbot(env,id,groupId,segments){
-  if(!groupId||!env.ONEBOT_HUB)throw new Error("BBOT_TARGET_UNAVAILABLE");
-  const stub=env.ONEBOT_HUB.get(env.ONEBOT_HUB.idFromName("bridge-bbot-napcat-v2"));
-  const response=await stub.fetch("https://internal/send",{method:"POST",headers:{"content-type":"application/json"},
-   body:JSON.stringify({id,groupId,segments})});
-  const info=await response.json();
-  if(!response.ok||!info?.ok)throw new Error("BBOT_"+(info?.reason||"SEND_FAILED"));
-  return info;
+// All bridge transmissions must use the authenticated NapCat/Bbot OneBot connection.
+// QQ Open Platform/Abot is deliberately disabled until the user opts back in.
+export async function sendUsingBbot(env,id,groupId,segments) {
+ if(!groupId||!env.ONEBOT_HUB)throw new Error("BBOT_TARGET_UNAVAILABLE");
+ const stub=env.ONEBOT_HUB.get(env.ONEBOT_HUB.idFromName("bridge-bbot-napcat-v2"));
+ const response=await stub.fetch("https://internal/send",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({id,groupId,segments})});
+ const info=await response.json();
+ if(!response.ok||!info?.ok)throw new Error("BBOT_"+(info?.reason||"SEND_FAILED"));
+ return info;
 }
-export async function deliver(env,item,{sendBbot=sendUsingBbot,sendText=sendGroup,sendAttachment=sendMedia}={}){
- const operation=JSON.parse(item.payload||"{}");
- if(String(item.target_group).startsWith("napcat:")){
-   // No target Group OpenID exists: Abot cannot address this QQ group.
-   // NapCat is the primary and only known transport for this destination.
-   try{
-     await sendBbot(env,item.id,item.target_qq_group_id,operation.segments);
-     return {status:"sent_bbot",path:"bbot"};
-   }catch(e){return {status:"failed_ambiguous",path:"bbot",error:String(e).slice(0,180)};}
- }
- let abotError=null;
- try{
-  if(operation.kind==="text"){
-   await sendText(env,item.target_group,operation.content+BRIDGE_ECHO_MARKER);
-  } else if(operation.kind==="media"){
-   await sendAttachment(env,item.target_group,operation);
-  } else {
-   // Native-only QQ proprietary emoji / replies cannot be encoded faithfully by the public API.
-   throw Object.assign(new Error("ABOT_NATIVE_FORMAT_UNAVAILABLE"),{status:415});
-  }
-  return {status:"sent_abot",path:"abot"};
- }catch(e){
-  abotError=e;
- }
- const failure=classifyAbotFailure(abotError);
- const mode=String(env.BRIDGE_BBOT_FALLBACK||"on-rejection");
- const canFallback=!!item.target_qq_group_id;
- if(!decideFallback({mode,failure,bbotAvailable:canFallback})){
-  return {status:failure==="ambiguous"?"failed_ambiguous":"failed",
-   path:"abot",error:String(abotError).slice(0,180)};
- }
+export async function deliver(env,item,{sendBbot=sendUsingBbot}={}) {
+ // Do not attempt QQ official API for any destination, even a historical real OpenID.
+ if(!item?.target_qq_group_id)return {status:"failed",path:"bbot",error:"TARGET_QQ_GROUP_UNKNOWN"};
+ let operation;
+ try{operation=JSON.parse(item.payload||"{}");}catch{return {status:"failed",path:"bbot",error:"INVALID_PAYLOAD"};}
+ if(!Array.isArray(operation?.segments)||!operation.segments.length)return {status:"failed",path:"bbot",error:"NO_ONEBOT_SEGMENTS"};
  try{
   await sendBbot(env,item.id,item.target_qq_group_id,operation.segments);
-  return {status:"sent_bbot",path:"bbot",error:String(abotError).slice(0,180)};
+  return {status:"sent_bbot",path:"bbot"};
  }catch(e){
-  return {status:"failed_ambiguous",path:"bbot",error:("Abot: "+String(abotError)+"; Bbot: "+String(e)).slice(0,180)};
+  // OneBot ACK timeout is ambiguous. Do not replay automatically.
+  return {status:"failed_ambiguous",path:"bbot",error:String(e).slice(0,180)};
  }
 }

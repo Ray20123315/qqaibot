@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {parseOnebot,isRelayable} from "../src/core.js";
-import {relayOperations,safeMediaUrl,classifyAbotFailure,decideFallback,outboundAction} from "../src/relay.js";
+import {relayOperations,safeMediaUrl,outboundAction} from "../src/relay.js";
 import {deliver} from "../src/delivery.js";
 import {OneBotHub} from "../worker.js";
 const input={post_type:"message",message_type:"group",group_id:808882936,user_id:3569028262,self_id:2681167798,message_id:1001,
@@ -34,44 +34,49 @@ test("cross-group target member absent => textual at in Bbot output",()=>{
  assert.equal(ops[0].content,"[跨群]客戶：@473204883");
  assert.equal(ops[0].segments[1].type,"text");
 });
-test("only HTTPS public media is uploaded by Abot",()=>{
+test("public media URL sanitization remains available, but Abot upload is disabled",()=>{
  assert.equal(safeMediaUrl("file:///tmp/secret"),"");
  assert.equal(safeMediaUrl("http://localhost/secret"),"");
  assert.equal(safeMediaUrl("https://127.0.0.1/private"),"");
  assert.equal(safeMediaUrl("https://files.example.org/photo.png"),"https://files.example.org/photo.png");
 });
-test("definitive official denial leads to Bbot; successful Abot never calls Bbot",async()=>{
- let official=0,personal=0;
- const item={id:"id",target_group:"groupOpen",target_qq_group_id:"808882936",
+test("Bbot-only sends text to a numeric QQ group even when OpenID exists",async()=>{
+ let bbot=0,official=0;
+ const item={id:"txt",target_group:"old-real-openid",target_qq_group_id:"808882936",
   payload:JSON.stringify({kind:"text",content:"hello",segments:[{type:"text",data:{text:"hello"}}]})};
- const sendText=async()=>{official++;throw Object.assign(new Error("push disabled"),{status:403,code:0});};
- const sendBbot=async()=>{personal++;return {ok:true};};
- const a=await deliver({BRIDGE_BBOT_FALLBACK:"on-rejection"},item,{sendText,sendBbot});
- assert.equal(a.status,"sent_bbot");
- assert.equal(official,1);assert.equal(personal,1);
- const b=await deliver({},item,{sendText:async()=>({id:"ok"}),sendBbot:async()=>{throw Error("Bbot should not run");}});
- assert.equal(b.status,"sent_abot");
+ const result=await deliver({},item,{sendBbot:async()=>{bbot++;return {ok:true};},
+  sendText:async()=>{official++;return {id:"should-not-run"};}});
+ assert.equal(result.status,"sent_bbot");
+ assert.equal(bbot,1);
+ assert.equal(official,0);
 });
-test("ambiguous official failure cannot trigger duplicate via Bbot",async()=>{
- let personal=0;
- const item={id:"id",target_group:"groupOpen",target_qq_group_id:"808882936",
+test("Bbot-only forwards original native media without any Abot upload",async()=>{
+ let used=0;
+ const item={id:"img",target_group:"historical-openid",target_qq_group_id:"808882936",
+  payload:JSON.stringify({kind:"media",mediaKind:"image",content:"[群]甲：",
+  segments:[{type:"text",data:{text:"[群]甲："}},{type:"image",data:{file:"native-image.jpg"}}]})};
+ const result=await deliver({},item,{sendBbot:async(_env,id,group,segments)=>{
+   used++;assert.equal(group,"808882936");assert.equal(segments[1].type,"image");
+ }});
+ assert.equal(result.status,"sent_bbot");
+ assert.equal(used,1);
+});
+test("missing numeric QQ group ID fails closed; no invented mapping",async()=>{
+ let attempts=0;
+ const item={id:"bad",target_group:"opaque-openid",target_qq_group_id:"",
   payload:JSON.stringify({kind:"text",content:"hello",segments:[{type:"text",data:{text:"hello"}}]})};
- const result=await deliver({BRIDGE_BBOT_FALLBACK:"on-rejection"},item,{sendText:async()=>{throw new Error("network timeout");},sendBbot:async()=>{personal++;}});
+ const result=await deliver({},item,{sendBbot:async()=>{attempts++;}});
+ assert.equal(result.status,"failed");
+ assert.equal(result.error,"TARGET_QQ_GROUP_UNKNOWN");
+ assert.equal(attempts,0);
+});
+test("Bbot ACK timeout does not cause duplicate sends",async()=>{
+ let attempts=0;
+ const item={id:"timeout",target_group:"napcat:808882936",target_qq_group_id:"808882936",
+  payload:JSON.stringify({kind:"text",content:"hello",segments:[{type:"text",data:{text:"hello"}}]})};
+ const result=await deliver({},item,{sendBbot:async()=>{attempts++;throw new Error("ambiguous_timeout");}});
  assert.equal(result.status,"failed_ambiguous");
- assert.equal(personal,0);
- assert.equal(classifyAbotFailure(Object.assign(new Error("Quota"),{code:22009})),"definitive");
- assert.equal(decideFallback({mode:"disabled",failure:"definitive",bbotAvailable:true}),false);
-});
-test("Abot media upload fails with definite type error => Bbot sends native attachment",async()=>{
- let fallback=0;
- const item={id:"img",target_group:"groupOpen",target_qq_group_id:"808882936",
-  payload:JSON.stringify({kind:"media",mediaKind:"image",content:"[群]甲：",mediaUrl:"",
-   segments:[{type:"text",data:{text:"[群]甲："}},{type:"image",data:{file:"native-image.jpg"}}]})};
- const result=await deliver({BRIDGE_BBOT_FALLBACK:"on-rejection"},item,{
-   sendAttachment:async()=>{throw Object.assign(new Error("No public URL"),{status:415});},
-   sendBbot:async(env,eid,group,segments)=>{fallback++;assert.equal(group,"808882936");assert.equal(segments[1].type,"image");return {ok:true};}
- });
- assert.equal(result.status,"sent_bbot");assert.equal(fallback,1);
+ assert.equal(attempts,1);
 });
 test("OneBot outbound action has explicit target and echo",()=>{
  const a=outboundAction("abc","808882936",[{type:"text",data:{text:"hello"}}]);

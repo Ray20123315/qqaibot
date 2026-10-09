@@ -45,10 +45,9 @@ database_id = "569a01fe-3297-40e1-832f-09c3793056ed"
 crons = ["* * * * *"]
 
 [vars]
-QQ_OPEN_APP_ID = "1905687174"
-QQ_OPEN_INTENTS = "100663296"
-BRIDGE_REAL_MENTIONS = "true"
-BRIDGE_BBOT_FALLBACK = "on-rejection"
+BRIDGE_REAL_MENTIONS = "false" # QQ numeric @ is handled natively by NapCat after roster verification
+BRIDGE_ABOT_ENABLED = "false"
+BRIDGE_MODE = "bbot-only"
 BRIDGE_NAPCAT_COMMANDS = "true"
 
 [observability]

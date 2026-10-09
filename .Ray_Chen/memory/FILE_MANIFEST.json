@@ -1,70 +1,82 @@
 {
-  "version": "v0.0.78",
+  "version": "v0.0.79",
   "task_id": "qq-cross-group-bridge-20261009",
-  "goal_revision": 7,
-  "changed_at": "2026-10-10T00:52:00+08:00",
+  "goal_revision": 8,
+  "changed_at": "2026-10-09T17:02:01.899Z",
+  "file_change_transaction": "bbot-only-20261010",
   "provider": "GitHub",
   "location_type": "remote",
   "repository": "Ray20123315/qqaibot",
-  "branch": "main",
-  "previous_main": "ff80b3d96e223b1663e7d2c5b5b578828b052410",
-  "product_sha": "4db8fcbf844fc0cc64b4a1cf3919e18dcef5902f",
-  "final_revision": "memory-commit-pending",
+  "branch": "feature/bbot-only-20261010",
+  "before_revision": "e02b5ecd94ef51a70a1299e3f28ea0a578dc4738",
+  "after_revision": "feature_commit_pending",
   "verification": {
-    "ci_runs": [
-      37960960301,
-      37961297179
-    ],
-    "ci_outcome": "success",
-    "cloudflare_deployment": "0f0dd1fc-54f1-4773-9de3-59a269ffbeb8",
-    "cloudflare_version": "be4ec8e1-656d-43c7-9b55-00d5eafab839",
-    "cloudflare_build": "success",
-    "traffic_percent": 100,
-    "live_qq": "pending"
+    "ci": "pending",
+    "main": "unchanged",
+    "cloudflare": "pending",
+    "qq_live": "unverified"
   },
-  "files": [
+  "changes": [
     {
-      "path": "src/napcat-control.js",
-      "action": "created"
-    },
-    {
-      "path": "src/bridge.js",
-      "action": "modified"
+      "path": "worker.js",
+      "action": "created_or_modified",
+      "blob_sha": "2962c3d71171012b3092f8dc0449850f64efa17c"
     },
     {
       "path": "src/delivery.js",
-      "action": "modified"
+      "action": "created_or_modified",
+      "blob_sha": "2734ba7da5b3acad0857eacc294119857908414b"
     },
     {
-      "path": "worker.js",
-      "action": "modified"
-    },
-    {
-      "path": "tests/napcat-control.test.mjs",
-      "action": "created"
+      "path": "src/bridge.js",
+      "action": "created_or_modified",
+      "blob_sha": "592c054563066074f48a2eb13bf3a67f41024b4f"
     },
     {
       "path": "wrangler.toml",
-      "action": "modified"
+      "action": "created_or_modified",
+      "blob_sha": "d0afbd5b51646776dcd17864d30a45191d81d49c"
     },
     {
       "path": "README.md",
-      "action": "modified"
+      "action": "created_or_modified",
+      "blob_sha": "4c40416850c539349529703d7c8407d94092ea6a"
     },
     {
       "path": "docs/DEPLOY.md",
-      "action": "modified"
+      "action": "created_or_modified",
+      "blob_sha": "6ed3aea5266e135517ed981996422f56af3b0d3d"
+    },
+    {
+      "path": "tests/command-routing.test.mjs",
+      "action": "created_or_modified",
+      "blob_sha": "a146211cebde9571e4ba90fca7ce37a5fd70eb52"
+    },
+    {
+      "path": "tests/abot-disabled.test.mjs",
+      "action": "created_or_modified",
+      "blob_sha": "362d23176af26ed39fcf2d9f111ed003048b9fa8"
+    },
+    {
+      "path": "tests/relay.test.mjs",
+      "action": "created_or_modified",
+      "blob_sha": "3adbe9c3cd72a4715aed01c43ee96fa074a3a967"
+    },
+    {
+      "path": "tests/qq-reply.test.mjs",
+      "action": "created_or_modified",
+      "blob_sha": "5a2d474347d47402b315750cb33cc19f903c4e98"
     },
     {
       "path": ".github/workflows/bridge-check.yml",
-      "action": "memory_version_update"
+      "action": "update_archive_version"
     },
     {
       "path": ".Ray_Chen/memory/*",
-      "action": "update"
+      "action": "update_canonical_memory"
     }
   ],
-  "legacy_archive": {
+  "old_archive": {
     "branch": "archive/legacy-main-20261009",
     "sha": "6a22b06433cfaffcf13abe2b60a917305290b629"
   }

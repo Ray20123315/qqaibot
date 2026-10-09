@@ -23,12 +23,16 @@ test("unknown /! and ! commands must not relay to other groups",()=>{
 });
 test("public /health reports only limited connection state without secrets",async()=>{
  const {default:worker}=await import("../worker.js");
- const fake={get:()=>({fetch:async()=>new Response(JSON.stringify({connected:true,ready:true}))}),idFromName:()=>({})};
- const res=await worker.fetch(new Request("https://example.com/health"),{ONEBOT_HUB:fake,QQ_OPEN_GATEWAY:fake,
+ const fake={get:()=>({fetch:async()=>new Response(JSON.stringify({connected:true}))}),idFromName:()=>({})};
+ const forbidden={get:()=>{throw Error("ABOT_GATEWAY_MUST_NOT_BE_QUERIED")},idFromName:()=>{throw Error("ABOT_GATEWAY_MUST_NOT_BE_QUERIED")}};
+ const res=await worker.fetch(new Request("https://example.com/health"),{ONEBOT_HUB:fake,QQ_OPEN_GATEWAY:forbidden,
    ONEBOT_ACCESS_TOKEN:"secret_1",QQ_OPEN_APP_ID:"id",QQ_OPEN_CLIENT_SECRET:"secret_2"});
  const s=await res.json();
  assert.equal(s.command_prefix,"/! or !");
  assert.deepEqual(s.bbot,{connected:true});
- assert.deepEqual(s.abot,{connected:true,session_ready:true});
+ assert.deepEqual(s.abot,{connected:false,session_ready:false,enabled:false});
+ assert.equal(s.mode,"bbot-only");
+ assert.equal(s.configured,true);
  assert.equal(JSON.stringify(s).includes("secret_"),false);
+ assert.equal(s.primary_command_transport,"bbot");
 });

@@ -1,48 +1,41 @@
+# QQAIBOT · Bbot（NapCat）單一模式
 
-# QQAIBOT — QQ 跨群橋接
+**Abot／QQ Open Platform 暫停。** 本 Worker 不會建立新的 QQ 官方 Gateway 連線、處理官方指令或呼叫官方發送 API。所有群組的訊息接收、QQ 號與群成員身分查核、邀請碼、回覆、管理指令及跨群轉發都由 **Bbot（NapCat / OneBot）** 完成。
 
-兩種 Bot 職責固定：
+Cloudflare Worker + D1 負責群組連線、去重、權限和待發送佇列。AI 聊天、舊插件和 QQ 快捷面板均不載入。完整原版程式仍保存在 `archive/legacy-main-20261009`。
 
-- **Bbot（NapCat / OneBot）**：監聽 QQ 群、識別原始 QQ 號及結構化 @，負責真實的群成員快照。
-- **Abot（QQ 開放平台）**：接收官方事件、執行群組連線建立與發送跨群訊息。
-- **Worker / D1**：代碼、群號與 OpenID 映射、權限、轉發佇列與錯誤紀錄。
-
-**AI 聊天目前完全停用**；新 Worker 不載入任何 AI 模型或舊插件。
-
-
-## NapCat 原生跨群指令（主要操作方式）
-
-**QQ 群直接發送普通文字，不要 @AIBot，也不需點選 QQ 舊指令面板。** Bbot（NapCat）必須在該群並連線。
+## 指令（在群內傳普通文字，不加 @）
 
 | 指令 | 用途 |
-|---|---|
-| `!use` | 第一群建立連線並產生邀請碼 |
-| `!連線碼 群簡寫` | 其他群加入；NapCat 驗證真實 QQ 號及本群管理身分 |
-| `!status`、`!help` | 檢查連線和取得操作說明 |
+| --- | --- |
+| `!use` | 第一個群建立跨群連線並取得邀請碼 |
+| `!連線碼 群簡寫` | 其他群加入相同連線，Bbot 驗證本群管理身分 |
+| `!status`、`!help` | 查詢狀態及指令 |
 | `!code`、`!revoke` | 換發或撤銷邀請碼 |
-| `!rename 名稱`、`!stop`、`!resume`、`!leave` | 改名、停止、恢復或離開 |
-| `!grant QQ號 manage|stop|both`、`!ungrant QQ號` | 授權或取消授權 |
+| `!rename 名稱` | 修改群簡寫 |
+| `!stop`、`!resume`、`!leave` | 停止、恢復、退出 |
+| `!grant QQ號 manage\|stop\|both`、`!ungrant QQ號` | 授權與取消授權 |
 
-`/!use`、`/!status` 及原有 `/use` 同樣支援，但**建議不加 @、直接打 `!use`**，以免觸發 QQ 官方舊 Gateway。
+`/!use` 與 `/use` 仍可解析，最推薦 **`!use`**。無須加入 Abot，無須 Group OpenID，無須 `/!verify`。原先 Abot 建立的待驗證代碼不能當成 NapCat 邀請碼使用，舊資料不刪除。
 
-新的群建立和加入不依賴 Abot Group OpenID 或 `/!verify`；原本 Abot 的待驗證邀請資料不會被清除，但不能自動變成 NapCat 原生邀請，請由 Bbot `!use` 建立新的連線。
+QQ `3569028262`、`2681167798` 為受保護帳號；群內有任一在場時，未獲授權的群主／管理員不能經本系統停用或退出橋接，只有受保護帳號可授權其他人。群主／管理員仍可正常建立或加入群組連線。這不會阻止 QQ 群主使用 QQ 平台本身的管理功能。
 
-**發送優先順序：**目的群有真實 Group OpenID 就使用 Abot，明確拒絕時由 Bbot 備援；只有 NapCat 群號、沒有 Group OpenID 時，Abot 無法尋址，由 Bbot 原生發送。
+## 發送方式
 
-**保護規則：** QQ `3569028262` 或 `2681167798` 在群內時，未獲授權的群主／管理員不能停止、退出或撤銷橋接，且只有受保護 QQ 號能授權其他人；但群主和管理員仍可建立／加入連線。
+目標群必須有已核實的數字 QQ 群號。Bbot 使用原生 OneBot `send_group_msg` 轉發文字、真實 @（需最新目標群成員資料）、圖片、語音、影片與檔案訊息段；格式依 NapCat/QQ 客戶端能力而定。所有歷史群組，包括原本有真正 OpenID 的目的群，也**只使用 Bbot**。
 
-QQ 帳號 `3569028262`、`2681167798` 為受保護身分。群內有任一受保護帳號時，**未明確授權的群主／管理員**無權執行 stop、leave、revoke 等會停用連線的指令。只有受保護帳號可授予或撤銷委派權限。
+若目標沒有 QQ 群號，系統明確記錄失敗，絕不拿 OpenID 當 QQ 群號或改呼叫 Abot。發送需要 OneBot 回覆 ACK；回覆結果不明時禁止盲目重送。Bbot 離線時，cron 保留 pending 佇列以待重新連線。
 
-此限制只適用於橋接系統指令，**不能阻止 QQ 群主在 QQ 客戶端直接踢出／停用機器人**。
+## 連線與健康檢查
 
-## 上線前必要設定
+設定 NapCat WebSocket Client：
+- URL：`wss://aibot.ray2025.com/onebot`
+- 消息格式：`Array`
+- Token：等於 Cloudflare Secret `ONEBOT_ACCESS_TOKEN`
+- 心跳／重連：`30000`／`5000` 毫秒
 
-見 [部署與限制](docs/DEPLOY.md)。不應將任何密鑰提交到 GitHub。
+`GET https://aibot.ray2025.com/health` 應顯示 `mode="bbot-only"`、`abot.enabled=false` 及 `bbot.connected`。
 
-## 新版媒體與備援路由
+Cloudflare 原有 QQ_OPEN_GATEWAY 類別與 D1 不刪除（為了保護舊 migration）；舊 Gateway 的已知實例會被要求關閉。QQ 開放平台端殘留的舊指令面板與 Bot 帳號需另行管理，Worker 部署不會刪掉 QQ 平台的選單配置。
 
-先 Abot、再 Bbot：Bbot 僅在 Abot **明確拒絕／無法處理某種訊息格式** 時負責代發；Abot 錯誤結果不明時不備援，以免同訊息重複送出。預設備援模式 `BRIDGE_BBOT_FALLBACK=on-rejection`。
-
-支援盡力還原：文字、跨群 @、QQ 表情、圖片、影片、語音、一般檔案；群聊富媒體經官方兩段式上傳，不支援平台能力時回退 NapCat 原生訊息段。群聊主動發言開關由群主在 QQ 的機器人管理設定開啟，非 API 可任意替群主更改的權限。
-
-新功能仍待實際兩群測試與授權配置完成，開發分支不代表已上線。
+完整步驟與風險參考 [部署與測試](docs/DEPLOY.md)。

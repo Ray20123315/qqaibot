@@ -1,6 +1,5 @@
 
-import {onOnebotEvent,onOnebotRoster,onOfficialEvent,flushOutbox} from "./src/bridge.js";
-import {qqRequest,accessToken} from "./src/qq-api.js";
+import {onOnebotEvent,onOnebotRoster,flushOutbox} from "./src/bridge.js";
 import {qq,parseOnebot} from "./src/core.js";
 import {roster,init} from "./src/store.js";
 import {outboundAction} from "./src/relay.js";
@@ -14,18 +13,25 @@ async function secretMatches(request,secret){
  return Array.from(new Uint8Array(x)).every((v,i)=>v===new Uint8Array(y)[i]);
 }
 const hub=env=>env.ONEBOT_HUB.get(env.ONEBOT_HUB.idFromName("bridge-bbot-napcat-v2"));
-// New Durable Object identity: supersedes the gateway instance left active across
-// the 2026-10-09 main cutover. Future revisions should keep this stable.
-const gateway=env=>env.QQ_OPEN_GATEWAY.get(env.QQ_OPEN_GATEWAY.idFromName("bridge-abot-commands-v2"));
+// Retain the legacy QQ_OPEN_GATEWAY binding and Durable Object migration, but
+// make the official gateway passive and ask both historical instances to close.
+const oldGatewayNames=["bridge-abot","bridge-abot-commands-v2"];
+async function stopOldGateways(env){
+ if(!env.QQ_OPEN_GATEWAY)return;
+ await Promise.allSettled(oldGatewayNames.map(name=>{
+  const stub=env.QQ_OPEN_GATEWAY.get(env.QQ_OPEN_GATEWAY.idFromName(name));
+  return stub.fetch("https://internal/shutdown",{method:"POST"});
+ }));
+}
 export default {
  async fetch(request,env){
   const path=new URL(request.url).pathname;
   if(path==="/health"&&request.method==="GET"){
-   const [b,g]=await Promise.allSettled([hub(env).fetch("https://internal/status"),gateway(env).fetch("https://internal/status")]);
-   const bbot=b.status==="fulfilled"&&b.value.ok?await b.value.json():{connected:false};
-   const abot=g.status==="fulfilled"&&g.value.ok?await g.value.json():{connected:false};
-   return json({service:"qq-cross-group-bridge",ai:false,configured:!!(env.ONEBOT_ACCESS_TOKEN&&env.QQ_OPEN_APP_ID&&env.QQ_OPEN_CLIENT_SECRET),
-    bbot:{connected:!!bbot.connected},abot:{connected:!!abot.connected,session_ready:!!abot.ready},command_prefix:"/! or !",
+   const b=await hub(env).fetch("https://internal/status").catch(()=>null);
+   const bbot=b?.ok?await b.json():{connected:false};
+   return json({service:"qq-cross-group-bridge",ai:false,configured:!!env.ONEBOT_ACCESS_TOKEN,
+    mode:"bbot-only",abot:{connected:false,session_ready:false,enabled:false},
+    bbot:{connected:!!bbot.connected},command_prefix:"/! or !",
     verification:"napcat",primary_command_transport:"bbot"});
   }
   if(path==="/onebot" || path==="/onebot/roster"){
@@ -45,7 +51,7 @@ export default {
   return json({error:"not_found"},404);
  },
  async scheduled(event,env,ctx){
-  ctx.waitUntil(gateway(env).fetch("https://internal/ensure").catch(e=>console.error("ABOT_GATEWAY",String(e).slice(0,220))));
+  ctx.waitUntil(stopOldGateways(env));
   ctx.waitUntil(flushOutbox(env,15).catch(e=>console.error("RELAY_FLUSH",String(e).slice(0,220))));
  }
 };
@@ -91,7 +97,16 @@ export class OneBotHub {
   if(result?.forwarded>0)await this.state.storage.setAlarm(Date.now()+1000);
  }
  async alarm(){
-  if(this.socket())try{await flushOutbox(this.env,12);}catch(e){console.error("BBOT_RELAY_FLUSH",String(e).slice(0,130));}
+  const ws=this.socket();
+  if(!ws)return;
+  try{
+   await flushOutbox(this.env,12,{sendBbot:async (_env,id,group,segments)=>{
+    const response=await this.dispatch(ws,id,group,segments);
+    const result=await response.json();
+    if(!response.ok||!result?.ok)throw new Error("BBOT_"+(result?.reason||"ACK_FAILED"));
+    return result;
+   }});
+  }catch(e){console.error("BBOT_RELAY_FLUSH",String(e).slice(0,130));}
  }
 
  requestRoster(ws,group){
@@ -157,57 +172,20 @@ export class OneBotHub {
  async webSocketClose(ws,code,reason){try{ws.close(code,reason);}catch{}}
  async webSocketError(ws,error){console.error("BBOT_SOCKET_ERROR",String(error).slice(0,150));}
 }
+// Kept only because Cloudflare's historical durable-object migrations refer to
+// this class. There is NO connect, token fetch, command handling or heartbeat.
 export class QqOpenGateway {
- constructor(state,env){this.state=state;this.env=env;this.ws=null;this.token="";this.seq=null;this.sessionId="";this.interval=30000;this.connecting=false;}
+ constructor(state,env){this.state=state;this.env=env;this.ws=null;}
+ async shutdown(){
+  try{this.ws?.close(1000,"Abot disabled; Bbot-only mode");}catch{}
+  this.ws=null;
+  try{await this.state.storage.deleteAlarm();}catch{}
+ }
  async fetch(request){
   const path=new URL(request.url).pathname;
-  if(path==="/status" && request.method==="GET")return json({connected:this.ws?.readyState===1,ready:!!this.sessionId});
-  if(path!=="/ensure")return json({error:"not_found"},404);
-  try{await this.ensure();return json({active:!!this.ws,connecting:this.connecting,ready:!!this.sessionId});}
-  catch(e){console.error("QQ_OPEN_CONNECT_FAILED",String(e).slice(0,200));await this.state.storage.setAlarm(Date.now()+30000);return json({error:"gateway_failed"},503);}
+  if(path==="/shutdown"){await this.shutdown();return json({disabled:true});}
+  if(path==="/status")return json({connected:false,ready:false,disabled:true});
+  return json({error:"ABOT_DISABLED",disabled:true},410);
  }
- async ensure(){
-  if(this.ws&&[0,1].includes(this.ws.readyState))return;
-  if(this.connecting)return;
-  this.connecting=true;
-  try{
-   this.token=await accessToken(this.env);
-   const data=await qqRequest(this.env,"/gateway");
-   if(!/^wss:\/\//.test(data?.url||""))throw new Error("INVALID_GATEWAY_URL");
-   const ws=new WebSocket(data.url);this.ws=ws;
-   ws.addEventListener("open",()=>{this.connecting=false;});
-   ws.addEventListener("message",event=>{this.handleMessage(event.data).catch(e=>console.error("QQ_OPEN_EVENT_FAILED",String(e).slice(0,250)));});
-   ws.addEventListener("close",event=>{console.warn("ABOT_GATEWAY_CLOSED",event.code);if(this.ws===ws){this.ws=null;this.connecting=false;this.sessionId="";}this.state.storage.setAlarm(Date.now()+10000).catch(()=>{});});
-   ws.addEventListener("error",()=>{this.connecting=false;});
-   await this.state.storage.setAlarm(Date.now()+30000);
-  }finally{this.connecting=false;}
- }
- async handleMessage(message){
-  let payload;try{payload=JSON.parse(message);}catch{return;}
-  if(Number.isInteger(payload?.s))this.seq=payload.s;
-  const op=payload?.op;
-  if(op===10){
-   this.interval=Math.max(5000,Number(payload.d?.heartbeat_interval||30000));
-   this.ws?.send(JSON.stringify({op:2,d:{token:"QQBot "+this.token,intents:Number(this.env.QQ_OPEN_INTENTS||100663296),shard:[0,1],properties:{"$os":"cloudflare","$browser":"QQAIBOT-bridge","$device":"QQAIBOT-bridge"}}}));
-   await this.state.storage.setAlarm(Date.now()+this.interval);
-  }
-  if(op===0){
-   if(payload.t==="READY"){this.sessionId=payload.d?.session_id||"";console.log("ABOT_GATEWAY_READY");}
-   if(payload.t==="GROUP_AT_MESSAGE_CREATE"||payload.t==="GROUP_MESSAGE_CREATE"){
-     // Log event type only; do not retain message content or QQ user data.
-     console.log("ABOT_GROUP_EVENT_RECEIVED",payload.t);
-     const outcome=await onOfficialEvent(this.env,payload);
-     console.log("ABOT_GROUP_COMMAND_RESULT",JSON.stringify({handled:!!outcome?.handled,ignored:!!outcome?.ignored,reply:outcome?.reply??null}));
-   }
-  }
-  if(op===7||op===9){try{this.ws?.close();}catch{}this.ws=null;await this.state.storage.setAlarm(Date.now()+10000);}
- }
- async alarm(){
-  if(this.ws?.readyState===1){
-   try{this.ws.send(JSON.stringify({op:1,d:this.seq}));}catch(e){console.error("QQ_HEARTBEAT",String(e).slice(0,100));}
-   await this.state.storage.setAlarm(Date.now()+this.interval);
-  }else{
-   try{await this.ensure();}catch(e){console.error("QQ_RECONNECT",String(e).slice(0,170));await this.state.storage.setAlarm(Date.now()+30000);}
-  }
- }
+ async alarm(){await this.shutdown();}
 }

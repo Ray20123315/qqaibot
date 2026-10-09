@@ -1,8 +1,8 @@
 # VERIFY
 
-- GitHub Actions feature CI 37961297179: success, Node tests and Wrangler dry-run plus memory v0.0.77 archive. Earlier CI 37960960301 also succeeded.
-- Production main product commit 4db8fcbf844fc0cc64b4a1cf3919e18dcef5902f fast-forward verified before final memory update.
-- Cloudflare main Worker qqai build outcome SUCCESS, deployment 0f0dd1fc-54f1-4773-9de3-59a269ffbeb8, version be4ec8e1-656d-43c7-9b55-00d5eafab839 with 100% traffic, source 4db8fcbf844fc0cc64b4a1cf3919e18dcef5902f.
-- Final v0.0.78 memory archive CI pending this checkpoint.
-- Real acceptance requires NapCat Client reconnect and authenticated WS, fresh group roster, !use first group, !CODE nickname second group, !status reports two and actual sample forwarding/permissions.
-- Rollback old full branch archive/legacy-main-20261009, SHA 6a22b06433cfaffcf13abe2b60a917305290b629.
+- npm run check: node --test tests/*.test.mjs && Wrangler deploy --dry-run.
+- Tests verify no Abot message transport even on former real OpenID destinations, no credentials loaded by new gateway, 2 historical gateway DO /shutdown signals, Bbot native ACK and group controls.
+- Verify GitHub Actions on feature/bbot-only-20261010 before main push, CI main after, and Cloudflare Worker source SHA and success.
+- Worker /health must return mode bbot-only, abot.enabled=false, bbot.connected boolean; no access to Abot tokens.
+- Monitor Cloudflare old ABOT_GATEWAY_READY / GROUP_EVENT telemetry after deployment; any continued events are a blocker.
+- Check real QQ !use, !CODE alias, !status and one normal cross-group message. No live QQ user result yet.

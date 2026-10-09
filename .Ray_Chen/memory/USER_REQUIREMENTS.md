@@ -1,8 +1,8 @@
 # USER_REQUIREMENTS
 
-- Preserve old main entire code and history in archive/legacy-main-20261009; new bridge on main when tested.
-- All normal text and as much media as possible shared among arbitrarily many groups, sender shown as [群簡寫]暱稱：原訊息.
-- Protected numeric QQ identities 3569028262 and 2681167798 prohibit ungranted owners/admins from STOP/LEAVE/REVOKE when any present, and grant delegation can only be performed by protected account in protected group; owners/admins may JOIN / CREATE because that is not stopping.
-- AI chat off, avoid QQ native old command panel; primary commands !use and /!use.
-- User reports Abot able to generate link code in just one QQ group, group-to-group Abot message permissions unreliable. Latest: switch Bbot/NapCat to receive, send and verify group linking, no Group OpenID required for link. Bbot can directly send target messages when Abot has no valid destination Group OpenID. Existing Abot-first for known valid OpenIDs, guarded Bbot backup otherwise.
-- NapCat must retain high trust from group member list, cannot infer IDs or grant permission to other groups without verified member role.
+- All code must ship to main after tests, with original main preserved at archive/legacy-main-20261009.
+- Bridge arbitrary number of QQ groups with !use and !CODE group alias, using NapCat to authenticate real QQ account IDs, current group membership and owner/admin roles.
+- Protect QQ IDs 3569028262 and 2681167798 from ungranted group admin stop/leave/revoke; only protected user can grant while either is in the group. Admins may start/join. Keep explicit delegated scopes.
+- Relay text, numeric @ if target member present, image, voice, video, files and native segments as far as OneBot supports; guard against loops and duplicate delivery.
+- Native command only via Bbot, no QQ slash panel required; no AI chat.
+- NEW 2026-10-10: TEMPORARILY DISABLE Abot entirely and route EVERY incoming message, reply, verification and cross-group outbound using Bbot, even when official OpenID exists. Preserve Abot credentials, old data and capability for possible later reenable.
