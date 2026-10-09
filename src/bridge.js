@@ -38,8 +38,11 @@ export async function onOnebotEvent(env,event,reply){
  if(!source?.verified)return {ignored:true,reason:"group_not_paired"};
  if(source.stopped||source.receive_only||!isRelayable(msg))return {ignored:true,reason:source.receive_only?"receive_only":"not_relayable"};
  if(!msg.messageId)return {ignored:true,reason:"missing_message_id"};
+ const pluginMode=String(env.ASSISTANT_MODE||"")==="true";
  const targets=await all(env.DB,
-  "SELECT * FROM bridge_groups WHERE room_id=? AND verified=1 AND stopped=0 AND group_openid<>?",
+  pluginMode
+   ?"SELECT * FROM bridge_groups WHERE room_id=? AND verified=1 AND stopped=0 AND group_openid<>? AND EXISTS (SELECT 1 FROM assistant_groups ag WHERE ag.group_id=bridge_groups.qq_group_id AND ag.bridge_enabled=1)"
+   :"SELECT * FROM bridge_groups WHERE room_id=? AND verified=1 AND stopped=0 AND group_openid<>?",
   source.room_id,source.group_openid);
  const sourceView=await roster(env.DB,msg.groupId);
  const sourceMembers=sourceView.fresh?await all(env.DB,"SELECT qq_id,nickname FROM bridge_members WHERE qq_group_id=?",msg.groupId):[];
@@ -105,7 +108,9 @@ export async function flushOutbox(env,limit=15,deliveryOptions={}){
  const started=now();
  const batch=await fanoutByGroup(pending,async item=>{
   const target=await get(env.DB,
-   "SELECT stopped,verified,qq_group_id FROM bridge_groups WHERE group_openid=?",item.target_group);
+   String(env.ASSISTANT_MODE||"")==="true"
+    ?"SELECT g.stopped,g.verified,g.qq_group_id FROM bridge_groups g WHERE g.group_openid=? AND EXISTS (SELECT 1 FROM assistant_groups ag WHERE ag.group_id=g.qq_group_id AND ag.bridge_enabled=1)"
+    :"SELECT stopped,verified,qq_group_id FROM bridge_groups WHERE group_openid=?",item.target_group);
   if(!target?.verified||target.stopped||target.qq_group_id!==item.target_qq_group_id){
    await run(env.DB,"UPDATE bridge_outbox SET state='cancelled',content='',payload='',updated_at=? WHERE id=? AND state='pending'",now(),item.id);
    return;

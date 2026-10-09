@@ -1,5 +1,8 @@
 # GOTCHAS
-- QQ client may automatically unfurl raw HTTPS URLs even if OneBot sends plain text segments. Direct copy usability and never-preview are conflicting properties at client level. Plain link chosen to prioritize copyability as latest user request.
-- Bilibili URLs validated with safeMediaUrl and exact/child domain matches bilibili.com or b23.tv; do not echo arbitrary raw signed QQ card JSON.
-- User also requested hidden receiving destinations and prevention of corresponding recall. Existing bridge provides source group recall via mapped ACK IDs. Do not covertly disable that while hiding destinations, since origin participants cannot know where revoked content remains.
-- Hot Durable Object WS may require reconnect on code deployment; BBOT_HUB_ID remains bridge-bbot-recall-v4, unchanged in this safe edit.
+- Do not invent missing credentials; Cloudflare qqai already has GEMINI_API_KEYS, GEMINI_VISION_API_KEYS and DEEPSEEK_API_KEY. Never print raw binding values.
+- Existing GEMINI_CHAT_MODELS starts with 2026 model names; some may be retired or preview. Try first configured model plus gemini-2.5-flash fallback, no DeepSeek automatic fallback.
+- Model requests can be rate-limited/cost money; quotas per user/group default 20/120, Gemini only by default, DeepSeek explicit.
+- Old bridge D1 pending queue may exist, so plugin off should block cron and target deliveries, not just incoming processing.
+- Cloudflare DO WebSocket can keep old version after deploy; use fresh bridge-bbot-ai-v1 and require NapCat WS client restart after cutover.
+- Existing code QqOpenGateway class and migrations must be retained to avoid migration failure; it should remain inert.
+- Tests with stubbed model fetch do NOT prove actual QQ chat or provider availability. No live messages sent without controlled test.

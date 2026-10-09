@@ -34,7 +34,9 @@ test("public /health reports only limited connection state without secrets",asyn
  assert.equal(s.relay.mode,"parallel");
  assert.equal(s.relay.max_parallel_groups,4);
  assert.deepEqual(s.abot,{connected:false,session_ready:false,enabled:false});
- assert.equal(s.mode,"bbot-only");
+ assert.equal(s.mode,"ai-assistant");
+ assert.equal(s.ai,true);
+ assert.equal(s.assistant.bridge_default,false);
  assert.equal(s.configured,true);
  assert.equal(JSON.stringify(s).includes("secret_"),false);
  assert.equal(s.primary_command_transport,"bbot");

@@ -33,14 +33,14 @@ test("scheduled worker never requests Abot gateway ensure or official API",async
  const hub={idFromName:name=>name,get:()=>({fetch:async request=>{
   calls.push(typeof request==="string"?request:request.url);return new Response(JSON.stringify({connected:false}),{headers:{"content-type":"application/json"}});
  }})};
- const db={prepare:sql=>({run:async()=>({meta:{changes:0}})})};
+ const db={prepare:sql=>({run:async()=>({meta:{changes:0}}),bind:()=>({first:async()=>({count:0})})})};
  const contexts=[];
  const ctx={waitUntil:p=>contexts.push(p)};
  await worker.scheduled({}, {QQ_OPEN_GATEWAY:gateway,ONEBOT_HUB:hub,DB:db},ctx);
  await Promise.all(contexts);
  assert.deepEqual(gateways.map(x=>x.id).sort(),["bridge-abot","bridge-abot-commands-v2"]);
  assert.ok(gateways.every(x=>String(x.url).endsWith("/shutdown")));
- assert.equal(calls.some(x=>x.endsWith("/flush")),true);
+ assert.equal(calls.some(x=>x.endsWith("/flush")),false);
  assert.equal(calls.some(x=>x.endsWith("/status")),false);
 });
 

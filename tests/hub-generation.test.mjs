@@ -5,7 +5,7 @@ import {BBOT_HUB_ID} from "../src/bbot-hub.js";
 import {sendUsingBbot} from "../src/delivery.js";
 
 test("health and outbound target the same fresh OneBotHub generation",async()=>{
- assert.equal(BBOT_HUB_ID,"bridge-bbot-recall-v4");
+ assert.equal(BBOT_HUB_ID,"bridge-bbot-ai-v1");
  const seen=[];
  const hub={idFromName:id=>{seen.push(id);return id;},get:()=>({fetch:async input=>{
   if(String(input).endsWith("/status"))return new Response(JSON.stringify({
@@ -15,9 +15,9 @@ test("health and outbound target the same fresh OneBotHub generation",async()=>{
  }})};
  const response=await worker.fetch(new Request("https://qqai.example.com/health"),{ONEBOT_HUB:hub,ONEBOT_ACCESS_TOKEN:"secret"});
  const status=await response.json();
- assert.equal(status.mode,"bbot-only");
+ assert.equal(status.mode,"ai-assistant");
  assert.equal(status.bbot.connected,false);
- assert.equal(status.bbot.hub_generation,"recall-v4");
+ assert.equal(status.bbot.hub_generation,"ai-v1");
  await sendUsingBbot({ONEBOT_HUB:hub},"msg","808882936",[{type:"text",data:{text:"test"}}]);
  assert.deepEqual(seen,[BBOT_HUB_ID,BBOT_HUB_ID]);
 });

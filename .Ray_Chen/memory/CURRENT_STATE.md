@@ -1,8 +1,6 @@
 # CURRENT_STATE
-- Production main before feature: d0e45d2a02d4183bdda227371042eca7212f3d6a
-- Original archive branch archive/legacy-main-20261009 at 6a22b06433cfaffcf13abe2b60a917305290b629
-- Bbot-only / Abot disabled, receives OneBot relays, existing --no group remains receive-only and is visible in public !help and !setting group lists; receives source recall synchronization
-- New feature branch feature/bilibili-copyable-text-20261010 changes src/relay.js readableCard for Bilibili HTTPS copyable raw text; keeps plain text, not original QQ card payload
-- New tests verify Bilibili link preservation and non-Bilibili sanitization
-- No D1 mutation or admin policy change
-- Feature CI, Cloudflare deployment and actual QQ preview behavior unverified
+- Production main before feature 13b915d1d4451d4cb15ff91f70a498cede760d40, existing Bbot cross-group bridge with Abot disabled.
+- Baseline Cloudflare deployed qqai existing secret binding names GEMINI_API_KEYS, GEMINI_VISION_API_KEYS, DEEPSEEK_API_KEY and CODEX_BRIDGE_ACCESS_TOKEN (contents not read), GEMINI_CHAT_MODELS/GEMMA_DECISION_MODELS/DEEPSEEK_FLASH_MODEL exist.
+- Legacy original backup archive/legacy-main-20261009 commit 6a22b06433cfaffcf13abe2b60a917305290b629; new bridge-before-AI backup archive/bbot-bridge-before-ai-20261010 commit 13b915d1d4451d4cb15ff91f70a498cede760d40.
+- New feature branch feature/ai-assistant-rebuild-20261010 contains lazy AI router, bounded Gemini/DeepSeek client, per-group D1 state, quiet default and bridge plugin opt-in, no Workers AI binding needed.
+- No changes to main or live Worker at this checkpoint. CI and QQ live acceptance pending.

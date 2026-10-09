@@ -1,56 +1,93 @@
 {
-  "version": "v0.0.89",
-  "task_id": "qq-cross-group-bridge-20261009",
-  "goal_revision": 11,
-  "changed_at": "2026-10-09T18:00:36.245Z",
-  "location_type": "remote",
+  "version": "v0.0.91",
+  "task_id": "qqaibot-ai-rebuild-20261010",
+  "goal_revision": 1,
+  "file_change_transaction": "ai-mvp-20261010",
+  "changed_at": "2026-10-09T18:26:04.585Z",
   "provider": "GitHub",
   "repository": "Ray20123315/qqaibot",
-  "branch": "feature/bilibili-copyable-text-20261010",
-  "before_revision": "d0e45d2a02d4183bdda227371042eca7212f3d6a",
-  "after_revision": "new_commit_pending",
+  "location_type": "remote",
+  "branch": "feature/ai-assistant-rebuild-20261010",
+  "before_revision": "13b915d1d4451d4cb15ff91f70a498cede760d40",
+  "after_revision": "feature_commit_pending",
   "verification": {
     "ci": "pending",
-    "main": "not_updated",
-    "cloudflare": "pending",
-    "live_qq": "unknown"
+    "main": "unchanged",
+    "live_qq": "untested"
   },
-  "files": [
+  "changes": [
     {
-      "path": "src/relay.js",
-      "action": "modify",
-      "blob_sha": "4dedcd884ac58fd6ff45cdbcf139f938fcb3a0c6"
+      "path": "src/model-client.js",
+      "action": "create_or_modify",
+      "blob_sha": "b6026faf4a8929ff2d65cc74fe48e175f4288b0f"
     },
     {
-      "path": "tests/recall-emoji.test.mjs",
-      "action": "modify",
-      "blob_sha": "f6cf01ad98c1949beda128c76f8abb5bfca69fa7"
+      "path": "src/assistant.js",
+      "action": "create_or_modify",
+      "blob_sha": "65e4624e73bc2cd4207197d107a59e8c66fd0b40"
+    },
+    {
+      "path": "src/bbot-hub.js",
+      "action": "create_or_modify",
+      "blob_sha": "c74b45c1abc5a223146007c9244d40816de1f124"
+    },
+    {
+      "path": "src/bridge.js",
+      "action": "create_or_modify",
+      "blob_sha": "969852c07017e1452a0b28c8eae04cb7dad87da0"
+    },
+    {
+      "path": "worker.js",
+      "action": "create_or_modify",
+      "blob_sha": "8f8abf2c467a1b1ccdce1e14aec06c80c98ddb6e"
+    },
+    {
+      "path": "wrangler.toml",
+      "action": "create_or_modify",
+      "blob_sha": "210a1fa58b9aa27f1f2b845f42a0f3d2cd109803"
+    },
+    {
+      "path": "tests/assistant.test.mjs",
+      "action": "create_or_modify",
+      "blob_sha": "d52d852c8c76456f0d4080178b68bffc97e2c374"
+    },
+    {
+      "path": "tests/command-routing.test.mjs",
+      "action": "create_or_modify",
+      "blob_sha": "e447eb687f747a66d15358916a5ac856542ee1eb"
+    },
+    {
+      "path": "tests/hub-generation.test.mjs",
+      "action": "create_or_modify",
+      "blob_sha": "d1fcfedf804aef91d927b1cd80481878b9390baf"
+    },
+    {
+      "path": "tests/abot-disabled.test.mjs",
+      "action": "create_or_modify",
+      "blob_sha": "d664f35576d66d4ba71993e0e64ff1fbe9dbcb55"
     },
     {
       "path": "README.md",
-      "action": "modify",
-      "blob_sha": "218293b5e0c49e3797e7d38763cd68badbca8428"
+      "action": "create_or_modify",
+      "blob_sha": "3e07f34572d0cd1e9f20a6b1681ae3ad5200332b"
     },
     {
       "path": "docs/DEPLOY.md",
-      "action": "modify",
-      "blob_sha": "b490b1c3049067b0751f9db5b444b7c7397938c0"
+      "action": "create_or_modify",
+      "blob_sha": "40820dcfc7107d9bac5442cf3eb3dc9cb2e831f2"
     },
     {
       "path": ".github/workflows/bridge-check.yml",
-      "action": "update memory archive version"
+      "action": "update CI and memory version"
     },
     {
       "path": ".Ray_Chen/memory/*",
-      "action": "canonical update"
+      "action": "initialize new task"
     }
   ],
-  "unimplemented": [
-    "hide --no from linked/ACL lists and help",
-    "disable recall sync for hidden recipients"
-  ],
-  "backup": {
-    "branch": "archive/legacy-main-20261009",
-    "sha": "6a22b06433cfaffcf13abe2b60a917305290b629"
+  "archive": {
+    "branch": "archive/bbot-bridge-before-ai-20261010",
+    "sha": "13b915d1d4451d4cb15ff91f70a498cede760d40",
+    "earlier_original": "archive/legacy-main-20261009"
   }
 }

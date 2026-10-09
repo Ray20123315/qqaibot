@@ -47,7 +47,10 @@ crons = ["* * * * *"]
 [vars]
 BRIDGE_REAL_MENTIONS = "false" # QQ numeric @ is handled natively by NapCat after roster verification
 BRIDGE_ABOT_ENABLED = "false"
-BRIDGE_MODE = "bbot-only"
+BRIDGE_MODE = "plugin-disabled"
+ASSISTANT_MODE = "true"
+AI_DAILY_USER_LIMIT = "20"
+AI_DAILY_GROUP_LIMIT = "120"
 BRIDGE_NAPCAT_COMMANDS = "true"
 
 [observability]

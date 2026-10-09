@@ -1,4 +1,6 @@
 # USER_REQUIREMENTS
-- Latest user asks --no receiving-only group to be omitted from authorizations and connected group lists, have forwarded messages retained after original recall, and omitted from !help. Requested as a bundle, not implemented due covert copying/retention concerns. A safer future design should show receiving destinations to authorized origin-group administrators, with explicit consent and retention policy.
-- User asks Bilibili cards to produce directly copyable text. Implement plain title plus authentic valid Bilibili HTTPS URL without raw QQ card; QQ auto previews may still occur.
-- Prior confirmed requirements: Bbot-only no Abot, multi-group QQ relay, permissions protected QQ 3569028262 and 2681167798, native QQ image/face/mface, true at when target member present, synchronous recall, normal --no receive-only semantics, !setting, !help, no AI.
+- Change product from noisy cross-group bridge to lean AI assistant; keep optional bridge plugin default disabled.
+- Avoid giant plugin/skill loading and spontaneous chat; only respond to intentional @Bot, reply to Bot or !ai; group histories isolated.
+- Reuse existing model API Secrets already present; user specifically objected to making up new Workers AI binding/asking for API key. Confirmed GEMINI_API_KEYS and DEEPSEEK_API_KEY exist in Cloudflare qqai settings. Gemini primary, DeepSeek explicit option.
+- Preserve old app code, D1 records, original backups, protected QQ identities.
+- Rebuild clean commands, no legacy QQ slash keyboard dependency, account and usage guardrails.

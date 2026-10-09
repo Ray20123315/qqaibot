@@ -1,6 +1,6 @@
 import {BBOT_HUB_ID} from "./src/bbot-hub.js";
 
-import {onOnebotEvent,onOnebotRoster,onOnebotNotice,flushOutbox,flushRecalls} from "./src/bridge.js";
+import {routeBotEvent,routeBotNotice,bridgeCanFlush,assistantHealth,recordAssistantReply} from "./src/assistant.js";
 import {qq,parseOnebot} from "./src/core.js";
 import {roster,init} from "./src/store.js";
 import {outboundAction} from "./src/relay.js";
@@ -30,13 +30,13 @@ export default {
   if(path==="/health"&&request.method==="GET"){
    const b=await hub(env).fetch("https://internal/status").catch(()=>null);
    const bbot=b?.ok?await b.json():{connected:false};
-   return json({service:"qq-cross-group-bridge",ai:false,configured:!!env.ONEBOT_ACCESS_TOKEN,
-    mode:"bbot-only",abot:{connected:false,session_ready:false,enabled:false},
-    bbot:{connected:!!bbot.connected,hub_generation:"recall-v4",websocket_count:Number(bbot.websocket_count||0),
+   return json({service:"qqaibot-ai-assistant",ai:true,configured:!!env.ONEBOT_ACCESS_TOKEN,
+    mode:"ai-assistant",abot:{connected:false,session_ready:false,enabled:false},
+    bbot:{connected:!!bbot.connected,hub_generation:"ai-v1",websocket_count:Number(bbot.websocket_count||0),
      last_connected_at:bbot.last_connected_at||null,last_event_at:bbot.last_event_at||null,
      last_closed_at:bbot.last_closed_at||null},
     command_prefix:"/! or !",relay:{mode:"parallel",max_parallel_groups:4},
-    verification:"napcat",primary_command_transport:"bbot"});
+    verification:"napcat",primary_command_transport:"bbot",assistant:await assistantHealth(env)});
   }
   if(path==="/onebot" || path==="/onebot/roster"){
    if(!await secretMatches(request,env.ONEBOT_ACCESS_TOKEN))return json({error:"unauthorized"},401);
@@ -47,17 +47,18 @@ export default {
    try{
     if(path==="/onebot/roster"){
      if(!data?.group_id||!Array.isArray(data?.members))return json({error:"invalid_roster"},400);
+     const {onOnebotRoster}=await import("./src/bridge.js");
      return json(await onOnebotRoster(env,data.group_id,data.members,data.group_name));
     }
-    if(data?.post_type==="notice"&&data.notice_type==="group_recall")return json(await onOnebotNotice(env,data));
-    return json(await onOnebotEvent(env,data));
+    if(data?.post_type==="notice"&&data.notice_type==="group_recall")return json(await routeBotNotice(env,data));
+    return json(await routeBotEvent(env,data));
    }catch(e){console.error("ONEBOT_HTTP_ERROR",String(e).slice(0,300));return json({error:"ingest_failed"},503);}
   }
   return json({error:"not_found"},404);
  },
  async scheduled(event,env,ctx){
   ctx.waitUntil(stopOldGateways(env));
-  ctx.waitUntil(hub(env).fetch("https://internal/flush").catch(e=>console.error("RELAY_SCHEDULE",String(e).slice(0,180))));
+  ctx.waitUntil(bridgeCanFlush(env).then(enabled=>enabled?hub(env).fetch("https://internal/flush"):null).catch(e=>console.error("PLUGIN_SCHEDULE",String(e).slice(0,180))));
  }
 };
 export class OneBotHub {
@@ -129,7 +130,10 @@ export class OneBotHub {
   if(!result.ok)throw new Error("BBOT_COMMAND_SEND_"+result.status);
   const obj=await result.json();
   if(!obj.ok)throw new Error("BBOT_COMMAND_SEND_"+obj.reason);
-  console.log("BBOT_COMMAND_REPLY_OK");
+  if(obj.message_id!==null&&obj.message_id!==undefined)
+   await recordAssistantReply(this.env,groupId,String(obj.message_id));
+  console.log("BBOT_ASSISTANT_REPLY_OK");
+  return obj;
  }
  async afterHandled(result){
   if(result?.forwarded>0){
@@ -144,6 +148,8 @@ export class OneBotHub {
   this.flushing=true;
   let result=null,recalled=null;
   try{
+   if(!await bridgeCanFlush(this.env))return;
+   const {flushRecalls,flushOutbox}=await import("./src/bridge.js");
    recalled=await flushRecalls(this.env,id=>this.recallMessage(ws,id),20);
    result=await flushOutbox(this.env,20,{sendBbot:async (_env,id,group,segments)=>{
     const response=await this.dispatch(ws,id,group,segments);
@@ -189,6 +195,7 @@ export class OneBotHub {
   if(echo.startsWith("bridge-roster:")){
    const group=echo.slice(14);
    if(data?.status==="ok"&&Array.isArray(data.data)){
+    const {onOnebotRoster}=await import("./src/bridge.js");
     await onOnebotRoster(this.env,group,data.data);
     const queueKey="queue:"+group;
     const queued=(await this.state.storage.get(queueKey))||[];
@@ -196,7 +203,7 @@ export class OneBotHub {
     const name=(await this.state.storage.get("groupname:"+group))||"";
     for(const evt of queued){
      evt.__bridge_group_name=name;
-     const result=await onOnebotEvent(this.env,evt,text=>this.replyFromBbot(ws,group,text));
+     const result=await routeBotEvent(this.env,evt,text=>this.replyFromBbot(ws,group,text));
      await this.afterHandled(result);
     }
    }else{await this.state.storage.delete("queue:"+group);console.error("BBOT_ROSTER_FAILED",echo,String(data?.retcode||""));}
@@ -212,7 +219,7 @@ export class OneBotHub {
   }
   if(data?.post_type==="notice"&&data.notice_type==="group_recall"){
    try{
-    const result=await onOnebotNotice(this.env,data);
+    const result=await routeBotNotice(this.env,data);
     if(result?.recalls>0)await this.afterHandled({forwarded:result.recalls});
    }catch(e){console.error("BBOT_RECALL_EVENT_FAILED",String(e).slice(0,180));}
    return;
@@ -230,9 +237,9 @@ export class OneBotHub {
    return;
   }
   try{
-   const result=await onOnebotEvent(this.env,data,text=>this.replyFromBbot(ws,msg.groupId,text));
+   const result=await routeBotEvent(this.env,data,text=>this.replyFromBbot(ws,msg.groupId,text));
    await this.afterHandled(result);
-  }catch(e){console.error("BBOT_EVENT_FAILED",String(e).slice(0,250));}
+  }catch(e){console.error("ASSISTANT_EVENT_FAILED",String(e).slice(0,250));}
  }
  async webSocketClose(ws,code,reason){
   await this.state.storage.put("last_closed_at",new Date().toISOString());
