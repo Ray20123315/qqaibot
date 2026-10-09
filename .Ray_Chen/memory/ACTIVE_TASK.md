@@ -3,20 +3,17 @@
 task_id: qq-cross-group-bridge-20261009
 task_status: active
 goal_revision: 7
-goal: replace Abot-only group linking with Bbot/NapCat-verified multi-group linking, preserve all user protection requirements and deploy to main
-current_phase: NapCat-native feature regression fix
-current_step: new commit CI, then main fast-forward if passed
+goal: implement NapCat/Bbot group verification and cross-group linking independent of Abot Group OpenID on main
+current_phase: stop old Bbot websocket instances from carrying old code
+current_step: run feature CI and then promote new Bbot DO to main
 
 completed_steps:
-- initial feature commit 06583523172de11413c409b9ffe63929479f2a9e created on feature/napcat-native-link-20261010
-- CI 37960815779: 31/32 unit tests PASSED, failed only existing tests/command-routing.test.mjs public health expected prefix '/! or !' while new worker returned '! or /!'; no NapCat-native functional test failed
-- src/napcat-control.js: !use, !CODE alias, !status, !code, stop/resume/leave/revoke, ACL, Bbot direct replies
-- src/bridge.js: Bbot control handling primary, Abot control ignored in new mode, outgoing outbox enqueued only
-- src/delivery.js: synthetic napcat: target dispatched through Bbot instead of Abot
-- worker.js: OneBotHub direct ws reply awaiting ACK, short alarm flush, /health prefix fixed to maintain existing API response string
-- docs, wrangler, tests updated, main not yet changed
+- initial NapCat-native feature CI 37960815779 had one /health prefix string mismatch, 31/32 passed; fixed.
+- CI 37960960301 succeeded with all tests and Wrangler dry-run for v0.0.76.
+- fast-forward main to feature commit 16a1391457e64f3909ccc997ca771d21fbd27542, Cloudflare deployment 845effb2-fb1b-48dd-898f-8d35bcb1ae22, Worker version 55fa43bd-4b1f-4ec9-9d0a-f0cd93c3e4b7, build outcome success with source 16a1391457e64f3909ccc997ca771d21fbd27542, traffic 100%.
+- found old Bbot OneBotHub hot DO still could be attached to old code. Changed hub and delivery stub idFromName to bridge-bbot-napcat-v2, which needs one NapCat WS reconnect after deployment.
+- docs/DEPLOY.md instructs disable/re-enable WebSocket Client once, same URL and Token.
 
-known_failures: first feature CI 37960815779 failed single health diagnostic string assertion, fixed this revision
-verification: CI pending; no real new QQ group test yet
-blockers: need NapCat live client in at least two groups for end-to-end confirmation, and Abot existing stale pending invite cannot be auto-imported
-next_exact_action: verify CI success and package, fast-forward main with lease check, verify Cloudflare connected build and D1 safe availability, deliver memory package and notify Gmail.
+verification: current updated DO source CI pending; no true QQ chat send test yet.
+known_risks: Bbot must reconnect WebSocket to new DO, official Abot hot Gateway may still receive @AIBot commands; user should send bare !use without @.
+next_exact_action: run feature CI; if green update main, verify Cloudflare deployment and memory package, then ask user to reconnect NapCat WS once and try !use in first group and !CODE alias in second group.

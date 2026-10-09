@@ -29,3 +29,9 @@ QQ 客戶端的 `/!设置插话率` 等舊選單來自 QQ 開放平台「指令�
 ## 驗證
 
 CI 透過 `npm run check` 運行 Node 測試和 Wrangler dry-run。跨群文字、圖片、語音、影片與 @ 仍需要真實群組端到端驗證；AI 聊天維持停用。
+
+## Bbot 熱更新後必須重新連線
+
+本次 NapCat 原生控制器使用新的 Durable Object 身分 `bridge-bbot-napcat-v2`，避免舊 WebSocket 長時間停留在更新前的程式版本。
+正式部署後，請在 NapCat 的 WebSocket Client 將 `QQAIBOT-Bbot` **先停用，再啟用一次**（或直接重新啟動該 Client），以建立新連線。
+無須變更 Token 或 URL。重新連線後，透過 `/health` 檢查 `bbot.connected`，再在群裡發送普通文字 `!use`。

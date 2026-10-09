@@ -1,34 +1,43 @@
 {
-  "version": "v0.0.76",
+  "version": "v0.0.77",
   "task_id": "qq-cross-group-bridge-20261009",
   "goal_revision": 7,
-  "changed_at": "2026-10-10T00:44:00+08:00",
+  "changed_at": "2026-10-10T00:48:00+08:00",
   "provider": "GitHub",
   "repository": "Ray20123315/qqaibot",
   "branch": "feature/napcat-native-link-20261010",
   "location_type": "remote",
-  "before_revision": "06583523172de11413c409b9ffe63929479f2a9e",
-  "after_revision": "pending_new_commit",
-  "action": "fix-health-string-compat-and-update-memory",
+  "before_revision": "16a1391457e64f3909ccc997ca771d21fbd27542",
+  "after_revision": "pending_git_commit",
   "verification": {
-    "previous_ci": 37960815779,
-    "previous_result": "31/32; health-string mismatch",
-    "new_ci": "pending",
-    "live_qq": "not_tested"
+    "previous_ci": 37960960301,
+    "previous_result": "success",
+    "current_ci": "pending",
+    "live_qq": "unknown"
   },
-  "files": [
+  "changes": [
     {
       "path": "worker.js",
-      "action": "fix",
-      "blob_sha": "31695ccca6c78e35121b62bbd7a64028293dee7f"
+      "action": "new OneBotHub DO identity",
+      "blob_sha": "36ed4a6e3de32bcab53a1af9de84543db352d7db"
+    },
+    {
+      "path": "src/delivery.js",
+      "action": "matching Bbot DO stub",
+      "blob_sha": "1a87de5097d758a689e66cf3f40741c157758287"
+    },
+    {
+      "path": "docs/DEPLOY.md",
+      "action": "NapCat reconnect instruction",
+      "blob_sha": "16ec9b31c3b0a4373af971fe8b4ff245b4f5eda2"
     },
     {
       "path": ".github/workflows/bridge-check.yml",
-      "action": "memory version update"
+      "action": "memory v0.0.77"
     },
     {
       "path": ".Ray_Chen/memory/*",
-      "action": "canonical updates"
+      "action": "canonical update"
     }
   ]
 }

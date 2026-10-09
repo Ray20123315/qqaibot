@@ -1,7 +1,8 @@
 # VERIFY
 
-- First feature Github CI 37960815779: 31 passed / 1 failed; only tests/command-routing.test.mjs expected /health command_prefix '/! or !'.
-- Fix source worker.js now returns '/! or !' while native command parsing still prefers plain !.
-- Newly added NapCat group linking, admin ACL, native message destination and onOnebotEvent mock unit tests passed in first feature run.
-- Full next CI and memory v0.0.76 TAR.GZ verification pending.
-- After CI green: promote main, verify Worker build source SHA and OneBot socket health, then user tests plain !use in one group and !CODE alias in second group.
+- CI 37960960301 success for previous NapCat-native feature, all tests and Wrangler dry run.
+- New code changes only Bbot OneBotHub DO identity in worker and src/delivery to bridge-bbot-napcat-v2, docs user reconnect.
+- Need rerun full GitHub Actions node tests and Worker dry-run on v0.0.77.
+- Must verify current main and Cloudflare connected build source after fast-forward.
+- NapCat Client must reconnect, then /health bbot.connected true, one-group !use and second-group !CODE alias real user acceptance.
+- Original backup archive/legacy-main-20261009 safe.

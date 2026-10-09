@@ -1,8 +1,9 @@
 # CURRENT_STATE
 
-- main before this feature: ff80b3d96e223b1663e7d2c5b5b578828b052410
-- legacy archive/legacy-main-20261009: 6a22b06433cfaffcf13abe2b60a917305290b629
-- new primary control code on feature/napcat-native-link-20261010 includes NapCat native group ID, role authorization, Bbot-only destination sends and short alarm outbox
-- first feature CI 37960815779: 31 tests passed, one health field string regression. Fix worker.js 'command_prefix' to preserve existing expected '/! or !'.
-- no production deployment or D1 destructive change yet; previous Abot one-group response and QQ 40034105 on others observed
-- new CI pending, live Bbot reply/forwarding not proven by mock tests
+- main at product SHA 16a1391457e64f3909ccc997ca771d21fbd27542 before Bbot hot-instance fix, Cloudflare deployment confirmed.
+- legacy full archive: archive/legacy-main-20261009 at 6a22b06433cfaffcf13abe2b60a917305290b629.
+- NapCat-native group control and direct Bbot routing: all unit tests green in CI 37960960301.
+- new worker.js and src/delivery.js both now use ONEBOT_HUB.idFromName('bridge-bbot-napcat-v2'); current CI pending.
+- new synthetic group ID prefix napcat: routes native to Bbot, no official Group OpenID required.
+- real Bbot WebSocket switch to new DO needs manual disable/re-enable Client; no server-side old socket termination API provided.
+- actual QQ end-to-end not proven.

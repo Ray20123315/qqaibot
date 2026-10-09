@@ -13,7 +13,7 @@ async function secretMatches(request,secret){
  const [x,y]=await Promise.all([crypto.subtle.digest("SHA-256",a),crypto.subtle.digest("SHA-256",b)]);
  return Array.from(new Uint8Array(x)).every((v,i)=>v===new Uint8Array(y)[i]);
 }
-const hub=env=>env.ONEBOT_HUB.get(env.ONEBOT_HUB.idFromName("bridge-bbot"));
+const hub=env=>env.ONEBOT_HUB.get(env.ONEBOT_HUB.idFromName("bridge-bbot-napcat-v2"));
 // New Durable Object identity: supersedes the gateway instance left active across
 // the 2026-10-09 main cutover. Future revisions should keep this stable.
 const gateway=env=>env.QQ_OPEN_GATEWAY.get(env.QQ_OPEN_GATEWAY.idFromName("bridge-abot-commands-v2"));

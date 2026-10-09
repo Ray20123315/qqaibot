@@ -3,7 +3,7 @@ import {sendGroup,sendMedia} from "./qq-api.js";
 import {classifyAbotFailure,decideFallback} from "./relay.js";
 export async function sendUsingBbot(env,id,groupId,segments){
   if(!groupId||!env.ONEBOT_HUB)throw new Error("BBOT_TARGET_UNAVAILABLE");
-  const stub=env.ONEBOT_HUB.get(env.ONEBOT_HUB.idFromName("bridge-bbot"));
+  const stub=env.ONEBOT_HUB.get(env.ONEBOT_HUB.idFromName("bridge-bbot-napcat-v2"));
   const response=await stub.fetch("https://internal/send",{method:"POST",headers:{"content-type":"application/json"},
    body:JSON.stringify({id,groupId,segments})});
   const info=await response.json();
