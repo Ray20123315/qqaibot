@@ -1,7 +1,11 @@
 # CURRENT_STATE
-- Production main at start 95057385c5822e6e355066c273f7475b06d32d87, Cloudflare parallel code deployed 100% after CI success
-- Observability 2026-10-09T17:21:04Z shows OneBotHub old DO version ac768bc3-0d69-4eb7-9d18-f162cac90c5f returned HTTP 404 to new /flush. This prevents new cron route from operating through existing old socket.
-- New feature branch fix/parallel-hub-reconnect-20261010 uses src/bbot-hub.js shared BBOT_HUB_ID bridge-bbot-parallel-v3 in worker, bridge and delivery, test pending.
-- New health reports bbot.hub_generation=parallel-v3, websocket_count/current connected, last event/connected/closed; cannot claim connected before client reconnect.
-- No changes to Abot-disabled state, protected QQ ACL, existing D1 or original archived code.
-- Original archive/legacy-main-20261009 at SHA 6a22b06433cfaffcf13abe2b60a917305290b629.
+
+- Active GitHub main code revision: 5b36ddcd8106f4566fcc15f2c63706cd5febd8dc
+- Original full legacy branch archive/legacy-main-20261009 revision 6a22b06433cfaffcf13abe2b60a917305290b629
+- Latest parallel-v3 Worker deployed Cloudflare qqai deployment 11d869b9-a305-4e0a-ad60-7be82a616293, Worker version 77ce16ed-350d-4b7f-ad55-e8c2309f4d01, 100%, main build success
+- Latest code main CI 37966044948 SUCCESS; feature CI 37965979192 SUCCESS; prior parallel core CI 37965452837 SUCCESS
+- Bbot-only: QQ Open Platform API and Abot remain disabled
+- OneBotHub canonical ID now bridge-bbot-parallel-v3 in shared src/bbot-hub.js, not bridge-bbot-napcat-v2
+- Inbound message relays to target groups in parallel up to 4 groups, preserved within-group FIFO, native OneBot segment message batches, ACK required, pending outbox retained offline
+- Old hot OneBotHub returned /flush 404 immediately following first parallel deployment. New hub ID fix is deployed, but old WS must be disconnected/reconnected by user.
+- Live bbot.connected state and QQ E2E 3-group timings UNKNOWN after new deployment.

@@ -1,68 +1,87 @@
 {
-  "version": "v0.0.85",
+  "version": "v0.0.86",
   "task_id": "qq-cross-group-bridge-20261009",
   "goal_revision": 9,
-  "changed_at": "2026-10-09T17:23:47.498Z",
+  "changed_at": "2026-10-09T17:26:06.060Z",
   "provider": "GitHub",
   "location_type": "remote",
   "repository": "Ray20123315/qqaibot",
-  "branch": "fix/parallel-hub-reconnect-20261010",
-  "before_revision": "95057385c5822e6e355066c273f7475b06d32d87",
-  "after_revision": "pending_commit",
+  "branch": "main",
+  "before_revision": "9b97668ccb4bfa910b065ff9be386fe2022a8604",
+  "product_sha": "5b36ddcd8106f4566fcc15f2c63706cd5febd8dc",
+  "after_revision": "final_memory_commit_pending",
   "verification": {
-    "prior_feature_ci": 37965452837,
-    "prior_main_ci": 37965524681,
-    "prior_parallel_deployment": "e9f2e322-b3a8-4ba8-868e-d9656dfaf36e",
-    "stale_do_event": "/flush 404 on older DO",
-    "new_ci": "pending",
-    "live_qq": "not tested"
+    "parallel_ci": 37965452837,
+    "parallel_main_ci": 37965524681,
+    "hub_fix_ci": 37965979192,
+    "hub_main_ci": 37966044948,
+    "all_ci": "success",
+    "cloudflare_deployment": "11d869b9-a305-4e0a-ad60-7be82a616293",
+    "cloudflare_version": "77ce16ed-350d-4b7f-ad55-e8c2309f4d01",
+    "cloudflare_source_sha": "5b36ddcd8106f4566fcc15f2c63706cd5febd8dc",
+    "cloudflare_percent": 100,
+    "live_qq": "not_verified",
+    "websocket_reconnect": "user_action_needed"
   },
   "files": [
     {
-      "path": "src/bbot-hub.js",
-      "action": "add_or_modify",
-      "blob_sha": "17dea574de76244430edc3f511ba95b7c5e2e25d"
-    },
-    {
-      "path": "worker.js",
-      "action": "add_or_modify",
-      "blob_sha": "a20fa7e3263de6ad8ddaf0d4b1ec3cb29200f7a1"
-    },
-    {
-      "path": "src/delivery.js",
-      "action": "add_or_modify",
-      "blob_sha": "c4fb69d666fb011e4fd178f063b8af57a7307166"
+      "path": "src/batch.js",
+      "action": "new_or_modified_on_main"
     },
     {
       "path": "src/bridge.js",
-      "action": "add_or_modify",
-      "blob_sha": "054352281364397917bd0af8c559c0290314cb64"
+      "action": "new_or_modified_on_main"
+    },
+    {
+      "path": "src/relay.js",
+      "action": "new_or_modified_on_main"
+    },
+    {
+      "path": "src/bbot-hub.js",
+      "action": "new_or_modified_on_main"
+    },
+    {
+      "path": "src/delivery.js",
+      "action": "new_or_modified_on_main"
+    },
+    {
+      "path": "worker.js",
+      "action": "new_or_modified_on_main"
+    },
+    {
+      "path": "tests/parallel-relay.test.mjs",
+      "action": "new_or_modified_on_main"
     },
     {
       "path": "tests/hub-generation.test.mjs",
-      "action": "add_or_modify",
-      "blob_sha": "657ea6742afdf5c65aad3baccec827be92491e5b"
+      "action": "new_or_modified_on_main"
+    },
+    {
+      "path": "tests/abot-disabled.test.mjs",
+      "action": "new_or_modified_on_main"
+    },
+    {
+      "path": "tests/command-routing.test.mjs",
+      "action": "new_or_modified_on_main"
     },
     {
       "path": "README.md",
-      "action": "add_or_modify",
-      "blob_sha": "229e0c4358e51e6d996db46fbdfc53782356228d"
+      "action": "new_or_modified_on_main"
     },
     {
       "path": "docs/DEPLOY.md",
-      "action": "add_or_modify",
-      "blob_sha": "9654d3d09c610b4041fa60a11970ffc33e430eef"
+      "action": "new_or_modified_on_main"
     },
     {
       "path": ".github/workflows/bridge-check.yml",
-      "action": "update memory version"
+      "action": "new_or_modified_on_main"
     },
     {
       "path": ".Ray_Chen/memory/*",
-      "action": "canonical update"
+      "action": "new_or_modified_on_main"
     }
   ],
-  "backup": {
+  "old_archive": {
     "branch": "archive/legacy-main-20261009",
     "sha": "6a22b06433cfaffcf13abe2b60a917305290b629"
   }

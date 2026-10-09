@@ -1,11 +1,11 @@
 # Ray_Chen Memory
-version: v0.0.85
+memory_version: v0.0.86
 task_id: qq-cross-group-bridge-20261009
+task_status: blocked (live NapCat reconnection + 3-group acceptance)
 goal_revision: 9
-task_status: active
-canonical_branch: fix/parallel-hub-reconnect-20261010
-production_main_at_start: 95057385c5822e6e355066c273f7475b06d32d87
+canonical_branch: main
+latest_product_sha: 5b36ddcd8106f4566fcc15f2c63706cd5febd8dc
 legacy_archive: archive/legacy-main-20261009
-updated_at: 2026-10-09T17:23:47.498Z
+updated_at: 2026-10-09T17:26:06.060Z
 
-Read ACTIVE_TASK, CURRENT_STATE, USER_REQUIREMENTS, DECISIONS, GOTCHAS, VERIFY and FILE_MANIFEST. Hot OneBotHub persisted old source and returned 404 to new /flush; fix uses bridge-bbot-parallel-v3 shared Hub ID. CI pending. User must restart NapCat WS after deployment.
+Parallel native OneBot fanout has been deployed, backed by shared hub ID bridge-bbot-parallel-v3. User must toggle NapCat WebSocket Client off/on ONCE after this change. No QQ messages sent during testing. Read ACTIVE_TASK, CURRENT_STATE, USER_REQUIREMENTS, DECISIONS, GOTCHAS, VERIFY, FILE_MANIFEST before resuming.

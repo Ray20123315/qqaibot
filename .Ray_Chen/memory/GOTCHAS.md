@@ -1,6 +1,9 @@
 # GOTCHAS
-- Cloudflare DO WebSocket hot instance can remain on old Worker code after auto-deploy. A new Cron calling /flush returned 404 because existing bridge-bbot-napcat-v2 was still running former version. Don't assume CI/build updates hot DO method handlers.
-- Rotate OneBotHub idFromName to bridge-bbot-parallel-v3 across Worker + bridge + delivery (shared constant), and require NapCat WS Client toggle off/on once. Do not change URL/Token, keep D1 state.
-- /health connected=false until new hub receives authenticated WS handshake; old DO message traffic does not count as current connected.
-- QQ Group send_onebot ACK and QQ rate limits may still constrain latency; do not promise hard 5 seconds.
-- Abot remains disabled and protected QQ IDs remain.
+
+- Three-group latency is cumulative under serial ACK. Even 1 sec fixed alarm + three RTTs can be >5s. Run parallel groups with cap 4 and preserve group FIFO and ACK.
+- Native message batching may combine images+text+face; QQ OneBot adapters may reject some mixed voice/video/file segments. Actual acceptance must be tested, not assumed.
+- In-flight DO flush needs a needsFlush signal so that new alarms while processing do not lose batches; cron should only wake hub.
+- Cloudflare Worker deploy DOES NOT necessarily replace code inside long-lived WebSocket Durable Object; observed GET /internal/flush HTTP 404 on version ac768bc3 after newer Worker deploy. New ID parallel-v3 needs manual NapCat toggle off/on.
+- /health connected=false can coexist with recent previous OneBotHub message activity; inspect last event, current readyState and last closed, do not infer current active socket.
+- Keep webSocket Token private, do not rotate without operator action. NapCat URL unchanged.
+- Abot remains disabled. QQ group protected IDs 3569028262/2681167798 retained.
