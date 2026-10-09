@@ -20,13 +20,27 @@ async function ready(env){
 const now=()=>Date.now();
 const sanitizeAlias=v=>clean(v,24).replace(/[<>\[\]]/g,"");
 const adminRole=role=>role==="owner"||role==="admin";
-async function answer(env,group,text,msgId) {
+export async function answer(env,group,text,msgId,sendImpl=sendGroup) {
+ // Use the inbound message ID for passive replies. A definite 40034024
+ // means the platform rejected that ID; a single proactive send is safe.
  if(!msgId){
    const ctx=await get(env.DB,"SELECT msg_id FROM bridge_reply_context WHERE group_openid=? AND expires_at>?",group,now());
    msgId=ctx?.msg_id||undefined;
  }
- try {await sendGroup(env,group,text+BRIDGE_ECHO_MARKER,msgId);return true;}
- catch(e){console.error("ABOT_RESPONSE_FAILED",String(e).slice(0,240));return false;}
+ const content=text+BRIDGE_ECHO_MARKER;
+ try {await sendImpl(env,group,content,msgId);return true;}
+ catch(e){
+   if(msgId && Number(e?.code)===40034024){
+     console.warn("ABOT_REPLY_INVALID_MSG_ID_PROACTIVE_RETRY");
+     try {await sendImpl(env,group,content);return true;}
+     catch(fallbackError){
+       console.error("ABOT_PROACTIVE_REPLY_FAILED",String(fallbackError).slice(0,240));
+       return false;
+     }
+   }
+   console.error("ABOT_RESPONSE_FAILED",String(e).slice(0,240));
+   return false;
+ }
 }
 async function logDelivery(env,id,target,state,error=""){
  await run(env.DB,"INSERT OR REPLACE INTO bridge_deliveries(id,target_group,status,error,created_at) VALUES(?,?,?,?,?)",id,target,state,clean(error,220),now());
@@ -50,10 +64,18 @@ export async function onOfficialEvent(env,payload){
  if(msgId)await run(env.DB,"INSERT INTO bridge_reply_context(group_openid,msg_id,expires_at) VALUES(?,?,?) ON CONFLICT(group_openid) DO UPDATE SET msg_id=excluded.msg_id,expires_at=excluded.expires_at",groupOpenid,msgId,now()+120000);
  if(command.name==="help")return {handled:true,reply:await answer(env,groupOpenid,"指令：/use /代碼 簡寫 /verify /status /stop /resume /leave /rename 名稱 /revoke /code /grant QQ號 manage|stop|both /ungrant QQ號 /id /verifyid",msgId)};
  if(command.name==="use"){
-  if(current)return {handled:true,reply:await answer(env,groupOpenid,"本群已有連線或待驗證，請使用 /status。",msgId)};
+  if(current?.verified)return {handled:true,reply:await answer(env,groupOpenid,"本群已建立連線，請使用 /status。",msgId)};
   const invite=makeCode(12),roomId=crypto.randomUUID(),nonce=makeCode(10);
   await run(env.DB,"INSERT INTO bridge_rooms(id,code_hash,created_at) VALUES(?,?,?)",roomId,await digest(invite),now());
-  await initialGroup(env,groupOpenid,roomId,"",nonce);
+  if(current){
+    // A prior /use might have created data before the response was rejected.
+    // Regenerate both codes so the group is never stranded in pending state.
+    await run(env.DB,"UPDATE bridge_groups SET room_id=?,pairing_hash=?,pairing_expires=?,stopped=0 WHERE group_openid=? AND verified=0",
+      roomId,await digest(nonce),now()+300000,groupOpenid);
+    await run(env.DB,"UPDATE bridge_rooms SET revoked=1 WHERE id=?",current.room_id);
+  }else{
+    await initialGroup(env,groupOpenid,roomId,"",nonce);
+  }
   const response="連線代碼："+invite+"\n待驗證：請本群群主或管理員在這個群送出 @Abot /verify "+nonce+"。\nAbot 和 Bbot 都收到後才會配對；請勿把驗證碼轉給其他群。";
   return {handled:true,reply:await answer(env,groupOpenid,response,msgId)};
  }

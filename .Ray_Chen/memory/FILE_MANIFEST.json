@@ -1,61 +1,39 @@
 {
-  "version": "v0.0.70",
-  "project": "QQAIBOT",
+  "version": "v0.0.71",
   "task_id": "qq-cross-group-bridge-20261009",
-  "goal_revision": 4,
-  "file_change_transaction": "promote-bridge-main-and-record-deployment-20261009",
-  "changed_at": "2026-10-09T23:58:00+08:00",
+  "goal_revision": 5,
+  "changed_at": "2026-10-10T00:15:00+08:00",
+  "repository": "Ray20123315/qqaibot",
   "provider": "GitHub",
   "location_type": "remote",
-  "repository": "Ray20123315/qqaibot",
-  "branch": "main",
-  "before_revision": "6a22b06433cfaffcf13abe2b60a917305290b629",
-  "product_after_revision": "2beed0b762d07484fc8b7f201682504f429b5201",
-  "after_revision": "memory-only follow-up commit",
-  "actions": [
+  "branch": "fix/qq-passive-reply-20261010",
+  "before_revision": "906262b122796935bab5196328f7ae27e4729cfd",
+  "after_revision": "fix_commit_pending",
+  "action": "repair-qq-invalid-msgid-and-pending-use",
+  "files": [
     {
-      "path": "refs/heads/main",
-      "action": "fast_forward",
-      "before_sha": "6a22b06433cfaffcf13abe2b60a917305290b629",
-      "after_sha": "2beed0b762d07484fc8b7f201682504f429b5201",
-      "verification": "read-back confirmed"
+      "path": "src/bridge.js",
+      "sha": "29c8a1c5490be037fcdc83f0f0fefbcb4f17d64e",
+      "action": "modify"
     },
     {
-      "path": "archive/legacy-main-20261009",
-      "action": "preserved",
-      "after_sha": "6a22b06433cfaffcf13abe2b60a917305290b629",
-      "verification": "read-back confirmed"
-    },
-    {
-      "path": "worker.js",
-      "action": "product code moved onto main",
-      "after_sha": "2beed0b762d07484fc8b7f201682504f429b5201",
-      "verification": "CI 37955271118 and Cloudflare success"
-    },
-    {
-      "path": ".Ray_Chen/memory/*",
-      "action": "record main promotion deployment and test limitations",
-      "verification": "memory package workflow pending"
+      "path": "tests/qq-reply.test.mjs",
+      "sha": "2b5e1a0b28e68d654e4dfe55b4579ea73e34280b",
+      "action": "add"
     },
     {
       "path": ".github/workflows/bridge-check.yml",
-      "action": "update packaging version to v0.0.70",
-      "verification": "workflow pending"
+      "action": "modify"
+    },
+    {
+      "path": ".Ray_Chen/memory/*",
+      "action": "canonical-memory-update"
     }
   ],
-  "external_deployment": {
-    "provider": "Cloudflare",
-    "worker": "qqai",
-    "deployment_id": "7e8bb6ff-e5ba-4621-b22d-01fc6b665f27",
-    "version_id": "3a774f7c-2268-4c94-849c-bb0ad0d414a5",
-    "source_sha": "2beed0b762d07484fc8b7f201682504f429b5201",
-    "traffic_percent": 100,
-    "build_outcome": "success"
-  },
   "verification": {
-    "github_ci": 37955271118,
-    "github_ci_outcome": "success",
-    "cloudflare_build": "success",
-    "live_qq": "not_tested"
+    "runtime_error": "QQ_API_400:40034024",
+    "repair_ci": "pending",
+    "qq_live": "pending",
+    "main_not_yet_updated": true
   }
 }

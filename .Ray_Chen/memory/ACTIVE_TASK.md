@@ -1,27 +1,25 @@
 # ACTIVE_TASK
 
 task_id: qq-cross-group-bridge-20261009
-task_status: blocked
-goal_revision: 4
-goal: put Abot/Bbot QQ cross-group bridge onto main for real-world testing, preserving legacy code backup
-current_phase: product main promotion / production deployment verified, live QQ functional acceptance pending
-current_step: user tests QQ group pairing and relay using deployed Worker
+task_status: active
+goal_revision: 5
+goal: restore /use and QQ official replies on deployed main; ensure pending groups recover without losing codes
+current_phase: repair official group reply msg_id validation failure
+current_step: verify 40034024 safe proactive retry implementation and CI, then promote onto main
+
+verified failure evidence:
+- Cloudflare qqai Workers Observability event at 2026-10-09T16:01:12Z: ABOT_RESPONSE_FAILED Error: QQ_API_400:40034024:请求参数msg_id无效或越权
+- DO gateway, worker cron, /ensure are being invoked; this is a definite refused send (not merely offline)
+- Existing /use created DB rows before responding, leaving pending groups blocked for retry.
 
 completed_steps:
-- preserved original main code in archive/legacy-main-20261009 at 6a22b06433cfaffcf13abe2b60a917305290b629
-- deployed feature product commit 2beed0b762d07484fc8b7f201682504f429b5201 to main via nonforce fast-forward, expected old head lease accepted
-- verified both main and backup GitHub refs
-- GitHub main CI 37955271118 succeeded: tests and Wrangler dry-run, memory artifact v0.0.69
-- Cloudflare connected build for qqai version 3a774f7c-2268-4c94-849c-bb0ad0d414a5 reported success, branch main source commit 2beed0b762d07484fc8b7f201682504f429b5201
-- Cloudflare deployment 7e8bb6ff-e5ba-4621-b22d-01fc6b665f27 100% routing at 2026-10-09T15:55:42Z
-- bridge code supports Abot-first, Bbot fallback only after definitive rejection, media handling, two-sided binding and two protected QQ IDs
-- AI chat excluded from new Worker
-- latest memory-only commit created after these observations, follow-up GitHub CI/Cloudflare deployment to be verified
+- preserved archive/legacy-main-20261009 from earlier task
+- staged src/bridge.js: on explicit QQ 40034024 only, retry one proactive message with no msg_id; never repeat on ambiguous errors
+- staged src/bridge.js: /use pending state reissues fresh invite+verification and revokes old invite, but active verified groups untouched
+- added tests/qq-reply.test.mjs for normal success, definite rejection retry, fallback failure and uncertain errors
 
-known_blockers:
-- Bbot NapCat websocket reconnect and group member roster not proven on new Worker
-- QQ Abot proactive message ability and real @ plus media delivery not end-to-end verified
-- /health external URL not accessible through available inspection tools; use connected live QQ smoke
-- no claim actual QQ message delivery success without observed test
-
-next_exact_action: In isolated QQ test groups with both Bots, verify /use -> Abot/Bbot dual /verify -> /<code> group join, Bbot incoming observation, Abot outgoing and media/@; use logged response to diagnose any failure, then verify Bbot explicit-denial fallback. Do not force replay ambiguous message results.
+files_modified: src/bridge.js, tests/qq-reply.test.mjs, .github/workflows/bridge-check.yml, .Ray_Chen/memory/*
+verification_results: pending GitHub CI
+known_risks: proactive send is subject to QQ group owner's toggle; if QQ denies proactive too, responses still cannot be delivered. Cannot prove actual QQ client receipt without new user test.
+next_exact_action: inspect repair branch GitHub CI and memory archive; if successful fast-forward main, verify Cloudflare connected build and Observability errors, then ask user to retry @Abot /use once.
+last_checkpoint_at: 2026-10-10T00:15:00+08:00
