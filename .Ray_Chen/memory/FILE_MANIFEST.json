@@ -1,93 +1,55 @@
 {
-  "version": "v0.0.88",
+  "version": "v0.0.89",
   "task_id": "qq-cross-group-bridge-20261009",
-  "goal_revision": 10,
-  "changed_at": "2026-10-09T17:53:01.621Z",
-  "provider": "GitHub",
+  "goal_revision": 11,
+  "changed_at": "2026-10-09T18:00:36.245Z",
   "location_type": "remote",
+  "provider": "GitHub",
   "repository": "Ray20123315/qqaibot",
-  "branch": "main",
-  "before_revision": "24a33000916d239caa1b9fcac789213972a5d041",
-  "product_sha": "61666942ac971a4d52c88105a1970898a180f340",
-  "after_revision": "memory_checkpoint_commit_pending",
+  "branch": "feature/bilibili-copyable-text-20261010",
+  "before_revision": "d0e45d2a02d4183bdda227371042eca7212f3d6a",
+  "after_revision": "new_commit_pending",
   "verification": {
-    "feature_ci": 37969072123,
-    "main_ci": 37969193082,
-    "ci_outcome": "success",
-    "cloudflare_deployment": "7903d855-69bb-49d1-9d49-2c85ef5fd16a",
-    "cloudflare_version": "ed71a6b6-dbd6-4402-a4f2-e0a311e606d5",
-    "cloudflare_build": "success",
-    "traffic_percent": 100,
-    "qq_live": "unknown",
-    "napcat_reconnect": "user_action_required"
+    "ci": "pending",
+    "main": "not_updated",
+    "cloudflare": "pending",
+    "live_qq": "unknown"
   },
   "files": [
     {
-      "path": "src/recall.js",
-      "action": "new_or_modified_main"
-    },
-    {
-      "path": "src/core.js",
-      "action": "new_or_modified_main"
-    },
-    {
       "path": "src/relay.js",
-      "action": "new_or_modified_main"
-    },
-    {
-      "path": "src/bridge.js",
-      "action": "new_or_modified_main"
-    },
-    {
-      "path": "src/napcat-control.js",
-      "action": "new_or_modified_main"
-    },
-    {
-      "path": "src/delivery.js",
-      "action": "new_or_modified_main"
-    },
-    {
-      "path": "src/bbot-hub.js",
-      "action": "new_or_modified_main"
-    },
-    {
-      "path": "worker.js",
-      "action": "new_or_modified_main"
+      "action": "modify",
+      "blob_sha": "4dedcd884ac58fd6ff45cdbcf139f938fcb3a0c6"
     },
     {
       "path": "tests/recall-emoji.test.mjs",
-      "action": "new_or_modified_main"
-    },
-    {
-      "path": "tests/napcat-control.test.mjs",
-      "action": "new_or_modified_main"
-    },
-    {
-      "path": "tests/hub-generation.test.mjs",
-      "action": "new_or_modified_main"
-    },
-    {
-      "path": "tests/relay.test.mjs",
-      "action": "new_or_modified_main"
+      "action": "modify",
+      "blob_sha": "f6cf01ad98c1949beda128c76f8abb5bfca69fa7"
     },
     {
       "path": "README.md",
-      "action": "new_or_modified_main"
+      "action": "modify",
+      "blob_sha": "218293b5e0c49e3797e7d38763cd68badbca8428"
     },
     {
       "path": "docs/DEPLOY.md",
-      "action": "new_or_modified_main"
+      "action": "modify",
+      "blob_sha": "b490b1c3049067b0751f9db5b444b7c7397938c0"
     },
     {
       "path": ".github/workflows/bridge-check.yml",
-      "action": "new_or_modified_main"
+      "action": "update memory archive version"
     },
     {
       "path": ".Ray_Chen/memory/*",
-      "action": "new_or_modified_main"
+      "action": "canonical update"
     }
   ],
-  "legacy_backup": {
+  "unimplemented": [
+    "hide --no from linked/ACL lists and help",
+    "disable recall sync for hidden recipients"
+  ],
+  "backup": {
     "branch": "archive/legacy-main-20261009",
     "sha": "6a22b06433cfaffcf13abe2b60a917305290b629"
   }

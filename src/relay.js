@@ -20,8 +20,14 @@ export function readableCard(type,raw){
   if(/bilibili|b23\.tv/i.test(text))label="[B站分享]";
  }
  // Prevent QQ client from automatically unfurling a new card from our text.
- if(/^https?:\/\//i.test(link))link=link.replace(/^https?:\/\//i,m=>m.replace("://","[:]//"));
- else link="";
+ if(/^https?:\/\//i.test(link)){
+  const normalized=safeMediaUrl(link);
+  const host=normalized?new URL(normalized).hostname.toLowerCase():"";
+  // Bilibili links are usable plain text, so recipients can select/copy the URL.
+  // Preserve existing non-preview safety for other providers' card links.
+  if(label==="[B站分享]" && /(^|\.)(?:bilibili\.com|b23\.tv)$/.test(host))link=normalized;
+  else link=normalized.replace("://","[:]//");
+ }else link="";
  return [label,title,link].filter(Boolean).join(" ").slice(0,650);
 }
 

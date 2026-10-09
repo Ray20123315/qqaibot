@@ -68,3 +68,9 @@ Worker 的 scheduled cron 不再打開 QQ Open Platform Gateway，只執行 Bbot
 QQ `face` 與商城 `mface` 保持原生型別，未包含必要 ID 的商城表情降為文字說明而非圖片；B站 JSON/XML 卡片抽取純文字描述而不轉原卡片；跨群 @ 在目標群有使用者 QQ ID 時送 OneBot 原生 at，否則顯示來源已知暱稱，不顯示 QQ 號。圖片等媒體保留 OneBot 原生類型。
 
 **需要 NapCat WebSocket Client 重新連線**至新 Hub `bridge-bbot-recall-v4`。原 URL `wss://aibot.ray2025.com/onebot`，原 Token 不變；`/health` 會顯示 `bbot.hub_generation=recall-v4`，可觀察是否連線。
+
+## 2026-10-10 B站卡片可複製文字
+
+B站 JSON/XML 分享卡片現在只送文字摘要與原始可複製的 HTTPS 網址（限 bilibili.com、b23.tv），不直接複製 QQ 卡片 JSON。由於網址未變形，QQ 客戶端可能主動產生預覽卡片，這需要 QQ 端實測。非 B站來源仍限制可直接點擊的未知網址。
+
+未實作：從群組清單及 help 完全隱藏 --no 接收端並取消來源訊息撤回同步；該組合會造成來源群無從察覺仍在收集的副本。後續應優先設計來源群群主可稽核的目的地登錄與通知／保存期限。

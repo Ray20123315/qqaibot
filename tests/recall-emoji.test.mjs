@@ -21,8 +21,8 @@ test("Bilibili JSON card stays plain text rather than raw JSON card",()=>{
  assert.deepEqual(seg.map(s=>s.type),["text","text"]);
  assert.match(seg[1].data.text,/B站分享/);
  assert.match(seg[1].data.text,/精彩視頻/);
- assert.doesNotMatch(seg[1].data.text,/https:\/\/www\.bilibili/);
- assert.equal(readableCard("json",raw).includes("https[:]//"),true);
+ assert.match(seg[1].data.text,/https:\/\/www\.bilibili\.com\/video\/BV123/);
+ assert.equal(readableCard("json",raw).includes("https://www.bilibili.com/video/BV123"),true);
 });
 test("QQ face remains face; mface retains native package id not image",()=>{
  const event={post_type:"message",message_type:"group",group_id:808882936,user_id:3569028262,message_id:123,
@@ -106,4 +106,11 @@ test("Bbot OneBot sends ACK with message_id necessary to implement synchronized 
  hub=new OneBotHub({getWebSockets:()=>[ws]},{});
  const result=await hub.dispatch(ws,"relay-id","808882936",[{type:"text",data:{text:"hello"}}]);
  assert.equal((await result.json()).message_id,76543);
+});
+
+test("QQ non-Bilibili card URLs stay plain readable but do not expose actionable raw link",()=>{
+ const qq=JSON.stringify({prompt:"網站卡片",meta:{detail_1:{title:"例子",qqdocurl:"https://example.org/abc"}}});
+ const res=readableCard("json",qq);
+ assert.match(res,/例子/);
+ assert.doesNotMatch(res,/https:\/\/example\.org/);
 });

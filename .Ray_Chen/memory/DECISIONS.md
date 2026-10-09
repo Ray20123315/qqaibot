@@ -1,5 +1,4 @@
 # DECISIONS
-2026-10-10 r10: Implement group message recall only for Bbot-created relay copies with confirmed ACK message ID, and only when original group's group_recall notice arrives. Covers author and admin recalls. Pending sends canceled, late ACK triggers queued deletion.
-2026-10-10 r10: `!CODE --no` is join-time receive-only, suppresses that group's outward chat forwarding and remote join notices. `!setting` lists caller's proven permissions and every linked group; normal join produces notices.
-2026-10-10 r10: OneBot native face and mface sent as original types. Absentee @ fallback source nickname instead of QQ number. Bilibili and JSON/XML share cards rendered into text without raw JSON card.
-2026-10-10 r10: New Hub generation bridge-bbot-recall-v4 because hot websocket Durable Object may preserve stale code across deploy; human reconnect required. Abot remains disabled.
+2026-10-10 goal revision 11: Bilibili share card outputs plain text with real, directly copyable HTTPS link for exact domains bilibili.com/b23.tv, without re-sending JSON/XML card; QQ client may still unfurl a URL.
+2026-10-10: Hidden receive-only QQ groups while silently preserving recalled source messages are NOT implemented; this would conceal recipients and prevent source recall. Prefer auditable recipient lists and explicit retention rules before changing those semantics.
+2026-10-10: Keep current --no and recall source behavior and protected QQ ACL unchanged; no D1 migration.
