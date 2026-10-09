@@ -3,6 +3,7 @@ import {init,get,all,run,digest,roster,recordRoster,groupByQq} from "./store.js"
 import {relayOperations} from "./relay.js";
 import {deliver} from "./delivery.js";
 import {handleNapcatCommand} from "./napcat-control.js";
+import {fanoutByGroup} from "./batch.js";
 
 // No Abot event subscription or QQ Open Platform API use in Bbot-only mode.
 // Keep the original D1 tables and records intact for a possible future re-enable.
@@ -36,18 +37,20 @@ export async function onOnebotEvent(env,event,reply){
   "SELECT * FROM bridge_groups WHERE room_id=? AND verified=1 AND stopped=0 AND group_openid<>?",
   source.room_id,source.group_openid);
  let added=0;
- for(const target of targets){
-  // A numeric QQ group ID is essential to Bbot. An OpenID is never substituted.
+ await fanoutByGroup(targets,async target=>{
   if(!qq(target.qq_group_id)){
    console.warn("BBOT_TARGET_MISSING_QQ_ID");
-   continue;
+   return;
   }
   const rosterState=await roster(env.DB,target.qq_group_id);
   const members=rosterState.fresh?await all(env.DB,
    "SELECT qq_id FROM bridge_members WHERE qq_group_id=?",target.qq_group_id):[];
+  // One native OneBot message with multiple segments replaces many separate
+  // text/image/emoji sends for each destination (when NapCat supports it).
   const operations=relayOperations(source.alias||source.display_name||"QQ群 "+msg.groupId,
    msg.senderName,msg.parts,{},{
     realMentions:false,
+    nativeBatch:true,
     targetMembers:new Set(members.map(x=>x.qq_id))
    });
   for(const operation of operations){
@@ -57,7 +60,7 @@ export async function onOnebotEvent(env,event,reply){
     id,target.group_openid,target.qq_group_id,operation.content,JSON.stringify(operation),now()+operation.index,now());
    if(Number(result.meta?.changes||0))added++;
   }
- }
+ },{key:target=>target.group_openid,concurrency:4});
  return {forwarded:added,total:targets.length};
 }
 export async function onOnebotRoster(env,groupId,members,groupName){
@@ -82,25 +85,26 @@ export async function flushOutbox(env,limit=15,deliveryOptions={}){
  const pending=await all(env.DB,
   "SELECT * FROM bridge_outbox WHERE state='pending' ORDER BY created_at ASC LIMIT ?",limit);
  let sent=0,failed=0;
- for(const item of pending){
+ const started=now();
+ const batch=await fanoutByGroup(pending,async item=>{
   const target=await get(env.DB,
    "SELECT stopped,verified,qq_group_id FROM bridge_groups WHERE group_openid=?",item.target_group);
   if(!target?.verified||target.stopped||target.qq_group_id!==item.target_qq_group_id){
    await run(env.DB,"UPDATE bridge_outbox SET state='cancelled',content='',payload='',updated_at=? WHERE id=? AND state='pending'",now(),item.id);
-   continue;
+   return;
   }
   const claimed=await run(env.DB,
    "UPDATE bridge_outbox SET state='sending',updated_at=? WHERE id=? AND state='pending'",now(),item.id);
-  if(!Number(claimed.meta?.changes||0))continue;
-  // For DO alarms, supply a direct same-WebSocket sender to prevent self-stub deadlocks.
+  if(!Number(claimed.meta?.changes||0))return;
   const result=await deliver(env,item,deliveryOptions);
   await run(env.DB,"UPDATE bridge_outbox SET state=?,content='',payload='',error=?,updated_at=? WHERE id=?",
    result.status,result.error||"",now(),item.id);
   await logDelivery(env,item.id,item.target_group,result.status,result.error);
   if(result.status==="sent_bbot")sent++;else failed++;
- }
+ },{key:item=>item.target_group,concurrency:4});
+ if(pending.length)console.log("BBOT_BATCH_RESULT",JSON.stringify({count:pending.length,groups:batch.groups,parallel:batch.parallel,sent,failed,duration_ms:now()-started}));
  await run(env.DB,"DELETE FROM bridge_seen WHERE created_at<?",now()-86400000);
  await run(env.DB,"DELETE FROM bridge_deliveries WHERE created_at<?",now()-7*86400000);
  await run(env.DB,"DELETE FROM bridge_pending_ids WHERE expires_at<?",now());
- return {sent,failed};
+ return {sent,failed,processed:pending.length,groups:batch.groups,parallel:batch.parallel};
 }

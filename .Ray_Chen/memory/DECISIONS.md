@@ -1,5 +1,6 @@
 # DECISIONS
-- 2026-10-10 goal revision 8: user explicitly requests Abot temporarily disabled, Bbot solely responsible for commands, numeric QQ verification, group linking, replies, media and relaying. Supersedes former Abot-first fallback. Keep secret and DB for future re-enable, no QQ platform account deletion.
-- 2026-10-10 Bbot-only code merged nonforce to main at 7d2dbac38f212dc23f735e3f8f3fa18c156ce89e, tested and auto deployed.
-- Existing historical Abot DOs receive /shutdown each cron; retained inert gateway class to preserve migrations. Do not claim QQ platform or old hot connection removed without live evidence.
-- Do not attempt official sends even to historical real OpenID groups. Require verified numeric QQ group and use OneBot.
+2026-10-10 revision 9: Parallelize independent target QQ groups (max 4) with bounded Promise workers; preserve same-target FIFO and per-message ACK; do not invent OneBot multi-group broadcast API.
+2026-10-10: When Bbot-only, OneBot supports array message segments; use one native OneBot action per incoming message/target where possible. Existing default relayOperations split logic retained for compatibility tests and future cases.
+2026-10-10: Remove fixed 1-second alarm wait in favor of near-immediate ~50-ms scheduling, and make cron wake the same BbotHub to prevent cross-invocation ordering races.
+2026-10-10: /health false is meaningful for current readyState; expose last connection/event/closure separately. Do not claim 'connected' from recent events.
+2026-10-10: Preserve Abot-disabled code, user QQ 3569028262/2681167798 protections, existing D1 and legacy archive. No private secrets in logs.

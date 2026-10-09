@@ -40,7 +40,8 @@ test("scheduled worker never requests Abot gateway ensure or official API",async
  await Promise.all(contexts);
  assert.deepEqual(gateways.map(x=>x.id).sort(),["bridge-abot","bridge-abot-commands-v2"]);
  assert.ok(gateways.every(x=>String(x.url).endsWith("/shutdown")));
- assert.equal(calls.some(x=>x.endsWith("/status")),true);
+ assert.equal(calls.some(x=>x.endsWith("/flush")),true);
+ assert.equal(calls.some(x=>x.endsWith("/status")),false);
 });
 
 test("no official group API use in Bbot-only outbound, including historical OpenID groups",async()=>{

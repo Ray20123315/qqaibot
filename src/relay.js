@@ -7,6 +7,38 @@ export function safeMediaUrl(value) {
 export function relayOperations(groupName,sender,parts,mapping={},options={}) {
   const label="["+clean(groupName,36).replace(/[\[\]]/g,"")+"]"+clean(sender,40)+"：";
   const realMentions=options.realMentions===true;
+  if(options.nativeBatch===true){
+   const segments=[textPart(label)];
+   let readable=label;
+   for(const part of parts.slice(0,60)){
+    if(part.type==="text"){
+     const v=String(part.text||"").slice(0,2500);
+     segments.push(textPart(v));readable+=v;
+    }else if(part.type==="at"){
+     const id=qq(part.qq);
+     if(!id)continue;
+     if(options.targetMembers?.has(id))segments.push({type:"at",data:{qq:id}});
+     else segments.push(textPart("@"+id));
+     readable+="@"+id;
+    }else if(mediaType(part.type)){
+     const data=part.data||{};
+     const file=clean(data.file||data.url||"",2048);
+     const name=clean(data.name||"",100);
+     if(file)segments.push({type:part.type,data:{file,...(name?{name}:{})}});
+     else segments.push(textPart("[來源媒體不可取得]"));
+     readable+="["+part.type+"]";
+    }else if(part.type==="face"&&/^\d+$/.test(String(part.data?.id||""))){
+     segments.push({type:"face",data:{id:String(part.data.id)}});readable+="[表情]";
+    }else if(part.type==="mface"){
+     const file=clean(part.data?.file||"",1024);
+     segments.push(file?{type:"image",data:{file}}:textPart("[表情]"));readable+="[表情]";
+    }else if(["reply","forward","json","xml","poke"].includes(part.type)){
+     const hint=part.type==="reply"?"[回覆]":part.type==="forward"?"[合併轉發]":part.type==="poke"?"[戳一戳]":"[卡片訊息]";
+     segments.push(textPart(hint));readable+=hint;
+    }
+   }
+   return [{index:0,kind:"native",content:readable.slice(0,1700),segments}];
+  }
   const operations=[];
   let text="",segments=[],started=false;
   function open() {if(!started){text=label;segments=[textPart(label)];started=true;}}

@@ -29,7 +29,10 @@ test("public /health reports only limited connection state without secrets",asyn
    ONEBOT_ACCESS_TOKEN:"secret_1",QQ_OPEN_APP_ID:"id",QQ_OPEN_CLIENT_SECRET:"secret_2"});
  const s=await res.json();
  assert.equal(s.command_prefix,"/! or !");
- assert.deepEqual(s.bbot,{connected:true});
+ assert.equal(s.bbot.connected,true);
+ assert.equal(s.bbot.websocket_count,0);
+ assert.equal(s.relay.mode,"parallel");
+ assert.equal(s.relay.max_parallel_groups,4);
  assert.deepEqual(s.abot,{connected:false,session_ready:false,enabled:false});
  assert.equal(s.mode,"bbot-only");
  assert.equal(s.configured,true);

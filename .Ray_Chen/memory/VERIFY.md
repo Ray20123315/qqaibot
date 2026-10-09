@@ -1,8 +1,7 @@
 # VERIFY
-- Feature GitHub Actions 37963923027 SUCCESS: 35 tests + Wrangler dry-run + package v0.0.82.
-- Main GitHub Actions 37964001494 SUCCESS.
-- Cloudflare qqai connected deployment ID ed52e60a-7c9f-47ec-bf8a-78383af71815, version a37b19c5-42ea-43aa-b8b7-a38d702f3d45, 100% from 7d2dbac38f212dc23f735e3f8f3fa18c156ce89e.
-- New Worker src has no QQ Open imports or outgoing official send calls, and dormant QQ gateway class shuts down alarms.
-- Cloudflare observability shows POST /shutdown request to legacy QQ DO at 2026-10-09T17:08:15Z, and latest Bbot OneBotHub traffic. No new Abot READY/group events sampled.
-- Need main follow-up CI and memory v0.0.83 archive + SHA readback.
-- Real QQ user smoke not completed. Test plain !use, !CODE nickname and one normal message; original archive remains available.
+- GitHub Actions npm run check: node --test tests/*.test.mjs and Wrangler dry-run.
+- New tests/parallel-relay.test.mjs checks three target groups start without serial waiting, same destination order, native text + image + face joined into one OneBot message, outgoing D1 outbox dispatch concurrently, health status never lies about socket connectivity.
+- Existing tests/abot-disabled.test.mjs adapted for scheduled internal /flush, tests/command-routing.test.mjs adapted for extra health diagnostics.
+- CI feature branch pending, production main SHA still 9b97668ccb4bfa910b065ff9be386fe2022a8604.
+- After promote, observe Cloudflare qqai source SHA, bbot.connected and bbot.last_event_at/last_closed_at, BBOT_BATCH_RESULT.duration_ms.
+- Live QQ 3-group latency test and rich-media acceptance still pending; do not claim sub-five-second SLA before observing it.

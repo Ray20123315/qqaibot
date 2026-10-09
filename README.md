@@ -39,3 +39,12 @@ QQ `3569028262`、`2681167798` 為受保護帳號；群內有任一在場時，�
 Cloudflare 原有 QQ_OPEN_GATEWAY 類別與 D1 不刪除（為了保護舊 migration）；舊 Gateway 的已知實例會被要求關閉。QQ 開放平台端殘留的舊指令面板與 Bot 帳號需另行管理，Worker 部署不會刪掉 QQ 平台的選單配置。
 
 完整步驟與風險參考 [部署與測試](docs/DEPLOY.md)。
+
+## 多群加速：並行 OneBot 送出（2026-10-10）
+
+- 同一則來源訊息的文字、圖片與表情等可用 OneBot 訊息段，盡量合併成**每個目標群一筆** `send_group_msg`，避免拆成多則。
+- **同時最多處理 4 個不同目的群**；同一目的群仍按原始佇列順序送出，每筆都要收到 NapCat ACK 才標記成功。
+- 新訊息入列後的 Durable Object alarm 排程縮短至約 50 毫秒，下一批超過 20 筆會續排，不必等到整分鐘 cron。
+- Cron 僅通知同一個 OneBotHub 排程，不直接搶送；避免 cron 與 alarm 對相同群的佇列造成順序競爭。
+- `/health` 提供 `bbot.connected`、`bbot.websocket_count`、`last_connected_at`、`last_event_at`、`last_closed_at`，便於追查你遇到的 `connected=false`。
+- 訊息經 NapCat／QQ 平台的實際速度仍受網路與平台限制，**不能保證**三群一定在 5 秒內完成；可看 Worker `BBOT_BATCH_RESULT.duration_ms` 找瓶頸。

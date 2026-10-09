@@ -31,7 +31,10 @@ export default {
    const bbot=b?.ok?await b.json():{connected:false};
    return json({service:"qq-cross-group-bridge",ai:false,configured:!!env.ONEBOT_ACCESS_TOKEN,
     mode:"bbot-only",abot:{connected:false,session_ready:false,enabled:false},
-    bbot:{connected:!!bbot.connected},command_prefix:"/! or !",
+    bbot:{connected:!!bbot.connected,websocket_count:Number(bbot.websocket_count||0),
+     last_connected_at:bbot.last_connected_at||null,last_event_at:bbot.last_event_at||null,
+     last_closed_at:bbot.last_closed_at||null},
+    command_prefix:"/! or !",relay:{mode:"parallel",max_parallel_groups:4},
     verification:"napcat",primary_command_transport:"bbot"});
   }
   if(path==="/onebot" || path==="/onebot/roster"){
@@ -52,14 +55,28 @@ export default {
  },
  async scheduled(event,env,ctx){
   ctx.waitUntil(stopOldGateways(env));
-  ctx.waitUntil(flushOutbox(env,15).catch(e=>console.error("RELAY_FLUSH",String(e).slice(0,220))));
+  ctx.waitUntil(hub(env).fetch("https://internal/flush").catch(e=>console.error("RELAY_SCHEDULE",String(e).slice(0,180))));
  }
 };
 export class OneBotHub {
  constructor(state,env){this.state=state;this.env=env;this.pending=new Map();this.inflight=new Map();this.lastRosterRequested=new Map();}
  async fetch(request){
   const pathname=new URL(request.url).pathname;
-  if(pathname==="/status" && request.method==="GET")return json({connected:!!this.socket()});
+  if(pathname==="/status" && request.method==="GET"){
+   const sockets=this.state.getWebSockets();
+   const [lastConnected,lastEvent,lastClosed]=await Promise.all([
+    this.state.storage.get("last_connected_at"),
+    this.state.storage.get("last_event_at"),
+    this.state.storage.get("last_closed_at")
+   ]);
+   return json({connected:!!this.socket(),websocket_count:sockets.length,
+    last_connected_at:lastConnected||null,last_event_at:lastEvent||null,last_closed_at:lastClosed||null});
+  }
+  if(pathname==="/flush"&&request.method==="GET"){
+   if(!this.socket())return json({scheduled:false,reason:"bbot_disconnected"},503);
+   await this.state.storage.setAlarm(Date.now()+50);
+   return json({scheduled:true});
+  }
   if(pathname==="/send" && request.method==="POST"){
    let data;try{data=await request.json();}catch{return json({ok:false,reason:"invalid_payload"},400);}
    const ws=this.socket();
@@ -71,6 +88,7 @@ export class OneBotHub {
   for(const existing of this.state.getWebSockets())try{existing.close(1000,"reconnected");}catch{}
   const pair=new WebSocketPair(),[client,server]=Object.values(pair);
   this.state.acceptWebSocket(server);
+  await this.state.storage.put("last_connected_at",new Date().toISOString());
   console.log("BBOT_WS_CONNECTED");
   return new Response(null,{status:101,webSocket:client});
  }
@@ -94,19 +112,33 @@ export class OneBotHub {
   console.log("BBOT_COMMAND_REPLY_OK");
  }
  async afterHandled(result){
-  if(result?.forwarded>0)await this.state.storage.setAlarm(Date.now()+1000);
+  if(result?.forwarded>0){
+   if(this.flushing)this.needsFlush=true;
+   await this.state.storage.setAlarm(Date.now()+50);
+  }
  }
  async alarm(){
   const ws=this.socket();
   if(!ws)return;
+  if(this.flushing){this.needsFlush=true;return;}
+  this.flushing=true;
+  let result=null;
   try{
-   await flushOutbox(this.env,12,{sendBbot:async (_env,id,group,segments)=>{
+   result=await flushOutbox(this.env,20,{sendBbot:async (_env,id,group,segments)=>{
     const response=await this.dispatch(ws,id,group,segments);
-    const result=await response.json();
-    if(!response.ok||!result?.ok)throw new Error("BBOT_"+(result?.reason||"ACK_FAILED"));
-    return result;
+    const ack=await response.json();
+    if(!response.ok||!ack?.ok)throw new Error("BBOT_"+(ack?.reason||"ACK_FAILED"));
+    return ack;
    }});
-  }catch(e){console.error("BBOT_RELAY_FLUSH",String(e).slice(0,130));}
+   // A busy relay should drain the next batch immediately, not wait for cron.
+  }catch(e){console.error("BBOT_RELAY_FLUSH",String(e).slice(0,160));}
+  finally{
+   this.flushing=false;
+   if(this.needsFlush||result?.processed>=20){
+    this.needsFlush=false;
+    await this.state.storage.setAlarm(Date.now()+50);
+   }
+  }
  }
 
  requestRoster(ws,group){
@@ -117,6 +149,11 @@ export class OneBotHub {
   ws.send(JSON.stringify({action:"get_group_info",params:{group_id:Number(group),no_cache:true},echo:"bridge-info:"+group}));
  }
  async webSocketMessage(ws,message){
+  const eventTime=Date.now();
+  if(eventTime-(this.lastRecordedEvent||0)>=15000){
+   this.lastRecordedEvent=eventTime;
+   if(this.state.storage?.put)await this.state.storage.put("last_event_at",new Date(eventTime).toISOString());
+  }
   let data;try{data=JSON.parse(typeof message==="string"?message:new TextDecoder().decode(message));}catch{return;}
   const echo=String(data?.echo||"");
   if(echo.startsWith("bridge-send:")){
@@ -169,8 +206,15 @@ export class OneBotHub {
    await this.afterHandled(result);
   }catch(e){console.error("BBOT_EVENT_FAILED",String(e).slice(0,250));}
  }
- async webSocketClose(ws,code,reason){try{ws.close(code,reason);}catch{}}
- async webSocketError(ws,error){console.error("BBOT_SOCKET_ERROR",String(error).slice(0,150));}
+ async webSocketClose(ws,code,reason){
+  await this.state.storage.put("last_closed_at",new Date().toISOString());
+  console.warn("BBOT_WS_CLOSED",code);
+  try{ws.close(code,reason);}catch{}
+ }
+ async webSocketError(ws,error){
+  await this.state.storage.put("last_closed_at",new Date().toISOString());
+  console.error("BBOT_SOCKET_ERROR",String(error).slice(0,150));
+ }
 }
 // Kept only because Cloudflare's historical durable-object migrations refer to
 // this class. There is NO connect, token fetch, command handling or heartbeat.

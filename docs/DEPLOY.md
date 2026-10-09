@@ -36,3 +36,11 @@ Worker 的 scheduled cron 不再打開 QQ Open Platform Gateway，只執行 Bbot
 - QQ 開放平台的舊 slash 面板是獨立配置，程式暫停 Abot 不會刪掉那份設定。
 - 保留完整舊版 Git 分支 `archive/legacy-main-20261009`，不刪除歷史 DB 資料。
 - AI 聊天維持停用。
+
+## 並行轉發與 WebSocket 診斷（2026-10-10）
+
+- Bbot 的群組發送改為最多 4 組並行（各群組內仍依序）；OneBot 接受 Array 訊息段，因此同一來源訊息可盡量合併文字、圖片、表情為一個訊息，不再每一類分別等待 ACK。
+- DO `alarm` 會在入列後約 50 毫秒喚醒，而非固定 1 秒；繁忙時續排下一批。Cron 僅喚醒同一 DO，不直接和 DO 搶發送佇列。
+- 新 `/health` 的 `bbot.connected` 僅表示當下存在 readyState=OPEN 的 WebSocket，`last_event_at` 只表示曾有最近訊息，**不能當作仍連線**。有 `last_event_at` 但 `connected=false` 時，檢查 `last_closed_at`、NapCat WebSocket Client 重新連線記錄及是否顯示 HTTP 401。
+- 詳細延遲由 `BBOT_BATCH_RESULT` 記錄總任務數、目的群數、並行度、成功失敗及 Worker batch 耗時（不寫入 QQ 訊息內容）。
+- **不要保證固定秒數**：QQ／NapCat 速率限制、網路與媒體上傳耗時可能仍導致大於 5 秒。若 QQ 拒絕複合媒體訊息，需依實際 OneBot 回傳代碼調整格式。
