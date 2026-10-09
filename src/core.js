@@ -10,7 +10,7 @@ export function qq(value) {
 }
 export function isProtected(value) { return PROTECTED_QQ.has(qq(value)); }
 export function parseCommand(input) {
-  const value = String(input ?? "").replace(/\[CQ:at,[^\]]+\]/g, " ").replace(/<@!?[^>]+>/g, " ").trim();
+  const value = String(input ?? "").replace(/\[CQ:at,[^\]]+\]/g, " ").replace(/<@!?[^>]+>/g, " ").replace(/^@(?:Abot|AIBot|QQBot)\s*/i,"").trim();
   const match = value.match(/^\/(\S+)(?:\s+([\s\S]*))?$/);
   if (!match) return null;
   const command = match[1].toLowerCase(), arg = clean(match[2] || "", 100);
@@ -73,6 +73,6 @@ export function formatForward(group, sender, parts, resolveMention = ()=>null) {
 export function isRelayable(msg) {
   if (!msg || !msg.parts.length) return false;
   if (msg.selfId && msg.senderQq===msg.selfId) return false;
-  if (parseCommand(msg.text)) return false;
+  if (parseCommand(msg.text) || /^\s*\//.test(msg.text)) return false;
   return msg.parts.some(p=>p.type==="at" || (p.type==="text" && p.text.trim()));
 }

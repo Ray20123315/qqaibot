@@ -52,3 +52,9 @@ test("bot messages never loop and slash commands are not relayed",()=>{
   message_id:88,message:[{type:"text",data:{text:"/status"}}]});
  assert.equal(isRelayable(msg),false);
 });
+
+test("literal @Abot and unknown slash ignored",()=>{
+ assert.deepEqual(parseCommand("@Abot /use"),{name:"use",arg:""});
+ const msg=parseOnebot({post_type:"message",message_type:"group",group_id:12345678,user_id:123456789,self_id:999999999,message_id:99,message:[{type:"text",data:{text:"/unknown test"}}]});
+ assert.equal(isRelayable(msg),false);
+});
