@@ -1,4 +1,3 @@
-
 name: Cross-group bridge verification
 on:
   push:
@@ -14,3 +13,22 @@ jobs:
           node-version: '22'
       - run: npm install --ignore-scripts
       - run: npm run check
+      - name: Archive and verify project memory
+        run: |
+          test -r .Ray_Chen/memory/00_START_HERE.md
+          test -r .Ray_Chen/memory/ACTIVE_TASK.md
+          test -r .Ray_Chen/memory/CURRENT_STATE.md
+          test -r .Ray_Chen/memory/FILE_MANIFEST.json
+          test "$(cat .Ray_Chen/memory/MEMORY_VERSION.txt)" = "v0.0.66"
+          tar -czf Ray_Chen_memory_v0.0.66.tar.gz .Ray_Chen/memory/
+          tar -tzf Ray_Chen_memory_v0.0.66.tar.gz > memory-list.txt
+          grep -q ".Ray_Chen/memory/FILE_MANIFEST.json" memory-list.txt
+          grep -q ".Ray_Chen/memory/ACTIVE_TASK.md" memory-list.txt
+          sha256sum Ray_Chen_memory_v0.0.66.tar.gz | tee Ray_Chen_memory_v0.0.66.sha256
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ray-chen-memory-v0.0.66
+          path: |
+            Ray_Chen_memory_v0.0.66.tar.gz
+            Ray_Chen_memory_v0.0.66.sha256
+          retention-days: 90

@@ -1,81 +1,97 @@
 {
-  "version": "v0.0.64",
-  "project": "QQAIBOT",
+  "version": "v0.0.66",
   "task_id": "qq-cross-group-bridge-20261009",
-  "changed_at": "2026-10-09T22:10:00+08:00",
-  "location_type": "github",
   "provider": "GitHub",
+  "location_type": "remote_repository",
   "repository": "Ray20123315/qqaibot",
+  "legacy_archive_branch": "archive/legacy-main-20261009",
+  "legacy_main_sha": "6a22b06433cfaffcf13abe2b60a917305290b629",
   "branch": "feature/qq-cross-group-bridge-20261009",
+  "latest_code_sha": "f5e7dc5fdb89de3db4708c7623bdbcc33be0f47d",
+  "action": "create-clean-bridge-worker-and-follow-up-regressions",
   "before_revision": "6a22b06433cfaffcf13abe2b60a917305290b629",
-  "after_revision": "PENDING_COMMIT",
-  "action": "create-clean-tree",
-  "verification": "code-produced-test-pending",
+  "after_revision": "FINAL_MEMORY_COMMIT_PENDING",
+  "verification": {
+    "github_ci_runs": [
+      37946376223,
+      37946659489
+    ],
+    "unit": "passed",
+    "bundle": "passed",
+    "live_qq": "not_tested",
+    "main_updated": false
+  },
+  "changed_at": "2026-10-09T23:15:00+08:00",
   "files": [
     {
+      "path": "worker.js",
+      "change": "feature_clean_tree_or_update",
+      "status": "produced"
+    },
+    {
       "path": "src/core.js",
-      "action": "new-bridge-version",
-      "blob_sha": "2e73828a51b29713a04b4f47ca36fc9279805a4f"
+      "change": "feature_clean_tree_or_update",
+      "status": "produced"
     },
     {
       "path": "src/store.js",
-      "action": "new-bridge-version",
-      "blob_sha": "1e6c71b1cd85e16404a491bbe710363c06a7542b"
+      "change": "feature_clean_tree_or_update",
+      "status": "produced"
     },
     {
       "path": "src/qq-api.js",
-      "action": "new-bridge-version",
-      "blob_sha": "d8cb9d1bc375713544fc8a3e4d718b063d9ff724"
+      "change": "feature_clean_tree_or_update",
+      "status": "produced"
     },
     {
       "path": "src/bridge.js",
-      "action": "new-bridge-version",
-      "blob_sha": "ff67bf1a0b0553998e230a594442c9446c8c0a34"
-    },
-    {
-      "path": "worker.js",
-      "action": "new-bridge-version",
-      "blob_sha": "97f864b5555fa26b8108275c478350b5d7ca6381"
-    },
-    {
-      "path": "package.json",
-      "action": "new-bridge-version",
-      "blob_sha": "fc6543ffefb48c8a66c7872e5dfb8638dbb4c723"
-    },
-    {
-      "path": "package-lock.json",
-      "action": "new-bridge-version",
-      "blob_sha": "dd3e8cbb607a5b8ae1ad0226720389e253de3c37"
-    },
-    {
-      "path": "wrangler.toml",
-      "action": "new-bridge-version",
-      "blob_sha": "188bbe25bc720e2d5fbded7b5a277d399e3ae152"
+      "change": "feature_clean_tree_or_update",
+      "status": "produced"
     },
     {
       "path": "tests/core.test.mjs",
-      "action": "new-bridge-version",
-      "blob_sha": "eb387c188b0e7efe9f10e58dfc40cac3901786a9"
+      "change": "feature_clean_tree_or_update",
+      "status": "produced"
     },
     {
-      "path": ".github/workflows/bridge-check.yml",
-      "action": "new-bridge-version",
-      "blob_sha": "6f0170f1779ba1036ade10a31f5f8d00a8374d27"
+      "path": "wrangler.toml",
+      "change": "feature_clean_tree_or_update",
+      "status": "produced"
     },
     {
-      "path": ".gitignore",
-      "action": "new-bridge-version",
-      "blob_sha": "4cbb7092986bc70bbe2cfc1739e6bd13eacd4d54"
+      "path": "package.json",
+      "change": "feature_clean_tree_or_update",
+      "status": "produced"
+    },
+    {
+      "path": "package-lock.json",
+      "change": "feature_clean_tree_or_update",
+      "status": "produced"
     },
     {
       "path": "README.md",
-      "action": "new-bridge-version",
-      "blob_sha": "6573246b278b6aec9105cf43429a681888c24af8"
+      "change": "feature_clean_tree_or_update",
+      "status": "produced"
     },
     {
       "path": "docs/DEPLOY.md",
-      "action": "new-bridge-version",
-      "blob_sha": "dd46d47a3ede5a1e48cfd15687cf9c6107e1feb5"
+      "change": "feature_clean_tree_or_update",
+      "status": "produced"
+    },
+    {
+      "path": ".github/workflows/bridge-check.yml",
+      "change": "feature_clean_tree_or_update",
+      "status": "produced"
+    },
+    {
+      "path": ".gitignore",
+      "change": "feature_clean_tree_or_update",
+      "status": "produced"
+    },
+    {
+      "path": ".Ray_Chen/memory/*",
+      "change": "feature_clean_tree_or_update",
+      "status": "produced"
     }
   ]
 }
