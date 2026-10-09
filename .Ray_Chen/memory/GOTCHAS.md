@@ -1,11 +1,10 @@
 # GOTCHAS
 
-- QQ API official 2025 notice says proactive push disabled, but 2026 community reports say group owners can enable it; actual target-group setting remains decisive.
-- Bbot QQ ID and Abot group member OpenID are not the same.
-- Native media may be only a NapCat internal file ID; Abot cannot upload without public HTTPS media URL. OneBot Bbot can sometimes forward local file media, but not guaranteed.
-- If QQ API request times out or 5xx, delivered vs undelivered can be ambiguous; never fall back automatically, avoid duplicate sends.
-- If Bbot OneBot ACK is missing, do not automatically retry. Delivery state 'failed_ambiguous'.
-- Two-minute Bbot roster can become stale; refuse protected admin writes when stale. Also use fresh target roster for Bbot true @.
-- DO queue and Bbot websocket health affect fallback. Incoming Bbot echo events must be filtered so messages do not loop.
-- QQ platform owner can directly kick bot, software cannot override.
-- Some reply/forward/face/card fidelity cannot be recreated cross group; do not claim 100%.
+- 2026 QQ group proactive push enable reported on mobile QQ, but official 2025 doc still says disabled; verify actual API and group toggle.
+- Bbot numeric QQ ID and Abot opaque Group OpenID not interchangeable. Pairing requires both observed code proofs from same QQ group.
+- Bbot roster expires in 2 minutes and can be stale; stop protected admin writes fail closed.
+- Official API may not reproduce QQ proprietary cards, reply/forward IDs or inaccessible media. Bbot native fallback best effort and may be unavailable.
+- Abot timeout/5xx and Bbot send ACK timeout are ambiguous: DO NOT replay and risk double send.
+- Inbound Abot echo may lose invisible marker in QQ client; obtain ABOT_QQ_ID from real Bbot observations for robust ignore.
+- Old QQ Gateway DO state/WS and NapCat reverse WS may persist across deployment; safe cutover requires reconnect plan.
+- Platform group owner can remove Bot, protected-user rule cannot override that.

@@ -20,7 +20,7 @@ Bbot NapCat 反向 WebSocket 使用 `wss://aibot.ray2025.com/onebot`，授權標
 
 1. Abot 收到 `@Abot /use` 建立暫存房間與驗證碼。
 2. Bbot 使用 OneBot `get_group_member_list` 取得可信數字 QQ ID 名單及身分；此名單僅兩分鐘有效。
-3. 同群管理員／群主輸入 `/verify <code>`，Bbot 綁定來源 QQ 群號與 Abot 的 `group_openid`。
+3. 同群管理員／群主輸入 `@Abot /verify <code>`，Abot 與 Bbot 必須各自觀測並提交相同代碼的證明，雙方核對成功後才將數字 QQ 群號綁定到 Abot `group_openid`。**只有 Bbot 收到驗證碼時不可以單獨綁定**。
 4. 新群以 `@Abot /<邀請代碼> <簡寫>` 加入，仍須獨立驗證。
 5. 要將 QQ ID 對應成 OpenID，先 `@Abot /id`，再由相同用戶發送 `@Abot /verifyid <code>`；Abot 與 Bbot 雙方看到驗證內容後才建立映射。
 
@@ -72,3 +72,9 @@ Bbot 會保存 OneBot 結構化的文字、@、圖片、語音、影片、檔案
 - 建議預先取得群成員同意跨群轉發，避免把原群私人內容發給未授權的群。
 
 參考：QQ 官方 [發送訊息規格](https://github.com/tencent-connect/bot-docs/blob/main/docs/develop/api-v2/server-inter/message/send-receive/send.md)、[NapCat 消息段](https://doc.napneko.icu/onebot/segment)、[Chobits 2026 API 聯調報告](https://github.com/xueelf/chobits)。
+
+## 雙向驗證與防循環（v0.0.69）
+
+- `/verify` 必須使用 `@Abot /verify <碼>`，讓兩個 Bot 在同一個 QQ 群看到這次訊息；不能只讓 Bbot 接收。
+- Abot 與 Bbot 的配對證明各自寫入資料庫；其中一側缺少證明、過期、群不匹配、未驗證群主身分或群員名單逾期，都不得完成映射。
+- Abot 發送的回覆及跨群訊息會加不可見的防循環標記，以減少 Bbot 再次轉發；若 QQ 客戶端清除該標記，應額外設定 `ABOT_QQ_ID`（需由 Bbot 驗證取得，不能猜測）以可靠排除 Abot 帳號本身。

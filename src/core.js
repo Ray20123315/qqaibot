@@ -1,3 +1,4 @@
+export const BRIDGE_ECHO_MARKER = "\u2063\u2063\u2063";
 
 export const PROTECTED_QQ = Object.freeze(new Set(["3569028262", "2681167798"]));
 export const MANAGE = new Set(["rename", "resume", "leave", "revoke", "stop", "code"]);

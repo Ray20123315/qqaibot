@@ -1,34 +1,70 @@
 {
-  "version": "v0.0.68",
+  "version": "v0.0.69",
   "task_id": "qq-cross-group-bridge-20261009",
-  "goal_revision": 2,
-  "changed_at": "2026-10-09T23:19:00+08:00",
-  "provider": "GitHub",
+  "goal_revision": 3,
+  "changed_at": "2026-10-09T23:45:00+08:00",
   "repository": "Ray20123315/qqaibot",
   "branch": "feature/qq-cross-group-bridge-20261009",
+  "provider": "GitHub",
   "location_type": "remote",
-  "before_revision": "00b2187f5aad3a49f44456212d6ac674b279d089",
+  "before_revision": "281fdf83c06dabe1090a65ee6c4e9bd7ed94b4dd",
   "after_revision": "this-commit-see-git-head",
+  "legacy_main": "6a22b06433cfaffcf13abe2b60a917305290b629",
   "verification": {
-    "previous_ci": 37949966486,
-    "previous_ci_outcome": "failed_due_to_test_mock_signature",
-    "new_ci": "pending",
-    "live_qq": "unknown",
-    "main_updated": false
+    "previous_ci": 37950336668,
+    "previous_ci_status": "success",
+    "current_ci": "pending",
+    "qq_live": "unverified",
+    "main_untouched": true
   },
   "changes": [
     {
-      "path": "tests/relay.test.mjs",
-      "sha": "bf30a6c93226b903ab35c6828c52aceba53b37ab",
-      "action": "fix_mock"
+      "path": "src/core.js",
+      "action": "updated",
+      "blob_sha": "e87cd8c00925e765666e780bd36d3a626558373f"
     },
     {
-      "path": ".Ray_Chen/memory/*",
-      "action": "update"
+      "path": "src/delivery.js",
+      "action": "updated",
+      "blob_sha": "00f3ee65b474083e8bb92e6c03fbc9b4b775fa77"
+    },
+    {
+      "path": "src/qq-api.js",
+      "action": "updated",
+      "blob_sha": "9c8e45d5f5b3adf76dd96d57cd0cf970497c0664"
+    },
+    {
+      "path": "src/pairing.js",
+      "action": "updated",
+      "blob_sha": "70eb3bee7e8fe04e5f1b10b13dcf11d2d3624d41"
+    },
+    {
+      "path": "src/bridge.js",
+      "action": "updated",
+      "blob_sha": "c6d102991db6fceef50620a124b09087ea308b21"
+    },
+    {
+      "path": "tests/pairing.test.mjs",
+      "action": "updated",
+      "blob_sha": "b287e0b13b2e9c90824c77265c2900e3c445e19b"
+    },
+    {
+      "path": "docs/DEPLOY.md",
+      "action": "updated",
+      "blob_sha": "56c46cf3d7cf347a9f52f29bcb3ec136badb6154"
+    },
+    {
+      "path": "README.md",
+      "action": "updated",
+      "blob_sha": "4943d2f4c7d9cdc76dba5484601ebc93ee50dc9a"
     },
     {
       "path": ".github/workflows/bridge-check.yml",
-      "action": "update"
+      "action": "memory_package_version"
+    },
+    {
+      "path": ".Ray_Chen/memory/*",
+      "action": "canonical_sync"
     }
   ]
 }

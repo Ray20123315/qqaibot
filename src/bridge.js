@@ -1,9 +1,10 @@
 
-import {clean,qq,isProtected,parseCommand,parseOnebot,authorize,formatForward,isRelayable} from "./core.js";
+import {BRIDGE_ECHO_MARKER,clean,qq,isProtected,parseCommand,parseOnebot,authorize,formatForward,isRelayable} from "./core.js";
 import {init,get,all,run,digest,makeCode,groupByQq,groupByOpen,roster,recordRoster} from "./store.js";
 import {sendGroup,groupBotState} from "./qq-api.js";
 import {relayOperations} from "./relay.js";
 import {deliver} from "./delivery.js";
+import {pairCanFinalize} from "./pairing.js";
 let extraReady=false;
 async function ready(env){
  await init(env.DB);
@@ -12,6 +13,7 @@ async function ready(env){
   await env.DB.prepare("CREATE INDEX IF NOT EXISTS bridge_outbox_state_idx ON bridge_outbox(state,created_at)").run();
   await env.DB.prepare("CREATE TABLE IF NOT EXISTS bridge_id_proof (token_hash TEXT PRIMARY KEY, official_confirmed INTEGER NOT NULL DEFAULT 0, qq_id TEXT, verified_at INTEGER NOT NULL DEFAULT 0)").run();
   await env.DB.prepare("CREATE TABLE IF NOT EXISTS bridge_reply_context (group_openid TEXT PRIMARY KEY, msg_id TEXT NOT NULL, expires_at INTEGER NOT NULL)").run();
+  await env.DB.prepare("CREATE TABLE IF NOT EXISTS bridge_pair_proof (token_hash TEXT PRIMARY KEY, group_openid TEXT NOT NULL, bbot_group TEXT NOT NULL DEFAULT '', actor_qq TEXT NOT NULL DEFAULT '', display_name TEXT NOT NULL DEFAULT '', official_seen INTEGER NOT NULL DEFAULT 0, bbot_seen INTEGER NOT NULL DEFAULT 0, updated_at INTEGER NOT NULL)").run();
   extraReady=true;
  }
 }
@@ -23,7 +25,7 @@ async function answer(env,group,text,msgId) {
    const ctx=await get(env.DB,"SELECT msg_id FROM bridge_reply_context WHERE group_openid=? AND expires_at>?",group,now());
    msgId=ctx?.msg_id||undefined;
  }
- try {await sendGroup(env,group,text,msgId);return true;}
+ try {await sendGroup(env,group,text+BRIDGE_ECHO_MARKER,msgId);return true;}
  catch(e){console.error("ABOT_RESPONSE_FAILED",String(e).slice(0,240));return false;}
 }
 async function logDelivery(env,id,target,state,error=""){
@@ -52,7 +54,7 @@ export async function onOfficialEvent(env,payload){
   const invite=makeCode(12),roomId=crypto.randomUUID(),nonce=makeCode(10);
   await run(env.DB,"INSERT INTO bridge_rooms(id,code_hash,created_at) VALUES(?,?,?)",roomId,await digest(invite),now());
   await initialGroup(env,groupOpenid,roomId,"",nonce);
-  const response="連線代碼："+invite+"\n待驗證：請本群群主或管理員送出 /verify "+nonce+"。\n驗證成功後代碼才生效；請勿公開傳到不信任的群。";
+  const response="連線代碼："+invite+"\n待驗證：請本群群主或管理員在這個群送出 @Abot /verify "+nonce+"。\nAbot 和 Bbot 都收到後才會配對；請勿把驗證碼轉給其他群。";
   return {handled:true,reply:await answer(env,groupOpenid,response,msgId)};
  }
  if(command.name==="join"){
@@ -60,7 +62,16 @@ export async function onOfficialEvent(env,payload){
   const room=await get(env.DB,"SELECT * FROM bridge_rooms WHERE code_hash=? AND active=1 AND revoked=0",await digest(command.code));
   if(!room)return {handled:true,reply:await answer(env,groupOpenid,"連線代碼無效、未驗證或已撤銷。",msgId)};
   const nonce=makeCode(10);await initialGroup(env,groupOpenid,room.id,command.arg,nonce);
-  return {handled:true,reply:await answer(env,groupOpenid,"加入待驗證，請本群群主或管理員輸入 /verify "+nonce,msgId)};
+  return {handled:true,reply:await answer(env,groupOpenid,"加入待驗證，請本群群主或管理員在本群輸入 @Abot /verify "+nonce,msgId)};
+ }
+ if(command.name==="verify"){
+  const hash=await digest(command.arg.toUpperCase());
+  const g=await get(env.DB,"SELECT * FROM bridge_groups WHERE group_openid=? AND pairing_hash=? AND verified=0 AND pairing_expires>?",groupOpenid,hash,now());
+  if(!g)return {handled:true,reply:await answer(env,groupOpenid,"驗證碼無效，或不是本群產生的代碼。",msgId)};
+  await run(env.DB,"INSERT OR IGNORE INTO bridge_pair_proof(token_hash,group_openid,official_seen,updated_at) VALUES(?,?,1,?)",hash,groupOpenid,now());
+  await run(env.DB,"UPDATE bridge_pair_proof SET official_seen=1,updated_at=? WHERE token_hash=? AND group_openid=?",now(),hash,groupOpenid);
+  const joined=await finishPair(env,hash);
+  return {handled:true,reply:await answer(env,groupOpenid,joined?"群組雙重驗證成功，橋接已啟用。":"Abot 已確認本群，等待 Bbot 核對 QQ 群號及群主／管理員身分。",msgId)};
  }
  if(command.name==="id"){
   if(!current?.verified)return {handled:true};
@@ -101,11 +112,25 @@ async function finishIdentity(env,hash){
  await run(env.DB,"DELETE FROM bridge_id_proof WHERE token_hash=?",hash);
  return true;
 }
+async function finishPair(env,hash){
+ const group=await get(env.DB,"SELECT * FROM bridge_groups WHERE pairing_hash=? AND verified=0 AND pairing_expires>?",hash,now());
+ const proof=await get(env.DB,"SELECT * FROM bridge_pair_proof WHERE token_hash=?",hash);
+ if(!group||!proof||!qq(proof.bbot_group))return false;
+ const view=await roster(env.DB,proof.bbot_group);
+ const actor=await get(env.DB,"SELECT role FROM bridge_members WHERE qq_group_id=? AND qq_id=?",proof.bbot_group,proof.actor_qq);
+ const exists=await groupByQq(env.DB,proof.bbot_group);
+ if(!pairCanFinalize(group,proof,view,actor,exists))return false;
+ const result=await run(env.DB,"UPDATE bridge_groups SET qq_group_id=?,verified=1,pairing_hash=NULL,pairing_expires=0,display_name=? WHERE group_openid=? AND verified=0",
+ proof.bbot_group,clean(proof.display_name||"QQ群 "+proof.bbot_group,60),group.group_openid);
+ if(!Number(result.meta?.changes||0))return false;
+ await run(env.DB,"UPDATE bridge_rooms SET active=1,creator_qq=COALESCE(creator_qq,?) WHERE id=?",proof.actor_qq,group.room_id);
+ await run(env.DB,"DELETE FROM bridge_pair_proof WHERE token_hash=?",hash);
+ return true;
+}
 async function verifyPair(env,msg,command){
  const hash=await digest(command.arg.toUpperCase());
  const group=await get(env.DB,"SELECT * FROM bridge_groups WHERE pairing_hash=? AND verified=0 AND pairing_expires>?",hash,now());
  if(!group)return false;
- // Only verified Bbot group sender and current trusted roster determine privileges.
  const view=await roster(env.DB,msg.groupId);
  const actor=await get(env.DB,"SELECT role FROM bridge_members WHERE qq_group_id=? AND qq_id=?",msg.groupId,msg.senderQq);
  if(!view.fresh||(!adminRole(actor?.role)&&!isProtected(msg.senderQq))){
@@ -115,12 +140,17 @@ async function verifyPair(env,msg,command){
  if(exists&&exists.group_openid!==group.group_openid){
   await answer(env,group.group_openid,"此 QQ 群已綁定另一個連線。");return true;
  }
- await run(env.DB,"UPDATE bridge_groups SET qq_group_id=?, verified=1, pairing_hash=NULL, pairing_expires=0, display_name=? WHERE group_openid=? AND verified=0",
- msg.groupId,clean(msg.groupName||"QQ群 "+msg.groupId,60),group.group_openid);
- await run(env.DB,"UPDATE bridge_rooms SET active=1,creator_qq=COALESCE(creator_qq,?) WHERE id=?",msg.senderQq,group.room_id);
- await answer(env,group.group_openid,"群組驗證成功，跨群橋接已啟用。");
+ await run(env.DB,"INSERT OR IGNORE INTO bridge_pair_proof(token_hash,group_openid,bbot_group,actor_qq,display_name,bbot_seen,updated_at) VALUES(?,?,?,?,?,1,?)",
+ hash,group.group_openid,msg.groupId,msg.senderQq,clean(msg.groupName||"QQ群 "+msg.groupId,60),now());
+ const recorded=await get(env.DB,"SELECT * FROM bridge_pair_proof WHERE token_hash=?",hash);
+ if(recorded.group_openid!==group.group_openid||(recorded.bbot_group&&recorded.bbot_group!==msg.groupId))return true;
+ await run(env.DB,"UPDATE bridge_pair_proof SET bbot_group=?,actor_qq=?,display_name=?,bbot_seen=1,updated_at=? WHERE token_hash=? AND group_openid=? AND (bbot_group='' OR bbot_group=?)",
+ msg.groupId,msg.senderQq,clean(msg.groupName||"QQ群 "+msg.groupId,60),now(),hash,group.group_openid,msg.groupId);
+ const joined=await finishPair(env,hash);
+ if(joined)await answer(env,group.group_openid,"群組雙重驗證成功，跨群橋接已啟用。");
  return true;
 }
+
 async function handleControl(env,group,msg,command){
  const name=command.name;
  if(name==="help")return answer(env,group.group_openid,"指令：/use /代碼 簡寫 /verify /status /stop /resume /leave /rename 名稱 /revoke /code /grant QQ號 manage|stop|both /ungrant QQ號 /id /verifyid");
@@ -181,7 +211,7 @@ async function handleControl(env,group,msg,command){
 }
 export async function onOnebotEvent(env,event){
  const msg=parseOnebot(event);if(!msg)return {ignored:true};
- if(msg.senderQq===msg.selfId||msg.senderQq===qq(env.ABOT_QQ_ID))return {ignored:true};
+ if(msg.senderQq===msg.selfId||msg.senderQq===qq(env.ABOT_QQ_ID)||msg.text.includes(BRIDGE_ECHO_MARKER))return {ignored:true};
  await ready(env);
  const command=parseCommand(msg.text);
  if(command?.name==="verify")return {handled:await verifyPair(env,msg,command)};

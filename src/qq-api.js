@@ -1,3 +1,4 @@
+import {BRIDGE_ECHO_MARKER} from "./core.js";
 const API="https://api.sgroup.qq.com";
 const tokens=new Map();
 function qqApiError(status,body){
@@ -40,7 +41,7 @@ export async function uploadGroupMedia(env,group,kind,url){
 export async function sendMedia(env,group,operation){
  if(!operation.mediaUrl)throw Object.assign(new Error("ABOT_MEDIA_NO_PUBLIC_URL"),{status:415});
  const fileInfo=await uploadGroupMedia(env,group,operation.mediaKind,operation.mediaUrl);
- return sendGroup(env,group," ",undefined,{msg_type:7,media:{file_info:fileInfo}});
+ return sendGroup(env,group," "+BRIDGE_ECHO_MARKER,undefined,{msg_type:7,media:{file_info:fileInfo}});
 }
 
 export async function groupBotState(env,group){

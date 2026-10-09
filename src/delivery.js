@@ -1,3 +1,4 @@
+import {BRIDGE_ECHO_MARKER} from "./core.js";
 import {sendGroup,sendMedia} from "./qq-api.js";
 import {classifyAbotFailure,decideFallback} from "./relay.js";
 export async function sendUsingBbot(env,id,groupId,segments){
@@ -14,7 +15,7 @@ export async function deliver(env,item,{sendBbot=sendUsingBbot,sendText=sendGrou
  let abotError=null;
  try{
   if(operation.kind==="text"){
-   await sendText(env,item.target_group,operation.content);
+   await sendText(env,item.target_group,operation.content+BRIDGE_ECHO_MARKER);
   } else if(operation.kind==="media"){
    await sendAttachment(env,item.target_group,operation);
   } else {
