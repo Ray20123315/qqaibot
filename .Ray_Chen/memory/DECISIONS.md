@@ -1,7 +1,7 @@
 # DECISIONS
 
-- 2026-10-10 goal revision 7: NapCat Bbot now primary for receiving commands, verifying group owner/admin and sending verification replies. Other QQ groups need only Bbot membership; does not require Abot Group OpenID or Abot receiving official event. Supersedes mandatory Abot/Bbot two-sided proof for new NapCat-only links.
-- 2026-10-10: synthetic group_openid prefix napcat: identifies Bbot-routed numeric QQ group. Never send this synthetic value to QQ official API. Existing real Abot groups still retain their verified mappings and can be used by old Abot-first transport when linked.
-- 2026-10-10: group creation/join permitted by trusted owner/admin even in group containing Bbot protected QQ; protected ACL continues to prohibit stopping/leaving/revoking or delegation.
-- 2026-10-10: no synchronous outbound message flush from Bbot incoming WS event. Enqueue then short OneBotHub alarm and cron backup to permit successful OneBot ACK handling.
-- 2026-10-10: current Abot Gateway skips group management commands under BRIDGE_NAPCAT_COMMANDS=true to avoid duplicate room creation when @AIBot message seen. Plain !use without @ recommended until older Gateway sessions cease.
+2026-10-10: Abot replies only in one QQ group, other groups show 40034105 no proactive permission. Use NapCat Bbot as primary command observer, authority for QQ IDs/rosters and verification sender; group creation/join does not require Abot OpenID (supersedes mandatory dual-proof for new NapCat-native groups).
+2026-10-10: Synthetic database key napcat:<QQgroup> is not real QQ OpenID; deliver straight to OneBot for this type, preserving Abot-first for valid real OpenID groups.
+2026-10-10: Owner/admin may join or initiate room even with protected QQ present; grant/stop/leave/revoke still subject to protected QQ policy.
+2026-10-10: Use new DO identity bridge-bbot-napcat-v2 so existing hot Bbot DO is not mistaken for current code; user must reconnect NapCat Client one time after main deploy.
+2026-10-10: No secrets rotated or exported. Old state kept and old interface command panel not reactivated. All changes CI verified before main fast-forward.

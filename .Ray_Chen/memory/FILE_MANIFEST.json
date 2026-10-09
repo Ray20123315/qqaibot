@@ -1,43 +1,71 @@
 {
-  "version": "v0.0.77",
+  "version": "v0.0.78",
   "task_id": "qq-cross-group-bridge-20261009",
   "goal_revision": 7,
-  "changed_at": "2026-10-10T00:48:00+08:00",
+  "changed_at": "2026-10-10T00:52:00+08:00",
   "provider": "GitHub",
-  "repository": "Ray20123315/qqaibot",
-  "branch": "feature/napcat-native-link-20261010",
   "location_type": "remote",
-  "before_revision": "16a1391457e64f3909ccc997ca771d21fbd27542",
-  "after_revision": "pending_git_commit",
+  "repository": "Ray20123315/qqaibot",
+  "branch": "main",
+  "previous_main": "ff80b3d96e223b1663e7d2c5b5b578828b052410",
+  "product_sha": "4db8fcbf844fc0cc64b4a1cf3919e18dcef5902f",
+  "final_revision": "memory-commit-pending",
   "verification": {
-    "previous_ci": 37960960301,
-    "previous_result": "success",
-    "current_ci": "pending",
-    "live_qq": "unknown"
+    "ci_runs": [
+      37960960301,
+      37961297179
+    ],
+    "ci_outcome": "success",
+    "cloudflare_deployment": "0f0dd1fc-54f1-4773-9de3-59a269ffbeb8",
+    "cloudflare_version": "be4ec8e1-656d-43c7-9b55-00d5eafab839",
+    "cloudflare_build": "success",
+    "traffic_percent": 100,
+    "live_qq": "pending"
   },
-  "changes": [
+  "files": [
     {
-      "path": "worker.js",
-      "action": "new OneBotHub DO identity",
-      "blob_sha": "36ed4a6e3de32bcab53a1af9de84543db352d7db"
+      "path": "src/napcat-control.js",
+      "action": "created"
+    },
+    {
+      "path": "src/bridge.js",
+      "action": "modified"
     },
     {
       "path": "src/delivery.js",
-      "action": "matching Bbot DO stub",
-      "blob_sha": "1a87de5097d758a689e66cf3f40741c157758287"
+      "action": "modified"
+    },
+    {
+      "path": "worker.js",
+      "action": "modified"
+    },
+    {
+      "path": "tests/napcat-control.test.mjs",
+      "action": "created"
+    },
+    {
+      "path": "wrangler.toml",
+      "action": "modified"
+    },
+    {
+      "path": "README.md",
+      "action": "modified"
     },
     {
       "path": "docs/DEPLOY.md",
-      "action": "NapCat reconnect instruction",
-      "blob_sha": "16ec9b31c3b0a4373af971fe8b4ff245b4f5eda2"
+      "action": "modified"
     },
     {
       "path": ".github/workflows/bridge-check.yml",
-      "action": "memory v0.0.77"
+      "action": "memory_version_update"
     },
     {
       "path": ".Ray_Chen/memory/*",
-      "action": "canonical update"
+      "action": "update"
     }
-  ]
+  ],
+  "legacy_archive": {
+    "branch": "archive/legacy-main-20261009",
+    "sha": "6a22b06433cfaffcf13abe2b60a917305290b629"
+  }
 }

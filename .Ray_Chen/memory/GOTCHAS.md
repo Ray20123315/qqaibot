@@ -1,9 +1,10 @@
 # GOTCHAS
 
-- QQ official Abot group proactive send can return QQ_API_400:40034105 无权限 in unapproved groups, even if one group works. Do not assume all group IDs are addressable.
-- A NapCat-only group has no QQ official Group OpenID. Its database key napcat:<groupID> MUST NOT be passed to official send API; use Bbot OneBot direct.
-- Some QQ groups have Bbot self QQ 2681167798 which is protected; this must not block an administrator from joining a bridge, only prevent ungranted stop/leave/revoke or grant.
-- Fresh OneBot roster required for privileged commands. Bbot must have valid authenticated Reverse WS and receive roster callback; HTTP 401 means no commands work.
-- Incoming WS handler blocking on self DO stub fetch can deadlock OneBot ACK; use direct same-socket send for command replies and alarm-based outbox dispatch.
-- Old Abot /!use previously issued unverified invite in one group; it is NOT an active Bbot-native invite and must not be silently mixed with groups from unknown QQ ID mappings.
-- Old Abot Gateway hot DO instance might still process older versions of @AIBot commands. Plain !use without @ suppresses official-event duplication.
+- QQ Open Abot active-send could be restricted per group (observed QQ 40034105), so cross-group joining cannot depend on Abot availability.
+- Existing Abot pending code cannot be used as a NapCat-created active invite; do not auto-import without group mapping. Ask first group to create fresh !use Bbot code.
+- NapCat reverse WS may keep a hot DO running older code across deployments. New hub key bridge-bbot-napcat-v2 is isolated; must reconnect client to attach to new DO; /health reports connected only after handshake.
+- Bbot's own numeric QQ 2681167798 may be one of the protected identities in every group; this must restrict STOP/LEAVE/GRANT but not prevent admin/owner from initial JOIN/CREATE.
+- Native Bbot group commands and replies require a fresh OneBot get_group_member_list roster. If roster query fails, fail closed rather than claim caller admin.
+- Outbox dispatch in a Bbot DO should not synchronously call the same DO while receiving a WebSocket message; use short alarm, do not blindly resend ambiguous ACK.
+- Bare !use (no @AIBot) prevents older official QQ Gateway from issuing a second unrelated link code.
+- Abot and Bbot media formats may not be completely interoperable; no real QQ media end-to-end evidence yet.

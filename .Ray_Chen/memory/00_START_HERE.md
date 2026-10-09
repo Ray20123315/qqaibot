@@ -1,11 +1,12 @@
 # Ray_Chen Memory
 
-memory_version: v0.0.77
+version: v0.0.78
 task_id: qq-cross-group-bridge-20261009
+task_status: blocked
 goal_revision: 7
-task_status: active
-canonical_branch: feature/napcat-native-link-20261010
+canonical_branch: main
+product_commit: 4db8fcbf844fc0cc64b4a1cf3919e18dcef5902f
 legacy_archive: archive/legacy-main-20261009
-updated_at: 2026-10-10T00:48:00+08:00
+updated_at: 2026-10-10T00:52:00+08:00
 
-Read ACTIVE_TASK, CURRENT_STATE, DECISIONS, GOTCHAS, VERIFY before production promotion. NapCat control CI v0.0.76 green; Bbot DO identity moved to bridge-bbot-napcat-v2 to avoid hot old instance; full CI rerun pending.
+NapCat-native /! and ! group link and forwarding code is now deployed to production main. Bbot WebSocket Client must reconnect once to new DO instance bridge-bbot-napcat-v2 and then live user checks !use and !code join across two groups. Read ACTIVE_TASK, CURRENT_STATE, DECISIONS, GOTCHAS, VERIFY and FILE_MANIFEST before resuming.
