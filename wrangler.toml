@@ -1,28 +1,18 @@
-"$schema" = "./node_modules/wrangler/config-schema.json"
 
-# Active maintainer deployment. New installations should start from wrangler.example.toml.
 name = "qqai"
 main = "worker.js"
 compatibility_date = "2026-07-21"
 compatibility_flags = ["nodejs_compat"]
 workers_dev = true
-# Keep Dashboard-managed non-secret variables that are intentionally not declared below.
-# This prevents deployments from deleting DEVELOPER_IDS / ROOT_QQ_IDS / DEVELOPER_ID and other web-managed vars.
 keep_vars = true
 
-# Custom domain for this deployment; fork owners may replace or remove this block.
 [[routes]]
 pattern = "aibot.ray2025.com"
 custom_domain = true
 
-# Temporary compatibility host. HTTP requests are redirected to aibot.ray2025.com by worker.js.
-# WebSocket /onebot remains accepted so existing NapCat clients can migrate without downtime.
 [[routes]]
 pattern = "qqai.ray2025.com"
 custom_domain = true
-
-[ai]
-binding = "AI"
 
 [[durable_objects.bindings]]
 name = "ONEBOT_HUB"
@@ -32,125 +22,32 @@ class_name = "OneBotHub"
 name = "QQ_OPEN_GATEWAY"
 class_name = "QqOpenGateway"
 
-# Durable Object migration history must not be deleted, renamed or reordered.
+# Preserve the existing Durable Object migration history exactly.
 [[migrations]]
 tag = "v1_onebot_hub"
 new_sqlite_classes = ["OneBotHub"]
-
 [[migrations]]
 tag = "v2_budget_guard"
 new_sqlite_classes = ["BudgetGuard"]
-
 [[migrations]]
 tag = "v3_remove_budget_guard"
 deleted_classes = ["BudgetGuard"]
-
 [[migrations]]
 tag = "v4_qqopen_gateway"
 new_sqlite_classes = ["QqOpenGateway"]
 
-# Active production resources. Fork owners must create and substitute their own IDs.
 [[d1_databases]]
 binding = "DB"
 database_name = "qqaibot"
 database_id = "569a01fe-3297-40e1-832f-09c3793056ed"
 
-[[vectorize]]
-binding = "VECTORIZE"
-index_name = "qqai"
-
-# Minute scheduler plus hourly D1 cleanup.
 [triggers]
-crons = ["* * * * *", "17 * * * *"]
-
-[[ratelimits]]
-name = "MY_RATE_LIMITER"
-namespace_id = "999"
-
-  [ratelimits.simple]
-  limit = 1
-  period = 10
+crons = ["* * * * *"]
 
 [vars]
-# Developer / Root identity is intentionally Dashboard-managed and NOT declared here.
-# Set DEVELOPER_IDS / ROOT_QQ_IDS / legacy DEVELOPER_ID in Cloudflare Dashboard Variables.
-# keep_vars=true preserves those values across Wrangler/Git deployments.
-
-# Public links shown by the bot. Change this when using another domain or workers.dev URL.
-PUBLIC_BASE_URL = "https://aibot.ray2025.com"
-BOT_DISPLAY_NAME = "QQAI"
-
-# QQ Open Native V4. Keep QQ_OPEN_CLIENT_SECRET as a Cloudflare Secret.
-QQ_OPEN_ENABLED = "true"
 QQ_OPEN_APP_ID = "1905687174"
 QQ_OPEN_INTENTS = "100663296"
-QQ_OPEN_TRANSPORT = "websocket"
-QQ_OPEN_SHARD_ID = "0"
-QQ_OPEN_SHARD_TOTAL = "1"
-QQ_OPEN_DISCOVERY_SYNC = "true"
-# QQ 自定义消息按钮属于额外能力；AppID 未明确获批前保持关闭。
-QQ_OPEN_CUSTOM_KEYBOARD_ENABLED = "false"
-# QQ Open owns interactive side effects; OneBot/NapCat remains auxiliary observation.
-QQ_HYBRID_PRIMARY = "qq-open"
-# Explicit numeric OneBot group id -> QQ group_openid mapping. Never infer it.
-QQ_HYBRID_GROUP_MAP = "{}"
-
-# Deployment notification scope and timing.
-DEPLOY_NOTIFY_WORKER_NAME = "qqai"
-DEPLOY_NOTIFY_BRANCH = "main"
-DEPLOY_NOTIFY_SELF_GRACE_SECONDS = "90"
-
-# Manual all-group check-in batch concurrency. Automatic midnight check-in is disabled in the lean v2 runtime.
-# Paid-model policy and model lists.
-DEEPSEEK_FLASH_MODEL = "deepseek-v4-flash"
-DEEPSEEK_DAILY_BUDGET_CNY = "0.35"
-GEMINI_CHAT_MODELS = "gemini-3.5-flash,gemini-3.1-flash-lite,gemini-3-flash-preview,gemini-2.5-flash,gemini-2.5-flash-lite,gemma-4-26b-a4b-it,gemma-4-31b-it"
-GEMMA_DECISION_MODELS = "gemma-4-26b-a4b-it,gemma-4-31b-it"
-GEMINI_TTS_MODELS = "gemini-3.1-flash-tts-preview,gemini-2.5-flash-preview-tts"
-GEMINI_LIVE_MODEL = "models/gemini-3.1-flash-live-preview"
-
-# Optional: sandboxed external plugins require Cloudflare Dynamic Workers (Workers Paid).
-# Uncomment only after confirming the production account supports Dynamic Workers.
-# [[worker_loaders]]
-# binding = "PLUGIN_LOADER"
+BRIDGE_REAL_MENTIONS = "false"
 
 [observability]
-enabled = false
-
-
-# V4 branch Preview: same Worker and same physical D1, but a dedicated SQL table namespace.
-# Production continues to use kv_store because QQAI_DB_TABLE is not defined above.
-[previews.ai]
-binding = "AI"
-
-[[previews.durable_objects.bindings]]
-name = "ONEBOT_HUB"
-class_name = "OneBotHub"
-
-[[previews.durable_objects.bindings]]
-name = "QQ_OPEN_GATEWAY"
-class_name = "QqOpenGateway"
-
-[[previews.d1_databases]]
-binding = "DB"
-database_name = "qqaibot"
-database_id = "569a01fe-3297-40e1-832f-09c3793056ed"
-
-[[previews.ratelimits]]
-name = "MY_RATE_LIMITER"
-namespace_id = "1999"
-
-  [previews.ratelimits.simple]
-  limit = 1
-  period = 10
-
-[previews.vars]
-QQAI_DB_TABLE = "kv_store_v4public_preview"
-BOT_DISPLAY_NAME = "QQAI V4 Preview"
-QQ_OPEN_ENABLED = "false"
-QQ_OPEN_TRANSPORT = "websocket"
-QQ_HYBRID_PRIMARY = "qq-open"
-QQ_HYBRID_GROUP_MAP = "{}"
-DEPLOY_NOTIFY_WORKER_NAME = "qqai"
-DEPLOY_NOTIFY_BRANCH = "feature/v4-public-bot"
-DEPLOY_NOTIFY_SELF_GRACE_SECONDS = "90"
+enabled = true

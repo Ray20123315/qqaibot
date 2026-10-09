@@ -1,146 +1,24 @@
 # ACTIVE_TASK
 
-task_id: qqaibot-20261001-panel-complete-real-message-send
-task_status: blocked
-goal_revision: 7
-
-## Goal
-
-Fix the live QQ category panel so `/!面板 <分类>` renders an actually clickable command keyboard in the QQ client. The live 2026-10-02 17:50 test proved that the current payload produces title text only.
-
-## Acceptance Criteria
-
-- PLANNED: keyboard serialization follows the current Tencent Node SDK minimum shape.
-- PLANNED: direct/no-argument commands still use `action.type=2` with `enter=true`.
-- PLANNED: parameterized commands use `action.type=2` without auto-send and remain editable.
-- PLANNED: pagination stays reusable and clickable.
-- PLANNED: every retained non-empty group category remains covered.
-- PLANNED: development CI passes.
-- PLANNED: main CI passes after verified promotion.
-- PLANNED: production deployment succeeds.
-- NEEDS_REVIEW: live QQ must show visible buttons after deployment.
-
-## Live Evidence
-
-- 2026-10-02T17:50:41+08:00: user sent `/!面板 群聊`.
-- Bot returned exactly the category prompt text but no visible keyboard.
-- No `备用文字` fallback appeared, so this is not the explicit keyboard-error fallback path.
-- Cloudflare account-level observability does not currently expose the `qqai` Worker dataset, so there is no usable centralized payload log for that event.
-
-## Current Phase
-
-Phase 4 — production live-client acceptance.
-
-## Current Step
-
-Product code is VERIFIED and DEPLOYED at `232e2577558dd67fffab769ac474243956bf8435`. Only the live QQ client rendering/click behavior remains unverified.
-
-## Execution Plan
-
-1. Compare deployed keyboard JSON against current Tencent SDK/documented keyboard shape.
-2. Minimize optional button fields while preserving required direct-send/prefill semantics.
-3. Extend regression assertions for exact serialized payloads and all categories.
-4. Run development CI; repair any failure before promotion.
-5. Promote the verified revision to `main`, verify main CI/deployment, then require one live QQ smoke.
-
-## Product Files Changed
-
-- src/v4/commands/group-panel.js
-- src/v4/qqopen/runtime.js
-- verify-v4-qqopen.mjs
-
-## Verification Results
-
-- VERIFIED: development CI `36996324380` success, including V4 QQ Open checks and Worker bundle.
-- VERIFIED: main CI `36996506963` success.
-- VERIFIED: Cloudflare Connected Build `18614133-1169-402a-a9b9-5d9c4b34f0bb` for commit `232e2577558dd67fffab769ac474243956bf8435` finished with `build_outcome=success`.
-- VERIFIED: `main` points to `232e2577558dd67fffab769ac474243956bf8435`.
-- VERIFIED: Ray_Chen package run `36996507133` produced artifact `11222360778` for v0.0.59.
-- BLOCKED/PENDING_USER: live QQ rendering/click behavior after this production deployment.
-
-## Known Risk
-
-QQ custom inline keyboards are an application capability. If the minimal officially documented payload is still silently omitted by the client, the remaining blocker is the QQ application button capability/approval rather than command registry contents.
-
-## next_exact_action
-
-User sends `/!面板 群聊` once in QQ and reports whether the child-command buttons are visible. If visible, verify one direct-send button and one parameterized prefill button.
-
-last_checkpoint_at: 2026-10-02T18:42:00+08:00
-
-
-## Goal Revision 6 — Current State
-
-current_phase: live native-command acceptance
-current_step: product and production deployment verified; waiting for QQ native `/` panel observation
-
-completed_steps:
-- recorded second live inline-keyboard failure at 2026-10-02 18:47:52 +08:00
-- verified official custom-button capability gate
-- added `QQ_OPEN_CUSTOM_KEYBOARD_ENABLED`
-- production sets the flag to `false`
-- native group discovery publishes root category launchers and categorized concrete commands
-- development CI `36998626039` passed
-- main CI `36998794211` passed
-- Cloudflare production build `3f3ddb50-013a-4f1a-a4fb-74d045198704` passed
-- production Worker binding read-back confirms custom keyboard false and discovery sync true
-
-blockers:
-- PENDING_USER: native QQ client visibility/click test
-
-next_exact_action: In the target QQ group, type `/` to open the native command panel and confirm concrete commands (at minimum `!help`, `!status`, and one parameterized command) are present and clickable.
-last_checkpoint_at: 2026-10-02T19:08:00+08:00
-
-
-## Goal Revision 7
-
-current_phase: discovery reconciliation repair
-current_step: checkpoint root cause before modifying runtime
+task_id: qq-cross-group-bridge-20261009
+task_status: active
+goal_revision: 1
+current_phase: implementation and verification
+current_step: new standalone Worker staged on feature branch; run CI and manual transport checks before main promotion
 
 acceptance_criteria:
-- `/ensure` reconciles discovery even if Gateway WebSocket is already connected.
-- unchanged fingerprint performs no destructive panel rewrite.
-- failed discovery sync is persisted and surfaced in status.
-- explicit internal force-sync route exists for recovery.
-- development CI and main CI pass.
-- Cloudflare production build succeeds.
-- production settings preserve `QQ_OPEN_DISCOVERY_SYNC=true`.
-- final QQ native `/` panel is usable.
-
-known_failure:
-- current minute watchdog only checks connection health; it does not reconcile discovery on an already-open socket.
-
-next_exact_action: patch src/v4/qqopen/runtime.js and V4 regressions so ensure performs discovery reconciliation.
-last_checkpoint_at: 2026-10-08T14:30:00+08:00
-
-
-## Goal Revision 7 — Deployment Result
-
-current_phase: live QQ acceptance
-current_step: implementation, CI and production deployment complete
-
-completed_steps:
-- fixed minute `/ensure` so discovery reconciles even when Gateway websocket is already healthy
-- added discovery fingerprint no-op and serialized sync
-- added internal force-sync endpoint
-- persisted discovery sync reason/change/error/panel/create/delete diagnostics
-- preserved healthy Gateway connectivity when discovery sync itself fails
-- fixed native `/!command` routing for registered commands before AI opt-out handling
-- preserved arbitrary unknown `/!text` as the existing AI opt-out syntax
-- development CI `37738458422` success
-- main CI `37738621298` success
-- Cloudflare build `77bcd624-84fd-4d1a-a419-c697cadfdeab` success
-- production setting read-back verified discovery sync enabled
-
-files_modified:
-- src/v4/qqopen/runtime.js
-- src/v4/commands/group-panel.js
-- worker.js
-- verify-v4-qqopen.mjs
-- docs/v4-qqopen-native.md
+- archive old main immutably at 6a22b06433cfaffcf13abe2b60a917305290b629
+- create bridge connection code, multi-group join, QQ ID/group OpenID pairing
+- Bbot-only privileged QQ identity, role and roster verification
+- protect QQ 3569028262 and 2681167798 from unauthorized stop/leave/revoke
+- support delegated manage/stop via /grant and /ungrant
+- support /status, /leave, /rename, /revoke, /stop, /resume, /code
+- disable AI and protect from duplicate relay and self-relay
+- verify tests and Cloudflare bundle
+- validate actual QQ active-send/@ before main promotion
 
 blockers:
-- PENDING_USER: real QQ client must confirm native panel is now visible/current and clicked commands execute.
+- QQ official docs say proactive push discontinued 2025-04-21. Destination groups cannot necessarily receive unsolicited Abot sends.
+- Need live QQ/NapCat credential-backed sandbox to prove mention/push and OpenID mapping.
 
-next_exact_action: In the target QQ group, open the native `/` panel and click `!help`, then `!status`, then one parameterized command; report only if any of those still fails.
-last_checkpoint_at: 2026-10-08T14:41:00+08:00
+next_exact_action: execute feature branch CI and record outcome, then test transport in isolated QQ groups; do not promote main without live evidence.

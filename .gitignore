@@ -1,6 +1,6 @@
 node_modules/
 dist/
+.env
+.dev.vars
 *.log
-.Ray_Chen/
-Ray_Chen_memory_*.tar.gz
-Ray_Chen_memory_*.sha256
+*.tar.gz
