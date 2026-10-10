@@ -1,4 +1,3 @@
 # USER_REQUIREMENTS
-- 2026-10-10 new requirement: QQAIBOT should not discuss politics. Implement as global AI answer restriction rather than modifying QQ group content or blocking ordinary nonpolitical commands.
-- Existing: Official Abot receives QQ GROUP_AT_MESSAGE_CREATE and sends passive msg_id AI reply, reuse existing Gemini Secret, no unsolicited group chat, no duplicate Bbot answer. Bbot cross-group bridge plugin default OFF.
-- Preserve D1 and Cloudflare Secret values, backups, protected QQ identities and deployed service.
+2026-10-11: Restrict AI answer length naturally (no direct truncation), bot replies without Markdown. When previously built EXE is online, keep Codex model Luna non-thinking and conversation session. Use Bbot for group chat collection, D1 and vector database for memory.
+Earlier: Abot official AI default, Bbot only optional relay plugin default OFF, no unsolicited messages, politics disallowed, all Secrets and D1 preserved, old branches backed up.

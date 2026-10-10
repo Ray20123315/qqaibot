@@ -41,6 +41,10 @@ binding = "DB"
 database_name = "qqaibot"
 database_id = "569a01fe-3297-40e1-832f-09c3793056ed"
 
+[[vectorize]]
+binding = "VECTORIZE"
+index_name = "qqai"
+
 [triggers]
 crons = ["* * * * *"]
 
@@ -53,6 +57,7 @@ QQ_AI_ABOT_ENABLED = "true" # Only passive official replies; group @ events requ
 AI_DAILY_USER_LIMIT = "20"
 AI_DAILY_GROUP_LIMIT = "120"
 BRIDGE_NAPCAT_COMMANDS = "true"
+BOT_MEMORY_ENABLED = "true" # Per-group opt-in required via !memory on
 
 [observability]
 enabled = true

@@ -18,3 +18,12 @@
 ## 政治討論封鎖
 
 `src/topic-policy.js` 以全域 AI 話題限制實作：輸入先於 Gemini 請求攔截、Abot/Bbot 模型 system instruction 加入限制、模型輸出再做檢查及固定拒答。拒答的政治內容不寫入 AI 對話歷史。測試 `tests/political-policy.test.mjs`、`tests/abot-ai.test.mjs`、`tests/assistant.test.mjs`，須確認政治問題 0 模型呼叫、生成政治內容不原樣發送、正常提問不被拒絕。這不會自動刪除舊歷史政治對話或過濾跨群插件的他人訊息，也不能保證涵蓋所有變體與隱語。
+
+## 2026-10-11：Codex 與記憶整合
+
+- Cloudflare Worker `qqai`：新增原 EXE 已使用的 `/v3/codex-bridge`，只接受有 `CODEX_BRIDGE_ACCESS_TOKEN` Bearer Token 的 WebSocket upgrade。OneBotHub 以不同 tags 管理 NapCat 與 Codex，避免斷線與訊息互相混淆。
+- EXE 發送 `hello` + `qqai-codex-bridge-v1`，Worker 回 Hello；Worker Chat 請求指定 `gpt-6-luna`、`reasoningEffort=none`、哈希 sessionKey。更新版 Windows EXE 會把 none 映射成 `codex exec -c model_reasoning_effort="none"`；需確認安裝的 CLI 真正支援該模型和 config。
+- `wrangler.toml` 增加既有 `qqai` Vectorize 綁定、`BOT_MEMORY_ENABLED=true` 表示允許此功能，但每個 QQ 群仍須管理員輸入 `!memory on` 才開始收集。
+- D1 新表 `bot_memory_groups`、`bot_memory_items`，只新增、不改／刪既有 schema；群命名空間限制 Vectorize 的跨群檢索。
+- 檢查 `/health` 的 `codex.connected`、`memory.collection_available`、`memory.vectorize_bound`，不公開金鑰。
+- 不能假裝原本 EXE 已在線，不能因 API mock 成功聲稱 Codex／實際向量嵌入可用。正式驗證時先在小群由有權限者啟用記憶，單發普通訊息，確認 D1 和 Vectorize 檢索後再測 Abot。

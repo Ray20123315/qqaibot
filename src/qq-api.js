@@ -27,7 +27,9 @@ export async function qqRequest(env,path,options={},fetchImpl=fetch){
  return data;
 }
 export async function sendGroup(env,group,content,msgId,extra={}) {
- const body={msg_type:0,content:String(content).slice(0,1800),...extra};
+ const text=String(content||"");
+ if(text.length>1800)throw new Error("ABOT_REPLY_TOO_LONG_REWRITE_REQUIRED");
+ const body={msg_type:0,content:text,...extra};
  if(msgId){body.msg_id=msgId;body.msg_seq=1;}
  return qqRequest(env,"/v2/groups/"+encodeURIComponent(group)+"/messages",{method:"POST",body});
 }

@@ -22,7 +22,7 @@ function normalizeMessages(messages){
 export async function generateWithExistingSecrets(env,{provider="gemini",model="",messages,maxTokens=480}={},fetchImpl=fetch) {
  const input=normalizeMessages(messages);
  if(!input.some(m=>m.role==="user"))throw new Error("MODEL_INPUT_MISSING");
- const maxOutputTokens=Math.min(Math.max(128,Number(maxTokens)||480),1024);
+ const maxOutputTokens=Math.min(Math.max(128,Number(maxTokens)||650),1500);
  const selected=String(provider||"gemini").toLowerCase();
  if(!["gemini","deepseek"].includes(selected))throw new Error("MODEL_PROVIDER_INVALID");
  const list=unique(selected==="gemini"?env.GEMINI_API_KEYS:env.DEEPSEEK_API_KEY);
@@ -53,9 +53,10 @@ export async function generateWithExistingSecrets(env,{provider="gemini",model="
       continue;
      }
      const data=await res.json();
+     if(data?.candidates?.[0]?.finishReason==="MAX_TOKENS")throw new Error("MODEL_INCOMPLETE_RESPONSE");
      const answer=(data?.candidates?.[0]?.content?.parts||[]).filter(x=>!x?.thought).map(x=>x.text||"").join("").trim();
      if(!answer)throw new Error("MODEL_EMPTY_RESPONSE");
-     return {text:answer.slice(0,1800),provider:selected,model:currentModel};
+     return {text:answer,provider:selected,model:currentModel};
     }
     const res=await fetchImpl("https://api.deepseek.com/chat/completions",{
      method:"POST",headers:{"content-type":"application/json",Authorization:"Bearer "+secret},
@@ -64,6 +65,7 @@ export async function generateWithExistingSecrets(env,{provider="gemini",model="
     });
     if(!res.ok){lastError=sanitizeError(res);if(res.status===400||res.status===404)break;continue;}
     const data=await res.json(),answer=String(data?.choices?.[0]?.message?.content||"").trim();
+    if(data?.choices?.[0]?.finish_reason==="length")throw new Error("MODEL_INCOMPLETE_RESPONSE");
     if(!answer)throw new Error("MODEL_EMPTY_RESPONSE");
     return {text:answer.slice(0,1800),provider:selected,model:currentModel};
    }catch(e){

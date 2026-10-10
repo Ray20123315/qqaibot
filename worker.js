@@ -6,6 +6,8 @@ import {onAbotAiEvent} from "./src/abot-ai.js";
 import {qq,parseOnebot} from "./src/core.js";
 import {roster,init} from "./src/store.js";
 import {outboundAction} from "./src/relay.js";
+import {memoryCommand,collectBbotMemory,recallBbotMemory,pruneGroupMemory} from "./src/group-memory.js";
+import {CODEX_BRIDGE_PROTOCOL} from "./src/codex-bridge.js";
 const json=(data,status=200)=>new Response(JSON.stringify(data),{status,headers:{"content-type":"application/json; charset=utf-8","cache-control":"no-store"}});
 async function secretMatches(request,secret){
  if(!secret)return false;
@@ -32,6 +34,8 @@ export default {
   const path=new URL(request.url).pathname;
   if(path==="/health"&&request.method==="GET"){
    const b=await hub(env).fetch("https://internal/status").catch(()=>null);
+   const c=await hub(env).fetch("https://internal/codex/status").catch(()=>null);
+   const codex=c?.ok?await c.json():{connected:false};
    const bbot=b?.ok?await b.json():{connected:false};
    const a=String(env.QQ_AI_ABOT_ENABLED)==="true"?await newAbotGateway(env).fetch("https://internal/status").catch(()=>null):null;
    const abot=a?.ok?await a.json():{connected:false,session_ready:false,enabled:false};
@@ -41,7 +45,14 @@ export default {
      last_connected_at:bbot.last_connected_at||null,last_event_at:bbot.last_event_at||null,
      last_closed_at:bbot.last_closed_at||null},
     command_prefix:"/! or !",relay:{mode:"parallel",max_parallel_groups:4},
-    verification:"napcat",primary_command_transport:"abot",assistant:await assistantHealth(env)});
+    verification:"napcat",primary_command_transport:"abot",assistant:await assistantHealth(env),
+    codex:{connected:!!codex.connected,model:"gpt-6-luna",reasoning_effort:"none"},
+    memory:{collection_available:String(env.BOT_MEMORY_ENABLED)==="true",vectorize_bound:!!env.VECTORIZE}});
+  }
+  if(path==="/v3/codex-bridge"){
+   if(request.headers.get("upgrade")?.toLowerCase()!=="websocket")return json({error:"upgrade_required"},426);
+   if(!await secretMatches(request,env.CODEX_BRIDGE_ACCESS_TOKEN))return json({error:"unauthorized"},401);
+   return hub(env).fetch(new Request("https://internal/codex/bridge",{headers:request.headers}));
   }
   if(path==="/onebot" || path==="/onebot/roster"){
    if(!await secretMatches(request,env.ONEBOT_ACCESS_TOKEN))return json({error:"unauthorized"},401);
@@ -55,7 +66,14 @@ export default {
      const {onOnebotRoster}=await import("./src/bridge.js");
      return json(await onOnebotRoster(env,data.group_id,data.members,data.group_name));
     }
-    if(data?.post_type==="notice"&&data.notice_type==="group_recall")return json(await routeBotNotice(env,data));
+    if(data?.post_type==="notice"&&data.notice_type==="group_recall"){
+      await recallBbotMemory(env,data).catch(()=>console.warn("BOT_MEMORY_RECALL_FAILED"));
+      return json(await routeBotNotice(env,data));
+    }
+    const control=await memoryCommand(env,data);
+    if(control)return json(control);
+    if(String(env.BOT_MEMORY_ENABLED)==="true")
+     await collectBbotMemory(env,data).catch(()=>console.warn("BOT_MEMORY_STORE_FAILED"));
     return json(await routeBbotBridgeOnly(env,data));
    }catch(e){console.error("ONEBOT_HTTP_ERROR",String(e).slice(0,300));return json({error:"ingest_failed"},503);}
   }
@@ -63,17 +81,39 @@ export default {
  },
  async scheduled(event,env,ctx){
   ctx.waitUntil(stopOldGateways(env));
+  ctx.waitUntil(pruneGroupMemory(env).catch(()=>console.warn("BOT_MEMORY_PRUNE_FAILED")));
   if(String(env.QQ_AI_ABOT_ENABLED)==="true")
    ctx.waitUntil(newAbotGateway(env).fetch("https://internal/ensure").catch(e=>console.error("ABOT_GATEWAY_ENSURE",String(e?.message||"failed").slice(0,90))));
   ctx.waitUntil(bridgeCanFlush(env).then(enabled=>enabled?hub(env).fetch("https://internal/flush"):null).catch(e=>console.error("PLUGIN_SCHEDULE",String(e).slice(0,180))));
  }
 };
 export class OneBotHub {
- constructor(state,env){this.state=state;this.env=env;this.pending=new Map();this.inflight=new Map();this.lastRosterRequested=new Map();}
+ constructor(state,env){this.state=state;this.env=env;this.pending=new Map();this.inflight=new Map();this.codexPending=new Map();this.lastRosterRequested=new Map();}
  async fetch(request){
   const pathname=new URL(request.url).pathname;
+  if(pathname==="/codex/status"&&request.method==="GET")return json({connected:!!this.codexSocket(),model:"gpt-6-luna",reasoning_effort:"none",session:"persistent-by-user"});
+  if(pathname==="/codex/chat"&&request.method==="POST"){
+    const body=await request.json().catch(()=>null);
+    if(!body||body.protocol!==CODEX_BRIDGE_PROTOCOL||body.model!=="gpt-6-luna"||body.reasoningEffort!=="none")return json({ok:false,reason:"invalid_codex_request"},400);
+    const ws=this.codexSocket();
+    if(!ws)return json({ok:false,reason:"codex_offline"},503);
+    const id=crypto.randomUUID();
+    return new Promise(resolve=>{
+      const timer=setTimeout(()=>{this.codexPending.delete(id);resolve(json({ok:false,reason:"codex_timeout"},504));},Math.min(60000,Math.max(1000,Number(body.timeoutMs||35000))));
+      this.codexPending.set(id,{resolve,timer});
+      try{ws.send(JSON.stringify({...body,type:"request",id}));}
+      catch{clearTimeout(timer);this.codexPending.delete(id);resolve(json({ok:false,reason:"codex_disconnected"},503));}
+    });
+  }
+  if(pathname==="/codex/bridge"&&request.headers.get("upgrade")?.toLowerCase()==="websocket"){
+   for(const existing of this.state.getWebSockets("codex"))try{existing.close(1000,"reconnected");}catch{}
+   const pair=new WebSocketPair(),[client,server]=Object.values(pair);
+   this.state.acceptWebSocket(server,["codex"]);
+   console.log("CODEX_LUNA_WS_CONNECTED");
+   return new Response(null,{status:101,webSocket:client});
+  }
   if(pathname==="/status" && request.method==="GET"){
-   const sockets=this.state.getWebSockets();
+   const sockets=this.state.getWebSockets().filter(ws=>!this.state.getTags?.(ws)?.includes("codex"));
    const [lastConnected,lastEvent,lastClosed]=await Promise.all([
     this.state.storage.get("last_connected_at"),
     this.state.storage.get("last_event_at"),
@@ -102,14 +142,15 @@ export class OneBotHub {
    catch{return json({ok:false,reason:"invalid_action"},400);}
   }
   if(pathname!=="/ws" || request.headers.get("upgrade")?.toLowerCase()!=="websocket")return json({error:"not_found"},404);
-  for(const existing of this.state.getWebSockets())try{existing.close(1000,"reconnected");}catch{}
+  for(const existing of this.state.getWebSockets().filter(ws=>!this.state.getTags?.(ws)?.includes("codex")))try{existing.close(1000,"reconnected");}catch{}
   const pair=new WebSocketPair(),[client,server]=Object.values(pair);
-  this.state.acceptWebSocket(server);
+  this.state.acceptWebSocket(server,["bbot"]);
   await this.state.storage.put("last_connected_at",new Date().toISOString());
   console.log("BBOT_WS_CONNECTED");
   return new Response(null,{status:101,webSocket:client});
  }
- socket(){return this.state.getWebSockets().find(ws=>ws.readyState===1);}
+ codexSocket(){return this.state.getWebSockets("codex").find(ws=>ws.readyState===1);}
+ socket(){return this.state.getWebSockets().find(ws=>ws.readyState===1&&!this.state.getTags?.(ws)?.includes("codex"));}
  async dispatchAction(ws,action,params,id){
   const echo="bridge-send:"+String(id||crypto.randomUUID());
   if(this.inflight.has(echo))return json({ok:false,reason:"duplicate_inflight"},409);
@@ -132,7 +173,8 @@ export class OneBotHub {
   return result;
  }
  async replyFromBbot(ws,groupId,text){
-  const segments=[{type:"text",data:{text:String(text).slice(0,1900)}}];
+  if(String(text).length>1900)throw Error("BBOT_REPLY_TOO_LONG_REWRITE_REQUIRED");
+  const segments=[{type:"text",data:{text:String(text)}}];
   const result=await this.dispatch(ws,"cmd-"+crypto.randomUUID(),groupId,segments);
   if(!result.ok)throw new Error("BBOT_COMMAND_SEND_"+result.status);
   const obj=await result.json();
@@ -183,6 +225,19 @@ export class OneBotHub {
   ws.send(JSON.stringify({action:"get_group_info",params:{group_id:Number(group),no_cache:true},echo:"bridge-info:"+group}));
  }
  async webSocketMessage(ws,message){
+  if(this.state.getTags?.(ws)?.includes("codex")){
+    let packet;try{packet=JSON.parse(typeof message==="string"?message:new TextDecoder().decode(message));}catch{return;}
+    if(packet?.protocol!==CODEX_BRIDGE_PROTOCOL)return;
+    if(packet.type==="hello"){ws.send(JSON.stringify({type:"hello",protocol:CODEX_BRIDGE_PROTOCOL,role:"worker",model:"gpt-6-luna",reasoningEffort:"none"}));return;}
+    if(packet.type==="response"){
+      const pending=this.codexPending.get(String(packet.id||""));
+      if(!pending)return;
+      clearTimeout(pending.timer);this.codexPending.delete(String(packet.id));
+      const answer=typeof packet.text==="string"?packet.text:"";
+      pending.resolve(json(packet.ok===true&&answer.trim()?{ok:true,text:answer,model:String(packet.model||"").slice(0,80)}:{ok:false,reason:"codex_error"},packet.ok===true&&answer.trim()?200:502));
+    }
+    return;
+  }
   const eventTime=Date.now();
   if(eventTime-(this.lastRecordedEvent||0)>=15000){
    this.lastRecordedEvent=eventTime;
@@ -210,7 +265,12 @@ export class OneBotHub {
     const name=(await this.state.storage.get("groupname:"+group))||"";
     for(const evt of queued){
      evt.__bridge_group_name=name;
-     const result=await routeBbotBridgeOnly(this.env,evt,text=>this.replyFromBbot(ws,group,text));
+     const answer=text=>this.replyFromBbot(ws,group,text);
+     const command=await memoryCommand(this.env,evt,answer);
+     if(command)continue;
+     if(String(this.env.BOT_MEMORY_ENABLED)==="true")
+      await collectBbotMemory(this.env,evt).catch(()=>console.warn("BOT_MEMORY_STORE_FAILED"));
+     const result=await routeBbotBridgeOnly(this.env,evt,answer);
      await this.afterHandled(result);
     }
    }else{await this.state.storage.delete("queue:"+group);console.error("BBOT_ROSTER_FAILED",echo,String(data?.retcode||""));}
@@ -226,6 +286,7 @@ export class OneBotHub {
   }
   if(data?.post_type==="notice"&&data.notice_type==="group_recall"){
    try{
+    await recallBbotMemory(this.env,data).catch(()=>console.warn("BOT_MEMORY_RECALL_FAILED"));
     const result=await routeBotNotice(this.env,data);
     if(result?.recalls>0)await this.afterHandled({forwarded:result.recalls});
    }catch(e){console.error("BBOT_RECALL_EVENT_FAILED",String(e).slice(0,180));}
@@ -244,16 +305,25 @@ export class OneBotHub {
    return;
   }
   try{
+   const control=await memoryCommand(this.env,data,text=>this.replyFromBbot(ws,msg.groupId,text));
+   if(control)return;
+   if(String(this.env.BOT_MEMORY_ENABLED)==="true")
+    await collectBbotMemory(this.env,data).catch(()=>console.warn("BOT_MEMORY_STORE_FAILED"));
    const result=await routeBbotBridgeOnly(this.env,data,text=>this.replyFromBbot(ws,msg.groupId,text));
    await this.afterHandled(result);
   }catch(e){console.error("ASSISTANT_EVENT_FAILED",String(e).slice(0,250));}
  }
  async webSocketClose(ws,code,reason){
+  if(this.state.getTags?.(ws)?.includes("codex")){
+   for(const [id,pending] of this.codexPending){clearTimeout(pending.timer);pending.resolve(json({ok:false,reason:"codex_disconnected"},503));this.codexPending.delete(id);}
+   return;
+  }
   await this.state.storage.put("last_closed_at",new Date().toISOString());
   console.warn("BBOT_WS_CLOSED",code);
   try{ws.close(code,reason);}catch{}
  }
  async webSocketError(ws,error){
+  if(this.state.getTags?.(ws)?.includes("codex")){console.warn("CODEX_LUNA_WS_ERROR");return;}
   await this.state.storage.put("last_closed_at",new Date().toISOString());
   console.error("BBOT_SOCKET_ERROR",String(error).slice(0,150));
  }

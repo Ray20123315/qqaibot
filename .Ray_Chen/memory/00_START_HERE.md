@@ -1,10 +1,9 @@
-# Ray_Chen Canonical Memory
-version: v0.0.96
+# Ray_Chen Memory
+version: v0.0.97
 task_id: qqaibot-ai-rebuild-20261010
-goal_revision: 3
-task_status: completed (code deployment; real QQ acceptance remains unverified)
-canonical_branch: main
-product_sha: 6fa907d2a6bede25243faa130f9ac9e4cb6e202f
-updated_at: 2026-10-10T15:26:54.379Z
-
-Owner's rule: QQAIBOT AI must not discuss politics. Shared src/topic-policy.js handles pre-LLM keyword filter, Gemini/DeepSeek system instruction, and post-LLM output replacement for Abot AI plus latent Bbot AI. GitHub tests and Cloudflare successful; no actual QQ question sent during this edit. See ACTIVE_TASK, CURRENT_STATE, USER_REQUIREMENTS, DECISIONS, GOTCHAS, VERIFY and FILE_MANIFEST.
+task_status: active
+goal_revision: 4
+branch: feature/compact-codex-vector-memory-20261010
+base_main: 0a5580bd0ffa5206261bcdca88da90a2abcbb03d
+updated_at: 2026-10-10T16:15:32.435Z
+Read ACTIVE_TASK, CURRENT_STATE, USER_REQUIREMENTS, DECISIONS, GOTCHAS, VERIFY, FILE_MANIFEST. New concise plain QQ answer, authenticated old Windows Codex bridge, Bbot opt-in D1/Vectorize memory under CI. Backups preserved.

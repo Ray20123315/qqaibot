@@ -1,6 +1,8 @@
 import {parseOnebot,clean,qq,isProtected,BRIDGE_ECHO_MARKER,authorize} from "./core.js";
 import {get,all,run,roster} from "./store.js";
-import {generateWithExistingSecrets,modelAvailability,DEFAULT_GEMINI_MODEL} from "./model-client.js";
+import {modelAvailability,DEFAULT_GEMINI_MODEL} from "./model-client.js";
+import {generateWithCodexPreference} from "./codex-bridge.js";
+import {PLAIN_REPLY_RULE,completeShortReply} from "./reply-style.js";
 import {isPoliticalTopic,politicalSafeReply,POLITICAL_REFUSAL,POLITICAL_SYSTEM_RULE} from "./topic-policy.js";
 
 const DEFAULT_MODEL=DEFAULT_GEMINI_MODEL;
@@ -77,11 +79,16 @@ async function useQuota(env,msg){
 }
 async function generate(env,msg,prompt,config){
  const history=await all(env.DB,"SELECT role,content FROM assistant_history WHERE group_id=? AND user_qq=? ORDER BY created_at DESC LIMIT 10",msg.groupId,msg.senderQq);
- const messages=[{role:"system",content:"你是 QQ 群中的 AI 助理。依照使用者語言回答（繁體中文、簡體中文或其他語言）。清楚、簡短、有用。不要假裝已操作 QQ 群管理功能，不要主動插話。群組與其他使用者的私人對話內容不可見。\n"+POLITICAL_SYSTEM_RULE}];
+ const messages=[{role:"system",content:"你是 QQ 群中的 AI 助理。依照使用者語言回答（繁體中文、簡體中文或其他語言）。清楚、簡短、有用。不要假裝已操作 QQ 群管理功能，不要主動插話。群組與其他使用者的私人對話內容不可見。\n"+POLITICAL_SYSTEM_RULE+"\n"+PLAIN_REPLY_RULE}];
  for(const h of [...history].reverse())if(["user","assistant"].includes(h.role))messages.push({role:h.role,content:h.content});
  messages.push({role:"user",content:prompt});
- const response=await generateWithExistingSecrets(env,{provider:config.provider,model:config.model,messages,maxTokens:480});
- const answer=politicalSafeReply(response.text);
+ const params={provider:config.provider,model:config.model,messages,maxTokens:650,groupId:msg.groupId,userId:msg.senderQq};
+ const response=await generateWithCodexPreference(env,params);
+ const safe=politicalSafeReply(response.text);
+ const answer=await completeShortReply(safe,{regenerate:async full=>{
+  const revised=await generateWithCodexPreference(env,{...params,messages:[{role:"system",content:messages[0].content},{role:"user",content:"請完整而精簡地重寫以下回答，以自然純文字給出結論，不要 Markdown，不要截斷句子：\n"+full}]});
+  return politicalSafeReply(revised.text);
+ }});
  if(!answer)throw new Error("AI_EMPTY_RESPONSE");
  if(answer===POLITICAL_REFUSAL)return answer;
  const created=Date.now(),key=msg.messageId||crypto.randomUUID();
@@ -91,7 +98,7 @@ async function generate(env,msg,prompt,config){
   msg.groupId,msg.senderQq,"answer:"+key,"assistant",answer.slice(0,1600),created+1);
  // Each caller keeps a bounded short-term context, not permanent full-chat logging.
  await run(env.DB,"DELETE FROM assistant_history WHERE group_id=? AND user_qq=? AND created_at<?",msg.groupId,msg.senderQq,created-3*86400000);
- return answer.slice(0,1600);
+ return answer;
 }
 export async function routeAssistantEvent(env,event,reply){
  const msg=parseOnebot(event);

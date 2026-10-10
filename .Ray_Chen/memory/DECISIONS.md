@@ -1,5 +1,4 @@
 # DECISIONS
-2026-10-10 rev3: Enforce bot no-politics restriction with input guard before LLM, model system instruction, and generated-output guard before sending. Neutral refusal: 抱歉，我不討論政治相關話題。可以聊聊其他主題。
-2026-10-10: Implement one src/topic-policy.js as canonical policy shared by Abot AI and Bbot AI paths; avoid duplicating keyword semantics.
-2026-10-10: Rejected political input should not consume Gemini tokens, and blocked output should not enter conversation history. Preserve legitimate other chat and management commands.
-2026-10-10: Acknowledge heuristic's incompleteness rather than claiming absolute guarantee. No filtering of cross-group user-generated forwarded messages.
+2026-10-11 r4: Model advisory short style and complete rewrite for oversized output, no postprocessing slice. Plain-text QQ formatter.
+2026-10-11 r4: Reuse old EXE WebSocket protocol and preexisting Token; separate Bbot and Codex WS tags; stable per group/user session hash, Codex request gpt-6-luna reasoningEffort none. Session retention is not permanently loaded model process.
+2026-10-11 r4: Opt-in Bbot group memory via authenticated group administrator, no automatic log all groups, bounded two-day retention and recall delete. D1 source of truth; Vectorize namespace per QQ group. Abot retrieval needs verified existing group mapping, otherwise no external group context.
