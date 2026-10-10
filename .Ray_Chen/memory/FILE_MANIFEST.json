@@ -1,108 +1,110 @@
 {
-  "version": "v0.0.97",
+  "version": "v0.0.98",
   "task_id": "qqaibot-ai-rebuild-20261010",
   "goal_revision": 4,
-  "changed_at": "2026-10-10T16:15:32.435Z",
-  "location_type": "remote",
+  "changed_at": "2026-10-10T16:24:56.845Z",
   "provider": "GitHub",
+  "location_type": "remote",
   "repository": "Ray20123315/qqaibot",
-  "branch": "feature/compact-codex-vector-memory-20261010",
+  "branch": "main",
   "before_revision": "0a5580bd0ffa5206261bcdca88da90a2abcbb03d",
-  "after_revision": "feature_commit_pending",
+  "product_sha": "c39f8cc4c8468b83ce530f30063b726193d2729f",
+  "after_revision": "final_memory_commit_pending",
   "verification": {
-    "ci": "pending",
-    "worker_deployed": false,
-    "exe_online": "unverified",
-    "vectorize_1024_index": "exists"
+    "feature_ci": 38067245509,
+    "main_ci": 38067312503,
+    "outcome": "success",
+    "exe_ci": 38067312576,
+    "exe_sha256": "8e6556d428c2a61e8f3df44ae2929a20716a0ca5326b07c452c35f8ca7b43ab7",
+    "exe_artifact_id": 11675425929,
+    "cloudflare_deployment": "7a15e23e-8a7d-40fa-ae25-c7111c131951",
+    "cloudflare_version": "45eab88a-7fe6-421b-a60e-568eb4e739a0",
+    "cloudflare_build": "success",
+    "traffic_percent": 100,
+    "vector_binding": "verified",
+    "qq_live": "untested",
+    "codex_live": "untested"
   },
-  "files": [
+  "changed_files": [
     {
       "path": "src/reply-style.js",
-      "action": "create_or_modify",
-      "blob_sha": "86657829acac6d3474aa72beafaf28ca99858f39"
+      "action": "created_or_modified"
     },
     {
       "path": "src/codex-bridge.js",
-      "action": "create_or_modify",
-      "blob_sha": "a33ed986df42b06a1c806df07b26520dc5ea0e41"
+      "action": "created_or_modified"
     },
     {
       "path": "src/group-memory.js",
-      "action": "create_or_modify",
-      "blob_sha": "2f401288d58deaf112a73293e68d6ae63b5aa383"
+      "action": "created_or_modified"
     },
     {
       "path": "src/abot-ai.js",
-      "action": "create_or_modify",
-      "blob_sha": "8063f55724bf5b4267979c77fa5ef7d2ada72a7a"
+      "action": "created_or_modified"
     },
     {
       "path": "src/model-client.js",
-      "action": "create_or_modify",
-      "blob_sha": "90ac6631b522ede9dae6009a91858891e279aa6a"
+      "action": "created_or_modified"
     },
     {
       "path": "src/qq-api.js",
-      "action": "create_or_modify",
-      "blob_sha": "3f1dc39df3451c50af138cef82bae4b70b6df3a9"
+      "action": "created_or_modified"
     },
     {
       "path": "src/assistant.js",
-      "action": "create_or_modify",
-      "blob_sha": "5ffeee0671473e440099f1edf581ddda6e8efe85"
+      "action": "created_or_modified"
     },
     {
       "path": "worker.js",
-      "action": "create_or_modify",
-      "blob_sha": "c4f8b4c61395f02eb5d9710b675191671b527d5d"
+      "action": "created_or_modified"
     },
     {
       "path": "wrangler.toml",
-      "action": "create_or_modify",
-      "blob_sha": "3894a6fa72376f1008e2f8ae8f4e06dc1cae7382"
+      "action": "created_or_modified"
     },
     {
       "path": "tests/compact-codex-memory.test.mjs",
-      "action": "create_or_modify",
-      "blob_sha": "d3678cc539a788cc38e6ab53f3144bea2c70c4e6"
+      "action": "created_or_modified"
+    },
+    {
+      "path": "tests/codex-websocket.test.mjs",
+      "action": "created_or_modified"
+    },
+    {
+      "path": "tests/hub-generation.test.mjs",
+      "action": "created_or_modified"
     },
     {
       "path": "tools/codex-work-bridge.mjs",
-      "action": "create_or_modify",
-      "blob_sha": "6e3c86c010017ada16b5736a4cc6a62a46345940"
+      "action": "created_or_modified"
     },
     {
       "path": "tools/codex-bridge-windows.mjs",
-      "action": "create_or_modify",
-      "blob_sha": "1065920d53acdaea54ae0aa2668ae7e3688ad8d7"
+      "action": "created_or_modified"
     },
     {
       "path": "tools/codex-bridge.config.example.json",
-      "action": "create_or_modify",
-      "blob_sha": "cb84884f8bd749ba01483a90b5325528a1b4c4c9"
+      "action": "created_or_modified"
     },
     {
       "path": ".github/workflows/build-codex-bridge-exe.yml",
-      "action": "create_or_modify",
-      "blob_sha": "b7ecc79f12c7b67f4670bba922c24d131323227e"
+      "action": "created_or_modified"
     },
     {
       "path": "README.md",
-      "action": "create_or_modify",
-      "blob_sha": "a30bf746daefecb108601279dabdcacb9bd42b1f"
+      "action": "created_or_modified"
     },
     {
       "path": "docs/DEPLOY.md",
-      "action": "create_or_modify",
-      "blob_sha": "0dae2f723d327dc6797e240091dced4f43cc7e40"
+      "action": "created_or_modified"
     },
     {
       "path": ".github/workflows/bridge-check.yml",
-      "action": "CI version update"
+      "action": "created_or_modified"
     },
     {
       "path": ".Ray_Chen/memory/*",
-      "action": "memory checkpoint"
+      "action": "created_or_modified"
     }
   ],
   "backups": [
