@@ -1,28 +1,26 @@
 # ACTIVE_TASK
 task_id: qqaibot-ai-rebuild-20261010
-task_status: active
+task_status: completed
 goal_revision: 3
-goal: owner requests QQAIBOT never discuss politics; enforce on current Abot official AI and any future Bbot AI route
-acceptance_criteria:
-- Obvious political requests in Traditional Chinese, Simplified Chinese and English receive one neutral fixed refusal without LLM call.
-- Reinforce provider system prompt with no-politics instruction; generated political output must be sanitized before sending and must not be persisted in conversation history.
-- Unrelated technical, lifestyle, food and entertainment questions and !help/status should still work.
-- Keep all existing QQ official Abot passive reply msg_id handling, Bbot optional bridge, API secrets, D1 schema, backups and quotas unchanged.
-- Run full CI and Wrangler dry-run before non-force promotion to main, verify production source SHA and Cloudflare build.
-current_phase: isolated feature branch implementation complete; CI pending
-current_step: commit feature and run CI; repair failures, then promote main and verify production
+goal: enforce no-politics behavior in QQAIBOT AI Abot and Bbot routes
+current_phase: code completed, verified, deployed on main; platform live QQ acceptance outstanding
+current_step: none for code change; real QQ smoke test requested for user next
 completed_steps:
-- Inspected live main a9c55b6ad8c87f02034752f9216720b0543fa85a and verified src/abot-ai.js official group mention route and src/assistant.js dormant Bbot AI route.
-- Added src/topic-policy.js with neutral refusal, Chinese/English politics trigger detection, NFKC normalization and spaced-Chinese handling, output sanitizer and central system instruction. Conservative keyword heuristic, not perfect semantic classifier.
-- Patched src/abot-ai.js to refuse obvious political input before model call, add system policy, replace any political output before send, never store such output or refused input in history.
-- Patched src/assistant.js to refuse before Bbot quota and Gemini requests and suppress/persist no political output; same shared system policy.
-- Added tests/political-policy.test.mjs, expanded Abot and Bbot AI regression tests for blocked input, blocked output, normal input, no model call, no storing political output.
-- README and docs/DEPLOY describe behavior and keyword false-positive/false-negative limitations.
-- Existing backup archive/bbot-ai-before-abot-20261010 SHA 8bc7427f85f23ab52935c2a83b87e7e2df909c14 and original archive/legacy-main-20261009 unchanged.
-verification_results: feature CI pending; no live QQ model send to avoid disruption
+- Started from main a9c55b6ad8c87f02034752f9216720b0543fa85a; feature/no-politics-guard-20261010 implemented new src/topic-policy.js.
+- On Abot official src/abot-ai.js, incoming political questions refused before model call, system message instructs refusal, generated political content sanitized before send and never stored in chat history.
+- On Bbot latent src/assistant.js, same three-stage policy; incoming politics no quota or Gemini/DeepSeek use.
+- Keywords support Chinese Traditional/Simplified and English with NFKC and spaced-Han normalization; caveat: heuristic cannot guarantee 100% accuracy.
+- Regression tests: tests/political-policy.test.mjs, tests/abot-ai.test.mjs, tests/assistant.test.mjs; documentation README and docs/DEPLOY updated.
+- GitHub feature CI 38063487027 successful, main CI 38063546208 successful, Node suite and Wrangler dry-run passed.
+- Non-force fast-forwarded main to product commit 6fa907d2a6bede25243faa130f9ac9e4cb6e202f, preserving all existing D1, Gemini/DeepSeek Secrets, Bbot plugin settings and all three full-code backup branches.
+- Cloudflare qqai build source 6fa907d2a6bede25243faa130f9ac9e4cb6e202f completed successfully, deployment d6e05bc2-aa97-49a1-a8c6-7742c74eee67, version c8c4f8b2-d1ff-489e-af4d-cd68a400e4f3, 100% traffic.
+- Followup memory v0.0.96 records verification. Archive CI pending.
+verification_results:
+- CI, build and Cloudflare deployment successful with source SHA match. Policy tests mock model responses.
+- Real QQ official passive reply and policy smoke tests NOT run; Gateway READY previously observed but actual QQ send remains platform-dependent.
 known_risks:
-- Keyword-based pre/post filter may miss coded politics, names not listed, euphemisms or block harmless quoted contexts. Model instruction helps but cannot guarantee perfect exclusion.
-- Cross-group plugin forwards user messages as transport rather than generates AI replies; it is not censored by this restriction.
-- QQ official group passive reply functionality remains platform-gated, real send unverified.
-next_exact_action: trigger CI for feature/no-politics-guard-20261010; if green update main with expected sha, check Cloudflare deployment, update memory with evidence, generate archive and send one Gmail notification. Then user performs @AIBot political and non-political smoke test.
-checkpoint_at: 2026-10-10T15:24:12.984Z
+- Keyword model may miss disguised political phrasing or overblock benign terms. Not a perfect classifier.
+- Original user messages relayed by opt-in cross-group plugin are not edited by AI policy.
+- No automatic deletion of historical political content already in D1.
+next_exact_action: user sends one genuinely nonpolitical @AIBot message and one political @AIBot question in controlled QQ group, confirming ordinary answer and refusal; if response fails inspect sanitized Abot Gateway logs and QQ API code.
+checkpoint_at: 2026-10-10T15:26:54.379Z

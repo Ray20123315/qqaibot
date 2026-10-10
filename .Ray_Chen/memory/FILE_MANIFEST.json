@@ -1,71 +1,69 @@
 {
-  "version": "v0.0.95",
+  "version": "v0.0.96",
   "task_id": "qqaibot-ai-rebuild-20261010",
   "goal_revision": 3,
-  "changed_at": "2026-10-10T15:24:12.984Z",
+  "changed_at": "2026-10-10T15:26:54.379Z",
   "location_type": "remote",
   "provider": "GitHub",
   "repository": "Ray20123315/qqaibot",
-  "branch": "feature/no-politics-guard-20261010",
+  "branch": "main",
   "before_revision": "a9c55b6ad8c87f02034752f9216720b0543fa85a",
-  "after_revision": "feature_commit_pending",
+  "product_sha": "6fa907d2a6bede25243faa130f9ac9e4cb6e202f",
+  "after_revision": "memory_commit_pending",
   "verification": {
-    "ci": "pending",
-    "main": "unchanged",
-    "cloudflare": "unchanged",
+    "feature_ci": 38063487027,
+    "main_ci": 38063546208,
+    "ci_outcome": "success",
+    "cloudflare_deployment": "d6e05bc2-aa97-49a1-a8c6-7742c74eee67",
+    "cloudflare_version": "c8c4f8b2-d1ff-489e-af4d-cd68a400e4f3",
+    "cloudflare_source_sha": "6fa907d2a6bede25243faa130f9ac9e4cb6e202f",
+    "cloudflare_build": "success",
+    "traffic_percent": 100,
     "live_qq": "not tested"
   },
-  "changes": [
+  "files": [
     {
       "path": "src/topic-policy.js",
-      "action": "create_or_modify",
-      "blob_sha": "77c4113a24fc58f1f95f1c175975710dbed8452e"
+      "action": "created_or_modified"
     },
     {
       "path": "src/abot-ai.js",
-      "action": "create_or_modify",
-      "blob_sha": "4012c8c8dcb978648330e769693fc079cb4fd736"
+      "action": "created_or_modified"
     },
     {
       "path": "src/assistant.js",
-      "action": "create_or_modify",
-      "blob_sha": "512e6245bcd05376244f238604177c34f1179302"
+      "action": "created_or_modified"
     },
     {
       "path": "tests/political-policy.test.mjs",
-      "action": "create_or_modify",
-      "blob_sha": "5595039c860ec259dafabecb5a6d086882b26798"
+      "action": "created_or_modified"
     },
     {
       "path": "tests/abot-ai.test.mjs",
-      "action": "create_or_modify",
-      "blob_sha": "6e9f56aef996d828bac1d882d825d65f4f24f4db"
+      "action": "created_or_modified"
     },
     {
       "path": "tests/assistant.test.mjs",
-      "action": "create_or_modify",
-      "blob_sha": "c940f635641ceb0ac5462bc64b481352b2c14f76"
+      "action": "created_or_modified"
     },
     {
       "path": "README.md",
-      "action": "create_or_modify",
-      "blob_sha": "ce3e433f9cf5ca85d224f4edf973acb0dd788d2d"
+      "action": "created_or_modified"
     },
     {
       "path": "docs/DEPLOY.md",
-      "action": "create_or_modify",
-      "blob_sha": "692deec4c2fce4b1e306b9fc5ba51a06505771e9"
+      "action": "created_or_modified"
     },
     {
       "path": ".github/workflows/bridge-check.yml",
-      "action": "bump archive version and feature CI branch"
+      "action": "created_or_modified"
     },
     {
       "path": ".Ray_Chen/memory/*",
-      "action": "checkpoint restriction goal"
+      "action": "created_or_modified"
     }
   ],
-  "backup_branches": [
+  "backups": [
     "archive/bbot-ai-before-abot-20261010",
     "archive/bbot-bridge-before-ai-20261010",
     "archive/legacy-main-20261009"
