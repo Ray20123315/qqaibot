@@ -1,31 +1,31 @@
 # ACTIVE_TASK
 task_id: qqaibot-ai-rebuild-20261010
-task_status: blocked
-goal_revision: 1
-goal: lean QQ AI assistant running existing Gemini and opt-in DeepSeek API Secrets, no uninvited group chat, disabled-by-default bridge plugin, preserve old code/data and deploy to main
-current_phase: feature implemented, CI verified and Cloudflare deployed; waiting for controlled NapCat and Gemini live QQ acceptance
-current_step: reconnect NapCat WebSocket Client to bridge-bbot-ai-v1, then test !help, !status, !ai in a controlled QQ group; confirm Gemini actual response and no unsolicited chat
-
+task_status: active
+goal_revision: 2
+goal: trial QQ official Abot as sole AI message receiver/sender through passive msg_id replies; Bbot retains opt-in bridge plugin only
+acceptance_criteria:
+- QQ official Gateway QqOpenGateway reconnects and heartbeats, receives GROUP_AT_MESSAGE_CREATE; ignores unmentioned ordinary GROUP_MESSAGE_CREATE.
+- AI uses existing GEMINI_API_KEYS Secret and Gemini model client, group and sender OpenIDs preserved and separated, no numeric QQ-ID guessing.
+- QQ passive group reply POST /v2/groups/{group_openid}/messages contains inbound msg_id and msg_seq; never proactively sends AI.
+- No duplicate AI answers from Bbot; Bbot remains only for optional off-by-default bridge.
+- D1 dedupe, daily limits, short context; official API error stays visible as code only, no silent Bbot fallback.
+- Preserve main backup and old backups, QQ keys, D1, DO migrations; pass CI and Wrangler dry-run before main.
+current_phase: initial Abot implementation staged
+current_step: run CI on feature/abot-ai-passive-20261010, repair tests and deploy to main if green
 completed_steps:
-- Confirmed Cloudflare qqai already had secret_text GEMINI_API_KEYS, DEEPSEEK_API_KEY, GEMINI_VISION_API_KEYS and CODEX_BRIDGE_ACCESS_TOKEN, plus model configuration. No raw Secret values read or modified. Followed archived Gemini generateContent / DeepSeek chat/completions syntax.
-- Archived full pre-AI bridge main as archive/bbot-bridge-before-ai-20261010 SHA 13b915d1d4451d4cb15ff91f70a498cede760d40; older archive/legacy-main-20261009 SHA 6a22b06433cfaffcf13abe2b60a917305290b629 unchanged.
-- src/model-client.js reuses existing Gemini key list and DeepSeek explicit key, limits attempts, sanitizes errors, no automatic paid provider fallback.
-- src/assistant.js handles only @Bot, reply-to-Bot and !ai triggers, no proactive group chatter. Includes !help, !status, !setting on/off, !model Gemini/DeepSeek, !plugin bridge on/off, !clear, per-group/user 3-day context and D1 daily quotas 20 user/120 group by Taiwan date.
-- Worker /health reports AI assistant mode, provider Secret binding presence only, and active NapCat socket. Abot gateway inert, old DO preserved; bridge loaded dynamically only as needed.
-- src/bridge.js blocks old outbox targeting groups without explicit bridge plugin enabled, uses ASSISTANT_MODE=true.
-- New OneBotHub generation bridge-bbot-ai-v1; NapCat WS client must reconnect post-deploy; no URL/Token changes.
-- Modified README docs/DEPLOY and CI tests, added provider mock tests. Feature CI 37973263797 success, main CI 37973472725 success, Node tests and Wrangler dry-run.
-- Non-force GitHub main fast-forward to product SHA 9d19fd6ad19970290b2c4ee34259bf97fe30679e.
-- Cloudflare qqai build from 9d19fd6ad19970290b2c4ee34259bf97fe30679e outcome success, deployment ID 5162563f-51b9-4ddc-a52e-888e46798fa7, version 291e36cf-dbc6-4963-8984-db0f64bd90b6, 100% traffic.
-- Read-back after deploy confirmed Secret types: GEMINI_API_KEYS secret_text, DEEPSEEK_API_KEY secret_text, GEMINI_VISION_API_KEYS secret_text, ONEBOT_ACCESS_TOKEN secret_text, D1 and OneBotHub bindings. ASSISTANT_MODE true.
-- Latest v0.0.92 memory-only commit prepared; CI artifact pending.
-
-verification_results: tests and Cloudflare deploy successful; real Gemini API/QQ chat behavior NOT TESTED, image understanding is not part of first text MVP.
+- Inspected QQ official message send docs; msg_id passive reply valid for about 5 min, per incoming event.
+- Archived current Bbot AI main 8bc7427f85f23ab52935c2a83b87e7e2df909c14 as archive/bbot-ai-before-abot-20261010; earlier full archives remain.
+- Added src/abot-ai.js parseOfficialGroupEvent, D1 OpenID per-room/per-author context and seen dedupe, Gemini response and sendGroup via QQ official only, error-code-only log.
+- Reimplemented worker.js QqOpenGateway outbound WebSocket op10 HELLO/op2 IDENTIFY/op1 heartbeat/op0 READY, reconnect alarm, status endpoint; cron ensures new official ai Gateway ID qqai-abot-passive-ai-v1 while shutdown old two gateway instances.
+- Worker /health mode abot-ai-passive and gateway status, AI commands received by Abot only; Bbot route now bridge-only + authorized plugin/settings control.
+- wrangler.toml QQ_AI_ABOT_ENABLED true, bridge plugin still default disabled, Abot old bridge sender still off.
+- Tests include passive reply msg_id, official OpenID identity and dedupe, no Bbot fallback on HTTP rejection, gateway HELLO and READY, cron starts new+shuts old.
+verification_results: CI pending; no live QQ API sent or official gateway event received yet.
 known_risks:
-- GEMINI_CHAT_MODELS configuration includes recent/preview model names; first configured model could be unavailable, client tries stable gemini-2.5-flash fallback. Unknown actual Gemini quota.
-- No real network model call or NapCat QQ chat send performed for this release. Controlled QQ group test needed.
-- QQ replies and command triggers need Bbot WS reconnect to fresh Durable Object bridge-bbot-ai-v1.
-- Vision, voice, file AI and other old plugins not ported; text assistant is deliberately minimal.
-- Existing legacy D1 bridge data persists but opt-in plugin OFF; avoid accidental old message replay after enabling without review.
-next_exact_action: user toggles NapCat WebSocket Client off and on without changing wss://aibot.ray2025.com/onebot or token; checks /health mode ai-assistant, hub_generation ai-v1, bbot.connected true, assistant.configured true; in a small group sends !help then !ai 你好 once. If reply fails, collect sanitized Worker logs and provider HTTP status only.
-checkpoint_at: 2026-10-09T18:29:45.586Z
+- QQ official per-app group privileges may still reject passive response (past errors e.g. 40034105), actual Gateway connection not tested.
+- No private user C2C or proactive send. Official group @ event and bot membership/intents required.
+- 5-minute passive message window; if Gemini stalls beyond window, may fail.
+- Existing Bbot AI command behavior intentionally stopped to prevent duplicated responses; Bbot plugin control remains.
+- Claude Gemini credentials not shown; only configured name.
+next_exact_action: run CI; if green promote main with expected old SHA, verify Cloudflare deployment and bindings, archive memory, notify Gmail. Human live acceptance: @AIBot !help then @AIBot 你好 in small group, inspect /health and QQ error codes.
+checkpoint_at: 2026-10-10T15:04:16.032Z

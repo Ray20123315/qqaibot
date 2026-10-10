@@ -15,7 +15,7 @@ test("health and outbound target the same fresh OneBotHub generation",async()=>{
  }})};
  const response=await worker.fetch(new Request("https://qqai.example.com/health"),{ONEBOT_HUB:hub,ONEBOT_ACCESS_TOKEN:"secret"});
  const status=await response.json();
- assert.equal(status.mode,"ai-assistant");
+ assert.equal(status.mode,"abot-ai-passive");
  assert.equal(status.bbot.connected,false);
  assert.equal(status.bbot.hub_generation,"ai-v1");
  await sendUsingBbot({ONEBOT_HUB:hub},"msg","808882936",[{type:"text",data:{text:"test"}}]);

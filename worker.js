@@ -1,6 +1,8 @@
 import {BBOT_HUB_ID} from "./src/bbot-hub.js";
 
-import {routeBotEvent,routeBotNotice,bridgeCanFlush,assistantHealth,recordAssistantReply} from "./src/assistant.js";
+import {routeBbotBridgeOnly,routeBotNotice,bridgeCanFlush,assistantHealth,recordAssistantReply} from "./src/assistant.js";
+import {accessToken,qqRequest} from "./src/qq-api.js";
+import {onAbotAiEvent} from "./src/abot-ai.js";
 import {qq,parseOnebot} from "./src/core.js";
 import {roster,init} from "./src/store.js";
 import {outboundAction} from "./src/relay.js";
@@ -17,6 +19,7 @@ const hub=env=>env.ONEBOT_HUB.get(env.ONEBOT_HUB.idFromName(BBOT_HUB_ID));
 // Retain the legacy QQ_OPEN_GATEWAY binding and Durable Object migration, but
 // make the official gateway passive and ask both historical instances to close.
 const oldGatewayNames=["bridge-abot","bridge-abot-commands-v2"];
+const newAbotGateway=env=>env.QQ_OPEN_GATEWAY.get(env.QQ_OPEN_GATEWAY.idFromName("qqai-abot-passive-ai-v1"));
 async function stopOldGateways(env){
  if(!env.QQ_OPEN_GATEWAY)return;
  await Promise.allSettled(oldGatewayNames.map(name=>{
@@ -30,13 +33,15 @@ export default {
   if(path==="/health"&&request.method==="GET"){
    const b=await hub(env).fetch("https://internal/status").catch(()=>null);
    const bbot=b?.ok?await b.json():{connected:false};
-   return json({service:"qqaibot-ai-assistant",ai:true,configured:!!env.ONEBOT_ACCESS_TOKEN,
-    mode:"ai-assistant",abot:{connected:false,session_ready:false,enabled:false},
+   const a=String(env.QQ_AI_ABOT_ENABLED)==="true"?await newAbotGateway(env).fetch("https://internal/status").catch(()=>null):null;
+   const abot=a?.ok?await a.json():{connected:false,session_ready:false,enabled:false};
+   return json({service:"qqaibot-ai-assistant",ai:true,configured:!!env.QQ_OPEN_APP_ID&&!!env.QQ_OPEN_CLIENT_SECRET,
+    mode:"abot-ai-passive",abot:{connected:!!abot.connected,session_ready:!!abot.session_ready,enabled:!!abot.enabled,last_event_at:abot.last_event_at||null,last_error:abot.last_error||null},
     bbot:{connected:!!bbot.connected,hub_generation:"ai-v1",websocket_count:Number(bbot.websocket_count||0),
      last_connected_at:bbot.last_connected_at||null,last_event_at:bbot.last_event_at||null,
      last_closed_at:bbot.last_closed_at||null},
     command_prefix:"/! or !",relay:{mode:"parallel",max_parallel_groups:4},
-    verification:"napcat",primary_command_transport:"bbot",assistant:await assistantHealth(env)});
+    verification:"napcat",primary_command_transport:"abot",assistant:await assistantHealth(env)});
   }
   if(path==="/onebot" || path==="/onebot/roster"){
    if(!await secretMatches(request,env.ONEBOT_ACCESS_TOKEN))return json({error:"unauthorized"},401);
@@ -51,13 +56,15 @@ export default {
      return json(await onOnebotRoster(env,data.group_id,data.members,data.group_name));
     }
     if(data?.post_type==="notice"&&data.notice_type==="group_recall")return json(await routeBotNotice(env,data));
-    return json(await routeBotEvent(env,data));
+    return json(await routeBbotBridgeOnly(env,data));
    }catch(e){console.error("ONEBOT_HTTP_ERROR",String(e).slice(0,300));return json({error:"ingest_failed"},503);}
   }
   return json({error:"not_found"},404);
  },
  async scheduled(event,env,ctx){
   ctx.waitUntil(stopOldGateways(env));
+  if(String(env.QQ_AI_ABOT_ENABLED)==="true")
+   ctx.waitUntil(newAbotGateway(env).fetch("https://internal/ensure").catch(e=>console.error("ABOT_GATEWAY_ENSURE",String(e?.message||"failed").slice(0,90))));
   ctx.waitUntil(bridgeCanFlush(env).then(enabled=>enabled?hub(env).fetch("https://internal/flush"):null).catch(e=>console.error("PLUGIN_SCHEDULE",String(e).slice(0,180))));
  }
 };
@@ -203,7 +210,7 @@ export class OneBotHub {
     const name=(await this.state.storage.get("groupname:"+group))||"";
     for(const evt of queued){
      evt.__bridge_group_name=name;
-     const result=await routeBotEvent(this.env,evt,text=>this.replyFromBbot(ws,group,text));
+     const result=await routeBbotBridgeOnly(this.env,evt,text=>this.replyFromBbot(ws,group,text));
      await this.afterHandled(result);
     }
    }else{await this.state.storage.delete("queue:"+group);console.error("BBOT_ROSTER_FAILED",echo,String(data?.retcode||""));}
@@ -237,7 +244,7 @@ export class OneBotHub {
    return;
   }
   try{
-   const result=await routeBotEvent(this.env,data,text=>this.replyFromBbot(ws,msg.groupId,text));
+   const result=await routeBbotBridgeOnly(this.env,data,text=>this.replyFromBbot(ws,msg.groupId,text));
    await this.afterHandled(result);
   }catch(e){console.error("ASSISTANT_EVENT_FAILED",String(e).slice(0,250));}
  }
@@ -253,18 +260,103 @@ export class OneBotHub {
 }
 // Kept only because Cloudflare's historical durable-object migrations refer to
 // this class. There is NO connect, token fetch, command handling or heartbeat.
+// QQ Official Gateway powers AI via passive msg_id replies. It is independent
+// of NapCat/Bbot and never attempts proactive group sends.
 export class QqOpenGateway {
- constructor(state,env){this.state=state;this.env=env;this.ws=null;}
- async shutdown(){
-  try{this.ws?.close(1000,"Abot disabled; Bbot-only mode");}catch{}
-  this.ws=null;
-  try{await this.state.storage.deleteAlarm();}catch{}
+ constructor(state,env){
+  this.state=state;this.env=env;this.ws=null;this.token="";
+  this.seq=null;this.sessionId="";this.interval=30000;this.connecting=false;this.ready=false;
  }
  async fetch(request){
   const path=new URL(request.url).pathname;
-  if(path==="/shutdown"){await this.shutdown();return json({disabled:true});}
-  if(path==="/status")return json({connected:false,ready:false,disabled:true});
-  return json({error:"ABOT_DISABLED",disabled:true},410);
+  if(path==="/status"){
+   const lastEvent=await this.state.storage?.get?.("last_event_at");
+   const lastError=await this.state.storage?.get?.("last_error");
+   return json({connected:this.ws?.readyState===1,session_ready:this.ready,
+    enabled:String(this.env.QQ_AI_ABOT_ENABLED)==="true",
+    last_event_at:lastEvent||null,last_error:lastError||null});
+  }
+  if(path==="/shutdown"){
+   await this.shutdown();return json({disabled:true});
+  }
+  if(path!=="/ensure")return json({error:"not_found"},404);
+  if(String(this.env.QQ_AI_ABOT_ENABLED)!=="true")return json({enabled:false});
+  try{await this.ensure();return json({enabled:true,connecting:this.connecting,connected:this.ws?.readyState===1,ready:this.ready});}
+  catch(e){
+   await this.recordError("CONNECT_"+String(e?.code||e?.status||"FAILED"));
+   await this.state.storage.setAlarm(Date.now()+60000);
+   return json({enabled:true,error:"gateway_unavailable"},503);
+  }
  }
- async alarm(){await this.shutdown();}
+ async recordError(code){
+  const safe=String(code||"unknown").replace(/[^A-Za-z0-9_-]/g,"").slice(0,60);
+  await this.state.storage?.put?.("last_error",safe);
+  console.error("ABOT_GATEWAY_ERROR",safe);
+ }
+ async ensure(){
+  if(String(this.env.QQ_AI_ABOT_ENABLED)!=="true")return;
+  if(this.ws&&[0,1].includes(this.ws.readyState))return;
+  if(this.connecting)return;
+  this.connecting=true;
+  try{
+   this.token=await accessToken(this.env);
+   const data=await qqRequest(this.env,"/gateway");
+   if(!/^wss:\/\//i.test(data?.url||""))throw new Error("BAD_GATEWAY_URL");
+   const ws=new WebSocket(data.url);this.ws=ws;this.ready=false;
+   ws.addEventListener("open",()=>{this.connecting=false;});
+   ws.addEventListener("message",e=>this.handleMessage(e.data).catch(err=>this.recordError("EVENT_"+String(err?.status||"FAILED"))));
+   ws.addEventListener("close",()=>{
+    if(this.ws===ws){this.ws=null;this.ready=false;this.connecting=false;}
+    this.state.storage.setAlarm(Date.now()+15000).catch(()=>{});
+   });
+   ws.addEventListener("error",()=>{this.connecting=false;});
+   await this.state.storage.setAlarm(Date.now()+30000);
+  }finally{this.connecting=false;}
+ }
+ async handleMessage(input){
+  let p;try{p=JSON.parse(typeof input==="string"?input:new TextDecoder().decode(input));}catch{return;}
+  if(Number.isInteger(p?.s))this.seq=p.s;
+  if(p?.op===10){
+   this.interval=Math.min(120000,Math.max(5000,Number(p?.d?.heartbeat_interval||30000)));
+   const intents=Number(this.env.QQ_OPEN_INTENTS||100663296);
+   this.ws?.send(JSON.stringify({op:2,d:{token:"QQBot "+this.token,intents,shard:[0,1],
+    properties:{"$os":"cloudflare","$browser":"QQAIBOT-Abot-AI","$device":"QQAIBOT-Abot-AI"}}}));
+   await this.state.storage.setAlarm(Date.now()+this.interval);
+   return;
+  }
+  if(p?.op===0){
+   if(p.t==="READY"||p.t==="RESUMED"){
+    this.ready=true;this.sessionId=String(p?.d?.session_id||this.sessionId);
+    await this.state.storage.put("last_error","");
+    console.log("ABOT_AI_GATEWAY_READY");
+    return;
+   }
+   if(p.t==="GROUP_AT_MESSAGE_CREATE"||p.t==="GROUP_MESSAGE_CREATE"){
+    await this.state.storage.put("last_event_at",new Date().toISOString());
+    const result=await onAbotAiEvent(this.env,p);
+    if(result?.status==="failed")await this.recordError("SEND_OR_MODEL_"+String(result.errorCode||"UNKNOWN"));
+   }
+  }
+  if(p?.op===7||p?.op===9){
+   try{this.ws?.close(1000,"gateway_reconnect");}catch{}
+   this.ws=null;this.ready=false;
+   await this.state.storage.setAlarm(Date.now()+20000);
+  }
+ }
+ async alarm(){
+  if(String(this.env.QQ_AI_ABOT_ENABLED)!=="true"){await this.shutdown();return;}
+  if(this.ws?.readyState===1){
+   try{this.ws.send(JSON.stringify({op:1,d:this.seq}));}
+   catch{await this.recordError("HEARTBEAT_SEND_FAILED");}
+   await this.state.storage.setAlarm(Date.now()+this.interval);
+  }else{
+   try{await this.ensure();}
+   catch(e){await this.recordError("RECONNECT_"+String(e?.status||"FAILED"));await this.state.storage.setAlarm(Date.now()+60000);}
+  }
+ }
+ async shutdown(){
+  try{this.ws?.close(1000,"operator_shutdown");}catch{}
+  this.ws=null;this.ready=false;
+  try{await this.state.storage.deleteAlarm();}catch{}
+ }
 }

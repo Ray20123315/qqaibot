@@ -1,28 +1,16 @@
-# QQAIBOT AI 助理重構：部署與驗收
+# Abot 官方 AI 試行版部署
 
-## 部署範圍
+## 既有綁定與開關
+保留 Cloudflare `QQ_OPEN_APP_ID`、`QQ_OPEN_CLIENT_SECRET`、`QQ_OPEN_GATEWAY`、`GEMINI_API_KEYS`、D1、ONEBOT_HUB、ONEBOT_ACCESS_TOKEN，不讀取或記錄 Secret 值。
 
-Cloudflare Worker：`qqai`，自訂域名 `aibot.ray2025.com`。維持既有 D1 ID、Durable Object migration 與 Secrets；設定檔 `keep_vars=true`。
+`wrangler.toml` 設 `QQ_AI_ABOT_ENABLED=true`，只重新啟用官方 Gateway 的 **AI 被動回覆**，並不啟用跨群 Abot 主動推送。舊 `BRIDGE_ABOT_ENABLED=false` 和 `BRIDGE_MODE=plugin-disabled` 保持不變。
 
-只使用既有 Secret 名稱：`GEMINI_API_KEYS`、`DEEPSEEK_API_KEY`、`ONEBOT_ACCESS_TOKEN`。前兩者由 HTTP 模型供應商介面使用；請勿將內容寫到 GitHub、Worker URL、日志或回覆。Gemini 透過 `x-goog-api-key` request header 呼叫 `generateContent`；DeepSeek 使用 Bearer Authorization 呼叫 `chat/completions`。不新增 Cloudflare AI binding。
+`QqOpenGateway` 使用新執行個體 `qqai-abot-passive-ai-v1`；Cron /ensure 檢查閘道，HELLO op10 後 IDENTIFY op2，HEARTBEAT op1，READY op0；Gateway 斷線依 alarm 安全重連。舊 bridge-abot、bridge-abot-commands-v2 執行個體仍依 cron 關閉。
 
-## 切換
+## 流程與限制
+只有官方 `GROUP_AT_MESSAGE_CREATE` 或可證實被 @ 的群訊息會處理。查出 `group_openid`、`author.member_openid`、`id`（原始 msg_id），在 D1 `abot_ai_seen` 做去重與配額；Gemini 從既有 Secret 呼叫，然後帶原始 `msg_id` 官方被動發送。無法確定官方發送成功時不向 Bbot 盲目重發。
 
-部署新 Worker 後，必須在 NapCat WebSocket Client 停用／啟用一次，使之連至新的 `bridge-bbot-ai-v1`。原 Token、URL、群組與權限資料維持原樣。
+建議先測 `@AIBot !help`（不用模型 API），其次 `@AIBot 你好`（Gemini）。若不能收事件檢查 `QQ_OPEN_INTENTS` 和 QQ 群 Bot 權限；若 API 回應錯誤碼 `40034105`，記錄代碼並確認官方主體是否具被動回覆權限。不能將自動測試成功等同 QQ 正式收發。
 
-**跨群插件預設關閉。** 舊聯通群不會因部署自動轉發，且至少要來源群與目標群明確開啟插件。新 AI 助理只回答 `@Bot`、回覆 Bot 或 `!ai`。
-
-## 驗證順序
-
-1. GitHub Actions 執行 `npm test` 與 Wrangler dry-run，檢查舊橋接／Abot 安全性及新 AI Secret mock。
-2. `/health` 顯示 `mode=ai-assistant`、`assistant.configured=true`，`bbot.connected=true`。若無，先查看 Bot Secret 名稱（非值）與 NapCat 握手。
-3. 在測試群 `!help`、`!status`、`!model`（不呼叫模型）。
-4. 在測試群單次 `!ai 你好`，確認真實 Gemini 回覆與短期對話；普通訊息不應觸發。
-5. 管理員切換 `!model deepseek` 前應確認願意使用付費 DeepSeek 模型。
-6. 在兩個測試群均啟用 `!plugin bridge on` 後，才檢查跨群轉發。不要直接在大型群壓力測試。
-
-## 已知限制
-
-初版 AI 核心僅支援文字問答；圖片、語音、檔案理解與外部工具插件先不自動啟用。真實 QQ 媒體不一定可由模型直接讀取，需要額外具權限限制的 Media Resolver。NapCat 可能回傳不同的 message_id 型別，回覆串接需真實 QQ 測試。
-
-模型商可能限速、停用部分預覽模型或變更計費；本版限制為最多兩個同供應商候選模型與兩把 API Key，Gemini 不會自動切到 DeepSeek。
+## 回復
+完整上一版 `archive/bbot-ai-before-abot-20261010`；可以將 `QQ_AI_ABOT_ENABLED=false` 關閉官方 Gateway 並保留 D1。所有新增 D1 表採 CREATE IF NOT EXISTS，既有表無刪除。

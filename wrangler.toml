@@ -49,6 +49,7 @@ BRIDGE_REAL_MENTIONS = "false" # QQ numeric @ is handled natively by NapCat afte
 BRIDGE_ABOT_ENABLED = "false"
 BRIDGE_MODE = "plugin-disabled"
 ASSISTANT_MODE = "true"
+QQ_AI_ABOT_ENABLED = "true" # Only passive official replies; group @ events required
 AI_DAILY_USER_LIMIT = "20"
 AI_DAILY_GROUP_LIMIT = "120"
 BRIDGE_NAPCAT_COMMANDS = "true"

@@ -33,11 +33,12 @@ test("public /health reports only limited connection state without secrets",asyn
  assert.equal(s.bbot.websocket_count,0);
  assert.equal(s.relay.mode,"parallel");
  assert.equal(s.relay.max_parallel_groups,4);
- assert.deepEqual(s.abot,{connected:false,session_ready:false,enabled:false});
- assert.equal(s.mode,"ai-assistant");
+ assert.equal(s.abot.connected,false);
+ assert.equal(s.abot.enabled,false);
+ assert.equal(s.mode,"abot-ai-passive");
  assert.equal(s.ai,true);
  assert.equal(s.assistant.bridge_default,false);
  assert.equal(s.configured,true);
  assert.equal(JSON.stringify(s).includes("secret_"),false);
- assert.equal(s.primary_command_transport,"bbot");
+ assert.equal(s.primary_command_transport,"abot");
 });

@@ -200,3 +200,19 @@ export async function bridgeCanFlush(env) {
 export async function assistantHealth(env){
  return {configured:modelAvailability(env).gemini,providers:modelAvailability(env).gemini?["gemini",...(modelAvailability(env).deepseek?["deepseek"]:[])]:modelAvailability(env).deepseek?["deepseek"]:[],trigger:"mention-or-reply-or-!ai",bridge_default:false};
 }
+
+/** When QQ Open Abot owns AI replies, Bbot is retained only for an explicitly
+ * enabled optional bridge plugin. No Bbot model call or !ai replies. */
+export async function routeBbotBridgeOnly(env,event,reply){
+ const msg=parseOnebot(event);
+ if(!msg||msg.senderQq===msg.selfId||msg.text.includes(BRIDGE_ECHO_MARKER))return {ignored:true};
+ const cmd=parseAssistantCommand(msg.text);
+ // Keep an authenticated Bbot management entry for optional plugin switching,
+ // but never generate Gemini/DeepSeek AI answers over NapCat in Abot mode.
+ if(cmd?.name==="plugin"||cmd?.name==="setting")
+  return routeAssistantEvent(env,event,reply);
+ const config=await groupSettings(env,msg.groupId);
+ if(!config.bridgeEnabled)return {ignored:true,reason:"bbot_bridge_off"};
+ const bridge=await import("./bridge.js");
+ return bridge.onOnebotEvent(env,event,reply);
+}

@@ -1,7 +1,8 @@
 # CURRENT_STATE
-- GitHub Ray20123315/qqaibot production main code SHA 9d19fd6ad19970290b2c4ee34259bf97fe30679e, AI assistant mode replacing noisy bridge core. Original bridge code preserved archive/bbot-bridge-before-ai-20261010 SHA 13b915d1d4451d4cb15ff91f70a498cede760d40, legacy archive/legacy-main-20261009 SHA 6a22b06433cfaffcf13abe2b60a917305290b629.
-- Cloudflare Worker qqai deployment 5162563f-51b9-4ddc-a52e-888e46798fa7, version 291e36cf-dbc6-4963-8984-db0f64bd90b6, source 9d19fd6ad19970290b2c4ee34259bf97fe30679e, build success, traffic 100%.
-- Secret bindings physically exist post-deploy: GEMINI_API_KEYS, DEEPSEEK_API_KEY, GEMINI_VISION_API_KEYS, ONEBOT_ACCESS_TOKEN; all secret_text. D1 and OneBotHub bound. ASSISTANT_MODE=true. No Secret values read.
-- Model client uses existing Google / DeepSeek HTTP APIs, not env.AI or Workers AI binding. Gemini default, DeepSeek explicitly selected only; vision key preserved but not yet used.
-- Per-group AI and bridge plugin settings via D1, original bridge only loaded on explicit plugin usage; source and target opt-in required.
-- CI feature 37973263797 and main 37973472725 both success; no live Gemini call, QQ response or manual NapCat socket reconnect verified.
+- GitHub main before new Abot trial 8bc7427f85f23ab52935c2a83b87e7e2df909c14.
+- New branch feature/abot-ai-passive-20261010 official AI passive reply implementation; no live network tests.
+- Cloudflare existing names QQ_OPEN_APP_ID, QQ_OPEN_CLIENT_SECRET, GEMINI_API_KEYS, DEEPSEEK_API_KEY, QQ_OPEN_GATEWAY, DB all retained. Intents existing QQ_OPEN_INTENTS read from existing Cloudflare env.
+- New QqOpenGateway instance qqai-abot-passive-ai-v1, old bridge-abot and bridge-abot-commands-v2 shut down by cron; class DO migrations preserved.
+- Bbot remains connected but routeBbotBridgeOnly avoids AI generation/reply. Bridge plugin per-group D1 remains default off.
+- D1 additive abot_ai_seen / abot_ai_history / abot_ai_settings tables. No old data destroyed.
+- Original legacy archive/legacy-main-20261009 at SHA 6a22b06433cfaffcf13abe2b60a917305290b629.
