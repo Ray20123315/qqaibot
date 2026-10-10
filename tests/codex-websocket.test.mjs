@@ -6,6 +6,7 @@ import {CODEX_BRIDGE_PROTOCOL} from "../src/codex-bridge.js";
 test("Codex and NapCat stay separated by WebSocket tags",async()=>{
  const codex={readyState:1,send:()=>{}},napcat={readyState:1,send:()=>{}};
  const state={
+  storage:{get:async()=>null},
   getWebSockets:tag=>tag==="codex"?[codex]:tag==="bbot"?[napcat]:[codex,napcat],
   getTags:ws=>ws===codex?["codex"]:["bbot"]
  };
