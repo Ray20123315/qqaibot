@@ -1,5 +1,7 @@
 # VERIFY
-- QQ official documentation: POST /v2/groups/{group_openid}/messages, msg_type:0, msg_id original, msg_seq:1, passive group reply lifetime ~5 min. Earlier src/qq-api.js sendGroup uses these fields.
-- New tests/abot-ai.test.mjs verify official event parsing, no ordinary group unsolicited replies, OpenID passive send msg_id, dedupe, !help local, API 40034105 failure no Bbot reroute, HELLO IDENTIFY and READY.
-- Updated tests/abot-disabled.test.mjs verifies old sessions shut down while new official session starts only if QQ_AI_ABOT_ENABLED.
-- Full npm run check + Wrangler dry-run pending, Cloudflare deployment and real QQ trial pending. Do not claim live success.
+- QQ official docs: POST /v2/groups/{group_openid}/messages, msg_type:0, incoming msg_id and msg_seq:1, passive lifetime approx 5 minutes; no proactive messages.
+- GitHub feature CI 38062142463 SUCCESS and main CI 38062213315 SUCCESS, npm check + Wrangler dry-run; 7 new Abot tests in tests/abot-ai.test.mjs.
+- Cloudflare deployed product SHA e2aeae4485f8bf3f49c6a481e7e71f921aea008c (success, 100%), deployment f0031760-6c11-43bf-a712-4426161c9970, version 13cdfd32-245c-4aff-b4ae-a3820ba53b60.
+- Cloudflare Telemetry ABOT_AI_GATEWAY_READY at 2026-10-10T15:06:08.297Z matches deployed version.
+- Live QQ @/message delivery not yet proven. Verify one '@AIBot !help' in a small group then '@AIBot 你好', inspect safe ABOT_AI_PASSIVE_SENT or ABOT_AI_FAILED error code and state.
+- Archive v0.0.94 CI pending latest memory-only commit.

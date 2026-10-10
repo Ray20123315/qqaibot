@@ -1,5 +1,5 @@
 # DECISIONS
-2026-10-10 rev 2: Re-enable official Abot gateway solely for AI group passive replies; unlike previous failing proactive sends, include source msg_id. No automatic fallback Bbot because message may be duplicated and disguises permission errors.
-2026-10-10: Official member_openid and group_openid are opaque; do not attempt numeric QQ ID inference. Use separate OpenID-keyed D1 AI history/seen/usage.
-2026-10-10: Safe trial supports official @ events and text only; more commands/permissions require real Abot identity verification and staged QQ tests.
-2026-10-10: Original Bbot AI main saved as archive/bbot-ai-before-abot-20261010 8bc7427f85f23ab52935c2a83b87e7e2df909c14; no force pushes.
+2026-10-10 rev2: Abot official AI Gateway test uses separate DO qqai-abot-passive-ai-v1 and existing QqOpenGateway migration. Only group @ messages trigger. Passive message replies carry original msg_id; no proactive push or fallback to Bbot.
+2026-10-10: Source group_openid/member_openid are opaque. D1 keys independent of Bbot numeric qq; model client unchanged (Gemini existing Secret default, DeepSeek configured but no automatic paid switch).
+2026-10-10: QQ official Gateway READY is necessary but insufficient for send proof. Real controlled @Abot needed.
+2026-10-10: Preserve backup archive/bbot-ai-before-abot-20261010 and earlier archives, don't delete data.

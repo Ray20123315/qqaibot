@@ -1,12 +1,12 @@
-# Ray_Chen Memory Entry
-version: v0.0.93
+# Ray_Chen Canonical Memory
+version: v0.0.94
 task_id: qqaibot-ai-rebuild-20261010
 goal_revision: 2
-task_status: active
-canonical_branch: feature/abot-ai-passive-20261010
-main_before: 8bc7427f85f23ab52935c2a83b87e7e2df909c14
-previous_AI_backup: archive/bbot-ai-before-abot-20261010
-earlier_bridge_backup: archive/bbot-bridge-before-ai-20261010
-updated_at: 2026-10-10T15:04:16.032Z
+task_status: blocked (waiting QQ real passive reply)
+canonical_branch: main
+product_commit: e2aeae4485f8bf3f49c6a481e7e71f921aea008c
+archive_before_Abot: archive/bbot-ai-before-abot-20261010
+archive_prior_bridge: archive/bbot-bridge-before-ai-20261010
+updated_at: 2026-10-10T15:08:21.722Z
 
-User requests Abot official bot to directly receive and send AI replies. Official gateway and passive QQ group reply msg_id implemented on feature branch, CI pending. Read ACTIVE_TASK, CURRENT_STATE, USER_REQUIREMENTS, DECISIONS, GOTCHAS, VERIFY, FILE_MANIFEST. Never claim live QQ send until observed. User's GEMINI_API_KEYS Secret retained.
+Official Abot AI passive trial is live in qqai Cloudflare Worker. New Abot official Gateway READY confirmed by production log 2026-10-10T15:06:08.297Z. No real group AI send yet. Uses existing Gemini Secret and QQ_OPEN_CLIENT_SECRET (binding existence verified, values not read). Read ACTIVE_TASK, CURRENT_STATE, USER_REQUIREMENTS, DECISIONS, GOTCHAS, VERIFY and FILE_MANIFEST.

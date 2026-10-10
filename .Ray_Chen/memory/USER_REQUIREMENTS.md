@@ -1,5 +1,5 @@
 # USER_REQUIREMENTS
-- Latest: run lean AI assistant through official QQ Abot, not NapCat Bbot, as trial. Abot receives GROUP_AT_MESSAGE_CREATE and replies through QQ official REST passive msg_id.
-- Reuse existing Gemini Secret GEMINI_API_KEYS, avoid redundant credential requests and new Workers AI binding.
-- Keep AI quiet unless @Bot, no unsolicited chatter; Bbot optional cross-group relay default off, no duplicate replies.
-- Preserve old Bbot AI archive, earlier bridge archive, D1, protected identities and current secrets.
+- User asks to try Abot as direct AI bot, using official QQ Gateway for group @ events and REST passive msg_id replies, not relying on Bbot/NapCat for AI.
+- Reuse existing GEMINI_API_KEYS, DEEPSEEK_API_KEY and QQ_OPEN_CLIENT_SECRET, never request/reveal keys.
+- No proactive chatter, no duplicate Abot/Bbot responses. Preserve Bbot optional bridge plugin off by default, archives, D1 and protected QQ identities.
+- Explicitly distinguish Gateway READY from verified group message send; actual QQ reply must be tested.

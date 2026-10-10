@@ -1,77 +1,73 @@
 {
-  "version": "v0.0.93",
+  "version": "v0.0.94",
   "task_id": "qqaibot-ai-rebuild-20261010",
   "goal_revision": 2,
-  "changed_at": "2026-10-10T15:04:16.032Z",
-  "location_type": "remote",
+  "changed_at": "2026-10-10T15:08:21.722Z",
   "provider": "GitHub",
+  "location_type": "remote",
   "repository": "Ray20123315/qqaibot",
-  "branch": "feature/abot-ai-passive-20261010",
+  "branch": "main",
   "before_revision": "8bc7427f85f23ab52935c2a83b87e7e2df909c14",
-  "after_revision": "pending_feature_commit",
+  "product_sha": "e2aeae4485f8bf3f49c6a481e7e71f921aea008c",
+  "after_revision": "memory_commit_pending",
   "verification": {
-    "feature_ci": "pending",
-    "main": "unchanged",
-    "live_qq": "unknown"
+    "feature_ci": 38062142463,
+    "main_ci": 38062213315,
+    "cloudflare_deployment": "f0031760-6c11-43bf-a712-4426161c9970",
+    "worker_version": "13cdfd32-245c-4aff-b4ae-a3820ba53b60",
+    "cloudflare_build": "success",
+    "traffic_percent": 100,
+    "gateway_ready_at": "2026-10-10T15:06:08.297Z",
+    "official_group_reply": "untested"
   },
-  "changes": [
+  "changed_files": [
     {
       "path": "src/abot-ai.js",
-      "action": "new_or_modify",
-      "blob_sha": "ac996a06ae507f08968842cdc879385f3f8ba4f8"
+      "action": "created_or_modified_on_main"
     },
     {
       "path": "src/assistant.js",
-      "action": "new_or_modify",
-      "blob_sha": "4b8dae174ca504aad2022924538bdcf04368b171"
+      "action": "created_or_modified_on_main"
     },
     {
       "path": "worker.js",
-      "action": "new_or_modify",
-      "blob_sha": "0802ff6b7d10e4f3042053bdc8506ca932570f22"
+      "action": "created_or_modified_on_main"
     },
     {
       "path": "wrangler.toml",
-      "action": "new_or_modify",
-      "blob_sha": "c15a51007f73bae04c822266694f1fe85b720b22"
+      "action": "created_or_modified_on_main"
     },
     {
       "path": "tests/abot-ai.test.mjs",
-      "action": "new_or_modify",
-      "blob_sha": "9d977c01b8a712d6685be33ef0e3c3131b560e86"
+      "action": "created_or_modified_on_main"
     },
     {
       "path": "tests/abot-disabled.test.mjs",
-      "action": "new_or_modify",
-      "blob_sha": "5b86c836f48c4189b07deff18db30180120e5e5f"
+      "action": "created_or_modified_on_main"
     },
     {
       "path": "tests/command-routing.test.mjs",
-      "action": "new_or_modify",
-      "blob_sha": "d3a32748f67985c18de1fb6e650454862e706af8"
+      "action": "created_or_modified_on_main"
     },
     {
       "path": "tests/hub-generation.test.mjs",
-      "action": "new_or_modify",
-      "blob_sha": "b0df7d080abb3aa73ef600c9af7808a9d062bff5"
+      "action": "created_or_modified_on_main"
     },
     {
       "path": "README.md",
-      "action": "new_or_modify",
-      "blob_sha": "061b1d3eff72f2223e1c5fc94cfe8f0fdfe474e4"
+      "action": "created_or_modified_on_main"
     },
     {
       "path": "docs/DEPLOY.md",
-      "action": "new_or_modify",
-      "blob_sha": "22de25b16780882e92d02c082da2cd4e0c2eb002"
+      "action": "created_or_modified_on_main"
     },
     {
       "path": ".github/workflows/bridge-check.yml",
-      "action": "update CI/archive"
+      "action": "created_or_modified_on_main"
     },
     {
       "path": ".Ray_Chen/memory/*",
-      "action": "canonical goal checkpoint"
+      "action": "created_or_modified_on_main"
     }
   ],
   "backups": [

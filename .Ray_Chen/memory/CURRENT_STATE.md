@@ -1,8 +1,8 @@
 # CURRENT_STATE
-- GitHub main before new Abot trial 8bc7427f85f23ab52935c2a83b87e7e2df909c14.
-- New branch feature/abot-ai-passive-20261010 official AI passive reply implementation; no live network tests.
-- Cloudflare existing names QQ_OPEN_APP_ID, QQ_OPEN_CLIENT_SECRET, GEMINI_API_KEYS, DEEPSEEK_API_KEY, QQ_OPEN_GATEWAY, DB all retained. Intents existing QQ_OPEN_INTENTS read from existing Cloudflare env.
-- New QqOpenGateway instance qqai-abot-passive-ai-v1, old bridge-abot and bridge-abot-commands-v2 shut down by cron; class DO migrations preserved.
-- Bbot remains connected but routeBbotBridgeOnly avoids AI generation/reply. Bridge plugin per-group D1 remains default off.
-- D1 additive abot_ai_seen / abot_ai_history / abot_ai_settings tables. No old data destroyed.
-- Original legacy archive/legacy-main-20261009 at SHA 6a22b06433cfaffcf13abe2b60a917305290b629.
+- GitHub main official Abot AI code commit e2aeae4485f8bf3f49c6a481e7e71f921aea008c; earlier Bbot-only AI backup archive/bbot-ai-before-abot-20261010 SHA 8bc7427f85f23ab52935c2a83b87e7e2df909c14.
+- Feature CI 38062142463 and main CI 38062213315 both success; Node suite and Wrangler dry-run.
+- Cloudflare qqai deployment f0031760-6c11-43bf-a712-4426161c9970, version 13cdfd32-245c-4aff-b4ae-a3820ba53b60 from e2aeae4485f8bf3f49c6a481e7e71f921aea008c, build success, 100% traffic.
+- Cloudflare QqOpenGateway produced ABOT_AI_GATEWAY_READY on new version at 2026-10-10T15:06:08.297Z; upstream QQ gateway session READY observed. Actual QQ GROUP_AT_MESSAGE_CREATE and outgoing sendGroup not yet verified.
+- Existing QQ Open API and Gemini Secrets remain: QQ_OPEN_CLIENT_SECRET and GEMINI_API_KEYS secret_text; no raw values accessed.
+- Worker mode abot-ai-passive, QQ_AI_ABOT_ENABLED true, old Abot bridge instances closed by cron, Bbot AI replies disabled, cross-group plugin default off.
+- Additive abot_ai_seen, abot_ai_history, abot_ai_settings D1 tables, no deletion of earlier data.
