@@ -19,5 +19,5 @@ test("health and outbound target the same fresh OneBotHub generation",async()=>{
  assert.equal(status.bbot.connected,false);
  assert.equal(status.bbot.hub_generation,"ai-v1");
  await sendUsingBbot({ONEBOT_HUB:hub},"msg","808882936",[{type:"text",data:{text:"test"}}]);
- assert.deepEqual(seen,[BBOT_HUB_ID,BBOT_HUB_ID]);
+ assert.deepEqual(seen,[BBOT_HUB_ID,BBOT_HUB_ID,BBOT_HUB_ID]);
 });
