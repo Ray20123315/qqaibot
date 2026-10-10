@@ -1,5 +1,6 @@
 import {generateWithExistingSecrets,modelAvailability} from "./model-client.js";
 import {sendGroup} from "./qq-api.js";
+import {isPoliticalTopic,politicalSafeReply,POLITICAL_REFUSAL,POLITICAL_SYSTEM_RULE} from "./topic-policy.js";
 
 const clean=(x,max=1500)=>String(x??"").replace(/[\u0000-\u001f\u007f]/g," ").trim().slice(0,max);
 const validOpenid=x=>/^[A-Za-z0-9_-]{8,160}$/.test(String(x||""));
@@ -63,16 +64,19 @@ export async function onAbotAiEvent(env,packet,{generate=generateWithExistingSec
   else{
    const prompt=clean(message.content.replace(/^(?:\/!|!)\s*ai(?:\s+|$)/i,""),1400);
    if(!prompt)answer="請 @我並輸入問題。";
+   else if(isPoliticalTopic(prompt))answer=POLITICAL_REFUSAL;
    else {
     provider=String(settings?.model_provider||"gemini");
     if(!["gemini","deepseek"].includes(provider))provider="gemini";
     const history=await sqlAll(env.DB,"SELECT role,content FROM abot_ai_history WHERE group_openid=? AND user_openid=? ORDER BY created_at DESC LIMIT 8",message.group,message.user);
-    const messages=[{role:"system",content:"你是 QQ 群裡的 AI 助理。自然、簡潔地回答；依使用者的文字使用繁體或簡體中文。未被呼叫時絕不插話，不聲稱已執行未實際執行的操作。"},...history.reverse().filter(x=>x.role==="user"||x.role==="assistant"),{role:"user",content:prompt}];
+    const messages=[{role:"system",content:"你是 QQ 群裡的 AI 助理。自然、簡潔地回答；依使用者的文字使用繁體或簡體中文。未被呼叫時絕不插話，不聲稱已執行未實際執行的操作。\n"+POLITICAL_SYSTEM_RULE},...history.reverse().filter(x=>x.role==="user"||x.role==="assistant"),{role:"user",content:prompt}];
     const output=await generate(env,{provider,messages,maxTokens:480});
-    answer=clean(output.text,1700);
+    answer=politicalSafeReply(clean(output.text,1700));
+    if(answer!==POLITICAL_REFUSAL){
     await sqlRun(env.DB,"INSERT OR IGNORE INTO abot_ai_history(group_openid,user_openid,message_id,role,content,created_at) VALUES(?,?,?,?,?,?)",message.group,message.user,message.id,"user",prompt,now());
     await sqlRun(env.DB,"INSERT OR IGNORE INTO abot_ai_history(group_openid,user_openid,message_id,role,content,created_at) VALUES(?,?,?,?,?,?)",message.group,message.user,"answer:"+message.id,"assistant",answer,now()+1);
     await sqlRun(env.DB,"DELETE FROM abot_ai_history WHERE group_openid=? AND user_openid=? AND created_at<?",message.group,message.user,now()-3*86400000);
+    }
    }
   }
   if(!answer)answer="這次沒有取得 AI 回覆。";

@@ -1,5 +1,4 @@
 # USER_REQUIREMENTS
-- User asks to try Abot as direct AI bot, using official QQ Gateway for group @ events and REST passive msg_id replies, not relying on Bbot/NapCat for AI.
-- Reuse existing GEMINI_API_KEYS, DEEPSEEK_API_KEY and QQ_OPEN_CLIENT_SECRET, never request/reveal keys.
-- No proactive chatter, no duplicate Abot/Bbot responses. Preserve Bbot optional bridge plugin off by default, archives, D1 and protected QQ identities.
-- Explicitly distinguish Gateway READY from verified group message send; actual QQ reply must be tested.
+- 2026-10-10 new requirement: QQAIBOT should not discuss politics. Implement as global AI answer restriction rather than modifying QQ group content or blocking ordinary nonpolitical commands.
+- Existing: Official Abot receives QQ GROUP_AT_MESSAGE_CREATE and sends passive msg_id AI reply, reuse existing Gemini Secret, no unsolicited group chat, no duplicate Bbot answer. Bbot cross-group bridge plugin default OFF.
+- Preserve D1 and Cloudflare Secret values, backups, protected QQ identities and deployed service.

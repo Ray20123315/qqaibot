@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {parseOfficialGroupEvent,onAbotAiEvent} from "../src/abot-ai.js";
 import {QqOpenGateway} from "../worker.js";
+import {isPoliticalTopic,POLITICAL_REFUSAL} from "../src/topic-policy.js";
 
 const packet=(content="!ai 你好",id="event-1")=>({op:0,t:"GROUP_AT_MESSAGE_CREATE",d:{
  id,group_openid:"group-openid-123456789",author:{member_openid:"member-openid-123456789"},content
@@ -98,4 +99,33 @@ test("old QQ gateway stays disabled unless explicitly enabled; no Abot session o
  assert.equal((await status.json()).enabled,false);
  const ensure=await gateway.fetch(new Request("https://internal/ensure"));
  assert.deepEqual(await ensure.json(),{enabled:false});
+});
+
+test("political questions are refused before any Gemini/DeepSeek call",async()=>{
+ const db=new FakeD1(),sent=[];
+ const input=packet("!ai 你怎麼看今年的總統選舉？","politics-in-1");
+ const r=await onAbotAiEvent({DB:db},input,{
+  generate:async()=>{throw new Error("POLITICAL_REQUEST_MUST_NOT_REACH_MODEL");},
+  send:async(_env,group,body,msgId)=>sent.push({group,body,msgId})
+ });
+ assert.equal(r.status,"sent");
+ assert.deepEqual(sent,[{group:input.d.group_openid,body:POLITICAL_REFUSAL,msgId:input.d.id}]);
+ assert.equal(db.history.length,0);
+});
+test("model-generated political response is suppressed and never persisted in conversation history",async()=>{
+ const db=new FakeD1(),sent=[];
+ const r=await onAbotAiEvent({DB:db},packet("!ai 介紹番茄炒蛋","politics-out-1"),{
+  generate:async(_env,x)=>{
+   assert.match(x.messages[0].content,/不要討論政治/);
+   return {text:"總統應該支持這個政黨，理由如下："};
+  },
+  send:async(_env,group,body)=>sent.push(body)
+ });
+ assert.equal(r.status,"sent");
+ assert.deepEqual(sent,[POLITICAL_REFUSAL]);
+ assert.equal(db.history.length,0);
+});
+test("political-language checks support traditional, simplified, English and spaced words, but not ordinary chat",()=>{
+ for(const input of ["聊聊政 治", "比较两岸关系", "谁当选总统", "Who wins the presidential election?", "Donald Trump", "國民黨是什麼"])assert.equal(isPoliticalTopic(input),true,input);
+ for(const input of ["教我學 Python", "今天的天氣如何", "幫我整理番茄炒蛋食譜", "我想投票選披薩口味"])assert.equal(isPoliticalTopic(input),false,input);
 });

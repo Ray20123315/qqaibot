@@ -1,7 +1,6 @@
 # GOTCHAS
-- QQ bot official group replies have ~5-minute passive window, require incoming msg_id. Past proactive API rejection 40034105 may persist; log safe status/code only and never silently substitute Bbot.
-- GROUP_MESSAGE_CREATE without actual mention may include every group message; ignore. GROUP_AT_MESSAGE_CREATE only when QQ subscribed.
-- Group and member OpenIDs cannot be assumed numerical QQ IDs. D1 official identity separate.
-- New DO gateway starts from Cron, 1-minute initial wait after deploying expected; READY logged 2026-10-10T15:06:08.297Z on correct version confirms connection.
-- QQ_AI_ABOT_ENABLED and QQ_OPEN_INTENTS are platform permission dependent; official gateway READY does not prove bot can reply in particular group.
-- Bbot AI disabled to avoid duplicate responses. Existing Bbot optional bridge plugin settings remain.
+- Political filter is keyword-based and NFKC-normalized with spaced Han normalization; aliases, slang or context may be missed, while innocuous quoted words may be blocked. No purely heuristic filter ensures total semantic coverage.
+- Apply output sanitizer BEFORE AI reply is sent or stored. The refusal text itself contains 政治 and should not be re-sanitized as generated output.
+- Abot status/help/clear commands must bypass the generative political filter to avoid hiding maintenance controls.
+- Gemini and QQ official send credentials remain server-only; do not print secret contents, user message text or OpenIDs.
+- Abot uses QQ official source msg_id to reply in eligible groups; Gateway READY is not proof of send permission.

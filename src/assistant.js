@@ -1,6 +1,7 @@
 import {parseOnebot,clean,qq,isProtected,BRIDGE_ECHO_MARKER,authorize} from "./core.js";
 import {get,all,run,roster} from "./store.js";
 import {generateWithExistingSecrets,modelAvailability,DEFAULT_GEMINI_MODEL} from "./model-client.js";
+import {isPoliticalTopic,politicalSafeReply,POLITICAL_REFUSAL,POLITICAL_SYSTEM_RULE} from "./topic-policy.js";
 
 const DEFAULT_MODEL=DEFAULT_GEMINI_MODEL;
 const DEFAULT_USER_LIMIT=20;
@@ -76,12 +77,13 @@ async function useQuota(env,msg){
 }
 async function generate(env,msg,prompt,config){
  const history=await all(env.DB,"SELECT role,content FROM assistant_history WHERE group_id=? AND user_qq=? ORDER BY created_at DESC LIMIT 10",msg.groupId,msg.senderQq);
- const messages=[{role:"system",content:"你是 QQ 群中的 AI 助理。依照使用者語言回答（繁體中文、簡體中文或其他語言）。清楚、簡短、有用。不要假裝已操作 QQ 群管理功能，不要主動插話。群組與其他使用者的私人對話內容不可見。"}];
+ const messages=[{role:"system",content:"你是 QQ 群中的 AI 助理。依照使用者語言回答（繁體中文、簡體中文或其他語言）。清楚、簡短、有用。不要假裝已操作 QQ 群管理功能，不要主動插話。群組與其他使用者的私人對話內容不可見。\n"+POLITICAL_SYSTEM_RULE}];
  for(const h of [...history].reverse())if(["user","assistant"].includes(h.role))messages.push({role:h.role,content:h.content});
  messages.push({role:"user",content:prompt});
  const response=await generateWithExistingSecrets(env,{provider:config.provider,model:config.model,messages,maxTokens:480});
- const answer=response.text;
+ const answer=politicalSafeReply(response.text);
  if(!answer)throw new Error("AI_EMPTY_RESPONSE");
+ if(answer===POLITICAL_REFUSAL)return answer;
  const created=Date.now(),key=msg.messageId||crypto.randomUUID();
  await run(env.DB,"INSERT OR IGNORE INTO assistant_history(group_id,user_qq,message_key,role,content,created_at) VALUES(?,?,?,?,?,?)",
   msg.groupId,msg.senderQq,key,"user",prompt.slice(0,1400),created);
@@ -164,6 +166,7 @@ export async function routeAssistantEvent(env,event,reply){
  return ask(env,msg,prompt,async text=>reply?{handled:true,reply:await reply(text),aiReply:true}:{handled:true,replyText:text,aiReply:true},config);
 }
 async function ask(env,msg,prompt,say,config){
+ if(isPoliticalTopic(prompt))return say(POLITICAL_REFUSAL);
  const over=await useQuota(env,msg);
  if(over==="ALREADY_PROCESSED")return {ignored:true,reason:"duplicate"};
  if(over)return say(over);

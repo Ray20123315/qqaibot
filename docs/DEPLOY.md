@@ -14,3 +14,7 @@
 
 ## 回復
 完整上一版 `archive/bbot-ai-before-abot-20261010`；可以將 `QQ_AI_ABOT_ENABLED=false` 關閉官方 Gateway 並保留 D1。所有新增 D1 表採 CREATE IF NOT EXISTS，既有表無刪除。
+
+## 政治討論封鎖
+
+`src/topic-policy.js` 以全域 AI 話題限制實作：輸入先於 Gemini 請求攔截、Abot/Bbot 模型 system instruction 加入限制、模型輸出再做檢查及固定拒答。拒答的政治內容不寫入 AI 對話歷史。測試 `tests/political-policy.test.mjs`、`tests/abot-ai.test.mjs`、`tests/assistant.test.mjs`，須確認政治問題 0 模型呼叫、生成政治內容不原樣發送、正常提問不被拒絕。這不會自動刪除舊歷史政治對話或過濾跨群插件的他人訊息，也不能保證涵蓋所有變體與隱語。

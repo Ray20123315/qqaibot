@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {generateWithExistingSecrets,modelAvailability} from "../src/model-client.js";
 import {parseAssistantCommand,routeBotEvent,assistantHealth} from "../src/assistant.js";
+import {POLITICAL_REFUSAL} from "../src/topic-policy.js";
 
 const request= (text="hi",id=1) => ({
  post_type:"message",message_type:"group",group_id:808882936,user_id:3569028262,self_id:2681167798,message_id:id,
@@ -122,4 +123,34 @@ test("unauthorized QQ member cannot enable bridge plugin without validated membe
  await routeBotEvent(env,event,async t=>{sent=t;});
  assert.match(sent,/權限不足|驗證/);
  assert.equal(db.settings.size,0);
+});
+
+test("Bbot AI path also refuses political topic without model request or quota usage",async()=>{
+ const db=new DB(),env={DB:db,GEMINI_API_KEYS:"already-configured"};
+ let sent="",called=0;
+ const original=globalThis.fetch;
+ try{
+  globalThis.fetch=async()=>{called++;throw Error("must not call provider");};
+  const res=await routeBotEvent(env,request("!ai 請分析政黨和總統選舉",77),async msg=>{sent=msg;});
+  assert.equal(res.handled,true);
+  assert.equal(sent,POLITICAL_REFUSAL);
+  assert.equal(called,0);
+  assert.equal(db.usage.length,0);
+  assert.equal(db.history.length,0);
+ }finally{globalThis.fetch=original;}
+});
+test("Bbot generated political text is replaced, not stored",async()=>{
+ const db=new DB(),env={DB:db,GEMINI_API_KEYS:"already-configured",GEMINI_CHAT_MODELS:"gemini-2.5-flash"};
+ let sent="";
+ const original=globalThis.fetch;
+ try{
+  globalThis.fetch=async(_url,opts)=>{
+   const body=JSON.parse(opts.body);
+   assert.match(body.systemInstruction.parts[0].text,/不要討論政治/);
+   return new Response(JSON.stringify({candidates:[{content:{parts:[{text:"這位總統的政策值得支持"}]}}]}),{status:200});
+  };
+  await routeBotEvent(env,request("!ai 番茄怎麼種植",78),async msg=>{sent=msg;});
+  assert.equal(sent,POLITICAL_REFUSAL);
+  assert.equal(db.history.length,0);
+ }finally{globalThis.fetch=original;}
 });
