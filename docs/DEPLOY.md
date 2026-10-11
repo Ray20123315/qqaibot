@@ -27,3 +27,11 @@
 - D1 新表 `bot_memory_groups`、`bot_memory_items`，只新增、不改／刪既有 schema；群命名空間限制 Vectorize 的跨群檢索。
 - 檢查 `/health` 的 `codex.connected`、`memory.collection_available`、`memory.vectorize_bound`，不公開金鑰。
 - 不能假裝原本 EXE 已在線，不能因 API mock 成功聲稱 Codex／實際向量嵌入可用。正式驗證時先在小群由有權限者啟用記憶，單發普通訊息，確認 D1 和 Vectorize 檢索後再測 Abot。
+
+## 2026-10-11 Windows EXE 啟動診斷
+
+啟動時不要再自動隱藏到背景。雙擊 `QQAIBOT-CodexBridge.exe` 可看到「已連線」、「Worker 已回應握手」或「Token 未配置」狀態；設定檔缺少時建立預設 `%APPDATA%\QQAIBOT\codex-bridge.json` 並開啟 Notepad。首次填入同一個已配置的 `CODEX_BRIDGE_ACCESS_TOKEN`，只需填本機 JSON 的 `bridgeToken`，不要將 Token 貼到 issue／截圖／聊天。診斷日誌是 `%LOCALAPPDATA%\QQAIBOT\logs\codex-bridge.log`，不包含憑證值；有 HTTP 401 時先核對 Worker Secret 與本機設定一致。
+
+`--diagnose` 顯示本機檢查；`--background` 明確要求背景才使用，`--run` 是前景。Windows GitHub Actions build workflow 除了 --help，還測首次診斷建立設定、缺少 Token 的退出碼。WebSocket 可連線不代表 Codex CLI 已登入或支援指定模型；需真實 QA。
+
+舊版 EXE SHA-256 8e6556d428c2a61e8f3df44ae2929a20716a0ca5326b07c452c35f8ca7b43ab7 為啟動 UX 修復前版本，不應再重新提供作為修復版。

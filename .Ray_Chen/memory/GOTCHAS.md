@@ -1,7 +1,6 @@
 # GOTCHAS
-- Original EXE connects wss://aibot.ray2025.com/v3/codex-bridge with Authorization Bearer Token, protocol qqai-codex-bridge-v1. New Worker must never treat Codex frames as NapCat OneBot events.
-- Windows EXE stays connected, but codex exec is started per request. Requested model gpt-6-luna may not be available in installed Codex CLI; live compatibility must be confirmed.
-- QQ official API replies include incoming msg_id; old implementation sliced answer at 1800, now send must reject too-long text not silently cut.
-- Bbot numeric QQ group differs from Abot opaque group_openid. Never infer mapping.
-- Vectorize qqai index dimensions=1024. Existing VECTORIZE_GEMINI_KEYS supports embedding API, no cross-group retrieval; avoid storing Secrets.
-- Memory only group admin opt-in. On source recall remove D1 and vector, expire records on cron, suppress politics and attachments.
+- Original EXE is valid Windows console PE and matches CI SHA, so "一閃而過" was caused by default detached hidden child and missing config early return, not proven corrupt binary.
+- Existing config %APPDATA%/QQAIBOT/codex-bridge.json might be absent or invalid; old default D:/QQAIBOT readRoots path did not exist on all computers and could crash startup when configured. New template defaults readRoots={} but never overwrites an old JSON config.
+- No arg should remain foreground for double-click. --background explicitly uses detached --run child, system startup via scheduled --run. Windows exe run --help smoke never tested no-arg before repair.
+- Token from local JSON or environment must not be included in logs, error text or screenshots. CLI may be missing or Luna model unavailable even when WebSocket connects.
+- Manual double-click on user's actual Windows desktop and connected Codex login state can't be proven in GitHub Windows CI.

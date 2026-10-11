@@ -1,4 +1,5 @@
 # DECISIONS
-2026-10-11 r4: Model advisory short style and complete rewrite for oversized output, no postprocessing slice. Plain-text QQ formatter.
-2026-10-11 r4: Reuse old EXE WebSocket protocol and preexisting Token; separate Bbot and Codex WS tags; stable per group/user session hash, Codex request gpt-6-luna reasoningEffort none. Session retention is not permanently loaded model process.
-2026-10-11 r4: Opt-in Bbot group memory via authenticated group administrator, no automatic log all groups, bounded two-day retention and recall delete. D1 source of truth; Vectorize namespace per QQ group. Abot retrieval needs verified existing group mapping, otherwise no external group context.
+2026-10-11 new task: diagnose uploaded EXE by PE format + SHA, then source rather than inventing Windows execution results. Match found existing CI binary.
+2026-10-11: Default no-arg EXE now VISIBLE foreground. Hiding process requires explicit --background; existing --install-startup scheduled task remains available.
+2026-10-11: First-run JSON is created but not silently dismissed: open Notepad to edit locally, retry config on close, if missing token wait Enter in interactive console. Do not ask user to paste Secret.
+2026-10-11: Restrict status logging to fixed events/short alphanumeric diagnostics only; no credentials, raw URLs, QQ chat or system stack traces in logs. Preserve existing config; no invented D: read root.

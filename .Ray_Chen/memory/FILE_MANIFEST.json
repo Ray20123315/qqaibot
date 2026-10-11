@@ -1,115 +1,58 @@
 {
-  "version": "v0.0.98",
-  "task_id": "qqaibot-ai-rebuild-20261010",
-  "goal_revision": 4,
-  "changed_at": "2026-10-10T16:24:56.845Z",
+  "version": "v0.0.99",
+  "task_id": "codex-exe-visible-startup-20261011",
+  "goal_revision": 1,
+  "changed_at": "2026-10-11T04:45:19.850Z",
   "provider": "GitHub",
   "location_type": "remote",
   "repository": "Ray20123315/qqaibot",
-  "branch": "main",
-  "before_revision": "0a5580bd0ffa5206261bcdca88da90a2abcbb03d",
-  "product_sha": "c39f8cc4c8468b83ce530f30063b726193d2729f",
-  "after_revision": "final_memory_commit_pending",
+  "branch": "fix/codex-exe-visible-startup-20261011",
+  "before_revision": "80d3cb38ce18fc44f3e77170ce8ff5ea4beff7be",
+  "after_revision": "feature_commit_pending",
   "verification": {
-    "feature_ci": 38067245509,
-    "main_ci": 38067312503,
-    "outcome": "success",
-    "exe_ci": 38067312576,
-    "exe_sha256": "8e6556d428c2a61e8f3df44ae2929a20716a0ca5326b07c452c35f8ca7b43ab7",
-    "exe_artifact_id": 11675425929,
-    "cloudflare_deployment": "7a15e23e-8a7d-40fa-ae25-c7111c131951",
-    "cloudflare_version": "45eab88a-7fe6-421b-a60e-568eb4e739a0",
-    "cloudflare_build": "success",
-    "traffic_percent": 100,
-    "vector_binding": "verified",
-    "qq_live": "untested",
-    "codex_live": "untested"
+    "pe_sha256": "8e6556d428c2a61e8f3df44ae2929a20716a0ca5326b07c452c35f8ca7b43ab7",
+    "ci": "pending",
+    "windows_exe": "pending",
+    "cloudflare": "unchanged"
   },
-  "changed_files": [
+  "changes": [
     {
-      "path": "src/reply-style.js",
-      "action": "created_or_modified"
-    },
-    {
-      "path": "src/codex-bridge.js",
-      "action": "created_or_modified"
-    },
-    {
-      "path": "src/group-memory.js",
-      "action": "created_or_modified"
-    },
-    {
-      "path": "src/abot-ai.js",
-      "action": "created_or_modified"
-    },
-    {
-      "path": "src/model-client.js",
-      "action": "created_or_modified"
-    },
-    {
-      "path": "src/qq-api.js",
-      "action": "created_or_modified"
-    },
-    {
-      "path": "src/assistant.js",
-      "action": "created_or_modified"
-    },
-    {
-      "path": "worker.js",
-      "action": "created_or_modified"
-    },
-    {
-      "path": "wrangler.toml",
-      "action": "created_or_modified"
-    },
-    {
-      "path": "tests/compact-codex-memory.test.mjs",
-      "action": "created_or_modified"
-    },
-    {
-      "path": "tests/codex-websocket.test.mjs",
-      "action": "created_or_modified"
-    },
-    {
-      "path": "tests/hub-generation.test.mjs",
-      "action": "created_or_modified"
+      "path": "tools/codex-bridge-windows.mjs",
+      "action": "modify launcher and diagnostics"
     },
     {
       "path": "tools/codex-work-bridge.mjs",
-      "action": "created_or_modified"
+      "action": "websocket status callback"
     },
     {
-      "path": "tools/codex-bridge-windows.mjs",
-      "action": "created_or_modified"
-    },
-    {
-      "path": "tools/codex-bridge.config.example.json",
-      "action": "created_or_modified"
+      "path": "tests/codex-exe-startup.test.mjs",
+      "action": "create"
     },
     {
       "path": ".github/workflows/build-codex-bridge-exe.yml",
-      "action": "created_or_modified"
+      "action": "extend Windows smoke"
     },
     {
       "path": "README.md",
-      "action": "created_or_modified"
+      "action": "document Windows setup"
     },
     {
       "path": "docs/DEPLOY.md",
-      "action": "created_or_modified"
+      "action": "document first run"
     },
     {
       "path": ".github/workflows/bridge-check.yml",
-      "action": "created_or_modified"
+      "action": "memory archive bump"
     },
     {
       "path": ".Ray_Chen/memory/*",
-      "action": "created_or_modified"
+      "action": "task checkpoint"
     }
   ],
   "backups": [
-    "archive/bbot-ai-before-abot-20261010",
-    "archive/bbot-bridge-before-ai-20261010",
-    "archive/legacy-main-20261009"
+    {
+      "branch": "archive/codex-exe-before-startup-fix-20261011",
+      "sha": "80d3cb38ce18fc44f3e77170ce8ff5ea4beff7be"
+    }
   ]
 }

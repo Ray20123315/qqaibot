@@ -55,3 +55,18 @@ Abot 用 QQ 官方 group_openid，Bbot 用數字 QQ 群號；**只對既有 veri
 ## 測試限制
 
 GitHub 自動測試只使用模擬 EXE、Gemini 與 Vectorize；正式 QQ 傳訊、EXE 是否在線、Luna 模型是否支援、實際 1024 維嵌入與 D1 群組映射，仍需要線上驗證。跨群插件保持預設關閉；Abot AI 與 Bbot 收集分工不會讓兩者同時回覆。
+
+## 2026-10-11 Codex Bridge EXE 雙擊閃退／啟動 UX 修復
+
+原版的**無參數啟動**會立即分離背景程序並關閉視窗，尚未填寫設定時則建立 JSON 範本後結束。這不一定是程式崩潰，但使用者看不到任何診斷。
+
+新版 Windows x64 EXE 的預設雙擊行為改為**前景可見**：
+1. 在主控台顯示啟動、連線、Worker 已握手、斷線重連、無 Codex CLI 或 HTTP 401 等狀態。
+2. 沒有設定時自動建立 `%APPDATA%\QQAIBOT\codex-bridge.json`，並開啟 Windows 記事本。請只在本機填入原有 Bridge Token 的 `bridgeToken` 欄位；關閉記事本後會自動重新讀取並嘗試連線。Token 不會印在主控台與日誌。
+3. 初次設定範本的 `readRoots` 為空物件，不再假設電腦存在 `D:\QQAIBOT`。需要 CodexWork 讀檔權限時，才由使用者明確指定資料夾。
+4. 設定無效時顯示錯誤原因和檔案位置；雙擊啟動會保留主控台，等待 Enter 才關閉。成功連上後則維持視窗和 WebSocket 常駐。
+5. 日誌位於 `%LOCALAPPDATA%\QQAIBOT\logs\codex-bridge.log`，只寫入安全狀態碼、時間與事件，不記錄任何 Token 或 QQ 訊息文字；超過 512 KiB 會輪替。
+
+另外提供 `--diagnose`（不發送請求，只檢查本機設定、Token 是否存在及 Codex CLI 可執行性）、`--run`（明確前景）、`--background`（使用者明確要求才隱藏背景）、`--install-startup`（保持先前登入啟動相容）和 `--help`。
+
+實際 Windows 雙擊與使用者本機 Codex 登入狀態仍需人工測試；Windows CI 會驗證 EXE 的 `--help`、首次 `--diagnose` 設定建立，以及缺少 Token 的失敗碼，避免只有 smoke test --help 就宣稱啟動正常。

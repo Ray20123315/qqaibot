@@ -6,6 +6,7 @@ on:
     branches:
       - main
       - feature/compact-codex-vector-memory-20261010
+      - fix/codex-exe-visible-startup-20261011
     paths:
       - "tools/codex-work-bridge.mjs"
       - "tools/codex-bridge-windows.mjs"
@@ -41,6 +42,14 @@ jobs:
         run: |
           & .\dist\QQAIBOT-CodexBridge.exe --help
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $testConfig = Join-Path $env:RUNNER_TEMP "qqaibot-first-run-smoke.json"
+          & .\dist\QQAIBOT-CodexBridge.exe --diagnose --config $testConfig
+          if ($LASTEXITCODE -ne 0) { throw "First-run diagnostics failed" }
+          if (!(Test-Path $testConfig)) { throw "First-run template not created" }
+          $template = Get-Content $testConfig -Raw | ConvertFrom-Json
+          if ($template.bridgeToken -ne "") { throw "First-run template included a token" }
+          & .\dist\QQAIBOT-CodexBridge.exe --run --config $testConfig
+          if ($LASTEXITCODE -ne 2) { throw "Missing token should exit with actionable error, not start in background" }
           $hash = (Get-FileHash .\dist\QQAIBOT-CodexBridge.exe -Algorithm SHA256).Hash.ToLower()
           "$hash  QQAIBOT-CodexBridge.exe" | Set-Content -Encoding ascii .\dist\QQAIBOT-CodexBridge_SHA256SUMS.txt
           Get-Item .\dist\QQAIBOT-CodexBridge.exe | Format-List Name,Length

@@ -301,7 +301,8 @@ function bridgeConfig(env = process.env) {
   };
 }
 
-async function main() {
+async function main({onStatus=()=>{}}={}) {
+  const status=value=>{try{onStatus(value);}catch{}};
   const config = bridgeConfig();
   if (!config.url || !/^wss?:\/\//i.test(config.url)) throw new Error("QQAI_CODEX_BRIDGE_URL_REQUIRED");
   if (!config.token) throw new Error("QQAI_CODEX_BRIDGE_TOKEN_REQUIRED");
@@ -311,12 +312,13 @@ async function main() {
   const { WebSocket } = await import("ws");
   let retry = 1000;
   const connect = () => {
+    status("connecting");
     const ws = new WebSocket(config.url, { headers: { Authorization: `Bearer ${config.token}` }, maxPayload: 2*1024*1024 });
-    ws.on("open", () => { retry = 1000; ws.send(JSON.stringify({ type: "hello", protocol: PROTOCOL, role: "local-codex-bridge", at: Date.now() })); });
+    ws.on("open", () => { retry = 1000; status("connected");ws.send(JSON.stringify({ type: "hello", protocol: PROTOCOL, role: "local-codex-bridge", at: Date.now() })); });
     ws.on("message", async raw => {
       let p; try { p = JSON.parse(String(raw)); } catch { return; }
       if (p?.type === "ping") return ws.send(JSON.stringify({ type: "pong", protocol: PROTOCOL, at: Date.now() }));
-      if (p?.type === "hello") return;
+      if (p?.type === "hello") {status("server_ready");return;}
       if (p?.type === "quota.request") return ws.send(JSON.stringify({ type: "quota.response", protocol: PROTOCOL, id: String(p.id||""), quota: { available: false, sampledAt: Date.now(), source: "qqaibot_local_bridge", error: "PLAN_QUOTA_NOT_QUERIED_BY_BRIDGE" } }));
       if (p?.type !== "request" || !p?.id) return;
       try {
@@ -325,8 +327,14 @@ async function main() {
         ws.send(JSON.stringify({ type: "response", protocol: PROTOCOL, id: String(p.id), ok: true, ...result }));
       } catch (e) { ws.send(JSON.stringify({ type: "response", protocol: PROTOCOL, id: String(p.id), ok: false, error: String(e?.message || e).slice(0,1200) })); }
     });
-    ws.on("close", () => setTimeout(connect, retry = Math.min(30000, retry*2)));
-    ws.on("error", () => {});
+    ws.on("close", () => {status("disconnected");setTimeout(connect, retry = Math.min(30000, retry*2));});
+    ws.on("error", error => {
+      // Only a stable diagnostic code is emitted. Never include the full URL,
+      // Authorization header, token, prompt, or raw WebSocket error.
+      const http=String(error?.message||"").match(/Unexpected server response:\s*(\d{3})/i);
+      const code=http?"HTTP_"+http[1]:String(error?.code||"WS_ERROR").replace(/[^A-Za-z0-9_-]/g,"").slice(0,32);
+      status("error:"+code);
+    });
   };
   connect();
 }

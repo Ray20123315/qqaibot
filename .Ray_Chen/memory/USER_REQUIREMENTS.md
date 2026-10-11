@@ -1,3 +1,4 @@
 # USER_REQUIREMENTS
-2026-10-11: Restrict AI answer length naturally (no direct truncation), bot replies without Markdown. When previously built EXE is online, keep Codex model Luna non-thinking and conversation session. Use Bbot for group chat collection, D1 and vector database for memory.
-Earlier: Abot official AI default, Bbot only optional relay plugin default OFF, no unsolicited messages, politics disallowed, all Secrets and D1 preserved, old branches backed up.
+- Latest: user double-clicked uploaded QQAIBOT-CodexBridge.exe and saw immediate flash/exit; expects functional, observable executable and working local Codex bridge, not only code suggestions.
+- Preserve earlier requirements: Codex uses existing Secret, Luna non-think if available, group-person persistent session; QQ AI concise no Markdown, Bbot opt-in D1/Vectorize memory, official Abot AI, disabled-by-default bridge plugin, no unsolicited QQ chatter or credentials in logs.
+- No guessing actual local Windows config/CLI status or claiming online without health proof; deliver updated EXE, show setup route if needed.
