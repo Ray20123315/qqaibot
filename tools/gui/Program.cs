@@ -96,8 +96,10 @@ internal sealed class BridgeWindow : Form
         Controls.Add(header);
 
         var tabs = new TabControl { Dock = DockStyle.Fill, Padding = new Point(20, 9), Font = new Font("Microsoft JhengHei UI", 10.5F) };
-        var dashboard = NewTab("總覽", tabs), configuration = NewTab("連線設定", tabs);
-        var permissions = NewTab("資料夾權限", tabs), diagnostics = NewTab("診斷日誌", tabs);
+        var dashboard = NewTab("總覽", tabs);
+        var configuration = NewTab("連線設定", tabs);
+        var permissions = NewTab("資料夾權限", tabs);
+        var diagnostics = NewTab("診斷日誌", tabs);
         Controls.Add(tabs);
         tabs.BringToFront();
         header.BringToFront();
