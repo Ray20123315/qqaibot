@@ -1,14 +1,6 @@
 # GOTCHAS
-- PE Subsystem 2=Windows GUI vs 3=console. Previous 2026-10-11 EXE was console despite visible status, incorrect for explicit GUI requirement.
-- GUI exe and Backend.exe must be in same directory. Windows GUI auto starts backend only when original settings are valid. Backend is hidden with CreateNoWindow and existing Bridge token/URL.
-- Preserve user local config at %APPDATA%/QQAIBOT/codex-bridge.json incl advanced read/edit roots. Do not leak Token in GUI logs or support messages; status data restricted to known fixed labels.
-- Minimize to tray retains connection; close GUI stops its spawned backend. CLI model availability and real Windows environment not verifiable by CI alone.
-- QQ slash menu published at developer portal may persist independently of program. Source search passing does not remove server-published QQ command entry.
-
-
-## 2026-10-11 · QQ panel API exact retirement cleanup
-- Baseline main 546f2128ed41495e66ba7eeb0bbae7c8eff2c479 already has verified WinForms GUI and Windows artifact. DO NOT replace or duplicate the canonical tools/codex-bridge-gui implementation.
-- New change: src/qq-panel-cleanup.js official GET/PUT/DELETE /v2/panels via existing QQ_OPEN_APP_ID and QQ_OPEN_CLIENT_SECRET, exact retired 设置插话率 only; preserve all other command items, marks and targets.
-- Worker /status and public /health expose abot.command_panel_cleanup in pending|removed|no_match|failed; cron QqOpenGateway runs once, 15-min retry backoff, no broad deletion.
-- No source changes to Abot model replies, Codex bridge, Bbot, D1/Vectorize, or Windows GUI.
-- Feature CI and Cloudflare actual panel API result pending; if no_match/failed, QQ legacy publish settings still need manual operator action.
+- Native Windows GUI requires PE Subsystem 2. Preserve tools/codex-bridge-gui and packaged Node backend, side by side, and %APPDATA%/QQAIBOT/codex-bridge.json including read/edit root allowlists. Previous console-only EXE was not acceptable.
+- Do not publish QQ_OPEN_CLIENT_SECRET, Codex tokens, raw QQ API responses, panel items, user/group IDs or any full exception bodies in diagnostics.
+- QQ official developer portal old published slash entries may be independent of new /v2/panels. API returned no documented records at runtime; a no_match or unknown response does not prove an old client menu was removed.
+- QQ /v2/panels mutations affect other live commands. Delete only an exact command named 设置插话率 after removing /! prefix; preserve all other items and metadata. Unexpected response schema must fail closed.
+- Cloudflare cron is every minute but command cleanup Durable Object has 15-minute retry and one-shot success state. CI success does not verify QQ endpoint behavior; inspect version-specific production logs.
