@@ -17,3 +17,15 @@
 這是 QQ 開放平台**發布資料**的管理動作，目前沒有已連線的 QQ 官方後台操作工具，也未核對到該筆發布資料的 ID，因此不能聲稱已從平台刪除。不要因這條過期指令去修改 Bbot 群設定、AI 模型、Secret 或 D1。
 
 參考：QQ 官方 `tencent-connect/bot-docs` 的「發布設定 / 功能配置 / 指令配置」說明，以及 QQ 指令面板管理 API。
+
+## 自動清理實作（2026-10-11 補充）
+
+除了上述 QQ 管理端手動移除方式，目前 QQ 官方已提供 `/v2/panels` 查詢、更新、刪除 API。本專案新增一次性清理任務：`src/qq-panel-cleanup.js` 只匹配 `设置插话率`（容許前綴 `/!`），對含有其他指令的面板只更新並保留其他項目；當面板唯一項目就是此過期指令時才刪除空面板，不改其他指令名稱、說明、權限或關聯範圍。
+
+Worker 的 `QQ_RETIRED_COMMAND_CLEANUP=true` 配合原有 Abot Gateway Durable Object，每次最少間隔 15 分鐘，成功後只執行一次，狀態記錄在 Durable Object storage。可透過 `/health` 的 `abot.command_panel_cleanup` 查看：
+- `removed`：QQ API 已成功更新或刪除含舊指令的面板（需確認前端刷新）。
+- `no_match`：新式面板沒有找到它，QQ 客戶端可能引用舊發布設定，依上一節到開放平台管理端刪除。
+- `failed`：QQ API 權限、參數或連線錯誤，需要核查 Worker 安全錯誤碼，不得宣稱已清理。
+- `pending`：尚未執行或已部署但 Cron 尚未觸發。
+
+此流程不是重建全部面板，且不會更動 AI／Codex／D1 資料。因為 QQ 指令面板及開放平台舊「指令配置」可能共存，如果清理結果是 no_match 仍不能說已修好。

@@ -82,3 +82,7 @@ Windows CI 除了測 Node Bridge 後端的第一次啟動、Token 缺少和設�
 ### 過期 QQ 官方指令選單
 
 使用者看見的 `/!设置插话率`、`查看主动插话暂停状态` 是 QQ 客戶端原生「/」指令建議，不是目前 QQAIBOT AI 的有效功能。程式碼與回歸測試保證不重新註冊這些名稱；既有 QQ 平台發布資料必須在 **QQ 開放平台 → AIBot → 發布設定 → 功能配置 → 指令配置** 刪掉並確認發布，詳見 `docs/QQ_COMMAND_PANEL_CLEANUP.md`。不能聲稱 Worker 程式部署已刪除遠端平台選單。
+
+## QQ 舊指令面板一次性清理
+
+已補上 QQ 官方指令面板 API 的精確比對，移除不存在的 `/!设置插话率` 項目，其他指令全部保留。清理結果可在 `/health` 查看 `abot.command_panel_cleanup`。若為 `no_match` 或 `failed`，請參照 `docs/QQ_COMMAND_PANEL_CLEANUP.md`；不能把尚存在 QQ 客戶端的舊發布指令當成新版程式仍有功能。

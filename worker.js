@@ -2,6 +2,7 @@ import {BBOT_HUB_ID} from "./src/bbot-hub.js";
 
 import {routeBbotBridgeOnly,routeBotNotice,bridgeCanFlush,assistantHealth,recordAssistantReply} from "./src/assistant.js";
 import {accessToken,qqRequest} from "./src/qq-api.js";
+import {cleanupRetiredQQCommands} from "./src/qq-panel-cleanup.js";
 import {onAbotAiEvent} from "./src/abot-ai.js";
 import {qq,parseOnebot} from "./src/core.js";
 import {roster,init} from "./src/store.js";
@@ -40,7 +41,7 @@ export default {
    const a=String(env.QQ_AI_ABOT_ENABLED)==="true"?await newAbotGateway(env).fetch("https://internal/status").catch(()=>null):null;
    const abot=a?.ok?await a.json():{connected:false,session_ready:false,enabled:false};
    return json({service:"qqaibot-ai-assistant",ai:true,configured:!!env.QQ_OPEN_APP_ID&&!!env.QQ_OPEN_CLIENT_SECRET,
-    mode:"abot-ai-passive",abot:{connected:!!abot.connected,session_ready:!!abot.session_ready,enabled:!!abot.enabled,last_event_at:abot.last_event_at||null,last_error:abot.last_error||null},
+    mode:"abot-ai-passive",abot:{connected:!!abot.connected,session_ready:!!abot.session_ready,enabled:!!abot.enabled,last_event_at:abot.last_event_at||null,last_error:abot.last_error||null,command_panel_cleanup:abot.command_panel_cleanup||"pending"},
     bbot:{connected:!!bbot.connected,hub_generation:"ai-v1",websocket_count:Number(bbot.websocket_count||0),
      last_connected_at:bbot.last_connected_at||null,last_event_at:bbot.last_event_at||null,
      last_closed_at:bbot.last_closed_at||null},
@@ -84,6 +85,8 @@ export default {
   ctx.waitUntil(pruneGroupMemory(env).catch(()=>console.warn("BOT_MEMORY_PRUNE_FAILED")));
   if(String(env.QQ_AI_ABOT_ENABLED)==="true")
    ctx.waitUntil(newAbotGateway(env).fetch("https://internal/ensure").catch(e=>console.error("ABOT_GATEWAY_ENSURE",String(e?.message||"failed").slice(0,90))));
+  if(String(env.QQ_RETIRED_COMMAND_CLEANUP)==="true")
+   ctx.waitUntil(newAbotGateway(env).fetch("https://internal/cleanup-old-panel").catch(()=>console.warn("QQ_PANEL_CLEANUP_TRANSPORT_ERROR")));
   ctx.waitUntil(bridgeCanFlush(env).then(enabled=>enabled?hub(env).fetch("https://internal/flush"):null).catch(e=>console.error("PLUGIN_SCHEDULE",String(e).slice(0,180))));
  }
 };
@@ -339,12 +342,34 @@ export class QqOpenGateway {
  }
  async fetch(request){
   const path=new URL(request.url).pathname;
+  if(path==="/cleanup-old-panel"){
+   if(String(this.env.QQ_RETIRED_COMMAND_CLEANUP)!=="true")return json({status:"disabled"});
+   const stateKey="qq_panel_cleanup_20261011";
+   const previous=await this.state.storage.get(stateKey);
+   if(previous?.done)return json({status:previous.status,removed:previous.removed||0});
+   const lastAttempt=Number(await this.state.storage.get(stateKey+"_last_attempt")||0);
+   if(Date.now()-lastAttempt<900000)return json({status:"rate_limited",removed:0});
+   await this.state.storage.put(stateKey+"_last_attempt",Date.now());
+   try{
+    const result=await cleanupRetiredQQCommands(this.env);
+    const record={done:true,status:result.removed?"removed":"no_match",removed:result.removed,updated:result.updated,deleted:result.deleted};
+    await this.state.storage.put(stateKey,record);
+    console.log("QQ_RETIRED_PANEL_CLEANUP",JSON.stringify(record));
+    return json(record);
+   }catch(e){
+    const code=Number(e?.status||e?.code||0);
+    await this.state.storage.put(stateKey,{done:false,status:"failed",http_status:code});
+    console.warn("QQ_RETIRED_PANEL_CLEANUP_FAILED",code||"unknown");
+    return json({status:"failed",http_status:code},503);
+   }
+  }
   if(path==="/status"){
    const lastEvent=await this.state.storage?.get?.("last_event_at");
    const lastError=await this.state.storage?.get?.("last_error");
    return json({connected:this.ws?.readyState===1,session_ready:this.ready,
     enabled:String(this.env.QQ_AI_ABOT_ENABLED)==="true",
-    last_event_at:lastEvent||null,last_error:lastError||null});
+    last_event_at:lastEvent||null,last_error:lastError||null,
+    command_panel_cleanup:(await this.state.storage.get("qq_panel_cleanup_20261011"))?.status||"pending"});
   }
   if(path==="/shutdown"){
    await this.shutdown();return json({disabled:true});
