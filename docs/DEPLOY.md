@@ -35,3 +35,15 @@
 `--diagnose` 顯示本機檢查；`--background` 明確要求背景才使用，`--run` 是前景。Windows GitHub Actions build workflow 除了 --help，還測首次診斷建立設定、缺少 Token 的退出碼。WebSocket 可連線不代表 Codex CLI 已登入或支援指定模型；需真實 QA。
 
 舊版 EXE SHA-256 8e6556d428c2a61e8f3df44ae2929a20716a0ca5326b07c452c35f8ca7b43ab7 為啟動 UX 修復前版本，不應再重新提供作為修復版。
+
+## 原生 Windows GUI（Codex Bridge）
+
+新的發行 ZIP 包含兩個 Windows x64 EXE：
+- `QQAIBOT-CodexBridge.exe`：.NET 8 WinForms 原生 GUI 主程序（WinExe，PE Subsystem 2，單檔 self-contained）。
+- `QQAIBOT-CodexBridge-Backend.exe`：隱藏執行的舊 Node Codex Bridge 進程，保持現有 WebSocket 協定及 Gemini 失聯後回退策略不變。
+
+兩檔須一起解壓到同一資料夾。開啟 GUI → 填入本機原有 Bridge Token（不傳給支援人員）→「儲存設定」→「啟動連線」。若設定已存在，GUI 預設讀取並自動啟動。若縮小視窗將停留系統匣並繼續保持 WS；關閉 GUI 則會停止所啟動的後端。透過 GUI 進階設定可修改舊 JSON read/edit roots 而不破壞其他欄位。原始後端仍有 --help/--run/--diagnose CLI 供回歸測試，但主要對使用者的介面不再是 CLI。
+
+Windows Action 先建置 pkg backend，再用 dotnet publish WinForms self-contained / single file，測 GUI 的 --self-test 和 PE GUI Subsystem=2，並替主 GUI 與後端分別寫 SHA-256。實際 Windows 桌面操作和使用者本機登入仍須受控測試。
+
+過期 QQ `/!设置插话率` 的客戶端指令預覽屬平台發布設定；請依 `docs/QQ_COMMAND_PANEL_CLEANUP.md` 前往 QQ 開放平台刪除。沒有核對平台發布資料 ID 前不能宣稱已刪。

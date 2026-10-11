@@ -70,3 +70,15 @@ GitHub 自動測試只使用模擬 EXE、Gemini 與 Vectorize；正式 QQ 傳訊
 另外提供 `--diagnose`（不發送請求，只檢查本機設定、Token 是否存在及 Codex CLI 可執行性）、`--run`（明確前景）、`--background`（使用者明確要求才隱藏背景）、`--install-startup`（保持先前登入啟動相容）和 `--help`。
 
 實際 Windows 雙擊與使用者本機 Codex 登入狀態仍需人工測試；Windows CI 會驗證 EXE 的 `--help`、首次 `--diagnose` 設定建立，以及缺少 Token 的失敗碼，避免只有 smoke test --help 就宣稱啟動正常。
+
+## 2026-10-11：原生 Windows GUI 版本
+
+**`QQAIBOT-CodexBridge.exe` 是真正的 Windows WinForms 圖形程式（WinExe，無 CLI 視窗）**，取代先前以 Node pkg 建置的主控台啟動器；同 ZIP 附上 `QQAIBOT-CodexBridge-Backend.exe`，負責與 Worker 持續連線、使用既有 Codex CLI，兩個檔案必須放在同一資料夾，請務必完整解壓。
+
+視窗提供：Bridge 連線狀態、Worker 握手資訊、`wss://aibot.ray2025.com/v3/codex-bridge`、遮蔽的 Bridge Token 欄位、Codex CLI 指定、儲存設定、啟動／停止、進階設定（Notepad）、安全診斷訊息、縮小至系統匣。設定沿用 `%APPDATA%\QQAIBOT\codex-bridge.json`，只改 GUI 控制的三個欄位，舊 CodexWork 的 readRoots、editRoots 等設定不覆蓋；密鑰絕不寫入 Git 或應用程式日誌。前景 GUI 透過子程序執行既有 Bridge CLI，啟動與狀態不需要使用者自行敲終端指令。GUI 關閉時關閉 Bridge，縮小到系統匣則保持連線。
+
+Windows CI 除了測 Node Bridge 後端的第一次啟動、Token 缺少和設定建立，還檢查原生 GUI `--self-test` 及編譯後 PE Subsystem=2（Windows GUI），以防再次把 CLI 誤標為 GUI。GitHub mock／CI 通過不代表已確認使用者 Windows 上的 Codex CLI 登入與 Luna 模型可用。
+
+### 過期 QQ 官方指令選單
+
+使用者看見的 `/!设置插话率`、`查看主动插话暂停状态` 是 QQ 客戶端原生「/」指令建議，不是目前 QQAIBOT AI 的有效功能。程式碼與回歸測試保證不重新註冊這些名稱；既有 QQ 平台發布資料必須在 **QQ 開放平台 → AIBot → 發布設定 → 功能配置 → 指令配置** 刪掉並確認發布，詳見 `docs/QQ_COMMAND_PANEL_CLEANUP.md`。不能聲稱 Worker 程式部署已刪除遠端平台選單。

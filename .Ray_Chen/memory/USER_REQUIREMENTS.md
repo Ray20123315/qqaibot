@@ -1,4 +1,3 @@
 # USER_REQUIREMENTS
-- Latest: user double-clicked uploaded QQAIBOT-CodexBridge.exe and saw immediate flash/exit; expects functional, observable executable and working local Codex bridge, not only code suggestions.
-- Preserve earlier requirements: Codex uses existing Secret, Luna non-think if available, group-person persistent session; QQ AI concise no Markdown, Bbot opt-in D1/Vectorize memory, official Abot AI, disabled-by-default bridge plugin, no unsolicited QQ chatter or credentials in logs.
-- No guessing actual local Windows config/CLI status or claiming online without health proof; deliver updated EXE, show setup route if needed.
+- Latest: QQAIBOT Codex EXE needs genuine GUI, not CLI or image mockup; fix obsolete QQ native suggestion /!设置插话率 from screenshot. User states no such active feature exists.
+- Keep existing Abot AI, Bbot memory D1/Vectorize, Luna non-think session preference, political policy and QQ plain text reply, preserved Secrets/local configuration/backups.
