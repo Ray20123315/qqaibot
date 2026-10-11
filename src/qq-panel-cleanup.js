@@ -32,8 +32,9 @@ export async function cleanupRetiredQQCommands(env,{fetchImpl=fetch,scopes=SCOPE
    const q=new URLSearchParams({scope,limit:"50"});
    if(cursor)q.set("cursor",cursor);
    const data=await call(env,"/v2/panels?"+q,{fetchImpl});
-   if(!Array.isArray(data.records))throw new Error("QQ_PANEL_RECORDS_MISSING");
-   for(const record of data.records){
+   const records=Array.isArray(data.records)?data.records:Array.isArray(data?.data?.records)?data.data.records:null;
+   if(!records)throw new Error("QQ_PANEL_RECORDS_MISSING");
+   for(const record of records){
     report.examined++;
     const items=record.panel?.items;
     if(!Array.isArray(items))continue;
@@ -53,7 +54,8 @@ export async function cleanupRetiredQQCommands(env,{fetchImpl=fetch,scopes=SCOPE
     }
     report.removed+=count;
    }
-   cursor=!data.is_end&&typeof data.next_cursor==="string"?data.next_cursor:"";
+   const resultData=data?.data?.records?data.data:data;
+   cursor=!resultData.is_end&&typeof resultData.next_cursor==="string"?resultData.next_cursor:"";
   }while(cursor);
   report.scopes.push(scope);
  }

@@ -23,7 +23,7 @@ const hub=env=>env.ONEBOT_HUB.get(env.ONEBOT_HUB.idFromName(BBOT_HUB_ID));
 // make the official gateway passive and ask both historical instances to close.
 const oldGatewayNames=["bridge-abot","bridge-abot-commands-v2"];
 const newAbotGateway=env=>env.QQ_OPEN_GATEWAY.get(env.QQ_OPEN_GATEWAY.idFromName("qqai-abot-passive-ai-v1"));
-const retiredPanelGateway=env=>env.QQ_OPEN_GATEWAY.get(env.QQ_OPEN_GATEWAY.idFromName("qqai-retired-panel-sync-20261011"));
+const retiredPanelGateway=env=>env.QQ_OPEN_GATEWAY.get(env.QQ_OPEN_GATEWAY.idFromName("qqai-retired-panel-sync-20261011-diagnostic-v2"));
 async function stopOldGateways(env){
  if(!env.QQ_OPEN_GATEWAY)return;
  await Promise.allSettled(oldGatewayNames.map(name=>{
@@ -362,9 +362,12 @@ export class QqOpenGateway {
     return json(record);
    }catch(e){
     const code=Number(e?.status||e?.code||0);
-    await this.state.storage.put(stateKey,{done:false,status:"failed",http_status:code});
-    console.warn("QQ_RETIRED_PANEL_CLEANUP_FAILED",code||"unknown");
-    return json({status:"failed",http_status:code},503);
+    const label=String(e?.message||"");
+    const safeReason=/^(?:QQ_PANEL_[A-Z0-9_]+|QQ_TOKEN_FAILED)(?:\b|:)/.test(label)
+      ?label.split(":")[0].slice(0,72):"QQ_PANEL_NETWORK_OR_PARSE";
+    await this.state.storage.put(stateKey,{done:false,status:"failed",http_status:code,reason:safeReason});
+    console.warn("QQ_RETIRED_PANEL_CLEANUP_FAILED",code||"none",safeReason);
+    return json({status:"failed",http_status:code,reason:safeReason},503);
    }
   }
   if(path==="/status"){
