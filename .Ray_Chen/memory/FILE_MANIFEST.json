@@ -1,58 +1,65 @@
 {
-  "version": "v0.0.99",
+  "version": "v0.0.100",
   "task_id": "codex-exe-visible-startup-20261011",
   "goal_revision": 1,
-  "changed_at": "2026-10-11T04:45:19.850Z",
-  "provider": "GitHub",
+  "changed_at": "2026-10-11T04:52:22.393Z",
   "location_type": "remote",
+  "provider": "GitHub",
   "repository": "Ray20123315/qqaibot",
-  "branch": "fix/codex-exe-visible-startup-20261011",
+  "branch": "main",
   "before_revision": "80d3cb38ce18fc44f3e77170ce8ff5ea4beff7be",
-  "after_revision": "feature_commit_pending",
+  "product_commit": "a71c41a349575f97e51d8b24992f6f002fa7eee0",
+  "after_revision": "memory_only_commit_pending",
   "verification": {
-    "pe_sha256": "8e6556d428c2a61e8f3df44ae2929a20716a0ca5326b07c452c35f8ca7b43ab7",
-    "ci": "pending",
-    "windows_exe": "pending",
-    "cloudflare": "unchanged"
+    "feature_ci": 38112718727,
+    "feature_windows_ci": 38112718730,
+    "main_ci": 38112831921,
+    "main_windows_ci": 38112831914,
+    "outcome": "success",
+    "exe_artifact_id": 11692173286,
+    "exe_sha256": "897845fa5104703abf205a33da32f2e92584113d630315b424575703dc896e21",
+    "cloudflare_deployment": "0044dbc3-218f-47da-842f-70cbcfda3f92",
+    "worker_version": "a3d7fc6e-6b77-4e44-907a-0338b2cd2236",
+    "cloudflare_build": "success",
+    "traffic_percent": 100,
+    "local_windows_user_test": "unknown"
   },
-  "changes": [
+  "files": [
     {
       "path": "tools/codex-bridge-windows.mjs",
-      "action": "modify launcher and diagnostics"
+      "action": "modified"
     },
     {
       "path": "tools/codex-work-bridge.mjs",
-      "action": "websocket status callback"
+      "action": "modified"
     },
     {
       "path": "tests/codex-exe-startup.test.mjs",
-      "action": "create"
+      "action": "created"
     },
     {
       "path": ".github/workflows/build-codex-bridge-exe.yml",
-      "action": "extend Windows smoke"
+      "action": "modified"
     },
     {
       "path": "README.md",
-      "action": "document Windows setup"
+      "action": "modified"
     },
     {
       "path": "docs/DEPLOY.md",
-      "action": "document first run"
+      "action": "modified"
     },
     {
       "path": ".github/workflows/bridge-check.yml",
-      "action": "memory archive bump"
+      "action": "memory version increment"
     },
     {
       "path": ".Ray_Chen/memory/*",
-      "action": "task checkpoint"
+      "action": "final verified checkpoint"
     }
   ],
-  "backups": [
-    {
-      "branch": "archive/codex-exe-before-startup-fix-20261011",
-      "sha": "80d3cb38ce18fc44f3e77170ce8ff5ea4beff7be"
-    }
-  ]
+  "backup": {
+    "branch": "archive/codex-exe-before-startup-fix-20261011",
+    "sha": "80d3cb38ce18fc44f3e77170ce8ff5ea4beff7be"
+  }
 }
