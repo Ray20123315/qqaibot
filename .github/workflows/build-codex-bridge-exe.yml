@@ -50,6 +50,7 @@ jobs:
           if ($template.bridgeToken -ne "") { throw "First-run template included a token" }
           & .\dist\QQAIBOT-CodexBridge.exe --run --config $testConfig
           if ($LASTEXITCODE -ne 2) { throw "Missing token should exit with actionable error, not start in background" }
+          $global:LASTEXITCODE = 0 # Expected missing-token exit 2 is checked; avoid PowerShell step inheriting it.
           $hash = (Get-FileHash .\dist\QQAIBOT-CodexBridge.exe -Algorithm SHA256).Hash.ToLower()
           "$hash  QQAIBOT-CodexBridge.exe" | Set-Content -Encoding ascii .\dist\QQAIBOT-CodexBridge_SHA256SUMS.txt
           Get-Item .\dist\QQAIBOT-CodexBridge.exe | Format-List Name,Length
