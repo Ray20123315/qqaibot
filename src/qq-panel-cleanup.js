@@ -3,9 +3,8 @@ import {accessToken} from "./qq-api.js";
 const API="https://api.bot.qq.com";
 const SCOPES=["group","c2c","channel","dm"];
 const obsoleteName=value=>/^设置插话率$/.test(String(value||"").replace(/^[\/!！\s]+/g,"").trim());
-const obsoleteDesc=value=>String(value||"").trim()==="查看主动插话暂停状态";
 export function isObsoleteQQCommand(item){
- return item?.type==="command"&&(obsoleteName(item.name)||obsoleteDesc(item.desc));
+ return item?.type==="command"&&obsoleteName(item.name);
 }
 async function call(env,path,{method="GET",body,fetchImpl=fetch}={}){
  const token=await accessToken(env,fetchImpl);

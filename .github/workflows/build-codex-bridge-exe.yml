@@ -50,8 +50,9 @@ jobs:
       - name: Smoke-test GUI and hidden engine
         shell: pwsh
         run: |
-          & .\dist\gui\QQAIBOT-CodexBridge.exe --self-test
-          if ($LASTEXITCODE -ne 0) { throw "GUI self test failed" }
+          $guiExe = (Resolve-Path .\dist\gui\QQAIBOT-CodexBridge.exe).Path
+          $guiProcess = Start-Process -FilePath $guiExe -ArgumentList "--self-test" -Wait -PassThru
+          if ($guiProcess.ExitCode -ne 0) { throw "GUI self test failed (exit $($guiProcess.ExitCode))" }
           & .\dist\gui\QQAIBOT-CodexBridge-Engine.exe --help
           if ($LASTEXITCODE -ne 0) { throw "Engine help failed" }
           $testConfig = Join-Path $env:RUNNER_TEMP "qqaibot-gui-first-run.json"

@@ -5,7 +5,7 @@ import {cleanupRetiredQQCommands,isObsoleteQQCommand} from "../src/qq-panel-clea
 test("exact obsolete QQ command and description are detected, unrelated commands untouched",()=>{
  assert.equal(isObsoleteQQCommand({type:"command",name:"/!设置插话率",desc:"查看主动插话暂停状态"}),true);
  assert.equal(isObsoleteQQCommand({type:"command",name:"设置插话率"}),true);
- assert.equal(isObsoleteQQCommand({type:"command",name:"正常命令",desc:"查看主动插话暂停状态"}),true);
+ assert.equal(isObsoleteQQCommand({type:"command",name:"正常命令",desc:"查看主动插话暂停状态"}),false);
  assert.equal(isObsoleteQQCommand({type:"command",name:"帮助",desc:"使用说明"}),false);
  assert.equal(isObsoleteQQCommand({type:"link",name:"设置插话率"}),false);
 });
