@@ -29,3 +29,11 @@ Worker 的 `QQ_RETIRED_COMMAND_CLEANUP=true` 配合原有 Abot Gateway Durable O
 - `pending`：尚未執行或已部署但 Cron 尚未觸發。
 
 此流程不是重建全部面板，且不會更動 AI／Codex／D1 資料。因為 QQ 指令面板及開放平台舊「指令配置」可能共存，如果清理結果是 no_match 仍不能說已修好。
+
+## 2026-10-11：Cloudflare 實際診斷與保守處理
+
+Cloudflare qqai 部署版本 `9ef32fc9-0039-4bcd-abe7-0de69633e68f` 於 05:34 UTC 記錄 `QQ_PANEL_RECORDS_MISSING`。因此尚無證據顯示 QQ 過期指令已被移除；GitHub CI 成功不代表平台操作成功。
+
+後續修補只放寬已知的 API 封裝層次（直接 `records`、`data.records`、`data.data.records`），仍要求 `records` 必須是陣列。未知格式不執行 PUT 或 DELETE，而是以 `OBJECT`／`ARRAY`／`ABSENT` 等類型產生安全診斷碼，不輸出原始 API 資料及機密。
+
+下一步依更新後 Cloudflare 的錯誤碼確定資料格式；舊版 QQ 發布後台與新式 `/v2/panels` 的資料可能不同，不得將 `no_match` 視為 QQ 客戶端舊指令已消失。
