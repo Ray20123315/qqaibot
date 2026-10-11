@@ -23,6 +23,7 @@ const hub=env=>env.ONEBOT_HUB.get(env.ONEBOT_HUB.idFromName(BBOT_HUB_ID));
 // make the official gateway passive and ask both historical instances to close.
 const oldGatewayNames=["bridge-abot","bridge-abot-commands-v2"];
 const newAbotGateway=env=>env.QQ_OPEN_GATEWAY.get(env.QQ_OPEN_GATEWAY.idFromName("qqai-abot-passive-ai-v1"));
+const retiredPanelGateway=env=>env.QQ_OPEN_GATEWAY.get(env.QQ_OPEN_GATEWAY.idFromName("qqai-retired-panel-sync-20261011"));
 async function stopOldGateways(env){
  if(!env.QQ_OPEN_GATEWAY)return;
  await Promise.allSettled(oldGatewayNames.map(name=>{
@@ -40,8 +41,11 @@ export default {
    const bbot=b?.ok?await b.json():{connected:false};
    const a=String(env.QQ_AI_ABOT_ENABLED)==="true"?await newAbotGateway(env).fetch("https://internal/status").catch(()=>null):null;
    const abot=a?.ok?await a.json():{connected:false,session_ready:false,enabled:false};
+   const p=String(env.QQ_RETIRED_COMMAND_CLEANUP)==="true"
+    ?await retiredPanelGateway(env).fetch("https://internal/status").catch(()=>null):null;
+   const panelStatus=p?.ok?(await p.json()).command_panel_cleanup:"pending";
    return json({service:"qqaibot-ai-assistant",ai:true,configured:!!env.QQ_OPEN_APP_ID&&!!env.QQ_OPEN_CLIENT_SECRET,
-    mode:"abot-ai-passive",abot:{connected:!!abot.connected,session_ready:!!abot.session_ready,enabled:!!abot.enabled,last_event_at:abot.last_event_at||null,last_error:abot.last_error||null,command_panel_cleanup:abot.command_panel_cleanup||"pending"},
+    mode:"abot-ai-passive",abot:{connected:!!abot.connected,session_ready:!!abot.session_ready,enabled:!!abot.enabled,last_event_at:abot.last_event_at||null,last_error:abot.last_error||null,command_panel_cleanup:panelStatus||"pending"},
     bbot:{connected:!!bbot.connected,hub_generation:"ai-v1",websocket_count:Number(bbot.websocket_count||0),
      last_connected_at:bbot.last_connected_at||null,last_event_at:bbot.last_event_at||null,
      last_closed_at:bbot.last_closed_at||null},
@@ -86,7 +90,7 @@ export default {
   if(String(env.QQ_AI_ABOT_ENABLED)==="true")
    ctx.waitUntil(newAbotGateway(env).fetch("https://internal/ensure").catch(e=>console.error("ABOT_GATEWAY_ENSURE",String(e?.message||"failed").slice(0,90))));
   if(String(env.QQ_RETIRED_COMMAND_CLEANUP)==="true")
-   ctx.waitUntil(newAbotGateway(env).fetch("https://internal/cleanup-old-panel").catch(()=>console.warn("QQ_PANEL_CLEANUP_TRANSPORT_ERROR")));
+   ctx.waitUntil(retiredPanelGateway(env).fetch("https://internal/cleanup-old-panel").catch(()=>console.warn("QQ_PANEL_CLEANUP_TRANSPORT_ERROR")));
   ctx.waitUntil(bridgeCanFlush(env).then(enabled=>enabled?hub(env).fetch("https://internal/flush"):null).catch(e=>console.error("PLUGIN_SCHEDULE",String(e).slice(0,180))));
  }
 };
