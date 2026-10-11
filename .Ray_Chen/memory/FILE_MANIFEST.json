@@ -1,81 +1,60 @@
 {
-  "version": "v0.0.104",
+  "version": "v0.0.105",
   "task_id": "qq-retired-panel-schema-diagnostic-20261011",
   "goal_revision": 3,
   "location_type": "remote",
   "provider": "GitHub",
   "repository": "Ray20123315/qqaibot",
-  "branch": "fix/qq-panel-schema-diagnostic-20261011",
-  "before_revision": "b4bfd8036a2419c6448161368c0effa7167dd87c",
-  "after_revision": "feature_branch_head_pending_final_ci",
+  "branch": "main",
+  "before_revision": "7a206ebb33639f7d4cd8413f8f339a58066dc0c2",
+  "after_revision": "memory_checkpoint_commit_pending",
   "changed_at_date": "2026-10-11",
   "verification": {
-    "baseline_main_ci": "success:38115171608",
-    "previous_cloudflare_deployment": "76a77bf2-c2e4-4064-9159-d3c70f380a8f at 100%",
-    "actual_qq_panel_cleanup": "failed:QQ_PANEL_RECORDS_MISSING",
-    "new_feature_ci": "pending",
-    "final_main_deployment": "pending"
+    "feature_ci": "success:38115855773",
+    "main_ci": "success:38115895140",
+    "cloudflare_deployment": "100%:62887ac7-c947-4efc-93a0-bcd2ef9797db",
+    "actual_qq_panel_cleanup": "UNKNOWN: last error QQ_PANEL_RECORDS_MISSING on previous version"
   },
   "files": [
     {
-      "path": "src/qq-panel-cleanup.js",
+      "path": ".Ray_Chen/memory/00_START_HERE.md",
       "action": "modified",
-      "verification": "feature CI pending"
-    },
-    {
-      "path": "tests/qq-panel-cleanup.test.mjs",
-      "action": "modified",
-      "verification": "feature CI pending"
-    },
-    {
-      "path": "docs/QQ_COMMAND_PANEL_CLEANUP.md",
-      "action": "modified",
-      "verification": "feature CI pending"
-    },
-    {
-      "path": ".github/workflows/bridge-check.yml",
-      "action": "modified",
-      "verification": "feature CI pending"
+      "verification": "memory CI pending"
     },
     {
       "path": ".Ray_Chen/memory/ACTIVE_TASK.md",
       "action": "modified",
-      "verification": "feature CI pending"
+      "verification": "memory CI pending"
     },
     {
       "path": ".Ray_Chen/memory/CURRENT_STATE.md",
       "action": "modified",
-      "verification": "feature CI pending"
+      "verification": "memory CI pending"
     },
     {
       "path": ".Ray_Chen/memory/VERIFY.md",
       "action": "modified",
-      "verification": "feature CI pending"
-    },
-    {
-      "path": ".Ray_Chen/memory/GOTCHAS.md",
-      "action": "modified",
-      "verification": "feature CI pending"
-    },
-    {
-      "path": ".Ray_Chen/memory/00_START_HERE.md",
-      "action": "modified",
-      "verification": "feature CI pending"
+      "verification": "memory CI pending"
     },
     {
       "path": ".Ray_Chen/memory/FILE_MANIFEST.json",
       "action": "modified",
-      "verification": "feature CI pending"
+      "verification": "memory CI pending"
     },
     {
       "path": ".Ray_Chen/memory/MEMORY_VERSION.txt",
       "action": "modified",
-      "verification": "feature CI pending"
+      "verification": "memory CI pending"
+    },
+    {
+      "path": ".github/workflows/bridge-check.yml",
+      "action": "modified",
+      "verification": "memory CI pending"
     }
   ],
   "backups": [
     "archive/cli-before-native-gui-20261011",
     "b4bfd8036a2419c6448161368c0effa7167dd87c"
   ],
-  "next_exact_action": "Verify feature CI; fast-forward main only if passing; inspect Cloudflare safe diagnostic and QQ client"
+  "next_exact_action": "Check production cleanup response after next scheduled retry; verify QQ client/management portal"
 }
