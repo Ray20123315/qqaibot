@@ -32,8 +32,14 @@ export async function cleanupRetiredQQCommands(env,{fetchImpl=fetch,scopes=SCOPE
    const q=new URLSearchParams({scope,limit:"50"});
    if(cursor)q.set("cursor",cursor);
    const data=await call(env,"/v2/panels?"+q,{fetchImpl});
-   const records=Array.isArray(data.records)?data.records:Array.isArray(data?.data?.records)?data.data.records:null;
-   if(!records)throw new Error("QQ_PANEL_RECORDS_MISSING");
+   // Restrict modifications to confirmed panel record arrays. Never log payloads.
+   const pages=[data,data?.data,data?.data?.data];
+   const page=pages.find(value=>Array.isArray(value?.records));
+   if(!page){
+    const type=value=>Array.isArray(value)?"ARRAY":value===null?"NULL":value===undefined?"ABSENT":typeof value==="object"?"OBJECT":"SCALAR";
+    throw new Error("QQ_PANEL_RECORDS_MISSING_"+pages.map(type).join("_"));
+   }
+   const records=page.records;
    for(const record of records){
     report.examined++;
     const items=record.panel?.items;
@@ -54,8 +60,7 @@ export async function cleanupRetiredQQCommands(env,{fetchImpl=fetch,scopes=SCOPE
     }
     report.removed+=count;
    }
-   const resultData=data?.data?.records?data.data:data;
-   cursor=!resultData.is_end&&typeof resultData.next_cursor==="string"?resultData.next_cursor:"";
+   cursor=!page.is_end&&typeof page.next_cursor==="string"?page.next_cursor:"";
   }while(cursor);
   report.scopes.push(scope);
  }
