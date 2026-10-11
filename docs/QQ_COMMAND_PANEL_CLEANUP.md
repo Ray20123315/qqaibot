@@ -37,3 +37,8 @@ Cloudflare qqai 部署版本 `9ef32fc9-0039-4bcd-abe7-0de69633e68f` 於 05:34 UT
 後續修補只放寬已知的 API 封裝層次（直接 `records`、`data.records`、`data.data.records`），仍要求 `records` 必須是陣列。未知格式不執行 PUT 或 DELETE，而是以 `OBJECT`／`ARRAY`／`ABSENT` 等類型產生安全診斷碼，不輸出原始 API 資料及機密。
 
 下一步依更新後 Cloudflare 的錯誤碼確定資料格式；舊版 QQ 發布後台與新式 `/v2/panels` 的資料可能不同，不得將 `no_match` 視為 QQ 客戶端舊指令已消失。
+
+## 2026-10-11 正式環境再次驗證
+已核對 Cloudflare Workers 05:50 UTC 的實際錯誤：`QQ_PANEL_RECORDS_MISSING_OBJECT_ABSENT_ABSENT`（Worker script version `ecea24a8-ea33-4e89-bdf0-656cc67a737c`）。這表示返回 JSON 的根層是物件，但是在目前所支援的結構中沒有 `records` 或 `data`。因沒有原始完整結構、也沒有官方已發布指令 ID，不允許推測資料代表空面板後自動刪除。程式仍以 fail-closed 模式保護其他指令。
+
+**下一個必需動作**：由 QQ 機器人開放平台管理者在 AIBot「發布設定 → 功能配置 → 指令配置」查找並只移除過時的「设置插话率」，重新發布並在 QQ 客戶端確認；如果面板已不存在，需取得已遮蔽帳號與隱私的 API schema，才能繼續修程式。

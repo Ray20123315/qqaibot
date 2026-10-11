@@ -1,60 +1,66 @@
 {
-  "version": "v0.0.105",
+  "version": "v0.0.106",
   "task_id": "qq-retired-panel-schema-diagnostic-20261011",
   "goal_revision": 3,
   "location_type": "remote",
   "provider": "GitHub",
   "repository": "Ray20123315/qqaibot",
   "branch": "main",
-  "before_revision": "7a206ebb33639f7d4cd8413f8f339a58066dc0c2",
-  "after_revision": "memory_checkpoint_commit_pending",
+  "before_revision": "03e7f8100eeaefaaf4fc9c04de11538fb34edf7b",
+  "after_revision": "memory_final_checkpoint_pending_commit",
   "changed_at_date": "2026-10-11",
   "verification": {
     "feature_ci": "success:38115855773",
     "main_ci": "success:38115895140",
-    "cloudflare_deployment": "100%:62887ac7-c947-4efc-93a0-bcd2ef9797db",
-    "actual_qq_panel_cleanup": "UNKNOWN: last error QQ_PANEL_RECORDS_MISSING on previous version"
+    "memory_v105_ci": "success:38116000833",
+    "cloudflare_deployment": "100%:4fe73d53-19e9-4f62-adda-550c46d5f7a6",
+    "qq_panel_cleanup": "failed:QQ_PANEL_RECORDS_MISSING_OBJECT_ABSENT_ABSENT at 05:50Z; no removal verified"
   },
   "files": [
     {
       "path": ".Ray_Chen/memory/00_START_HERE.md",
       "action": "modified",
-      "verification": "memory CI pending"
+      "verification": "memory snapshot CI pending"
     },
     {
       "path": ".Ray_Chen/memory/ACTIVE_TASK.md",
       "action": "modified",
-      "verification": "memory CI pending"
+      "verification": "memory snapshot CI pending"
     },
     {
       "path": ".Ray_Chen/memory/CURRENT_STATE.md",
       "action": "modified",
-      "verification": "memory CI pending"
+      "verification": "memory snapshot CI pending"
     },
     {
       "path": ".Ray_Chen/memory/VERIFY.md",
       "action": "modified",
-      "verification": "memory CI pending"
+      "verification": "memory snapshot CI pending"
     },
     {
       "path": ".Ray_Chen/memory/FILE_MANIFEST.json",
       "action": "modified",
-      "verification": "memory CI pending"
+      "verification": "memory snapshot CI pending"
     },
     {
       "path": ".Ray_Chen/memory/MEMORY_VERSION.txt",
       "action": "modified",
-      "verification": "memory CI pending"
+      "verification": "memory snapshot CI pending"
     },
     {
       "path": ".github/workflows/bridge-check.yml",
       "action": "modified",
-      "verification": "memory CI pending"
+      "verification": "memory snapshot CI pending"
+    },
+    {
+      "path": "docs/QQ_COMMAND_PANEL_CLEANUP.md",
+      "action": "modified",
+      "verification": "memory snapshot CI pending"
     }
   ],
   "backups": [
     "archive/cli-before-native-gui-20261011",
     "b4bfd8036a2419c6448161368c0effa7167dd87c"
   ],
-  "next_exact_action": "Check production cleanup response after next scheduled retry; verify QQ client/management portal"
+  "next_exact_action": "Inspect exact old QQ published command in official bot developer portal; delete only 设置插话率 and confirm native menu, otherwise obtain redacted official API schema"
 }
