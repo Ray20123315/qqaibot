@@ -1,18 +1,18 @@
-name: Build Codex Bridge Windows EXE
+name: Build QQAIBOT Codex Bridge GUI for Windows
 
 on:
   workflow_dispatch:
   push:
     branches:
       - main
-      - feature/compact-codex-vector-memory-20261010
-      - fix/codex-exe-visible-startup-20261011
+      - feature/native-gui-and-qq-panel-cleanup-20261011
     paths:
       - "tools/codex-work-bridge.mjs"
       - "tools/codex-bridge-windows.mjs"
+      - "tools/gui/**"
       - "tools/codex-bridge.config.example.json"
-      - "package.json"
       - ".github/workflows/build-codex-bridge-exe.yml"
+      - "package.json"
 
 permissions:
   contents: read
@@ -20,46 +20,59 @@ permissions:
 jobs:
   build:
     runs-on: windows-latest
-    timeout-minutes: 15
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: npm
-      - name: Install repository dependencies
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+      - name: Install dependencies
         run: npm ci --ignore-scripts
-      - name: Ensure bridge WebSocket dependency
+      - name: Install WS engine dependency
         run: npm install --no-save --ignore-scripts ws@8.21.0
-      - name: Build Windows executable
+      - name: Build hidden backend engine (not the user-facing GUI)
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force dist | Out-Null
           npx --yes esbuild@0.28.1 tools/codex-bridge-windows.mjs --bundle --platform=node --target=node22 --format=cjs --outfile=dist/codex-bridge-bundle.cjs
-          npx --yes @yao-pkg/pkg@6.22.0 dist/codex-bridge-bundle.cjs --targets node22-win-x64 --output dist/QQAIBOT-CodexBridge.exe --compress GZip
-      - name: Smoke test executable
+          npx --yes @yao-pkg/pkg@6.22.0 dist/codex-bridge-bundle.cjs --targets node22-win-x64 --output dist/QQAIBOT-CodexBridge-Engine.exe --compress GZip
+      - name: Publish native WinForms self-contained GUI
         shell: pwsh
         run: |
-          & .\dist\QQAIBOT-CodexBridge.exe --help
+          dotnet publish tools/gui/QQAIBOT.CodexBridge.Gui.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -p:PublishTrimmed=false -o dist/gui
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          $testConfig = Join-Path $env:RUNNER_TEMP "qqaibot-first-run-smoke.json"
-          & .\dist\QQAIBOT-CodexBridge.exe --diagnose --config $testConfig
-          if ($LASTEXITCODE -ne 0) { throw "First-run diagnostics failed" }
-          if (!(Test-Path $testConfig)) { throw "First-run template not created" }
+          Copy-Item dist/QQAIBOT-CodexBridge-Engine.exe dist/gui/QQAIBOT-CodexBridge-Engine.exe
+          if (!(Test-Path dist/gui/QQAIBOT-CodexBridge.exe)) { throw "GUI executable missing" }
+      - name: Smoke-test GUI and hidden engine
+        shell: pwsh
+        run: |
+          & .\dist\gui\QQAIBOT-CodexBridge.exe --self-test
+          if ($LASTEXITCODE -ne 0) { throw "GUI self test failed" }
+          & .\dist\gui\QQAIBOT-CodexBridge-Engine.exe --help
+          if ($LASTEXITCODE -ne 0) { throw "Engine help failed" }
+          $testConfig = Join-Path $env:RUNNER_TEMP "qqaibot-gui-first-run.json"
+          & .\dist\gui\QQAIBOT-CodexBridge-Engine.exe --diagnose --config $testConfig
+          if ($LASTEXITCODE -ne 0) { throw "Engine first-run diagnostics failed" }
+          if (!(Test-Path $testConfig)) { throw "First-run config was not created" }
           $template = Get-Content $testConfig -Raw | ConvertFrom-Json
-          if ($template.bridgeToken -ne "") { throw "First-run template included a token" }
-          & .\dist\QQAIBOT-CodexBridge.exe --run --config $testConfig
-          if ($LASTEXITCODE -ne 2) { throw "Missing token should exit with actionable error, not start in background" }
-          $global:LASTEXITCODE = 0 # Expected missing-token exit 2 is checked; avoid PowerShell step inheriting it.
-          $hash = (Get-FileHash .\dist\QQAIBOT-CodexBridge.exe -Algorithm SHA256).Hash.ToLower()
-          "$hash  QQAIBOT-CodexBridge.exe" | Set-Content -Encoding ascii .\dist\QQAIBOT-CodexBridge_SHA256SUMS.txt
-          Get-Item .\dist\QQAIBOT-CodexBridge.exe | Format-List Name,Length
-          Get-Content .\dist\QQAIBOT-CodexBridge_SHA256SUMS.txt
+          if ($template.bridgeToken -ne "") { throw "Template contained a Token" }
+          & .\dist\gui\QQAIBOT-CodexBridge-Engine.exe --run --config $testConfig
+          if ($LASTEXITCODE -ne 2) { throw "Expected missing-token error not returned" }
+          $global:LASTEXITCODE = 0
+          $gui = (Get-FileHash .\dist\gui\QQAIBOT-CodexBridge.exe -Algorithm SHA256).Hash.ToLower()
+          $engine = (Get-FileHash .\dist\gui\QQAIBOT-CodexBridge-Engine.exe -Algorithm SHA256).Hash.ToLower()
+          "$gui  QQAIBOT-CodexBridge.exe" | Set-Content -Encoding ascii .\dist\gui\SHA256SUMS.txt
+          "$engine  QQAIBOT-CodexBridge-Engine.exe" | Add-Content -Encoding ascii .\dist\gui\SHA256SUMS.txt
       - uses: actions/upload-artifact@v4
         with:
-          name: QQAIBOT-CodexBridge-Windows-x64
+          name: QQAIBOT-CodexBridge-NativeGUI-Windows-x64
           path: |
-            dist/QQAIBOT-CodexBridge.exe
-            dist/QQAIBOT-CodexBridge_SHA256SUMS.txt
+            dist/gui/QQAIBOT-CodexBridge.exe
+            dist/gui/QQAIBOT-CodexBridge-Engine.exe
+            dist/gui/SHA256SUMS.txt
           if-no-files-found: error
           retention-days: 30

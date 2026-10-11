@@ -1,65 +1,84 @@
 {
-  "version": "v0.0.100",
-  "task_id": "codex-exe-visible-startup-20261011",
+  "version": "v0.0.101",
+  "task_id": "qqaibot-native-gui-and-stale-command-20261011",
   "goal_revision": 1,
-  "changed_at": "2026-10-11T04:52:22.393Z",
+  "changed_at": "2026-10-11T05:12:20.985Z",
   "location_type": "remote",
   "provider": "GitHub",
   "repository": "Ray20123315/qqaibot",
-  "branch": "main",
-  "before_revision": "80d3cb38ce18fc44f3e77170ce8ff5ea4beff7be",
-  "product_commit": "a71c41a349575f97e51d8b24992f6f002fa7eee0",
-  "after_revision": "memory_only_commit_pending",
+  "branch": "feature/native-gui-and-qq-panel-cleanup-20261011",
+  "before_revision": "5415fb104b7cb2b30b0f59938c91a412c476b494",
+  "after_revision": "feature_commit_pending",
   "verification": {
-    "feature_ci": 38112718727,
-    "feature_windows_ci": 38112718730,
-    "main_ci": 38112831921,
-    "main_windows_ci": 38112831914,
-    "outcome": "success",
-    "exe_artifact_id": 11692173286,
-    "exe_sha256": "897845fa5104703abf205a33da32f2e92584113d630315b424575703dc896e21",
-    "cloudflare_deployment": "0044dbc3-218f-47da-842f-70cbcfda3f92",
-    "worker_version": "a3d7fc6e-6b77-4e44-907a-0338b2cd2236",
-    "cloudflare_build": "success",
-    "traffic_percent": 100,
-    "local_windows_user_test": "unknown"
+    "feature_ci": "pending",
+    "windows_gui_ci": "pending",
+    "qq_panel_removed": "unknown",
+    "cloudflare": "not_changed"
   },
-  "files": [
+  "changes": [
     {
-      "path": "tools/codex-bridge-windows.mjs",
-      "action": "modified"
+      "path": "tools/gui/QQAIBOT.CodexBridge.Gui.csproj",
+      "action": "create_or_modify",
+      "blob_sha": "77fce3e6bb136a9e7fcd30441534e7e612c4639c"
     },
     {
-      "path": "tools/codex-work-bridge.mjs",
-      "action": "modified"
+      "path": "tools/gui/Program.cs",
+      "action": "create_or_modify",
+      "blob_sha": "8bf75ed7e12f9f17f0efaf67b2ff7dffe66354ec"
     },
     {
-      "path": "tests/codex-exe-startup.test.mjs",
-      "action": "created"
+      "path": "src/qq-panel-cleanup.js",
+      "action": "create_or_modify",
+      "blob_sha": "f996a5473f3af1ccf369b7a21d30cb3092aa18f3"
+    },
+    {
+      "path": "tests/qq-panel-cleanup.test.mjs",
+      "action": "create_or_modify",
+      "blob_sha": "097df60617a083fde691ad899e037e48941560c9"
+    },
+    {
+      "path": "worker.js",
+      "action": "create_or_modify",
+      "blob_sha": "3234d180f26e0d7b7710639816401534a3093201"
+    },
+    {
+      "path": "wrangler.toml",
+      "action": "create_or_modify",
+      "blob_sha": "56a2f61654bbc48c634de8f445ad661b0af3114a"
     },
     {
       "path": ".github/workflows/build-codex-bridge-exe.yml",
-      "action": "modified"
+      "action": "create_or_modify",
+      "blob_sha": "aa964963338a7d7c57692836f3ba714f93f8482b"
     },
     {
       "path": "README.md",
-      "action": "modified"
+      "action": "create_or_modify",
+      "blob_sha": "bb432eaed8b886ff35f6b8bef2ab84ccddfd5f52"
     },
     {
       "path": "docs/DEPLOY.md",
-      "action": "modified"
+      "action": "create_or_modify",
+      "blob_sha": "27cc4c83c164b25b4a91a62c04d75eb38046f924"
+    },
+    {
+      "path": "tools/codex-bridge.config.example.json",
+      "action": "create_or_modify",
+      "blob_sha": "0d4a0b07bde9007f82f2dc58a11c7c7003b9425e"
     },
     {
       "path": ".github/workflows/bridge-check.yml",
-      "action": "memory version increment"
+      "action": "bump memory archive and feature CI"
     },
     {
       "path": ".Ray_Chen/memory/*",
-      "action": "final verified checkpoint"
+      "action": "new goal checkpoint"
     }
   ],
-  "backup": {
-    "branch": "archive/codex-exe-before-startup-fix-20261011",
-    "sha": "80d3cb38ce18fc44f3e77170ce8ff5ea4beff7be"
-  }
+  "backups": [
+    {
+      "branch": "archive/pre-native-gui-20261011",
+      "sha": "5415fb104b7cb2b30b0f59938c91a412c476b494"
+    }
+  ]
 }

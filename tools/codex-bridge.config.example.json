@@ -1,14 +1,12 @@
 {
   "bridgeUrl": "wss://aibot.ray2025.com/v3/codex-bridge",
-  "bridgeToken": "REPLACE_WITH_LOCAL_BRIDGE_TOKEN",
+  "bridgeToken": "",
   "codexBin": "codex",
-  "codexHome": "C:\\Users\\YOUR_NAME\\.qqaibot-codex",
-  "chatCwd": "C:\\Users\\YOUR_NAME\\AppData\\Local\\Temp",
-  "readRoots": {
-    "project": "D:\\QQAIBOT"
-  },
+  "codexHome": "",
+  "chatCwd": "",
+  "readRoots": {},
   "editRoots": {},
-  "exportDir": "C:\\Users\\YOUR_NAME\\QQAIBOT-exports",
+  "exportDir": "",
   "maxFiles": 5000,
   "maxBytes": 134217728,
   "exportMaxBytes": 33554432

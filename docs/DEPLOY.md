@@ -35,3 +35,11 @@
 `--diagnose` 顯示本機檢查；`--background` 明確要求背景才使用，`--run` 是前景。Windows GitHub Actions build workflow 除了 --help，還測首次診斷建立設定、缺少 Token 的退出碼。WebSocket 可連線不代表 Codex CLI 已登入或支援指定模型；需真實 QA。
 
 舊版 EXE SHA-256 8e6556d428c2a61e8f3df44ae2929a20716a0ca5326b07c452c35f8ca7b43ab7 為啟動 UX 修復前版本，不應再重新提供作為修復版。
+
+## GUI 與 QQ 快捷指令清理（2026-10-11）
+
+新版 Windows GitHub Action `build-codex-bridge-exe.yml` 不再將 Node CLI 包裝後交給使用者當主程式。實際交付 `QQAIBOT-CodexBridge.exe` 是 .NET 8 WinForms 無主控台 GUI，`QQAIBOT-CodexBridge-Engine.exe` 是只供 GUI 管理的後端，必須同目錄。CI 在 windows-latest 上以 `dotnet publish -r win-x64 --self-contained true -p:PublishSingleFile=true` 產物化 GUI，執行 `--self-test`，並測 Engine 設定/Token 錯誤行為。
+
+QQ 官方舊指令 `/!设置插话率` 不在目前 bot 的命令 registry。Abot 在 `QQ_RETIRED_COMMAND_CLEANUP=true` 時透過本來存在的 QQ_APP Secret 取得 QQ 官方存取權杖，每 15 分鐘至多嘗試一次，成功後在既有 `QqOpenGateway` Durable Object storage 記錄 `qq_panel_cleanup_20261011`，之後不再反覆更動面板。只移除精確匹配的舊命令，其他項目維持原樣。設定 `QQ_RETIRED_COMMAND_CLEANUP=false` 可立即停止後續執行，無須刪除其他 QQ 設定。
+
+`/health` 的 `abot.command_panel_cleanup` 用於稽核是否成功移除；若回報 `no_match` 或 `failed`，QQ 目前指令可能由舊管理端頁面維護，請在 QQ 開放平台「發布設定 → 功能配置 → 指令」刪掉該指令，而非清除所有 Bot 指令或更動 Worker AI 回覆。

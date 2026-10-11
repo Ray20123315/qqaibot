@@ -70,3 +70,19 @@ GitHub 自動測試只使用模擬 EXE、Gemini 與 Vectorize；正式 QQ 傳訊
 另外提供 `--diagnose`（不發送請求，只檢查本機設定、Token 是否存在及 Codex CLI 可執行性）、`--run`（明確前景）、`--background`（使用者明確要求才隱藏背景）、`--install-startup`（保持先前登入啟動相容）和 `--help`。
 
 實際 Windows 雙擊與使用者本機 Codex 登入狀態仍需人工測試；Windows CI 會驗證 EXE 的 `--help`、首次 `--diagnose` 設定建立，以及缺少 Token 的失敗碼，避免只有 smoke test --help 就宣稱啟動正常。
+
+## 2026-10-11 真正 Windows GUI 版（取代主控台入口）
+
+使用者入口為 `tools/gui/QQAIBOT.CodexBridge.Gui.csproj` 編譯出的 Windows **WinForms 原生視窗程式** `QQAIBOT-CodexBridge.exe`；它和 `QQAIBOT-CodexBridge-Engine.exe` 必須解壓在同一目錄。請雙擊 **GUI EXE**，不要直接執行 Engine。GUI 由 .NET 8 自包含單檔編譯，無需使用者另裝 .NET；Engine 在 GUI 背景管理、無命令列視窗。
+
+GUI 四個分頁：
+- 總覽：WebSocket 狀態、啟動／停止連線、Codex 模型偏好與回退提示。
+- 連線設定：設定 Worker URL、遮蔽輸入的 Bridge Token、Codex CLI 路徑。沿用本機 `%APPDATA%\QQAIBOT\codex-bridge.json`，不覆蓋未知欄位。
+- 資料夾權限：手動選擇 readRoots，是否提供 editRoots 預設關閉；資料夾權限需使用者自行授權。
+- 診斷日誌：顯示安全錯誤碼、時間以及本機 `%LOCALAPPDATA%\QQAIBOT\logs\codex-bridge.log`，不公開金鑰或 QQ 訊息內容。
+
+這個 GUI 控制既有 `qqai-codex-bridge-v1` EXE 後端協定。連線成功不等於 Codex CLI 登入或必然有 gpt-6-luna 模型權限。Windows GitHub Actions 包含 **WinForms GUI 自測**、Engine `--help`、首次設定與缺少 Token 的情境；真實使用者桌面行為仍需現場驗收。
+
+### QQ 舊快捷指令清理
+
+原 `/!设置插话率`（說明 `查看主动插话暂停状态`）已從 AI 版指令解析器移除，但 QQ 官方指令面板可能保留舊設定。新版 `src/qq-panel-cleanup.js` 使用 QQ 官方 **`GET /v2/panels` / `PUT /v2/panels/{panel_id}` / `DELETE /v2/panels/{panel_id}`**，由 Cloudflare Abot Gateway 的一次性受限任務，掃描 group/c2c/channel/dm 面板，只刪名稱或說明精確吻合的過期項目，其他面板元素、權限和備註不變。如果面板只有過期項目，就刪除此空面板。Worker `/health` 的 `abot.command_panel_cleanup` 顯示 `pending`、`removed`、`no_match` 或 `failed`。後者須依官方錯誤碼檢查；`no_match` 但 QQ 仍顯示，表示可能是舊的管理端「指令配置」或客戶端快取，需要在 QQ 開放平台機器人管理端的「發布設定 → 功能配置 → 指令」手動刪除並儲存後刷新 QQ 客戶端。**絕不以重建整個指令清單代替局部清理。**
