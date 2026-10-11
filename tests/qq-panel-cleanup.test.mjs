@@ -51,3 +51,28 @@ test("no match does not modify QQ command panels",async()=>{
  const report=await cleanupRetiredQQCommands({QQ_OPEN_APP_ID:"app",QQ_OPEN_CLIENT_SECRET:"secret"},{fetchImpl:fake,scopes:["group"]});
  assert.equal(report.removed,0);assert.equal(wrote,false);
 });
+
+test("nested QQ API envelope can be scanned without modifying unrelated commands",async()=>{
+ let writes=0;
+ const fake=async(url,options={})=>{
+  if(url.includes("getAppAccessToken"))return Response.json({access_token:"dummy",expires_in:3600});
+  if(options.method&&options.method!=="GET")writes++;
+  return Response.json({data:{data:{records:[{panel_id:"abc",panel:{items:[{type:"command",name:"/help"}]}}],is_end:true}}});
+ };
+ const report=await cleanupRetiredQQCommands({QQ_OPEN_APP_ID:"app",QQ_OPEN_CLIENT_SECRET:"secret"},{fetchImpl:fake,scopes:["group"]});
+ assert.equal(report.examined,1);assert.equal(report.removed,0);assert.equal(writes,0);
+});
+test("unknown QQ response shape remains fail-closed with no payload exposure",async()=>{
+ let writes=0;
+ const fake=async(url,options={})=>{
+  if(url.includes("getAppAccessToken"))return Response.json({access_token:"dummy",expires_in:3600});
+  if(options.method&&options.method!=="GET")writes++;
+  return Response.json({data:{panels:[]},debug:"do-not-expose-this"});
+ };
+ await assert.rejects(cleanupRetiredQQCommands({QQ_OPEN_APP_ID:"app",QQ_OPEN_CLIENT_SECRET:"secret"},{fetchImpl:fake,scopes:["group"]}),e=>{
+  assert.equal(e.message,"QQ_PANEL_RECORDS_MISSING_OBJECT_OBJECT_ABSENT");
+  assert.equal(e.message.includes("do-not-expose-this"),false);
+  return true;
+ });
+ assert.equal(writes,0);
+});
