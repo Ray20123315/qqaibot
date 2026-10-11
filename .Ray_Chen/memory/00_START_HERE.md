@@ -1,11 +1,11 @@
 # Ray_Chen Memory
-version: v0.0.101
+version: v0.0.102
 task_id: codex-bridge-native-gui-20261011
-task_status: active
+task_status: blocked
 goal_revision: 1
-feature_branch: feature/native-winforms-gui-cleanup-20261011
-main_before: 5415fb104b7cb2b30b0f59938c91a412c476b494
-backup: archive/cli-before-native-gui-20261011
-updated_at: 2026-10-11T05:11:42.794Z
+canonical_branch: main
+product_commit: ed944543d4a265101a7abafa2ff9eeee84f28c63
+backup_commit: 5415fb104b7cb2b30b0f59938c91a412c476b494
+updated_at: 2026-10-11T05:18:25.694Z
 
-Owner requests true native Windows GUI rather than CLI Codex EXE, and cleanup of QQ native stale slash entry for interjection-rate setting. Native WinForms frontend and legacy backend separate, CI pending. QQ slash entry stored in platform published command config, not current source. Read ACTIVE_TASK, CURRENT_STATE, VERIFY, FILE_MANIFEST.
+Native Windows GUI Codex Bridge completed, built in feature and main Windows CI, tested PE subsystem 2, packaged two EXE binaries with SHA-256; Cloudflare production deployment main build matches. QQ stale platform slash command was NOT removed: only user with QQ bot developer management permissions or platform API access can delete an exact published command. See docs/QQ_COMMAND_PANEL_CLEANUP.md. Read ACTIVE_TASK, CURRENT_STATE, VERIFY, GOTCHAS, FILE_MANIFEST.

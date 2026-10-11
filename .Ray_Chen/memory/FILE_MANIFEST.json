@@ -1,21 +1,32 @@
 {
-  "version": "v0.0.101",
+  "version": "v0.0.102",
   "task_id": "codex-bridge-native-gui-20261011",
   "goal_revision": 1,
-  "changed_at": "2026-10-11T05:11:42.794Z",
+  "changed_at": "2026-10-11T05:18:25.694Z",
   "location_type": "remote",
   "provider": "GitHub",
   "repository": "Ray20123315/qqaibot",
-  "branch": "feature/native-winforms-gui-cleanup-20261011",
+  "branch": "main",
   "before_revision": "5415fb104b7cb2b30b0f59938c91a412c476b494",
-  "after_revision": "pending",
+  "product_sha": "ed944543d4a265101a7abafa2ff9eeee84f28c63",
+  "after_revision": "memory_commit_pending",
   "verification": {
-    "node_ci": "pending",
-    "windows_build": "pending",
-    "qq_published_command": "unverified_not_deleted",
-    "production": "unchanged"
+    "feature_node": 38114026195,
+    "feature_windows": 38114026126,
+    "main_node": 38114199375,
+    "main_windows": 38114199372,
+    "all_outcome": "success",
+    "gui_sha256": "5cb47bb16e252e9c871d26e17cd01ab939e80836c57df9bab52f4b0b47a3eeb9",
+    "backend_sha256": "9501d9e055d6e2b7e0cf8a165603712e33fc830d752d092d52fba3c1b33febff",
+    "exe_artifact_id": 11693066002,
+    "cloudflare_deployment": "c92451d0-bdc5-470b-bc49-24cab00837ae",
+    "cloudflare_version": "f50fed87-5265-478d-84b3-1c6fc85d269c",
+    "cloudflare_build": "success",
+    "traffic_percent": 100,
+    "qq_native_slash_removal": "not_done_no_platform_access",
+    "windows_user_acceptance": "untested"
   },
-  "files": [
+  "changed_files": [
     {
       "path": "tools/codex-bridge-gui/QQAIBOT-CodexBridge.csproj",
       "action": "created_or_modified"
