@@ -52,7 +52,7 @@ test("Bbot native batch sends mixed text, picture and face as one OneBot message
  assert.equal(operations[0].segments[0].data.text,"[甲群]甲：");
 });
 test("outbox delivers to three destinations concurrently, ACK must be awaited",async()=>{
- const messages=[sample("a","808882936"),sample("b","810000111"),sample("c","810000222")];
+ const messages=[sample("a","808882936"),sample("b","810000111"),sample("c","810000222")].map(x=>({...x,id:"manual-v1:"+x.id}));
  let seen=[],released=deferred(),three=deferred();
  const db={prepare(sql){
   return {
