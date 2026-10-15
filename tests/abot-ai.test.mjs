@@ -8,7 +8,7 @@ const packet=(content="!ai 你好",id="event-1")=>({op:0,t:"GROUP_AT_MESSAGE_CRE
  id,group_openid:"group-openid-123456789",author:{member_openid:"member-openid-123456789"},content
 }});
 class FakeD1 {
- constructor(){this.seen=[];this.history=[];this.sent=[];this.settings=new Map();}
+ constructor(){this.seen=[];this.history=[];this.sent=[];this.settings=new Map();this.rate=new Map();}
  prepare(sql){
   const db=this;
   return {run:async()=>({meta:{changes:0}}),bind(...args){return {
@@ -19,6 +19,13 @@ class FakeD1 {
    },
    all:async()=>({results:sql.includes("FROM abot_ai_history")?db.history.filter(x=>x.group===args[0]&&x.user===args[1]).map(x=>({role:x.role,content:x.content})):[]}),
    run:async()=>{
+    if(sql.startsWith("INSERT INTO abot_ai_rate_limit")){
+     const key=args[0]+":"+args[1],old=db.rate.get(key);
+     const used=old?.bucket===args[2]?old.used:0;
+     if(used>=4)return {meta:{changes:0}};
+     db.rate.set(key,{bucket:args[2],used:used+1});
+     return {meta:{changes:1}};
+    }
     if(sql.startsWith("INSERT OR IGNORE INTO abot_ai_seen")){
      if(db.seen.some(x=>x.group===args[0]&&x.id===args[1]))return {meta:{changes:0}};
      db.seen.push({group:args[0],id:args[1],user:args[2],status:"processing"});return {meta:{changes:1}};
@@ -128,4 +135,34 @@ test("model-generated political response is suppressed and never persisted in co
 test("political-language checks support traditional, simplified, English and spaced words, but not ordinary chat",()=>{
  for(const input of ["聊聊政 治", "比较两岸关系", "谁当选总统", "Who wins the presidential election?", "Donald Trump", "國民黨是什麼"])assert.equal(isPoliticalTopic(input),true,input);
  for(const input of ["教我學 Python", "今天的天氣如何", "幫我整理番茄炒蛋食譜", "我想投票選披薩口味"])assert.equal(isPoliticalTopic(input),false,input);
+});
+
+test("Abot Gemini has no daily message cap even after 20 requests",async()=>{
+ const db=new FakeD1(),env={DB:db};
+ const original=Date.now;let clock=1760000000000;
+ let calls=0;
+ Date.now=()=>clock;
+ try{
+  for(let i=0;i<25;i++){
+   const result=await onAbotAiEvent(env,packet("!ai 你好","gemini-no-daily-"+i),{
+    generate:async()=>{calls++;return {text:"你好"};},
+    send:async()=>{}
+   });
+   assert.equal(result.status,"sent");
+   clock+=11000; // beyond anti-spam window, still within the same day
+  }
+ }finally{Date.now=original;}
+ assert.equal(calls,25);
+ assert.equal(db.seen.length,25);
+});
+test("Abot short anti-spam limit blocks the fifth same-user request in ten seconds",async()=>{
+ const db=new FakeD1(),env={DB:db},sent=[];
+ let calls=0;
+ for(let i=0;i<5;i++)await onAbotAiEvent(env,packet("!ai 天氣","burst-"+i),{
+  generate:async()=>{calls++;return {text:"正常回答"};},
+  send:async(_env,_group,body)=>sent.push(body)
+ });
+ assert.equal(calls,4);
+ assert.match(sent[4],/太密集/);
+ assert.equal(db.seen.length,5);
 });
