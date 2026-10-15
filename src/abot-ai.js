@@ -16,13 +16,26 @@ async function dbInit(env){
   "CREATE TABLE IF NOT EXISTS abot_ai_seen (group_openid TEXT NOT NULL,source_id TEXT NOT NULL,user_openid TEXT NOT NULL,status TEXT NOT NULL DEFAULT 'processing',error_code TEXT NOT NULL DEFAULT '',created_at INTEGER NOT NULL,PRIMARY KEY(group_openid,source_id))",
   "CREATE TABLE IF NOT EXISTS abot_ai_history (group_openid TEXT NOT NULL,user_openid TEXT NOT NULL,message_id TEXT NOT NULL,role TEXT NOT NULL,content TEXT NOT NULL,created_at INTEGER NOT NULL,PRIMARY KEY(group_openid,user_openid,message_id,role))",
   "CREATE INDEX IF NOT EXISTS abot_ai_history_group_idx ON abot_ai_history(group_openid,user_openid,created_at)",
-  "CREATE TABLE IF NOT EXISTS abot_ai_settings (group_openid TEXT PRIMARY KEY,ai_enabled INTEGER NOT NULL DEFAULT 1,model_provider TEXT NOT NULL DEFAULT 'gemini',updated_at INTEGER NOT NULL)"
+  "CREATE TABLE IF NOT EXISTS abot_ai_settings (group_openid TEXT PRIMARY KEY,ai_enabled INTEGER NOT NULL DEFAULT 1,model_provider TEXT NOT NULL DEFAULT 'gemini',updated_at INTEGER NOT NULL)",
+  "CREATE TABLE IF NOT EXISTS abot_ai_rate_limit (group_openid TEXT NOT NULL,user_openid TEXT NOT NULL,bucket INTEGER NOT NULL,used INTEGER NOT NULL,PRIMARY KEY(group_openid,user_openid))"
  ])await env.DB.prepare(q).run();
  bootstrapped=true;
 }
 async function sqlRun(db,sql,...args){return db.prepare(sql).bind(...args).run();}
 async function sqlOne(db,sql,...args){return db.prepare(sql).bind(...args).first();}
 async function sqlAll(db,sql,...args){const res=await db.prepare(sql).bind(...args).all();return res.results||[];}
+// Atomic D1 upsert: at most four AI requests per user/group in each 10-second
+// bucket. It prevents short bursts without imposing a daily Gemini quota.
+async function takeShortRateSlot(env,message){
+ const bucket=Math.floor(now()/10000);
+ const result=await sqlRun(env.DB,`INSERT INTO abot_ai_rate_limit(group_openid,user_openid,bucket,used)
+  VALUES(?,?,?,1) ON CONFLICT(group_openid,user_openid) DO UPDATE SET
+  used=CASE WHEN abot_ai_rate_limit.bucket=excluded.bucket THEN abot_ai_rate_limit.used+1 ELSE 1 END,
+  bucket=excluded.bucket
+  WHERE abot_ai_rate_limit.bucket<>excluded.bucket OR abot_ai_rate_limit.used<4`,
+  message.group,message.user,bucket);
+ return Number(result.meta?.changes||0)===1;
+}
 export function parseOfficialGroupEvent(packet){
  if(packet?.op!==0 || !["GROUP_AT_MESSAGE_CREATE","GROUP_MESSAGE_CREATE"].includes(packet?.t))return null;
  const d=packet.d||{},group=String(d.group_openid||"");
@@ -45,12 +58,6 @@ export async function onAbotAiEvent(env,packet,{generate=generateWithCodexPrefer
  const inserted=await sqlRun(env.DB,"INSERT OR IGNORE INTO abot_ai_seen(group_openid,source_id,user_openid,status,error_code,created_at) VALUES(?,?,?,'processing','',?)",
   message.group,message.id,message.user,now());
  if(!Number(inserted.meta?.changes||0))return {ignored:true,reason:"duplicate"};
- const day=Math.floor((now()+28800000)/86400000)*86400000-28800000;
- const [userCount,groupCount]=await Promise.all([
-  sqlOne(env.DB,"SELECT COUNT(*) AS n FROM abot_ai_seen WHERE group_openid=? AND user_openid=? AND created_at>=?",message.group,message.user,day),
-  sqlOne(env.DB,"SELECT COUNT(*) AS n FROM abot_ai_seen WHERE group_openid=? AND created_at>=?",message.group,day)
- ]);
- const over=Number(userCount?.n||0)>20?"本日個人 AI 額度已用完。":Number(groupCount?.n||0)>120?"本群今日 AI 額度已用完。":"";
  const cmd=message.content.replace(/^(?:\/!|!)\s*/,"").trim();
  const is=(name)=>new RegExp("^"+name+"(?:\\s|$)","i").test(cmd);
  let answer="",provider="gemini";
@@ -63,11 +70,11 @@ export async function onAbotAiEvent(env,packet,{generate=generateWithCodexPrefer
   }else if(is("clear")){
    await sqlRun(env.DB,"DELETE FROM abot_ai_history WHERE group_openid=? AND user_openid=?",message.group,message.user);
    answer="已清除你在本群的 AI 對話記憶。";
-  }else if(over)answer=over;
-  else{
+  }else{
    const prompt=clean(message.content.replace(/^(?:\/!|!)\s*ai(?:\s+|$)/i,""),1400);
    if(!prompt)answer="請 @我並輸入問題。";
    else if(isPoliticalTopic(prompt))answer=POLITICAL_REFUSAL;
+   else if(!await takeShortRateSlot(env,message))answer="訊息太密集，請稍後再試。";
    else {
     provider=String(settings?.model_provider||"gemini");
     if(!["gemini","deepseek"].includes(provider))provider="gemini";

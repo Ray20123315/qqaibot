@@ -65,18 +65,15 @@ export async function recordAssistantReply(env,groupId,messageId){
 function quota(env,name,fallback){
  const x=Number(env[name]);return Number.isSafeInteger(x)&&x>0&&x<=10000?x:fallback;
 }
+// Legacy Bbot AI path: idempotency and a short anti-spam window only.
+// Gemini chat is not subject to a per-person or per-group daily cap.
 async function useQuota(env,msg){
- const start=Math.floor((Date.now()+28800000)/86400000)*86400000-28800000;
- const [user,group]=await Promise.all([
-  get(env.DB,"SELECT COUNT(*) AS count FROM assistant_usage WHERE group_id=? AND user_qq=? AND created_at>=?",msg.groupId,msg.senderQq,start),
-  get(env.DB,"SELECT COUNT(*) AS count FROM assistant_usage WHERE group_id=? AND created_at>=?",msg.groupId,start)
- ]);
- if(Number(user?.count||0)>=quota(env,"AI_DAILY_USER_LIMIT",DEFAULT_USER_LIMIT))return "今天的個人 AI 額度已用完，明天重置。";
- if(Number(group?.count||0)>=quota(env,"AI_DAILY_GROUP_LIMIT",DEFAULT_GROUP_LIMIT))return "今天本群 AI 額度已用完，明天重置。";
- // Atomic single event accounting prevents duplicated OneBot delivery from double-billing.
+ const time=Date.now();
  const key=msg.messageId||"user-"+crypto.randomUUID();
- const inserted=await run(env.DB,"INSERT OR IGNORE INTO assistant_usage(group_id,user_qq,message_key,created_at) VALUES(?,?,?,?)",msg.groupId,msg.senderQq,key,Date.now());
- return Number(inserted.meta?.changes||0)===1?null:"ALREADY_PROCESSED";
+ const inserted=await run(env.DB,"INSERT OR IGNORE INTO assistant_usage(group_id,user_qq,message_key,created_at) VALUES(?,?,?,?)",msg.groupId,msg.senderQq,key,time);
+ if(Number(inserted.meta?.changes||0)!==1)return "ALREADY_PROCESSED";
+ const usage=await get(env.DB,"SELECT COUNT(*) AS count FROM assistant_usage WHERE group_id=? AND user_qq=? AND created_at>=?",msg.groupId,msg.senderQq,time-10000);
+ return Number(usage?.count||0)>4?"訊息太密集，請稍後再試。":null;
 }
 async function generate(env,msg,prompt,config){
  const history=await all(env.DB,"SELECT role,content FROM assistant_history WHERE group_id=? AND user_qq=? ORDER BY created_at DESC LIMIT 10",msg.groupId,msg.senderQq);
@@ -110,7 +107,7 @@ export async function routeAssistantEvent(env,event,reply){
  if(cmd){
   const say=async text=>reply?{handled:true,reply:await reply(text)}:{handled:true,replyText:text};
   if(cmd.name==="help")return say(help());
-  if(cmd.name==="status")return say("【QQAIBOT 狀態】\n"+configSummary(config,env)+"\nNapCat：收到訊息／正在服務\n今日個人上限："+quota(env,"AI_DAILY_USER_LIMIT",DEFAULT_USER_LIMIT));
+  if(cmd.name==="status")return say("【QQAIBOT 狀態】\n"+configSummary(config,env)+"\nNapCat：收到訊息／正在服務\n一般聊天：無固定每日次數上限（仍受防刷限制）");
   if(cmd.name==="settings"||cmd.name==="setting"){
    const change=cmd.arg.match(/^ai\s+(on|off)$/i);
    if(change){

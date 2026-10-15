@@ -8,3 +8,10 @@
 - QQ stale official native menu item /!设置插话率 remains UNKNOWN/NOT VERIFIED removed. Cloudflare earlier QQ panel endpoint returned unsupported schema; no broad deletes authorized.
 
 - GitHub main CI 38702611657 PASS; Cloudflare qqai production deployment 57425b2c-a1de-45d3-bc6e-c89626144951 version 113e3cbc-8659-4b59-8acb-16405a6a588b at 100% from commit 526e199284275fe2e40fc251c3afb4707ce7a58a, build success. QQ actual delivery untested pending authorizations and !resume.
+
+## QQAIBOT comprehensive upgrade branch 2026-10-15
+- main HEAD 78d7a8b252cbd12a44599e8c93e1462a524de4a6 preserved; PR #81 draft branch feature/qqaibot-upgrade-phase1-20261015 only.
+- Phase 1 changes: model default Gemini when Codex Bridge online or offline; legacy daily Abot quotas removed, replace with atomic D1 short burst limit 4 per 10s per group/user. Bbot dormant assistant quota replaced with short rate window.
+- New abot_ai_rate_limit schema is ADDITIVE in code plus migrations/20261015_001_abot_ai_rate_limit.sql; not yet applied to live D1.
+- No Agent sandbox, user Luna/Sol/Max authorization, activity/voting plugin, portal UI/API or fallback circuit breaker is finished. Existing main Portal is minimal; full legacy site remains only in archive/legacy-main-20261009.
+- CI success 38729107874 predates documentation/memory updates; final CI must be verified on latest PR head. No production/QQ live testing or deploy.

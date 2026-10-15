@@ -1,112 +1,113 @@
 {
-  "version": "v0.0.108",
-  "task_id": "manual-cross-group-command-20261015",
+  "version": "v0.0.109",
+  "task_id": "qqaibot-full-upgrade-20261015",
   "goal_revision": 1,
   "changed_at": "2026-10-15",
   "location_type": "remote",
   "provider": "GitHub",
   "repository": "Ray20123315/qqaibot",
-  "branch": "main",
-  "before_revision": "526e199284275fe2e40fc251c3afb4707ce7a58a",
-  "after_revision": "memory_checkpoint_pending_commit",
+  "branch": "feature/qqaibot-upgrade-phase1-20261015",
+  "base_main_commit": "78d7a8b252cbd12a44599e8c93e1462a524de4a6",
+  "pr": 81,
+  "after_revision": "See latest GitHub PR #81 head (memory-only commits follow verification)",
   "verification": {
-    "feature_ci": "SUCCESS:38702516128",
-    "main_ci": "SUCCESS:38702611657",
-    "cloudflare_deployment": "SUCCESS:57425b2c-a1de-45d3-bc6e-c89626144951 at 100%, main SHA 526e199284275fe2e40fc251c3afb4707ce7a58a",
-    "db_read_only": "8 binding rows / 4 verified / all stopped",
-    "real_qq_delivery": "BLOCKED pending authorized !resume"
+    "code_ci": "SUCCESS run 38729107874 on 8dca089cf2f6f9f330fe909ff6934869a4deab9e",
+    "latest_memory_ci": "PENDING",
+    "real_qq": "NOT_TESTED",
+    "production_db": "NOT_MODIFIED",
+    "production_deploy": "NOT_PERFORMED"
   },
   "files": [
     {
-      "path": ".Ray_Chen/memory/00_START_HERE.md",
+      "path": "src/codex-bridge.js",
       "action": "modified",
-      "verification": "pending v0.0.108 main CI"
+      "verification": "staged on draft branch; final CI pending"
     },
     {
-      "path": ".Ray_Chen/memory/ACTIVE_TASK.md",
+      "path": "src/abot-ai.js",
       "action": "modified",
-      "verification": "pending v0.0.108 main CI"
-    },
-    {
-      "path": ".Ray_Chen/memory/CURRENT_STATE.md",
-      "action": "modified",
-      "verification": "pending v0.0.108 main CI"
-    },
-    {
-      "path": ".Ray_Chen/memory/VERIFY.md",
-      "action": "modified",
-      "verification": "pending v0.0.108 main CI"
-    },
-    {
-      "path": ".Ray_Chen/memory/FILE_MANIFEST.json",
-      "action": "modified",
-      "verification": "pending v0.0.108 main CI"
-    },
-    {
-      "path": ".Ray_Chen/memory/MEMORY_VERSION.txt",
-      "action": "modified",
-      "verification": "pending v0.0.108 main CI"
-    },
-    {
-      "path": ".github/workflows/bridge-check.yml",
-      "action": "modified",
-      "verification": "pending v0.0.108 main CI"
-    },
-    {
-      "path": "src/manual-relay.js",
-      "action": "created",
-      "verification": "CI planned on memory checkpoint"
+      "verification": "staged on draft branch; final CI pending"
     },
     {
       "path": "src/assistant.js",
       "action": "modified",
-      "verification": "CI planned on memory checkpoint"
+      "verification": "staged on draft branch; final CI pending"
     },
     {
-      "path": "src/bridge.js",
+      "path": "tests/abot-ai.test.mjs",
       "action": "modified",
-      "verification": "CI planned on memory checkpoint"
+      "verification": "staged on draft branch; final CI pending"
     },
     {
-      "path": "src/napcat-control.js",
+      "path": "tests/compact-codex-memory.test.mjs",
       "action": "modified",
-      "verification": "CI planned on memory checkpoint"
+      "verification": "staged on draft branch; final CI pending"
     },
     {
-      "path": "tests/manual-cross-group.test.mjs",
+      "path": "tests/gemini-default-routing.test.mjs",
       "action": "created",
-      "verification": "CI planned on memory checkpoint"
+      "verification": "staged on draft branch; final CI pending"
     },
     {
-      "path": "tests/parallel-relay.test.mjs",
-      "action": "modified",
-      "verification": "CI planned on memory checkpoint"
+      "path": "migrations/20261015_001_abot_ai_rate_limit.sql",
+      "action": "created",
+      "verification": "staged on draft branch; final CI pending"
     },
     {
-      "path": "README.md",
+      "path": "docs/QQAIBOT_UPGRADE_PLAN_20261015.md",
+      "action": "created",
+      "verification": "staged on draft branch; final CI pending"
+    },
+    {
+      "path": ".Ray_Chen/memory/00_START_HERE.md",
       "action": "modified",
-      "verification": "CI planned on memory checkpoint"
+      "verification": "staged on draft branch; final CI pending"
+    },
+    {
+      "path": ".Ray_Chen/memory/ACTIVE_TASK.md",
+      "action": "modified",
+      "verification": "staged on draft branch; final CI pending"
+    },
+    {
+      "path": ".Ray_Chen/memory/CURRENT_STATE.md",
+      "action": "modified",
+      "verification": "staged on draft branch; final CI pending"
     },
     {
       "path": ".Ray_Chen/memory/USER_REQUIREMENTS.md",
       "action": "modified",
-      "verification": "CI planned on memory checkpoint"
+      "verification": "staged on draft branch; final CI pending"
     },
     {
       "path": ".Ray_Chen/memory/DECISIONS.md",
       "action": "modified",
-      "verification": "CI planned on memory checkpoint"
+      "verification": "staged on draft branch; final CI pending"
     },
     {
       "path": ".Ray_Chen/memory/GOTCHAS.md",
       "action": "modified",
-      "verification": "CI planned on memory checkpoint"
+      "verification": "staged on draft branch; final CI pending"
+    },
+    {
+      "path": ".Ray_Chen/memory/VERIFY.md",
+      "action": "modified",
+      "verification": "staged on draft branch; final CI pending"
+    },
+    {
+      "path": ".Ray_Chen/memory/FILE_MANIFEST.json",
+      "action": "modified",
+      "verification": "staged on draft branch; final CI pending"
+    },
+    {
+      "path": ".Ray_Chen/memory/MEMORY_VERSION.txt",
+      "action": "modified",
+      "verification": "staged on draft branch; final CI pending"
+    },
+    {
+      "path": ".github/workflows/bridge-check.yml",
+      "action": "modified",
+      "verification": "staged on draft branch; final CI pending"
     }
   ],
-  "backups": [
-    "archive/legacy-main-20261009",
-    "archive/cli-before-native-gui-20261011",
-    "6172bf1043653fa34634db6494d030d92acc78f0"
-  ],
-  "next_exact_action": "Authorized group owners or protected QQ accounts must resume linked groups and send /跨群 測試; confirm receiving group before declaring live complete"
+  "next_exact_action": "Validate canonical cross-group QQ ID mapping and atomic active Luna quota without touching live DB"
 }
