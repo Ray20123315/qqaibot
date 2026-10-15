@@ -5,6 +5,7 @@ import {relayOperations} from "./relay.js";
 import {deliver} from "./delivery.js";
 import {handleNapcatCommand} from "./napcat-control.js";
 import {fanoutByGroup} from "./batch.js";
+import {parseManualRelay} from "./manual-relay.js";
 import {initRecall,handleRecallEvent,recordRelayMessage,drainRecalls} from "./recall.js";
 
 // No Abot event subscription or QQ Open Platform API use in Bbot-only mode.
@@ -34,16 +35,19 @@ export async function onOnebotEvent(env,event,reply){
  await ready(env);
  const command=parseCommand(msg.text);
  if(command)return handleNapcatCommand(env,msg,command,reply);
+ const manual=parseManualRelay(msg.text);
+ if(!manual)return {ignored:true,reason:"manual_relay_only"};
+ const say=async text=>reply?reply(text+BRIDGE_ECHO_MARKER):null;
+ if(manual.error==="missing_text")return {handled:true,reply:await say("用法：/跨群 文字")};
+ if(manual.error==="too_long")return {handled:true,reply:await say("跨群文字過長，請分成數則，每則最多 1200 字。")};
  const source=await groupByQq(env.DB,msg.groupId);
- if(!source?.verified)return {ignored:true,reason:"group_not_paired"};
- if(source.stopped||source.receive_only||!isRelayable(msg))return {ignored:true,reason:source.receive_only?"receive_only":"not_relayable"};
+ if(!source?.verified)return {handled:true,reply:await say("本群尚未綁定跨群連線。請由管理員使用 !use 或連線碼加入。")};
+ if(source.stopped||source.receive_only)return {handled:true,reply:await say(source.receive_only?"本群為僅接收模式，不能向其他群轉發。":"本群跨群連線已停止，需由有權限的管理員恢復後才能轉發。")};
  if(!msg.messageId)return {ignored:true,reason:"missing_message_id"};
- const pluginMode=String(env.ASSISTANT_MODE||"")==="true";
  const targets=await all(env.DB,
-  pluginMode
-   ?"SELECT * FROM bridge_groups WHERE room_id=? AND verified=1 AND stopped=0 AND group_openid<>? AND EXISTS (SELECT 1 FROM assistant_groups ag WHERE ag.group_id=bridge_groups.qq_group_id AND ag.bridge_enabled=1)"
-   :"SELECT * FROM bridge_groups WHERE room_id=? AND verified=1 AND stopped=0 AND group_openid<>?",
+  "SELECT * FROM bridge_groups WHERE room_id=? AND verified=1 AND stopped=0 AND group_openid<>?",
   source.room_id,source.group_openid);
+ if(!targets.length)return {handled:true,forwarded:0,total:0,reply:await say("目前沒有可接收的其他已綁定群組（可能全部停止）。")};
  const sourceView=await roster(env.DB,msg.groupId);
  const sourceMembers=sourceView.fresh?await all(env.DB,"SELECT qq_id,nickname FROM bridge_members WHERE qq_group_id=?",msg.groupId):[];
  const sourceNames=new Map(sourceMembers.map(m=>[m.qq_id,m.nickname]).filter(([,v])=>v));
@@ -59,21 +63,21 @@ export async function onOnebotEvent(env,event,reply){
   // One native OneBot message with multiple segments replaces many separate
   // text/image/emoji sends for each destination (when NapCat supports it).
   const operations=relayOperations(source.alias||source.display_name||"QQ群 "+msg.groupId,
-   msg.senderName,msg.parts,{},{
+   msg.senderName,[{type:"text",text:manual.text}],{},{
     realMentions:false,
     nativeBatch:true,
     sourceMembers:sourceNames,
     targetMembers:new Set(members.map(x=>x.qq_id))
    });
   for(const operation of operations){
-   const id=await digest(msg.groupId+":"+msg.messageId+"|"+target.group_openid+"|"+operation.index);
+   const id="manual-v1:"+await digest(msg.groupId+":"+msg.messageId+"|"+target.group_openid+"|"+operation.index);
    const result=await run(env.DB,
     "INSERT OR IGNORE INTO bridge_outbox(id,target_group,target_qq_group_id,content,payload,state,created_at,updated_at) VALUES(?,?,?,?,?,'pending',?,?)",
-    id,target.group_openid,target.qq_group_id,operation.content,JSON.stringify({...operation,sourceGroupId:msg.groupId,sourceMessageId:msg.messageId}),now()+operation.index,now());
+    id,target.group_openid,target.qq_group_id,operation.content,JSON.stringify({...operation,manualRelay:true,sourceGroupId:msg.groupId,sourceMessageId:msg.messageId}),now()+operation.index,now());
    if(Number(result.meta?.changes||0))added++;
   }
  },{key:target=>target.group_openid,concurrency:4});
- return {forwarded:added,total:targets.length};
+ return {handled:true,forwarded:added,total:targets.length};
 }
 export async function onOnebotNotice(env,event){
  await ready(env);
@@ -102,15 +106,16 @@ export async function flushOutbox(env,limit=15,deliveryOptions={}){
   const connected=status?.ok&&((await status.json().catch(()=>({})))?.connected);
   if(!connected)return {sent:0,failed:0,offline:true};
  }
+ // Retire old automatic sends; only explicit manual-v1: messages may be dispatched.
+ await run(env.DB,"UPDATE bridge_outbox SET state='cancelled',content='',payload='',updated_at=? WHERE state='pending' AND id NOT LIKE 'manual-v1:%'",now());
  const pending=await all(env.DB,
-  "SELECT * FROM bridge_outbox WHERE state='pending' ORDER BY created_at ASC LIMIT ?",limit);
+  "SELECT * FROM bridge_outbox WHERE state='pending' AND id LIKE 'manual-v1:%' ORDER BY created_at ASC LIMIT ?",limit);
  let sent=0,failed=0,lateRecalls=0;
  const started=now();
  const batch=await fanoutByGroup(pending,async item=>{
+  if(!String(item.id||"").startsWith("manual-v1:"))return;
   const target=await get(env.DB,
-   String(env.ASSISTANT_MODE||"")==="true"
-    ?"SELECT g.stopped,g.verified,g.qq_group_id FROM bridge_groups g WHERE g.group_openid=? AND EXISTS (SELECT 1 FROM assistant_groups ag WHERE ag.group_id=g.qq_group_id AND ag.bridge_enabled=1)"
-    :"SELECT stopped,verified,qq_group_id FROM bridge_groups WHERE group_openid=?",item.target_group);
+   "SELECT stopped,verified,qq_group_id FROM bridge_groups WHERE group_openid=?",item.target_group);
   if(!target?.verified||target.stopped||target.qq_group_id!==item.target_qq_group_id){
    await run(env.DB,"UPDATE bridge_outbox SET state='cancelled',content='',payload='',updated_at=? WHERE id=? AND state='pending'",now(),item.id);
    return;
