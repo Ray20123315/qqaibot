@@ -31,7 +31,7 @@ class DB {
     },
     all:async()=>({results:
      sql.includes("SELECT * FROM bridge_groups WHERE room_id=")?db.groups.filter(x=>x.room_id===a[0]&&x.verified&&!x.stopped&&x.group_openid!==a[1]):
-     sql.includes("SELECT * FROM bridge_outbox")?db.outbox.filter(x=>x.state==="pending"&&x.id.startsWith("manual-v1:")):
+     sql.includes("SELECT * FROM bridge_outbox")?db.outbox.filter(x=>x.state==="pending"&&x.id.startsWith("manual-v1:")).map(x=>({...x,payload:JSON.stringify(x.payload)})):
      []}),
     run:async()=>{
      if(sql.includes("INSERT OR IGNORE INTO bridge_outbox")){
