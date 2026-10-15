@@ -1,4 +1,5 @@
-import {parseOnebot,clean,qq,isProtected,BRIDGE_ECHO_MARKER,authorize} from "./core.js";
+import {parseOnebot,clean,qq,isProtected,BRIDGE_ECHO_MARKER,authorize,parseCommand} from "./core.js";
+import {parseManualRelay} from "./manual-relay.js";
 import {get,all,run,roster} from "./store.js";
 import {modelAvailability,DEFAULT_GEMINI_MODEL} from "./model-client.js";
 import {generateWithCodexPreference} from "./codex-bridge.js";
@@ -39,11 +40,11 @@ async function privilege(env,msg) {
  const scopes=await all(env.DB,"SELECT scope FROM bridge_acl WHERE qq_group_id=? AND qq_id=?",msg.groupId,msg.senderQq);
  return authorize({actor:msg.senderQq,role:member.role,protectedPresent:view.protectedPresent,rosterFresh:view.fresh,scopes:scopes.map(x=>x.scope),action:"rename"});
 }
-const help=()=>"【QQAIBOT · AI 助理】\n@Bot 提問、回覆 Bot 或 !ai 問題：與 AI 對話\n!help：指令說明\n!status：AI／NapCat 狀態\n!setting：本群 AI 與插件設定\n!plugin list：插件清單\n!model：查看或切換 Gemini／DeepSeek（管理員）\n!clear：清除自己在本群的 AI 對話記憶\n跨群橋接預設關閉；群管理員可使用 !plugin bridge on 啟用。";
+const help=()=>"【QQAIBOT · AI 助理】\n@Bot 提問、回覆 Bot 或 !ai 問題：與 AI 對話\n!help：指令說明\n!status：AI／NapCat 狀態\n!setting：本群 AI 與插件設定\n!plugin list：插件清單\n!model：查看或切換 Gemini／DeepSeek（管理員）\n!clear：清除自己在本群的 AI 對話記憶\n跨群轉發只接受 /跨群 文字；!use／!連線碼 簡寫管理綁定，不再自動轉發普通聊天。";
 function configSummary(settings,env) {
  return "AI："+(settings.aiEnabled?"開啟":"關閉")+
   "\n模型："+settings.provider+"/"+(settings.model|| (settings.provider==="deepseek"?String(env.DEEPSEEK_FLASH_MODEL||"deepseek-chat"):String(env.GEMINI_CHAT_MODELS||DEFAULT_MODEL).split(",")[0]))+
-  "\n跨群插件："+(settings.bridgeEnabled?"已啟用":"關閉（預設）")+
+  "\n跨群轉發：只有 /跨群 文字 才觸發"+
   "\n觸發：@Bot／回覆 Bot／!ai\n主動插話：關閉";
 }
 async function setOption(env,msg,kind,on){
@@ -137,14 +138,14 @@ export async function routeAssistantEvent(env,event,reply){
    return say("本群 AI 模型已切換為 "+(provider==="gemini"?"Gemini":"DeepSeek")+"；原有 Cloudflare Secret 繼續使用。");
   }
   if(cmd.name==="plugin"){
-   if(!cmd.arg||cmd.arg==="list")return say("【插件】\nbridge 跨群轉發："+(config.bridgeEnabled?"已啟用":"關閉")+"（預設關閉）\n管理員：!plugin bridge on|off");
+   if(!cmd.arg||cmd.arg==="list")return say("【插件】\nbridge 跨群轉發：僅 /跨群 文字 觸發\n舊開關："+(config.bridgeEnabled?"on":"off")+"（不會啟用普通聊天轉發）");
    const action=cmd.arg.match(/^bridge\s+(on|off)$/i);
    if(!action)return say("可用：!plugin list、!plugin bridge on、!plugin bridge off");
    const permission=await privilege(env,msg);
    if(!permission.ok)return say("權限不足："+permission.reason);
    const on=action[1].toLowerCase()==="on";
    await setOption(env,msg,"bridge",on);
-   return say("跨群轉發插件已"+(on?"啟用（請使用 !use 建立群組連線）":"關閉，不再自動轉發"));
+   return say("已保存舊插件開關；跨群只接受 /跨群 文字，普通聊天永不自動轉發。");
   }
   if(cmd.name==="clear"){
    await run(env.DB,"DELETE FROM assistant_history WHERE group_id=? AND user_qq=?",msg.groupId,msg.senderQq);
@@ -158,15 +159,11 @@ export async function routeAssistantEvent(env,event,reply){
  }
  // An unrecognized !command is never fed into an LLM.
  if(/^(?:\/!|!)\S+/.test(msg.text)) {
-  if(config.bridgeEnabled)return {bridge:true};
   return {ignored:true,reason:"unknown_command"};
  }
  const atBot=!!msg.selfId&&msg.atIds.includes(msg.selfId);
  const replied=await isBotReply(env,msg);
- if(!atBot&&!replied){
-  if(config.bridgeEnabled)return {bridge:true};
-  return {ignored:true,reason:"no_trigger"};
- }
+ if(!atBot&&!replied)return {ignored:true,reason:"no_trigger"};
  if(!config.aiEnabled)return {ignored:true,reason:"ai_disabled"};
  const prompt=clean(msg.text,1400);
  if(!prompt)return {handled:true,replyText:"請 @我並輸入問題，或使用 !ai 問題。"};
@@ -186,29 +183,26 @@ async function ask(env,msg,prompt,say,config){
  }
 }
 export async function routeBotEvent(env,event,reply){
- const result=await routeAssistantEvent(env,event,reply);
- if(result.bridge){
+ const msg=parseOnebot(event);
+ if(msg&&parseManualRelay(msg.text)){
   const bridge=await import("./bridge.js");
   return bridge.onOnebotEvent(env,event,reply);
  }
- return result;
+ return routeAssistantEvent(env,event,reply);
 }
 export async function routeBotNotice(env,event){
  if(event?.notice_type!=="group_recall")return {ignored:true};
  const groupId=qq(event?.group_id);
  if(!groupId)return {ignored:true};
- const config=await groupSettings(env,groupId);
- if(!config.bridgeEnabled)return {ignored:true,reason:"bridge_off"};
  const bridge=await import("./bridge.js");
  return bridge.onOnebotNotice(env,event);
 }
 export async function bridgeCanFlush(env) {
- await ensure(env);
- const row=await get(env.DB,"SELECT COUNT(*) AS count FROM assistant_groups WHERE bridge_enabled=1");
- return Number(row?.count||0)>0;
+ // Manual outbox must drain independently of the obsolete continuous-mode switch.
+ return !!env?.DB;
 }
 export async function assistantHealth(env){
- return {configured:modelAvailability(env).gemini,providers:modelAvailability(env).gemini?["gemini",...(modelAvailability(env).deepseek?["deepseek"]:[])]:modelAvailability(env).deepseek?["deepseek"]:[],trigger:"mention-or-reply-or-!ai",bridge_default:false};
+ return {configured:modelAvailability(env).gemini,providers:modelAvailability(env).gemini?["gemini",...(modelAvailability(env).deepseek?["deepseek"]:[])]:modelAvailability(env).deepseek?["deepseek"]:[],trigger:"mention-or-reply-or-!ai",bridge_default:false,bridge_trigger:"/跨群 文字"};
 }
 
 /** When QQ Open Abot owns AI replies, Bbot is retained only for an explicitly
@@ -222,7 +216,8 @@ export async function routeBbotBridgeOnly(env,event,reply){
  if(cmd?.name==="plugin"||cmd?.name==="setting")
   return routeAssistantEvent(env,event,reply);
  const config=await groupSettings(env,msg.groupId);
- if(!config.bridgeEnabled)return {ignored:true,reason:"bbot_bridge_off"};
+ if(!parseManualRelay(msg.text)&&!parseCommand(msg.text))
+  return {ignored:true,reason:"manual_relay_only"};
  const bridge=await import("./bridge.js");
  return bridge.onOnebotEvent(env,event,reply);
 }
