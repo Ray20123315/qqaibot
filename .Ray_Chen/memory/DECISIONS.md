@@ -4,3 +4,7 @@
 - 2026-10-15: Only exact leading /跨群 <文字> authorizes sending; all other QQ group events are non-relay. Existing D1 room_id defines the scope and preserves trust separation between rooms.
 - 2026-10-15: Forward only to verified and not stopped targets; stopped and receive-only sender restrictions remain effective. Legacy bridge_enabled toggles never reactivate continuous forwarding.
 - 2026-10-15: Mark manual outbox IDs with manual-v1: and dispatch only those; cancel historical pending automatic jobs to avoid delayed broadcast. Disable join announcements. Use existing NapCat/Bbot ACK and do not retry ambiguous sends.
+
+- 2026-10-15: Latest user override: **Gemini first**, not Codex Bridge online preference. Keep compatibility exported function name but invoke Gemini/explicit provider; no unsafe automatic fallback before guarded global DO gate.
+- 2026-10-15: Normal Gemini daily caps removed in Abot; short burst D1 UPSERT gate 4 AI requests/user/group per 10-sec fixed bucket; maintain event deduplication. Migration uses CREATE TABLE IF NOT EXISTS and is not applied to production.
+- 2026-10-15: Upgrade only on draft feature branch PR #81; no main/Cloudflare deployment or D1 data writes without permission. Protect previous cross-group stopped flags.
