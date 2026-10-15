@@ -107,7 +107,7 @@ export async function routeAssistantEvent(env,event,reply){
  if(cmd){
   const say=async text=>reply?{handled:true,reply:await reply(text)}:{handled:true,replyText:text};
   if(cmd.name==="help")return say(help());
-  if(cmd.name==="status")return say("【QQAIBOT 狀態】\n"+configSummary(config,env)+"\nNapCat：收到訊息／正在服務\n一般聊天：無固定每日次數上限（仍受防刷限制）);
+  if(cmd.name==="status")return say("【QQAIBOT 狀態】\n"+configSummary(config,env)+"\nNapCat：收到訊息／正在服務\n一般聊天：無固定每日次數上限（仍受防刷限制）");
   if(cmd.name==="settings"||cmd.name==="setting"){
    const change=cmd.arg.match(/^ai\s+(on|off)$/i);
    if(change){
