@@ -1,22 +1,57 @@
 {
-  "version": "v0.0.107",
+  "version": "v0.0.108",
   "task_id": "manual-cross-group-command-20261015",
   "goal_revision": 1,
   "changed_at": "2026-10-15",
   "location_type": "remote",
   "provider": "GitHub",
   "repository": "Ray20123315/qqaibot",
-  "branch": "feature/manual-cross-group-command-20261015",
-  "before_revision": "6172bf1043653fa34634db6494d030d92acc78f0",
-  "after_revision": "feature_commit_pending_memory_ci",
+  "branch": "main",
+  "before_revision": "526e199284275fe2e40fc251c3afb4707ce7a58a",
+  "after_revision": "memory_checkpoint_pending_commit",
   "verification": {
-    "code_feature_ci": "SUCCESS:38701967374",
-    "code_main_ci": "pending",
-    "cloudflare_deployment": "pending",
-    "real_qq": "blocked: all verified group rows stopped=1",
-    "db_mutation": "none; read only aggregates"
+    "feature_ci": "SUCCESS:38702516128",
+    "main_ci": "SUCCESS:38702611657",
+    "cloudflare_deployment": "SUCCESS:57425b2c-a1de-45d3-bc6e-c89626144951 at 100%, main SHA 526e199284275fe2e40fc251c3afb4707ce7a58a",
+    "db_read_only": "8 binding rows / 4 verified / all stopped",
+    "real_qq_delivery": "BLOCKED pending authorized !resume"
   },
   "files": [
+    {
+      "path": ".Ray_Chen/memory/00_START_HERE.md",
+      "action": "modified",
+      "verification": "pending v0.0.108 main CI"
+    },
+    {
+      "path": ".Ray_Chen/memory/ACTIVE_TASK.md",
+      "action": "modified",
+      "verification": "pending v0.0.108 main CI"
+    },
+    {
+      "path": ".Ray_Chen/memory/CURRENT_STATE.md",
+      "action": "modified",
+      "verification": "pending v0.0.108 main CI"
+    },
+    {
+      "path": ".Ray_Chen/memory/VERIFY.md",
+      "action": "modified",
+      "verification": "pending v0.0.108 main CI"
+    },
+    {
+      "path": ".Ray_Chen/memory/FILE_MANIFEST.json",
+      "action": "modified",
+      "verification": "pending v0.0.108 main CI"
+    },
+    {
+      "path": ".Ray_Chen/memory/MEMORY_VERSION.txt",
+      "action": "modified",
+      "verification": "pending v0.0.108 main CI"
+    },
+    {
+      "path": ".github/workflows/bridge-check.yml",
+      "action": "modified",
+      "verification": "pending v0.0.108 main CI"
+    },
     {
       "path": "src/manual-relay.js",
       "action": "created",
@@ -53,26 +88,6 @@
       "verification": "CI planned on memory checkpoint"
     },
     {
-      "path": ".github/workflows/bridge-check.yml",
-      "action": "modified",
-      "verification": "CI planned on memory checkpoint"
-    },
-    {
-      "path": ".Ray_Chen/memory/00_START_HERE.md",
-      "action": "modified",
-      "verification": "CI planned on memory checkpoint"
-    },
-    {
-      "path": ".Ray_Chen/memory/ACTIVE_TASK.md",
-      "action": "modified",
-      "verification": "CI planned on memory checkpoint"
-    },
-    {
-      "path": ".Ray_Chen/memory/CURRENT_STATE.md",
-      "action": "modified",
-      "verification": "CI planned on memory checkpoint"
-    },
-    {
       "path": ".Ray_Chen/memory/USER_REQUIREMENTS.md",
       "action": "modified",
       "verification": "CI planned on memory checkpoint"
@@ -86,21 +101,6 @@
       "path": ".Ray_Chen/memory/GOTCHAS.md",
       "action": "modified",
       "verification": "CI planned on memory checkpoint"
-    },
-    {
-      "path": ".Ray_Chen/memory/VERIFY.md",
-      "action": "modified",
-      "verification": "CI planned on memory checkpoint"
-    },
-    {
-      "path": ".Ray_Chen/memory/FILE_MANIFEST.json",
-      "action": "modified",
-      "verification": "CI planned on memory checkpoint"
-    },
-    {
-      "path": ".Ray_Chen/memory/MEMORY_VERSION.txt",
-      "action": "modified",
-      "verification": "CI planned on memory checkpoint"
     }
   ],
   "backups": [
@@ -108,5 +108,5 @@
     "archive/cli-before-native-gui-20261011",
     "6172bf1043653fa34634db6494d030d92acc78f0"
   ],
-  "next_exact_action": "Verify v0.0.107 CI then fast-forward main with lease and observe Cloudflare deployed version; live QQ requires authorized !resume"
+  "next_exact_action": "Authorized group owners or protected QQ accounts must resume linked groups and send /跨群 測試; confirm receiving group before declaring live complete"
 }
