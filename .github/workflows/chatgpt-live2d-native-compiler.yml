@@ -1,0 +1,170 @@
+name: ChatGPT Aye Native MOC3 Compiler
+
+on:
+  push:
+    branches:
+      - chatgpt/live2d-aye-v0.0.1
+    paths:
+      - '.chatgpt_live2d_native/**'
+      - '.github/workflows/chatgpt-live2d-native-compiler.yml'
+  pull_request:
+    branches:
+      - main
+    paths:
+      - '.chatgpt_live2d_native/**'
+      - '.github/workflows/chatgpt-live2d-native-compiler.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  minimal-core-gate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Checkout temporary branch
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install compiler dependencies
+        run: |
+          python -m pip install --disable-pip-version-check pillow
+          python -m pip install --disable-pip-version-check 'git+https://github.com/Ludentes/py-moc3.git@2fb112e11a2d495557cfd09fbea72015cbfd47c5'
+
+      - name: Compile original MOC3 candidate matrix
+        run: python .chatgpt_live2d_native/build_minimal.py
+
+      - name: Download v4.02 reference for format diagnostics only
+        run: |
+          curl --fail --location --retry 3 \
+            'https://raw.githubusercontent.com/Live2D/CubismWebSamples/4-r.7/Samples/Resources/Mao/Mao.moc3' \
+            --output .chatgpt_live2d_native/reference_mao.moc3
+          cp .chatgpt_live2d_native/reference_mao.moc3 \
+            .chatgpt_live2d_native/dist_minimal/reference_mao.moc3
+          python .chatgpt_live2d_native/diagnose_reference.py \
+            > .chatgpt_live2d_native/dist_minimal/reference_diagnostic_stdout.txt
+
+      - name: Fetch official Cubism Core hosting build
+        run: |
+          curl --fail --location --retry 3 \
+            'https://cubism.live2d.com/sdk-web/cubismcore/live2dcubismcore.min.js' \
+            --output .chatgpt_live2d_native/dist_minimal/live2dcubismcore.min.js
+          test -s .chatgpt_live2d_native/dist_minimal/live2dcubismcore.min.js
+          cp .chatgpt_live2d_native/validate_minimal.html \
+            .chatgpt_live2d_native/dist_minimal/validate_minimal.html
+
+      - name: Validate reference and candidate matrix with official Cubism Core
+        id: core_gate
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd .chatgpt_live2d_native/dist_minimal
+          python -m http.server 8765 >server.log 2>&1 &
+          SERVER_PID=$!
+          trap 'kill "$SERVER_PID" 2>/dev/null || true' EXIT
+          sleep 2
+
+          CHROME="$(command -v google-chrome || command -v chromium || command -v chromium-browser)"
+          if [ -z "$CHROME" ]; then
+            echo 'Chrome/Chromium not found' >&2
+            exit 1
+          fi
+
+          run_gate() {
+            local file="$1"
+            local output="$2"
+            local chrome_log="$3"
+            timeout 60s "$CHROME" \
+              --headless=new \
+              --no-sandbox \
+              --disable-gpu \
+              --disable-dev-shm-usage \
+              --virtual-time-budget=15000 \
+              --dump-dom "http://127.0.0.1:8765/validate_minimal.html?file=${file}" \
+              >"$output" 2>"$chrome_log" || true
+          }
+
+          run_gate reference_mao.moc3 reference_core_dom.txt reference_chrome.log
+          cat reference_core_dom.txt
+          grep -q 'data-status="PASS"' reference_core_dom.txt
+
+          : > CANDIDATE_CORE_RESULTS.txt
+          : > PASSING_CANDIDATES.txt
+          while IFS= read -r file; do
+            [ -n "$file" ] || continue
+            base="${file%.moc3}"
+            dom="${base}_core_dom.txt"
+            log="${base}_chrome.log"
+            run_gate "$file" "$dom" "$log"
+            if grep -q 'data-status="PASS"' "$dom"; then
+              echo "$file PASS" | tee -a CANDIDATE_CORE_RESULTS.txt
+              echo "$file" >> PASSING_CANDIDATES.txt
+            else
+              echo "$file FAIL" | tee -a CANDIDATE_CORE_RESULTS.txt
+            fi
+          done < CANDIDATE_FILES.txt
+
+          test -s PASSING_CANDIDATES.txt
+          selected="$(head -n 1 PASSING_CANDIDATES.txt)"
+          printf '%s\n' "$selected" > SELECTED_CANDIDATE.txt
+          cp "$selected" Aye_Minimal.passing.moc3
+
+      - name: Generate hashes and artifact manifest
+        if: always()
+        run: |
+          cd .chatgpt_live2d_native/dist_minimal
+          sha256sum Aye_Candidate_*.moc3 Aye_Minimal.moc3 \
+            Aye_Minimal.model3.json texture_00.png \
+            live2dcubismcore.min.js > SHA256SUMS.txt
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          root = Path('.')
+          report = json.loads((root / 'PY_MOC3_VERIFY.json').read_text())
+          reference_dom = (root / 'reference_core_dom.txt').read_text(errors='replace') if (root / 'reference_core_dom.txt').exists() else ''
+          report['reference_core_gate'] = 'passed' if 'data-status="PASS"' in reference_dom else 'failed'
+
+          results = []
+          passing = []
+          for candidate in report.get('candidates', []):
+              filename = f"Aye_Candidate_{candidate['name']}.moc3"
+              dom_path = root / f"Aye_Candidate_{candidate['name']}_core_dom.txt"
+              dom = dom_path.read_text(errors='replace') if dom_path.exists() else ''
+              status = 'passed' if 'data-status="PASS"' in dom else 'failed'
+              candidate['official_core_gate'] = status
+              results.append({'file': filename, 'status': status})
+              if status == 'passed':
+                  passing.append(filename)
+
+          report['candidate_core_results'] = results
+          report['passing_candidates'] = passing
+          report['selected_candidate'] = passing[0] if passing else None
+          report['official_core_gate'] = 'passed' if passing else 'failed'
+          report['reference_binary_packaged'] = False
+          report['files_before_reference_cleanup'] = sorted(p.name for p in root.iterdir() if p.is_file())
+          (root / 'FINAL_VERIFY.json').write_text(json.dumps(report, ensure_ascii=False, indent=2) + '\n')
+          PY
+          rm -f reference_mao.moc3
+          test ! -e reference_mao.moc3
+          cd ..
+          rm -f reference_mao.moc3 reference_mao.roundtrip.moc3
+
+      - name: Upload minimal compiler diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Aye_Native_MOC3_Minimal_Core_Gate
+          path: .chatgpt_live2d_native/dist_minimal/*
+          if-no-files-found: error
+          retention-days: 1
+
+      - name: Enforce official Core gate
+        if: steps.core_gate.outcome != 'success'
+        run: exit 1
