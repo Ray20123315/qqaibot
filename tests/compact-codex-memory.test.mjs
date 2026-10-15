@@ -27,23 +27,18 @@ test("Codex requests pin Luna non-think with stable session key",()=>{
  assert.equal(req.sessionKey,"qqaibot:ai:demo");
  assert.equal(req.task,"chat");
 });
-test("Connected old EXE is preferred over Gemini and retains per-person session",async()=>{
- let n=0;
- const stub={fetch:async(url,options)=>{
-  if(url.endsWith("/codex/status"))return Response.json({connected:true});
-  assert.ok(url.endsWith("/codex/chat"));
-  const request=JSON.parse(options.body);n++;
-  assert.equal(request.model,"gpt-6-luna");
-  assert.equal(request.reasoningEffort,"none");
-  assert.match(request.sessionKey,/^qqaibot:ai:/);
-  return Response.json({ok:true,text:"本機 Codex 回覆"});
- }};
- const env={ONEBOT_HUB:{idFromName:()=>({}),get:()=>stub}};
- const input={messages:[{role:"user",content:"Hello"}],groupOpenid:"group_open_123",userOpenid:"user_open_456"};
- const r=await generateWithCodexPreference(env,input);
- assert.equal(r.provider,"codex");
- assert.equal(r.text,"本機 Codex 回覆");
- assert.equal(n,1);
+test("A connected old EXE does not override Gemini-first normal chat",async()=>{
+ let bridgeCalls=0;
+ const stub={fetch:async()=>{bridgeCalls++;return Response.json({connected:true});}};
+ const env={ONEBOT_HUB:{idFromName:()=>({}),get:()=>stub},GEMINI_API_KEYS:"dummy"};
+ const previous=globalThis.fetch;
+ try{
+  globalThis.fetch=async()=>Response.json({candidates:[{content:{parts:[{text:"Gemini 回覆"}]}}]});
+  const result=await generateWithCodexPreference(env,{messages:[{role:"user",content:"Hello"}],groupOpenid:"group_open_123",userOpenid:"user_open_456"});
+  assert.equal(result.provider,"gemini");
+  assert.equal(result.text,"Gemini 回覆");
+  assert.equal(bridgeCalls,0);
+ }finally{globalThis.fetch=previous;}
 });
 test("Gemini is used when EXE is offline; no artificial Workers AI binding",async()=>{
  const stub={fetch:async()=>Response.json({connected:false})};
