@@ -5,7 +5,7 @@ import {sendUsingBbot} from "./delivery.js";
 export const NAPCAT_GROUP_PREFIX="napcat:";
 export function isNapcatGroup(openid){return String(openid||"").startsWith(NAPCAT_GROUP_PREFIX);}
 export function napcatGroupKey(groupId){const id=qq(groupId);if(!id)throw new Error("INVALID_GROUP");return NAPCAT_GROUP_PREFIX+id;}
-export const NAPCAT_HELP="跨群橋接（NapCat）\n!use 建立連線\n!連線碼 簡寫 加入連線\n!status 查看狀態\n!code 重設邀請碼\n!rename 名稱、!stop、!resume、!leave、!revoke\n!grant QQ號 manage|stop|both、!ungrant QQ號\n!setting 權限及已加入群\n!連線碼 --no 僅接收不轉出\n也支援 /! 前綴；不必使用 QQ 舊指令面板。";
+export const NAPCAT_HELP="跨群橋接（NapCat）\n!use 建立連線\n!連線碼 簡寫 加入連線\n!status 查看狀態\n!code 重設邀請碼\n!rename 名稱、!stop、!resume、!leave、!revoke\n!grant QQ號 manage|stop|both、!ungrant QQ號\n!setting 權限及已加入群\n!連線碼 --no 僅接收不轉出\n/跨群 文字 發送至本連線的其他群\n一般聊天不自動轉發。";
 
 async function respond(env,msg,text,reply) {
   const body=String(text).slice(0,1700);
@@ -64,7 +64,7 @@ export async function handleNapcatCommand(env,msg,command,reply) {
     const list=linked.map(x=>(x.receive_only?"[僅接收] ":"")+
        clean(x.alias||"群組",32)+(x.stopped?" [已停止]":"")).join("、");
     return {handled:true,reply:await respondText("【Bbot 設定】\n本群："+(group?.verified?(group.alias||group.display_name):"未連線")+
-      "\n連線模式："+(group?.receive_only?"僅接收 --no":"雙向轉發")+
+      "\n連線模式："+(group?.receive_only?"僅接收 --no":"手動 /跨群 指令轉發")+
       "\n你的 QQ 身分："+(member?.role||"尚未驗證")+
       "\n受保護帳號在場："+(view.protectedPresent?"是":"否")+
       "\n名單已驗證："+(view.fresh?"是":"否")+
@@ -113,21 +113,9 @@ export async function handleNapcatCommand(env,msg,command,reply) {
       return {handled:true,reply:await respondText("此群可能已經連線；請使用 !status 確認。")};
     }
     if(noMode)await run(env.DB,"UPDATE bridge_groups SET receive_only=1 WHERE qq_group_id=?",msg.groupId);
-    let notices=0;
-    if(!noMode){
-     const otherGroups=await all(env.DB,"SELECT group_openid,qq_group_id FROM bridge_groups WHERE room_id=? AND verified=1 AND stopped=0 AND qq_group_id<>?",room.id,msg.groupId);
-     for(const target of otherGroups){
-      if(!qq(target.qq_group_id))continue;
-      const id="notice-"+crypto.randomUUID();
-      const text="【跨群連線】"+alias+" 已加入連線，共享群訊息。"+BRIDGE_ECHO_MARKER;
-      const payload={kind:"native",segments:[{type:"text",data:{text}}]};
-      const inserted=await run(env.DB,"INSERT OR IGNORE INTO bridge_outbox(id,target_group,target_qq_group_id,content,payload,state,created_at,updated_at) VALUES(?,?,?,?,?,'pending',?,?)",
-        id,target.group_openid,target.qq_group_id,text,JSON.stringify(payload),Date.now(),Date.now());
-      if(Number(inserted.meta?.changes||0))notices++;
-     }
-    }
-    return {handled:true,forwarded:notices,reply:await respondText("加入成功！本群簡寫："+alias+
-      (noMode?"\n本群為僅接收模式：不向其他群轉發或廣播加入提示。":"\n已通知其他連線群組（"+notices+" 群）。"))};
+    // Linking changes only D1 membership; no unsolicited join broadcast.
+    return {handled:true,forwarded:0,reply:await respondText("加入成功！本群簡寫："+alias+
+      (noMode?"\n本群為僅接收模式。":"\n跨群只在輸入 /跨群 文字 時觸發。"))};
   }
   if(!group?.verified)return {handled:true,reply:await respondText("本群尚未連線，請先輸入 !use 或 !連線碼 簡寫。")};
   if(name==="code"){
