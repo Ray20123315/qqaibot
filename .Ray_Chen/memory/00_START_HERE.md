@@ -1,15 +1,19 @@
 # Ray_Chen Memory
-version: v0.0.106
-task_id: qq-retired-panel-schema-diagnostic-20261011
-task_status: blocked
-goal_revision: 3
+version: v0.0.107
+task_id: manual-cross-group-command-20261015
+task_status: active
+goal_revision: 1
 canonical_branch: main
-verified_main_commit: 7a206ebb33639f7d4cd8413f8f339a58066dc0c2
-updated_date: 2026-10-11
+feature_branch: feature/manual-cross-group-command-20261015
+verified_feature_commit: 4e9924729598d556b5030acd91561a9bba6d6f2d
+previous_main_commit: 6172bf1043653fa34634db6494d030d92acc78f0
+updated_at: 2026-10-15T08:00:00Z
 
 ## Quick resume
-- Native Windows CodexBridge GUI previously passed Windows CI 38114199372, artifact 11693066002; preserve implementation.
-- QQ panel response schema diagnostic commit 7a206ebb33639f7d4cd8413f8f339a58066dc0c2 is on main; feature CI 38115855773 and main CI 38115895140 succeeded.
-- Cloudflare qqai current production 100% deployment 4fe73d53-19e9-4f62-adda-550c46d5f7a6, version ecea24a8-ea33-4e89-bdf0-656cc67a737c.
-- Production follow-up at 2026-10-11 05:50Z reports QQ_PANEL_RECORDS_MISSING_OBJECT_ABSENT_ABSENT. Root is object without expected records/data; no deletion verified, so no broader write allowed.
-- Read ACTIVE_TASK.md, CURRENT_STATE.md, VERIFY.md and FILE_MANIFEST.json. Next: owner must verify old published command in QQ official developer portal and remove exact obsolete entry; check QQ native menu. Do not assume /v2/panels covers old publishing configuration.
+- Only exact Bbot OneBot command /跨群 <文字> sends cross-group. Ordinary QQ chat, AI @ messages, and old bridge toggle must NEVER auto-forward.
+- Preserve D1 bridge rooms/bindings, target only same room, verified=1, stopped=0, target not source; receive_only groups may receive but not originate. Group join no longer broadcasts notices.
+- Feature commit 4e9924729598d556b5030acd91561a9bba6d6f2d; CI 38701967374 SUCCESS npm run check (102 tests, Wrangler dry-run), memory checkpoint CI pending.
+- Cloudflare D1 read-only observed 8 bindings total, 4 verified in one room, ALL 4 stopped. Never change stopped without authorized !resume; end-to-end delivery remains BLOCKED until resumed.
+- Existing Windows native Codex GUI, Abot AI, Bbot memory D1/Vectorize, secret settings and old backups untouched.
+- QQ official stale /!设置插话率 published command still unverified removed; old API returned QQ_PANEL_RECORDS_MISSING_OBJECT_ABSENT_ABSENT. Do not claim native QQ slash menu has been changed.
+- Read ACTIVE_TASK.md CURRENT_STATE.md USER_REQUIREMENTS.md DECISIONS.md GOTCHAS.md VERIFY.md FILE_MANIFEST.json. Check GitHub branch and CI before further changes.

@@ -1,8 +1,8 @@
 # CURRENT_STATE
-- GitHub repository: Ray20123315/qqaibot. Baseline main before this feature: b4bfd8036a2419c6448161368c0effa7167dd87c.
-- Verified native .NET 8 WinForms GUI at tools/codex-bridge-gui, bundled with existing Node Codex backend. Main Windows CI 38114199372 success; GUI PE subsystem 2; artifact 11693066002; hashes GUI 5cb47bb16e252e9c871d26e17cd01ab939e80836c57df9bab52f4b0b47a3eeb9 and backend 9501d9e055d6e2b7e0cf8a165603712e33fc830d752d092d52fba3c1b33febff. User's desktop GUI acceptance UNKNOWN.
-- Abot passive AI, Bbot memory D1/Vectorize, Luna no-think session preference, political policy, plain-text replies and existing bridge settings remain in scope but unchanged.
-- Cloudflare qqai production deployment 76a77bf2-c2e4-4064-9159-d3c70f380a8f, version 9ef32fc9-0039-4bcd-abe7-0de69633e68f, 100%, created 2026-10-11 05:33:53Z.
-- Cloudflare runtime log 2026-10-11 05:34Z: QQ_RETIRED_PANEL_CLEANUP_FAILED none QQ_PANEL_RECORDS_MISSING. Neither new panels nor legacy QQ published slash commands confirmed removed.
-- Diagnostic commit 7a206ebb33639f7d4cd8413f8f339a58066dc0c2 on main; feature CI 38115855773 and main CI 38115895140 passed. Cloudflare deployment 62887ac7-c947-4efc-93a0-bcd2ef9797db, script version 0ef2b6c2-2123-4753-9f85-092a14fe6411 at 100% since 2026-10-11 05:47:03Z. QQ platform cleanup after deployment UNKNOWN.
-- NEW RUNTIME 2026-10-11 05:50Z, current Worker version ecea24a8-ea33-4e89-bdf0-656cc67a737c / deployment 4fe73d53-19e9-4f62-adda-550c46d5f7a6: QQ_RETIRED_PANEL_CLEANUP_FAILED none QQ_PANEL_RECORDS_MISSING_OBJECT_ABSENT_ABSENT. This is failure, not no_match or removed. No automatic writes attempted for unknown schema.
+- Repository Ray20123315/qqaibot; main at task start 6172bf1043653fa34634db6494d030d92acc78f0, feature feature/manual-cross-group-command-20261015 @ 4e9924729598d556b5030acd91561a9bba6d6f2d.
+- Strict Bbot /跨群 command-only source implemented and tested in feature; AI reply path remains Abot passive, Codex GUI source unchanged, Bbot D1/Vectorize memory source unchanged.
+- Existing cross-group binding storage: D1 bridge_groups and bridge_rooms; synthetic napcat:<QQ group> IDs remain. No migrations or D1 writes made during this task.
+- Cloudflare D1 read-only 2026-10-15: 8 total group binding rows, 4 verified under one room; all 4 verified rows stopped=1 with numeric group IDs; zero active sender/destination. Real send acceptance BLOCKED until authorized resume.
+- Feature tests enforce text length 1–1200, exact literal /跨群, all active same-room targets, no self/other-room/stop, recall mapping, manual-v1 outbox-only, no stale auto sends and no unsolicited join broadcast.
+- Existing Windows GUI Codex Bridge built by prior Windows CI 38114199372; preserve tools/codex-bridge-gui and package workflow.
+- QQ stale official native menu item /!设置插话率 remains UNKNOWN/NOT VERIFIED removed. Cloudflare earlier QQ panel endpoint returned unsupported schema; no broad deletes authorized.

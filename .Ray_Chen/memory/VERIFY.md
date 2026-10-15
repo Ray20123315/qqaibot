@@ -1,7 +1,7 @@
 # VERIFY
-- GitHub main baseline b4bfd8036a2419c6448161368c0effa7167dd87c: Actions Node verification run 38115171608 completed SUCCESS (npm run check, memory archive).
-- Native GUI Windows compilation / startup smoke: run 38114199372 completed SUCCESS; artifact 11693066002 checked GUI PE subsystem 2 and backend console subsystem 3. Actual user's Windows installation and local Codex login unverified.
-- Cloudflare qqai 100% production deployment 76a77bf2-c2e4-4064-9159-d3c70f380a8f, version 9ef32fc9-0039-4bcd-abe7-0de69633e68f. Runtime log on 2026-10-11 at 05:34Z: QQ_PANEL_RECORDS_MISSING (not deletion success).
-- QQ schema diagnostic commit 7a206ebb33639f7d4cd8413f8f339a58066dc0c2: feature CI 38115855773 SUCCESS and main CI 38115895140 SUCCESS (npm run check, memory archive). Cloudflare deployment 62887ac7-c947-4efc-93a0-bcd2ef9797db at 100%, version 0ef2b6c2-2123-4753-9f85-092a14fe6411. Post-deployment QQ API result not observed.
-- No local git clone (container cannot resolve github.com). Official QQ published-command record and actual QQ UI removal not independently accessible; remain UNKNOWN.
-- Post-main-follow-up Cloudflare Observability event 2026-10-11 05:50Z on Worker version ecea24a8-ea33-4e89-bdf0-656cc67a737c: QQ_PANEL_RECORDS_MISSING_OBJECT_ABSENT_ABSENT. This independently verifies safe diagnostic operates and strict cleanup remains blocked. Actual QQ menu user verification still UNKNOWN.
+- New feature commit 4e9924729598d556b5030acd91561a9bba6d6f2d, branch feature/manual-cross-group-command-20261015: GitHub Actions 38701967374 SUCCESS (npm run check: 102 node tests and Wrangler dry-run, current-memory archive v0.0.106 during feature code test).
+- Strict parser tests: /跨群 文字 valid; /跨群 empty error; /跨群測試, /!跨群, !跨群, @AIBot + normal text never forwarded; >1200 characters rejected without truncation.
+- End-to-end unit with fake D1: all active targets within source room (including receive-only destination) enqueued once; source excluded, stopped group excluded, other room excluded; replayed message ID creates no new outbox entries.
+- Bbot flush test: manual-v1: IDs sent, historical queued auto IDs cancelled. NapCat command tests retained, parallel outgoing batch mock unchanged.
+- Cloudflare D1 READ ONLY: SELECT aggregate returned 8 total bindings, 4 verified in 1 room; 4 verified rows stopped=1. No DB changes and no QQ messages sent by these checks.
+- Outstanding: memory v0.0.107 CI, main promotion, Cloudflare new build/deploy, real QQ group acceptance. Prior QQ native slash entry deletion still UNKNOWN.

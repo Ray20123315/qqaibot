@@ -1,6 +1,8 @@
 # GOTCHAS
-- Native Windows GUI requires PE Subsystem 2. Preserve tools/codex-bridge-gui and packaged Node backend, side by side, and %APPDATA%/QQAIBOT/codex-bridge.json including read/edit root allowlists. Previous console-only EXE was not acceptable.
-- Do not publish QQ_OPEN_CLIENT_SECRET, Codex tokens, raw QQ API responses, panel items, user/group IDs or any full exception bodies in diagnostics.
-- QQ official developer portal old published slash entries may be independent of new /v2/panels. API returned no documented records at runtime; a no_match or unknown response does not prove an old client menu was removed.
-- QQ /v2/panels mutations affect other live commands. Delete only an exact command named 设置插话率 after removing /! prefix; preserve all other items and metadata. Unexpected response schema must fail closed.
-- Cloudflare cron is every minute but command cleanup Durable Object has 15-minute retry and one-shot success state. CI success does not verify QQ endpoint behavior; inspect version-specific production logs.
+- QQ actual bridge data as of 2026-10-15: four verified groups share one room, but all stopped=1. Preserve these settings; protected QQ account rules restrict !resume. No end-to-end relay can succeed until authorized resume.
+- QQ Bbot/NapCat authenticated websocket and fresh roster required for privileged !use/!CODE/!resume controls. Bbot receives native numeric QQ IDs; never send synthetic napcat: identifiers to QQ official API.
+- An incoming OneBot message may be duplicated; idempotent manual-v1: hashed outbox IDs are required. Outbound OneBot ACK timeout is ambiguous and must not be blindly retried.
+- Group memory collection deliberately excludes leading slash commands, so /跨群 content is not ingested as source group long-term memory.
+- QQ official published native slash menu is NOT the same as command text parser. Text command works if Bbot receives it; QQ menu cannot be claimed configured without platform readback.
+- Existing qqai /v2/panels API returned QQ_PANEL_RECORDS_MISSING_OBJECT_ABSENT_ABSENT. Do not assume empty response is evidence old menu removed; refuse unrelated deletes.
+- Preserve Windows native Codex GUI, local bridge JSON including edit/read roots, Cloudflare Secrets, Abot AI, D1/Vectorize. No destructive repo reset or force push.
