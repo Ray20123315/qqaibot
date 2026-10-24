@@ -42,22 +42,57 @@ function eventToChat(payload) {
   return {isGroup,target,id:text(d.id),message};
 }
 let tokenCache={value:'',expires:0};
+const sanitizedProviderCode = value => {
+  const code=String(value??'');
+  return /^[0-9]{1,8}$/.test(code)&&code!=='0'?code:'';
+};
 async function qqToken(env) {
   if(tokenCache.value&&Date.now()<tokenCache.expires)return tokenCache.value;
-  const response=await fetch('https://api.bot.qq.com/app/getAppAccessToken',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({appId:env.QQ_APP_ID,clientSecret:env.QQ_APP_SECRET}),signal:timeouts(8000),redirect:'error'});
+  let response;
+  try {
+    response=await fetch('https://api.bot.qq.com/app/getAppAccessToken',{
+      method:'POST',
+      headers:{'content-type':'application/json'},
+      body:JSON.stringify({appId:env.QQ_APP_ID,clientSecret:env.QQ_APP_SECRET}),
+      signal:timeouts(8000),redirect:'manual'
+    });
+  } catch(err) {
+    if(err?.name==='TimeoutError'||err?.name==='AbortError')throw Error('QQ_AUTH_TIMEOUT');
+    throw Error('QQ_AUTH_FETCH_FAILED');
+  }
+  if(response.status>=300&&response.status<400)throw Error('QQ_AUTH_REDIRECT_'+response.status);
   if(!response.ok)throw Error('QQ_AUTH_HTTP_'+response.status);
-  const data=await response.json();
-  if(!data.access_token)throw Error('QQ_AUTH_INVALID_RESPONSE');
-  tokenCache={value:data.access_token,expires:Date.now()+Math.max(60,Number(data.expires_in||7200)-300)*1000};
+  let data;
+  try {data=await response.json();}catch{throw Error('QQ_AUTH_INVALID_RESPONSE');}
+  if(!data?.access_token){
+    const code=sanitizedProviderCode(data?.code);
+    throw Error(code?'QQ_AUTH_CODE_'+code:'QQ_AUTH_INVALID_RESPONSE');
+  }
+  const ttl=Number(data.expires_in||7200);
+  if(!Number.isFinite(ttl)||ttl<=0)throw Error('QQ_AUTH_INVALID_RESPONSE');
+  tokenCache={value:data.access_token,expires:Date.now()+Math.max(60,ttl-300)*1000};
   return tokenCache.value;
 }
 async function sendQQ(env,event,answer) {
   const route=event.isGroup?'groups':'users';
   const token=await qqToken(env);
-  const response=await fetch('https://api.bot.qq.com/v2/'+route+'/'+encodeURIComponent(event.target)+'/messages',{method:'POST',redirect:'error',signal:timeouts(8000),headers:{authorization:'QQBot '+token,'content-type':'application/json'},body:JSON.stringify({msg_type:0,content:answer,msg_id:event.id,msg_seq:1})});
+  let response;
+  try {
+    response=await fetch('https://api.bot.qq.com/v2/'+route+'/'+encodeURIComponent(event.target)+'/messages',{
+      method:'POST',redirect:'manual',signal:timeouts(8000),
+      headers:{authorization:'QQBot '+token,'content-type':'application/json'},
+      body:JSON.stringify({msg_type:0,content:answer,msg_id:event.id,msg_seq:1})
+    });
+  } catch(err) {
+    if(err?.name==='TimeoutError'||err?.name==='AbortError')throw Error('QQ_SEND_TIMEOUT');
+    throw Error('QQ_SEND_FETCH_FAILED');
+  }
+  if(response.status>=300&&response.status<400)throw Error('QQ_SEND_REDIRECT_'+response.status);
   if(!response.ok)throw Error('QQ_SEND_HTTP_'+response.status);
-  const result=await response.json();
-  if(result.err_code||result.code)throw Error('QQ_SEND_API_REJECTED');
+  let result;
+  try{result=await response.json();}catch{throw Error('QQ_SEND_INVALID_RESPONSE');}
+  const code=sanitizedProviderCode(result?.err_code??result?.code);
+  if(code)throw Error('QQ_SEND_CODE_'+code);
 }
 export async function queryModel(env,message,{timeoutMs=60_000}={}) {
   const config=await readModelConfig(env);
@@ -94,7 +129,7 @@ export async function queryModel(env,message,{timeoutMs=60_000}={}) {
 const qqDiagnosticStages=['callback_verify','callback_rejected','event_received','event_ignored','model_failed','send_failed','reply_sent'];
 const diagnosticCode=(err)=>{
   const value=String(err?.message||'').replace(/[^A-Z0-9_]/g,'').slice(0,48);
-  return /^(MODEL_(NOT_CONFIGURED|TIMEOUT|CONNECTION_FAILED|EMPTY_RESPONSE|INVALID_RESPONSE|HTTP_[0-9]{3}|REDIRECT_[0-9]{3})|QQ_(AUTH|SEND)_(HTTP_[0-9]{3}|INVALID_RESPONSE|API_REJECTED))$/.test(value)?value:'UNKNOWN';
+  return /^(MODEL_(NOT_CONFIGURED|TIMEOUT|CONNECTION_FAILED|EMPTY_RESPONSE|INVALID_RESPONSE|HTTP_[0-9]{3}|REDIRECT_[0-9]{3})|QQ_(AUTH|SEND)_(HTTP_[0-9]{3}|REDIRECT_[0-9]{3}|TIMEOUT|FETCH_FAILED|INVALID_RESPONSE|CODE_[0-9]{1,8}|API_REJECTED))$/.test(value)?value:'UNKNOWN';
 };
 async function recordQQ(env,stage,code='OK') {
   if(!qqDiagnosticStages.includes(stage)||!env.CONFIG_KV)return;
