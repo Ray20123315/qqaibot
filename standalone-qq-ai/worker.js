@@ -1,6 +1,8 @@
 import {readModelConfig,listUnslothModels,saveModelConfig} from "./model-config.js";
 import {DASHBOARD_HTML} from "./dashboard.js";
-import {scopeKey,ensureSchema,appendMessage,loadContext,compactOneBatch,getMemoryStats,contextBudget} from "./conversation-memory.js";
+import {scopeKey,appendMessage,loadContext,compactOneBatch,getMemoryStats,contextBudget} from "./conversation-memory.js";
+import {roomDatabase} from "./qq-memory-room.js";
+export {QQMemoryRoom} from "./qq-memory-room.js";
 import {lookupSupport,citationContext,uploadPublicDocument,listPublicDocuments} from "./support-knowledge.js";
 import {commandResult,parseCommand} from "./qq-commands.js";
 import {markdownPayload,plainPayload,rejectedMarkdown} from "./qq-format.js";
@@ -175,14 +177,14 @@ export async function processEvent(env,event) {
     await recordQQ(env,'event_ignored','EMPTY_MESSAGE');
     return;
   }
-  let scope=null,state=null;
-  if(env.MEMORY_DB){
+  let scope=null,state=null,db=null;
+  if(env.CHAT_ROOMS){
     try{
       scope=await scopeKey(env,event);
-      // The storage migration is deployed before Worker; no unsafe lazy schema changes on hot path.
-      await appendMessage(env.MEMORY_DB,scope,event.id,'user',event.message);
+      db=roomDatabase(env,scope);
+      await appendMessage(db,scope,event.id,'user',event.message);
       const window=Number(await env.CONFIG_KV?.get('context-window-v1'))||16384;
-      state=await loadContext(env.MEMORY_DB,scope,{window});
+      state=await loadContext(db,scope,{window});
     }catch(err){
       console.error('QQ_MEMORY_READ_FAILED',String(err?.message||'UNKNOWN').replace(/[^A-Z0-9_]/g,'').slice(0,36));
       scope=null;state=null; // QQ text must still reply when memory database is unavailable.
@@ -193,7 +195,7 @@ export async function processEvent(env,event) {
   if(parsed){
     let stats=null;
     if(scope&&(parsed.name==='上下文'||parsed.name==='总结')){
-      try{stats=await getMemoryStats(env.MEMORY_DB,scope);}catch{}
+      try{stats=await getMemoryStats(db,scope);}catch{}
     }
     const cmd=commandResult(event.message,{stats,summary:state?.summary||''});
     if(cmd.handled)answer=cmd.text;
@@ -222,9 +224,9 @@ export async function processEvent(env,event) {
     await recordQQ(env,'reply_sent','OK');
     if(scope){
       try{
-        await appendMessage(env.MEMORY_DB,scope,event.id+':reply','assistant',answer);
+        await appendMessage(db,scope,event.id+':reply','assistant',answer);
         if(state?.compactionRecommended){
-          await compactOneBatch(env.MEMORY_DB,scope,(old,rows)=>summarizeConversation(env,old,rows));
+          await compactOneBatch(db,scope,(old,rows)=>summarizeConversation(env,old,rows));
         }
       }catch(err){console.error('QQ_MEMORY_WRITE_FAILED',String(err?.message||'UNKNOWN').replace(/[^A-Z0-9_]/g,'').slice(0,36));}
     }
@@ -267,7 +269,7 @@ export default {
       if(request.method==='GET'){
         const configured=Number(await env.CONFIG_KV?.get('context-window-v1'))||16384;
         return json({...contextBudget(configured),modelCeiling:262144,actualStudioWindowVerified:false,
-          memoryEnabled:!!env.MEMORY_DB,nonDestructiveCompaction:true});
+          memoryEnabled:!!env.CHAT_ROOMS,nonDestructiveCompaction:true});
       }
       const data=await request.json().catch(()=>null);
       const window=Number(data?.window);
