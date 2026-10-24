@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {markdownForQQ,markdownToPlainText,markdownPayload,plainPayload,rejectedMarkdown} from '../qq-format.js';
-import {getConfig,chat,CUSTOMER_SERVICE_PROMPT} from '../role-router.js';
+import {getConfig,chat,GENERAL_CHAT_PROMPT} from '../role-router.js';
 test('QQ Markdown delivers actual first/second-level headings and ordered list',()=>{
  const raw='功能介紹\n\n1. 聊天\n2. 上網\n3. 語音';
  const md=markdownPayload(raw,'incoming-msg');
@@ -41,27 +41,21 @@ test('even previous persisted false webSearch settings are upgraded to always-on
   assert.equal(request.mcp_enabled,false);
   assert.ok(!('tools' in request));
   assert.equal(request.stream,true);
-  assert.match(request.messages[0].content,/网络搜索可由每位使用者自行开启或关闭/);
-  assert.match(request.messages[0].content,/所有对用户显示的文字都用简体中文/);
-  assert.match(request.messages[0].content,/客服与聊天伙伴/);
+  assert.match(request.messages[0].content,/搜索/);
+  assert.match(request.messages[0].content,/简体中文/);
+  assert.match(request.messages[0].content,/QQ 通用聊天助手/);
   return new Response(JSON.stringify({choices:[{message:{content:'你好'}}]}),{headers:{'content-type':'application/json'}});
  });
  assert.equal(value.text,'你好');
  assert.equal(value.searched,false);
 });
 
-test('persona presents a natural customer-service conversation without model details',()=>{
- assert.match(CUSTOMER_SERVICE_PROMPT,/客服与聊天伙伴/);
- assert.match(CUSTOMER_SERVICE_PROMPT,/自然、靠谱/);
- assert.match(CUSTOMER_SERVICE_PROMPT,/日常/);
- assert.match(CUSTOMER_SERVICE_PROMPT,/简体中文/);
- assert.match(CUSTOMER_SERVICE_PROMPT,/绝不主动介绍、宣传或列出内部使用的 AI/);
- assert.match(CUSTOMER_SERVICE_PROMPT,/即使用户询问/);
- assert.match(CUSTOMER_SERVICE_PROMPT,/这些属于内部技术信息，暂不提供/);
- assert.match(CUSTOMER_SERVICE_PROMPT,/不得假装自己是现实生活中的具体真人/);
- assert.match(CUSTOMER_SERVICE_PROMPT,/不得声称已经查过、改过、发过、处理过/);
- assert.match(CUSTOMER_SERVICE_PROMPT,/不能调用 shell、Python/);
- assert.doesNotMatch(CUSTOMER_SERVICE_PROMPT,/Qwen3\\.5-9B|Flint|Qwen3-TTS/);
+test('persona is general chat only without HRS support identity',()=>{
+ assert.match(GENERAL_CHAT_PROMPT,/QQ 通用聊天助手/);
+ assert.match(GENERAL_CHAT_PROMPT,/技术/);
+ assert.match(GENERAL_CHAT_PROMPT,/游戏/);
+ assert.match(GENERAL_CHAT_PROMPT,/简体中文/);
+ assert.doesNotMatch(GENERAL_CHAT_PROMPT,/客服与聊天伙伴|HRS 客服|售后客服|退款服务/);
 });
 
 test('stray null prefix before Chinese QQ text is removed without touching ordinary mentions',()=>{

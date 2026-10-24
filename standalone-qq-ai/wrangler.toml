@@ -14,10 +14,8 @@ class_name = "QQMemoryRoom"
 type = "durable-object"
 storage = "sqlite"
 
-# Qwen embedding based public customer-support knowledge (do not upload secrets).
-[[ai_search]]
-binding = "SUPPORT_SEARCH"
-instance_name = "qqaibot-support"
+# HRS support index is not bound to this general-chat Worker.
+# Existing index is intentionally retained for backup and recovery.
 
 # Unsloth credentials must be stored exclusively as Cloudflare Secret UNSLOTH_API_KEY.
 # Only the selected model identifier is stored in KV.

@@ -3,7 +3,6 @@ import {DASHBOARD_HTML} from "./dashboard.js";
 import {scopeKey,appendMessage,loadContext,getMemoryStats,contextBudget} from "./conversation-memory.js";
 import {roomDatabase} from "./qq-memory-room.js";
 export {QQMemoryRoom} from "./qq-memory-room.js";
-import {lookupSupport,citationContext,uploadPublicDocument,listPublicDocuments} from "./support-knowledge.js";
 import {commandResult,parseCommand} from "./qq-commands.js";
 import {handleModeCommand,readModes} from "./qq-modes.js";
 import {qqImageAttachments,imagePartFromQQ} from "./qq-image.js";
@@ -216,20 +215,15 @@ export async function processEvent(env,event) {
       answer='该指令目前不可用。输入 /帮助 查看已开放的功能。';
     }else {
       try {
-        let knowledge='';
-        if(env.ENABLE_PAID_AI_SEARCH==='true'&&env.SUPPORT_SEARCH&&/(HRS|MFL|客服|订单|权限|支付|付费|登录|购买|订阅|使用|报错|帮助)/i.test(event.message)){
-          try{knowledge=citationContext(await lookupSupport(env,event.message));}
-          catch{ /* Knowledge index failure must not break QQ text chat. */ }
-        }
         const history=(state?.messages||[]).filter(row=>row.seq!==state?.lastSeq);
         const modes=await readModes(env,event);
         if(event.hadImage&&!event.images?.length)throw Error('QQ_IMAGE_UNAVAILABLE');
         const image=event.images?.length?await imagePartFromQQ(event.images[0]):null;
-        answer=await queryModel(env,event.message,{timeoutMs:23_000,history,summary:state?.summary||'',knowledge,modes,image});
+        answer=await queryModel(env,event.message,{timeoutMs:23_000,history,summary:state?.summary||'',modes,image});
       }catch(err){
         const reason=diagnosticCode(err);
         await recordQQ(env,'model_failed',reason);
-        answer=String(err?.message||'').startsWith('QQ_IMAGE_')?'暂时无法读取这张图片。请使用 QQ 正常发送 JPG、PNG 或 WebP 图片，再试一次。':'客服暂时无法完成回复（'+reason+'），请稍后再试。';
+        answer=String(err?.message||'').startsWith('QQ_IMAGE_')?'暂时无法读取这张图片。请使用 QQ 正常发送 JPG、PNG 或 WebP 图片，再试一次。':'聊天服务暂时无法完成回复（'+reason+'），请稍后再试。';
       }
     }
   }
@@ -261,22 +255,6 @@ export default {
       return json({qq_configured:!!(env.QQ_APP_ID&&env.QQ_APP_SECRET),events:await readQQDiagnostics(env)});
     }
 
-    if(pathname==='/api/knowledge'){
-      if(!['GET','POST'].includes(request.method))return json({error:'METHOD_NOT_ALLOWED'},405);
-      if(!await adminAllowed(request,env))return json({error:'UNAUTHORIZED'},401);
-      // Paid Cloudflare AI Search is disabled by default; no hidden index/upload usage.
-      if(env.ENABLE_PAID_AI_SEARCH!=='true')return json({error:'KNOWLEDGE_PAID_BACKEND_DISABLED'},503);
-      try{
-        if(request.method==='GET')return json({documents:await listPublicDocuments(env),visibility:'PUBLIC_SUPPORT'});
-        if(Number(request.headers.get('content-length'))>4*1024*1024+16000)return json({error:'TOO_LARGE'},413);
-        if(!request.headers.get('content-type')?.startsWith('multipart/form-data;'))return json({error:'INVALID_KNOWLEDGE_FILE'},400);
-        const form=await request.formData().catch(()=>null);
-        return json(await uploadPublicDocument(env,form?.get('file')));
-      }catch(err){
-        const code=err?.message==='INVALID_KNOWLEDGE_FILE'?'INVALID_KNOWLEDGE_FILE':'KNOWLEDGE_UNAVAILABLE';
-        return json({error:code},code==='INVALID_KNOWLEDGE_FILE'?400:503);
-      }
-    }
     if(pathname==='/api/context'){
       if(!['GET','POST'].includes(request.method))return json({error:'METHOD_NOT_ALLOWED'},405);
       if(!await adminAllowed(request,env))return json({error:'UNAUTHORIZED'},401);
