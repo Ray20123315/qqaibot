@@ -61,3 +61,9 @@
 - PR #101 merged main 218809ad9d2670a405b1a8ed1e6578c30183ed01. Isolated Worker CI 40091803676 SUCCESS and legacy QQAIBOT AI CI 40091803666 SUCCESS; initial CI failures due stale persona phrase assertion fixed.
 - Cloudflare independent qqaibot-unsloth deployment 79cef349-a2b2-4c13-91d1-5dcb38e40326 at 100%; readback confirms new persona and nondisclosure strings, unchanged 4 Secret bindings, CONFIG_KV selected-model-v2/model-roles-v3, QQ webhook and global_fetch_strictly_public.
 - NOT VERIFIED: real QQ generated replies consistently Simplified, never contain model details under adversarial questioning, and sound natural. Worker hardcoded Chinese refusal/error messages are unchanged.
+
+## 2026-10-24 admin login inline JavaScript syntax repair
+- Pre-fix: pulled actual GitHub main dashboard.js, extracted DASHBOARD_HTML <script>; new Function(script) emitted SyntaxError: missing ) after argument list. Line saveRoles mistakenly had quote/plus text `+'，web_search 固定開啟+'。'` from prior UI edit.
+- Fix PR #103 main 500b6cebb6457080ef50e32b05a7060ed1421834. Corrected concatenation and tested new Function(script) PASS. Added node:vm.Script over actual served Worker HTML and mocked browser submit handler verifying /api/session POST, app visibility and password clear. CI isolated 40094335343 SUCCESS; original AI 40094335412 SUCCESS.
+- Cloudflare standalone Worker six-module strict-inherit upload HTTP 200, version c2c0ab0e-1f02-4804-ae81-bf7dd4c63b1f 100%. GET settings/deploy/source/namespace keys confirmed 4 secret_text ADMIN_TOKEN QQ_APP_ID QQ_APP_SECRET UNSLOTH_API_KEY, KV CONFIG_KV 033b241f7377496790d92056d39669ad, selected-model-v2/model-roles-v3, global_fetch_strictly_public, new fixed markup, /api/session and /webhook.
+- NOT VERIFIED: real custom-domain browser access/login with user ADMIN_TOKEN (web open inaccessible, container DNS failed), QQ real-message behavior after deployment. No model/voice/QQ config changed.
