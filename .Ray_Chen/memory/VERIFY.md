@@ -56,3 +56,8 @@
 - PR #98 isolated CI 40089303664 SUCCESS and old QQ AI CI 40089303680 SUCCESS, merged main 03f829edebff295cb5953ad5636e41db2c5527ce. New tests validate native QQ MD payload, structured headings/ordered lists, cleaned fallback, rejection cache, no duplicate retry after timeout, role config legacy webSearch:false always effective true, fixed upstream/tool allowlist.
 - Cloudflare six-module PUT HTTP 200, version cdfea900-f08a-4df0-9363-d80a5abad14c 100% readback, unchanged 4 secret_text + CONFIG_KV 033b241f7377496790d92056d39669ad, global_fetch_strictly_public, KV model-roles-v3 and selected-model-v2 retained, source includes withSearch true, qq-markdown-denied-v1 and existing webhook. Original qqai not altered.
 - NOT VERIFIED: live Unsloth web_search execution, actual QQ platform Markdown privilege/format, mobile list font sizing, or real QQ message after release. Do not overclaim based on CI mocks.
+
+## 2026-10-24 natural QQ persona no technical disclosure
+- PR #101 merged main 218809ad9d2670a405b1a8ed1e6578c30183ed01. Isolated Worker CI 40091803676 SUCCESS and legacy QQAIBOT AI CI 40091803666 SUCCESS; initial CI failures due stale persona phrase assertion fixed.
+- Cloudflare independent qqaibot-unsloth deployment 79cef349-a2b2-4c13-91d1-5dcb38e40326 at 100%; readback confirms new persona and nondisclosure strings, unchanged 4 Secret bindings, CONFIG_KV selected-model-v2/model-roles-v3, QQ webhook and global_fetch_strictly_public.
+- NOT VERIFIED: real QQ generated replies consistently Simplified, never contain model details under adversarial questioning, and sound natural. Worker hardcoded Chinese refusal/error messages are unchanged.
