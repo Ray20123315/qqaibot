@@ -2,6 +2,18 @@
 
 這是 **qq aibot 舊系統以外**的獨立 Cloudflare Worker `qqaibot-unsloth`。它只接 QQ 官方群組 @ 事件 `GROUP_AT_MESSAGE_CREATE` 與私訊 `C2C_MESSAGE_CREATE`，使用固定上游 `https://msiai.ray2025.com/v1/chat/completions` 及 QQ 官方 API 被動回覆。**沒有執行系統指令、工具呼叫、檔案操作、任意 URL 代理的功能**。
 
+## 2026-10-24 全對話 Web Search 與 QQ Markdown 回覆
+
+依使用者最新要求，**每次模型聊天都會向 Unsloth Studio 請求使用內建網路搜尋**，不必輸入 `/search`，不用在後台手動切換搜尋。所有舊 KV 的 `webSearch:false` 設定將被讀取層覆寫為預設開啟，並在新設定儲存時寫入 true。上游請求限制 `enabled_tools:["web_search"]` 且 `mcp_enabled:false`，絕不啟用 terminal、Python、檔案、電腦控制、圖片理解或圖片生成。模型系統指令要求嘗試搜尋並附來源；若工具未真正執行或無法取得結果，不得聲稱查證最新資訊。
+
+注意：Unsloth Studio `web_search` 工具是否真的執行仍取決於版本、網路和工具調度。Worker **只保證每次嘗試啟用，不會僅因 `enable_tools:true` 就回報搜尋已成功**。Unsloth 官方曾記錄 `enabled_tools:["web_search"]` 在特定 GGUF 版本未執行工具的問題，必須用真實模型測試。每次嘗試搜尋會增加網路流量、推論延遲及可能使公開群組資訊送交搜尋服務。群組工作流程有 23 秒背景推論時限，慢搜尋會顯示模型逾時而不是無限等待。
+
+QQ 官方 `/v2/groups/{group_openid}/messages` / `/v2/users/{openid}/messages` `msg_type:2` 支援 `markdown:{content:"# 大標題\n## 小標題\n1. 條目"}`；本 Worker 現在**優先發送真正的 Markdown**，並保持 `msg_id` 被動回覆關聯。標題、編號清單和段落會由 QQ 客戶端排版，不是將原始 `#`/`**` 當普通文字顯示。
+
+QQ 官方文件明確說明「原生 Markdown」與「群組被動 Markdown」可能需要**單獨申請權限**。若 QQ 發送 API 明確回傳 400/403/415/422 或數字業務拒絕碼，Worker 會**只降級一次為可閱讀的純文字**，移除生硬的 Markdown 標記、保留換行與編號；該拒絕狀態暫存於 KV `qq-markdown-denied-v1` 24 小時以免持續重試刷頻。傳輸逾時/連線例外或不確定是否已送達時絕不二次發送。QQ 的 Markdown 實際顯示及申請權限狀態必須以真實平台測試確認。
+
+**風險與明確排除**：即使 QQ API 存在 `msg_type:2`，未必表示此機器人已開通被動 Markdown，因此仍可能只顯示純文字（例如 `【標題】`、`1. 條目`）。此版本不安裝或啟用任何圖片相關模型，也不擴大 QQ 單次訊息數或取消發送限速。只有完成真實 QQ 回覆驗收後才可認定富文字可用。
+
 ## Unsloth 多模型路由（2026-10-24）
 
 獨立 QQ AI Worker 維持單一上游 `https://msiai.ray2025.com/v1` 與原 `UNSLOTH_API_KEY` Cloudflare Secret，不需要額外模型 API 金鑰，也沒有任何可變上游 URL。模型路由設在管理台「多模型路由」：
