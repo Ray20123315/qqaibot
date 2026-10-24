@@ -99,3 +99,68 @@ test('QQ callback op=13 responds with Ed25519 verification signature and records
  const d=await r.json();assert.equal(d.plain_token,'validation_token');assert.match(d.signature,/^[a-f0-9]{128}$/);
  await h.finish();assert.ok((await(await diagnostics(h.env)).json()).events.some(x=>x.stage==='callback_verify'));
 });
+
+test('QQ auth fetch rejection records QQ_AUTH_FETCH_FAILED instead of UNKNOWN',async()=>{
+ const {processEvent}=await import('../worker.js?qq-auth-fetch-case');
+ const h=harness();const original=globalThis.fetch;
+ globalThis.fetch=async()=>{throw new TypeError('private failure: token never log');};
+ try{
+   await assert.rejects(()=>processEvent(h.env,{message:'/help',isGroup:true,target:'opaqueGroup',id:'fresh-001'}),/QQ_AUTH_FETCH_FAILED/);
+   const diag=(await(await diagnostics(h.env)).json()).events;
+   assert.ok(diag.some(x=>x.stage==='send_failed'&&x.code==='QQ_AUTH_FETCH_FAILED'));
+   assert.doesNotMatch(JSON.stringify(diag),/private failure|token never log|test-fake-key/);
+ }finally{globalThis.fetch=original;}
+});
+test('QQ send fetch rejection after valid token is distinguished from auth failure',async()=>{
+ const {processEvent}=await import('../worker.js?qq-send-fetch-case');
+ const h=harness();const original=globalThis.fetch;
+ globalThis.fetch=async(url)=>{
+   if(String(url).includes('/app/getAppAccessToken'))
+     return new Response(JSON.stringify({access_token:'fake-token',expires_in:7200}),{status:200});
+   if(String(url).includes('/v2/groups/'))
+     throw new TypeError('private network error must not be exposed');
+   throw Error('unexpected fetch');
+ };
+ try{
+   await assert.rejects(()=>processEvent(h.env,{message:'/help',isGroup:true,target:'opaqueGroup',id:'fresh-002'}),/QQ_SEND_FETCH_FAILED/);
+   const diag=(await(await diagnostics(h.env)).json()).events;
+   assert.ok(diag.some(x=>x.stage==='send_failed'&&x.code==='QQ_SEND_FETCH_FAILED'));
+ }finally{globalThis.fetch=original;}
+});
+test('QQ token and send API business failure codes are safe bounded numeric values',async()=>{
+ const orig=globalThis.fetch;
+ const {processEvent:authProcess}=await import('../worker.js?qq-auth-biz-code');
+ const h=harness();
+ globalThis.fetch=async()=>new Response(JSON.stringify({code:100016,message:'contains secret'}),{status:200});
+ try {
+   await assert.rejects(()=>authProcess(h.env,{message:'/help',isGroup:true,target:'opaqueGroup',id:'fresh-003'}),/QQ_AUTH_CODE_100016/);
+   assert.ok((await(await diagnostics(h.env)).json()).events.some(x=>x.code==='QQ_AUTH_CODE_100016'));
+ }finally{globalThis.fetch=orig;}
+ const {processEvent:sendProcess}=await import('../worker.js?qq-send-biz-code');
+ const b=harness();
+ globalThis.fetch=async(url)=>{
+   if(String(url).includes('/app/getAppAccessToken'))
+     return new Response(JSON.stringify({access_token:'fake-token',expires_in:7200}),{status:200});
+   return new Response(JSON.stringify({err_code:304023,message:'untrusted provider text'}),{status:200});
+ };
+ try{
+   await assert.rejects(()=>sendProcess(b.env,{message:'/help',isGroup:true,target:'opaqueGroup',id:'fresh-004'}),/QQ_SEND_CODE_304023/);
+   const diag=(await(await diagnostics(b.env)).json()).events;
+   assert.ok(diag.some(x=>x.code==='QQ_SEND_CODE_304023'));
+   assert.doesNotMatch(JSON.stringify(diag),/untrusted provider text/);
+ }finally{globalThis.fetch=orig;}
+});
+test('QQ auth and send timeout are distinguished safely',async()=>{
+ const h=harness();const original=globalThis.fetch;
+ const {processEvent:authProcess}=await import('../worker.js?qq-auth-timeout');
+ globalThis.fetch=async()=>{throw new DOMException('sensitive','TimeoutError');};
+ try{await assert.rejects(()=>authProcess(h.env,{message:'/help',isGroup:true,target:'opaqueGroup',id:'fresh-005'}),/QQ_AUTH_TIMEOUT/);}finally{globalThis.fetch=original;}
+ const b=harness();const {processEvent:sendProcess}=await import('../worker.js?qq-send-timeout');
+ globalThis.fetch=async(url)=>{
+   if(String(url).includes('/app/getAppAccessToken'))return new Response(JSON.stringify({access_token:'fake-token',expires_in:7200}),{status:200});
+   throw new DOMException('private info','TimeoutError');
+ };
+ try{
+   await assert.rejects(()=>sendProcess(b.env,{message:'/help',isGroup:true,target:'opaqueGroup',id:'fresh-006'}),/QQ_SEND_TIMEOUT/);
+ }finally{globalThis.fetch=original;}
+});
