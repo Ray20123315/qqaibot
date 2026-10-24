@@ -6,3 +6,6 @@ Canonical archives:
 - archive/legacy-main-20261009 at 6a22b06433cfaffcf13abe2b60a917305290b629
 
 No account secrets in repository. Preserve known protected QQ identities 3569028262 and 2681167798.
+
+## 2026-10-24 independent Unsloth QQ worker
+Separate `standalone-qq-ai/` Cloudflare Worker `qqaibot-unsloth`, with custom domain `qqbot-ai.ray2025.com`, serves a QQ official signed Webhook + minimal admin chat; no DO, D1, R2, shell, arbitrary proxy or shared QQ bot callback. Original root `qqai` stays untouched.

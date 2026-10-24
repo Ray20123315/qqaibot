@@ -1,18 +1,18 @@
 # Ray_Chen Memory
-version: v0.0.108
-task_id: manual-cross-group-command-20261015
+version: v0.0.110
+task_id: unsloth-qq-ai-20261024
 task_status: blocked
 goal_revision: 1
 canonical_branch: main
-verified_main_commit: 526e199284275fe2e40fc251c3afb4707ce7a58a
-previous_main_commit: 6172bf1043653fa34634db6494d030d92acc78f0
-updated_at: 2026-10-15T08:00:00Z
+verified_code_commit: a365f0c6c391a171154241e82c28f00bfa1eb322
+updated_at: 2026-10-24T14:20:00+08:00
 
 ## Quick resume
-- Only exact Bbot OneBot command /跨群 <文字> sends cross-group. Ordinary QQ chat, AI @ messages, and old bridge toggle must NEVER auto-forward.
-- Preserve D1 bridge rooms/bindings, target only same room, verified=1, stopped=0, target not source; receive_only groups may receive but not originate. Group join no longer broadcasts notices.
-- Code main commit 526e199284275fe2e40fc251c3afb4707ce7a58a, feature CI 38702516128 SUCCESS and main CI 38702611657 SUCCESS; Cloudflare production deployment 57425b2c-a1de-45d3-bc6e-c89626144951, version 113e3cbc-8659-4b59-8acb-16405a6a588b, 100% build SHA matched.
-- Cloudflare D1 read-only observed 8 bindings total, 4 verified in one room, ALL 4 stopped. Never change stopped without authorized !resume; end-to-end delivery remains BLOCKED until resumed.
-- Existing Windows native Codex GUI, Abot AI, Bbot memory D1/Vectorize, secret settings and old backups untouched.
-- QQ official stale /!设置插话率 published command still unverified removed; old API returned QQ_PANEL_RECORDS_MISSING_OBJECT_ABSENT_ABSENT. Do not claim native QQ slash menu has been changed.
-- Read ACTIVE_TASK.md CURRENT_STATE.md USER_REQUIREMENTS.md DECISIONS.md GOTCHAS.md VERIFY.md FILE_MANIFEST.json. Check GitHub branch and CI before further changes.
+- Standalone QQ official Webhook AI Worker added under `standalone-qq-ai/`; DO NOT modify existing `qqai` Worker, its routes, D1/DO, QQ callback, NapCat, cross-group bridge or Codex GUI.
+- PR #82 merged into main at `a365f0c6c391a171154241e82c28f00bfa1eb322`; isolated CI 40068743188 and existing AI CI 40068743122 SUCCESS.
+- Cloudflare Worker `qqaibot-unsloth` API deployment `4ca53f6f1f6648d097ca1109607d8b9f` succeeded; workers.dev route and custom domain `qqbot-ai.ray2025.com` enabled via API readback.
+- Cloudflare new Worker Secrets GET returned zero items. No QQ AppID/AppSecret, Unsloth key/model ID or admin token configured. QQ true end-to-end and public HTTPS not verified; QQ fixed-egress IP whitelist might block sending.
+- Next: configure 5 Secrets, separate QQ official Bot with Webhook `https://qqbot-ai.ray2025.com/webhook`, events GROUP_AT_MESSAGE_CREATE and C2C_MESSAGE_CREATE; validate Unsloth and real messages.
+- No tool calling or commands in new Worker. Prior legacy /跨群 exact command, D1 stopped binding states and QQ stale slash panel concerns unchanged.
+
+- New memory archive CI 40069333964 SUCCESS after dynamic version workflow fix; main merge of memory PR #83 pending.

@@ -8,3 +8,9 @@
 - QQ stale official native menu item /!设置插话率 remains UNKNOWN/NOT VERIFIED removed. Cloudflare earlier QQ panel endpoint returned unsupported schema; no broad deletes authorized.
 
 - GitHub main CI 38702611657 PASS; Cloudflare qqai production deployment 57425b2c-a1de-45d3-bc6e-c89626144951 version 113e3cbc-8659-4b59-8acb-16405a6a588b at 100% from commit 526e199284275fe2e40fc251c3afb4707ce7a58a, build success. QQ actual delivery untested pending authorizations and !resume.
+
+## 2026-10-24 independent bot
+- PR #82 merged to main commit a365f0c6c391a171154241e82c28f00bfa1eb322, isolated tests and existing AI suite success. New source under `standalone-qq-ai/`; original `qqai` code/DB/DO not modified.
+- Cloudflare Worker `qqaibot-unsloth` deployment 4ca53f6f1f6648d097ca1109607d8b9f created. Custom Domain `qqbot-ai.ray2025.com` and workers.dev subdomain enabled; secrets list empty. No live Unsloth or QQ messages verified, custom domain external HTTPS unverified.
+
+- Memory packaging CI issue on hardcoded 0.0.108 resolved; subsequent PR #83 run 40069333964 SUCCESS.
