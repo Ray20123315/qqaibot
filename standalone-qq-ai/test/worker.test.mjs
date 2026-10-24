@@ -23,7 +23,7 @@ test('admin bearer required, text command never executed',async()=>{
  const opts=(auth,message)=>({method:'POST',headers:{authorization:auth,'content-type':'application/json'},body:JSON.stringify({message})});
  assert.equal((await call('/api/chat',opts('Bearer wrong','你好'))).status,401);
  const r=await call('/api/chat',opts('Bearer very-secret','/rm -rf /'));
- assert.equal(r.status,200);assert.match((await r.json()).reply,/無法執行指令/);
+ assert.equal(r.status,200);assert.match((await r.json()).reply,/指令目前不可用/);
 });
 test('model request never provides tool permissions or dynamic target',async()=>{
  const original=globalThis.fetch;let called=false;

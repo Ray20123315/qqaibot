@@ -63,3 +63,9 @@ test('persona presents a natural customer-service conversation without model det
  assert.match(CUSTOMER_SERVICE_PROMPT,/只允许 web_search/);
  assert.doesNotMatch(CUSTOMER_SERVICE_PROMPT,/Qwen3\\.5-9B|Flint|Qwen3-TTS/);
 });
+
+test('stray null prefix before Chinese QQ text is removed without touching ordinary mentions',()=>{
+ assert.equal(markdownForQQ('null你好'), '你好');
+ assert.equal(markdownToPlainText('null收到，我来解释'), '收到，我来解释');
+ assert.equal(markdownForQQ('null pointer 是什么'), 'null pointer 是什么');
+});

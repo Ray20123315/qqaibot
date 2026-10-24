@@ -1,5 +1,10 @@
 import {readModelConfig,listUnslothModels,saveModelConfig} from "./model-config.js";
 import {DASHBOARD_HTML} from "./dashboard.js";
+import {scopeKey,appendMessage,loadContext,getMemoryStats,contextBudget} from "./conversation-memory.js";
+import {roomDatabase} from "./qq-memory-room.js";
+export {QQMemoryRoom} from "./qq-memory-room.js";
+import {lookupSupport,citationContext,uploadPublicDocument,listPublicDocuments} from "./support-knowledge.js";
+import {commandResult,parseCommand} from "./qq-commands.js";
 import {markdownPayload,plainPayload,rejectedMarkdown} from "./qq-format.js";
 import {getConfig as getRoles,setConfig as setRoles,chat as chatWithRoles,speech as ttsWithRoles,transcribe as asrWithRoles} from "./role-router.js";
 import {adminAllowed,sessionRoute} from "./session-auth.js";
@@ -118,9 +123,9 @@ async function sendQQ(env,event,answer) {
     throw Error('QQ_SEND_HTTP_'+plain.response.status);
   }
 }
-export async function queryModel(env,message,{timeoutMs=60_000}={}) {
+export async function queryModel(env,message,{timeoutMs=60_000,history=[],summary='',knowledge=''}={}) {
   try {
-    const result=await chatWithRoles(env,message,fetch,{timeout:timeoutMs});
+    const result=await chatWithRoles(env,message,fetch,{timeout:timeoutMs,history,summary,knowledge});
     return result.text.slice(0,1500);
   }catch(err){
     // Preserve the existing MODEL_* public diagnostic codes for QQ and old admin clients.
@@ -172,20 +177,57 @@ export async function processEvent(env,event) {
     await recordQQ(env,'event_ignored','EMPTY_MESSAGE');
     return;
   }
+  let scope=null,state=null,db=null;
+  if(env.CHAT_ROOMS){
+    try{
+      scope=await scopeKey(env,event);
+      db=roomDatabase(env,scope);
+      await appendMessage(db,scope,event.id,'user',event.message);
+      const window=Number(await env.CONFIG_KV?.get('context-window-v1'))||16384;
+      state=await loadContext(db,scope,{window});
+    }catch(err){
+      console.error('QQ_MEMORY_READ_FAILED',String(err?.message||'UNKNOWN').replace(/[^A-Z0-9_]/g,'').slice(0,36));
+      scope=null;state=null; // QQ text must still reply when memory database is unavailable.
+    }
+  }
   let answer;
-  if(/^[!/$>]/.test(event.message)&&!/^\/(?:search|web)(?:\s|$)/.test(event.message))answer='這是純文字聊天機器人，無法執行指令。';
-  else {
-    try { answer=await queryModel(env,event.message,{timeoutMs:23_000}); }
-    catch(err){
-      const reason=diagnosticCode(err);
-      await recordQQ(env,'model_failed',reason);
-      // Still acknowledge the QQ message if inference is unavailable (model unloaded etc.).
-      answer='AI 模型暫時無法回覆（'+reason+'），請稍後再試。';
+  const parsed=parseCommand(event.message);
+  if(parsed){
+    let stats=null;
+    if(scope&&(parsed.name==='上下文'||parsed.name==='总结')){
+      try{stats=await getMemoryStats(db,scope);}catch{}
+    }
+    const cmd=commandResult(event.message,{stats,summary:state?.summary||''});
+    if(cmd.handled)answer=cmd.text;
+  }
+  if(!answer){
+    if(/^[!/$>]/.test(event.message)&&!/^\/(?:search|web)(?:\s|$)/.test(event.message)){
+      answer='该指令目前不可用。输入 /帮助 查看已开放的功能。';
+    }else {
+      try {
+        let knowledge='';
+        if(env.SUPPORT_SEARCH&&/(HRS|MFL|客服|订单|权限|支付|付费|登录|购买|订阅|使用|报错|帮助)/i.test(event.message)){
+          try{knowledge=citationContext(await lookupSupport(env,event.message));}
+          catch{ /* Knowledge index failure must not break QQ text chat. */ }
+        }
+        const history=(state?.messages||[]).filter(row=>row.seq!==state?.lastSeq);
+        answer=await queryModel(env,event.message,{timeoutMs:23_000,history,summary:state?.summary||'',knowledge});
+      }catch(err){
+        const reason=diagnosticCode(err);
+        await recordQQ(env,'model_failed',reason);
+        answer='客服暂时无法完成回复（'+reason+'），请稍后再试。';
+      }
     }
   }
   try {
     await sendQQ(env,event,answer);
     await recordQQ(env,'reply_sent','OK');
+    if(scope){
+      try{
+        await appendMessage(db,scope,event.id+':reply','assistant',answer);
+        // Scoped Durable Object schedules non-destructive compaction after QQ reply.
+      }catch(err){console.error('QQ_MEMORY_WRITE_FAILED',String(err?.message||'UNKNOWN').replace(/[^A-Z0-9_]/g,'').slice(0,36));}
+    }
   }catch(err) {
     await recordQQ(env,'send_failed',diagnosticCode(err));
     throw err;
@@ -203,6 +245,36 @@ export default {
       if(request.method!=='GET')return json({error:'METHOD_NOT_ALLOWED'},405);
       if(!await adminAllowed(request,env))return json({error:'UNAUTHORIZED'},401);
       return json({qq_configured:!!(env.QQ_APP_ID&&env.QQ_APP_SECRET),events:await readQQDiagnostics(env)});
+    }
+
+    if(pathname==='/api/knowledge'){
+      if(!['GET','POST'].includes(request.method))return json({error:'METHOD_NOT_ALLOWED'},405);
+      if(!await adminAllowed(request,env))return json({error:'UNAUTHORIZED'},401);
+      try{
+        if(request.method==='GET')return json({documents:await listPublicDocuments(env),visibility:'PUBLIC_SUPPORT'});
+        if(Number(request.headers.get('content-length'))>4*1024*1024+16000)return json({error:'TOO_LARGE'},413);
+        if(!request.headers.get('content-type')?.startsWith('multipart/form-data;'))return json({error:'INVALID_KNOWLEDGE_FILE'},400);
+        const form=await request.formData().catch(()=>null);
+        return json(await uploadPublicDocument(env,form?.get('file')));
+      }catch(err){
+        const code=err?.message==='INVALID_KNOWLEDGE_FILE'?'INVALID_KNOWLEDGE_FILE':'KNOWLEDGE_UNAVAILABLE';
+        return json({error:code},code==='INVALID_KNOWLEDGE_FILE'?400:503);
+      }
+    }
+    if(pathname==='/api/context'){
+      if(!['GET','POST'].includes(request.method))return json({error:'METHOD_NOT_ALLOWED'},405);
+      if(!await adminAllowed(request,env))return json({error:'UNAUTHORIZED'},401);
+      if(request.method==='GET'){
+        const configured=Number(await env.CONFIG_KV?.get('context-window-v1'))||16384;
+        return json({...contextBudget(configured),modelCeiling:262144,actualStudioWindowVerified:false,
+          memoryEnabled:!!env.CHAT_ROOMS,nonDestructiveCompaction:true});
+      }
+      const data=await request.json().catch(()=>null);
+      const window=Number(data?.window);
+      if(!Number.isInteger(window)||window<4096||window>262144)return json({error:'INVALID_WINDOW'},400);
+      if(!env.CONFIG_KV)return json({error:'STORAGE_UNAVAILABLE'},503);
+      await env.CONFIG_KV.put('context-window-v1',String(window));
+      return json({...contextBudget(window),actualStudioWindowVerified:false});
     }
 
     if(pathname==='/api/model-roles'){
@@ -275,7 +347,7 @@ export default {
       const data=await request.json().catch(()=>null);
       const message=text(data?.message);
       if(!message||message.length>1500)return json({error:'INVALID_MESSAGE'},400);
-      try{return json({reply:/^[!/$>]/.test(message)&&!/^\/(?:search|web)(?:\s|$)/.test(message)?'這是純文字聊天機器人，無法執行指令。':await queryModel(env,message)});}
+      try{return json({reply:/^[!/$>]/.test(message)&&!/^\/(?:search|web)(?:\s|$)/.test(message)?'该指令目前不可用。输入 /帮助 查看已开放的功能。':await queryModel(env,message)});}
       catch(err){
         const reason=String(err?.message||'').replace(/[^A-Z0-9_]/g,'').slice(0,45);
         const approved=/^(MODEL_NOT_CONFIGURED|INVALID_SAVED_MODEL|MODEL_TIMEOUT|MODEL_CONNECTION_FAILED|MODEL_REDIRECT_[0-9]{3}|MODEL_HTTP_[0-9]{3}|MODEL_INVALID_RESPONSE|MODEL_EMPTY_RESPONSE|CHAT_NOT_CONFIGURED|UPSTREAM_(TIMEOUT|CONNECTION_FAILED|TOO_LONG|EMPTY_STREAM|EMPTY_RESPONSE|INVALID_JSON|HTTP_[0-9]{3}|REDIRECT_[0-9]{3}))$/.test(reason);
