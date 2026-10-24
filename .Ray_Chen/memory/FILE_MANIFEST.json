@@ -1,10 +1,10 @@
 {
-  "version": "v0.0.114",
-  "task_id": "unsloth-qq-chat-diagnostics-20261024",
-  "goal_revision": 5,
+  "version": "v0.0.116",
+  "task_id": "qq-unsloth-send-unknown-20261024",
+  "goal_revision": 7,
   "changed_at": "2026-10-24",
   "repository": "Ray20123315/qqaibot",
-  "code_main_commit": "a974232b6f71991af2d23f654d618ccc0ec72465",
+  "code_main_commit": "d6997d37bb3861e037dbca4bbb742c6b490ecbc5",
   "files": [
     {
       "location_type": "remote",
@@ -13,28 +13,20 @@
       "branch": "main",
       "path": "standalone-qq-ai/worker.js",
       "action": "modified",
-      "after_revision": "a974232b6f71991af2d23f654d618ccc0ec72465",
-      "verification": "PR #89 merged; GitHub isolated CI 40076227706 SUCCESS, existing 40076227711 SUCCESS"
+      "before_revision": "f939e1f6d98fad94f1c948b3abd70219d7ed6f2f",
+      "after_revision": "d6997d37bb3861e037dbca4bbb742c6b490ecbc5",
+      "verification": "PR #92 merged; isolated CI 40079995888 PASS, legacy AI CI 40079995892 PASS"
     },
     {
       "location_type": "remote",
       "provider": "GitHub",
       "repository": "Ray20123315/qqaibot",
       "branch": "main",
-      "path": "standalone-qq-ai/test/worker.test.mjs",
+      "path": "standalone-qq-ai/test/qq-delivery.test.mjs",
       "action": "modified",
-      "after_revision": "a974232b6f71991af2d23f654d618ccc0ec72465",
-      "verification": "PR #89 merged; GitHub isolated CI 40076227706 SUCCESS, existing 40076227711 SUCCESS"
-    },
-    {
-      "location_type": "remote",
-      "provider": "GitHub",
-      "repository": "Ray20123315/qqaibot",
-      "branch": "main",
-      "path": "standalone-qq-ai/test/model-config.test.mjs",
-      "action": "modified",
-      "after_revision": "a974232b6f71991af2d23f654d618ccc0ec72465",
-      "verification": "PR #89 merged; GitHub isolated CI 40076227706 SUCCESS, existing 40076227711 SUCCESS"
+      "before_revision": "f939e1f6d98fad94f1c948b3abd70219d7ed6f2f",
+      "after_revision": "d6997d37bb3861e037dbca4bbb742c6b490ecbc5",
+      "verification": "PR #92 merged; isolated CI 40079995888 PASS, legacy AI CI 40079995892 PASS"
     },
     {
       "location_type": "remote",
@@ -43,107 +35,108 @@
       "branch": "main",
       "path": "standalone-qq-ai/README.md",
       "action": "modified",
-      "after_revision": "a974232b6f71991af2d23f654d618ccc0ec72465",
-      "verification": "PR #89 merged; GitHub isolated CI 40076227706 SUCCESS, existing 40076227711 SUCCESS"
+      "before_revision": "f939e1f6d98fad94f1c948b3abd70219d7ed6f2f",
+      "after_revision": "d6997d37bb3861e037dbca4bbb742c6b490ecbc5",
+      "verification": "PR #92 merged; isolated CI 40079995888 PASS, legacy AI CI 40079995892 PASS"
     },
     {
       "location_type": "remote",
       "provider": "Cloudflare",
       "resource_id_or_path": "workers/scripts/qqaibot-unsloth",
       "action": "modified",
-      "before_revision": "01bc4391-2638-465e-8142-faf22e6f144a",
-      "after_revision": "327900f7-5a47-46dc-87ca-ee8988240bdf",
-      "verification": "Cloudflare API deployment 100%; strict inherited secrets and KV, flag, source readback"
+      "before_revision": "21f125fc-b566-4e07-8368-cad0490602b3",
+      "after_revision": "9ece06c4-edbc-4055-8a2a-1a7e2f87ecb4",
+      "verification": "Cloudflare deployment 100%, code/compat flag/inherited secrets/KV readback"
     },
     {
       "location_type": "remote",
       "provider": "GitHub",
       "repository": "Ray20123315/qqaibot",
-      "branch": "chore/unsloth-chat-memory-v114-20261024",
+      "branch": "chore/qq-send-diagnostics-memory-v116-20261024",
       "path": ".Ray_Chen/memory/00_START_HERE.md",
       "action": "modified",
-      "after_revision": "v0.0.114",
-      "verification": "memory PR / CI pending"
+      "after_revision": "v0.0.116",
+      "verification": "GitHub memory PR CI pending"
     },
     {
       "location_type": "remote",
       "provider": "GitHub",
       "repository": "Ray20123315/qqaibot",
-      "branch": "chore/unsloth-chat-memory-v114-20261024",
+      "branch": "chore/qq-send-diagnostics-memory-v116-20261024",
       "path": ".Ray_Chen/memory/ACTIVE_TASK.md",
       "action": "modified",
-      "after_revision": "v0.0.114",
-      "verification": "memory PR / CI pending"
+      "after_revision": "v0.0.116",
+      "verification": "GitHub memory PR CI pending"
     },
     {
       "location_type": "remote",
       "provider": "GitHub",
       "repository": "Ray20123315/qqaibot",
-      "branch": "chore/unsloth-chat-memory-v114-20261024",
+      "branch": "chore/qq-send-diagnostics-memory-v116-20261024",
       "path": ".Ray_Chen/memory/MEMORY_VERSION.txt",
       "action": "modified",
-      "after_revision": "v0.0.114",
-      "verification": "memory PR / CI pending"
+      "after_revision": "v0.0.116",
+      "verification": "GitHub memory PR CI pending"
     },
     {
       "location_type": "remote",
       "provider": "GitHub",
       "repository": "Ray20123315/qqaibot",
-      "branch": "chore/unsloth-chat-memory-v114-20261024",
+      "branch": "chore/qq-send-diagnostics-memory-v116-20261024",
       "path": ".Ray_Chen/memory/CURRENT_STATE.md",
       "action": "modified",
-      "after_revision": "v0.0.114",
-      "verification": "memory PR / CI pending"
+      "after_revision": "v0.0.116",
+      "verification": "GitHub memory PR CI pending"
     },
     {
       "location_type": "remote",
       "provider": "GitHub",
       "repository": "Ray20123315/qqaibot",
-      "branch": "chore/unsloth-chat-memory-v114-20261024",
+      "branch": "chore/qq-send-diagnostics-memory-v116-20261024",
       "path": ".Ray_Chen/memory/USER_REQUIREMENTS.md",
       "action": "modified",
-      "after_revision": "v0.0.114",
-      "verification": "memory PR / CI pending"
+      "after_revision": "v0.0.116",
+      "verification": "GitHub memory PR CI pending"
     },
     {
       "location_type": "remote",
       "provider": "GitHub",
       "repository": "Ray20123315/qqaibot",
-      "branch": "chore/unsloth-chat-memory-v114-20261024",
+      "branch": "chore/qq-send-diagnostics-memory-v116-20261024",
       "path": ".Ray_Chen/memory/DECISIONS.md",
       "action": "modified",
-      "after_revision": "v0.0.114",
-      "verification": "memory PR / CI pending"
+      "after_revision": "v0.0.116",
+      "verification": "GitHub memory PR CI pending"
     },
     {
       "location_type": "remote",
       "provider": "GitHub",
       "repository": "Ray20123315/qqaibot",
-      "branch": "chore/unsloth-chat-memory-v114-20261024",
+      "branch": "chore/qq-send-diagnostics-memory-v116-20261024",
       "path": ".Ray_Chen/memory/GOTCHAS.md",
       "action": "modified",
-      "after_revision": "v0.0.114",
-      "verification": "memory PR / CI pending"
+      "after_revision": "v0.0.116",
+      "verification": "GitHub memory PR CI pending"
     },
     {
       "location_type": "remote",
       "provider": "GitHub",
       "repository": "Ray20123315/qqaibot",
-      "branch": "chore/unsloth-chat-memory-v114-20261024",
+      "branch": "chore/qq-send-diagnostics-memory-v116-20261024",
       "path": ".Ray_Chen/memory/VERIFY.md",
       "action": "modified",
-      "after_revision": "v0.0.114",
-      "verification": "memory PR / CI pending"
+      "after_revision": "v0.0.116",
+      "verification": "GitHub memory PR CI pending"
     },
     {
       "location_type": "remote",
       "provider": "GitHub",
       "repository": "Ray20123315/qqaibot",
-      "branch": "chore/unsloth-chat-memory-v114-20261024",
+      "branch": "chore/qq-send-diagnostics-memory-v116-20261024",
       "path": ".Ray_Chen/memory/FILE_MANIFEST.json",
       "action": "modified",
-      "after_revision": "v0.0.114",
-      "verification": "memory PR / CI pending"
+      "after_revision": "v0.0.116",
+      "verification": "GitHub memory PR CI pending"
     }
   ],
   "memory_updates": [
@@ -158,13 +151,18 @@
     "FILE_MANIFEST.json"
   ],
   "verification": {
-    "isolated_ci": "SUCCESS:40076227706",
-    "existing_ci": "SUCCESS:40076227711",
-    "cloudflare_deployment": "SUCCESS:327900f7-5a47-46dc-87ca-ee8988240bdf",
-    "secrets": "PRESERVED:secret_text",
-    "kv_binding": "PRESERVED:selected-model-v2",
-    "model_real_chat": "UNVERIFIED",
-    "qq_e2e": "UNVERIFIED"
+    "isolated_ci": "SUCCESS:40079995888",
+    "existing_ci": "SUCCESS:40079995892",
+    "cloudflare_deployment": "SUCCESS:9ece06c4-edbc-4055-8a2a-1a7e2f87ecb4",
+    "secrets": "4 names preserved secret_text",
+    "kv": "CONFIG_KV + selected-model-v2 preserved",
+    "qq_incoming": "VERIFIED user diagnostic callback and GROUP_AT",
+    "qq_outgoing": "BLOCKED pending retry after new error codes"
   },
-  "next_exact_action": "Refresh QQ AI admin page and retry chat; report exact safe error or successful model reply."
+  "next_exact_action": "User sends fresh QQ group @ message, opens authenticated QQ diagnostics and reports newest send_failed code or reply_sent OK.",
+  "previous_local_memory_archive": {
+    "version": "v0.0.115",
+    "sha256": "330f5cef91ad35c3708e01724ff37d460053518ddb2e3778c0c5ecd0a0765603",
+    "state": "valid local archive, git remote v0.0.114 when user reported send_failed UNKNOWN"
+  }
 }
