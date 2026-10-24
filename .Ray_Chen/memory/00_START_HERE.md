@@ -1,19 +1,17 @@
 # Ray_Chen Memory
-version: v0.0.119
-task_id: unsloth-multirole-routing-20261024
+version: v0.0.120
+task_id: qq-always-web-markdown-20261024
 task_status: completed
-goal_revision: 9
+goal_revision: 10
 canonical_branch: main
-verified_code_commit: dfc771c6e39e53fe316d75039fc834d0f2af87a4
-updated_at: 2026-10-24
+code_commit: 03f829edebff295cb5953ad5636e41db2c5527ce
+last_updated: 2026-10-24
 
 ## Quick resume
-- User asked to RETRY GitHub writes for Unsloth multi-model QQ router, after an earlier platform safety rejection. Normal GitHub create_file succeeded on existing feature/unsloth-multirole-routing-20261024 branch; no safety bypass was used.
-- PR #96 merged to main dfc771c6e39e53fe316d75039fc834d0f2af87a4. New standalone-qq-ai/role-router.js with three roles (chat/asr/tts) and opt-in Unsloth web_search (not a model). Image understanding and image generation are explicitly EXCLUDED by latest user request.
-- Worker routes fixed https://msiai.ray2025.com/v1, no arbitrary URLs or command/file/MCP tools. Ordinary Qwen chat disables tools, explicit search when enabled only permits web_search. QQ /search and /web commands are allowed while other command prefixes still refused. Admin audio speech/transcriptions API tests available; QQ rich media is NOT YET integrated/verified.
-- New responsive dashboard model roles page; stores IDs + webSearch bool in dedicated CONFIG_KV model-roles-v3, keeps selected-model-v2 synchronized. API key stays solely in UNSLOTH_API_KEY Worker Secret.
-- Isolated CI run 40087298832 SUCCESS and original QQAIBOT CI run 40087298901 SUCCESS after fixing 4 diagnostic-code backward compatibility regressions. Existing MODEL_* error codes remain unchanged.
-- Cloudflare qqaibot-unsloth deployment 365a232a-ad3b-49ab-aecb-e150a3214c4c at 100%; source readback confirms role router/admin audio/QQ callback. All 4 Secret bindings, CONFIG_KV, original Qwen selected model and global_fetch_strictly_public preserved. Original production qqai untouched.
-- Existing GitHub memory was v0.0.117 while prior verified local package v0.0.118 was not synchronized due earlier safety rejection. This version v0.0.119 supersedes v0.0.118 release handoff and records successful deployed version.
-- Live authenticated browser/API E2E, web-search SSE against user's exact Unsloth version, ASR/TTS model calls and simultaneous VRAM residence are NOT VERIFIED. Search toggle defaults false, ASR and TTS IDs unset. Unsloth Studio Settings/API handles automatic model switch/unload, not Worker.
-- NEXT: Owner opens https://qqbot-ai.ray2025.com/ -> 多模型路由, enters installed Qwen chat/ASR/TTS model IDs, enables web search if desired, saves and tests admin audio/search; checks QQ group @ replies.
+- User requests always-on Unsloth web search without typing /search or flipping a manual switch, and QQ-native rendered Markdown headings, paragraphs and ordered 1/2/3 lists rather than raw ** or #.
+- PR #98 code merged main 03f829edebff295cb5953ad5636e41db2c5527ce; isolated Worker CI 40089303664 and legacy AI CI 40089303680 both SUCCESS. Original qqai production untouched.
+- New qq-format.js generates QQ msg_type:2 markdown.content with headings and numbered list, fallback once to msg_type:0 cleaned plaintext on explicit HTTP 400/403/415/422 or business-code rejection; caches markdown rejection in CONFIG_KV for 24h. Never retries uncertain transport timeout (duplicate risk). Added tests including actual signed QQ delivery compatibility, markdown rejection/cache, no retry on timeout.
+- Unsloth role-router.js effective webSearch TRUE for legacy config and every chat, sends enable_tools:true, enabled_tools:['web_search'], mcp_enabled:false, stream:true, session_id to fixed msiai.ray2025.com. System prompt must not claim live search succeeded if no actual tool result, and requests QQ Markdown-friendly response formatting. No terminal/Python/file/MCP/image routes; user explicitly prohibits image models.
+- Cloudflare independent Worker qqaibot-unsloth deployed version cdfea900-f08a-4df0-9363-d80a5abad14c 100% and readback verified 4 secret_text bindings, CONFIG_KV, flags, previous selected-model-v2 / model-roles-v3 keys and QQ callback remain.
+- QQ official API docs support native md type 2 but Markdown and especially PASSIVE group Markdown may require distinct privilege. Actual QQ mobile rendering/entitlement is NOT verified; fallback may be plain instead of true sized headings. Unsloth specific GGUF versions can ignore enabled_tools web_search; request being enabled does not prove internet searches actually occur. Must not say guaranteed web searched every turn.
+- NEXT: User sends new QQ group @ message asking structured 3-point answer and current web info, inspects rendered headings; report actual output and new error code/QQ stage, without posting secrets.

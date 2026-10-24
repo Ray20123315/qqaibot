@@ -1,32 +1,43 @@
 {
-  "version": "v0.0.119",
-  "task_id": "unsloth-multirole-routing-20261024",
-  "goal_revision": 9,
+  "version": "v0.0.120",
+  "task_id": "qq-always-web-markdown-20261024",
+  "goal_revision": 10,
   "changed_at": "2026-10-24",
   "repository": "Ray20123315/qqaibot",
-  "code_main_commit": "dfc771c6e39e53fe316d75039fc834d0f2af87a4",
+  "code_main_commit": "03f829edebff295cb5953ad5636e41db2c5527ce",
   "files": [
     {
       "location_type": "remote",
       "provider": "GitHub",
       "repository": "Ray20123315/qqaibot",
       "branch": "main",
-      "path": "standalone-qq-ai/role-router.js",
+      "path": "standalone-qq-ai/qq-format.js",
       "action": "created",
       "before_revision": null,
-      "after_revision": "dfc771c6e39e53fe316d75039fc834d0f2af87a4",
-      "verification": "PR #96 merged; isolated CI 40087298832 SUCCESS, legacy QQ CI 40087298901 SUCCESS"
+      "after_revision": "03f829edebff295cb5953ad5636e41db2c5527ce",
+      "verification": "PR #98 merged; isolated CI 40089303664 SUCCESS and legacy QQ CI 40089303680 SUCCESS"
     },
     {
       "location_type": "remote",
       "provider": "GitHub",
       "repository": "Ray20123315/qqaibot",
       "branch": "main",
-      "path": "standalone-qq-ai/test/role-router.test.mjs",
+      "path": "standalone-qq-ai/test/qq-markdown.test.mjs",
       "action": "created",
       "before_revision": null,
-      "after_revision": "dfc771c6e39e53fe316d75039fc834d0f2af87a4",
-      "verification": "PR #96 merged; isolated CI 40087298832 SUCCESS, legacy QQ CI 40087298901 SUCCESS"
+      "after_revision": "03f829edebff295cb5953ad5636e41db2c5527ce",
+      "verification": "PR #98 merged; isolated CI 40089303664 SUCCESS and legacy QQ CI 40089303680 SUCCESS"
+    },
+    {
+      "location_type": "remote",
+      "provider": "GitHub",
+      "repository": "Ray20123315/qqaibot",
+      "branch": "main",
+      "path": "standalone-qq-ai/role-router.js",
+      "action": "modified",
+      "before_revision": "4c76a2d7aebb9d15ab87ed0d04d60522fd139b54",
+      "after_revision": "03f829edebff295cb5953ad5636e41db2c5527ce",
+      "verification": "PR #98 merged; isolated CI 40089303664 SUCCESS and legacy QQ CI 40089303680 SUCCESS"
     },
     {
       "location_type": "remote",
@@ -35,9 +46,9 @@
       "branch": "main",
       "path": "standalone-qq-ai/worker.js",
       "action": "modified",
-      "before_revision": "db611532ec80d401d2fc0dfe2e52d1531b4833a9",
-      "after_revision": "dfc771c6e39e53fe316d75039fc834d0f2af87a4",
-      "verification": "PR #96 merged; isolated CI 40087298832 SUCCESS, legacy QQ CI 40087298901 SUCCESS"
+      "before_revision": "4c76a2d7aebb9d15ab87ed0d04d60522fd139b54",
+      "after_revision": "03f829edebff295cb5953ad5636e41db2c5527ce",
+      "verification": "PR #98 merged; isolated CI 40089303664 SUCCESS and legacy QQ CI 40089303680 SUCCESS"
     },
     {
       "location_type": "remote",
@@ -46,9 +57,9 @@
       "branch": "main",
       "path": "standalone-qq-ai/dashboard.js",
       "action": "modified",
-      "before_revision": "db611532ec80d401d2fc0dfe2e52d1531b4833a9",
-      "after_revision": "dfc771c6e39e53fe316d75039fc834d0f2af87a4",
-      "verification": "PR #96 merged; isolated CI 40087298832 SUCCESS, legacy QQ CI 40087298901 SUCCESS"
+      "before_revision": "4c76a2d7aebb9d15ab87ed0d04d60522fd139b54",
+      "after_revision": "03f829edebff295cb5953ad5636e41db2c5527ce",
+      "verification": "PR #98 merged; isolated CI 40089303664 SUCCESS and legacy QQ CI 40089303680 SUCCESS"
     },
     {
       "location_type": "remote",
@@ -57,108 +68,130 @@
       "branch": "main",
       "path": "standalone-qq-ai/README.md",
       "action": "modified",
-      "before_revision": "db611532ec80d401d2fc0dfe2e52d1531b4833a9",
-      "after_revision": "dfc771c6e39e53fe316d75039fc834d0f2af87a4",
-      "verification": "PR #96 merged; isolated CI 40087298832 SUCCESS, legacy QQ CI 40087298901 SUCCESS"
+      "before_revision": "4c76a2d7aebb9d15ab87ed0d04d60522fd139b54",
+      "after_revision": "03f829edebff295cb5953ad5636e41db2c5527ce",
+      "verification": "PR #98 merged; isolated CI 40089303664 SUCCESS and legacy QQ CI 40089303680 SUCCESS"
+    },
+    {
+      "location_type": "remote",
+      "provider": "GitHub",
+      "repository": "Ray20123315/qqaibot",
+      "branch": "main",
+      "path": "standalone-qq-ai/test/role-router.test.mjs",
+      "action": "modified",
+      "before_revision": "4c76a2d7aebb9d15ab87ed0d04d60522fd139b54",
+      "after_revision": "03f829edebff295cb5953ad5636e41db2c5527ce",
+      "verification": "PR #98 merged; isolated CI 40089303664 SUCCESS and legacy QQ CI 40089303680 SUCCESS"
+    },
+    {
+      "location_type": "remote",
+      "provider": "GitHub",
+      "repository": "Ray20123315/qqaibot",
+      "branch": "main",
+      "path": "standalone-qq-ai/test/qq-delivery.test.mjs",
+      "action": "modified",
+      "before_revision": "4c76a2d7aebb9d15ab87ed0d04d60522fd139b54",
+      "after_revision": "03f829edebff295cb5953ad5636e41db2c5527ce",
+      "verification": "PR #98 merged; isolated CI 40089303664 SUCCESS and legacy QQ CI 40089303680 SUCCESS"
     },
     {
       "location_type": "remote",
       "provider": "Cloudflare",
       "resource_id_or_path": "workers/scripts/qqaibot-unsloth",
       "action": "modified",
-      "before_revision": "68e38e2c-da07-4c2b-a9d7-1e959f89e4d2",
-      "after_revision": "365a232a-ad3b-49ab-aecb-e150a3214c4c",
-      "verification": "Cloudflare API readback 100% version, strict inherited 4 Secrets/KV/flags; original QQ worker untouched"
+      "before_revision": "365a232a-ad3b-49ab-aecb-e150a3214c4c",
+      "after_revision": "cdfea900-f08a-4df0-9363-d80a5abad14c",
+      "verification": "Cloudflare API 100% deployment, source markers, four secrets, KV and flags readback"
     },
     {
       "location_type": "remote",
       "provider": "GitHub",
       "repository": "Ray20123315/qqaibot",
-      "branch": "chore/unsloth-multirole-memory-v119-20261024",
+      "branch": "chore/qq-search-markdown-memory-v120-20261024",
       "path": ".Ray_Chen/memory/00_START_HERE.md",
       "action": "modified",
-      "after_revision": "v0.0.119",
-      "verification": "Memory PR and artifact CI pending"
+      "after_revision": "v0.0.120",
+      "verification": "Memory PR/CI/artifact pending"
     },
     {
       "location_type": "remote",
       "provider": "GitHub",
       "repository": "Ray20123315/qqaibot",
-      "branch": "chore/unsloth-multirole-memory-v119-20261024",
+      "branch": "chore/qq-search-markdown-memory-v120-20261024",
       "path": ".Ray_Chen/memory/ACTIVE_TASK.md",
       "action": "modified",
-      "after_revision": "v0.0.119",
-      "verification": "Memory PR and artifact CI pending"
+      "after_revision": "v0.0.120",
+      "verification": "Memory PR/CI/artifact pending"
     },
     {
       "location_type": "remote",
       "provider": "GitHub",
       "repository": "Ray20123315/qqaibot",
-      "branch": "chore/unsloth-multirole-memory-v119-20261024",
+      "branch": "chore/qq-search-markdown-memory-v120-20261024",
       "path": ".Ray_Chen/memory/MEMORY_VERSION.txt",
       "action": "modified",
-      "after_revision": "v0.0.119",
-      "verification": "Memory PR and artifact CI pending"
+      "after_revision": "v0.0.120",
+      "verification": "Memory PR/CI/artifact pending"
     },
     {
       "location_type": "remote",
       "provider": "GitHub",
       "repository": "Ray20123315/qqaibot",
-      "branch": "chore/unsloth-multirole-memory-v119-20261024",
+      "branch": "chore/qq-search-markdown-memory-v120-20261024",
       "path": ".Ray_Chen/memory/CURRENT_STATE.md",
       "action": "modified",
-      "after_revision": "v0.0.119",
-      "verification": "Memory PR and artifact CI pending"
+      "after_revision": "v0.0.120",
+      "verification": "Memory PR/CI/artifact pending"
     },
     {
       "location_type": "remote",
       "provider": "GitHub",
       "repository": "Ray20123315/qqaibot",
-      "branch": "chore/unsloth-multirole-memory-v119-20261024",
+      "branch": "chore/qq-search-markdown-memory-v120-20261024",
       "path": ".Ray_Chen/memory/USER_REQUIREMENTS.md",
       "action": "modified",
-      "after_revision": "v0.0.119",
-      "verification": "Memory PR and artifact CI pending"
+      "after_revision": "v0.0.120",
+      "verification": "Memory PR/CI/artifact pending"
     },
     {
       "location_type": "remote",
       "provider": "GitHub",
       "repository": "Ray20123315/qqaibot",
-      "branch": "chore/unsloth-multirole-memory-v119-20261024",
+      "branch": "chore/qq-search-markdown-memory-v120-20261024",
       "path": ".Ray_Chen/memory/DECISIONS.md",
       "action": "modified",
-      "after_revision": "v0.0.119",
-      "verification": "Memory PR and artifact CI pending"
+      "after_revision": "v0.0.120",
+      "verification": "Memory PR/CI/artifact pending"
     },
     {
       "location_type": "remote",
       "provider": "GitHub",
       "repository": "Ray20123315/qqaibot",
-      "branch": "chore/unsloth-multirole-memory-v119-20261024",
+      "branch": "chore/qq-search-markdown-memory-v120-20261024",
       "path": ".Ray_Chen/memory/GOTCHAS.md",
       "action": "modified",
-      "after_revision": "v0.0.119",
-      "verification": "Memory PR and artifact CI pending"
+      "after_revision": "v0.0.120",
+      "verification": "Memory PR/CI/artifact pending"
     },
     {
       "location_type": "remote",
       "provider": "GitHub",
       "repository": "Ray20123315/qqaibot",
-      "branch": "chore/unsloth-multirole-memory-v119-20261024",
+      "branch": "chore/qq-search-markdown-memory-v120-20261024",
       "path": ".Ray_Chen/memory/VERIFY.md",
       "action": "modified",
-      "after_revision": "v0.0.119",
-      "verification": "Memory PR and artifact CI pending"
+      "after_revision": "v0.0.120",
+      "verification": "Memory PR/CI/artifact pending"
     },
     {
       "location_type": "remote",
       "provider": "GitHub",
       "repository": "Ray20123315/qqaibot",
-      "branch": "chore/unsloth-multirole-memory-v119-20261024",
+      "branch": "chore/qq-search-markdown-memory-v120-20261024",
       "path": ".Ray_Chen/memory/FILE_MANIFEST.json",
       "action": "modified",
-      "after_revision": "v0.0.119",
-      "verification": "Memory PR and artifact CI pending"
+      "after_revision": "v0.0.120",
+      "verification": "Memory PR/CI/artifact pending"
     }
   ],
   "memory_updates": [
@@ -173,18 +206,18 @@
     "FILE_MANIFEST.json"
   ],
   "verification": {
-    "isolated_ci": "SUCCESS:40087298832",
-    "legacy_ci": "SUCCESS:40087298901",
-    "code_merge": "SUCCESS:dfc771c6e39e53fe316d75039fc834d0f2af87a4",
-    "cloudflare": "SUCCESS:365a232a-ad3b-49ab-aecb-e150a3214c4c 100%",
-    "secrets": "PRESERVED 4 secret_text",
-    "kv": "CONFIG_KV and selected-model-v2 preserved; model-roles-v3 not yet configured",
-    "qq_webhook": "Source preserved; no new live QQ E2E",
-    "images": "NO image routes",
-    "real_web_and_audio": "NOT_VERIFIED",
-    "simultaneous_model_residence": "NOT_VERIFIED"
+    "isolated_ci": "SUCCESS:40089303664",
+    "legacy_ci": "SUCCESS:40089303680",
+    "code_merge": "SUCCESS:03f829edebff295cb5953ad5636e41db2c5527ce",
+    "cloudflare": "SUCCESS:cdfea900-f08a-4df0-9363-d80a5abad14c 100%",
+    "secrets": "PRESERVED four secret_text",
+    "kv": "PRESERVED CONFIG_KV / model-roles-v3 / selected-model-v2",
+    "qq_real_markdown": "UNVERIFIED",
+    "live_unsloth_web_tool": "UNVERIFIED",
+    "images": "NO routes",
+    "old_qqai": "UNCHANGED"
   },
-  "next_exact_action": "User opens Qwen QQ dashboard Multi-model Routing, fills installed chat/ASR/TTS IDs, enables search if desired, saves and tests real chat/search/audio.",
+  "next_exact_action": "User tests a new QQ group @ message requesting structured numbered answer and recent web info, reports whether QQ rendered headings and any diagnostic code.",
   "previous_local_memory_archive": {
     "version": "v0.0.118",
     "status": "Prior local validated but not merged in GitHub; latest remote v0.0.117 at task start."

@@ -1,24 +1,24 @@
 # ACTIVE_TASK
-task_id: unsloth-multirole-routing-20261024
+task_id: qq-always-web-markdown-20261024
 task_status: completed
-goal_revision: 9
-goal: Retry normal GitHub writes and ship Unsloth-only model role routing to isolated QQ AI Worker, excluding ALL images.
+goal_revision: 10
+goal: Make Unsloth web_search requested on every QQ and admin Qwen text conversation, and send QQ actual Markdown rich messages with readable single fallback on explicit platform rejection.
 acceptance_criteria:
-- GitHub normal write/PR to main; safe CI and Cloudflare independent Worker deployment.
-- chat/asr/tts model IDs set independently, explicit opt-in web_search, fixed Unsloth HTTPS host + Worker Secret; old model selection compatible.
-- No image generation or vision, no arbitrary tools, shell, file ops, dynamic external URLs, or modifications to old qqai.
-- Confirm Cloudflare four secrets and CONFIG_KV bindings unchanged and 100% deployment; package versioned memory and Gmail.
-current_phase: Code merged/deployed, documented real-user acceptance limitations.
-current_step: Manual Unsloth/QQ acceptance in owner-managed authenticated admin console.
+- No manual /search command or webSearch toggle required.
+- Only web_search tool allowed; MCP/shell/Python/files/images remain forbidden.
+- Model never claims internet verified without actual tool results.
+- Native Markdown message type 2 with # and ## headings and 1. 2. 3. lists; permission rejection downgraded to text, no raw syntax and no duplicate retry on unknown outcome.
+- GitHub isolated+legacy CI pass, main merge, standalone Worker deployment and readback, preserve 4 secrets/KV/QQ events/old qqai.
+current_phase: code/CI/merge/deploy verified, live Unsloth search execution and QQ native rich rendering require human testing.
+current_step: User tests actual QQ group reply with structured and fresh-info request; if plain fallback, confirm QQ native/passive Markdown permission.
 completed_steps:
-- Confirmed main db611532ec80d401d2fc0dfe2e52d1531b4833a9 and existing branch pre-write. Retried Github create_file, success 6d8aeb9d307e3451d41a46b971ab2802ab658ff5.
-- Updated role-router.js safe search/ASR/TTS helpers, worker.js admin endpoints/chat compatibility/QQ search, dashboard.js model-roles UI, test/role-router.test.mjs 7 tests, README.md.
-- PR #96 initial CI found 4 existing MODEL_* diagnostic regression failures; repaired wrapper and reran both CI groups to success (isolated 40087298832, old QQ 40087298901). Merged PR #96 commit dfc771c6e39e53fe316d75039fc834d0f2af87a4.
-- Before deployment verified existing Secret/KV bindings and original Worker version 68e38e2c-da07-4c2b-a9d7-1e959f89e4d2.
-- Uploaded 5 independent modules with strict binding inheritance to qqaibot-unsloth, deployed version 365a232a-ad3b-49ab-aecb-e150a3214c4c 100%; verified source flags 4 Secrets, CONFIG_KV/selected-model-v2.
-verification_results: GitHub isolated CI success, legacy QQ CI success, merge main readback, Cloudflare script/settings/deploy readback success. Real Unsloth web_search/audio model tests, QQ rich-media speech, multi-model simultaneous residence NOT VERIFIED.
-known_failures: Initial GitHub create_file safety rejection on previous turn; normal retry succeeded this turn. Initial feature CI 4 failures from renamed MODEL errors; fixed and reran.
-blockers: No blockers to code/deploy. User must select actual installed ASR/TTS IDs and enable web_search. Runtime API interoperability and auto-switch depend on user's Unsloth version/hardware.
-next_exact_action: Owner sign in to Qwen QQ AI dashboard -> 多模型路由, save chat/ASR/TTS IDs and webSearch choice, run QQ /search and admin audio tests, report any safe error codes.
-resume_rule: Check main, Worker deployment and CONFIG_KV before any new edits; no image routes and no unauthorized QQ messages; do not claim live end-to-end results without evidence.
+- Read official Tencent QQ v2 send + markdown docs; native msg_type 2 markdown.content, special group passive Markdown privilege may be required. Read Unsloth smoke test using enabled_tools web_search; know GitHub issue on some GGUF Studio releases not actually triggering search despite enabled_tools.
+- Added standalone-qq-ai/qq-format.js and test/qq-markdown.test.mjs, edited role-router.js/worker.js/dashboard.js/README.md/test/role-router.test.mjs/test/qq-delivery.test.mjs. No images.
+- CI isolated 40089303664 SUCCESS, legacy 40089303680 SUCCESS including rejection fallback and retry suppression; code PR #98 merged main 03f829edebff295cb5953ad5636e41db2c5527ce.
+- Cloudflare independent qqaibot-unsloth 6-module strict inherit deployed cdfea900-f08a-4df0-9363-d80a5abad14c at 100%, readback verifies new code/4 secret_text+CONFIG_KV/flags, selected-model-v2 and model-roles-v3 intact, original qqai unchanged.
+verification_results: CI and Cloudflare API PASS; real QQ rich Markdown and actual Unsloth search tool invocation NOT VERIFIED. No QQ message actively sent by these tools.
+known_failures: QQ native Markdown entitlement may not be granted, fallback necessary; external search may not really run; 23-second QQ inference timeout may be insufficient for slow web searches.
+blockers: None for code or deployment. Operator needs test results; QQ Markdown permission outside Worker.
+next_exact_action: User asks QQ AI for three numbered items and up-to-date info; inspect true heading/list rendering, send back actual output and QQ diag or error code.
+resume_rule: Confirm repo main/Cloudflare version before further writes; do not claim actual tool execution or native Markdown rendering until user evidence; preserve all secrets and exclude image models.
 last_checkpoint_date: 2026-10-24
