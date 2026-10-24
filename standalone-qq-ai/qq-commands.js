@@ -1,6 +1,6 @@
 /** Deterministic, side-effect-free QQ slash commands. Group moderation is intentionally NOT executable here. */
 const topics=['今天有什么想分享的小确幸？','如果能学会一项新技能，你会选什么？','你最近遇到过最有趣的科技产品是什么？','周末最喜欢怎么放松？'];
-export function commandHelp(){return '# 客服与聊天指令\n\n1. /帮助 — 查看指令\n2. /骰子 — 掷六面骰子\n3. /抽签 甲 乙 丙 — 随机抽选\n4. /今日话题 — 获取聊天话题\n5. /上下文 — 查看本会话上下文概况\n6. /总结 — 查看现有对话摘要\n\n群管理的禁言、踢人、审核需 QQ 官方权限，当前未开放执行。';}
+export function commandHelp(){return '# 客服与聊天指令\n\n1. /帮助 — 查看指令\n2. /骰子 — 掷六面骰子\n3. /抽签 甲 乙 丙 — 随机抽选\n4. /今日话题 — 获取聊天话题\n5. /上下文 — 查看本会话上下文概况\n6. /总结 — 查看现有对话摘要\n7. /搜索开 /搜索关 — 个人网络搜索开关\n8. /思考开 /思考关 — 个人思考开关（默认关闭）\n\n深度搜索暂未通过兼容性验证。群聊 HTML 附件暂不开放发送。\n\n群管理的禁言、踢人、审核需 QQ 官方权限，当前未开放执行。';}
 export function parseCommand(message){
  const matched=/^\/([\u4e00-\u9fffA-Za-z]+)(?:\s+(.*))?$/.exec(String(message||'').trim());
  return matched?{name:matched[1],args:matched[2]||''}:null;
