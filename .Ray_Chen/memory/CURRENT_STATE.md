@@ -19,3 +19,8 @@
 - PR #84 code merged main 16764e1bcc7509f0eb761040e6ed738e05572194; GitHub CI isolated 40072501757 SUCCESS, legacy 40072501794 SUCCESS.
 - New CONFIG_KV dedicated `qqaibot-unsloth-config` namespace id 033b241f7377496790d92056d39669ad; encrypted key & chosen model (not yet configured). Worker c179d753-b3f8-4f0f-ac2f-a262379eff14 deployed 100% with binding readback.
 - Model listing through fixed /v1/models endpoint; admin chooses from returned IDs; same model used by QQ and web chat. Secrets GET empty; no live Unsloth/QQ verification. Old qqai remains untouched.
+
+## 2026-10-24 Unsloth Secret-only model picker
+- User verified public HTTPS /v1/models HTTP 200 with Bearer key, and local HTTP 200. Installed model lilcheaty/flint-abliterated-GGUF loaded.
+- PR #87 main 500c7689c199dc5db33f91146dc6e7c78f05f2fd, CI isolated 40075035673 SUCCESS and original 40075035664 SUCCESS.
+- Cloudflare qqaibot-unsloth version 678a0b74-800b-47ea-9efe-868fd7e551f0 deployed 100%, global_fetch_strictly_public enabled, ADMIN_TOKEN and CONFIG_KV bindings inherited/readback. Selected model ID alone in KV; API key exclusively Worker Secret (operator must configure). Prior key KV keys empty. Legacy qqai unchanged.
