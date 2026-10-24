@@ -10,3 +10,7 @@
 - New QQ worker: Cloudflare Workers general outgoing egress IP is not stable; QQ Open Platform may require fixed outbound IP whitelist. Cannot claim real message delivery without addressing policy and E2E evidence.
 - New Worker has no Secrets as of 2026-10-24; Unsloth model ID/key, QQ App credentials and ADMIN_TOKEN must be set manually. Custom domain API binding enabled but public HTTPS not independently verified. The home Unsloth service may need Access service authentication not implemented in this minimal Worker.
 - New Worker uses isolate-local best-effort replay cache and `waitUntil`; extremely slow local inference or retries can fail; no durable exactly-once semantics.
+
+- Encrypted KV key is derived from high-entropy ADMIN_TOKEN; changing it invalidates stored ciphertext. Explicitly supplying a new API Key via admin can overwrite undecryptable config. Never log or send raw key in GET query/URL.
+- Cloudflare KV is eventually consistent; after selecting a model, QQ requests from other locations may see an older configuration briefly. Never claim strong transactional consistency.
+- New dedicated CONFIG_KV namespace (033b241f7377496790d92056d39669ad) is NOT preexisting QQ data and must not be confused with legacy QQAIBOT D1 or QQbotKV.

@@ -1,10 +1,10 @@
 {
-  "version": "v0.0.110",
-  "task_id": "unsloth-qq-ai-20261024",
-  "goal_revision": 1,
+  "version": "v0.0.111",
+  "task_id": "unsloth-qq-model-picker-20261024",
+  "goal_revision": 2,
   "changed_at": "2026-10-24",
   "repository": "Ray20123315/qqaibot",
-  "code_main_commit": "a365f0c6c391a171154241e82c28f00bfa1eb322",
+  "code_main_commit": "16764e1bcc7509f0eb761040e6ed738e05572194",
   "files": [
     {
       "location_type": "remote",
@@ -12,27 +12,9 @@
       "repository": "Ray20123315/qqaibot",
       "branch": "main",
       "path": "standalone-qq-ai/worker.js",
-      "action": "created",
-      "after_revision": "a365f0c6c391a171154241e82c28f00bfa1eb322",
-      "verification": "GitHub CI 40068743188 SUCCESS; main readback"
-    },
-    {
-      "location_type": "remote",
-      "provider": "GitHub",
-      "repository": "Ray20123315/qqaibot",
-      "branch": "main",
-      "path": "standalone-qq-ai/wrangler.toml",
-      "action": "created",
-      "verification": "PR #82 merged; GitHub CI success"
-    },
-    {
-      "location_type": "remote",
-      "provider": "GitHub",
-      "repository": "Ray20123315/qqaibot",
-      "branch": "main",
-      "path": "standalone-qq-ai/package.json",
-      "action": "created",
-      "verification": "PR #82 merged; GitHub CI success"
+      "action": "modified",
+      "after_revision": "16764e1bcc7509f0eb761040e6ed738e05572194",
+      "verification": "PR #84 merged, CI 40072501757 SUCCESS"
     },
     {
       "location_type": "remote",
@@ -40,60 +22,143 @@
       "repository": "Ray20123315/qqaibot",
       "branch": "main",
       "path": "standalone-qq-ai/README.md",
-      "action": "created",
-      "verification": "PR #82 merged; GitHub CI success"
+      "action": "modified",
+      "after_revision": "16764e1bcc7509f0eb761040e6ed738e05572194",
+      "verification": "PR #84 merged, CI 40072501757 SUCCESS"
     },
     {
       "location_type": "remote",
       "provider": "GitHub",
       "repository": "Ray20123315/qqaibot",
       "branch": "main",
-      "path": "standalone-qq-ai/test/worker.test.mjs",
-      "action": "created",
-      "verification": "PR #82 merged; GitHub CI success"
+      "path": "standalone-qq-ai/wrangler.toml",
+      "action": "modified",
+      "after_revision": "16764e1bcc7509f0eb761040e6ed738e05572194",
+      "verification": "PR #84 merged, CI 40072501757 SUCCESS"
     },
     {
       "location_type": "remote",
       "provider": "GitHub",
       "repository": "Ray20123315/qqaibot",
       "branch": "main",
-      "path": ".github/workflows/qq-unsloth-check.yml",
+      "path": "standalone-qq-ai/model-config.js",
       "action": "created",
-      "verification": "PR #82 merged; GitHub CI success"
+      "after_revision": "16764e1bcc7509f0eb761040e6ed738e05572194",
+      "verification": "PR #84 merged, CI 40072501757 SUCCESS"
+    },
+    {
+      "location_type": "remote",
+      "provider": "GitHub",
+      "repository": "Ray20123315/qqaibot",
+      "branch": "main",
+      "path": "standalone-qq-ai/test/model-config.test.mjs",
+      "action": "created",
+      "after_revision": "16764e1bcc7509f0eb761040e6ed738e05572194",
+      "verification": "PR #84 merged, CI 40072501757 SUCCESS"
+    },
+    {
+      "location_type": "remote",
+      "provider": "Cloudflare",
+      "resource_id_or_path": "KV/qqaibot-unsloth-config",
+      "action": "created",
+      "after_revision": "033b241f7377496790d92056d39669ad",
+      "verification": "KV create success + worker binding readback"
     },
     {
       "location_type": "remote",
       "provider": "Cloudflare",
       "resource_id_or_path": "workers/scripts/qqaibot-unsloth",
-      "action": "created",
-      "after_revision": "4ca53f6f1f6648d097ca1109607d8b9f",
-      "verification": "API script PUT HTTP 200; fetch module compiled"
-    },
-    {
-      "location_type": "remote",
-      "provider": "Cloudflare",
-      "resource_id_or_path": "workers/domains/qqbot-ai.ray2025.com",
-      "action": "created",
-      "after_revision": "bb48e1009d7560d3728a5445155fbdae4baa40f5",
-      "verification": "API readback enabled=true; external HTTPS not verified"
+      "action": "updated",
+      "before_revision": "4ca53f6f-1f66-48d0-97ca-1109607d8b9f",
+      "after_revision": "c179d753-b3f8-4f0f-ac2f-a262379eff14",
+      "verification": "deployed 100%, CONFIG_KV binding verified"
     },
     {
       "location_type": "remote",
       "provider": "GitHub",
       "repository": "Ray20123315/qqaibot",
-      "branch": "feature/qq-unsloth-memory-20261024",
-      "path": ".github/workflows/bridge-check.yml",
+      "branch": "feature/unsloth-model-memory-20261024",
+      "path": ".Ray_Chen/memory/00_START_HERE.md",
       "action": "modified",
-      "before_revision": "2a72fe8cc7435be4d832e23b7b4062cd7fd5eb86",
-      "after_revision": "a6e8c942cc01bbf3d356c44432c293c5d8371e20",
-      "verification": "GitHub PR CI 40069333964 SUCCESS incl. dynamic archive step"
+      "verification": "v0.0.111 memory PR CI pending"
+    },
+    {
+      "location_type": "remote",
+      "provider": "GitHub",
+      "repository": "Ray20123315/qqaibot",
+      "branch": "feature/unsloth-model-memory-20261024",
+      "path": ".Ray_Chen/memory/ACTIVE_TASK.md",
+      "action": "modified",
+      "verification": "v0.0.111 memory PR CI pending"
+    },
+    {
+      "location_type": "remote",
+      "provider": "GitHub",
+      "repository": "Ray20123315/qqaibot",
+      "branch": "feature/unsloth-model-memory-20261024",
+      "path": ".Ray_Chen/memory/MEMORY_VERSION.txt",
+      "action": "modified",
+      "verification": "v0.0.111 memory PR CI pending"
+    },
+    {
+      "location_type": "remote",
+      "provider": "GitHub",
+      "repository": "Ray20123315/qqaibot",
+      "branch": "feature/unsloth-model-memory-20261024",
+      "path": ".Ray_Chen/memory/CURRENT_STATE.md",
+      "action": "modified",
+      "verification": "v0.0.111 memory PR CI pending"
+    },
+    {
+      "location_type": "remote",
+      "provider": "GitHub",
+      "repository": "Ray20123315/qqaibot",
+      "branch": "feature/unsloth-model-memory-20261024",
+      "path": ".Ray_Chen/memory/USER_REQUIREMENTS.md",
+      "action": "modified",
+      "verification": "v0.0.111 memory PR CI pending"
+    },
+    {
+      "location_type": "remote",
+      "provider": "GitHub",
+      "repository": "Ray20123315/qqaibot",
+      "branch": "feature/unsloth-model-memory-20261024",
+      "path": ".Ray_Chen/memory/DECISIONS.md",
+      "action": "modified",
+      "verification": "v0.0.111 memory PR CI pending"
+    },
+    {
+      "location_type": "remote",
+      "provider": "GitHub",
+      "repository": "Ray20123315/qqaibot",
+      "branch": "feature/unsloth-model-memory-20261024",
+      "path": ".Ray_Chen/memory/GOTCHAS.md",
+      "action": "modified",
+      "verification": "v0.0.111 memory PR CI pending"
+    },
+    {
+      "location_type": "remote",
+      "provider": "GitHub",
+      "repository": "Ray20123315/qqaibot",
+      "branch": "feature/unsloth-model-memory-20261024",
+      "path": ".Ray_Chen/memory/VERIFY.md",
+      "action": "modified",
+      "verification": "v0.0.111 memory PR CI pending"
+    },
+    {
+      "location_type": "remote",
+      "provider": "GitHub",
+      "repository": "Ray20123315/qqaibot",
+      "branch": "feature/unsloth-model-memory-20261024",
+      "path": ".Ray_Chen/memory/FILE_MANIFEST.json",
+      "action": "modified",
+      "verification": "v0.0.111 memory PR CI pending"
     }
   ],
   "memory_updates": [
     "00_START_HERE.md",
-    "MEMORY_VERSION.txt",
-    "PROJECT.md",
     "ACTIVE_TASK.md",
+    "MEMORY_VERSION.txt",
     "CURRENT_STATE.md",
     "USER_REQUIREMENTS.md",
     "DECISIONS.md",
@@ -102,13 +167,13 @@
     "FILE_MANIFEST.json"
   ],
   "verification": {
-    "isolated_ci": "SUCCESS:40068743188",
-    "existing_ci": "SUCCESS:40068743122",
-    "cloudflare_deployment": "SUCCESS:4ca53f6f1f6648d097ca1109607d8b9f",
+    "isolated_ci": "SUCCESS:40072501757",
+    "existing_ci": "SUCCESS:40072501794",
+    "cloudflare_deployment": "SUCCESS:c179d753-b3f8-4f0f-ac2f-a262379eff14 at 100%",
     "worker_secrets": "EMPTY",
-    "live_qq": "UNVERIFIED",
-    "unsloth_live": "UNVERIFIED",
-    "CI_archiving": "SUCCESS:40069333964 (dynamic memory version)"
+    "kv_binding": "VERIFIED",
+    "live_models": "UNVERIFIED",
+    "live_qq": "UNVERIFIED"
   },
-  "next_exact_action": "Configure five Cloudflare Worker Secrets and a separate QQ official Bot webhook; perform live model chat and QQ group @/C2C tests, verify IP whitelist"
+  "next_exact_action": "Set ADMIN_TOKEN in qqaibot-unsloth Worker Secrets, open web UI and enter Unsloth API Key, list and select model, then test"
 }

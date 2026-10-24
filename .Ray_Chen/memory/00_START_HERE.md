@@ -1,18 +1,17 @@
 # Ray_Chen Memory
-version: v0.0.110
-task_id: unsloth-qq-ai-20261024
+version: v0.0.111
+task_id: unsloth-qq-model-picker-20261024
 task_status: blocked
-goal_revision: 1
+goal_revision: 2
 canonical_branch: main
-verified_code_commit: a365f0c6c391a171154241e82c28f00bfa1eb322
-updated_at: 2026-10-24T14:20:00+08:00
+verified_code_commit: 16764e1bcc7509f0eb761040e6ed738e05572194
+updated_at: 2026-10-24
 
 ## Quick resume
-- Standalone QQ official Webhook AI Worker added under `standalone-qq-ai/`; DO NOT modify existing `qqai` Worker, its routes, D1/DO, QQ callback, NapCat, cross-group bridge or Codex GUI.
-- PR #82 merged into main at `a365f0c6c391a171154241e82c28f00bfa1eb322`; isolated CI 40068743188 and existing AI CI 40068743122 SUCCESS.
-- Cloudflare Worker `qqaibot-unsloth` API deployment `4ca53f6f1f6648d097ca1109607d8b9f` succeeded; workers.dev route and custom domain `qqbot-ai.ray2025.com` enabled via API readback.
-- Cloudflare new Worker Secrets GET returned zero items. No QQ AppID/AppSecret, Unsloth key/model ID or admin token configured. QQ true end-to-end and public HTTPS not verified; QQ fixed-egress IP whitelist might block sending.
-- Next: configure 5 Secrets, separate QQ official Bot with Webhook `https://qqbot-ai.ray2025.com/webhook`, events GROUP_AT_MESSAGE_CREATE and C2C_MESSAGE_CREATE; validate Unsloth and real messages.
-- No tool calling or commands in new Worker. Prior legacy /跨群 exact command, D1 stopped binding states and QQ stale slash panel concerns unchanged.
-
-- New memory archive CI 40069333964 SUCCESS after dynamic version workflow fix; main merge of memory PR #83 pending.
+- Standalone QQ official Worker `qqaibot-unsloth` at `qqbot-ai.ray2025.com`, separate from production `qqai`.
+- PR #84 merged into main `16764e1bcc7509f0eb761040e6ed738e05572194`; isolated CI 40072501757 and existing CI 40072501794 SUCCESS.
+- New admin UI: enter Unsloth API Key → GET fixed `https://msiai.ray2025.com/v1/models` → select verified ID → save. Worker encrypts API Key+model with AES-GCM key derived from ADMIN_TOKEN Secret, stores ciphertext in new exclusive KV `qqaibot-unsloth-config` (binding CONFIG_KV).
+- Cloudflare script deployment `c179d753-b3f8-4f0f-ac2f-a262379eff14`, running 100%; CONFIG_KV bound to `033b241f7377496790d92056d39669ad`. Original QQ worker, D1/DO/NapCat/Codex and domains unmodified.
+- No ADMIN_TOKEN, QQ credentials or Unsloth API key configured as of latest read; live model list, public HTTPS and QQ sending unverified.
+- Next: Set ADMIN_TOKEN (>=32 random chars) in qqaibot-unsloth Secrets, open https://qqbot-ai.ray2025.com/ to paste Unsloth API Key and pick model; then configure QQ_APP_ID / QQ_APP_SECRET for a separate Bot and verify actual webhook and message.
+- Changing ADMIN_TOKEN makes the old saved ciphertext unreadable; entering a fresh API Key in admin UI overwrites and restores config. KV eventual consistency. Legacy /跨群 and stopped D1 group bindings unchanged.
