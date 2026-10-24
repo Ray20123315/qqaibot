@@ -1,5 +1,5 @@
 {
-  "version": "v0.0.109",
+  "version": "v0.0.110",
   "task_id": "unsloth-qq-ai-20261024",
   "goal_revision": 1,
   "changed_at": "2026-10-24",
@@ -86,7 +86,7 @@
       "action": "modified",
       "before_revision": "2a72fe8cc7435be4d832e23b7b4062cd7fd5eb86",
       "after_revision": "a6e8c942cc01bbf3d356c44432c293c5d8371e20",
-      "verification": "Updated hardcoded archive version to current MEMORY_VERSION.txt; CI pending"
+      "verification": "GitHub PR CI 40069333964 SUCCESS incl. dynamic archive step"
     }
   ],
   "memory_updates": [
@@ -107,7 +107,8 @@
     "cloudflare_deployment": "SUCCESS:4ca53f6f1f6648d097ca1109607d8b9f",
     "worker_secrets": "EMPTY",
     "live_qq": "UNVERIFIED",
-    "unsloth_live": "UNVERIFIED"
+    "unsloth_live": "UNVERIFIED",
+    "CI_archiving": "SUCCESS:40069333964 (dynamic memory version)"
   },
-  "next_exact_action": "Configure five Cloudflare Secrets and separate QQ Bot webhook; confirm QQ outgoing IP policy and perform live E2E."
+  "next_exact_action": "Configure five Cloudflare Worker Secrets and a separate QQ official Bot webhook; perform live model chat and QQ group @/C2C tests, verify IP whitelist"
 }
