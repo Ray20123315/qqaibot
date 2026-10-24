@@ -1,18 +1,16 @@
 # Ray_Chen Memory
-version: v0.0.113
-task_id: unsloth-qq-secret-only-20261024
+version: v0.0.114
+task_id: unsloth-qq-chat-diagnostics-20261024
 task_status: blocked
-goal_revision: 4
+goal_revision: 5
 canonical_branch: main
-verified_main_commit: 500c7689c199dc5db33f91146dc6e7c78f05f2fd
+verified_code_commit: a974232b6f71991af2d23f654d618ccc0ec72465
 updated_at: 2026-10-24
 
 ## Quick resume
-- User requested Unsloth API Key be entered directly as a Cloudflare Worker Secret, not into browser. PR #87 merged main 500c7689c199dc5db33f91146dc6e7c78f05f2fd; isolated CI 40075035673 and original QQ CI 40075035664 SUCCESS.
-- Separate qqaibot-unsloth Cloudflare Worker version 678a0b74-800b-47ea-9efe-868fd7e551f0 deployed 100%; CONFIG_KV namespace 033b241f7377496790d92056d39669ad and existing ADMIN_TOKEN binding preserved.
-- Worker gets API Key ONLY from env.UNSLOTH_API_KEY, stores selected model ID only in KV key selected-model-v2, rejects browser-provided API key. Old KV format ignored and cleaned on first save; KV key listing empty before migration.
-- global_fetch_strictly_public compatibility flag enabled for same-zone msiai.ray2025.com Tunnel.
-- Windows user verified HTTP 200 from local /v1/models and with Bearer key from public HTTPS. Model lilcheaty/flint-abliterated-GGUF is loaded; Worker live model fetch not yet verified.
-- UNSLOTH_API_KEY is NOT YET CONFIGURED as a Cloudflare Worker Secret. ADMIN_TOKEN is currently plain_text binding, NOT Secret and should be made Secret by user without disclosing it. QQ_APP_ID/QQ_APP_SECRET unconfigured. Original qqai, D1, DO, NapCat, Codex and QQ callback untouched.
-- PR #86 diagnostic-only branch superseded by PR #87 secret-only flow; PR #87 includes improved errors and same-zone flag.
-- NEXT ACTION: User adds UNSLOTH_API_KEY Secret and converts ADMIN_TOKEN to Secret in qqaibot-unsloth, then opens https://qqbot-ai.ray2025.com/ to list/select/test model. Do not put secrets in chat.
+- User: qqaibot-unsloth admin chat test returned MODEL_UNAVAILABLE even though API key was accepted, model listed/selected. Cloudflare verified ADMIN_TOKEN and UNSLOTH_API_KEY as secret_text; CONFIG_KV selected-model-v2 present; global_fetch_strictly_public enabled.
+- PR #89 merged into main a974232b6f71991af2d23f654d618ccc0ec72465; CI runs 40076227706 isolated and 40076227711 old AI both SUCCESS. Source worker.js and test/worker.test.mjs and test/model-config.test.mjs, README changed.
+- Chat POST previously always masked failures and used 18s timeout, tools:[], tool_choice:none, max_tokens:400. New request sends no tool parameters, max_tokens:1024, web timeout 60s, QQ background 22s. Admin chat now emits safe MODEL_HTTP_NNN, MODEL_TIMEOUT, MODEL_CONNECTION_FAILED, MODEL_INVALID_RESPONSE, MODEL_EMPTY_RESPONSE, etc.; no API key or upstream response body.
+- Cloudflare Worker qqaibot-unsloth version 327900f7-5a47-46dc-87ca-ee8988240bdf deployed 100%, confirmed source markers/flag/Secret inheritance/KV key. Original qqai, D1, DO, NapCat, Codex and QQ callback not modified.
+- User earlier verified Unsloth local /v1/models 200, public /v1/models with valid Bearer 200, loaded model lilcheaty/flint-abliterated-GGUF. Actual /v1/chat/completions was never verified. Root cause of original MODEL_UNAVAILABLE remains UNKNOWN pending retry.
+- NEXT: user refreshes https://qqbot-ai.ray2025.com/, presses "測試 AI", reports response or new safe code, never posts any API key. If still fails, investigate actual backend HTTP/latency/model output based on code.
