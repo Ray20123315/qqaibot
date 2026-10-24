@@ -101,10 +101,12 @@ export async function chat(env,prompt,fetcher=fetch,{timeout=60_000}={}){
   const response=await call(env,'/chat/completions',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(request)},fetcher,timeout);
   if(withSearch){
     const type=response.headers.get('content-type')||'';
-    if(type.includes('application/json')){
-      const data=await response.json().catch(()=>null);
-      const content=data?.choices?.[0]?.message?.content;
-      if(typeof content!=='string'||!content.trim())throw Error('UPSTREAM_EMPTY_RESPONSE');
+    if(!type.includes('text/event-stream')){
+      let data;try{data=await response.json();}catch{throw Error('UPSTREAM_INVALID_JSON');}
+      const value=data?.choices?.[0]?.message?.content;
+      const content=typeof value==='string'?value:Array.isArray(value)?
+        value.filter(x=>x?.type==='text'&&typeof x.text==='string').map(x=>x.text).join('\n'):'';
+      if(!content.trim())throw Error('UPSTREAM_EMPTY_RESPONSE');
       // Configured tools do not prove upstream search actually executed.
       return {text:tidy(content),searched:false,searchRequested:true};
     }
