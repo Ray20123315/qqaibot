@@ -13,4 +13,4 @@
 - Cloudflare API script PUT success HTTP 200, deployment 4ca53f6f1f6648d097ca1109607d8b9f; workers.dev route enabled; Custom Domain qqbot-ai.ray2025.com API read-back enabled true. New Worker Secrets GET returned []. Public HTTP request tool could not validate reachability.
 - NOT VERIFIED: credentials, Unsloth live chat, signed QQ callback from platform, QQ C2C/group @ reply, fixed IP whitelist.
 
-- Legacy main CI failed on memory PR initial run 40069118447 because archive step pinned v0.0.108; npm run check passed. Updated `.github/workflows/bridge-check.yml` to read MEMORY_VERSION.txt, validate FILE_MANIFEST version, and archive dynamically. Revalidation pending.
+- Legacy main CI failed on memory PR initial run 40069118447 because archive step pinned v0.0.108; npm run check passed. Updated `.github/workflows/bridge-check.yml` to read MEMORY_VERSION.txt, validate FILE_MANIFEST version, and archive dynamically. Revalidated SUCCESS in PR CI run 40069333964 (npm run check, dynamic TAR creation, sha256 and artifact upload).
