@@ -16,3 +16,5 @@
 - New dedicated CONFIG_KV namespace (033b241f7377496790d92056d39669ad) is NOT preexisting QQ data and must not be confused with legacy QQAIBOT D1 or QQbotKV.
 
 - 2026-10-24: Cloudflare same-zone fetch to Tunnel may bypass public front door without global_fetch_strictly_public; keep flag on standalone Worker. Admin Token existing Cloudflare binding currently plain_text, not Secret; user must upgrade manually. API key secret missing; do not claim live Worker chat works.
+
+- 2026-10-24: A 200 on GET /v1/models does NOT prove POST /v1/chat/completions succeeds. Large 40B local model may take >18s; old Worker returned undifferentiated MODEL_UNAVAILABLE on all failures. New safe code separates timeout/http/empty response. QQ waitUntil after HTTP acknowledgement has a finite background execution allowance; 22s limit may be too short for cold models, durable queue required if persistent.
