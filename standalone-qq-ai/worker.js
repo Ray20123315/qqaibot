@@ -1,5 +1,6 @@
 import {readModelConfig,listUnslothModels,saveModelConfig} from "./model-config.js";
 import {DASHBOARD_HTML} from "./dashboard.js";
+import {markdownPayload,plainPayload,rejectedMarkdown} from "./qq-format.js";
 import {getConfig as getRoles,setConfig as setRoles,chat as chatWithRoles,speech as ttsWithRoles,transcribe as asrWithRoles} from "./role-router.js";
 import {adminAllowed,sessionRoute} from "./session-auth.js";
 /** QQ official Webhook -> Unsloth text-only chat. No command/tool execution. */
@@ -79,23 +80,43 @@ async function qqToken(env) {
 async function sendQQ(env,event,answer) {
   const route=event.isGroup?'groups':'users';
   const token=await qqToken(env);
-  let response;
-  try {
-    response=await fetch('https://api.bot.qq.com/v2/'+route+'/'+encodeURIComponent(event.target)+'/messages',{
-      method:'POST',redirect:'manual',signal:timeouts(8000),
-      headers:{authorization:'QQBot '+token,'content-type':'application/json'},
-      body:JSON.stringify({msg_type:0,content:answer,msg_id:event.id,msg_seq:1})
-    });
-  } catch(err) {
-    if(err?.name==='TimeoutError'||err?.name==='AbortError')throw Error('QQ_SEND_TIMEOUT');
-    throw Error('QQ_SEND_FETCH_FAILED');
+  const url='https://api.bot.qq.com/v2/'+route+'/'+encodeURIComponent(event.target)+'/messages';
+  async function send(body){
+    let response;
+    try {
+      response=await fetch(url,{
+        method:'POST',redirect:'manual',signal:timeouts(8000),
+        headers:{authorization:'QQBot '+token,'content-type':'application/json'},
+        body:JSON.stringify(body)
+      });
+    }catch(err){
+      // Unknown send outcome: never retry a failed network operation.
+      if(err?.name==='TimeoutError'||err?.name==='AbortError')throw Error('QQ_SEND_TIMEOUT');
+      throw Error('QQ_SEND_FETCH_FAILED');
+    }
+    if(response.status>=300&&response.status<400)throw Error('QQ_SEND_REDIRECT_'+response.status);
+    if(!response.ok)return {accepted:false,response,code:''};
+    let result;
+    try{result=await response.json();}catch{throw Error('QQ_SEND_INVALID_RESPONSE');}
+    const code=sanitizedProviderCode(result?.err_code??result?.code);
+    return {accepted:!code,response,code};
   }
-  if(response.status>=300&&response.status<400)throw Error('QQ_SEND_REDIRECT_'+response.status);
-  if(!response.ok)throw Error('QQ_SEND_HTTP_'+response.status);
-  let result;
-  try{result=await response.json();}catch{throw Error('QQ_SEND_INVALID_RESPONSE');}
-  const code=sanitizedProviderCode(result?.err_code??result?.code);
-  if(code)throw Error('QQ_SEND_CODE_'+code);
+  const markdownDisabled=(await env.CONFIG_KV?.get('qq-markdown-denied-v1').catch(()=>null))==='1';
+  if(!markdownDisabled){
+    const rich=await send(markdownPayload(answer,event.id));
+    if(rich.accepted)return;
+    if(!rejectedMarkdown(rich.response,rich.code)){
+      if(rich.code)throw Error('QQ_SEND_CODE_'+rich.code);
+      throw Error('QQ_SEND_HTTP_'+rich.response.status);
+    }
+    // Cache explicit Markdown rejection; avoid repeated failed rich-text probes per message.
+    try{await env.CONFIG_KV?.put('qq-markdown-denied-v1','1',{expirationTtl:86400});}catch{}
+  }
+  const plain=await send(plainPayload(answer,event.id,markdownDisabled?1:2));
+  if(!plain.accepted){
+    if(plain.code)throw Error('QQ_SEND_CODE_'+plain.code);
+    throw Error('QQ_SEND_HTTP_'+plain.response.status);
+  }
 }
 export async function queryModel(env,message,{timeoutMs=60_000}={}) {
   try {
@@ -154,7 +175,7 @@ export async function processEvent(env,event) {
   let answer;
   if(/^[!/$>]/.test(event.message)&&!/^\/(?:search|web)(?:\s|$)/.test(event.message))answer='這是純文字聊天機器人，無法執行指令。';
   else {
-    try { answer=await queryModel(env,event.message,{timeoutMs:18_000}); }
+    try { answer=await queryModel(env,event.message,{timeoutMs:23_000}); }
     catch(err){
       const reason=diagnosticCode(err);
       await recordQQ(env,'model_failed',reason);
