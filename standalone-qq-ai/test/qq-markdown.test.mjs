@@ -42,7 +42,7 @@ test('even previous persisted false webSearch settings are upgraded to always-on
   assert.ok(!('tools' in request));
   assert.equal(request.stream,true);
   assert.match(request.messages[0].content,/每次回答前都尝试用 web_search/);
-  assert.match(request.messages[0].content,/所有面向用户的回复必须使用简体中文/);
+  assert.match(request.messages[0].content,/所有对用户显示的文字都用简体中文/);
   assert.match(request.messages[0].content,/客服与聊天伙伴/);
   return new Response(JSON.stringify({choices:[{message:{content:'你好'}}]}),{headers:{'content-type':'application/json'}});
  });
