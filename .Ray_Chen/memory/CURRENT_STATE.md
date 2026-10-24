@@ -61,3 +61,9 @@
 - CI isolated 40091803676 SUCCESS, legacy AI 40091803666 SUCCESS (two earlier isolated CI failures caused outdated assertion wording, fixed).
 - Cloudflare qqaibot-unsloth version 79cef349-a2b2-4c13-91d1-5dcb38e40326 at 100%, 4 Secret bindings / CONFIG_KV model keys preserved. Existing QQ Webhook, Unsloth web_search, QQ Markdown, audio roles and legacy production qqai unchanged. No image routes.
 - Prompt-based responses in Simplified Chinese not yet validated on live QQ; fixed Worker fallback/command strings may still be Traditional Chinese.
+
+## 2026-10-24 standalone QQ AI dashboard login restored at script layer
+- User reported login nonresponsive. Existing dashboard.js inline script (embedded in DASHBOARD_HTML) syntax check with new Function failed: SyntaxError missing ) after argument list. Exact issue was malformed text concatenation in saveRoles UI: `+'，web_search 固定開啟+'。'`. Since JS never parsed, login button handler was never bound; this was not evidence of ADMIN_TOKEN mismatch.
+- PR #103 merged main 500b6cebb6457080ef50e32b05a7060ed1421834; minimal dashboard.js fix + stronger test/dashboard-session.test.mjs verifying real served script compiles using node:vm.Script and mocked DOM login event triggers session POST and UI transition. Isolated CI 40094335343 SUCCESS; legacy AI CI 40094335412 SUCCESS.
+- Cloudflare standalone qqaibot-unsloth deployment c2c0ab0e-1f02-4804-ae81-bf7dd4c63b1f is 100% (source/flags/Secret names/CONFIG_KV readback verified), models KV keys selected-model-v2 and model-roles-v3 intact. No original qqai, QQ webhook, model, API secret or Unsloth voice configuration changes.
+- External custom-domain HTTPS browser accessibility not available from current runtime, therefore actual user login after deployment NOT VERIFIED. User instructed hard-refresh Ctrl+Shift+R and use existing ADMIN_TOKEN.
