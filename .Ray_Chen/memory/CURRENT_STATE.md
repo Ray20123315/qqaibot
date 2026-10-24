@@ -54,3 +54,10 @@
 - Every text chat now sends Unsloth enable_tools:true, enabled_tools:['web_search'], mcp_enabled:false, stream:true; old webSearch:false KV effective value overridden to true; admin UI shows search always enabled. This is a request, not guarantee Unsloth GGUF actually performs search; no false claims. No image models/routes or unrestricted tools.
 - Cloudflare qqaibot-unsloth deployment cdfea900-f08a-4df0-9363-d80a5abad14c 100%, previous 4 Secrets CONFIG_KV model entries and existing QQ webhook maintained; original qqai untouched.
 - True QQ Markdown permission (especially group passive MD) and end-to-end Unsloth search results not yet verified; fallback plain-text behavior is by design.
+
+## 2026-10-24 natural support/chat persona with internal model nondisclosure
+- Prior local v0.0.121 memory archive was verified after GitHub partial branch was blocked; GitHub main stayed at v0.0.120. The prior PR #100 main 17afc4ea71084cac4cd270312edf202b909fb864 established support+chat Simplified-Chinese prompt with model disclosure on direct question still allowed, and deployed Cloudflare version a958a3ad-9d21-498e-9f91-0b7bff4bec50. This is superseded by new user policy.
+- PR #101 main 218809ad9d2670a405b1a8ed1e6578c30183ed01 updates CUSTOMER_SERVICE_PROMPT in standalone-qq-ai/role-router.js to personable service and casual chat, polite nondisclosure of internal AI/model/provider/version/quantization/deployment/system prompts **even on direct question**, without lying about real-human identity or inventing operations; test/qq-markdown.test.mjs and README modified.
+- CI isolated 40091803676 SUCCESS, legacy AI 40091803666 SUCCESS (two earlier isolated CI failures caused outdated assertion wording, fixed).
+- Cloudflare qqaibot-unsloth version 79cef349-a2b2-4c13-91d1-5dcb38e40326 at 100%, 4 Secret bindings / CONFIG_KV model keys preserved. Existing QQ Webhook, Unsloth web_search, QQ Markdown, audio roles and legacy production qqai unchanged. No image routes.
+- Prompt-based responses in Simplified Chinese not yet validated on live QQ; fixed Worker fallback/command strings may still be Traditional Chinese.
