@@ -38,3 +38,9 @@
 - Cloudflare strict-inherit deployment 9ece06c4-edbc-4055-8a2a-1a7e2f87ecb4 100% readback with 4 secret_text names, CONFIG_KV, flag global_fetch_strictly_public, source has new codes; selected-model-v2 and older diag keys remained. No real QQ send attempt triggered by tool actions.
 - Tencent official docs show production outbound IP allowlist; actual cause remains UNKNOWN until next QQ real message diagnostic. Real reply_sent not evidenced.
 - Previous local archive v0.0.115 checksum 330f5cef91ad35c3708e01724ff37d460053518ddb2e3778c0c5ecd0a0765603; GitHub remote v0.0.114 until this v116 reconciliation.
+
+## 2026-10-24 Modern Qwen QQ console
+- PR #94 isolated CI 40082915685 SUCCESS; legacy QQ AI CI 40082915660 SUCCESS, merged main 8741abb9ea524adfb77dd3d7629ace6dda5b5fd3. Initial CI uncovered dashboard text label mismatch with previous test; fixed and reran PASS.
+- Tests cover dashboard presence, admin login cookie flags, authorized cookie model listing and save, wrong admin key, cross-origin requests, revoked secret, logout cookie deletion, preserving Qwen chat newlines and tabs; all on Node test runner. Original QQ callback/token tests passed.
+- Cloudflare qqaibot-unsloth module script upload HTTP 200, version 68e38e2c-da07-4c2b-a9d7-1e959f89e4d2 deployment 100%. Readback flags global_fetch_strictly_public, 4 secret_text bindings retained, CONFIG_KV namespace 033b241f7377496790d92056d39669ad and selected-model-v2 key persisted. Source includes Qwen Console, __Host-qqai_session, /api/session, /webhook, /api/qq/diagnostics.
+- NOT VERIFIED: external browser screenshot/visual test, real admin cookie via actual public HTTPS, QQ sent/replied post new deployment, end-to-end image/audio/web forwarding. No image generation changes.
