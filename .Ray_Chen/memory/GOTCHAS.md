@@ -18,3 +18,6 @@
 - 2026-10-24: Cloudflare same-zone fetch to Tunnel may bypass public front door without global_fetch_strictly_public; keep flag on standalone Worker. Admin Token existing Cloudflare binding currently plain_text, not Secret; user must upgrade manually. API key secret missing; do not claim live Worker chat works.
 
 - 2026-10-24: A 200 on GET /v1/models does NOT prove POST /v1/chat/completions succeeds. Large 40B local model may take >18s; old Worker returned undifferentiated MODEL_UNAVAILABLE on all failures. New safe code separates timeout/http/empty response. QQ waitUntil after HTTP acknowledgement has a finite background execution allowance; 22s limit may be too short for cold models, durable queue required if persistent.
+
+- 2026-10-24: QQ send_failed UNKNOWN followed event_received GROUP_AT in real diagnostics; original qqToken/sendQQ passed fetch exceptions to diagnosticCode where unexpected Error/TypeError became UNKNOWN. Distinguish auth/send fetch failures before changing URLs or guessing IP allowlist. Tencent production IP allowlist can restrict QQ OpenAPI, but does not establish cause without specific API status.
+- 2026-10-24 memory divergence: verified local v0.0.115 existed, while GitHub memory remained v0.0.114 due blocked GitHub branch creation. v0.0.116 advances version, summarizes missing v0.0.115 release and reconciles with current code.
