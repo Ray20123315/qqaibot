@@ -2,6 +2,32 @@
 
 這是 **qq aibot 舊系統以外**的獨立 Cloudflare Worker `qqaibot-unsloth`。它只接 QQ 官方群組 @ 事件 `GROUP_AT_MESSAGE_CREATE` 與私訊 `C2C_MESSAGE_CREATE`，使用固定上游 `https://msiai.ray2025.com/v1/chat/completions` 及 QQ 官方 API 被動回覆。**沒有執行系統指令、工具呼叫、檔案操作、任意 URL 代理的功能**。
 
+## Unsloth 多模型路由（2026-10-24）
+
+獨立 QQ AI Worker 維持單一上游 `https://msiai.ray2025.com/v1` 與原 `UNSLOTH_API_KEY` Cloudflare Secret，不需要額外模型 API 金鑰，也沒有任何可變上游 URL。模型路由設在管理台「多模型路由」：
+
+| 角色 | 設定值 | 實際 API |
+| --- | --- | --- |
+| 文字聊天及搜尋 | `chat` | `POST /v1/chat/completions` |
+| 語音辨識 | `asr`，可不設定 | `POST /v1/audio/transcriptions` |
+| 語音合成 | `tts`，可不設定 | `POST /v1/audio/speech`（WAV） |
+| 網路搜尋 | `webSearch`（預設關） | **相同聊天模型**，明確搜尋時開啟 `enable_tools:true`、`enabled_tools:["web_search"]`，關閉 MCP |
+
+**圖片理解與圖片生成沒有任何路由、模型角色或執行端點**，依使用者最新要求暫停。使用者已將模型安裝在 Unsloth Studio，這次不下載／更動圖片模型。
+
+管理 API `GET/POST /api/model-roles` 使用現有 ADMIN_TOKEN Bearer 或安全 Session Cookie，KV key `model-roles-v3` 儲存純模型 ID 與 webSearch 布林值，與舊 `selected-model-v2` 同步以相容既有模型選擇 UI。拒絕非白名單欄位、URL、金鑰和未知角色。首次升級以現有聊天模型作 fallback，語音角色不預設任何模型，搜尋預設關閉。Unsloth 模型 ID 必須與你的 Studio 模型清單一致；若 ASR／TTS 模型不在通用 `/v1/models` 中，可手動填入實際 ID。
+
+新增的管理員測試端點：
+- `POST /api/audio/speech`：JSON `{"text":"測試文字"}`；只呼叫固定 Unsloth TTS API，最大 600 字與 6 MiB WAV。
+- `POST /api/audio/transcriptions`：`multipart/form-data` 的 `file` 欄位；只接受 audio MIME 類型、最大 8 MiB，固定 Unsloth ASR API。
+- 上面兩項目前為**管理介面測試**，不代表 QQ 富媒體語音事件已接入；QQ 語音發送可能需要 SILK 格式及 QQ Media API，另行驗證後才可聲稱成功。
+
+聊天只有使用者**明確要求搜尋**（如 `/search ...`、`/web ...`、搜尋／幫我查／即時新聞）且管理員開啟 `webSearch`，才會允許 `web_search`。其他聊天明確送 `enable_tools:false`、`enabled_tools:[]`、`mcp_enabled:false`。Worker 本身**沒有任意 Python、Shell、檔案存取、MCP 或任意 HTTP 工具執行權限**；不把 Unsloth 的網頁搜尋視為 unrestricted agent access。搜尋採 SSE 解析，實際上游版本可能不同，必須以本機實測驗證。啟用網路搜尋會使 Unsloth 對外查詢，管理員應評估外部內容風險及群組資料隱私。
+
+Unsloth Studio 的 Model auto-switch 與 idle unload 請在 **Settings → API** 設定；此 Worker 不主動呼叫模型 Load/Unload。多模型同時駐留依本機硬體、VRAM、推論後端而定；若後端會切換模型，ASR/TTS 和 Qwen 聊天會造成切換延遲。強制多模型常駐並非 Worker 可保證的設定。
+
+驗收限制：目前只有程式模擬測試；QQ 真實群組搜尋回覆、音訊推論結果與同時載入行為，必須實際打開管理介面、選擇已安裝的模型並測試。不應宣稱 QQ 已支援接收/發送語音附件或圖片。
+
 ## 新版 Qwen 管理控制台（2026-10-24）
 
 管理網址：<https://qqbot-ai.ray2025.com/>。新版管理頁改為暗色系、行動裝置自適應的正式登入與後台，具備：
