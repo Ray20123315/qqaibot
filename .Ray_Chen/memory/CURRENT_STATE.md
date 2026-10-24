@@ -24,3 +24,8 @@
 - User verified public HTTPS /v1/models HTTP 200 with Bearer key, and local HTTP 200. Installed model lilcheaty/flint-abliterated-GGUF loaded.
 - PR #87 main 500c7689c199dc5db33f91146dc6e7c78f05f2fd, CI isolated 40075035673 SUCCESS and original 40075035664 SUCCESS.
 - Cloudflare qqaibot-unsloth version 678a0b74-800b-47ea-9efe-868fd7e551f0 deployed 100%, global_fetch_strictly_public enabled, ADMIN_TOKEN and CONFIG_KV bindings inherited/readback. Selected model ID alone in KV; API key exclusively Worker Secret (operator must configure). Prior key KV keys empty. Legacy qqai unchanged.
+
+## 2026-10-24 MODEL_UNAVAILABLE diagnostics and fixes
+- User admin test returned MODEL_UNAVAILABLE after successful model picker; Worker Secrets ADMIN_TOKEN/UNSLOTH_API_KEY secret_text and selected-model-v2 KV key present, same-zone public flag enabled.
+- PR #89 code merged main a974232b6f71991af2d23f654d618ccc0ec72465, GitHub CI 40076227706 and 40076227711 SUCCESS.
+- Cloudflare qqaibot-unsloth version 327900f7-5a47-46dc-87ca-ee8988240bdf running 100%, secrets inherited strictly, KV binding preserved; web admin chat 60s, QQ background 22s, minimal no-tools request max_tokens1024, safe granular model errors. Live model POST remains untested; legacy qqai untouched.
