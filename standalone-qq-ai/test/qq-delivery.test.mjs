@@ -164,3 +164,49 @@ test('QQ auth and send timeout are distinguished safely',async()=>{
    await assert.rejects(()=>sendProcess(b.env,{message:'/help',isGroup:true,target:'opaqueGroup',id:'fresh-006'}),/QQ_SEND_TIMEOUT/);
  }finally{globalThis.fetch=original;}
 });
+
+test('QQ Markdown rejected: downgrade once to readable text, cache denial for later messages',async()=>{
+ const h=harness();const original=globalThis.fetch;const calls=[];
+ globalThis.fetch=async(url,opts)=>{
+   if(url==='https://api.bot.qq.com/app/getAppAccessToken')
+     return new Response(JSON.stringify({access_token:'fake-md-access-token',expires_in:7200}),{status:200});
+   if(String(url).includes('/v2/groups/')){
+     const b=JSON.parse(opts.body);
+     calls.push(b);
+     if(b.msg_type===2)return new Response(JSON.stringify({message:'Markdown capability not enabled'}),{status:403});
+     return new Response(JSON.stringify({id:'plain-success'}),{status:200});
+   }
+   throw Error('unexpected fetch '+url);
+ };
+ try {
+   const {processEvent}=await import('../worker.js?qq-markdown-reject');
+   const first={isGroup:true,target:'groupA',message:'/help',id:'unique-md-1'};
+   await processEvent(h.env,first);
+   assert.equal(calls.length,2);
+   assert.equal(calls[0].msg_type,2);
+   assert.equal(calls[1].msg_type,0);
+   assert.equal(calls[1].msg_seq,2);
+   assert.equal(h.records.get('qq-markdown-denied-v1'),'1');
+   const second={isGroup:true,target:'groupA',message:'/help',id:'unique-md-2'};
+   await processEvent(h.env,second);
+   assert.equal(calls.length,3,'second reply must not reprobe denied Markdown');
+   assert.equal(calls[2].msg_type,0);
+   const d=(await(await diagnostics(h.env)).json()).events;
+   assert.ok(d.some(x=>x.stage==='reply_sent'&&x.code==='OK'));
+ }finally{globalThis.fetch=original;}
+});
+test('QQ Markdown fetch timeout is never retried, to prevent duplicate messages',async()=>{
+ const h=harness();const original=globalThis.fetch;let count=0;
+ globalThis.fetch=async(url)=>{
+   if(url==='https://api.bot.qq.com/app/getAppAccessToken')
+     return new Response(JSON.stringify({access_token:'fake-md-access-token',expires_in:7200}),{status:200});
+   if(String(url).includes('/v2/groups/')){count++;throw new DOMException('internal private data','TimeoutError');}
+   throw Error('unexpected fetch');
+ };
+ try{
+   const {processEvent}=await import('../worker.js?qq-markdown-timeout');
+   await assert.rejects(()=>processEvent(h.env,{isGroup:true,target:'groupB',message:'/help',id:'md-timeout-id'}),/QQ_SEND_TIMEOUT/);
+   assert.equal(count,1);
+   assert.equal(h.records.get('qq-markdown-denied-v1'),undefined);
+ }finally{globalThis.fetch=original;}
+});
