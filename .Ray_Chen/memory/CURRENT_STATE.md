@@ -41,3 +41,10 @@
 - PR #94 main 8741abb9ea524adfb77dd3d7629ace6dda5b5fd3: dashboard.js responsive Qwen-branded login/admin page, session-auth.js HMAC signed 8h cookie, dashboard-session tests, worker.js session and preserve chat newline, README docs. Legacy bearer admin APIs preserved; existing QQ webhook and secrets unchanged.
 - Isolated CI 40082915685 SUCCESS; legacy AI CI 40082915660 SUCCESS. Standalone Cloudflare Worker 68e38e2c-da07-4c2b-a9d7-1e959f89e4d2 100%; 4 secrets ADMIN_TOKEN, QQ_APP_ID, QQ_APP_SECRET, UNSLOTH_API_KEY remained secret_text; CONFIG_KV and selected-model-v2 retained; global_fetch_strictly_public unchanged.
 - Browser visual/manual acceptance and real QQ message under new web UI not verified. No code change to original qqai, no image generator installed.
+
+## 2026-10-24 successful GitHub retry and Unsloth multi-role deployment
+- Initial prior GitHub safety-gated write prevented v118 deployment. User requested retry. Normal authorized GitHub create_file succeeded; PR #96 merged main dfc771c6e39e53fe316d75039fc834d0f2af87a4. No alternate writing methods/bypass.
+- New role-router.js chat/asr/tts + optional webSearch, no images, only fixed Unsloth HTTPS/Worker API key. dashboard.js models page; worker.js admin model roles and admin-only audio/speech+transcriptions. Existing QQ/group @ chat and MODEL_* errors backward-compatible.
+- GitHub isolated CI 40087298832 SUCCESS; legacy QQ CI 40087298901 SUCCESS after repairing 4 initial regression test failures.
+- Cloudflare qqaibot-unsloth version 365a232a-ad3b-49ab-aecb-e150a3214c4c deployed 100%, flags global_fetch_strictly_public, CONFIG_KV namespace 033b241f7377496790d92056d39669ad and 4 Secret bindings preserved, selected-model-v2 key still present. model-roles-v3 not yet saved because user hasn't chosen roles. Original qqai remains unchanged.
+- Prior local memory v118 not merged; latest GitHub memory was v117. This v119 reconciles successful retry with prior handoff. Live ASR/TTS/web-search and multi-model parallel VRAM not verified.
