@@ -21,3 +21,7 @@
 
 - 2026-10-24: QQ send_failed UNKNOWN followed event_received GROUP_AT in real diagnostics; original qqToken/sendQQ passed fetch exceptions to diagnosticCode where unexpected Error/TypeError became UNKNOWN. Distinguish auth/send fetch failures before changing URLs or guessing IP allowlist. Tencent production IP allowlist can restrict QQ OpenAPI, but does not establish cause without specific API status.
 - 2026-10-24 memory divergence: verified local v0.0.115 existed, while GitHub memory remained v0.0.114 due blocked GitHub branch creation. v0.0.116 advances version, summarizes missing v0.0.115 release and reconciles with current code.
+
+- 2026-10-24: Original Worker flattened all AI output control chars via /[\\u0000-\\u001f\\u007f]/g including newlines; replacement retains newline/tab and normalizes CRLF. Does not implement unbounded response length or QQ Markdown; QQ text length limit still applies.
+- 2026-10-24: User's Qwen vision/web/voice resources may be installed in separate local services, but standalone-qq-ai/worker.js currently handles only text in QQ payload. Do not falsely claim QQ end-to-end multimodal capabilities from just local model readiness. Image generation specifically disabled by user.
+- 2026-10-24: New admin cookie session requires browser HTTPS and matching Origin on POST/DELETE, distinct from API bearer compatibility. Changing ADMIN_TOKEN revokes all old signed sessions; user sign-in required again. No immediate server-side per-session revocation beyond cookie deletion.
