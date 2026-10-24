@@ -1,77 +1,83 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import worker,{queryModel} from "../worker.js";
-import {listUnslothModels,readModelConfig,saveModelConfig} from "../model-config.js";
-
-function mkEnv(){
- const memory=new Map();
- return {ADMIN_TOKEN:"test-admin-strong-password-with-32-characters",CONFIG_KV:{
-   get:async name=>memory.get(name)??null,put:async(name,value)=>{memory.set(name,value);}
- },_memory:memory,QQ_APP_ID:"1234567890",QQ_APP_SECRET:"anotherSecret"};
+import worker, {queryModel} from "../worker.js";
+import {listUnslothModels, readModelConfig, saveModelConfig} from "../model-config.js";
+const upstream="https://msiai.ray2025.com/v1/models";
+const chatUrl="https://msiai.ray2025.com/v1/chat/completions";
+const modelResponse=ids=>new Response(JSON.stringify({object:"list",data:ids.map(id=>({id,object:"model"}))}),{status:200});
+function envSetup(){
+  const store=new Map();
+  const config={ADMIN_TOKEN:"test-admin-secret-32characters-valid",UNSLOTH_API_KEY:"sk-secret-only-mock-123",
+    QQ_APP_ID:"1112223334",QQ_APP_SECRET:"secretforqqbot",
+    CONFIG_KV:{get:async k=>store.has(k)?store.get(k):null,put:async(k,v)=>{store.set(k,v);},delete:async k=>{store.delete(k);}},
+    _store:store};
+  return config;
 }
-const endpoint="https://msiai.ray2025.com/v1/models";
-const complete="https://msiai.ray2025.com/v1/chat/completions";
-const respond=ids=>new Response(JSON.stringify({object:"list",data:ids.map(id=>({id,object:"model"}))}),{status:200});
-function request(env,path,method,body,token=env.ADMIN_TOKEN){
- return worker.fetch(new Request("https://example.test"+path,{method,headers:{authorization:"Bearer "+token,"content-type":"application/json"},body:body===undefined?undefined:JSON.stringify(body)}),env,{waitUntil(){}});
-}
-test("model discovery lists only real API ids and never dynamic upstream",async()=>{
- let called=0;
- const ids=await listUnslothModels("sk-local-fake",async(url,opts)=>{
-   called++;assert.equal(url,endpoint);assert.equal(opts.headers.authorization,"Bearer sk-local-fake");
-   assert.equal(opts.redirect,"error");return respond(["model-z","model-a","model-z"]);
+const req=(env,path,method="GET",body,token=env.ADMIN_TOKEN)=>worker.fetch(new Request("https://unit.test"+path,
+  {method,headers:{authorization:"Bearer "+token,"content-type":"application/json"},body:body===undefined?undefined:JSON.stringify(body)}),env,{waitUntil(){}});
+test("model discovery reads ONLY Worker Secret and respects fixed URL",async()=>{
+ const env=envSetup();
+ const data=await listUnslothModels(env,async(url,init)=>{
+   assert.equal(url,upstream);assert.equal(init.headers.authorization,"Bearer sk-secret-only-mock-123");
+   assert.equal(init.redirect,"manual");
+   return modelResponse(["model-a","model-b","model-a"]);
  });
- assert.equal(called,1);assert.deepEqual(ids,["model-z","model-a"]);
+ assert.deepEqual(data,["model-a","model-b"]);
 });
-test("invalid and failed model lists are rejected",async()=>{
- await assert.rejects(()=>listUnslothModels("bad",async()=>respond(["anything"])),/API_KEY_REQUIRED/);
- await assert.rejects(()=>listUnslothModels("sk-local-abc",async()=>new Response("{}",{status:401})),/MODEL_LIST_HTTP_401/);
- await assert.rejects(()=>listUnslothModels("sk-local-abc",async()=>new Response(JSON.stringify({data:[]}),{status:200})),/NO_MODELS_AVAILABLE/);
+test("missing secret, HTTP status, redirect, timeout and network error have safe errors",async()=>{
+ const env=envSetup();delete env.UNSLOTH_API_KEY;
+ await assert.rejects(()=>listUnslothModels(env,async()=>modelResponse(["x"])),/UNSLOTH_SECRET_NOT_CONFIGURED/);
+ env.UNSLOTH_API_KEY="sk-secret-only-mock-123";
+ await assert.rejects(()=>listUnslothModels(env,async()=>new Response("",{status:401})),/MODEL_LIST_HTTP_401/);
+ await assert.rejects(()=>listUnslothModels(env,async()=>new Response("",{status:302,headers:{location:"https://example.com/signin"}})),/MODEL_LIST_REDIRECT_302/);
+ await assert.rejects(()=>listUnslothModels(env,async()=>{throw new DOMException("private","TimeoutError");}),/MODEL_LIST_TIMEOUT/);
+ await assert.rejects(()=>listUnslothModels(env,async()=>{throw Error("private");}),e=>e.message==="MODEL_LIST_CONNECTION_FAILED");
 });
-test("encryption hides key; persisted model drives chat even with environment fallback",async()=>{
- const env=mkEnv();env.UNSLOTH_API_KEY="legacy-example-key";env.UNSLOTH_MODEL="legacy-model";
- const mock=async()=>respond(["fast-q4","slow-q8"]);
- await assert.rejects(()=>saveModelConfig(env,"sk-local-real-abcdef","unlisted",mock),/MODEL_NOT_IN_LIST/);
- assert.equal(env._memory.size,0);
- const saved=await saveModelConfig(env,"sk-local-real-abcdef","fast-q4",mock);
- assert.equal(saved.model,"fast-q4");
- const raw=[...env._memory.values()][0];assert.ok(raw);assert.doesNotMatch(raw,/sk-local-real-abcdef|fast-q4/);
- assert.deepEqual(await readModelConfig(env),{apiKey:"sk-local-real-abcdef",model:"fast-q4",saved:true});
- const prior=globalThis.fetch;
+test("KV saves model only and removes legacy key, API key stays a Secret",async()=>{
+ const env=envSetup();env.UNSLOTH_MODEL="fallback";
+ env._store.set("model-configuration-v1","old encrypted data");
+ await assert.rejects(()=>saveModelConfig(env,"unlisted",async()=>modelResponse(["model-a"])),/MODEL_NOT_IN_LIST/);
+ assert.equal(env._store.size,1);
+ const v=await saveModelConfig(env,"model-a",async()=>modelResponse(["model-a"]));
+ assert.deepEqual(v,{model:"model-a",saved:true});
+ assert.deepEqual([...env._store.entries()],[["selected-model-v2","model-a"]]);
+ assert.deepEqual(await readModelConfig(env),{apiKey:"sk-secret-only-mock-123",model:"model-a",saved:true});
+ env.ADMIN_TOKEN="rotated-admin-key";
+ assert.equal((await readModelConfig(env)).model,"model-a");
+});
+test("selected model drives chat with tool calls forbidden and Secret used",async()=>{
+ const env=envSetup();env._store.set("selected-model-v2","model-choice");
+ const previous=globalThis.fetch;
  globalThis.fetch=async(url,opts)=>{
-   assert.equal(url,complete);
-   const body=JSON.parse(opts.body);assert.equal(body.model,"fast-q4");
-   assert.deepEqual(body.tools,[]);assert.equal(body.tool_choice,"none");
-   assert.equal(opts.headers.authorization,"Bearer sk-local-real-abcdef");
-   return new Response(JSON.stringify({choices:[{message:{content:"這是測試回覆"}}]}),{status:200});
+   assert.equal(url,chatUrl);assert.equal(opts.headers.authorization,"Bearer sk-secret-only-mock-123");
+   const d=JSON.parse(opts.body);assert.equal(d.model,"model-choice");
+   assert.deepEqual(d.tools,[]);assert.equal(d.tool_choice,"none");
+   return new Response(JSON.stringify({choices:[{message:{content:"收到"}}]}),{status:200});
  };
- try{assert.equal(await queryModel(env,"你好"),"這是測試回覆");}finally{globalThis.fetch=prior;}
+ try {assert.equal(await queryModel(env,"你好"),"收到");}finally{globalThis.fetch=previous;}
 });
-test("ADMIN_TOKEN rotation makes ciphertext unusable, never falls back to old key",async()=>{
- const env=mkEnv();await saveModelConfig(env,"sk-local-persistent-key","model-X",async()=>respond(["model-X"]));
- env.ADMIN_TOKEN="a-completely-new-admin-token-xxxxxxxxxxx";
- await assert.rejects(()=>readModelConfig(env),/SAVED_CONFIG_UNAVAILABLE/);
-});
-test("admin APIs reject unauthenticated calls, list and save without echoing the key",async()=>{
- const env=mkEnv();const original=globalThis.fetch;
- globalThis.fetch=async(url,opts)=>{assert.equal(url,endpoint);assert.equal(opts.method,"GET");return respond(["model-A","model-B"]);};
- try {
-   const forbidden=await request(env,"/api/models","POST",{api_key:"sk-local-valid-key"},"wrong");
-   assert.equal(forbidden.status,401);
-   const lists=await request(env,"/api/models","POST",{api_key:"sk-local-valid-key"});
-   assert.equal(lists.status,200);const data=await lists.json();assert.deepEqual(data.models,["model-A","model-B"]);assert.equal(JSON.stringify(data).includes("sk-local-valid-key"),false);
-   const applied=await request(env,"/api/settings","POST",{api_key:"sk-local-valid-key",model:"model-B"});
-   assert.equal(applied.status,200);assert.deepEqual(await applied.json(),{model:"model-B",saved:true});
-   const settings=await request(env,"/api/settings","GET");
-   assert.equal(settings.status,200);assert.deepEqual(await settings.json(),{model:"model-B",saved:true,configured:true});
-   const retried=await request(env,"/api/models","POST",{api_key:""});
-   assert.equal(retried.status,200);assert.deepEqual((await retried.json()).models,["model-A","model-B"]);
+test("admin-only model APIs forbid browser-submitted API keys",async()=>{
+ const env=envSetup();const original=globalThis.fetch;
+ globalThis.fetch=async(url,opts)=>{assert.equal(url,upstream);assert.equal(opts.headers.authorization,"Bearer sk-secret-only-mock-123");return modelResponse(["model-a","model-b"]);};
+ try{
+   const denied=await req(env,"/api/models","GET",undefined,"incorrect");assert.equal(denied.status,401);
+   const loaded=await req(env,"/api/models");assert.equal(loaded.status,200);assert.deepEqual((await loaded.json()).models,["model-a","model-b"]);
+   const reject=await req(env,"/api/settings","POST",{api_key:"sk-overwrite-attempt",model:"model-a"});
+   assert.equal(reject.status,400);
+   const applied=await req(env,"/api/settings","POST",{model:"model-b"});assert.equal(applied.status,200);
+   assert.equal((await applied.json()).model,"model-b");
+   const settings=await req(env,"/api/settings");const payload=await settings.json();assert.deepEqual(payload,{model:"model-b",saved:true,configured:true});
+   assert.equal(JSON.stringify(payload).includes("sk-secret-only-mock-123"),false);
  }finally{globalThis.fetch=original;}
 });
-test("HTML has model picker and never persists API keys in browser storage",async()=>{
- const env=mkEnv();
- const page=await worker.fetch(new Request("https://example.test/"),env);
+test("web admin has no Unsloth API Key form and secret status has no value",async()=>{
+ const env=envSetup();
+ const page=await worker.fetch(new Request("https://unit.test/"),env);
  const html=await page.text();
- assert.match(html,/取得模型清單/);assert.match(html,/儲存並套用此模型/);
- assert.doesNotMatch(html,/localStorage\.setItem|sessionStorage\.setItem/);
+ assert.doesNotMatch(html,/id=["']apiKey["']|localStorage\.setItem|sessionStorage\.setItem/);
+ assert.match(html,/UNSLOTH_API_KEY Secret/);
+ const resp=await worker.fetch(new Request("https://unit.test/api/status"),env);
+ const data=await resp.json();
+ assert.equal(data.unsloth_key_configured,true);
+ assert.equal(JSON.stringify(data).includes("sk-secret-only-mock-123"),false);
 });
