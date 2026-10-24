@@ -1,0 +1,9 @@
+name = "qqaibot-unsloth"
+main = "worker.js"
+compatibility_date = "2026-10-24"
+workers_dev = true
+
+# Configure secrets in Cloudflare Worker settings (never commit credentials).
+# This Worker has no D1, R2, Durable Objects, filesystem, or command tools.
+[observability]
+enabled = true
