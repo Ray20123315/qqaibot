@@ -1,112 +1,102 @@
 {
-  "version": "v0.0.108",
-  "task_id": "manual-cross-group-command-20261015",
+  "version": "v0.0.109",
+  "task_id": "unsloth-qq-ai-20261024",
   "goal_revision": 1,
-  "changed_at": "2026-10-15",
-  "location_type": "remote",
-  "provider": "GitHub",
+  "changed_at": "2026-10-24",
   "repository": "Ray20123315/qqaibot",
-  "branch": "main",
-  "before_revision": "526e199284275fe2e40fc251c3afb4707ce7a58a",
-  "after_revision": "memory_checkpoint_pending_commit",
-  "verification": {
-    "feature_ci": "SUCCESS:38702516128",
-    "main_ci": "SUCCESS:38702611657",
-    "cloudflare_deployment": "SUCCESS:57425b2c-a1de-45d3-bc6e-c89626144951 at 100%, main SHA 526e199284275fe2e40fc251c3afb4707ce7a58a",
-    "db_read_only": "8 binding rows / 4 verified / all stopped",
-    "real_qq_delivery": "BLOCKED pending authorized !resume"
-  },
+  "code_main_commit": "a365f0c6c391a171154241e82c28f00bfa1eb322",
   "files": [
     {
-      "path": ".Ray_Chen/memory/00_START_HERE.md",
-      "action": "modified",
-      "verification": "pending v0.0.108 main CI"
-    },
-    {
-      "path": ".Ray_Chen/memory/ACTIVE_TASK.md",
-      "action": "modified",
-      "verification": "pending v0.0.108 main CI"
-    },
-    {
-      "path": ".Ray_Chen/memory/CURRENT_STATE.md",
-      "action": "modified",
-      "verification": "pending v0.0.108 main CI"
-    },
-    {
-      "path": ".Ray_Chen/memory/VERIFY.md",
-      "action": "modified",
-      "verification": "pending v0.0.108 main CI"
-    },
-    {
-      "path": ".Ray_Chen/memory/FILE_MANIFEST.json",
-      "action": "modified",
-      "verification": "pending v0.0.108 main CI"
-    },
-    {
-      "path": ".Ray_Chen/memory/MEMORY_VERSION.txt",
-      "action": "modified",
-      "verification": "pending v0.0.108 main CI"
-    },
-    {
-      "path": ".github/workflows/bridge-check.yml",
-      "action": "modified",
-      "verification": "pending v0.0.108 main CI"
-    },
-    {
-      "path": "src/manual-relay.js",
+      "location_type": "remote",
+      "provider": "GitHub",
+      "repository": "Ray20123315/qqaibot",
+      "branch": "main",
+      "path": "standalone-qq-ai/worker.js",
       "action": "created",
-      "verification": "CI planned on memory checkpoint"
+      "after_revision": "a365f0c6c391a171154241e82c28f00bfa1eb322",
+      "verification": "GitHub CI 40068743188 SUCCESS; main readback"
     },
     {
-      "path": "src/assistant.js",
-      "action": "modified",
-      "verification": "CI planned on memory checkpoint"
-    },
-    {
-      "path": "src/bridge.js",
-      "action": "modified",
-      "verification": "CI planned on memory checkpoint"
-    },
-    {
-      "path": "src/napcat-control.js",
-      "action": "modified",
-      "verification": "CI planned on memory checkpoint"
-    },
-    {
-      "path": "tests/manual-cross-group.test.mjs",
+      "location_type": "remote",
+      "provider": "GitHub",
+      "repository": "Ray20123315/qqaibot",
+      "branch": "main",
+      "path": "standalone-qq-ai/wrangler.toml",
       "action": "created",
-      "verification": "CI planned on memory checkpoint"
+      "verification": "PR #82 merged; GitHub CI success"
     },
     {
-      "path": "tests/parallel-relay.test.mjs",
-      "action": "modified",
-      "verification": "CI planned on memory checkpoint"
+      "location_type": "remote",
+      "provider": "GitHub",
+      "repository": "Ray20123315/qqaibot",
+      "branch": "main",
+      "path": "standalone-qq-ai/package.json",
+      "action": "created",
+      "verification": "PR #82 merged; GitHub CI success"
     },
     {
-      "path": "README.md",
-      "action": "modified",
-      "verification": "CI planned on memory checkpoint"
+      "location_type": "remote",
+      "provider": "GitHub",
+      "repository": "Ray20123315/qqaibot",
+      "branch": "main",
+      "path": "standalone-qq-ai/README.md",
+      "action": "created",
+      "verification": "PR #82 merged; GitHub CI success"
     },
     {
-      "path": ".Ray_Chen/memory/USER_REQUIREMENTS.md",
-      "action": "modified",
-      "verification": "CI planned on memory checkpoint"
+      "location_type": "remote",
+      "provider": "GitHub",
+      "repository": "Ray20123315/qqaibot",
+      "branch": "main",
+      "path": "standalone-qq-ai/test/worker.test.mjs",
+      "action": "created",
+      "verification": "PR #82 merged; GitHub CI success"
     },
     {
-      "path": ".Ray_Chen/memory/DECISIONS.md",
-      "action": "modified",
-      "verification": "CI planned on memory checkpoint"
+      "location_type": "remote",
+      "provider": "GitHub",
+      "repository": "Ray20123315/qqaibot",
+      "branch": "main",
+      "path": ".github/workflows/qq-unsloth-check.yml",
+      "action": "created",
+      "verification": "PR #82 merged; GitHub CI success"
     },
     {
-      "path": ".Ray_Chen/memory/GOTCHAS.md",
-      "action": "modified",
-      "verification": "CI planned on memory checkpoint"
+      "location_type": "remote",
+      "provider": "Cloudflare",
+      "resource_id_or_path": "workers/scripts/qqaibot-unsloth",
+      "action": "created",
+      "after_revision": "4ca53f6f1f6648d097ca1109607d8b9f",
+      "verification": "API script PUT HTTP 200; fetch module compiled"
+    },
+    {
+      "location_type": "remote",
+      "provider": "Cloudflare",
+      "resource_id_or_path": "workers/domains/qqbot-ai.ray2025.com",
+      "action": "created",
+      "after_revision": "bb48e1009d7560d3728a5445155fbdae4baa40f5",
+      "verification": "API readback enabled=true; external HTTPS not verified"
     }
   ],
-  "backups": [
-    "archive/legacy-main-20261009",
-    "archive/cli-before-native-gui-20261011",
-    "6172bf1043653fa34634db6494d030d92acc78f0"
+  "memory_updates": [
+    "00_START_HERE.md",
+    "MEMORY_VERSION.txt",
+    "PROJECT.md",
+    "ACTIVE_TASK.md",
+    "CURRENT_STATE.md",
+    "USER_REQUIREMENTS.md",
+    "DECISIONS.md",
+    "GOTCHAS.md",
+    "VERIFY.md",
+    "FILE_MANIFEST.json"
   ],
-  "next_exact_action": "Authorized group owners or protected QQ accounts must resume linked groups and send /跨群 測試; confirm receiving group before declaring live complete"
+  "verification": {
+    "isolated_ci": "SUCCESS:40068743188",
+    "existing_ci": "SUCCESS:40068743122",
+    "cloudflare_deployment": "SUCCESS:4ca53f6f1f6648d097ca1109607d8b9f",
+    "worker_secrets": "EMPTY",
+    "live_qq": "UNVERIFIED",
+    "unsloth_live": "UNVERIFIED"
+  },
+  "next_exact_action": "Configure five Cloudflare Secrets and separate QQ Bot webhook; confirm QQ outgoing IP policy and perform live E2E."
 }
