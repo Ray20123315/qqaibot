@@ -1,15 +1,18 @@
 name = "qqaibot-unsloth"
 main = "worker.js"
 compatibility_date = "2026-10-24"
+# Route same-zone fetch to msiai.ray2025.com through Cloudflare public front door.
+compatibility_flags = ["global_fetch_strictly_public"]
 workers_dev = true
 
-# Admin API uses ADMIN_TOKEN Secret to encrypt a submitted Unsloth API key.
+# Unsloth credentials must be stored exclusively as Cloudflare Secret UNSLOTH_API_KEY.
+# Only the selected model identifier is stored in KV.
 # Keep this dedicated KV namespace exclusive to the new Worker.
 [[kv_namespaces]]
 binding = "CONFIG_KV"
 id = "033b241f7377496790d92056d39669ad"
 
-# Configure QQ_APP_ID, QQ_APP_SECRET, ADMIN_TOKEN in Worker Secrets.
+# Configure UNSLOTH_API_KEY, ADMIN_TOKEN, QQ_APP_ID, QQ_APP_SECRET as Worker Secrets.
 # No D1, R2, Durable Objects, shell, filesystem or tool execution.
 [observability]
 enabled = true
