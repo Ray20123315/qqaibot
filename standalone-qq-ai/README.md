@@ -93,6 +93,27 @@
 - 目前只實作 **單 isolate 記憶體短期去重**，不保證多實例下嚴格去重；QQ 自身的 `msg_id/msg_seq` 可輔助防止重覆回覆。若正式要大規模上線，需新增獨立 Queue/D1 與頻率限制。
 - 請在 Unsloth 本機另外停用 MCP、Shell、Computer Use 等具操作權限的功能；Worker 不能控制本機其他程式。
 
+## QQ 無回覆診斷
+
+Cloudflare Worker 管理頁 `https://qqbot-ai.ray2025.com/` 現有「查看 QQ 診斷」按鈕。請先以 `ADMIN_TOKEN` 登入，再在 QQ 群內 **@機器人** 或 QQ 私訊傳一則**新**訊息，然後按診斷按鈕。此面板只顯示最近 24 小時的事件階段、UTC 時間、經白名單限制的錯誤代碼，不保存或展示 QQ ID、訊息內容、AppSecret、API Key、Access Token 或上游原始錯誤。
+
+| 階段 | 解讀 |
+| --- | --- |
+| 沒有任何事件 | 優先檢查 QQ 開放平台 `https://qqbot-ai.ray2025.com/webhook` 回調**驗證通過且保存**、選擇 HTTP Webhook、訂閱 C2C_MESSAGE_CREATE / GROUP_AT_MESSAGE_CREATE、沙箱帳號與群組。此指標只是最佳努力，KV 短暫延遲或寫入節流亦可能造成缺口 |
+| `callback_verify OK` | QQ 平台完成 op=13 驗證請求（不代表已訂閱或送達聊天事件） |
+| `callback_rejected INVALID_APP` | Worker 的 QQ_APP_ID 和 QQ 平台來源不符 |
+| `callback_rejected INVALID_SIGNATURE` | 非有效簽名，請確認同一機器人的 QQ_APP_SECRET |
+| `event_received GROUP_AT/C2C` | 收到已驗簽且格式符合群@／私訊的事件 |
+| `event_ignored` | 不是可處理的事件或訊息為空 |
+| `model_failed MODEL_HTTP_400` | Unsloth 回傳錯誤；若上游內容為 No model loaded，可啟用 Studio Settings → API 的 Model auto-switch，並設定閒置自動卸載。程式會**盡可能回一則安全的錯誤訊息**，不會執行模型工具 |
+| `send_failed QQ_AUTH_*` | QQ AppID/AppSecret 兌換 Access Token 失敗 |
+| `send_failed QQ_SEND_HTTP_403` | QQ 發送 API 拒絕，檢查正式／沙箱模式、權限、IP 白名單、訊息有效期 |
+| `reply_sent OK` | QQ API 回應接受該則訊息（仍需手機 QQ 實際收件驗證） |
+
+QQ 回調事件被拒絕（INVALID_APP/INVALID_SIGNATURE）仍不會觸發 AI，也不會返回任何對話資料。未收到真正平台事件時不會憑空生成 QQ 訊息。新的 OpenID 驗證允許合法的不透明字串（含 + / =），送出時完整 URL 編碼。診斷 KV 是最佳努力且可能有傳播延遲；不應作為高流量正式持久事件系統。
+
+推論錯誤 QQ fallback 只發送純文字，不會顯示 API Key、QQ ID 或上游原始 HTTP 內容。QQ 非錯誤回覆的推論最多等待 18 秒以預留 QQ Token + 出站消息時間；非常慢的模型建議改用持久化隊列處理（避免 Cloudflare Worker `waitUntil` 背景時間過限）。
+
 ## 部署與驗證
 
 在本目錄執行 `npx wrangler deploy`（需有 Cloudflare 登入權限，且會使用本目錄專用 KV binding）。這與根目錄 `wrangler.toml` 的 `qqai` 不同。以 `npm test` 驗證基本功能；沒有 ADMIN_TOKEN 時無法使用網頁設定；沒有 QQ Secret 時無法從 QQ 實際收發；上線驗證必須以真實 API 與 QQ 訊息為準。
