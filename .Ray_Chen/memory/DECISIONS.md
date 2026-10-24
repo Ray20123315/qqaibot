@@ -6,3 +6,5 @@
 - 2026-10-15: Mark manual outbox IDs with manual-v1: and dispatch only those; cancel historical pending automatic jobs to avoid delayed broadcast. Disable join announcements. Use existing NapCat/Bbot ACK and do not retry ambiguous sends.
 
 - 2026-10-24: Build separate `qqaibot-unsloth` Worker and `qqbot-ai.ray2025.com` domain, independent of old production `qqai`; text-only official QQ signed Webhook, group @ and C2C, fixed Unsloth upstream and no tool calling. New QQ bot must be explicitly configured and must not commandeer old callback.
+
+- 2026-10-24: Admin-entered Unsloth API key is used only against the fixed /v1/models endpoint. A chosen model must be confirmed in that live list; encrypt key + selection with AES-GCM before persisting to standalone CONFIG_KV. ADMIN_TOKEN stays a Cloudflare Secret and is the encryption key derivation input; existing env secrets used only as initial fallback.
