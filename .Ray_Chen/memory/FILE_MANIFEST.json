@@ -76,6 +76,17 @@
       "action": "created",
       "after_revision": "bb48e1009d7560d3728a5445155fbdae4baa40f5",
       "verification": "API readback enabled=true; external HTTPS not verified"
+    },
+    {
+      "location_type": "remote",
+      "provider": "GitHub",
+      "repository": "Ray20123315/qqaibot",
+      "branch": "feature/qq-unsloth-memory-20261024",
+      "path": ".github/workflows/bridge-check.yml",
+      "action": "modified",
+      "before_revision": "2a72fe8cc7435be4d832e23b7b4062cd7fd5eb86",
+      "after_revision": "a6e8c942cc01bbf3d356c44432c293c5d8371e20",
+      "verification": "Updated hardcoded archive version to current MEMORY_VERSION.txt; CI pending"
     }
   ],
   "memory_updates": [
