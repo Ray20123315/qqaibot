@@ -15,7 +15,7 @@ completed_steps:
 - Implemented standalone-qq-ai files plus isolated GitHub Action; local 5/5 tests PASS; PR #82 CI runs 40068743188 and 40068743122 both SUCCESS.
 - Merged main SHA a365f0c6c391a171154241e82c28f00bfa1eb322 (readback).
 - Cloudflare script qqaibot-unsloth deployed as 4ca53f6f1f6648d097ca1109607d8b9f; workers.dev enabled; qqbot-ai.ray2025.com custom domain enabled via API.
-verification_results: GitHub PR CI success, Cloudflare script/domain API success, secrets EMPTY. Public HTTPS live request could not be verified. Real Unsloth and QQ responses untested.
+verification_results: GitHub PR CI success (40068743188, 40068743122), memory CI 40069333964 SUCCESS, Cloudflare script/domain API success, secrets EMPTY. Public HTTPS live request could not be verified. Real Unsloth and QQ responses untested.
 blockers: QQ_APP_ID, QQ_APP_SECRET, UNSLOTH_API_KEY, UNSLOTH_MODEL, ADMIN_TOKEN missing; QQ event subscription and fixed outgoing IP whitelist may be required.
 next_exact_action: Manually populate five Secrets for qqaibot-unsloth in Cloudflare, configure *new* QQ official Bot callback and perform C2C/group @ E2E; never replace old qqai callback without authorization.
 resume_rule: Confirm main SHA and Cloudflare worker/domain/secrets readback; no old Worker, D1 or group status mutations.
