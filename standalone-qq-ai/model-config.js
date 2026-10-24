@@ -35,9 +35,14 @@ export async function listUnslothModels(apiKey, fetcher=fetch) {
   try {
     response=await fetcher(MODELS_URL, {
       method:"GET",headers:{authorization:"Bearer "+apiKey,"accept":"application/json"},
-      signal:AbortSignal.timeout(12000),redirect:"error"
+      signal:AbortSignal.timeout(12000),redirect:"manual"
     });
-  } catch {throw Error("MODEL_LIST_NETWORK_ERROR");}
+  } catch (err) {
+    if(err?.name==="TimeoutError"||err?.name==="AbortError")throw Error("MODEL_LIST_TIMEOUT");
+    // Do not expose fetch error.message or its cause: they can contain headers, URLs or local paths.
+    throw Error("MODEL_LIST_CONNECTION_FAILED");
+  }
+  if(response.status>=300&&response.status<400)throw Error("MODEL_LIST_REDIRECT_"+response.status);
   if(!response.ok)throw Error("MODEL_LIST_HTTP_"+response.status);
   let payload;
   try { payload=await response.json(); } catch {throw Error("INVALID_MODEL_LIST");}
