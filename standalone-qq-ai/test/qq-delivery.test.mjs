@@ -66,7 +66,7 @@ test('Signed QQ group event with opaque OpenID is processed and model errors get
    assert.ok(outbound.url.endsWith('/a%2Bb%2Fc%3Dd/messages'));
    assert.equal(outbound.authorization,'QQBot fake-access-token');
    assert.equal(outbound.body.msg_id,'test-message-1');
-   assert.match(outbound.body.content,/MODEL_HTTP_400/);
+   assert.equal(outbound.body.msg_type,2);assert.match(outbound.body.markdown.content,/MODEL_HTTP_400/);
    const diag=(await(await diagnostics(h.env)).json()).events;
    assert.ok(diag.some(x=>x.stage==='event_received'&&x.code==='GROUP_AT'));
    assert.ok(diag.some(x=>x.stage==='model_failed'&&x.code==='MODEL_HTTP_400'));
