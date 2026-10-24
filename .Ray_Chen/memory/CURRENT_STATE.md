@@ -48,3 +48,9 @@
 - GitHub isolated CI 40087298832 SUCCESS; legacy QQ CI 40087298901 SUCCESS after repairing 4 initial regression test failures.
 - Cloudflare qqaibot-unsloth version 365a232a-ad3b-49ab-aecb-e150a3214c4c deployed 100%, flags global_fetch_strictly_public, CONFIG_KV namespace 033b241f7377496790d92056d39669ad and 4 Secret bindings preserved, selected-model-v2 key still present. model-roles-v3 not yet saved because user hasn't chosen roles. Original qqai remains unchanged.
 - Prior local memory v118 not merged; latest GitHub memory was v117. This v119 reconciles successful retry with prior handoff. Live ASR/TTS/web-search and multi-model parallel VRAM not verified.
+
+## 2026-10-24 Always-on Unsloth search + QQ Markdown rich display
+- PR #98 code main 03f829edebff295cb5953ad5636e41db2c5527ce; isolated CI 40089303664 and legacy QQ CI 40089303680 SUCCESS. Native QQ msg_type:2 markdown.content via qq-format.js; explicit permission/business rejection downgraded once to cleaned msg_type:0; KV qq-markdown-denied-v1 TTL 24h cache; never re-send after indeterminate timeouts. Source formats #/## headings and ordered lists.
+- Every text chat now sends Unsloth enable_tools:true, enabled_tools:['web_search'], mcp_enabled:false, stream:true; old webSearch:false KV effective value overridden to true; admin UI shows search always enabled. This is a request, not guarantee Unsloth GGUF actually performs search; no false claims. No image models/routes or unrestricted tools.
+- Cloudflare qqaibot-unsloth deployment cdfea900-f08a-4df0-9363-d80a5abad14c 100%, previous 4 Secrets CONFIG_KV model entries and existing QQ webhook maintained; original qqai untouched.
+- True QQ Markdown permission (especially group passive MD) and end-to-end Unsloth search results not yet verified; fallback plain-text behavior is by design.
