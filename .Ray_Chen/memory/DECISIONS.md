@@ -8,3 +8,5 @@
 - 2026-10-24: Build separate `qqaibot-unsloth` Worker and `qqbot-ai.ray2025.com` domain, independent of old production `qqai`; text-only official QQ signed Webhook, group @ and C2C, fixed Unsloth upstream and no tool calling. New QQ bot must be explicitly configured and must not commandeer old callback.
 
 - 2026-10-24: Admin-entered Unsloth API key is used only against the fixed /v1/models endpoint. A chosen model must be confirmed in that live list; encrypt key + selection with AES-GCM before persisting to standalone CONFIG_KV. ADMIN_TOKEN stays a Cloudflare Secret and is the encryption key derivation input; existing env secrets used only as initial fallback.
+
+- 2026-10-24 supersedes browser API Key input/encrypted KV plan: Unsloth API Key only in Cloudflare Secret UNSLOTH_API_KEY; admin UI list models without key field, store selected model ID only in CONFIG_KV. Use global_fetch_strictly_public for same-zone public Tunnel subrequests.
