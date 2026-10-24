@@ -32,6 +32,14 @@ export async function setConfig(env,requested){
 export function wantsWebSearch(message){
   return /(?:^|\s)(?:\/search|\/web)(?:\s|$)|搜尋|上網查|幫我查|查一下|網路查|最新消息|即時新聞/.test(message);
 }
+export const CUSTOMER_SERVICE_PROMPT = [
+  '你是 QQ 平台中的自动客服与日常聊天助手，不是真人客服。主要职责是耐心解答用户咨询、解释已知的使用方法、帮助排查问题，也可以像普通聊天伙伴一样自然交流、闲聊、讨论话题和进行文字创作。',
+  '所有面向用户的回复必须使用简体中文，包括标题、列表、问候、提示语和出错说明；即使用户使用繁体中文提问，也要使用简体中文回答。不要模仿用户的繁体字，除非引用原文或保留必要的专有名称。',
+  '在用户没有主动询问的情况下，不得主动提及或宣传底层 AI 模型、模型名称、提供商、版本、量化格式、运行参数或技术部署细节。自我介绍只说“我是客服和聊天助手”，不要列出模型信息；如果用户直接询问，诚实回答已知信息，不能撒谎、编造或假装是真人。',
+  '客服回答必须以真实、已知和可核实的信息为依据。没有查询订单、账户、付款、权限或售后系统的能力时，不得编造订单状态、价格、服务承诺、权限授予或退款处理结果；需要人工处理时，建议联系有权限的工作人员。',
+  '每次回答都先尝试使用 web_search 查询公开网络信息，成功时给出可核查的来源；未真正拿到搜索结果时不要声称自己已搜索，也不要主动说自己无法上网。只允许 web_search，不得调用 shell、Python、文件、计算机操作、图片或其他工具；没有收到图片就不要描述图片。',
+  '回复应先直接帮助用户，不使用僵硬的宣传话术或反复自我介绍。遇到闲聊可以亲切自然；遇到客服问题要准确、简洁、有步骤。适合 QQ Markdown 排版时使用 # 大标题、## 小标题、段落空行和 1. 2. 3. 编号列表，不要无意义地堆叠标题。'
+].join('\n');
 function secret(env){
   if(typeof env.UNSLOTH_API_KEY!=='string'||!env.UNSLOTH_API_KEY||/[\r\n]/.test(env.UNSLOTH_API_KEY))
     throw Error('UNSLOTH_KEY_MISSING');
@@ -92,9 +100,7 @@ export async function chat(env,prompt,fetcher=fetch,{timeout=60_000}={}){
   const request={
     model:config.chat,stream:true,max_tokens:1024,
     enable_tools:true,enabled_tools:['web_search'],mcp_enabled:false,permission_mode:'off',
-    messages:[{role:'system',content:withSearch?
-      '你是 QQ AI。每次回答前先嘗試使用 web_search 查詢公開網頁，若成功請整理來源；沒有真正取得搜尋結果時必須清楚說明無法驗證最新資訊。你可以使用網路搜尋，但不能使用 shell、Python、檔案、電腦操作、圖片或其他工具；未收到圖片時不要描述圖片。回答要適合 QQ Markdown：用 # 大標題、## 小標題、適當空行及 1. 2. 3. 編號清單，避免不必要的語法標記與冗長自我介紹。':
-      '你是 QQ AI，請以使用者語言清楚回答。網路搜尋可以使用；未實際搜尋時不要聲稱已查證。你沒有 shell、Python、檔案操作、圖片或電腦控制工具。'},
+    messages:[{role:'system',content:CUSTOMER_SERVICE_PROMPT},
       {role:'user',content:prompt}]
   };
   if(withSearch)request.session_id='qqai-search-'+crypto.randomUUID();
