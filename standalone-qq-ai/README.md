@@ -2,6 +2,18 @@
 
 這是 **qq aibot 舊系統以外**的獨立 Cloudflare Worker `qqaibot-unsloth`。它只接 QQ 官方群組 @ 事件 `GROUP_AT_MESSAGE_CREATE` 與私訊 `C2C_MESSAGE_CREATE`，使用固定上游 `https://msiai.ray2025.com/v1/chat/completions` 及 QQ 官方 API 被動回覆。**沒有執行系統指令、工具呼叫、檔案操作、任意 URL 代理的功能**。
 
+## 新版 Qwen 管理控制台（2026-10-24）
+
+管理網址：<https://qqbot-ai.ray2025.com/>。新版管理頁改為暗色系、行動裝置自適應的正式登入與後台，具備：
+- 管理員登入／登出、儀表板、Qwen 模型選擇、網頁文字測試聊天、QQ 事件診斷及功能狀態總覽。
+- `ADMIN_TOKEN` 僅由 HTTPS 登入表單提交一次，Worker 驗證後核發有效期 8 小時的 `__Host-qqai_session` cookie，設定 HttpOnly、Secure、SameSite=Strict。登入狀態透過 HMAC-SHA256 簽章，由 Worker Secret `ADMIN_TOKEN` 推導密鑰；不使用 localStorage / sessionStorage，亦不回傳金鑰值。
+- `POST /api/session` 登入、`GET /api/session` 查詢登入狀態、`DELETE /api/session` 登出。要求來源同源，登入狀態透過 cookie 傳遞；既有 `Authorization: Bearer <ADMIN_TOKEN>` 相容外部管理 API。
+- 網頁測試 AI 回覆會保留段落、換行與 tab；仍保留現有模型回覆安全控制與 QQ 發訊條件，不擅自改動其他 QQ 系統。
+- 使用者已具備 Qwen 圖片理解、網路搜尋及語音服務，**但目前此 standalone Worker 程式碼仍只把 QQ 文字事件轉送 OpenAI Chat Completions**。後台對此清楚顯示「已有服務、QQ 接入待核對」，不宣稱 QQ 圖片／語音／搜尋已實際由本 Worker 執行。Qwen 生圖依使用者要求暫不啟用，也不新增任何圖像模型。
+- Cookie 登出會清除瀏覽器 cookie；密鑰更換會使既有登入簽章失效。無伺服器端單筆 Session 撤銷功能，故不應在公用裝置上登入。建議配合 Cloudflare WAF 設定登入端點的 IP 速率限制。
+
+這次只有網頁管理後台重設計與文字換行修復；沒有安裝模型、沒有賦予 LLM 任意上網或操作電腦權限、沒有改動 QQ Webhook 協定或模型 Secret。
+
 ## Cloudflare Worker Secret 與模型選擇
 
 管理網址：https://qqbot-ai.ray2025.com/ 。Worker 僅使用以下 Cloudflare Worker **Secret**，不得在網頁輸入或在 GitHub / KV 保存 Unsloth API Key：
@@ -26,7 +38,7 @@
 ## 管理 API
 
 - `GET /api/status`：公開、僅顯示設定狀態；不含 Secret 原文。
-- `GET /api/models`：須以 `Authorization: Bearer <ADMIN_TOKEN>` 管理驗證；由 Worker Secret 抓模型清單，不接受使用者提供 API Key。
+- `GET /api/models`：支援已登入的安全 Cookie 或既有 `Authorization: Bearer <ADMIN_TOKEN>` 管理驗證；由 Worker Secret 抓模型清單，不接受網頁提供 API Key。
 - `GET /api/settings`：須管理驗證；顯示目前模型 ID。
 - `POST /api/settings`：須管理驗證，`{"model":"模型 ID"}`；再次驗證模型存在後將 ID 寫到 KV，拒絕 `api_key` 請求欄位。
 - `POST /api/chat`：純文字聊天測試，使用已選模型和 Worker Secret，禁止任何工具呼叫。
