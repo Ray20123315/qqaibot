@@ -1,3 +1,14 @@
+## 2026-10-24 用户模式、图片与反刷屏（分阶段）
+
+- 每个经 QQ 回调验证的群成员或私聊用户，可使用 `/搜索开`、`/搜索关`、`/思考开`、`/思考关`。模型请求始终显式传 `enable_thinking:false`（默认）、仅搜索开启时启用 `enabled_tools:['web_search']`，禁用 MCP、Python、终端、文件读写、图像生成与权限绕过。群组成员开关按 QQ author 分开，避免一个成员影响其他人；状态在既有 CONFIG_KV 中保存 30 天。未收到可信 author 的事件不能更改设置。
+- `/深度搜索` 只会说明暂未开放。Unsloth API 字段存在不代表这个本地 GGUF 及工具 handoff 已验收；普通搜索与深度搜索不能同时启用。
+- 从 QQ native `d.attachments` 解析图片，严格 HTTPS 域名白名单，禁止重定向、限制 MIME 和 2MiB 图片体积，转换成 OpenAI 多模态 `image_url` data URI 交给本机 Qwen；接收失败须明确告知而非虚称无图片。这不接入任何图片生成模型。上传图像是否被你现在的 Unsloth vision runtime 成功读取，须端到端实测。
+- 识别明显纯重复刷屏要求（例如一次发 100 个相同字符）并简短拒绝；输出层对高比例重复行做第二次保护。正常聊天、代码示例和合理长文本不应被全面封锁。
+- 主题范围限制可令机器人避免参与明显的政治立场辩论，但自然聊天、游戏和生活内容仍可正常回复。
+- **HTML 群文件**：当前 QQ 官方群富媒体 `file_type:4` 可用性未经实测，公开实现显示群聊可能尚不开放（仅 C2C）。没有确定支持前，任何生成请求不能声称已将 `.html` 文件发到群聊。本阶段不伪造文件成功、不提供本地读写或 Python 执行权限。每日可消费的配额及执行隔离，需要在真正的 HTML 文件交付链路验证后启用。
+- 多用户并行及 GPU 消耗还没有独立负载验证。Cloudflare 可并发收回调，不代表单一 Unsloth 模型可以无限并行；不要宣称已实现公平调度或后台长任务结果投递。
+- 本阶段不接入收费资源、Cloudflare AI Search 新消费路径或 R2；当前已有绑定保持，后续知识库替换为 SQLite FTS5 必须单独验收再发布。
+
 ## 對話記憶、262K 規劃、向量客服知識庫和指令（2026-10-24）
 
 此版本新增**獨立** Cloudflare SQLite Durable Objects `CHAT_ROOMS`（每個 QQ 群組及私信一個隔離 Object）與 AI Search `SUPPORT_SEARCH`（公開客服資料，Embedding `@cf/qwen/qwen3-embedding-0.6b`）。聊天原文保存在 SQLite 的 `qq_message_log`，摘要儲存在 `qq_compaction`；摘要游標前進時不刪原文，摘要失敗不使既有聊天不可用。以 QQ App Secret＋群/用戶 ID 產生不可逆 scope 鍵，資料庫不儲存明文 QQ OpenID；日後更換 App Secret 需規劃 memory key migration。
