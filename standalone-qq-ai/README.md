@@ -64,3 +64,27 @@ Cloudflare 已新增**獨立** Workers KV：`qqaibot-unsloth-config`，Worker bi
 ## 部署與驗證
 
 在本目錄執行 `npx wrangler deploy`（需有 Cloudflare 登入權限，且會使用本目錄專用 KV binding）。這與根目錄 `wrangler.toml` 的 `qqai` 不同。以 `npm test` 驗證基本功能；沒有 ADMIN_TOKEN 時無法使用網頁設定；沒有 QQ Secret 時無法從 QQ 實際收發；上線驗證必須以真實 API 與 QQ 訊息為準。
+
+## 模型清單連線診斷
+
+若管理頁「取得模型清單」失敗，請保留**錯誤代碼**，不要傳 API Key：
+
+| 代碼 | 意義 | 檢查方向 |
+| --- | --- | --- |
+| `MODEL_LIST_TIMEOUT` | Worker 等待 12 秒仍無回應 | 電腦上的 Unsloth Studio API 是否在回應；Tunnel 指向的服務連接埠 |
+| `MODEL_LIST_CONNECTION_FAILED` | 網路、TLS、DNS 或連線建立失敗 | Cloudflare Tunnel 公開主機名與本機服務是否可達；Worker 到上游的連線 |
+| `MODEL_LIST_REDIRECT_301/302/307/308` | 上游要求轉址 | 是否被導向登入、其他路徑或 Cloudflare 防護頁（Worker 不追隨重新導向） |
+| `MODEL_LIST_HTTP_401/403` | 上游確實回應拒絕 | Unsloth API Key 或額外的存取控制 |
+| `MODEL_LIST_HTTP_502/503/522/524` | 上游或 Cloudflare 錯誤 | 本機推論服務、Tunnel 到本機的連線、逾時 |
+| `INVALID_MODEL_LIST` | 上游回的不是 Unsloth 模型清單格式 | 上游 API 路由或服務類型 |
+
+**請在執行 Unsloth 的電腦測試**（Windows PowerShell，先不要貼出 API Key 或回應內的敏感資料）：
+
+```powershell
+# 這個檢查只驗證本機是否能與 Unsloth API 取得 HTTP 回應。
+curl.exe -I --max-time 10 http://127.0.0.1:8888/v1/models
+```
+
+`401` 代表 HTTP API 可以連接，但需要身分驗證；`200` 代表可讀；`connection refused` 或 `timeout` 表示本機 API 服務未就緒。若 Cloudflare Tunnel 指向的並非 `127.0.0.1`，還要檢查它所設定的實際本機位址。
+
+請勿把管理員金鑰或 Unsloth API Key 發到聊天、GitHub Issue 或記錄檔。

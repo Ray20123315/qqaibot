@@ -19,7 +19,7 @@ test("model discovery lists only real API ids and never dynamic upstream",async(
  let called=0;
  const ids=await listUnslothModels("sk-local-fake",async(url,opts)=>{
    called++;assert.equal(url,endpoint);assert.equal(opts.headers.authorization,"Bearer sk-local-fake");
-   assert.equal(opts.redirect,"error");return respond(["model-z","model-a","model-z"]);
+   assert.equal(opts.redirect,"manual");return respond(["model-z","model-a","model-z"]);
  });
  assert.equal(called,1);assert.deepEqual(ids,["model-z","model-a"]);
 });
@@ -74,4 +74,19 @@ test("HTML has model picker and never persists API keys in browser storage",asyn
  const html=await page.text();
  assert.match(html,/取得模型清單/);assert.match(html,/儲存並套用此模型/);
  assert.doesNotMatch(html,/localStorage\.setItem|sessionStorage\.setItem/);
+});
+
+test("HTTP redirect reports status rather than hiding it as a fetch network error",async()=>{
+ await assert.rejects(()=>listUnslothModels("sk-example-key",async(url,opts)=>{
+   assert.equal(opts.redirect,"manual");
+   return new Response("",{status:302,headers:{location:"https://example.com/login"}});
+ }),/MODEL_LIST_REDIRECT_302/);
+});
+test("timeout and raw fetch rejection have distinct safe error codes",async()=>{
+ await assert.rejects(()=>listUnslothModels("sk-example-key",async()=>{
+   throw new DOMException("origin secret internal diagnostic","TimeoutError");
+ }),/MODEL_LIST_TIMEOUT/);
+ await assert.rejects(()=>listUnslothModels("sk-example-key",async()=>{
+   throw new TypeError("origin secret internal diagnostic");
+ }),e=>e.message==="MODEL_LIST_CONNECTION_FAILED");
 });
