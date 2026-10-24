@@ -6,3 +6,7 @@
 - QQ official published native slash menu is NOT the same as command text parser. Text command works if Bbot receives it; QQ menu cannot be claimed configured without platform readback.
 - Existing qqai /v2/panels API returned QQ_PANEL_RECORDS_MISSING_OBJECT_ABSENT_ABSENT. Do not assume empty response is evidence old menu removed; refuse unrelated deletes.
 - Preserve Windows native Codex GUI, local bridge JSON including edit/read roots, Cloudflare Secrets, Abot AI, D1/Vectorize. No destructive repo reset or force push.
+
+- New QQ worker: Cloudflare Workers general outgoing egress IP is not stable; QQ Open Platform may require fixed outbound IP whitelist. Cannot claim real message delivery without addressing policy and E2E evidence.
+- New Worker has no Secrets as of 2026-10-24; Unsloth model ID/key, QQ App credentials and ADMIN_TOKEN must be set manually. Custom domain API binding enabled but public HTTPS not independently verified. The home Unsloth service may need Access service authentication not implemented in this minimal Worker.
+- New Worker uses isolate-local best-effort replay cache and `waitUntil`; extremely slow local inference or retries can fail; no durable exactly-once semantics.
