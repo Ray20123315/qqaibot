@@ -5,6 +5,20 @@ compatibility_date = "2026-10-24"
 compatibility_flags = ["global_fetch_strictly_public"]
 workers_dev = true
 
+# New isolated per-conversation SQLite Durable Objects. Never shared with legacy qqai.
+[[durable_objects.bindings]]
+name = "CHAT_ROOMS"
+class_name = "QQMemoryRoom"
+
+[exports.QQMemoryRoom]
+type = "durable-object"
+storage = "sqlite"
+
+# Qwen embedding based public customer-support knowledge (do not upload secrets).
+[[ai_search]]
+binding = "SUPPORT_SEARCH"
+instance_name = "qqaibot-support"
+
 # Unsloth credentials must be stored exclusively as Cloudflare Secret UNSLOTH_API_KEY.
 # Only the selected model identifier is stored in KV.
 # Keep this dedicated KV namespace exclusive to the new Worker.
@@ -13,6 +27,7 @@ binding = "CONFIG_KV"
 id = "033b241f7377496790d92056d39669ad"
 
 # Configure UNSLOTH_API_KEY, ADMIN_TOKEN, QQ_APP_ID, QQ_APP_SECRET as Worker Secrets.
-# No D1, R2, Durable Objects, shell, filesystem or tool execution.
+# Chat history is stored in isolated SQLite Durable Objects; public support RAG uses AI Search.
+# No D1 usage, shell, local filesystem or arbitrary tool execution.
 [observability]
 enabled = true
