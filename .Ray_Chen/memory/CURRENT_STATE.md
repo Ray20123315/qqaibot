@@ -14,3 +14,8 @@
 - Cloudflare Worker `qqaibot-unsloth` deployment 4ca53f6f1f6648d097ca1109607d8b9f created. Custom Domain `qqbot-ai.ray2025.com` and workers.dev subdomain enabled; secrets list empty. No live Unsloth or QQ messages verified, custom domain external HTTPS unverified.
 
 - Memory packaging CI issue on hardcoded 0.0.108 resolved; subsequent PR #83 run 40069333964 SUCCESS.
+
+## 2026-10-24 Unsloth model picker
+- PR #84 code merged main 16764e1bcc7509f0eb761040e6ed738e05572194; GitHub CI isolated 40072501757 SUCCESS, legacy 40072501794 SUCCESS.
+- New CONFIG_KV dedicated `qqaibot-unsloth-config` namespace id 033b241f7377496790d92056d39669ad; encrypted key & chosen model (not yet configured). Worker c179d753-b3f8-4f0f-ac2f-a262379eff14 deployed 100% with binding readback.
+- Model listing through fixed /v1/models endpoint; admin chooses from returned IDs; same model used by QQ and web chat. Secrets GET empty; no live Unsloth/QQ verification. Old qqai remains untouched.
