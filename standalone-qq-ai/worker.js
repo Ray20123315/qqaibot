@@ -217,7 +217,7 @@ export async function processEvent(env,event) {
     }else {
       try {
         let knowledge='';
-        if(env.SUPPORT_SEARCH&&/(HRS|MFL|客服|订单|权限|支付|付费|登录|购买|订阅|使用|报错|帮助)/i.test(event.message)){
+        if(env.ENABLE_PAID_AI_SEARCH==='true'&&env.SUPPORT_SEARCH&&/(HRS|MFL|客服|订单|权限|支付|付费|登录|购买|订阅|使用|报错|帮助)/i.test(event.message)){
           try{knowledge=citationContext(await lookupSupport(env,event.message));}
           catch{ /* Knowledge index failure must not break QQ text chat. */ }
         }
@@ -262,6 +262,8 @@ export default {
     }
 
     if(pathname==='/api/knowledge'){
+      // Paid Cloudflare AI Search is disabled by default; no hidden index/upload usage.
+      if(env.ENABLE_PAID_AI_SEARCH!=='true')return json({error:'KNOWLEDGE_PAID_BACKEND_DISABLED'},503);
       if(!['GET','POST'].includes(request.method))return json({error:'METHOD_NOT_ALLOWED'},405);
       if(!await adminAllowed(request,env))return json({error:'UNAUTHORIZED'},401);
       try{
