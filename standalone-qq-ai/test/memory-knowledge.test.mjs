@@ -116,7 +116,31 @@ test('admin-only memory budget and public KB APIs reject unsigned clients',async
 test('dashboard has memory / vector knowledge panels and executable script',async()=>{
  const r=await worker.fetch(new Request('https://test.example/'),{},{waitUntil(){}});
  const html=await r.text();
- for(const t of ['data-section="memory"','data-section="knowledge"','knowledgeFile','ctxWindow','PUBLIC'])assert.ok(html.includes(t),t);
+ for(const t of ['data-section="memory"','data-section="knowledge"','knowledgeFile','ctxWindow','公开客服资料'])assert.ok(html.includes(t),t);
  const script=html.match(/<script>([\s\S]*?)<\/script>/)?.[1];assert.ok(script);
  const vm=await import('node:vm');assert.doesNotThrow(()=>new vm.Script(script));
+});
+
+test('Durable Object adapter routes only internal SQL to the scoped stub',async()=>{
+ const {roomDatabase,QQMemoryRoom}=await import('../qq-memory-room.js');
+ let last=null;
+ const stub={fetch:async(url,options)=>{
+   assert.equal(url,'https://room.internal/sql');
+   last=JSON.parse(options.body);
+   return new Response(JSON.stringify({results:[{seq:1,content:'safe'}]}),{status:200});
+ }};
+ const env={CHAT_ROOMS:{idFromName:name=>name,get:id=>stub}};
+ const db=roomDatabase(env,'opaque-scope');
+ const rows=await db.prepare('SELECT seq,content FROM qq_message_log WHERE scope=?').bind('opaque-scope').all();
+ assert.equal(last.kind,'all');
+ assert.equal(last.params[0],'opaque-scope');
+ assert.equal(rows.results[0].content,'safe');
+ let queries=[];
+ const state={storage:{sql:{exec:(sql,...params)=>{queries.push(sql);return {toArray:()=>[{ok:1}],rowsWritten:1}}}}};
+ const room=new QQMemoryRoom(state,{});
+ const bad=await room.fetch(new Request('https://room.internal/sql',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({sql:'DROP TABLE qq_message_log',params:[],kind:'run'})}));
+ assert.equal(bad.status,400);
+ const ok=await room.fetch(new Request('https://room.internal/sql',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({sql:'SELECT seq FROM qq_message_log WHERE scope=?',params:['x'],kind:'all'})}));
+ assert.equal(ok.status,200);
+ assert.ok(queries.length>1);
 });
