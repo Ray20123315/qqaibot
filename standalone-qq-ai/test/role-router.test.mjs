@@ -14,9 +14,9 @@ const json=x=>new Response(JSON.stringify(x),{status:200,headers:{'content-type'
 const request=(env,path,method='GET',body)=>worker.fetch(new Request(base+path,
   {method,headers:{authorization:'Bearer '+env.ADMIN_TOKEN,'content-type':'application/json'},
   body:body===undefined?undefined:JSON.stringify(body)}),env,{waitUntil(){}});
-test('legacy chat remains selected; optional roles default off',async()=>{
+test('legacy chat remains selected; optional ASR/TTS roles default off, search on',async()=>{
  const e=fixture();
- assert.deepEqual(await getConfig(e),{chat:roles.chat,asr:null,tts:null,webSearch:false,saved:false});
+ assert.deepEqual(await getConfig(e),{chat:roles.chat,asr:null,tts:null,webSearch:true,saved:false});
 });
 test('role settings keep IDs only and disallow URLs, scripts and image roles',async()=>{
  const e=fixture();
@@ -26,16 +26,16 @@ test('role settings keep IDs only and disallow URLs, scripts and image roles',as
  assert.deepEqual(await getConfig(e),{...roles,saved:true});
  assert.doesNotMatch(JSON.stringify([...e.store]),/test-only-key-in-Worker-Secret/);
 });
-test('plain chat disables tools while explicit search allows only web_search',async()=>{
+test('all chat requests only web_search and never invokes other local tools',async()=>{
  const e=fixture();await setConfig(e,roles);
  let normal;
  const a=await chat(e,'你好',async(url,options)=>{normal=JSON.parse(options.body);assert.equal(url,'https://msiai.ray2025.com/v1/chat/completions');return json({choices:[{message:{content:'第一行\n第二行'}}]});});
  assert.equal(a.text,'第一行\n第二行');
- assert.equal(normal.enable_tools,false);assert.deepEqual(normal.enabled_tools,[]);assert.equal(normal.mcp_enabled,false);
+ assert.equal(normal.enable_tools,true);assert.deepEqual(normal.enabled_tools,['web_search']);assert.equal(normal.mcp_enabled,false);assert.equal(normal.stream,true);
  let searchReq;
  const sse='data: {"choices":[{"delta":{"content":"找到 "}}]}\n\ndata: {"choices":[{"delta":{"content":"來源"}}]}\n\ndata: [DONE]\n\n';
  const b=await chat(e,'請幫我查最新消息',async(url,options)=>{searchReq=JSON.parse(options.body);return new Response(sse,{headers:{'content-type':'text/event-stream'}});});
- assert.equal(b.text,'找到 來源');assert.equal(b.searched,true);assert.deepEqual(searchReq.enabled_tools,['web_search']);
+ assert.equal(b.text,'找到 來源');assert.equal(b.searched,false);assert.equal(b.searchRequested,true);assert.deepEqual(searchReq.enabled_tools,['web_search']);
  assert.equal(searchReq.enable_tools,true);assert.equal(searchReq.mcp_enabled,false);
  assert.equal(wantsWebSearch('/search 資安新聞'),true);
  assert.equal(wantsWebSearch('你好'),false);
