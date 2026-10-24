@@ -19,7 +19,7 @@ test("model discovery lists only real API ids and never dynamic upstream",async(
  let called=0;
  const ids=await listUnslothModels("sk-local-fake",async(url,opts)=>{
    called++;assert.equal(url,endpoint);assert.equal(opts.headers.authorization,"Bearer sk-local-fake");
-   assert.equal(opts.redirect,"error");return respond(["model-z","model-a","model-z"]);
+   assert.equal(opts.redirect,"manual");return respond(["model-z","model-a","model-z"]);
  });
  assert.equal(called,1);assert.deepEqual(ids,["model-z","model-a"]);
 });
