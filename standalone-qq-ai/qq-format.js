@@ -1,5 +1,5 @@
 /** QQ Markdown presentation and controlled plaintext downgrade. */
-const safeString=s=>String(s??'').replace(/\r\n?/g,'\n').replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g,'').trim();
+const safeString=s=>String(s??'').replace(/\r\n?/g,'\n').replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g,'').trim().replace(/^null(?=[\u3400-\u9fff])/i,'');
 export function markdownForQQ(answer){
   let s=safeString(answer);
   if(!s)return '暫時無法產生回覆。';
