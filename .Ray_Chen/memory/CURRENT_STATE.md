@@ -29,3 +29,9 @@
 - User admin test returned MODEL_UNAVAILABLE after successful model picker; Worker Secrets ADMIN_TOKEN/UNSLOTH_API_KEY secret_text and selected-model-v2 KV key present, same-zone public flag enabled.
 - PR #89 code merged main a974232b6f71991af2d23f654d618ccc0ec72465, GitHub CI 40076227706 and 40076227711 SUCCESS.
 - Cloudflare qqaibot-unsloth version 327900f7-5a47-46dc-87ca-ee8988240bdf running 100%, secrets inherited strictly, KV binding preserved; web admin chat 60s, QQ background 22s, minimal no-tools request max_tokens1024, safe granular model errors. Live model POST remains untested; legacy qqai untouched.
+
+## 2026-10-24 confirmed QQ callback / outbound UNKNOWN and classification repair
+- User recorded callback_verify OK, event_received GROUP_AT, send_failed UNKNOWN; therefore QQ webhook and event path had worked, although outbound send failed. Prior lack of logs no longer applies. UNKNOWN means missing exception classification; IP block is a hypothesis, not confirmed.
+- Prior v0.0.115 local verified archive contained PR #91 and deployment 21f125fc-b566-4e07-8368-cad0490602b3, but remote GitHub memory remained v0.0.114 due safety block. This v0.0.116 reconciles both releases.
+- PR #92 main d6997d37bb3861e037dbca4bbb742c6b490ecbc5, isolated CI 40079995888 and legacy 40079995892 pass. New QQ auth/send fetch, timeout, HTTP and safe numeric business codes recorded; no secrets/ids/logs.
+- Independent Cloudflare Worker qqaibot-unsloth deployment 9ece06c4-edbc-4055-8a2a-1a7e2f87ecb4 100%, inherited 4 secret_text and CONFIG_KV binding; selected-model-v2 retained. QQ live send remains unverified; original qqai unchanged.
