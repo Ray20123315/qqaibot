@@ -14,3 +14,9 @@
 - NOT VERIFIED: credentials, Unsloth live chat, signed QQ callback from platform, QQ C2C/group @ reply, fixed IP whitelist.
 
 - Legacy main CI failed on memory PR initial run 40069118447 because archive step pinned v0.0.108; npm run check passed. Updated `.github/workflows/bridge-check.yml` to read MEMORY_VERSION.txt, validate FILE_MANIFEST version, and archive dynamically. Revalidated SUCCESS in PR CI run 40069333964 (npm run check, dynamic TAR creation, sha256 and artifact upload).
+
+## 2026-10-24 Unsloth model picker
+- GitHub PR #84: isolated test CI 40072501757 SUCCESS; legacy test CI 40072501794 SUCCESS; merged main 16764e1bcc7509f0eb761040e6ed738e05572194 with worker and model-config.js readback.
+- Cloudflare API: dedicated KV namespace 033b241f7377496790d92056d39669ad created. qqaibot-unsloth script upload success; version c179d753-b3f8-4f0f-ac2f-a262379eff14 at 100% deployed, settings readback CONFIG_KV mapped to that ID; domain qqbot-ai.ray2025.com enabled.
+- Verified tests cover model listing URL/Authorization and no redirect, deduplicated IDs, list errors, authenticated settings, unlisted selection refusal, AES-GCM ciphertext not exposing key or model, rotated admin secret fails decrypt, selected model used for /v1/chat/completions without tool calls.
+- Limit: Secrets list still EMPTY. Web tool cannot access public HTTPS URL; no actual API key, model listing, chat completion or QQ platform event tested.
