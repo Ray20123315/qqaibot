@@ -1,3 +1,13 @@
+# 2026-10-24 — 聊天與 HRS 客服分離 / 聊天与 HRS 客服分离 / Separation of Chat and HRS Support
+
+**繁體中文：** 本獨立 Worker 目前定位是 QQAIBOT 通用聊天，可加入非 HRS 群組。既有聊天、上下文、搜尋、思考、圖片、語音、常用指令仍依原有權限與供應商能力運作；移除 HRS 客服專用提示詞、知識庫查詢／上傳介面與 AI Search Binding。既有客服索引不刪除，舊版 Git 設於 `backup/qqaibot-pre-split-20261024`。模型優先使用本機 Unsloth 的既有 HTTPS 上游；僅發生連線、逾時、503 等可回復錯誤時，且有 Worker Secret `GEMINI_API_KEY` 和設定 `GEMINI_FALLBACK_MODEL`，才會切至 Gemini。搜尋 Grounding 預設不會在備援啟用，可另設 `GEMINI_SEARCH_GROUNDING=true` 並實測，避免未授權付費。LLM 本身不共用 HRS 客服資料庫。未部署正式環境。
+
+**简体中文：** QQAIBOT 改为通用聊天 Bot，不限 HRS 群。保留已实现的聊天、记忆、搜索、思考、图像、语音及常用命令；移除 HRS 客服知识库与客服角色。优先连接你的电脑上的 Unsloth；连接失败后可在设置 Gemini Secret、模型 ID 后使用 Gemini。不会清除旧数据库及支持索引。原版可从备份分支恢复。
+
+**English:** QQAIBOT is now general chat, including non-HRS QQ groups. Existing chat features, QQ context, search/reasoning toggles, image, audio and commands are retained. HRS customer-service prompt, KB retrieval/upload UI and AI Search binding are removed without deleting stored index data. The existing local Unsloth HTTPS endpoint is primary; Gemini is a failure-only backup requiring `GEMINI_API_KEY` (Worker Secret) and `GEMINI_FALLBACK_MODEL`. Gemini grounding is opt-in. Previous code: `backup/qqaibot-pre-split-20261024`. Production is not changed.
+
+---
+
 ## 2026-10-24 用户模式、图片与反刷屏（分阶段）
 
 - 每个经 QQ 回调验证的群成员或私聊用户，可使用 `/搜索开`、`/搜索关`、`/思考开`、`/思考关`。模型请求始终显式传 `enable_thinking:false`（默认）、仅搜索开启时启用 `enabled_tools:['web_search']`，禁用 MCP、Python、终端、文件读写、图像生成与权限绕过。群组成员开关按 QQ author 分开，避免一个成员影响其他人；状态在既有 CONFIG_KV 中保存 30 天。未收到可信 author 的事件不能更改设置。

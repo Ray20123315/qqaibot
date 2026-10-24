@@ -1,7 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {approxTokens,contextBudget,scopeKey,appendMessage,loadContext,compactOneBatch,getMemoryStats} from '../conversation-memory.js';
-import {validFile,citationContext,lookupSupport} from '../support-knowledge.js';
 import {parseCommand,commandResult} from '../qq-commands.js';
 import {chat,summarizeConversation} from '../role-router.js';
 import worker from '../worker.js';
@@ -85,17 +84,6 @@ test('prompt routes actual multi-turn messages and summary; compactor cannot sea
  assert.deepEqual(body.enabled_tools,[]);
  assert.equal(body.mcp_enabled,false);
 });
-test('public support upload validates names and search citations are untrusted',async()=>{
- const blob=new Blob(['客服问答']);Object.defineProperty(blob,'name',{value:'support.md'});
- assert.equal(validFile(blob),true);
- const other=new Blob(['x']);Object.defineProperty(other,'name',{value:'secret.exe'});
- assert.equal(validFile(other),false);
- let input;
- const knowledge=await lookupSupport({SUPPORT_SEARCH:{search:async query=>{input=query;return {chunks:[{score:0.8,text:'请按步骤操作',item:{key:'faq.md'}}]};}}},'HRS 登录问题');
- assert.equal(knowledge[0].source,'faq.md');
- assert.match(citationContext(knowledge),/不可信引用内容/);
- assert.equal(input.ai_search_options.retrieval.max_num_results,4);
-});
 test('slash commands never actually execute moderation; unknown command not intercepted',()=>{
  assert.deepEqual(parseCommand('/骰子'),{name:'骰子',args:''});
  assert.equal(commandResult('/踢出 @用户').handled,true);
@@ -103,20 +91,23 @@ test('slash commands never actually execute moderation; unknown command not inte
  assert.match(commandResult('/帮助').text,/上下文/);
  assert.equal(commandResult('/search hi').handled,false);
 });
-test('admin-only memory budget and public KB APIs reject unsigned clients',async()=>{
+test('admin memory protected and support API absent',async()=>{
  const env={ADMIN_TOKEN:'long-test-token-not-private-000000000000',CONFIG_KV:{get:async k=>null,put:async()=>{}}};
- for(const path of ['/api/context','/api/knowledge']){
+ for(const path of ['/api/context']){
   const r=await worker.fetch(new Request('https://test.example'+path),env,{waitUntil(){}});
   assert.equal(r.status,401);
  }
+ const removed=await worker.fetch(new Request('https://test.example/api/knowledge',{headers:{authorization:'Bearer '+env.ADMIN_TOKEN}}),env,{waitUntil(){}});
+ assert.equal(removed.status,404);
  const r=await worker.fetch(new Request('https://test.example/api/context',{headers:{authorization:'Bearer '+env.ADMIN_TOKEN}}),env,{waitUntil(){}});
  assert.equal(r.status,200);
  const status=await r.json();assert.equal(status.modelCeiling,262144);assert.equal(status.actualStudioWindowVerified,false);
 });
-test('dashboard has memory / vector knowledge panels and executable script',async()=>{
+test('dashboard retains memory but removes support knowledge UI',async()=>{
  const r=await worker.fetch(new Request('https://test.example/'),{},{waitUntil(){}});
  const html=await r.text();
- for(const t of ['data-section="memory"','data-section="knowledge"','knowledgeFile','ctxWindow','公开客服资料'])assert.ok(html.includes(t),t);
+ for(const token of ['data-section="memory"','ctxWindow'])assert.ok(html.includes(token),token);
+ for(const token of ['data-section="knowledge"','knowledgeFile','公开客服资料'])assert.ok(!html.includes(token),token);
  const script=html.match(/<script>([\s\S]*?)<\/script>/)?.[1];assert.ok(script);
  const vm=await import('node:vm');assert.doesNotThrow(()=>new vm.Script(script));
 });
