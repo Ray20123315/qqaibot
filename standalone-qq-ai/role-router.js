@@ -15,16 +15,16 @@ export async function getConfig(env){
   const fallback=await env.CONFIG_KV?.get(CHAT_KEY)||env.UNSLOTH_MODEL||null;
   const chat=isModelId(fallback)?fallback:null;
   const saved=await env.CONFIG_KV?.get(ROLE_KEY);
-  if(saved==null)return {chat,asr:null,tts:null,webSearch:false,saved:false};
+  if(saved==null)return {chat,asr:null,tts:null,webSearch:true,saved:false};
   let parsed;
   try{parsed=JSON.parse(saved);}catch{throw Error('INVALID_ROLE_CONFIG');}
   if(!checkConfig(parsed))throw Error('INVALID_ROLE_CONFIG');
-  return {...parsed,saved:true};
+  return {...parsed,webSearch:true,saved:true};
 }
 export async function setConfig(env,requested){
   if(!env.CONFIG_KV)throw Error('CONFIG_STORAGE_UNAVAILABLE');
   if(!checkConfig(requested))throw Error('INVALID_ROLE_CONFIG');
-  const value={chat:requested.chat,asr:requested.asr,tts:requested.tts,webSearch:requested.webSearch};
+  const value={chat:requested.chat,asr:requested.asr,tts:requested.tts,webSearch:true};
   await env.CONFIG_KV.put(ROLE_KEY,JSON.stringify(value));
   await env.CONFIG_KV.put(CHAT_KEY,value.chat);
   return {...value,saved:true};
@@ -88,13 +88,13 @@ export async function chat(env,prompt,fetcher=fetch,{timeout=60_000}={}){
   if(typeof prompt!=='string'||!prompt.trim()||prompt.length>4000)throw Error('INVALID_PROMPT');
   const config=await getConfig(env);
   if(!config.chat)throw Error('CHAT_NOT_CONFIGURED');
-  const withSearch=config.webSearch&&wantsWebSearch(prompt);
+  const withSearch=true; // Every chat requests Unsloth's built-in web_search. QQ content controls none of the tool allowlist.
   const request={
-    model:config.chat,stream:withSearch,max_tokens:1024,
-    enable_tools:withSearch,enabled_tools:withSearch?['web_search']:[],mcp_enabled:false,
+    model:config.chat,stream:true,max_tokens:1024,
+    enable_tools:true,enabled_tools:['web_search'],mcp_enabled:false,permission_mode:'off',
     messages:[{role:'system',content:withSearch?
-      '你是 QQ AI。只使用 web_search 查詢公開網頁並列出可核查來源。你不能執行 shell、Python、檔案、電腦操作，也沒有其他工具；未收到圖片時不要描述圖片；未真正搜尋時不要宣稱已經搜尋。':
-      '你是 QQ AI，請以使用者語言清楚回答。你沒有 shell、Python、檔案操作、圖片或電腦控制工具；若沒有真實搜尋結果，不要宣稱曾上網；沒收到圖片不要虛構內容。'},
+      '你是 QQ AI。每次回答前先嘗試使用 web_search 查詢公開網頁，若成功請整理來源；沒有真正取得搜尋結果時必須清楚說明無法驗證最新資訊。你可以使用網路搜尋，但不能使用 shell、Python、檔案、電腦操作、圖片或其他工具；未收到圖片時不要描述圖片。回答要適合 QQ Markdown：用 # 大標題、## 小標題、適當空行及 1. 2. 3. 編號清單，避免不必要的語法標記與冗長自我介紹。':
+      '你是 QQ AI，請以使用者語言清楚回答。網路搜尋可以使用；未實際搜尋時不要聲稱已查證。你沒有 shell、Python、檔案操作、圖片或電腦控制工具。'},
       {role:'user',content:prompt}]
   };
   if(withSearch)request.session_id='qqai-search-'+crypto.randomUUID();
@@ -105,9 +105,11 @@ export async function chat(env,prompt,fetcher=fetch,{timeout=60_000}={}){
       const data=await response.json().catch(()=>null);
       const content=data?.choices?.[0]?.message?.content;
       if(typeof content!=='string'||!content.trim())throw Error('UPSTREAM_EMPTY_RESPONSE');
-      return {text:tidy(content),searched:true};
+      // Configured tools do not prove upstream search actually executed.
+      return {text:tidy(content),searched:false,searchRequested:true};
     }
-    return {text:tidy(await streamText(response)),searched:true};
+    // SSE is expected for Studio tool execution; no tool-result proof available in a bare text response.
+    return {text:tidy(await streamText(response)),searched:false,searchRequested:true};
   }
   let data;try{data=await response.json();}catch{throw Error('UPSTREAM_INVALID_JSON');}
   const value=data?.choices?.[0]?.message?.content;
