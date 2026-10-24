@@ -1,24 +1,25 @@
 # ACTIVE_TASK
-task_id: qq-natural-customer-persona-20261024
+task_id: qq-admin-login-js-fix-20261024
 task_status: completed
-goal_revision: 12
-goal: Change the independent QQbot from model-focused assistant into humanlike conversational customer service, without disclosing AI/model technical details even on direct question, while preserving truthful identity and simplified text.
+goal_revision: 13
+goal: Restore standalone qqaibot-unsloth web dashboard administrator login without touching secrets, QQ workflows or models.
 acceptance_criteria:
-- Natural support+chat, no repetitive automated self-intro; friendly informal but helpful.
-- Always instruct model output Simplified Chinese; no backend model, vendor, version, quantization, deployment or system prompt information even when asked, polite refusal without a fabricated answer.
-- No false claim to be real human, no invented orders, payments, refund/grants, offline memories or actions.
-- Existing QQ webhook, Markdown, every-chat Unsloth web_search, ASR/TTS model roles, Secrets/KV, no-image requirement unchanged.
-- New CI pass, code PR main merge, independent Cloudflare Worker 100% readback; versioned memory archive and Gmail notification.
-current_phase: Code/CI/merge/deploy verified; real QQ persona acceptance pending.
-current_step: User tests direct model question, casual chat and customer service.
+- Identify reproducible login blocker in current main source.
+- Fix minimal root cause, add regression test executing served dashboard JS and login handler.
+- Both isolated and original QQ AI CI pass before main merge.
+- Deploy only independent qqaibot-unsloth and verify 100% runtime version with existing Secret/KV bindings.
+- Update versioned Ray_Chen memory, deliver valid archive and send one Gmail notification, explicitly note if unavailable.
+current_phase: Verified source/CI/merge and Cloudflare deploy; user browser acceptance pending.
+current_step: User hard-reloads browser admin console and tries original ADMIN_TOKEN to confirm login.
 completed_steps:
-- Recovered context: previous local v121 TAR valid but GitHub remote memory v120, previous PR #100 main 17afc4ea71084cac4cd270312edf202b909fb864 already deployed.
-- PR #101 updates standalone-qq-ai/role-router.js CUSTOMER_SERVICE_PROMPT, test/qq-markdown.test.mjs and README, no additional Worker business logic.
-- Initial CI isolated failing due outdated assertion wording, corrected tests; isolated 40091803676 PASS and legacy AI 40091803666 PASS. PR #101 merged main 218809ad9d2670a405b1a8ed1e6578c30183ed01.
-- Cloudflare only qqaibot-unsloth deployment 79cef349-a2b2-4c13-91d1-5dcb38e40326 confirmed 100% and readback preserved 4 secret_text, CONFIG_KV model keys, web_search and QQ webhook; original qqai untouched.
-verification_results: CI PASS, main PR merged, Cloudflare deployment/readback PASS. No live QQ persona test; static traditional language existing.
-known_failures: Earlier v121 remote memory branch partial/blocked; replaced with reconciled v122. Model prompt is probabilistic.
-blockers: No known blockers; acceptance requires human QQ test.
-next_exact_action: User tests real QQ '你会做什么？' / '你用什么模型？' and a customer issue, then reports any undesired model info, traditional text or false actions.
-resume_rule: Read code main and Cloudflare version before further edits; no model secrets or QQ IDs in logs/archives; don't conflate persona with claim of real-human identity.
-last_checkpoint_at: 2026-10-24T19:48:00+08:00
+- Read actual GitHub dashboard.js and session-auth.js / worker.js; verified admin Secret binding exists. Parsed dashboard HTML and compiled embedded JavaScript; SyntaxError missing ) after argument list caused by invalid literal `+'，web_search 固定開啟+'。'` in saveRoles code. Login handlers never installed.
+- PR #103 feature branch fix only dashboard.js string concat. Extracted corrected inline script passed new Function parsing. Updated test/dashboard-session.test.mjs to compile actual served JS with node vm.Script and mock login submission, clear password and show admin app.
+- GitHub isolated CI 40094335343 SUCCESS, original QQAIBOT AI CI 40094335412 SUCCESS. PR #103 merged main commit 500b6cebb6457080ef50e32b05a7060ed1421834.
+- Deployed six-module qqaibot-unsloth script using strict inheritance, version c2c0ab0e-1f02-4804-ae81-bf7dd4c63b1f 100% Cloudflare readback; ADMIN_TOKEN, QQ_APP_ID, QQ_APP_SECRET, UNSLOTH_API_KEY secret_text all retained, CONFIG_KV namespace 033b241f7377496790d92056d39669ad and model-roles-v3/selected-model-v2 keys intact; original qqai unchanged.
+commands_run: In-tool JS parser new Function(script), GitHub Actions, Cloudflare PUT + settings/deploy/source/KV GET.
+verification_results: Reproducible SyntaxError before fix, compiled after fix, CI passed, deployed 100%, bindings/source readback passed. Public website/browser actual login NOT VERIFIED; external custom domain inaccessible from runtime.
+known_failures: Actual user acceptance pending; browser may cache old HTML, use hard refresh. If 401 remains after JS works, check Origin/session/ADMIN_TOKEN mismatch without exposing secret.
+blockers: No code/deploy blocker; actual admin UI confirmation requires user interaction.
+next_exact_action: User opens https://qqbot-ai.ray2025.com/, hard refresh Ctrl+Shift+R, enter existing ADMIN_TOKEN; report exact UI error or console if login still fails (never secret).
+resume_rule: Do not rotate ADMIN_TOKEN or alter QQ models. Read source + actual deployment first; keep original qqai isolated.
+last_checkpoint_at: 2026-10-24
