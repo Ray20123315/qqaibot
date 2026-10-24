@@ -106,6 +106,14 @@ Cloudflare Worker 管理頁 `https://qqbot-ai.ray2025.com/` 現有「查看 QQ �
 | `event_received GROUP_AT/C2C` | 收到已驗簽且格式符合群@／私訊的事件 |
 | `event_ignored` | 不是可處理的事件或訊息為空 |
 | `model_failed MODEL_HTTP_400` | Unsloth 回傳錯誤；若上游內容為 No model loaded，可啟用 Studio Settings → API 的 Model auto-switch，並設定閒置自動卸載。程式會**盡可能回一則安全的錯誤訊息**，不會執行模型工具 |
+| `send_failed QQ_AUTH_FETCH_FAILED` | 呼叫 QQ Access Token API 的 `fetch()` 失敗（可能是 DNS/TLS/網路/執行環境，**不代表金鑰錯**） |
+| `send_failed QQ_AUTH_TIMEOUT` | 取得 QQ Access Token 等待逾時（8 秒） |
+| `send_failed QQ_AUTH_CODE_100016` | QQ API 透過 HTTP 200 回報 AppID 或 AppSecret 無效（核對同一隻機器人） |
+| `send_failed QQ_AUTH_CODE_100007` | QQ API 回報 AppID 無效 |
+| `send_failed QQ_AUTH_HTTP_NNN` | QQ Token API 返回非 2xx HTTP 狀態碼 |
+| `send_failed QQ_SEND_FETCH_FAILED` | 已取得 Token，但呼叫 QQ 發訊 API 的 `fetch()` 失敗（檢查網路連線與 Cloudflare Worker 出口） |
+| `send_failed QQ_SEND_TIMEOUT` | QQ 發送 API 等待超過 8 秒 |
+| `send_failed QQ_SEND_CODE_NNN` | QQ 發送 API HTTP 200 仍回傳錯誤碼；對照 QQ 官方錯誤碼 |
 | `send_failed QQ_AUTH_*` | QQ AppID/AppSecret 兌換 Access Token 失敗 |
 | `send_failed QQ_SEND_HTTP_403` | QQ 發送 API 拒絕，檢查正式／沙箱模式、權限、IP 白名單、訊息有效期 |
 | `reply_sent OK` | QQ API 回應接受該則訊息（仍需手機 QQ 實際收件驗證） |
