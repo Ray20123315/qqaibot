@@ -1,11 +1,44 @@
 {
-  "version": "v0.0.116",
-  "task_id": "qq-unsloth-send-unknown-20261024",
-  "goal_revision": 7,
+  "version": "v0.0.117",
+  "task_id": "qwen-qq-admin-console-20261024",
+  "goal_revision": 8,
   "changed_at": "2026-10-24",
   "repository": "Ray20123315/qqaibot",
-  "code_main_commit": "d6997d37bb3861e037dbca4bbb742c6b490ecbc5",
+  "code_main_commit": "8741abb9ea524adfb77dd3d7629ace6dda5b5fd3",
   "files": [
+    {
+      "location_type": "remote",
+      "provider": "GitHub",
+      "repository": "Ray20123315/qqaibot",
+      "branch": "main",
+      "path": "standalone-qq-ai/dashboard.js",
+      "action": "created",
+      "before_revision": null,
+      "after_revision": "8741abb9ea524adfb77dd3d7629ace6dda5b5fd3",
+      "verification": "PR #94 merged; isolated CI 40082915685 PASS; old QQ CI 40082915660 PASS"
+    },
+    {
+      "location_type": "remote",
+      "provider": "GitHub",
+      "repository": "Ray20123315/qqaibot",
+      "branch": "main",
+      "path": "standalone-qq-ai/session-auth.js",
+      "action": "created",
+      "before_revision": null,
+      "after_revision": "8741abb9ea524adfb77dd3d7629ace6dda5b5fd3",
+      "verification": "PR #94 merged; isolated CI 40082915685 PASS; old QQ CI 40082915660 PASS"
+    },
+    {
+      "location_type": "remote",
+      "provider": "GitHub",
+      "repository": "Ray20123315/qqaibot",
+      "branch": "main",
+      "path": "standalone-qq-ai/test/dashboard-session.test.mjs",
+      "action": "created",
+      "before_revision": null,
+      "after_revision": "8741abb9ea524adfb77dd3d7629ace6dda5b5fd3",
+      "verification": "PR #94 merged; isolated CI 40082915685 PASS; old QQ CI 40082915660 PASS"
+    },
     {
       "location_type": "remote",
       "provider": "GitHub",
@@ -13,20 +46,9 @@
       "branch": "main",
       "path": "standalone-qq-ai/worker.js",
       "action": "modified",
-      "before_revision": "f939e1f6d98fad94f1c948b3abd70219d7ed6f2f",
-      "after_revision": "d6997d37bb3861e037dbca4bbb742c6b490ecbc5",
-      "verification": "PR #92 merged; isolated CI 40079995888 PASS, legacy AI CI 40079995892 PASS"
-    },
-    {
-      "location_type": "remote",
-      "provider": "GitHub",
-      "repository": "Ray20123315/qqaibot",
-      "branch": "main",
-      "path": "standalone-qq-ai/test/qq-delivery.test.mjs",
-      "action": "modified",
-      "before_revision": "f939e1f6d98fad94f1c948b3abd70219d7ed6f2f",
-      "after_revision": "d6997d37bb3861e037dbca4bbb742c6b490ecbc5",
-      "verification": "PR #92 merged; isolated CI 40079995888 PASS, legacy AI CI 40079995892 PASS"
+      "before_revision": "eedc76637d64b6ab7cdc437de09a4c33ea443dd7",
+      "after_revision": "8741abb9ea524adfb77dd3d7629ace6dda5b5fd3",
+      "verification": "PR #94 merged; isolated CI 40082915685 PASS; old QQ CI 40082915660 PASS"
     },
     {
       "location_type": "remote",
@@ -35,108 +57,108 @@
       "branch": "main",
       "path": "standalone-qq-ai/README.md",
       "action": "modified",
-      "before_revision": "f939e1f6d98fad94f1c948b3abd70219d7ed6f2f",
-      "after_revision": "d6997d37bb3861e037dbca4bbb742c6b490ecbc5",
-      "verification": "PR #92 merged; isolated CI 40079995888 PASS, legacy AI CI 40079995892 PASS"
+      "before_revision": "eedc76637d64b6ab7cdc437de09a4c33ea443dd7",
+      "after_revision": "8741abb9ea524adfb77dd3d7629ace6dda5b5fd3",
+      "verification": "PR #94 merged; isolated CI 40082915685 PASS; old QQ CI 40082915660 PASS"
     },
     {
       "location_type": "remote",
       "provider": "Cloudflare",
       "resource_id_or_path": "workers/scripts/qqaibot-unsloth",
       "action": "modified",
-      "before_revision": "21f125fc-b566-4e07-8368-cad0490602b3",
-      "after_revision": "9ece06c4-edbc-4055-8a2a-1a7e2f87ecb4",
-      "verification": "Cloudflare deployment 100%, code/compat flag/inherited secrets/KV readback"
+      "before_revision": "9ece06c4-edbc-4055-8a2a-1a7e2f87ecb4",
+      "after_revision": "68e38e2c-da07-4c2b-a9d7-1e959f89e4d2",
+      "verification": "Cloudflare deployment readback 100%; all 4 Worker secret_text bindings/CONFIG_KV/flags and model selected key preserved"
     },
     {
       "location_type": "remote",
       "provider": "GitHub",
       "repository": "Ray20123315/qqaibot",
-      "branch": "chore/qq-send-diagnostics-memory-v116-20261024",
+      "branch": "chore/qwen-admin-console-memory-v117-20261024",
       "path": ".Ray_Chen/memory/00_START_HERE.md",
       "action": "modified",
-      "after_revision": "v0.0.116",
-      "verification": "GitHub memory PR CI pending"
+      "after_revision": "v0.0.117",
+      "verification": "memory PR and archive workflow pending"
     },
     {
       "location_type": "remote",
       "provider": "GitHub",
       "repository": "Ray20123315/qqaibot",
-      "branch": "chore/qq-send-diagnostics-memory-v116-20261024",
+      "branch": "chore/qwen-admin-console-memory-v117-20261024",
       "path": ".Ray_Chen/memory/ACTIVE_TASK.md",
       "action": "modified",
-      "after_revision": "v0.0.116",
-      "verification": "GitHub memory PR CI pending"
+      "after_revision": "v0.0.117",
+      "verification": "memory PR and archive workflow pending"
     },
     {
       "location_type": "remote",
       "provider": "GitHub",
       "repository": "Ray20123315/qqaibot",
-      "branch": "chore/qq-send-diagnostics-memory-v116-20261024",
+      "branch": "chore/qwen-admin-console-memory-v117-20261024",
       "path": ".Ray_Chen/memory/MEMORY_VERSION.txt",
       "action": "modified",
-      "after_revision": "v0.0.116",
-      "verification": "GitHub memory PR CI pending"
+      "after_revision": "v0.0.117",
+      "verification": "memory PR and archive workflow pending"
     },
     {
       "location_type": "remote",
       "provider": "GitHub",
       "repository": "Ray20123315/qqaibot",
-      "branch": "chore/qq-send-diagnostics-memory-v116-20261024",
+      "branch": "chore/qwen-admin-console-memory-v117-20261024",
       "path": ".Ray_Chen/memory/CURRENT_STATE.md",
       "action": "modified",
-      "after_revision": "v0.0.116",
-      "verification": "GitHub memory PR CI pending"
+      "after_revision": "v0.0.117",
+      "verification": "memory PR and archive workflow pending"
     },
     {
       "location_type": "remote",
       "provider": "GitHub",
       "repository": "Ray20123315/qqaibot",
-      "branch": "chore/qq-send-diagnostics-memory-v116-20261024",
+      "branch": "chore/qwen-admin-console-memory-v117-20261024",
       "path": ".Ray_Chen/memory/USER_REQUIREMENTS.md",
       "action": "modified",
-      "after_revision": "v0.0.116",
-      "verification": "GitHub memory PR CI pending"
+      "after_revision": "v0.0.117",
+      "verification": "memory PR and archive workflow pending"
     },
     {
       "location_type": "remote",
       "provider": "GitHub",
       "repository": "Ray20123315/qqaibot",
-      "branch": "chore/qq-send-diagnostics-memory-v116-20261024",
+      "branch": "chore/qwen-admin-console-memory-v117-20261024",
       "path": ".Ray_Chen/memory/DECISIONS.md",
       "action": "modified",
-      "after_revision": "v0.0.116",
-      "verification": "GitHub memory PR CI pending"
+      "after_revision": "v0.0.117",
+      "verification": "memory PR and archive workflow pending"
     },
     {
       "location_type": "remote",
       "provider": "GitHub",
       "repository": "Ray20123315/qqaibot",
-      "branch": "chore/qq-send-diagnostics-memory-v116-20261024",
+      "branch": "chore/qwen-admin-console-memory-v117-20261024",
       "path": ".Ray_Chen/memory/GOTCHAS.md",
       "action": "modified",
-      "after_revision": "v0.0.116",
-      "verification": "GitHub memory PR CI pending"
+      "after_revision": "v0.0.117",
+      "verification": "memory PR and archive workflow pending"
     },
     {
       "location_type": "remote",
       "provider": "GitHub",
       "repository": "Ray20123315/qqaibot",
-      "branch": "chore/qq-send-diagnostics-memory-v116-20261024",
+      "branch": "chore/qwen-admin-console-memory-v117-20261024",
       "path": ".Ray_Chen/memory/VERIFY.md",
       "action": "modified",
-      "after_revision": "v0.0.116",
-      "verification": "GitHub memory PR CI pending"
+      "after_revision": "v0.0.117",
+      "verification": "memory PR and archive workflow pending"
     },
     {
       "location_type": "remote",
       "provider": "GitHub",
       "repository": "Ray20123315/qqaibot",
-      "branch": "chore/qq-send-diagnostics-memory-v116-20261024",
+      "branch": "chore/qwen-admin-console-memory-v117-20261024",
       "path": ".Ray_Chen/memory/FILE_MANIFEST.json",
       "action": "modified",
-      "after_revision": "v0.0.116",
-      "verification": "GitHub memory PR CI pending"
+      "after_revision": "v0.0.117",
+      "verification": "memory PR and archive workflow pending"
     }
   ],
   "memory_updates": [
@@ -151,15 +173,15 @@
     "FILE_MANIFEST.json"
   ],
   "verification": {
-    "isolated_ci": "SUCCESS:40079995888",
-    "existing_ci": "SUCCESS:40079995892",
-    "cloudflare_deployment": "SUCCESS:9ece06c4-edbc-4055-8a2a-1a7e2f87ecb4",
-    "secrets": "4 names preserved secret_text",
-    "kv": "CONFIG_KV + selected-model-v2 preserved",
-    "qq_incoming": "VERIFIED user diagnostic callback and GROUP_AT",
-    "qq_outgoing": "BLOCKED pending retry after new error codes"
+    "isolated_ci": "SUCCESS:40082915685",
+    "existing_ci": "SUCCESS:40082915660",
+    "cloudflare_deployment": "SUCCESS:68e38e2c-da07-4c2b-a9d7-1e959f89e4d2 at 100%",
+    "bindings": "ADMIN_TOKEN, QQ_APP_ID, QQ_APP_SECRET, UNSLOTH_API_KEY secret_text; CONFIG_KV preserved",
+    "manual_browser": "NOT_VERIFIED",
+    "multimodal_worker": "NOT_VERIFIED (user has local services)",
+    "image_generation": "DISABLED; user preference"
   },
-  "next_exact_action": "User sends fresh QQ group @ message, opens authenticated QQ diagnostics and reports newest send_failed code or reply_sent OK.",
+  "next_exact_action": "User opens the new Qwen console in browser, logs in using ADMIN_TOKEN, verifies dashboard/model picker/admin chat line breaks/QQ diagnostics and reports any issue.",
   "previous_local_memory_archive": {
     "version": "v0.0.115",
     "sha256": "330f5cef91ad35c3708e01724ff37d460053518ddb2e3778c0c5ecd0a0765603",
