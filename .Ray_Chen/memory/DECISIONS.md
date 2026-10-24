@@ -4,3 +4,5 @@
 - 2026-10-15: Only exact leading /跨群 <文字> authorizes sending; all other QQ group events are non-relay. Existing D1 room_id defines the scope and preserves trust separation between rooms.
 - 2026-10-15: Forward only to verified and not stopped targets; stopped and receive-only sender restrictions remain effective. Legacy bridge_enabled toggles never reactivate continuous forwarding.
 - 2026-10-15: Mark manual outbox IDs with manual-v1: and dispatch only those; cancel historical pending automatic jobs to avoid delayed broadcast. Disable join announcements. Use existing NapCat/Bbot ACK and do not retry ambiguous sends.
+
+- 2026-10-24: Build separate `qqaibot-unsloth` Worker and `qqbot-ai.ray2025.com` domain, independent of old production `qqai`; text-only official QQ signed Webhook, group @ and C2C, fixed Unsloth upstream and no tool calling. New QQ bot must be explicitly configured and must not commandeer old callback.
