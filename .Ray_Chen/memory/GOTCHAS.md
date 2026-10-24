@@ -14,3 +14,5 @@
 - Encrypted KV key is derived from high-entropy ADMIN_TOKEN; changing it invalidates stored ciphertext. Explicitly supplying a new API Key via admin can overwrite undecryptable config. Never log or send raw key in GET query/URL.
 - Cloudflare KV is eventually consistent; after selecting a model, QQ requests from other locations may see an older configuration briefly. Never claim strong transactional consistency.
 - New dedicated CONFIG_KV namespace (033b241f7377496790d92056d39669ad) is NOT preexisting QQ data and must not be confused with legacy QQAIBOT D1 or QQbotKV.
+
+- 2026-10-24: Cloudflare same-zone fetch to Tunnel may bypass public front door without global_fetch_strictly_public; keep flag on standalone Worker. Admin Token existing Cloudflare binding currently plain_text, not Secret; user must upgrade manually. API key secret missing; do not claim live Worker chat works.
