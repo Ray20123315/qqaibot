@@ -14,21 +14,26 @@ jobs:
       - run: npm install --ignore-scripts
       - run: npm run check
       - name: Archive and verify project memory
+        id: memory
         run: |
           test -r .Ray_Chen/memory/00_START_HERE.md
           test -r .Ray_Chen/memory/ACTIVE_TASK.md
           test -r .Ray_Chen/memory/CURRENT_STATE.md
           test -r .Ray_Chen/memory/FILE_MANIFEST.json
-          test "$(cat .Ray_Chen/memory/MEMORY_VERSION.txt)" = "v0.0.108"
-          tar -czf Ray_Chen_memory_v0.0.108.tar.gz .Ray_Chen/memory/
-          tar -tzf Ray_Chen_memory_v0.0.108.tar.gz > memory-list.txt
-          grep -q ".Ray_Chen/memory/FILE_MANIFEST.json" memory-list.txt
-          grep -q ".Ray_Chen/memory/ACTIVE_TASK.md" memory-list.txt
-          sha256sum Ray_Chen_memory_v0.0.108.tar.gz | tee Ray_Chen_memory_v0.0.108.sha256
+          VERSION="$(cat .Ray_Chen/memory/MEMORY_VERSION.txt)"
+          [[ "$VERSION" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          test "$(jq -r '.version' .Ray_Chen/memory/FILE_MANIFEST.json)" = "$VERSION"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          ARCHIVE="Ray_Chen_memory_${VERSION}.tar.gz"
+          tar -czf "$ARCHIVE" .Ray_Chen/memory/
+          tar -tzf "$ARCHIVE" > memory-list.txt
+          grep -Fqx ".Ray_Chen/memory/FILE_MANIFEST.json" memory-list.txt
+          grep -Fqx ".Ray_Chen/memory/ACTIVE_TASK.md" memory-list.txt
+          sha256sum "$ARCHIVE" | tee "Ray_Chen_memory_${VERSION}.sha256"
       - uses: actions/upload-artifact@v4
         with:
-          name: ray-chen-memory-v0.0.108
+          name: ray-chen-memory-${{ steps.memory.outputs.version }}
           path: |
-            Ray_Chen_memory_v0.0.108.tar.gz
-            Ray_Chen_memory_v0.0.108.sha256
+            Ray_Chen_memory_${{ steps.memory.outputs.version }}.tar.gz
+            Ray_Chen_memory_${{ steps.memory.outputs.version }}.sha256
           retention-days: 90
