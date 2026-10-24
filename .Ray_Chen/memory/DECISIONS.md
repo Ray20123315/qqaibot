@@ -10,3 +10,5 @@
 - 2026-10-24: Admin-entered Unsloth API key is used only against the fixed /v1/models endpoint. A chosen model must be confirmed in that live list; encrypt key + selection with AES-GCM before persisting to standalone CONFIG_KV. ADMIN_TOKEN stays a Cloudflare Secret and is the encryption key derivation input; existing env secrets used only as initial fallback.
 
 - 2026-10-24 supersedes browser API Key input/encrypted KV plan: Unsloth API Key only in Cloudflare Secret UNSLOTH_API_KEY; admin UI list models without key field, store selected model ID only in CONFIG_KV. Use global_fetch_strictly_public for same-zone public Tunnel subrequests.
+
+- 2026-10-24: Minimal OpenAI Chat Completions request deliberately omits tools/tool_choice (no delegation capability), uses max_tokens 1024. Admin chat 60s timeout; QQ async handler 22s budget. UI returns sanitized errors rather than raw HTTP body or credentials.
