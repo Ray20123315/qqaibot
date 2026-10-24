@@ -25,3 +25,9 @@
 - GitHub merged PR #87 main 500c7689c199dc5db33f91146dc6e7c78f05f2fd; isolated CI 40075035673 SUCCESS; existing AI CI 40075035664 SUCCESS.
 - Cloudflare Worker qqaibot-unsloth PUT HTTP 200 version 678a0b74-800b-47ea-9efe-868fd7e551f0 deployed 100%; settings readback shows global_fetch_strictly_public, original ADMIN_TOKEN plain_text and CONFIG_KV namespace 033b241f7377496790d92056d39669ad.
 - Source readback includes selected-model-v2 and no crypto.subtle.encrypt call; KV keys listing zero prior to change. User verified Unsloth local HTTP 200, public HTTP 200 with Bearer. Public live Worker model list/QQ message not yet tested (missing Worker Secret); platform web URL tool cannot reach endpoint.
+
+## 2026-10-24 Admin chat failure diagnostics
+- GitHub PR #89 tests: CI 40076227706 isolated Worker SUCCESS, 40076227711 existing AI SUCCESS, main merge a974232b6f71991af2d23f654d618ccc0ec72465 readback.
+- Tested no-tool request, 60s web timeout/22s QQ budget, HTTP 400 sanitization, network vs timeout, JSON invalid/empty response and text array responses. CI initially failed on outdated test assumptions, corrected and rerun PASS.
+- Cloudflare PUT HTTP 200 with strict inherit ADMIN_TOKEN/UNSLOTH_API_KEY and dedicated CONFIG_KV; deployment 327900f7-5a47-46dc-87ca-ee8988240bdf at 100%; source contains MODEL_TIMEOUT, MODEL_EMPTY_RESPONSE and max_tokens:1024. Secret types remain secret_text. global_fetch_strictly_public still active, selected-model-v2 KV key exists.
+- NOT VERIFIED: live POST /v1/chat/completions from Cloudflare Worker, real model response, QQ platform E2E. Need user web chat retest and safe error code.
