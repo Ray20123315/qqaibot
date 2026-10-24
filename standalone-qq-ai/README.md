@@ -2,38 +2,49 @@
 
 這是 **qq aibot 舊系統以外**的獨立 Cloudflare Worker `qqaibot-unsloth`。它只接 QQ 官方群組 @ 事件 `GROUP_AT_MESSAGE_CREATE` 與私訊 `C2C_MESSAGE_CREATE`，使用固定上游 `https://msiai.ray2025.com/v1/chat/completions` 及 QQ 官方 API 被動回覆。**沒有執行系統指令、工具呼叫、檔案操作、任意 URL 代理的功能**。
 
-## 網頁配置 Unsloth 模型
+## Cloudflare Worker Secret 與模型選擇
 
-Cloudflare 已新增**獨立** Workers KV：`qqaibot-unsloth-config`，Worker binding 為 `CONFIG_KV`，已寫入本資料夾的 `wrangler.toml`。它不使用舊 QQAIBOT 的 D1、DO 或其他 KV。
+管理網址：https://qqbot-ai.ray2025.com/ 。Worker 僅使用以下 Cloudflare Worker **Secret**，不得在網頁輸入或在 GitHub / KV 保存 Unsloth API Key：
 
-在 [Cloudflare Dashboard](https://dash.cloudflare.com/) → `qqaibot-unsloth` → Settings → Variables and Secrets，至少設定以下 Secret：
-
-| 名稱 | 用途 |
+| Secret | 值 |
 | --- | --- |
-| `ADMIN_TOKEN` | 網頁管理金鑰，請使用至少 32 個隨機字元。也作為加密資料金鑰的來源；**變更後須重新輸入 Unsloth API Key** |
-| `QQ_APP_ID` | 新 QQ 官方機器人 AppID |
-| `QQ_APP_SECRET` | 新 QQ AppSecret，不能共用公開金鑰 |
+| `UNSLOTH_API_KEY` | Unsloth Studio 產生的 API Key，**必須**存放在獨立 Worker `qqaibot-unsloth` 的 Secret |
+| `ADMIN_TOKEN` | 網頁管理用隨機強密碼，至少 32 個隨機字元，也要選擇 Secret 類型；不可設為 Plain Text |
+| `QQ_APP_ID` | 獨立 QQ 官方 Bot 的 AppID |
+| `QQ_APP_SECRET` | 獨立 QQ Bot 的 AppSecret |
 
-之後開啟 [QQ AI 網頁](https://qqbot-ai.ray2025.com/)：
+設定位置：[Cloudflare Dashboard](https://dash.cloudflare.com/) → Workers & Pages → `qqaibot-unsloth` → Settings → Variables and Secrets → Add Secret。金鑰不需要傳給 ChatGPT。只有 `UNSLOTH_API_KEY` 與 `ADMIN_TOKEN` 是「列出模型」和「儲存模型」的必要條件；QQ 憑證之後配置。
 
-1. 填入管理金鑰 `ADMIN_TOKEN`。
-2. 填入 Unsloth API Key（在 Unsloth Studio 取得）。
-3. 點選「取得模型清單」，透過固定網址 `GET https://msiai.ray2025.com/v1/models` 讀取 API 回傳的模型 ID。
-4. 從下拉選單選取模型，按「儲存並套用此模型」；Worker 會驗證選取的模型是否在清單中，再以 AES-GCM 加密 API Key 和模型設定後寫入專用 KV。
-5. 使用網頁聊天室測試，確認正常後再測 QQ 群組 @／私訊。QQ 與網頁使用同一份已選設定。
+使用方式：
+1. 將 API Key 儲存成 Worker Secret `UNSLOTH_API_KEY`，並確保 `ADMIN_TOKEN` 是 Secret（不是一般 Plain Text Variable）。
+2. 在管理網頁輸入 `ADMIN_TOKEN`，按「取得模型清單」。Worker 使用環境 Secret 對固定 `https://msiai.ray2025.com/v1/models` 呼叫 Bearer API。
+3. 選擇其中的模型並按「儲存並套用」，Worker 會再驗證所選模型存在，將**模型 ID（僅 ID）**儲存在專用 KV `qqaibot-unsloth-config`，不寫入任何 API 金鑰。
+4. 使用管理員聊天測試，再設定獨立 QQ Bot 回呼。
 
-**不可把 API Key 或 ADMIN_TOKEN 提交至 GitHub、放在網址、日誌、瀏覽器 localStorage 或聊天訊息。** 網頁 API Key 僅在本次表單中暫存，儲存成功即清空。KV 內只有加密密文、IV；加密金鑰由 Worker Secret `ADMIN_TOKEN` 衍生。管理員金鑰遺失或變更後，原密文無法復原；可重新輸入 API Key 覆蓋設定（舊密文無須解密）。
-
-若原本已有 Cloudflare Secret `UNSLOTH_API_KEY`、`UNSLOTH_MODEL`，在未經網頁儲存設定前，仍可作為 fallback。**網頁成功儲存的設定優先於這兩個 Secret。**
+此 Worker 的 `compatibility_flags = ["global_fetch_strictly_public"]` 讓對相同 Cloudflare Zone 的 `msiai.ray2025.com` 上游 `fetch()` 走 Cloudflare 公開路由，避免同 Zone 連線被送往與公開端點不同的來源。這是針對舊 `MODEL_LIST_NETWORK_ERROR` 的修復設定，但上線仍須實測。
 
 ## 管理 API
 
-- `GET /api/status`：公開、只顯示已設定狀態；不含 Secret 或模型 ID。
-- `GET /api/settings`：管理驗證後顯示已選模型與是否已設定，不回傳 API Key。
-- `POST /api/models`：使用 `Authorization: Bearer <ADMIN_TOKEN>` 與 JSON `{"api_key":"sk-local-..."}` 取得模型清單；已儲存金鑰可省略。
-- `POST /api/settings`：送 `{"api_key":"sk-local-...","model":"模型 ID"}`，驗證模型清單後儲存。已儲存金鑰可省略。
-- `POST /api/chat`：管理驗證的純文字聊天測試，使用目前已選模型。
-- `POST /webhook`：QQ 官方訊息入口，維持原 Ed25519 安全驗證。
+- `GET /api/status`：公開、僅顯示設定狀態；不含 Secret 原文。
+- `GET /api/models`：須以 `Authorization: Bearer <ADMIN_TOKEN>` 管理驗證；由 Worker Secret 抓模型清單，不接受使用者提供 API Key。
+- `GET /api/settings`：須管理驗證；顯示目前模型 ID。
+- `POST /api/settings`：須管理驗證，`{"model":"模型 ID"}`；再次驗證模型存在後將 ID 寫到 KV，拒絕 `api_key` 請求欄位。
+- `POST /api/chat`：純文字聊天測試，使用已選模型和 Worker Secret，禁止任何工具呼叫。
+- `POST /webhook`：QQ 官方 Webhook 簽章驗證和訊息回覆。
+
+舊版 KV `model-configuration-v1` 曾可包含加密金鑰。新程式**完全不會讀取它**，首次成功儲存模型後會將該舊項刪除。現有獨立 KV API 讀回清單為空；本次不改動其他 Worker、D1 或 QQ 既有資料。變更 ADMIN_TOKEN 不會影響已選模型。
+
+### 模型清單錯誤
+
+| 錯誤代碼 | 檢查 |
+| --- | --- |
+| `UNSLOTH_SECRET_NOT_CONFIGURED` | 設定 `qqaibot-unsloth` Worker 的 `UNSLOTH_API_KEY` Secret |
+| `MODEL_LIST_CONNECTION_FAILED` | 檢查 Cloudflare Worker 同 Zone 路由、Tunnel 和本機 API |
+| `MODEL_LIST_TIMEOUT` | 檢查上游 12 秒連線逾時 |
+| `MODEL_LIST_REDIRECT_3xx` | 檢查登入/重新導向 |
+| `MODEL_LIST_HTTP_401` | 檢查 Unsloth API Key 有效性 |
+| `MODEL_LIST_HTTP_502/503/524` | 檢查 Unsloth 本機服務/Tunnel |
+| `INVALID_MODEL_LIST` | 目前上游沒有提供標準 `data[].id` 格式 |
 
 ## QQ 接入
 
@@ -53,7 +64,7 @@ Cloudflare 已新增**獨立** Workers KV：`qqaibot-unsloth-config`，Worker bi
 
 ## 安全與限制
 
-- 管理 API 只接受有管理金鑰的同源操作，API Key 和選擇的模型以 AES-GCM 加密存在獨立 KV；KV 非強一致，更新跨資料中心可能有短暫傳播延遲。
+- 模型 ID 僅儲存在獨立 KV；Unsloth API Key 僅放 Cloudflare Worker Secret，管理 API 必須經過 ADMIN_TOKEN Bearer 驗證。KV 非強一致，更新跨資料中心可能有短暫延遲。
 - Worker 不提供 Shell、RCE、檔案存取、執行程式碼、代理請求或任何模型工具。Unsloth 模型呼叫固定 `tools: []`、`tool_choice: "none"`。
 - 上游 URL 固定為 `msiai.ray2025.com`；禁止 HTTP redirect，不能由聊天訊息改變 URL。
 - Webhook 非初始化事件需簽章及 5 分鐘時間窗；原始訊息不落盤，也沒有跨回合記憶。
