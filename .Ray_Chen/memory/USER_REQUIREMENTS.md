@@ -15,3 +15,6 @@
 - 2026-10-24: Address actual QQ bot silence after confirmed event_received GROUP_AT and send_failed UNKNOWN, with actionable safe auth-vs-send diagnostics without exposing credentials or touching original qqai.
 
 - 2026-10-24: Replace simplistic web page with proper Qwen login screen and functional admin interface. Vision, web browsing/search and speech functionality already exist in user's environment, so don't recommend reinstalling them or label them absent. Image generation explicitly on hold. Maintain safety boundaries and do not misrepresent QQ Worker integration.
+
+- 2026-10-24 latest: Unsloth-only multi-model routing for Qwen chat, Unsloth web search, Qwen ASR and TTS. DO NOT use images or image generation model until user specifically asks. If resources permit, simultaneous model loading is desirable, but must not overpromise or force GPU; maintain existing QQ safety.
+- 2026-10-24: User explicitly asked to retry GitHub writing after prior platform denial, finish normal PR/CI/main/deploy workflow rather than giving only an offline ZIP.

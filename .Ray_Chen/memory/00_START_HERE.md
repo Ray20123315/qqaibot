@@ -1,17 +1,19 @@
 # Ray_Chen Memory
-version: v0.0.117
-task_id: qwen-qq-admin-console-20261024
+version: v0.0.119
+task_id: unsloth-multirole-routing-20261024
 task_status: completed
-goal_revision: 8
+goal_revision: 9
 canonical_branch: main
-code_main_commit: 8741abb9ea524adfb77dd3d7629ace6dda5b5fd3
+verified_code_commit: dfc771c6e39e53fe316d75039fc834d0f2af87a4
 updated_at: 2026-10-24
 
 ## Quick resume
-- User wanted the existing qqaibot-unsloth simple web form redesigned to a polished modern management interface. User additionally corrected that they already have image understanding, internet search and voice services/model capabilities; image generation is deliberately PAUSED.
-- PR #94 merged to main 8741abb9ea524adfb77dd3d7629ace6dda5b5fd3. Added standalone-qq-ai/dashboard.js, session-auth.js, test/dashboard-session.test.mjs; updated worker.js, README.md.
-- New responsive dark Qwen Console with login, overview, model picker, admin chat, QQ diagnostics and capability cards; user claims vision/web/voice available, but the standalone Worker code only processes text QQ messages. UI does not imply QQ end-to-end multi-modal integration without evidence. No image-generation assets/models/services installed.
-- ADMIN_TOKEN secret remains in Cloudflare. New login issues 8h HMAC-SHA256 signed __Host-qqai_session HttpOnly; Secure; SameSite=Strict cookie. Same-origin checks on writes. Bearer API compatibility remains. No localStorage/sessionStorage; no secrets in HTML.
-- Fixed previous reply formatting bug: preserve newline/tab in queryModel, normalize CRLF; still keep existing text length limits and core QQ webhook semantics. No change to old qqai Worker, D1/DO/NapCat/Codex or existing QQ credentials.
-- GitHub isolated CI 40082915685 SUCCESS and old QQ CI 40082915660 SUCCESS. Cloudflare standalone Worker 68e38e2c-da07-4c2b-a9d7-1e959f89e4d2 deployed at 100% readback. All 4 Secret bindings and CONFIG_KV model key persisted. Exact browser-user login/visual/manual checks NOT VERIFIED.
-- NEXT: Open https://qqbot-ai.ray2025.com/ and test login with existing ADMIN_TOKEN, model picker, chat line breaks, QQ diagnostics, desktop/mobile appearance. No keys in chats.
+- User asked to RETRY GitHub writes for Unsloth multi-model QQ router, after an earlier platform safety rejection. Normal GitHub create_file succeeded on existing feature/unsloth-multirole-routing-20261024 branch; no safety bypass was used.
+- PR #96 merged to main dfc771c6e39e53fe316d75039fc834d0f2af87a4. New standalone-qq-ai/role-router.js with three roles (chat/asr/tts) and opt-in Unsloth web_search (not a model). Image understanding and image generation are explicitly EXCLUDED by latest user request.
+- Worker routes fixed https://msiai.ray2025.com/v1, no arbitrary URLs or command/file/MCP tools. Ordinary Qwen chat disables tools, explicit search when enabled only permits web_search. QQ /search and /web commands are allowed while other command prefixes still refused. Admin audio speech/transcriptions API tests available; QQ rich media is NOT YET integrated/verified.
+- New responsive dashboard model roles page; stores IDs + webSearch bool in dedicated CONFIG_KV model-roles-v3, keeps selected-model-v2 synchronized. API key stays solely in UNSLOTH_API_KEY Worker Secret.
+- Isolated CI run 40087298832 SUCCESS and original QQAIBOT CI run 40087298901 SUCCESS after fixing 4 diagnostic-code backward compatibility regressions. Existing MODEL_* error codes remain unchanged.
+- Cloudflare qqaibot-unsloth deployment 365a232a-ad3b-49ab-aecb-e150a3214c4c at 100%; source readback confirms role router/admin audio/QQ callback. All 4 Secret bindings, CONFIG_KV, original Qwen selected model and global_fetch_strictly_public preserved. Original production qqai untouched.
+- Existing GitHub memory was v0.0.117 while prior verified local package v0.0.118 was not synchronized due earlier safety rejection. This version v0.0.119 supersedes v0.0.118 release handoff and records successful deployed version.
+- Live authenticated browser/API E2E, web-search SSE against user's exact Unsloth version, ASR/TTS model calls and simultaneous VRAM residence are NOT VERIFIED. Search toggle defaults false, ASR and TTS IDs unset. Unsloth Studio Settings/API handles automatic model switch/unload, not Worker.
+- NEXT: Owner opens https://qqbot-ai.ray2025.com/ -> 多模型路由, enters installed Qwen chat/ASR/TTS model IDs, enables web search if desired, saves and tests admin audio/search; checks QQ group @ replies.
