@@ -75,3 +75,56 @@ test('Qwen chat preserves paragraphs, list newlines and tabs',async()=>{
   assert.equal(answer,'第一段\n\n- 要點一\n- 要點二\n結束\t！');
  }finally{globalThis.fetch=original;}
 });
+
+test('served dashboard JavaScript parses and login button actually submits a session',async()=>{
+ const {Script,createContext}=await import('node:vm');
+ const env=fixture();
+ const response=await call(env,'/');
+ assert.equal(response.status,200);
+ const html=await response.text();
+ const script=html.match(/<script>([\s\S]*?)<\/script>/)?.[1];
+ assert.ok(script,'dashboard has executable inline JS');
+ assert.doesNotThrow(()=>new Script(script,{filename:'dashboard-inline.js'}),'inline JS must parse for login handlers to exist');
+ const elements=new Map();
+ const listeners=new Map();
+ function node(id){
+   if(!elements.has(id)){
+     const classes=new Set(id==='app'?['is-hidden']:[]);
+     elements.set(id,{id,value:'',disabled:false,textContent:'',className:'',dataset:{},
+       classList:{add:k=>classes.add(k),remove:k=>classes.delete(k),toggle:(k,on)=>{if(on)classes.add(k);else classes.delete(k);},contains:k=>classes.has(k)},
+       addEventListener:(name,handler)=>listeners.set(id+':'+name,handler)});
+   }
+   return elements.get(id);
+ }
+ const calls=[];
+ const fetchFake=async(path,opts={})=>{
+   calls.push({path,method:opts.method||'GET',body:opts.body});
+   let value={authenticated:false};
+   if(path==='/api/session' && opts.method==='POST'){
+     assert.equal(JSON.parse(opts.body).admin_token,env.ADMIN_TOKEN);
+     value={authenticated:true};
+   }else if(path==='/api/status'){
+     value={status:'ok',qq_configured:true,model_configured:true,unsloth_key_configured:true};
+   }else if(path==='/api/settings'){
+     value={model:'unsloth/Qwen3.5-9B-GGUF'};
+   }
+   return {ok:true,status:200,json:async()=>value};
+ };
+ const globals={
+   document:{getElementById:node,querySelectorAll:()=>[]},
+   fetch:fetchFake,
+   console:{error(){},log(){}},
+ };
+ new Script(script).runInContext(createContext(globals));
+ await Promise.resolve(); await Promise.resolve();
+ const onSubmit=listeners.get('loginForm:submit');
+ assert.equal(typeof onSubmit,'function','submit handler bound to login form');
+ node('adminKey').value=env.ADMIN_TOKEN;
+ let prevented=false;
+ await onSubmit({preventDefault(){prevented=true;}});
+ assert.ok(prevented);
+ assert.ok(calls.some(x=>x.path==='/api/session'&&x.method==='POST'));
+ assert.equal(node('loginPage').classList.contains('is-hidden'),true,'login panel hidden after success');
+ assert.equal(node('app').classList.contains('is-hidden'),false,'admin app visible after success');
+ assert.equal(node('adminKey').value,'','admin key cleared immediately after login');
+});
