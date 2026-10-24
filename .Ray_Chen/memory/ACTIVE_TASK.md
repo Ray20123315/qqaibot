@@ -1,26 +1,24 @@
 # ACTIVE_TASK
-task_id: qwen-qq-admin-console-20261024
+task_id: unsloth-multirole-routing-20261024
 task_status: completed
-goal_revision: 8
-goal: Replace standalone qqaibot-unsloth primitive admin page with a modern Qwen-branded login and management console while preserving QQ/Cloudflare safety; reflect user's existing vision, web and voice resources without installing image generation.
+goal_revision: 9
+goal: Retry normal GitHub writes and ship Unsloth-only model role routing to isolated QQ AI Worker, excluding ALL images.
 acceptance_criteria:
-- Responsive modern login and navigation for dashboard, model, chat, QQ diagnostics and capabilities.
-- ADMIN_TOKEN never persisted in browser storage or shown to client except input at login; signed secure HttpOnly session cookie and same-origin CSRF guard. Existing bearer authentication still works.
-- Preserve user-provided truth: image understanding, internet and speech services already available; distinguish installed services from verified QQ Worker integration. Image generation explicitly paused.
-- Fix paragraph/newline flattening in AI output without altering QQ signature/routing or command/tool restrictions.
-- Isolated/legacy CI pass, PR merge main, standalone Cloudflare deployment readback with all secret/KV bindings.
-current_phase: Code/CI/merge/deployment verified, user browser acceptance pending.
-current_step: User opens live admin console and checks login/navigation/model/chat and QQ diagnosis.
+- GitHub normal write/PR to main; safe CI and Cloudflare independent Worker deployment.
+- chat/asr/tts model IDs set independently, explicit opt-in web_search, fixed Unsloth HTTPS host + Worker Secret; old model selection compatible.
+- No image generation or vision, no arbitrary tools, shell, file ops, dynamic external URLs, or modifications to old qqai.
+- Confirm Cloudflare four secrets and CONFIG_KV bindings unchanged and 100% deployment; package versioned memory and Gmail.
+current_phase: Code merged/deployed, documented real-user acceptance limitations.
+current_step: Manual Unsloth/QQ acceptance in owner-managed authenticated admin console.
 completed_steps:
-- Inspected repo and current Cloudflare bindings/QQ Worker. Old UI was literal inline HTML with ADMIN_TOKEN pasted for each call; current Worker only handles signed QQ text event payloads and fixed Unsloth chat endpoint.
-- Added dashboard.js modern HTML/CSS/JS login and console; session-auth.js signed 8h __Host cookie and same-origin checks.
-- Wired worker.js new modules and /api/session; preserved legacy bearer admin; replaced control-char regex to preserve \n, tabs and normalize CRLF; updated README and added dashboard-session tests.
-- Adjusted UI after user correction: voice, vision, web resources already available but QQ integration not proven; no image-generation installation.
-- PR #94 isolated CI 40082915685 PASS, existing AI CI 40082915660 PASS; merged main 8741abb9ea524adfb77dd3d7629ace6dda5b5fd3.
-- Cloudflare independent qqaibot-unsloth Worker module upload 68e38e2c-da07-4c2b-a9d7-1e959f89e4d2, 100% verified with all 4 secret_text and CONFIG_KV. Source readback contains dashboard/session/admin/QQ routes; KV selected-model-v2 preserved.
-verification_results: GitHub CI/merge and Cloudflare API deploy/readback SUCCESS. Real browser login/use and site visual appearance not independently smoke-tested. QQ real message after new deployment not checked.
-known_failures: Initial CI failed old UI literal test expectation for UNSLOTH_API_KEY Secret; label reinstated, CI rerun PASS.
-blockers: None for code/deploy. Manual browser acceptance and service integration are separate future work.
-next_exact_action: User opens https://qqbot-ai.ray2025.com/, signs in with ADMIN_TOKEN and tests model selection, paragraph-preserving chat and QQ diagnostics.
-resume_rule: Check current main and Worker deployment before further change; do not claim image/web/voice integration into this Worker without actual evidence; image generation stays disabled by user preference.
+- Confirmed main db611532ec80d401d2fc0dfe2e52d1531b4833a9 and existing branch pre-write. Retried Github create_file, success 6d8aeb9d307e3451d41a46b971ab2802ab658ff5.
+- Updated role-router.js safe search/ASR/TTS helpers, worker.js admin endpoints/chat compatibility/QQ search, dashboard.js model-roles UI, test/role-router.test.mjs 7 tests, README.md.
+- PR #96 initial CI found 4 existing MODEL_* diagnostic regression failures; repaired wrapper and reran both CI groups to success (isolated 40087298832, old QQ 40087298901). Merged PR #96 commit dfc771c6e39e53fe316d75039fc834d0f2af87a4.
+- Before deployment verified existing Secret/KV bindings and original Worker version 68e38e2c-da07-4c2b-a9d7-1e959f89e4d2.
+- Uploaded 5 independent modules with strict binding inheritance to qqaibot-unsloth, deployed version 365a232a-ad3b-49ab-aecb-e150a3214c4c 100%; verified source flags 4 Secrets, CONFIG_KV/selected-model-v2.
+verification_results: GitHub isolated CI success, legacy QQ CI success, merge main readback, Cloudflare script/settings/deploy readback success. Real Unsloth web_search/audio model tests, QQ rich-media speech, multi-model simultaneous residence NOT VERIFIED.
+known_failures: Initial GitHub create_file safety rejection on previous turn; normal retry succeeded this turn. Initial feature CI 4 failures from renamed MODEL errors; fixed and reran.
+blockers: No blockers to code/deploy. User must select actual installed ASR/TTS IDs and enable web_search. Runtime API interoperability and auto-switch depend on user's Unsloth version/hardware.
+next_exact_action: Owner sign in to Qwen QQ AI dashboard -> 多模型路由, save chat/ASR/TTS IDs and webSearch choice, run QQ /search and admin audio tests, report any safe error codes.
+resume_rule: Check main, Worker deployment and CONFIG_KV before any new edits; no image routes and no unauthorized QQ messages; do not claim live end-to-end results without evidence.
 last_checkpoint_date: 2026-10-24
