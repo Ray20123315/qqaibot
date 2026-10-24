@@ -27,6 +27,40 @@ test('admin bearer required, text command never executed',async()=>{
 });
 test('model request never provides tool permissions or dynamic target',async()=>{
  const original=globalThis.fetch;let called=false;
- globalThis.fetch=async(url,options)=>{called=true;assert.equal(url,'https://msiai.ray2025.com/v1/chat/completions');assert.equal(options.redirect,'error');const payload=JSON.parse(options.body);assert.deepEqual(payload.tools,[]);assert.equal(payload.tool_choice,'none');assert.equal(payload.model,'local-model');return new Response(JSON.stringify({choices:[{message:{content:'您好'}}]}),{status:200});};
+ globalThis.fetch=async(url,options)=>{called=true;assert.equal(url,'https://msiai.ray2025.com/v1/chat/completions');assert.equal(options.redirect,'manual');const payload=JSON.parse(options.body);assert.equal('tools' in payload,false);assert.equal('tool_choice' in payload,false);assert.equal(payload.model,'local-model');assert.equal(payload.max_tokens,1024);return new Response(JSON.stringify({choices:[{message:{content:'您好'}}]}),{status:200});};
  try{assert.equal(await queryModel(env,'你好'),'您好');assert.ok(called);}finally{globalThis.fetch=original;}
+});
+
+test('chat rejects upstream HTTP failures with safe diagnostics and no upstream body disclosure',async()=>{
+ const original=globalThis.fetch;
+ const errorMessage='private-upstream-token';
+ globalThis.fetch=async()=>new Response(JSON.stringify({error:{message:errorMessage}}),{status:400});
+ try {
+  const response=await call('/api/chat',{method:'POST',headers:{authorization:'Bearer very-secret','content-type':'application/json'},body:JSON.stringify({message:'你好'})});
+  assert.equal(response.status,502);
+  const body=await response.json();assert.deepEqual(body,{error:'MODEL_HTTP_400'});
+  assert.doesNotMatch(JSON.stringify(body),/private-upstream-token|fake-model-key/);
+ }finally{globalThis.fetch=original;}
+});
+test('chat diagnoses connection error and timeout without leaking exception details',async()=>{
+ const original=globalThis.fetch;
+ try {
+  globalThis.fetch=async()=>{throw new TypeError('internal sensitive network error')};
+  const a=await call('/api/chat',{method:'POST',headers:{authorization:'Bearer very-secret','content-type':'application/json'},body:JSON.stringify({message:'hi'})});
+  assert.equal((await a.json()).error,'MODEL_CONNECTION_FAILED');
+  globalThis.fetch=async()=>{throw new DOMException('do not expose','TimeoutError')};
+  const b=await call('/api/chat',{method:'POST',headers:{authorization:'Bearer very-secret','content-type':'application/json'},body:JSON.stringify({message:'hi'})});
+  assert.equal((await b.json()).error,'MODEL_TIMEOUT');
+ }finally{globalThis.fetch=original;}
+});
+test('chat handles text arrays and guards invalid or empty output',async()=>{
+ const original=globalThis.fetch;
+ try {
+  globalThis.fetch=async()=>new Response(JSON.stringify({choices:[{message:{content:[{type:'text',text:'您好'},{type:'other',text:'should not show'}]}}]}),{status:200});
+  assert.equal(await queryModel(env,'hello'),'您好');
+  globalThis.fetch=async()=>new Response(JSON.stringify({choices:[{message:{content:''}}]}),{status:200});
+  await assert.rejects(()=>queryModel(env,'hello'),/MODEL_EMPTY_RESPONSE/);
+  globalThis.fetch=async()=>new Response('not-json',{status:200});
+  await assert.rejects(()=>queryModel(env,'hello'),/MODEL_INVALID_RESPONSE/);
+ }finally{globalThis.fetch=original;}
 });
