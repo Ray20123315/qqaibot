@@ -1,5 +1,6 @@
 import {readModelConfig,listUnslothModels,saveModelConfig} from "./model-config.js";
 import {DASHBOARD_HTML} from "./dashboard.js";
+import {getConfig as getRoles,setConfig as setRoles,chat as chatWithRoles,speech as ttsWithRoles,transcribe as asrWithRoles} from "./role-router.js";
 import {adminAllowed,sessionRoute} from "./session-auth.js";
 /** QQ official Webhook -> Unsloth text-only chat. No command/tool execution. */
 const enc = new TextEncoder();
@@ -97,41 +98,14 @@ async function sendQQ(env,event,answer) {
   if(code)throw Error('QQ_SEND_CODE_'+code);
 }
 export async function queryModel(env,message,{timeoutMs=60_000}={}) {
-  const config=await readModelConfig(env);
-  if(!config.apiKey||!config.model)throw Error('MODEL_NOT_CONFIGURED');
-  let res;
-  try {
-    res=await fetch('https://msiai.ray2025.com/v1/chat/completions',{
-      method:'POST',redirect:'manual',signal:timeouts(timeoutMs),
-      headers:{'content-type':'application/json','accept':'application/json',authorization:'Bearer '+config.apiKey},
-      body:JSON.stringify({
-        model:config.model,stream:false,max_tokens:1024,messages:[
-          {role:'system',content:'你是 QQ 上的純文字聊天 AI。簡潔、友善並按使用者語言回答。你沒有工具或執行權限，不能執行指令、操作電腦、存取檔案或呼叫外部服務。不要聲稱已經執行任何操作。'},
-          {role:'user',content:message}
-        ]
-      })
-    });
-  } catch(err) {
-    // Error details and upstream response body are deliberately never returned/logged.
-    if(err?.name==='TimeoutError'||err?.name==='AbortError')throw Error('MODEL_TIMEOUT');
-    throw Error('MODEL_CONNECTION_FAILED');
-  }
-  if(res.status>=300&&res.status<400)throw Error('MODEL_REDIRECT_'+res.status);
-  if(!res.ok)throw Error('MODEL_HTTP_'+res.status);
-  let data;
-  try { data=await res.json(); }
-  catch { throw Error('MODEL_INVALID_RESPONSE'); }
-  const raw=data?.choices?.[0]?.message?.content;
-  const content=typeof raw==='string'?raw:
-    Array.isArray(raw)?raw.filter(part=>part?.type==='text'&&typeof part.text==='string').map(part=>part.text).join('\n'):'';
-  if(!content.trim())throw Error('MODEL_EMPTY_RESPONSE');
-  return content.replace(/\r\n?/g,'\n').replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g,' ').trim().slice(0,1500);
+  const result=await chatWithRoles(env,message,fetch,{timeout:timeoutMs});
+  return result.text.slice(0,1500);
 }
 // Keep only coarse delivery stages, UTC time and sanitized reason codes (no QQ IDs/messages/secrets).
 const qqDiagnosticStages=['callback_verify','callback_rejected','event_received','event_ignored','model_failed','send_failed','reply_sent'];
 const diagnosticCode=(err)=>{
   const value=String(err?.message||'').replace(/[^A-Z0-9_]/g,'').slice(0,48);
-  return /^(MODEL_(NOT_CONFIGURED|TIMEOUT|CONNECTION_FAILED|EMPTY_RESPONSE|INVALID_RESPONSE|HTTP_[0-9]{3}|REDIRECT_[0-9]{3})|QQ_(AUTH|SEND)_(HTTP_[0-9]{3}|REDIRECT_[0-9]{3}|TIMEOUT|FETCH_FAILED|INVALID_RESPONSE|CODE_[0-9]{1,8}|API_REJECTED))$/.test(value)?value:'UNKNOWN';
+  return /^(MODEL_(NOT_CONFIGURED|TIMEOUT|CONNECTION_FAILED|EMPTY_RESPONSE|INVALID_RESPONSE|HTTP_[0-9]{3}|REDIRECT_[0-9]{3})|CHAT_NOT_CONFIGURED|UPSTREAM_(TIMEOUT|CONNECTION_FAILED|TOO_LONG|EMPTY_STREAM|EMPTY_RESPONSE|INVALID_JSON|HTTP_[0-9]{3}|REDIRECT_[0-9]{3})|QQ_(AUTH|SEND)_(HTTP_[0-9]{3}|REDIRECT_[0-9]{3}|TIMEOUT|FETCH_FAILED|INVALID_RESPONSE|CODE_[0-9]{1,8}|API_REJECTED))$/.test(value)?value:'UNKNOWN';
 };
 async function recordQQ(env,stage,code='OK') {
   if(!qqDiagnosticStages.includes(stage)||!env.CONFIG_KV)return;
@@ -163,7 +137,7 @@ export async function processEvent(env,event) {
     return;
   }
   let answer;
-  if(/^[!/$>]/.test(event.message))answer='這是純文字聊天機器人，無法執行指令。';
+  if(/^[!/$>]/.test(event.message)&&!/^\/(?:search|web)(?:\s|$)/.test(event.message))answer='這是純文字聊天機器人，無法執行指令。';
   else {
     try { answer=await queryModel(env,event.message,{timeoutMs:18_000}); }
     catch(err){
@@ -195,6 +169,47 @@ export default {
       return json({qq_configured:!!(env.QQ_APP_ID&&env.QQ_APP_SECRET),events:await readQQDiagnostics(env)});
     }
 
+    if(pathname==='/api/model-roles'){
+      if(!['GET','POST'].includes(request.method))return json({error:'METHOD_NOT_ALLOWED'},405);
+      if(!await adminAllowed(request,env))return json({error:'UNAUTHORIZED'},401);
+      try{
+        if(request.method==='GET')return json(await getRoles(env));
+        if(Number(request.headers.get('content-length'))>4096)return json({error:'TOO_LARGE'},413);
+        const data=await request.json().catch(()=>null);
+        return json(await setRoles(env,data));
+      }catch(e){
+        const reason=e?.message;
+        return json({error:reason==='INVALID_ROLE_CONFIG'?reason:'ROLE_SETTINGS_FAILED'},400);
+      }
+    }
+    if(pathname==='/api/audio/speech'){
+      if(request.method!=='POST')return json({error:'METHOD_NOT_ALLOWED'},405);
+      if(!await adminAllowed(request,env))return json({error:'UNAUTHORIZED'},401);
+      if(Number(request.headers.get('content-length'))>4096)return json({error:'TOO_LARGE'},413);
+      const data=await request.json().catch(()=>null);
+      try{return await ttsWithRoles(env,data?.text);}
+      catch(e){
+        const code=String(e?.message||'');
+        const ok=/^(TTS_NOT_CONFIGURED|INVALID_SPEECH_TEXT|UPSTREAM_(TIMEOUT|CONNECTION_FAILED|INVALID_AUDIO|AUDIO_TOO_LARGE|HTTP_[0-9]{3}|REDIRECT_[0-9]{3}))$/.test(code);
+        return json({error:ok?code:'AUDIO_UNAVAILABLE'},502);
+      }
+    }
+    if(pathname==='/api/audio/transcriptions'){
+      if(request.method!=='POST')return json({error:'METHOD_NOT_ALLOWED'},405);
+      if(!await adminAllowed(request,env))return json({error:'UNAUTHORIZED'},401);
+      const size=Number(request.headers.get('content-length'));
+      if(size>8*1024*1024+20000)return json({error:'TOO_LARGE'},413);
+      if(!request.headers.get('content-type')?.startsWith('multipart/form-data;'))return json({error:'INVALID_AUDIO_UPLOAD'},400);
+      const form=await request.formData().catch(()=>null);
+      const file=form?.get('file');
+      try{return json(await asrWithRoles(env,file));}
+      catch(e){
+        const code=String(e?.message||'');
+        const ok=/^(ASR_NOT_CONFIGURED|INVALID_AUDIO_UPLOAD|UPSTREAM_(TIMEOUT|CONNECTION_FAILED|INVALID_JSON|INVALID_TRANSCRIPTION|HTTP_[0-9]{3}|REDIRECT_[0-9]{3}))$/.test(code);
+        return json({error:ok?code:'ASR_UNAVAILABLE'},502);
+      }
+    }
+
     if(pathname==='/api/models'||pathname==='/api/settings') {
       const listing=pathname==='/api/models';
       if((listing&&request.method!=='GET')||(!listing&&!['GET','POST'].includes(request.method)))return json({error:'METHOD_NOT_ALLOWED'},405);
@@ -206,7 +221,10 @@ export default {
         if(Number(request.headers.get('content-length'))>8192)return json({error:'TOO_LARGE'},413);
         const data=await request.json().catch(()=>null);
         if(!data||typeof data!=='object'||'api_key' in data)return json({error:'INVALID_REQUEST'},400);
-        return json(await saveModelConfig(env,text(data.model)));
+        const saved=await saveModelConfig(env,text(data.model));
+        const roles=await getRoles(env);
+        if(roles.saved)await setRoles(env,{chat:saved.model,asr:roles.asr,tts:roles.tts,webSearch:roles.webSearch});
+        return json(saved);
       } catch(error) {
         const reason=String(error?.message||'').replace(/[^A-Z0-9_]/g,'').slice(0,55);
         const ok=/^(UNSLOTH_SECRET_NOT_CONFIGURED|INVALID_SAVED_MODEL|INVALID_MODEL_SELECTION|MODEL_STORAGE_UNAVAILABLE|MODEL_NOT_IN_LIST|NO_MODELS_AVAILABLE|INVALID_MODEL_LIST|MODEL_LIST_TIMEOUT|MODEL_LIST_CONNECTION_FAILED|MODEL_LIST_REDIRECT_[0-9]{3}|MODEL_LIST_HTTP_[0-9]{3})$/.test(reason);
@@ -221,10 +239,10 @@ export default {
       const data=await request.json().catch(()=>null);
       const message=text(data?.message);
       if(!message||message.length>1500)return json({error:'INVALID_MESSAGE'},400);
-      try{return json({reply:/^[!/$>]/.test(message)?'這是純文字聊天機器人，無法執行指令。':await queryModel(env,message)});}
+      try{return json({reply:/^[!/$>]/.test(message)&&!/^\/(?:search|web)(?:\s|$)/.test(message)?'這是純文字聊天機器人，無法執行指令。':await queryModel(env,message)});}
       catch(err){
         const reason=String(err?.message||'').replace(/[^A-Z0-9_]/g,'').slice(0,45);
-        const approved=/^(MODEL_NOT_CONFIGURED|INVALID_SAVED_MODEL|MODEL_TIMEOUT|MODEL_CONNECTION_FAILED|MODEL_REDIRECT_[0-9]{3}|MODEL_HTTP_[0-9]{3}|MODEL_INVALID_RESPONSE|MODEL_EMPTY_RESPONSE)$/.test(reason);
+        const approved=/^(MODEL_NOT_CONFIGURED|INVALID_SAVED_MODEL|MODEL_TIMEOUT|MODEL_CONNECTION_FAILED|MODEL_REDIRECT_[0-9]{3}|MODEL_HTTP_[0-9]{3}|MODEL_INVALID_RESPONSE|MODEL_EMPTY_RESPONSE|CHAT_NOT_CONFIGURED|UPSTREAM_(TIMEOUT|CONNECTION_FAILED|TOO_LONG|EMPTY_STREAM|EMPTY_RESPONSE|INVALID_JSON|HTTP_[0-9]{3}|REDIRECT_[0-9]{3}))$/.test(reason);
         const code=approved?reason:'MODEL_UNAVAILABLE';
         console.error('QQ_AI_CHAT_FAILED',code);
         return json({error:code},code==='MODEL_NOT_CONFIGURED'?503:502);
