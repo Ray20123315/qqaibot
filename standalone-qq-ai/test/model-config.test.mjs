@@ -51,7 +51,7 @@ test("selected model drives chat with tool calls forbidden and Secret used",asyn
  globalThis.fetch=async(url,opts)=>{
    assert.equal(url,chatUrl);assert.equal(opts.headers.authorization,"Bearer sk-secret-only-mock-123");
    const d=JSON.parse(opts.body);assert.equal(d.model,"model-choice");
-   assert.deepEqual(d.tools,[]);assert.equal(d.tool_choice,"none");
+   assert.equal("tools" in d,false);assert.equal("tool_choice" in d,false);assert.equal(d.max_tokens,1024);
    return new Response(JSON.stringify({choices:[{message:{content:"收到"}}]}),{status:200});
  };
  try {assert.equal(await queryModel(env,"你好"),"收到");}finally{globalThis.fetch=previous;}
