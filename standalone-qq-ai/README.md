@@ -46,6 +46,27 @@
 | `MODEL_LIST_HTTP_502/503/524` | 檢查 Unsloth 本機服務/Tunnel |
 | `INVALID_MODEL_LIST` | 目前上游沒有提供標準 `data[].id` 格式 |
 
+
+### 聊天測試的模型錯誤診斷
+
+模型列表可用，不代表 `POST /v1/chat/completions` 一定成功。管理網頁以前將所有錯誤統一為 `MODEL_UNAVAILABLE`，現在改為以下安全代碼（**不會輸出金鑰、上游錯誤本文或模型原始訊息**）：
+
+| 代碼 | 原因／處理 |
+| --- | --- |
+| `MODEL_NOT_CONFIGURED` | 需要 `UNSLOTH_API_KEY` Secret 與已選模型 |
+| `MODEL_HTTP_400` | 推論 API 拒絕請求；檢查所選模型或 Unsloth Studio 版本 |
+| `MODEL_HTTP_401/403` | 上游 Bearer 驗證失敗或未授權 |
+| `MODEL_HTTP_500/502/503/524` | Unsloth Studio、推論後端或 Tunnel 出錯 |
+| `MODEL_TIMEOUT` | 管理員網頁最多等待 60 秒；可能是大型模型首次推論、資源不足或模型卡住 |
+| `MODEL_CONNECTION_FAILED` | Worker 無法建立到上游的網路連線 |
+| `MODEL_REDIRECT_3xx` | 公開 API 發生重新導向 |
+| `MODEL_INVALID_RESPONSE` | 上游回傳非 JSON |
+| `MODEL_EMPTY_RESPONSE` | 上游成功但沒有回覆文字 |
+
+為相容 Unsloth，傳送最小 OpenAI chat completions 請求：`model`、`messages`、`stream:false`、`max_tokens:1024`；沒有任何 `tools` 或 `tool_choice` 欄位，Worker 本身也不具備呼叫工具的能力。管理介面推論上限 60 秒；QQ 被動 Webhook 在 `waitUntil` 內使用 22 秒上限，避免超過常見的背景執行時限。非常慢的模型仍可能無法及時回覆 QQ，必須另外設計持久化佇列。
+
+在 Windows 已確認 `GET /v1/models` 本機和公開帶 Key 可以回傳 HTTP 200 且載入模型；`POST /v1/chat/completions` 的真實結果尚未獲得使用者確認。不可由 GET 200 推定推論也正常。
+
 ## QQ 接入
 
 1. **建議建立新的 QQ 官方機器人**。目前儲存庫既有 `qqai` Worker 已有自己的正式 QQ 機器人。不得直接覆蓋原有 QQ 平台回呼，以免中斷舊服務。
@@ -68,7 +89,7 @@
 - Worker 不提供 Shell、RCE、檔案存取、執行程式碼、代理請求或任何模型工具。Unsloth 模型呼叫固定 `tools: []`、`tool_choice: "none"`。
 - 上游 URL 固定為 `msiai.ray2025.com`；禁止 HTTP redirect，不能由聊天訊息改變 URL。
 - Webhook 非初始化事件需簽章及 5 分鐘時間窗；原始訊息不落盤，也沒有跨回合記憶。
-- 每次模型回覆須在短時間內完成，Worker 使用 `waitUntil` 處理 ACK 後回覆；慢模型可能逾時失敗。
+- 管理介面聊天測試設 60 秒推論上限；QQ Worker 使用 `waitUntil` 處理 ACK 後回覆，QQ 背景推論以 22 秒為上限，慢模型可能逾時失敗。
 - 目前只實作 **單 isolate 記憶體短期去重**，不保證多實例下嚴格去重；QQ 自身的 `msg_id/msg_seq` 可輔助防止重覆回覆。若正式要大規模上線，需新增獨立 Queue/D1 與頻率限制。
 - 請在 Unsloth 本機另外停用 MCP、Shell、Computer Use 等具操作權限的功能；Worker 不能控制本機其他程式。
 
