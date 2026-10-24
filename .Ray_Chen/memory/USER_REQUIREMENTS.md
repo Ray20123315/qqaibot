@@ -9,3 +9,5 @@
 - Latest 2026-10-24 (goal revision 2): after entering Unsloth API Key in QQ AI admin page, automatically retrieve available models and let user choose one; selected model must persist and be used for QQ replies. Keep strict no command execution.
 
 - 2026-10-24 latest: Store Unsloth API Key directly in Cloudflare Worker Secret, never in web UI or KV. Continue model discovery, model selection and QQ text-only mode with no command execution.
+
+- 2026-10-24: Investigate chat "MODEL_UNAVAILABLE" without disclosing secrets, keep selected Unsloth model and strict no-command/no-tool-execution behavior. Address slow inference and provide actual failure categories rather than hiding diagnostics.
