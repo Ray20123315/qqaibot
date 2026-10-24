@@ -18,3 +18,5 @@
 
 - 2026-10-24 latest: Unsloth-only multi-model routing for Qwen chat, Unsloth web search, Qwen ASR and TTS. DO NOT use images or image generation model until user specifically asks. If resources permit, simultaneous model loading is desirable, but must not overpromise or force GPU; maintain existing QQ safety.
 - 2026-10-24: User explicitly asked to retry GitHub writing after prior platform denial, finish normal PR/CI/main/deploy workflow rather than giving only an offline ZIP.
+
+- 2026-10-24 latest: Every QQ AI chat should try Unsloth built-in web search automatically, without explicit /search or a manual webSearch switch. QQ replies should display proper big/small Markdown headings, numbered lists and readable paragraphs, not raw Markdown symbols. Prefer native QQ Markdown with safe text downgrade. Images remain excluded under prior user request.
