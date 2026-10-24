@@ -54,3 +54,9 @@
 - Every text chat now sends Unsloth enable_tools:true, enabled_tools:['web_search'], mcp_enabled:false, stream:true; old webSearch:false KV effective value overridden to true; admin UI shows search always enabled. This is a request, not guarantee Unsloth GGUF actually performs search; no false claims. No image models/routes or unrestricted tools.
 - Cloudflare qqaibot-unsloth deployment cdfea900-f08a-4df0-9363-d80a5abad14c 100%, previous 4 Secrets CONFIG_KV model entries and existing QQ webhook maintained; original qqai untouched.
 - True QQ Markdown permission (especially group passive MD) and end-to-end Unsloth search results not yet verified; fallback plain-text behavior is by design.
+
+## 2026-10-24 QQ customer service + Simplified Chinese persona
+- User mandates dual role customer-service and social chat, Simplified Chinese replies, and no proactive underlying-model/vendor/version/quantization disclosure. Persona also prohibits invented payments/orders/refunds/grants and impersonation of human agent; direct model questions must not be answered falsely.
+- PR #100 merged main 17afc4ea71084cac4cd270312edf202b909fb864. Added CUSTOMER_SERVICE_PROMPT exported from role-router.js; test/qq-markdown.test.mjs and README updated. Isolated CI 40090505572 and legacy AI CI 40090505508 SUCCESS.
+- Cloudflare qqaibot-unsloth a958a3ad-9d21-498e-9f91-0b7bff4bec50 deployed 100% readback; 4 Secret bindings/KV roles/model/QQ webhook preserved. Previous always-on Unsloth web_search attempt and native QQ Markdown unchanged, image features excluded.
+- Attempt to change static Traditional-language command/error fallback strings in worker.js was BLOCKED by platform security check. No bypass. Thus prompt does not guarantee Simplified for static fallback or every generated token. No live QQ persona compliance test yet.
