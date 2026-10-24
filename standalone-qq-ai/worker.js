@@ -5,6 +5,9 @@ import {roomDatabase} from "./qq-memory-room.js";
 export {QQMemoryRoom} from "./qq-memory-room.js";
 import {lookupSupport,citationContext,uploadPublicDocument,listPublicDocuments} from "./support-knowledge.js";
 import {commandResult,parseCommand} from "./qq-commands.js";
+import {handleModeCommand,readModes} from "./qq-modes.js";
+import {qqImageAttachments,imagePartFromQQ} from "./qq-image.js";
+import {abusiveRepeatRequest,safeReplyText,isHtmlRequest,HTML_GROUP_NOT_SUPPORTED,userTopicBoundary,politicalScopeReply} from "./qq-output-policy.js";
 import {markdownPayload,plainPayload,rejectedMarkdown} from "./qq-format.js";
 import {getConfig as getRoles,setConfig as setRoles,chat as chatWithRoles,speech as ttsWithRoles,transcribe as asrWithRoles} from "./role-router.js";
 import {adminAllowed,sessionRoute} from "./session-auth.js";
@@ -48,7 +51,10 @@ function eventToChat(payload) {
   // QQ OpenID is opaque: do not silently drop valid identifiers containing +, / or =.
   if(!target||target.length>256||/[\u0000-\u001f\u007f]/.test(target))return null;
   const message=limited(d.content).replace(/<@!?[\w-]+>/g,'').trim();
-  return {isGroup,target,id:text(d.id),message};
+  const author=text(isGroup?(d.author?.member_openid||d.author?.user_openid||d.author?.id):target);
+  const images=qqImageAttachments(d);
+  const hadImage=!!(Array.isArray(d.attachments)&&d.attachments.some(x=>/^image\//.test(String(x?.content_type||x?.contentType||''))));
+  return {isGroup,target,id:text(d.id),author,images,hadImage,message:message||(hadImage?'请描述这张图片':'')};
 }
 let tokenCache={value:'',expires:0};
 const sanitizedProviderCode = value => {
@@ -123,9 +129,9 @@ async function sendQQ(env,event,answer) {
     throw Error('QQ_SEND_HTTP_'+plain.response.status);
   }
 }
-export async function queryModel(env,message,{timeoutMs=60_000,history=[],summary='',knowledge=''}={}) {
+export async function queryModel(env,message,{timeoutMs=60_000,history=[],summary='',knowledge='',modes={},image=null}={}) {
   try {
-    const result=await chatWithRoles(env,message,fetch,{timeout:timeoutMs,history,summary,knowledge});
+    const result=await chatWithRoles(env,message,fetch,{timeout:timeoutMs,history,summary,knowledge,modes,image});
     return result.text.slice(0,1500);
   }catch(err){
     // Preserve the existing MODEL_* public diagnostic codes for QQ and old admin clients.
@@ -191,8 +197,13 @@ export async function processEvent(env,event) {
     }
   }
   let answer;
+  const mode=await handleModeCommand(env,event).catch(()=>({handled:true,text:'设置暂时无法保存，请稍后再试。'}));
+  if(mode?.handled)answer=mode.text;
+  if(!answer&&abusiveRepeatRequest(event.message))answer='为了避免刷屏，我不能一次发送大量重复字符。你可以要求简短示例，或用单行代码表示。';
+  if(!answer&&userTopicBoundary(event.message))answer=politicalScopeReply;
+  if(!answer&&isHtmlRequest(event.message)&&event.isGroup)answer=HTML_GROUP_NOT_SUPPORTED;
   const parsed=parseCommand(event.message);
-  if(parsed){
+  if(parsed&&!answer){
     let stats=null;
     if(scope&&(parsed.name==='上下文'||parsed.name==='总结')){
       try{stats=await getMemoryStats(db,scope);}catch{}
@@ -206,21 +217,24 @@ export async function processEvent(env,event) {
     }else {
       try {
         let knowledge='';
-        if(env.SUPPORT_SEARCH&&/(HRS|MFL|客服|订单|权限|支付|付费|登录|购买|订阅|使用|报错|帮助)/i.test(event.message)){
+        if(env.ENABLE_PAID_AI_SEARCH==='true'&&env.SUPPORT_SEARCH&&/(HRS|MFL|客服|订单|权限|支付|付费|登录|购买|订阅|使用|报错|帮助)/i.test(event.message)){
           try{knowledge=citationContext(await lookupSupport(env,event.message));}
           catch{ /* Knowledge index failure must not break QQ text chat. */ }
         }
         const history=(state?.messages||[]).filter(row=>row.seq!==state?.lastSeq);
-        answer=await queryModel(env,event.message,{timeoutMs:23_000,history,summary:state?.summary||'',knowledge});
+        const modes=await readModes(env,event);
+        if(event.hadImage&&!event.images?.length)throw Error('QQ_IMAGE_UNAVAILABLE');
+        const image=event.images?.length?await imagePartFromQQ(event.images[0]):null;
+        answer=await queryModel(env,event.message,{timeoutMs:23_000,history,summary:state?.summary||'',knowledge,modes,image});
       }catch(err){
         const reason=diagnosticCode(err);
         await recordQQ(env,'model_failed',reason);
-        answer='客服暂时无法完成回复（'+reason+'），请稍后再试。';
+        answer=String(err?.message||'').startsWith('QQ_IMAGE_')?'暂时无法读取这张图片。请使用 QQ 正常发送 JPG、PNG 或 WebP 图片，再试一次。':'客服暂时无法完成回复（'+reason+'），请稍后再试。';
       }
     }
   }
   try {
-    await sendQQ(env,event,answer);
+    await sendQQ(env,event,safeReplyText(answer));
     await recordQQ(env,'reply_sent','OK');
     if(scope){
       try{
@@ -250,6 +264,8 @@ export default {
     if(pathname==='/api/knowledge'){
       if(!['GET','POST'].includes(request.method))return json({error:'METHOD_NOT_ALLOWED'},405);
       if(!await adminAllowed(request,env))return json({error:'UNAUTHORIZED'},401);
+      // Paid Cloudflare AI Search is disabled by default; no hidden index/upload usage.
+      if(env.ENABLE_PAID_AI_SEARCH!=='true')return json({error:'KNOWLEDGE_PAID_BACKEND_DISABLED'},503);
       try{
         if(request.method==='GET')return json({documents:await listPublicDocuments(env),visibility:'PUBLIC_SUPPORT'});
         if(Number(request.headers.get('content-length'))>4*1024*1024+16000)return json({error:'TOO_LARGE'},413);

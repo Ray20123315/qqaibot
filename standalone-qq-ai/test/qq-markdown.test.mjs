@@ -41,7 +41,7 @@ test('even previous persisted false webSearch settings are upgraded to always-on
   assert.equal(request.mcp_enabled,false);
   assert.ok(!('tools' in request));
   assert.equal(request.stream,true);
-  assert.match(request.messages[0].content,/每次回答前都尝试用 web_search/);
+  assert.match(request.messages[0].content,/网络搜索可由每位使用者自行开启或关闭/);
   assert.match(request.messages[0].content,/所有对用户显示的文字都用简体中文/);
   assert.match(request.messages[0].content,/客服与聊天伙伴/);
   return new Response(JSON.stringify({choices:[{message:{content:'你好'}}]}),{headers:{'content-type':'application/json'}});
@@ -60,7 +60,7 @@ test('persona presents a natural customer-service conversation without model det
  assert.match(CUSTOMER_SERVICE_PROMPT,/这些属于内部技术信息，暂不提供/);
  assert.match(CUSTOMER_SERVICE_PROMPT,/不得假装自己是现实生活中的具体真人/);
  assert.match(CUSTOMER_SERVICE_PROMPT,/不得声称已经查过、改过、发过、处理过/);
- assert.match(CUSTOMER_SERVICE_PROMPT,/只允许 web_search/);
+ assert.match(CUSTOMER_SERVICE_PROMPT,/不能调用 shell、Python/);
  assert.doesNotMatch(CUSTOMER_SERVICE_PROMPT,/Qwen3\\.5-9B|Flint|Qwen3-TTS/);
 });
 
