@@ -1,3 +1,4 @@
+import {readModelConfig,listUnslothModels,saveModelConfig} from "./model-config.js";
 /** QQ official Webhook -> Unsloth text-only chat. No command/tool execution. */
 const enc = new TextEncoder();
 const json = (data, status = 200) => new Response(JSON.stringify(data), {status, headers:{'content-type':'application/json; charset=utf-8','cache-control':'no-store','x-content-type-options':'nosniff'}});
@@ -58,9 +59,10 @@ async function sendQQ(env,event,answer) {
   if(result.err_code||result.code)throw Error('QQ_SEND_API_REJECTED');
 }
 export async function queryModel(env,message) {
-  if(!env.UNSLOTH_API_KEY||!env.UNSLOTH_MODEL)throw Error('MODEL_NOT_CONFIGURED');
-  const res=await fetch('https://msiai.ray2025.com/v1/chat/completions',{method:'POST',redirect:'error',signal:timeouts(18000),headers:{'content-type':'application/json',authorization:'Bearer '+env.UNSLOTH_API_KEY},
-    body:JSON.stringify({model:env.UNSLOTH_MODEL,stream:false,tools:[],tool_choice:'none',max_tokens:400,messages:[
+  const config=await readModelConfig(env);
+  if(!config.apiKey||!config.model)throw Error('MODEL_NOT_CONFIGURED');
+  const res=await fetch('https://msiai.ray2025.com/v1/chat/completions',{method:'POST',redirect:'error',signal:timeouts(18000),headers:{'content-type':'application/json',authorization:'Bearer '+config.apiKey},
+    body:JSON.stringify({model:config.model,stream:false,tools:[],tool_choice:'none',max_tokens:400,messages:[
       {role:'system',content:'你是 QQ 上的純文字聊天 AI。簡潔、友善並按使用者語言回答。你沒有工具或執行權限，不能執行指令、操作電腦、存取檔案或呼叫外部服務。不要聲稱已經執行任何操作。'},
       {role:'user',content:message}
     ]})
@@ -83,11 +85,7 @@ export async function processEvent(env,event) {
   const answer=/^[!/$>]/.test(event.message)?'這是純文字聊天機器人，無法執行指令。':await queryModel(env,event.message);
   await sendQQ(env,event,answer);
 }
-const PAGE = `<!doctype html><html lang="zh-Hant"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex"><title>QQ AI · Unsloth</title><style>
-:root{font-family:system-ui,-apple-system,sans-serif;color-scheme:light}body{background:#f4f6fa;color:#182338;margin:0}main{max-width:740px;margin:7vh auto;padding:24px}section{background:#fff;border:1px solid #dce2ec;border-radius:16px;padding:24px;margin:16px 0;box-shadow:0 4px 24px #192b4709}h1{font-size:26px}p{line-height:1.7;color:#536075}label{display:block;font-weight:600;margin:12px 0 6px}input,textarea{width:100%;box-sizing:border-box;font:inherit;padding:12px;border:1px solid #b5bfcd;border-radius:8px}button{background:#1f65dc;color:#fff;border:none;border-radius:8px;padding:11px 19px;font:inherit;cursor:pointer;margin-top:12px}button:disabled{opacity:.55}pre{white-space:pre-wrap;word-break:break-word;border-radius:8px;background:#f0f4f8;padding:16px;min-height:46px}small{color:#67758a}</style></head><body><main><h1>QQ AI · Unsloth</h1><p>獨立的 QQ 官方 Webhook 文字聊天服務。沒有系統指令、檔案操作或 AI 工具執行權限。</p><section><h2>服務狀態</h2><pre id="status">讀取中…</pre><small>狀態只顯示是否已設定金鑰，不會洩露金鑰內容。</small></section><section><h2>管理員聊天測試</h2><p>測試會直接呼叫 Unsloth；不會發送 QQ 訊息。管理金鑰不會被儲存在瀏覽器。</p><form id="chat"><label for="token">管理金鑰（ADMIN_TOKEN）</label><input type="password" id="token" autocomplete="off" required><label for="message">問題</label><textarea id="message" rows="4" maxlength="1500" required></textarea><button type="submit">測試 AI</button></form><pre id="reply" aria-live="polite">尚未發送。</pre></section></main><script>
-(async()=>{try{const r=await fetch('/api/status',{cache:'no-store'});const d=await r.json();document.getElementById('status').textContent='Worker：正常\\nQQ 憑證：'+(d.qq_configured?'已設定':'尚未設定')+'\\nUnsloth：'+(d.model_configured?'已設定':'尚未設定')+'\\n管理介面：'+(d.admin_configured?'已啟用':'尚未設定');}catch{document.getElementById('status').textContent='狀態無法取得';}})();
-document.getElementById('chat').addEventListener('submit',async e=>{e.preventDefault();const btn=e.target.querySelector('button'),out=document.getElementById('reply');btn.disabled=true;out.textContent='處理中…';try{const r=await fetch('/api/chat',{method:'POST',headers:{'content-type':'application/json','authorization':'Bearer '+document.getElementById('token').value},body:JSON.stringify({message:document.getElementById('message').value})});const d=await r.json();out.textContent=r.ok?d.reply:(d.error||'請求失敗');}catch{out.textContent='網路或模型服務無法使用';}finally{btn.disabled=false;}});
-</script></body></html>`;
+const PAGE = "<!doctype html><html lang=\"zh-Hant\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><meta name=\"robots\" content=\"noindex\"><title>QQ AI · Unsloth 模型設定</title>\n<style>:root{font-family:system-ui,-apple-system,sans-serif;color-scheme:light}body{background:#f4f6fa;color:#182338;margin:0}main{max-width:760px;margin:5vh auto;padding:24px}section{background:#fff;border:1px solid #dce2ec;border-radius:16px;padding:24px;margin:16px 0;box-shadow:0 4px 24px #192b4709}h1{font-size:26px}p{line-height:1.7;color:#536075}label{display:block;font-weight:600;margin:14px 0 6px}input,textarea,select{width:100%;box-sizing:border-box;font:inherit;padding:12px;border:1px solid #b5bfcd;border-radius:8px}button{background:#1f65dc;color:#fff;border:none;border-radius:8px;padding:11px 19px;font:inherit;cursor:pointer;margin:12px 10px 0 0}button:disabled{opacity:.55}pre{white-space:pre-wrap;word-break:break-word;border-radius:8px;background:#f0f4f8;padding:16px;min-height:46px}small{color:#67758a}</style>\n</head><body><main><h1>QQ AI · Unsloth 模型設定</h1><p>模型清單來自你自己的 Unsloth API。這個 Worker 只能傳送純文字聊天，沒有系統或檔案操作權限。</p>\n<section><h2>1. 管理員驗證</h2><label for=\"token\">管理金鑰（Cloudflare 的 ADMIN_TOKEN）</label><input type=\"password\" id=\"token\" autocomplete=\"off\" required><small>只用於本次網頁操作，不會寫入瀏覽器儲存空間。</small></section>\n<section><h2>2. 選擇 Unsloth 模型</h2><p>輸入 API Key 後讀取模型清單。若已設定過金鑰，可留空，直接重新取得清單。</p>\n<label for=\"apiKey\">Unsloth API Key</label><input type=\"password\" id=\"apiKey\" autocomplete=\"off\" placeholder=\"sk-local-...\">\n<button id=\"discover\" type=\"button\">取得模型清單</button>\n<label for=\"model\">可用模型</label><select id=\"model\" disabled><option value=\"\">請先取得模型清單</option></select>\n<button id=\"save\" type=\"button\" disabled>儲存並套用此模型</button>\n<pre id=\"modelResult\" aria-live=\"polite\">尚未連線。</pre><small>API Key 會由 Worker 加密後儲存到獨立 KV；不會寫入 GitHub、回傳給瀏覽器或儲存在 localStorage。更換 ADMIN_TOKEN 後須重新輸入 API Key。</small></section>\n<section><h2>3. AI 聊天測試</h2><p>使用已儲存的模型，不會發送 QQ 訊息。</p><form id=\"chat\"><label for=\"message\">訊息</label><textarea id=\"message\" rows=\"4\" maxlength=\"1500\" required></textarea><button type=\"submit\">測試模型</button></form><pre id=\"reply\" aria-live=\"polite\">尚未測試。</pre></section>\n<section><h2>服務狀態</h2><pre id=\"status\">讀取中…</pre></section>\n</main><script>\nconst el=id=>document.getElementById(id);\nconst auth=()=>({'authorization':'Bearer '+el('token').value,'content-type':'application/json'});\nasync function post(path,data){const r=await fetch(path,{method:'POST',headers:auth(),body:JSON.stringify(data),cache:'no-store'});const j=await r.json();if(!r.ok)throw Error(j.error||'REQUEST_FAILED');return j;}\nasync function status(){try{const r=await fetch('/api/status',{cache:'no-store'}),j=await r.json();el('status').textContent='Worker：正常\\nQQ 憑證：'+(j.qq_configured?'已設定':'未設定')+'\\n模型設定：'+(j.model_configured?'已設定':'未設定')+'\\n管理驗證：'+(j.admin_configured?'已啟用':'未設定');}catch{el('status').textContent='狀態無法讀取';}}\nstatus();\nel('discover').addEventListener('click',async()=>{const btn=el('discover'),result=el('modelResult');btn.disabled=true;el('save').disabled=true;el('model').disabled=true;result.textContent='正在讀取模型…';try{const j=await post('/api/models',{api_key:el('apiKey').value});el('model').replaceChildren();for(const id of j.models){const o=document.createElement('option');o.value=id;o.textContent=id;el('model').append(o);}if(j.selected&&j.models.includes(j.selected))el('model').value=j.selected;el('model').disabled=false;el('save').disabled=false;result.textContent='已取得 '+j.models.length+' 個模型。請選擇後儲存。';}catch(e){result.textContent='取得失敗：'+e.message;}finally{btn.disabled=false;}});\nel('save').addEventListener('click',async()=>{const btn=el('save'),result=el('modelResult');btn.disabled=true;result.textContent='正在儲存…';try{const j=await post('/api/settings',{api_key:el('apiKey').value,model:el('model').value});el('apiKey').value='';result.textContent='已儲存並套用：'+j.model+'。QQ 回覆將使用這個模型。';await status();}catch(e){result.textContent='儲存失敗：'+e.message;}finally{btn.disabled=false;}});\nel('chat').addEventListener('submit',async e=>{e.preventDefault();const btn=e.target.querySelector('button'),out=el('reply');btn.disabled=true;out.textContent='處理中…';try{const j=await post('/api/chat',{message:el('message').value});out.textContent=j.reply;}catch(e){out.textContent='測試失敗：'+e.message;}finally{btn.disabled=false;}});\n</script></body></html>";
 function page(){return new Response(PAGE,{headers:{'content-type':'text/html; charset=utf-8','cache-control':'no-store','content-security-policy':"default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; connect-src 'self'; form-action 'self'; frame-ancestors 'none'",'x-frame-options':'DENY','x-content-type-options':'nosniff','referrer-policy':'no-referrer'}});}
 async function adminAllowed(request,env) {
   if(!env.ADMIN_TOKEN)return false;
@@ -102,7 +100,31 @@ export default {
   async fetch(request,env,ctx) {
     const pathname=new URL(request.url).pathname;
     if(request.method==='GET'&&pathname==='/')return page();
-    if(request.method==='GET'&&pathname==='/api/status')return json({status:'ok',qq_configured:!!(env.QQ_APP_ID&&env.QQ_APP_SECRET),model_configured:!!(env.UNSLOTH_API_KEY&&env.UNSLOTH_MODEL),admin_configured:!!env.ADMIN_TOKEN,command_execution:false});
+    if(request.method==='GET'&&pathname==='/api/status')return json({status:'ok',qq_configured:!!(env.QQ_APP_ID&&env.QQ_APP_SECRET),model_configured:!!(await env.CONFIG_KV?.get("model-configuration-v1")||(env.UNSLOTH_API_KEY&&env.UNSLOTH_MODEL)),admin_configured:!!env.ADMIN_TOKEN,command_execution:false});
+
+    if(pathname==='/api/models'||pathname==='/api/settings') {
+      if((pathname==='/api/models'&&request.method!=='POST')||(pathname==='/api/settings'&&!['GET','POST'].includes(request.method)))return json({error:'METHOD_NOT_ALLOWED'},405);
+      if(!await adminAllowed(request,env))return json({error:'UNAUTHORIZED'},401);
+      if(Number(request.headers.get('content-length'))>8192)return json({error:'TOO_LARGE'},413);
+      try {
+        const saved=await readModelConfig(env);
+        if(request.method==='GET')return json({model:saved.model,saved:saved.saved,configured:!!(saved.apiKey&&saved.model)});
+        const data=await request.json().catch(()=>null);
+        if(!data||typeof data!=='object')return json({error:'INVALID_JSON'},400);
+        const key=text(data.api_key)||saved.apiKey;
+        if(pathname==='/api/models') {
+          const models=await listUnslothModels(key);
+          return json({models,selected:saved.model});
+        }
+        const selection=text(data.model);
+        const result=await saveModelConfig(env,key,selection);
+        return json(result);
+      } catch(error){
+        const reason=String(error?.message||'').replace(/[^A-Z0-9_]/g,'').slice(0,55);
+        const approved=/^(API_KEY_REQUIRED|ADMIN_NOT_CONFIGURED|INVALID_CONFIG|INVALID_MODEL_SELECTION|MODEL_STORAGE_UNAVAILABLE|MODEL_NOT_IN_LIST|NO_MODELS_AVAILABLE|INVALID_MODEL_LIST|MODEL_LIST_NETWORK_ERROR|MODEL_LIST_HTTP_[0-9]{3}|SAVED_CONFIG_UNAVAILABLE)$/.test(reason)?reason:'MODEL_CONFIGURATION_FAILED';
+        return json({error:approved},/^MODEL_LIST_/.test(approved)?502:400);
+      }
+    }
     if(pathname==='/api/chat') {
       if(request.method!=='POST')return json({error:'METHOD_NOT_ALLOWED'},405);
       if(!await adminAllowed(request,env))return json({error:'UNAUTHORIZED'},401);
