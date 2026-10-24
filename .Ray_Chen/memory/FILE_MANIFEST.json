@@ -1,10 +1,10 @@
 {
-  "version": "v0.0.120",
-  "task_id": "qq-always-web-markdown-20261024",
-  "goal_revision": 10,
+  "version": "v0.0.122",
+  "task_id": "qq-natural-customer-persona-20261024",
+  "goal_revision": 12,
   "changed_at": "2026-10-24",
   "repository": "Ray20123315/qqaibot",
-  "code_main_commit": "03f829edebff295cb5953ad5636e41db2c5527ce",
+  "code_main_commit": "218809ad9d2670a405b1a8ed1e6578c30183ed01",
   "files": [
     {
       "location_type": "remote",
@@ -192,6 +192,189 @@
       "action": "modified",
       "after_revision": "v0.0.120",
       "verification": "Memory PR/CI/artifact pending"
+    },
+    {
+      "location_type": "remote",
+      "provider": "GitHub",
+      "repository": "Ray20123315/qqaibot",
+      "branch": "main",
+      "path": "standalone-qq-ai/role-router.js",
+      "action": "modified",
+      "before_revision": "19ad8f937b4124da40ea33e6596688e350209283",
+      "after_revision": "17afc4ea71084cac4cd270312edf202b909fb864",
+      "verification": "PR #100 merged; isolated 40090505572 SUCCESS; original AI 40090505508 SUCCESS (previous v121 code release)"
+    },
+    {
+      "location_type": "remote",
+      "provider": "GitHub",
+      "repository": "Ray20123315/qqaibot",
+      "branch": "main",
+      "path": "standalone-qq-ai/role-router.js",
+      "action": "modified",
+      "before_revision": "17afc4ea71084cac4cd270312edf202b909fb864",
+      "after_revision": "218809ad9d2670a405b1a8ed1e6578c30183ed01",
+      "verification": "PR #101 merged; isolated 40091803676 SUCCESS; original AI 40091803666 SUCCESS"
+    },
+    {
+      "location_type": "remote",
+      "provider": "GitHub",
+      "repository": "Ray20123315/qqaibot",
+      "branch": "main",
+      "path": "standalone-qq-ai/test/qq-markdown.test.mjs",
+      "action": "modified",
+      "before_revision": "19ad8f937b4124da40ea33e6596688e350209283",
+      "after_revision": "17afc4ea71084cac4cd270312edf202b909fb864",
+      "verification": "PR #100 merged; isolated 40090505572 SUCCESS; original AI 40090505508 SUCCESS (previous v121 code release)"
+    },
+    {
+      "location_type": "remote",
+      "provider": "GitHub",
+      "repository": "Ray20123315/qqaibot",
+      "branch": "main",
+      "path": "standalone-qq-ai/test/qq-markdown.test.mjs",
+      "action": "modified",
+      "before_revision": "17afc4ea71084cac4cd270312edf202b909fb864",
+      "after_revision": "218809ad9d2670a405b1a8ed1e6578c30183ed01",
+      "verification": "PR #101 merged; isolated 40091803676 SUCCESS; original AI 40091803666 SUCCESS"
+    },
+    {
+      "location_type": "remote",
+      "provider": "GitHub",
+      "repository": "Ray20123315/qqaibot",
+      "branch": "main",
+      "path": "standalone-qq-ai/README.md",
+      "action": "modified",
+      "before_revision": "19ad8f937b4124da40ea33e6596688e350209283",
+      "after_revision": "17afc4ea71084cac4cd270312edf202b909fb864",
+      "verification": "PR #100 merged; isolated 40090505572 SUCCESS; original AI 40090505508 SUCCESS (previous v121 code release)"
+    },
+    {
+      "location_type": "remote",
+      "provider": "GitHub",
+      "repository": "Ray20123315/qqaibot",
+      "branch": "main",
+      "path": "standalone-qq-ai/README.md",
+      "action": "modified",
+      "before_revision": "17afc4ea71084cac4cd270312edf202b909fb864",
+      "after_revision": "218809ad9d2670a405b1a8ed1e6578c30183ed01",
+      "verification": "PR #101 merged; isolated 40091803676 SUCCESS; original AI 40091803666 SUCCESS"
+    },
+    {
+      "location_type": "remote",
+      "provider": "Cloudflare",
+      "resource_id_or_path": "workers/scripts/qqaibot-unsloth",
+      "action": "modified",
+      "before_revision": "cdfea900-f08a-4df0-9363-d80a5abad14c",
+      "after_revision": "a958a3ad-9d21-498e-9f91-0b7bff4bec50",
+      "verification": "Prior v121 release deployed 100% with 4 Secret bindings and CONFIG_KV intact"
+    },
+    {
+      "location_type": "remote",
+      "provider": "Cloudflare",
+      "resource_id_or_path": "workers/scripts/qqaibot-unsloth",
+      "action": "modified",
+      "before_revision": "a958a3ad-9d21-498e-9f91-0b7bff4bec50",
+      "after_revision": "79cef349-a2b2-4c13-91d1-5dcb38e40326",
+      "verification": "This release deployed 100%; 4 Secret bindings/CONFIG_KV/model keys/QQ webhook readback PASS"
+    },
+    {
+      "location_type": "remote",
+      "provider": "GitHub",
+      "repository": "Ray20123315/qqaibot",
+      "branch": "chore/qq-natural-persona-memory-v122-20261024",
+      "path": ".Ray_Chen/memory/00_START_HERE.md",
+      "action": "modified",
+      "before_revision": "v0.0.120",
+      "after_revision": "v0.0.122",
+      "verification": "memory PR/CI and archive verification pending"
+    },
+    {
+      "location_type": "remote",
+      "provider": "GitHub",
+      "repository": "Ray20123315/qqaibot",
+      "branch": "chore/qq-natural-persona-memory-v122-20261024",
+      "path": ".Ray_Chen/memory/ACTIVE_TASK.md",
+      "action": "modified",
+      "before_revision": "v0.0.120",
+      "after_revision": "v0.0.122",
+      "verification": "memory PR/CI and archive verification pending"
+    },
+    {
+      "location_type": "remote",
+      "provider": "GitHub",
+      "repository": "Ray20123315/qqaibot",
+      "branch": "chore/qq-natural-persona-memory-v122-20261024",
+      "path": ".Ray_Chen/memory/MEMORY_VERSION.txt",
+      "action": "modified",
+      "before_revision": "v0.0.120",
+      "after_revision": "v0.0.122",
+      "verification": "memory PR/CI and archive verification pending"
+    },
+    {
+      "location_type": "remote",
+      "provider": "GitHub",
+      "repository": "Ray20123315/qqaibot",
+      "branch": "chore/qq-natural-persona-memory-v122-20261024",
+      "path": ".Ray_Chen/memory/CURRENT_STATE.md",
+      "action": "modified",
+      "before_revision": "v0.0.120",
+      "after_revision": "v0.0.122",
+      "verification": "memory PR/CI and archive verification pending"
+    },
+    {
+      "location_type": "remote",
+      "provider": "GitHub",
+      "repository": "Ray20123315/qqaibot",
+      "branch": "chore/qq-natural-persona-memory-v122-20261024",
+      "path": ".Ray_Chen/memory/USER_REQUIREMENTS.md",
+      "action": "modified",
+      "before_revision": "v0.0.120",
+      "after_revision": "v0.0.122",
+      "verification": "memory PR/CI and archive verification pending"
+    },
+    {
+      "location_type": "remote",
+      "provider": "GitHub",
+      "repository": "Ray20123315/qqaibot",
+      "branch": "chore/qq-natural-persona-memory-v122-20261024",
+      "path": ".Ray_Chen/memory/DECISIONS.md",
+      "action": "modified",
+      "before_revision": "v0.0.120",
+      "after_revision": "v0.0.122",
+      "verification": "memory PR/CI and archive verification pending"
+    },
+    {
+      "location_type": "remote",
+      "provider": "GitHub",
+      "repository": "Ray20123315/qqaibot",
+      "branch": "chore/qq-natural-persona-memory-v122-20261024",
+      "path": ".Ray_Chen/memory/GOTCHAS.md",
+      "action": "modified",
+      "before_revision": "v0.0.120",
+      "after_revision": "v0.0.122",
+      "verification": "memory PR/CI and archive verification pending"
+    },
+    {
+      "location_type": "remote",
+      "provider": "GitHub",
+      "repository": "Ray20123315/qqaibot",
+      "branch": "chore/qq-natural-persona-memory-v122-20261024",
+      "path": ".Ray_Chen/memory/VERIFY.md",
+      "action": "modified",
+      "before_revision": "v0.0.120",
+      "after_revision": "v0.0.122",
+      "verification": "memory PR/CI and archive verification pending"
+    },
+    {
+      "location_type": "remote",
+      "provider": "GitHub",
+      "repository": "Ray20123315/qqaibot",
+      "branch": "chore/qq-natural-persona-memory-v122-20261024",
+      "path": ".Ray_Chen/memory/FILE_MANIFEST.json",
+      "action": "modified",
+      "before_revision": "v0.0.120",
+      "after_revision": "v0.0.122",
+      "verification": "memory PR/CI and archive verification pending"
     }
   ],
   "memory_updates": [
@@ -206,20 +389,22 @@
     "FILE_MANIFEST.json"
   ],
   "verification": {
-    "isolated_ci": "SUCCESS:40089303664",
-    "legacy_ci": "SUCCESS:40089303680",
-    "code_merge": "SUCCESS:03f829edebff295cb5953ad5636e41db2c5527ce",
-    "cloudflare": "SUCCESS:cdfea900-f08a-4df0-9363-d80a5abad14c 100%",
-    "secrets": "PRESERVED four secret_text",
-    "kv": "PRESERVED CONFIG_KV / model-roles-v3 / selected-model-v2",
-    "qq_real_markdown": "UNVERIFIED",
-    "live_unsloth_web_tool": "UNVERIFIED",
-    "images": "NO routes",
-    "old_qqai": "UNCHANGED"
+    "code_merge": "SUCCESS:218809ad9d2670a405b1a8ed1e6578c30183ed01",
+    "isolated_ci": "SUCCESS:40091803676",
+    "legacy_ci": "SUCCESS:40091803666",
+    "cloudflare": "SUCCESS:79cef349-a2b2-4c13-91d1-5dcb38e40326 100%",
+    "secrets": "4 secret_text PRESERVED",
+    "model_kv": "model-roles-v3 / selected-model-v2 PRESERVED",
+    "old_production_qqai": "UNCHANGED",
+    "qq_persona_live": "NOT VERIFIED",
+    "static_qq_error_language": "UNCHANGED, may contain Traditional",
+    "image_routes": "EXCLUDED",
+    "prior_local_v121": "VALID but not merged to GitHub"
   },
-  "next_exact_action": "User tests a new QQ group @ message requesting structured numbered answer and recent web info, reports whether QQ rendered headings and any diagnostic code.",
+  "next_exact_action": "User sends QQ support/chat and model-detail questions to verify natural Simplified replies, polite internal technology nondisclosure and no false human impersonation.",
   "previous_local_memory_archive": {
-    "version": "v0.0.118",
-    "status": "Prior local validated but not merged in GitHub; latest remote v0.0.117 at task start."
+    "version": "v0.0.121",
+    "sha256": "6da49f2772c87eebe62f4caffefa4a241cb09908c7cd6a7e51f5f62dea2ab288",
+    "status": "Verified and delivered locally; GitHub main remained v0.0.120 due previous incomplete memory branch, which was NOT merged; this v122 reconciles both code releases."
   }
 }
