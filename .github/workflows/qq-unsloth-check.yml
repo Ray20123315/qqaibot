@@ -1,0 +1,22 @@
+name: QQ Unsloth isolated Worker check
+on:
+  push:
+    paths:
+      - 'standalone-qq-ai/**'
+      - '.github/workflows/qq-unsloth-check.yml'
+  pull_request:
+    paths:
+      - 'standalone-qq-ai/**'
+      - '.github/workflows/qq-unsloth-check.yml'
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Test standalone Worker
+        run: cd standalone-qq-ai && npm test && node --check worker.js
