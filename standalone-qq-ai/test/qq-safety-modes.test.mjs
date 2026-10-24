@@ -74,3 +74,13 @@ test('thinking text markup is not returned to QQ output',async()=>{
  const e=env(),res=await chat(e,'你好',async()=>new Response(JSON.stringify({choices:[{message:{content:'<think>internal notes</think>你好'}}]}),{headers:{'content-type':'application/json'}}),{modes:{search:false}});
  assert.equal(res.text,'你好');
 });
+
+test('no-card deployment disables paid AI Search upload even for authenticated admins',async()=>{
+ const {default:worker}=await import('../worker.js');
+ const e=env();e.ADMIN_TOKEN='test-only-admin-token-at-least-32-chars';
+ const req=new Request('https://qqbot-ai.ray2025.com/api/knowledge',
+   {method:'GET',headers:{authorization:'Bearer '+e.ADMIN_TOKEN}});
+ const res=await worker.fetch(req,e,{waitUntil(){}});
+ assert.equal(res.status,503);
+ assert.equal((await res.json()).error,'KNOWLEDGE_PAID_BACKEND_DISABLED');
+});
