@@ -1,24 +1,26 @@
 # ACTIVE_TASK
-task_id: qq-always-web-markdown-20261024
+task_id: qq-customer-service-simplified-20261024
 task_status: completed
-goal_revision: 10
-goal: Make Unsloth web_search requested on every QQ and admin Qwen text conversation, and send QQ actual Markdown rich messages with readable single fallback on explicit platform rejection.
+goal_revision: 11
+goal: Make the independent Unsloth QQbot a Simplified-Chinese customer service and casual-chat assistant that never volunteers its underlying model while preserving truthful direct answers and existing safety.
 acceptance_criteria:
-- No manual /search command or webSearch toggle required.
-- Only web_search tool allowed; MCP/shell/Python/files/images remain forbidden.
-- Model never claims internet verified without actual tool results.
-- Native Markdown message type 2 with # and ## headings and 1. 2. 3. lists; permission rejection downgraded to text, no raw syntax and no duplicate retry on unknown outcome.
-- GitHub isolated+legacy CI pass, main merge, standalone Worker deployment and readback, preserve 4 secrets/KV/QQ events/old qqai.
-current_phase: code/CI/merge/deploy verified, live Unsloth search execution and QQ native rich rendering require human testing.
-current_step: User tests actual QQ group reply with structured and fresh-info request; if plain fallback, confirm QQ native/passive Markdown permission.
+- System prompt defines helpful customer support for known issues and natural casual chat; no invented orders, payments, permission grants/refunds, or impersonation of human support.
+- All model responses instructed to be Simplified Chinese even when user asks in Traditional Chinese; no unsolicited model vendor/version/quantization disclosure, but no deceptive responses to direct technical questions.
+- Existing QQ signatures, Unsloth web_search/Markdown/ASR/TTS/secret/KV remain intact; images stay excluded.
+- GitHub isolated/legacy CI successful, PR merged to main, standalone Cloudflare deployment verified.
+- Versioned memory archive and Gmail notice completed or explicit blocker reported.
+current_phase: Code and deployment verified; real QQ persona behavior and fixed static message language awaiting user test.
+current_step: User sends QQ test messages checking self-description, Simplified and casual/customer support.
 completed_steps:
-- Read official Tencent QQ v2 send + markdown docs; native msg_type 2 markdown.content, special group passive Markdown privilege may be required. Read Unsloth smoke test using enabled_tools web_search; know GitHub issue on some GGUF Studio releases not actually triggering search despite enabled_tools.
-- Added standalone-qq-ai/qq-format.js and test/qq-markdown.test.mjs, edited role-router.js/worker.js/dashboard.js/README.md/test/role-router.test.mjs/test/qq-delivery.test.mjs. No images.
-- CI isolated 40089303664 SUCCESS, legacy 40089303680 SUCCESS including rejection fallback and retry suppression; code PR #98 merged main 03f829edebff295cb5953ad5636e41db2c5527ce.
-- Cloudflare independent qqaibot-unsloth 6-module strict inherit deployed cdfea900-f08a-4df0-9363-d80a5abad14c at 100%, readback verifies new code/4 secret_text+CONFIG_KV/flags, selected-model-v2 and model-roles-v3 intact, original qqai unchanged.
-verification_results: CI and Cloudflare API PASS; real QQ rich Markdown and actual Unsloth search tool invocation NOT VERIFIED. No QQ message actively sent by these tools.
-known_failures: QQ native Markdown entitlement may not be granted, fallback necessary; external search may not really run; 23-second QQ inference timeout may be insufficient for slow web searches.
-blockers: None for code or deployment. Operator needs test results; QQ Markdown permission outside Worker.
-next_exact_action: User asks QQ AI for three numbered items and up-to-date info; inspect true heading/list rendering, send back actual output and QQ diag or error code.
-resume_rule: Confirm repo main/Cloudflare version before further writes; do not claim actual tool execution or native Markdown rendering until user evidence; preserve all secrets and exclude image models.
+- Inspected current GitHub code and main 19ad8f937b4124da40ea33e6596688e350209283; created normal feature branch.
+- Introduced exported CUSTOMER_SERVICE_PROMPT in standalone-qq-ai/role-router.js, replacing previous generic QQ AI/system strings; preserved fixed allowed tools/web search request, ASR/TTS paths and the original chat API.
+- Extended test/qq-markdown.test.mjs for system prompt injection, Chinese script, truthful model disclosure only on direct question and customer service safeguards. Updated README.md.
+- Tried writing static QQ fallback phrase replacements in worker.js; GitHub tool safety check BLOCKED the write. Did not bypass and did not modify worker.js; fixed fallback phrases may still be Traditional.
+- PR #100 CI isolated 40090505572 SUCCESS; legacy QQ CI 40090505508 SUCCESS; merge main 17afc4ea71084cac4cd270312edf202b909fb864.
+- Cloudflare independent qqaibot-unsloth deployed a958a3ad-9d21-498e-9f91-0b7bff4bec50 100%, readback confirms prompt strings, 4 secret_text, CONFIG_KV model role keys, existing QQ Webhook. Other production qqai not modified.
+verification_results: CI and Cloudflare readback pass. Real QQ model compliance/entitlement not tested; prompts are best effort. Static message language remains an acknowledged partial gap.
+known_failures: Blocked worker.js static-message modification; no bypass. Model may occasionally output Traditional despite instructions, no full CJK conversion engine.
+blockers: None for deployment; user acceptance needed; future security-compliant repair for static QQ error strings if required.
+next_exact_action: Owner sends a new QQ @ test '你会做什么？' and a Traditional-language question, then reports whether it responds in Simplified without unsolicited model-name disclosure.
+resume_rule: Check main and deployed version before new changes; do not claim all static messages converted. Continue preserving image exclusion and four Secrets.
 last_checkpoint_date: 2026-10-24
