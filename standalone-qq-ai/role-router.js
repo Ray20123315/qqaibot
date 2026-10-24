@@ -92,7 +92,7 @@ async function streamText(response){
   if(!answer.trim())throw Error('UPSTREAM_EMPTY_RESPONSE');
   return answer;
 }
-const tidy=s=>s.replace(/<think(?:\s[^>]*)?>[\s\S]*?<\/think\s*>/gi,'').replace(/<thinking(?:\s[^>]*)?>[\s\S]*?<\/thinking\s*>/gi,'').replace(/\r\n?/g,'\n').replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g,' ').trim();
+const tidy=s=>s.replace(/<think(?:\s[^>]*)?>[\s\S]*?<\/think\s*>/gi,'').replace(/<thinking(?:\s[^>]*)?>[\s\S]*?<\/thinking\s*>/gi,'').replace(/<think(?:\s[^>]*)?>[\s\S]*$/gi,'').replace(/<thinking(?:\s[^>]*)?>[\s\S]*$/gi,'').replace(/\r\n?/g,'\n').replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g,' ').trim();
 export async function chat(env,prompt,fetcher=fetch,{timeout=60_000,history=[],summary='',knowledge='',modes={},image=null}={}){
   if(typeof prompt!=='string'||!prompt.trim()||prompt.length>4000)throw Error('INVALID_PROMPT');
   const config=await getConfig(env);
