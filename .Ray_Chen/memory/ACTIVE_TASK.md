@@ -1,23 +1,23 @@
 # ACTIVE_TASK
-task_id: unsloth-qq-model-picker-20261024
+task_id: unsloth-qq-secret-only-20261024
 task_status: blocked
-goal_revision: 2
-goal: Let admin paste their Unsloth API key into the QQ AI web admin, list their actual models and select/persist the model used by QQ and web chat.
+goal_revision: 4
+goal: Change standalone QQ Unsloth Worker so Unsloth API Key lives exclusively in Cloudflare Worker Secret; admin web can list, select and save a model ID.
 acceptance_criteria:
-- Admin-only model discovery from fixed /v1/models endpoint using submitted/saved key. No API keys in GitHub, browser persistence or API responses.
-- Only model listed by API is selectable. Selection+key encrypted at rest in standalone KV, used for QQ reply and admin test.
-- Existing env secret fallback retained. ADMIN_TOKEN rotation supports new API Key overwrite.
-- No shell/tools/file execution, no edits to legacy qqai, D1, QQ bot callback or Codex.
-- GitHub tests pass, new standalone Cloudflare Worker deployed with verified KV binding.
-current_phase: Model picker PR #84 merged, Cloudflare Worker/KV deployed; real authenticated Unsloth & QQ verification blocked.
-current_step: User must configure ADMIN_TOKEN, supply Unsloth API Key in web UI, choose model and test; configure QQ credentials separately for real QQ bot.
+- No API key accepted via web; only env.UNSLOTH_API_KEY. KV stores selected model ID alone.
+- Keep ADMIN_TOKEN auth, fixed upstream, command/tool execution disabled and QQ worker separate from original.
+- Test and merge main; deploy to independent Cloudflare Worker with same-zone public route flag and preserve existing bindings.
+- Real model and QQ tests only after operator secrets.
+current_phase: GitHub PR #87 merged and Worker deployed/verified; missing user-provided secrets prevent end-to-end.
+current_step: User creates UNSLOTH_API_KEY Worker Secret and converts existing ADMIN_TOKEN plain_text to Secret.
 completed_steps:
-- Inspected baseline main v0.0.110 and Cloudflare scripts/secrets; checked Unsloth model endpoint and Cloudflare KV docs.
-- Added standalone-qq-ai/model-config.js, test/model-config.test.mjs; updated Worker admin HTML/API, README and wrangler binding.
-- Isolated tests CI 40072501757 SUCCESS; legacy AI CI 40072501794 SUCCESS; merged PR #84 main 16764e1bcc7509f0eb761040e6ed738e05572194.
-- Created dedicated KV namespace 033b241f7377496790d92056d39669ad; deployed script version c179d753-b3f8-4f0f-ac2f-a262379eff14 at 100% with CONFIG_KV API readback.
-verification_results: Github CI pass; Cloudflare Worker domain/binding/100% deployment readback pass. Secrets count zero. External HTTPS open via web tool not accessible. No live Unsloth or QQ bot event tested.
-blockers: Missing ADMIN_TOKEN, Unsloth API Key, QQ_APP_ID, QQ_APP_SECRET and actual QQ publisher webhook setup. May require fixed outbound IP allowlist for QQ API.
-next_exact_action: Set ADMIN_TOKEN as a strong Worker Secret in qqaibot-unsloth, then use admin UI to submit Unsloth API Key, list and save model; check live chat test.
-resume_rule: Confirm main SHA and Worker KV binding; do not modify original qqai resources or claim live QQ success without evidence.
+- User verified local /v1/models HTTP 200; public without key HTTP 401; public with valid Bearer HTTP 200 listing lilcheaty/flint-abliterated-GGUF.
+- Inspected Cloudflare bindings and empty dedicated CONFIG_KV key list.
+- Updated worker.js, model-config.js, model-config.test.mjs, README.md and wrangler.toml in PR #87.
+- CI 40075035673 isolated and 40075035664 original QQ both SUCCESS. Main merged 500c7689c199dc5db33f91146dc6e7c78f05f2fd.
+- Deployed Cloudflare version 678a0b74-800b-47ea-9efe-868fd7e551f0 at 100%; verified global_fetch_strictly_public, ADMIN_TOKEN and CONFIG_KV bindings.
+verification_results: GitHub CI pass; Cloudflare script PUT/API settings readback/deploy 100% pass. Public URL web fetch tool unavailable. Actual Worker model request and QQ events unverified. UNSLOTH_API_KEY absent; ADMIN_TOKEN binding is plain_text.
+blockers: Operator must configure API Secret/upgrade ADMIN_TOKEN to Secret; QQ_APP_ID and QQ_APP_SECRET needed later; actual Worker model list not tested.
+next_exact_action: Set UNSLOTH_API_KEY as Secret (not Plain Text) in qqaibot-unsloth, re-add ADMIN_TOKEN as Secret, open admin web and click 取得模型清單; select model and test.
+resume_rule: Check main and Worker deployment before changing anything; never alter original qqai or commit credentials.
 last_checkpoint_date: 2026-10-24

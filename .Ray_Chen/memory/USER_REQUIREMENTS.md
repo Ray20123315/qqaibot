@@ -7,3 +7,5 @@
 - Latest 2026-10-24: build a new official QQ Open Platform AI chatbot under QQAIBOT GitHub, in its own Cloudflare Worker; call home-hosted Unsloth via https://msiai.ray2025.com/; simple web backend, **no command execution**. Preserve existing QQ worker, bot, secrets and cross-group setup.
 
 - Latest 2026-10-24 (goal revision 2): after entering Unsloth API Key in QQ AI admin page, automatically retrieve available models and let user choose one; selected model must persist and be used for QQ replies. Keep strict no command execution.
+
+- 2026-10-24 latest: Store Unsloth API Key directly in Cloudflare Worker Secret, never in web UI or KV. Continue model discovery, model selection and QQ text-only mode with no command execution.

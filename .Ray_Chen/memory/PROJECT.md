@@ -9,3 +9,5 @@ No account secrets in repository. Preserve known protected QQ identities 3569028
 
 ## 2026-10-24 independent Unsloth QQ worker
 Separate `standalone-qq-ai/` Cloudflare Worker `qqaibot-unsloth`, with custom domain `qqbot-ai.ray2025.com`, serves a QQ official signed Webhook + minimal admin chat; no DO, D1, R2, shell, arbitrary proxy or shared QQ bot callback. Original root `qqai` stays untouched.
+
+- Standalone `qqaibot-unsloth` Worker now requires `UNSLOTH_API_KEY` exclusively as Cloudflare Secret; `CONFIG_KV` is only selected model ID. Same-zone calls route through front door via `global_fetch_strictly_public`.

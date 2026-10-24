@@ -20,3 +20,8 @@
 - Cloudflare API: dedicated KV namespace 033b241f7377496790d92056d39669ad created. qqaibot-unsloth script upload success; version c179d753-b3f8-4f0f-ac2f-a262379eff14 at 100% deployed, settings readback CONFIG_KV mapped to that ID; domain qqbot-ai.ray2025.com enabled.
 - Verified tests cover model listing URL/Authorization and no redirect, deduplicated IDs, list errors, authenticated settings, unlisted selection refusal, AES-GCM ciphertext not exposing key or model, rotated admin secret fails decrypt, selected model used for /v1/chat/completions without tool calls.
 - Limit: Secrets list still EMPTY. Web tool cannot access public HTTPS URL; no actual API key, model listing, chat completion or QQ platform event tested.
+
+## 2026-10-24 Secret-only deployment
+- GitHub merged PR #87 main 500c7689c199dc5db33f91146dc6e7c78f05f2fd; isolated CI 40075035673 SUCCESS; existing AI CI 40075035664 SUCCESS.
+- Cloudflare Worker qqaibot-unsloth PUT HTTP 200 version 678a0b74-800b-47ea-9efe-868fd7e551f0 deployed 100%; settings readback shows global_fetch_strictly_public, original ADMIN_TOKEN plain_text and CONFIG_KV namespace 033b241f7377496790d92056d39669ad.
+- Source readback includes selected-model-v2 and no crypto.subtle.encrypt call; KV keys listing zero prior to change. User verified Unsloth local HTTP 200, public HTTP 200 with Bearer. Public live Worker model list/QQ message not yet tested (missing Worker Secret); platform web URL tool cannot reach endpoint.
