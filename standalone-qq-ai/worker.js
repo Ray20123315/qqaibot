@@ -98,8 +98,23 @@ async function sendQQ(env,event,answer) {
   if(code)throw Error('QQ_SEND_CODE_'+code);
 }
 export async function queryModel(env,message,{timeoutMs=60_000}={}) {
-  const result=await chatWithRoles(env,message,fetch,{timeout:timeoutMs});
-  return result.text.slice(0,1500);
+  try {
+    const result=await chatWithRoles(env,message,fetch,{timeout:timeoutMs});
+    return result.text.slice(0,1500);
+  }catch(err){
+    // Preserve the existing MODEL_* public diagnostic codes for QQ and old admin clients.
+    const reason=String(err?.message||'');
+    const mapped={
+      UPSTREAM_TIMEOUT:'MODEL_TIMEOUT',
+      UPSTREAM_CONNECTION_FAILED:'MODEL_CONNECTION_FAILED',
+      UPSTREAM_INVALID_JSON:'MODEL_INVALID_RESPONSE',
+      UPSTREAM_EMPTY_RESPONSE:'MODEL_EMPTY_RESPONSE',
+      UPSTREAM_EMPTY_STREAM:'MODEL_EMPTY_RESPONSE',
+      CHAT_NOT_CONFIGURED:'MODEL_NOT_CONFIGURED',
+    }[reason] || (reason.match(/^UPSTREAM_(HTTP|REDIRECT)_([0-9]{3})$/)?.[0]||'').replace('UPSTREAM_','MODEL_');
+    if(mapped)throw Error(mapped);
+    throw err;
+  }
 }
 // Keep only coarse delivery stages, UTC time and sanitized reason codes (no QQ IDs/messages/secrets).
 const qqDiagnosticStages=['callback_verify','callback_rejected','event_received','event_ignored','model_failed','send_failed','reply_sent'];
