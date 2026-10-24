@@ -22,3 +22,5 @@
 - 2026-10-24 latest: Every QQ AI chat should try Unsloth built-in web search automatically, without explicit /search or a manual webSearch switch. QQ replies should display proper big/small Markdown headings, numbered lists and readable paragraphs, not raw Markdown symbols. Prefer native QQ Markdown with safe text downgrade. Images remain excluded under prior user request.
 
 - 2026-10-24 (supersedes earlier model-disclosure-on-request policy): User wants QQbot as natural personable customer-service representative and conversational companion; Simplified Chinese only in model outputs. No provision of AI/model provider/name/version/quantization/internal technique even if directly asked; politely decline the internal information without inventing a human identity. Retain web search, Markdown and speech roles; exclude images.
+
+- 2026-10-24 latest: Standalone QQ AI admin dashboard failed to log in. Repair functioning UI login urgently without resetting Cloudflare ADMIN_TOKEN, changing models, or touching original production qqai.
