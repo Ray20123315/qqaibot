@@ -1,8 +1,8 @@
 ## 對話記憶、262K 規劃、向量客服知識庫和指令（2026-10-24）
 
-此版本新增**獨立** Cloudflare D1 `MEMORY_DB`（QQ 群組及私信分開索引）與 AI Search `SUPPORT_SEARCH`（公開客服資料，Embedding `@cf/qwen/qwen3-embedding-0.6b`）。聊天原文保存在 `qq_message_log`，摘要儲存在 `qq_compaction`；摘要游標前進時不刪原文，摘要失敗不使既有聊天不可用。以 QQ App Secret＋群/用戶 ID 產生不可逆 scope 鍵，資料庫不儲存明文 QQ OpenID；日後更換 App Secret 需規劃 memory key migration。
+此版本新增**獨立** Cloudflare SQLite Durable Objects `CHAT_ROOMS`（每個 QQ 群組及私信一個隔離 Object）與 AI Search `SUPPORT_SEARCH`（公開客服資料，Embedding `@cf/qwen/qwen3-embedding-0.6b`）。聊天原文保存在 SQLite 的 `qq_message_log`，摘要儲存在 `qq_compaction`；摘要游標前進時不刪原文，摘要失敗不使既有聊天不可用。以 QQ App Secret＋群/用戶 ID 產生不可逆 scope 鍵，資料庫不儲存明文 QQ OpenID；日後更換 App Secret 需規劃 memory key migration。
 
-**262,144 Tokens 是 Qwen 模型聲稱的理論上限，不代表實際載入的 Unsloth GGUF 已啟用。** 初始預設工作窗口 `16,384`，頁面「会话记忆」可以提高到 `262,144`，實際推論可用長度必須由 Unsloth Studio context/cache 驗證，且每次推論預留 28% 餘量；輸入依實際需用選取最新多輪對話與已整理摘要，並非每次載滿 262K。D1 以 24 條為單位做非破壞性壓縮，至少留最近 16 條原文，使用獨立**不帶搜尋或其他工具**的摘要請求。摘要保留原文版本與序列游標，防止並發摘要覆蓋。
+**262,144 Tokens 是 Qwen 模型聲稱的理論上限，不代表實際載入的 Unsloth GGUF 已啟用。** 初始預設工作窗口 `16,384`，頁面「会话记忆」可以提高到 `262,144`，實際推論可用長度必須由 Unsloth Studio context/cache 驗證，且每次推論預留 28% 餘量；輸入依實際需用選取最新多輪對話與已整理摘要，並非每次載滿 262K。Durable Objects 以 24 條為單位做非破壞性壓縮，至少留最近 16 條原文，使用獨立**不帶搜尋或其他工具**的摘要請求。摘要保留原文版本與序列游標，防止並發摘要覆蓋。
 
 ### 公開知識庫
 管理網站新增「知识库管理」可上傳 `txt/md/pdf/docx/csv` 文件，不超過 4 MiB。經管理員 `ADMIN_TOKEN` 已驗證 Session 方可呼叫：
@@ -16,10 +16,10 @@
 目前可使用的安全指令：`/帮助`、`/骰子`、`/抽签 甲 乙`、`/今日话题`、`/上下文`、`/总结`。群管理 `/禁言`、`/解禁`、`/踢出`、`/审核` 因 QQ 官方機器人權限與身分驗證仍須另行開通，**明確告知未執行**，不以 LLM 決定任何實際處分。客服工單與私人長期記憶管理等需要權限、刪除流程後續獨立接入。
 
 ### 資料存放與部署
-- 新 D1 只用於此獨立 QQbot 的記憶，**絕不共用或修改原正式 qqai 的 D1**。
-- `MEMORY_DB` Cloudflare D1 binding、`SUPPORT_SEARCH` AI Search binding 必須在正式部署時存在；原有四個 Worker Secrets＋`CONFIG_KV` 需嚴格繼承。
-- 初始化 D1 migration 位於 `conversation-memory.js` 的 `ensureSchema()`，部署前套用 idempotent SQL。
-- 若 D1 / 搜尋資料庫暫時無法回應，既有 QQ 文字聊天仍會盡力執行，**不聲稱已讀取歷史或資料庫**。
+- 原帳號 D1 已達 **10 個資料庫上限**（Cloudflare HTTP 403 / 7406），因此不新增 D1，也不挪用其他專案的資料庫；改以 SQLite Durable Objects 實作。
+- `CHAT_ROOMS` Durable Objects SQLite binding、`SUPPORT_SEARCH` AI Search binding 必須在正式部署時存在；原有四個 Worker Secrets＋`CONFIG_KV` 需嚴格繼承。
+- 每個 Durable Object 首次啟動時自動以 idempotent SQL 建立兩個 SQLite 資料表；不使用 D1 migration。
+- 若 Durable Objects / AI Search 暫時無法回應，既有 QQ 文字聊天仍會盡力執行，**不聲稱已讀取歷史或資料庫**。
 - 使用已驗證的 `/api/session` HttpOnly Session 管理員登入；所有新增 POST 路由沿用同源保護；禁用圖像生成與理解模型。
 
 # QQAIBOT · 獨立 Unsloth QQ AI
