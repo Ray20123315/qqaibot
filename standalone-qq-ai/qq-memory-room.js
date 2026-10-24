@@ -1,9 +1,11 @@
+import {compactOneBatch} from "./conversation-memory.js";
+import {summarizeConversation} from "./role-router.js";
 /** Cloudflare SQLite-backed Durable Object; each QQ scope maps to one object. */
 const schema="CREATE TABLE IF NOT EXISTS qq_message_log (seq INTEGER PRIMARY KEY AUTOINCREMENT,scope TEXT NOT NULL,event_id TEXT NOT NULL,author TEXT NOT NULL,role TEXT NOT NULL CHECK(role IN ('user','assistant')),content TEXT NOT NULL,received_at TEXT NOT NULL DEFAULT (datetime('now')),UNIQUE(scope,event_id,role));CREATE INDEX IF NOT EXISTS qq_history_by_scope ON qq_message_log(scope,seq);CREATE TABLE IF NOT EXISTS qq_compaction (scope TEXT PRIMARY KEY,through_seq INTEGER NOT NULL DEFAULT 0,revision INTEGER NOT NULL DEFAULT 0,summary TEXT NOT NULL DEFAULT '',updated_at TEXT NOT NULL DEFAULT (datetime('now')));";
 /** Legacy Durable Object class shape, compatible with both module tests and Cloudflare stub.fetch. */
 export class QQMemoryRoom {
  constructor(state,env){
-   this.state=state;
+   this.state=state;this.env=env;
    this.state.storage.sql.exec(schema);
  }
  async fetch(request){
@@ -20,9 +22,33 @@ export class QQMemoryRoom {
    try{
      const cursor=this.state.storage.sql.exec(stmt,...req.params);
      const rows=cursor.toArray();
+     if(stmt.startsWith('INSERT OR IGNORE INTO qq_message_log')&&req.params[3]==='assistant'&&cursor.rowsWritten>0){
+       const count=this.state.storage.sql.exec('SELECT COUNT(*) count FROM qq_message_log WHERE scope=?',req.params[0]).toArray()[0]?.count||0;
+       if(count>=40&&count%12===0)await this.state.storage.setAlarm(Date.now()+1000);
+     }
      return Response.json(req.kind==='run'?{meta:{changes:cursor.rowsWritten}}:
        req.kind==='first'?(rows[0]||null):{results:rows});
    }catch(err){return new Response('MEMORY_SQL_FAILED',{status:500});}
+ }
+ async alarm(){
+   // Alarms run after the QQ reply has already been delivered, avoiding the 23s inference path.
+   const sql=this.state.storage.sql;
+   const first=sql.exec('SELECT scope FROM qq_message_log ORDER BY seq ASC LIMIT 1').toArray()[0];
+   if(!first?.scope)return;
+   const adapter={prepare(statement){return {bind(...params){const call=async(kind)=>{
+     const cur=sql.exec(statement,...params),rows=cur.toArray();
+     return kind==='run'?{meta:{changes:cur.rowsWritten}}:kind==='first'?rows[0]||null:{results:rows};
+   };return {all:()=>call('all'),first:()=>call('first'),run:()=>call('run')};}}}};
+   try{
+     const result=await compactOneBatch(adapter,first.scope,(old,rows)=>summarizeConversation(this.env,old,rows));
+     if(result.compacted){
+       const stats=sql.exec('SELECT COUNT(*) count FROM qq_message_log WHERE scope=? AND seq>?',first.scope,result.through).toArray()[0];
+       if((stats?.count||0)>=40)await this.state.storage.setAlarm(Date.now()+30_000);
+     }
+   }catch(err){
+     // Never delete originals, never retry indefinitely on model failure.
+     console.error('QQ_MEMORY_COMPACT_FAILED',String(err?.message||'UNKNOWN').replace(/[^A-Z0-9_]/g,'').slice(0,48));
+   }
  }
 }
 /** Read-only SQL statement strings are hardcoded in conversation-memory.js. */
