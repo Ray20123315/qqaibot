@@ -1,12 +1,12 @@
 import {readModelConfig,listUnslothModels,saveModelConfig} from "./model-config.js";
 import {DASHBOARD_HTML} from "./dashboard.js";
-import {scopeKey,appendMessage,loadContext,compactOneBatch,getMemoryStats,contextBudget} from "./conversation-memory.js";
+import {scopeKey,appendMessage,loadContext,getMemoryStats,contextBudget} from "./conversation-memory.js";
 import {roomDatabase} from "./qq-memory-room.js";
 export {QQMemoryRoom} from "./qq-memory-room.js";
 import {lookupSupport,citationContext,uploadPublicDocument,listPublicDocuments} from "./support-knowledge.js";
 import {commandResult,parseCommand} from "./qq-commands.js";
 import {markdownPayload,plainPayload,rejectedMarkdown} from "./qq-format.js";
-import {getConfig as getRoles,setConfig as setRoles,chat as chatWithRoles,summarizeConversation,speech as ttsWithRoles,transcribe as asrWithRoles} from "./role-router.js";
+import {getConfig as getRoles,setConfig as setRoles,chat as chatWithRoles,speech as ttsWithRoles,transcribe as asrWithRoles} from "./role-router.js";
 import {adminAllowed,sessionRoute} from "./session-auth.js";
 /** QQ official Webhook -> Unsloth text-only chat. No command/tool execution. */
 const enc = new TextEncoder();
@@ -225,9 +225,7 @@ export async function processEvent(env,event) {
     if(scope){
       try{
         await appendMessage(db,scope,event.id+':reply','assistant',answer);
-        if(state?.compactionRecommended){
-          await compactOneBatch(db,scope,(old,rows)=>summarizeConversation(env,old,rows));
-        }
+        // Scoped Durable Object schedules non-destructive compaction after QQ reply.
       }catch(err){console.error('QQ_MEMORY_WRITE_FAILED',String(err?.message||'UNKNOWN').replace(/[^A-Z0-9_]/g,'').slice(0,36));}
     }
   }catch(err) {
