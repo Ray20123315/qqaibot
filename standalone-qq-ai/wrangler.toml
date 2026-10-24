@@ -3,7 +3,13 @@ main = "worker.js"
 compatibility_date = "2026-10-24"
 workers_dev = true
 
-# Configure secrets in Cloudflare Worker settings (never commit credentials).
-# This Worker has no D1, R2, Durable Objects, filesystem, or command tools.
+# Admin API uses ADMIN_TOKEN Secret to encrypt a submitted Unsloth API key.
+# Keep this dedicated KV namespace exclusive to the new Worker.
+[[kv_namespaces]]
+binding = "CONFIG_KV"
+id = "033b241f7377496790d92056d39669ad"
+
+# Configure QQ_APP_ID, QQ_APP_SECRET, ADMIN_TOKEN in Worker Secrets.
+# No D1, R2, Durable Objects, shell, filesystem or tool execution.
 [observability]
 enabled = true
