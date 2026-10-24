@@ -107,10 +107,20 @@ export default {
       if(!await adminAllowed(request,env))return json({error:'UNAUTHORIZED'},401);
       if(Number(request.headers.get('content-length'))>8192)return json({error:'TOO_LARGE'},413);
       try {
-        const saved=await readModelConfig(env);
-        if(request.method==='GET')return json({model:saved.model,saved:saved.saved,configured:!!(saved.apiKey&&saved.model)});
+        if(request.method==='GET') {
+          const saved=await readModelConfig(env);
+          return json({model:saved.model,saved:saved.saved,configured:!!(saved.apiKey&&saved.model)});
+        }
         const data=await request.json().catch(()=>null);
         if(!data||typeof data!=='object')return json({error:'INVALID_JSON'},400);
+        let saved;
+        try { saved=await readModelConfig(env); }
+        catch(error) {
+          // Recover after rotating ADMIN_TOKEN: a newly supplied API key may
+          // replace encrypted configuration that cannot be decrypted.
+          if(!text(data.api_key))throw error;
+          saved={apiKey:'',model:'',saved:false};
+        }
         const key=text(data.api_key)||saved.apiKey;
         if(pathname==='/api/models') {
           const models=await listUnslothModels(key);
