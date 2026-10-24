@@ -43,19 +43,23 @@ test('even previous persisted false webSearch settings are upgraded to always-on
   assert.equal(request.stream,true);
   assert.match(request.messages[0].content,/每次回答都先尝试使用 web_search/);
   assert.match(request.messages[0].content,/所有面向用户的回复必须使用简体中文/);
-  assert.match(request.messages[0].content,/自动客服与日常聊天助手/);
+  assert.match(request.messages[0].content,/客服与聊天伙伴/);
   return new Response(JSON.stringify({choices:[{message:{content:'你好'}}]}),{headers:{'content-type':'application/json'}});
  });
  assert.equal(value.text,'你好');
  assert.equal(value.searched,false);
 });
 
-test('customer service persona allows friendly chat but does not proactively disclose the model',()=>{
- assert.match(CUSTOMER_SERVICE_PROMPT,/客服与日常聊天助手/);
- assert.match(CUSTOMER_SERVICE_PROMPT,/自然交流、闲聊/);
+test('persona presents a natural customer-service conversation without model details',()=>{
+ assert.match(CUSTOMER_SERVICE_PROMPT,/客服与聊天伙伴/);
+ assert.match(CUSTOMER_SERVICE_PROMPT,/自然、靠谱/);
+ assert.match(CUSTOMER_SERVICE_PROMPT,/日常/);
  assert.match(CUSTOMER_SERVICE_PROMPT,/简体中文/);
- assert.match(CUSTOMER_SERVICE_PROMPT,/不得主动提及或宣传底层 AI 模型/);
- assert.match(CUSTOMER_SERVICE_PROMPT,/如果用户直接询问，诚实回答/);
- assert.match(CUSTOMER_SERVICE_PROMPT,/不得编造订单状态/);
- assert.doesNotMatch(CUSTOMER_SERVICE_PROMPT,/Qwen3\.5-9B|Flint|Qwen3-TTS/);
+ assert.match(CUSTOMER_SERVICE_PROMPT,/绝不主动介绍、宣传或列出内部使用的 AI/);
+ assert.match(CUSTOMER_SERVICE_PROMPT,/即使用户询问/);
+ assert.match(CUSTOMER_SERVICE_PROMPT,/这些属于内部技术信息，暂不提供/);
+ assert.match(CUSTOMER_SERVICE_PROMPT,/不得假装自己是现实生活中的具体真人/);
+ assert.match(CUSTOMER_SERVICE_PROMPT,/不得声称已经查过、改过、发过、处理过/);
+ assert.match(CUSTOMER_SERVICE_PROMPT,/只允许 web_search/);
+ assert.doesNotMatch(CUSTOMER_SERVICE_PROMPT,/Qwen3\\.5-9B|Flint|Qwen3-TTS/);
 });
