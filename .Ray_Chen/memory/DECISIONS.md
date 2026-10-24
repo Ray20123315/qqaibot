@@ -12,3 +12,5 @@
 - 2026-10-24 supersedes browser API Key input/encrypted KV plan: Unsloth API Key only in Cloudflare Secret UNSLOTH_API_KEY; admin UI list models without key field, store selected model ID only in CONFIG_KV. Use global_fetch_strictly_public for same-zone public Tunnel subrequests.
 
 - 2026-10-24: Minimal OpenAI Chat Completions request deliberately omits tools/tool_choice (no delegation capability), uses max_tokens 1024. Admin chat 60s timeout; QQ async handler 22s budget. UI returns sanitized errors rather than raw HTTP body or credentials.
+
+- 2026-10-24: Keep QQ API fixed host while diagnosing. Current/legacy Tencent sources differ; do not blindly switch to api.sgroup.qq.com or bots.qq.com on UNKNOWN. Add safe QQ_AUTH_FETCH_FAILED and QQ_SEND_FETCH_FAILED classification, timeout/redirect/numeric business codes. Never send credentials or raw QQ response bodies into logs/KV.

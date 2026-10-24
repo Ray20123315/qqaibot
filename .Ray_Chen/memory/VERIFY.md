@@ -31,3 +31,10 @@
 - Tested no-tool request, 60s web timeout/22s QQ budget, HTTP 400 sanitization, network vs timeout, JSON invalid/empty response and text array responses. CI initially failed on outdated test assumptions, corrected and rerun PASS.
 - Cloudflare PUT HTTP 200 with strict inherit ADMIN_TOKEN/UNSLOTH_API_KEY and dedicated CONFIG_KV; deployment 327900f7-5a47-46dc-87ca-ee8988240bdf at 100%; source contains MODEL_TIMEOUT, MODEL_EMPTY_RESPONSE and max_tokens:1024. Secret types remain secret_text. global_fetch_strictly_public still active, selected-model-v2 KV key exists.
 - NOT VERIFIED: live POST /v1/chat/completions from Cloudflare Worker, real model response, QQ platform E2E. Need user web chat retest and safe error code.
+
+## 2026-10-24 QQ outbound UNKNOWN cause classification
+- Actual user QQ diagnostic: callback_verify OK (08:50:51.404Z), event_received GROUP_AT (08:47:16.871Z), send_failed UNKNOWN (08:47:17.621Z), earlier event_ignored (08:46:40.007Z). Evidence proves callback and incoming event, NOT outbound success.
+- PR #92 isolated CI 40079995888 PASS, original QQAIBOT AI CI 40079995892 PASS, merged main d6997d37bb3861e037dbca4bbb742c6b490ecbc5. Tests cover QQ token fetch exception/timeout, QQ send fetch exception/timeout, safe business codes for HTTP200 and no secret/raw error logging.
+- Cloudflare strict-inherit deployment 9ece06c4-edbc-4055-8a2a-1a7e2f87ecb4 100% readback with 4 secret_text names, CONFIG_KV, flag global_fetch_strictly_public, source has new codes; selected-model-v2 and older diag keys remained. No real QQ send attempt triggered by tool actions.
+- Tencent official docs show production outbound IP allowlist; actual cause remains UNKNOWN until next QQ real message diagnostic. Real reply_sent not evidenced.
+- Previous local archive v0.0.115 checksum 330f5cef91ad35c3708e01724ff37d460053518ddb2e3778c0c5ecd0a0765603; GitHub remote v0.0.114 until this v116 reconciliation.

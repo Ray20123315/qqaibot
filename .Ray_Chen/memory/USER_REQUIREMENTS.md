@@ -11,3 +11,5 @@
 - 2026-10-24 latest: Store Unsloth API Key directly in Cloudflare Worker Secret, never in web UI or KV. Continue model discovery, model selection and QQ text-only mode with no command execution.
 
 - 2026-10-24: Investigate chat "MODEL_UNAVAILABLE" without disclosing secrets, keep selected Unsloth model and strict no-command/no-tool-execution behavior. Address slow inference and provide actual failure categories rather than hiding diagnostics.
+
+- 2026-10-24: Address actual QQ bot silence after confirmed event_received GROUP_AT and send_failed UNKNOWN, with actionable safe auth-vs-send diagnostics without exposing credentials or touching original qqai.

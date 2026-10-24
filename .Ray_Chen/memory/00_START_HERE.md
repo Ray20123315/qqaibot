@@ -1,16 +1,17 @@
 # Ray_Chen Memory
-version: v0.0.114
-task_id: unsloth-qq-chat-diagnostics-20261024
+version: v0.0.116
+task_id: qq-unsloth-send-unknown-20261024
 task_status: blocked
-goal_revision: 5
+goal_revision: 7
 canonical_branch: main
-verified_code_commit: a974232b6f71991af2d23f654d618ccc0ec72465
+verified_code_commit: d6997d37bb3861e037dbca4bbb742c6b490ecbc5
 updated_at: 2026-10-24
 
 ## Quick resume
-- User: qqaibot-unsloth admin chat test returned MODEL_UNAVAILABLE even though API key was accepted, model listed/selected. Cloudflare verified ADMIN_TOKEN and UNSLOTH_API_KEY as secret_text; CONFIG_KV selected-model-v2 present; global_fetch_strictly_public enabled.
-- PR #89 merged into main a974232b6f71991af2d23f654d618ccc0ec72465; CI runs 40076227706 isolated and 40076227711 old AI both SUCCESS. Source worker.js and test/worker.test.mjs and test/model-config.test.mjs, README changed.
-- Chat POST previously always masked failures and used 18s timeout, tools:[], tool_choice:none, max_tokens:400. New request sends no tool parameters, max_tokens:1024, web timeout 60s, QQ background 22s. Admin chat now emits safe MODEL_HTTP_NNN, MODEL_TIMEOUT, MODEL_CONNECTION_FAILED, MODEL_INVALID_RESPONSE, MODEL_EMPTY_RESPONSE, etc.; no API key or upstream response body.
-- Cloudflare Worker qqaibot-unsloth version 327900f7-5a47-46dc-87ca-ee8988240bdf deployed 100%, confirmed source markers/flag/Secret inheritance/KV key. Original qqai, D1, DO, NapCat, Codex and QQ callback not modified.
-- User earlier verified Unsloth local /v1/models 200, public /v1/models with valid Bearer 200, loaded model lilcheaty/flint-abliterated-GGUF. Actual /v1/chat/completions was never verified. Root cause of original MODEL_UNAVAILABLE remains UNKNOWN pending retry.
-- NEXT: user refreshes https://qqbot-ai.ray2025.com/, presses "測試 AI", reports response or new safe code, never posts any API key. If still fails, investigate actual backend HTTP/latency/model output based on code.
+- User submitted real QQ diagnostics: callback_verify OK 2026-10-24T08:50:51.404Z, event_received GROUP_AT 08:47:16.871Z, send_failed UNKNOWN 08:47:17.621Z, event_ignored UNSUPPORTED_OR_INVALID_EVENT 08:46:40.007Z.
+- Therefore QQ HTTP callback signing/challenge and at least one GROUP_AT delivery HAVE worked. Delivery to QQ failed AFTER receiving group event; unknown was a gap in sanitizing unexpected fetch errors in qqToken/sendQQ, not proof of IP whitelist failure.
+- PR #92 merged main d6997d37bb3861e037dbca4bbb742c6b490ecbc5; isolated CI 40079995888 and original AI CI 40079995892 SUCCESS. Worker distinguishes QQ_AUTH_FETCH_FAILED vs QQ_SEND_FETCH_FAILED, timeouts, HTTP redirects/status and numeric QQ API error codes. No untrusted exception messages, response body, QQ identifiers or tokens in diagnostics.
+- Cloudflare independent qqaibot-unsloth version 9ece06c4-edbc-4055-8a2a-1a7e2f87ecb4 deployed at 100%, code/flags/4 secret_text bindings/CONFIG_KV selected-model-v2 verified. Previous diagnostic keys retained. Original production qqai/D1/DO/NapCat/Codex unchanged.
+- Tencent QQ official documentation lists IP whitelist requirements for production bots, but causes remain UNVERIFIED pending next real QQ event; official documentation includes multiple legacy/current API domain variants, so no blind URL switch occurred.
+- User previously received locally verified v0.0.115 memory archive, but GitHub memory had remained v0.0.114 after platform blocked its sync; this GitHub version v0.0.116 reconciles that historical state and this fix, without reusing version numbers.
+- NEXT: User sends a fresh GROUP_AT QQ message and checks the admin webpage's "查看 QQ 診斷"; provide latest send_failed stage code or reply_sent OK, not credentials. If QQ_AUTH_FETCH_FAILED, investigate QQ token endpoint connectivity; if QQ_SEND_FETCH_FAILED, investigate outbound API connectivity/IP allowlisting; if QQ_SEND_HTTP_403, check permission/IP whitelist.
