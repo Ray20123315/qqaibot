@@ -13,3 +13,5 @@
 - 2026-10-24: Investigate chat "MODEL_UNAVAILABLE" without disclosing secrets, keep selected Unsloth model and strict no-command/no-tool-execution behavior. Address slow inference and provide actual failure categories rather than hiding diagnostics.
 
 - 2026-10-24: Address actual QQ bot silence after confirmed event_received GROUP_AT and send_failed UNKNOWN, with actionable safe auth-vs-send diagnostics without exposing credentials or touching original qqai.
+
+- 2026-10-24: Replace simplistic web page with proper Qwen login screen and functional admin interface. Vision, web browsing/search and speech functionality already exist in user's environment, so don't recommend reinstalling them or label them absent. Image generation explicitly on hold. Maintain safety boundaries and do not misrepresent QQ Worker integration.
