@@ -262,10 +262,10 @@ export default {
     }
 
     if(pathname==='/api/knowledge'){
-      // Paid Cloudflare AI Search is disabled by default; no hidden index/upload usage.
-      if(env.ENABLE_PAID_AI_SEARCH!=='true')return json({error:'KNOWLEDGE_PAID_BACKEND_DISABLED'},503);
       if(!['GET','POST'].includes(request.method))return json({error:'METHOD_NOT_ALLOWED'},405);
       if(!await adminAllowed(request,env))return json({error:'UNAUTHORIZED'},401);
+      // Paid Cloudflare AI Search is disabled by default; no hidden index/upload usage.
+      if(env.ENABLE_PAID_AI_SEARCH!=='true')return json({error:'KNOWLEDGE_PAID_BACKEND_DISABLED'},503);
       try{
         if(request.method==='GET')return json({documents:await listPublicDocuments(env),visibility:'PUBLIC_SUPPORT'});
         if(Number(request.headers.get('content-length'))>4*1024*1024+16000)return json({error:'TOO_LARGE'},413);
