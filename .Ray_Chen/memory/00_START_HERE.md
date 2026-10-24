@@ -1,17 +1,17 @@
 # Ray_Chen Memory
-version: v0.0.116
-task_id: qq-unsloth-send-unknown-20261024
-task_status: blocked
-goal_revision: 7
+version: v0.0.117
+task_id: qwen-qq-admin-console-20261024
+task_status: completed
+goal_revision: 8
 canonical_branch: main
-verified_code_commit: d6997d37bb3861e037dbca4bbb742c6b490ecbc5
+code_main_commit: 8741abb9ea524adfb77dd3d7629ace6dda5b5fd3
 updated_at: 2026-10-24
 
 ## Quick resume
-- User submitted real QQ diagnostics: callback_verify OK 2026-10-24T08:50:51.404Z, event_received GROUP_AT 08:47:16.871Z, send_failed UNKNOWN 08:47:17.621Z, event_ignored UNSUPPORTED_OR_INVALID_EVENT 08:46:40.007Z.
-- Therefore QQ HTTP callback signing/challenge and at least one GROUP_AT delivery HAVE worked. Delivery to QQ failed AFTER receiving group event; unknown was a gap in sanitizing unexpected fetch errors in qqToken/sendQQ, not proof of IP whitelist failure.
-- PR #92 merged main d6997d37bb3861e037dbca4bbb742c6b490ecbc5; isolated CI 40079995888 and original AI CI 40079995892 SUCCESS. Worker distinguishes QQ_AUTH_FETCH_FAILED vs QQ_SEND_FETCH_FAILED, timeouts, HTTP redirects/status and numeric QQ API error codes. No untrusted exception messages, response body, QQ identifiers or tokens in diagnostics.
-- Cloudflare independent qqaibot-unsloth version 9ece06c4-edbc-4055-8a2a-1a7e2f87ecb4 deployed at 100%, code/flags/4 secret_text bindings/CONFIG_KV selected-model-v2 verified. Previous diagnostic keys retained. Original production qqai/D1/DO/NapCat/Codex unchanged.
-- Tencent QQ official documentation lists IP whitelist requirements for production bots, but causes remain UNVERIFIED pending next real QQ event; official documentation includes multiple legacy/current API domain variants, so no blind URL switch occurred.
-- User previously received locally verified v0.0.115 memory archive, but GitHub memory had remained v0.0.114 after platform blocked its sync; this GitHub version v0.0.116 reconciles that historical state and this fix, without reusing version numbers.
-- NEXT: User sends a fresh GROUP_AT QQ message and checks the admin webpage's "查看 QQ 診斷"; provide latest send_failed stage code or reply_sent OK, not credentials. If QQ_AUTH_FETCH_FAILED, investigate QQ token endpoint connectivity; if QQ_SEND_FETCH_FAILED, investigate outbound API connectivity/IP allowlisting; if QQ_SEND_HTTP_403, check permission/IP whitelist.
+- User wanted the existing qqaibot-unsloth simple web form redesigned to a polished modern management interface. User additionally corrected that they already have image understanding, internet search and voice services/model capabilities; image generation is deliberately PAUSED.
+- PR #94 merged to main 8741abb9ea524adfb77dd3d7629ace6dda5b5fd3. Added standalone-qq-ai/dashboard.js, session-auth.js, test/dashboard-session.test.mjs; updated worker.js, README.md.
+- New responsive dark Qwen Console with login, overview, model picker, admin chat, QQ diagnostics and capability cards; user claims vision/web/voice available, but the standalone Worker code only processes text QQ messages. UI does not imply QQ end-to-end multi-modal integration without evidence. No image-generation assets/models/services installed.
+- ADMIN_TOKEN secret remains in Cloudflare. New login issues 8h HMAC-SHA256 signed __Host-qqai_session HttpOnly; Secure; SameSite=Strict cookie. Same-origin checks on writes. Bearer API compatibility remains. No localStorage/sessionStorage; no secrets in HTML.
+- Fixed previous reply formatting bug: preserve newline/tab in queryModel, normalize CRLF; still keep existing text length limits and core QQ webhook semantics. No change to old qqai Worker, D1/DO/NapCat/Codex or existing QQ credentials.
+- GitHub isolated CI 40082915685 SUCCESS and old QQ CI 40082915660 SUCCESS. Cloudflare standalone Worker 68e38e2c-da07-4c2b-a9d7-1e959f89e4d2 deployed at 100% readback. All 4 Secret bindings and CONFIG_KV model key persisted. Exact browser-user login/visual/manual checks NOT VERIFIED.
+- NEXT: Open https://qqbot-ai.ray2025.com/ and test login with existing ADMIN_TOKEN, model picker, chat line breaks, QQ diagnostics, desktop/mobile appearance. No keys in chats.

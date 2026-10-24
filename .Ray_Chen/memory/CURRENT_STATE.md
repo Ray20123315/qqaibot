@@ -35,3 +35,9 @@
 - Prior v0.0.115 local verified archive contained PR #91 and deployment 21f125fc-b566-4e07-8368-cad0490602b3, but remote GitHub memory remained v0.0.114 due safety block. This v0.0.116 reconciles both releases.
 - PR #92 main d6997d37bb3861e037dbca4bbb742c6b490ecbc5, isolated CI 40079995888 and legacy 40079995892 pass. New QQ auth/send fetch, timeout, HTTP and safe numeric business codes recorded; no secrets/ids/logs.
 - Independent Cloudflare Worker qqaibot-unsloth deployment 9ece06c4-edbc-4055-8a2a-1a7e2f87ecb4 100%, inherited 4 secret_text and CONFIG_KV binding; selected-model-v2 retained. QQ live send remains unverified; original qqai unchanged.
+
+## 2026-10-24 Qwen modern QQ AI admin console
+- User confirms Qwen vision, web search and voice capabilities/services already available, but wants image generation paused. Current standalone-qq-ai Worker still only forwards QQ text events and has no verified image/audio/tool/search endpoint; UI differentiates existing capability from actual integration.
+- PR #94 main 8741abb9ea524adfb77dd3d7629ace6dda5b5fd3: dashboard.js responsive Qwen-branded login/admin page, session-auth.js HMAC signed 8h cookie, dashboard-session tests, worker.js session and preserve chat newline, README docs. Legacy bearer admin APIs preserved; existing QQ webhook and secrets unchanged.
+- Isolated CI 40082915685 SUCCESS; legacy AI CI 40082915660 SUCCESS. Standalone Cloudflare Worker 68e38e2c-da07-4c2b-a9d7-1e959f89e4d2 100%; 4 secrets ADMIN_TOKEN, QQ_APP_ID, QQ_APP_SECRET, UNSLOTH_API_KEY remained secret_text; CONFIG_KV and selected-model-v2 retained; global_fetch_strictly_public unchanged.
+- Browser visual/manual acceptance and real QQ message under new web UI not verified. No code change to original qqai, no image generator installed.
