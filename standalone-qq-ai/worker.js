@@ -349,7 +349,7 @@ export default {
       const data=await request.json().catch(()=>null);
       const message=text(data?.message);
       if(!message||message.length>1500)return json({error:'INVALID_MESSAGE'},400);
-      try{return json({reply:/^[!/$>]/.test(message)&&!/^\/(?:search|web)(?:\s|$)/.test(message)?'這是純文字聊天機器人，無法執行指令。':await queryModel(env,message)});}
+      try{return json({reply:/^[!/$>]/.test(message)&&!/^\/(?:search|web)(?:\s|$)/.test(message)?'该指令目前不可用。输入 /帮助 查看已开放的功能。':await queryModel(env,message)});}
       catch(err){
         const reason=String(err?.message||'').replace(/[^A-Z0-9_]/g,'').slice(0,45);
         const approved=/^(MODEL_NOT_CONFIGURED|INVALID_SAVED_MODEL|MODEL_TIMEOUT|MODEL_CONNECTION_FAILED|MODEL_REDIRECT_[0-9]{3}|MODEL_HTTP_[0-9]{3}|MODEL_INVALID_RESPONSE|MODEL_EMPTY_RESPONSE|CHAT_NOT_CONFIGURED|UPSTREAM_(TIMEOUT|CONNECTION_FAILED|TOO_LONG|EMPTY_STREAM|EMPTY_RESPONSE|INVALID_JSON|HTTP_[0-9]{3}|REDIRECT_[0-9]{3}))$/.test(reason);
