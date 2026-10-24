@@ -14,3 +14,5 @@
 - 2026-10-24: Minimal OpenAI Chat Completions request deliberately omits tools/tool_choice (no delegation capability), uses max_tokens 1024. Admin chat 60s timeout; QQ async handler 22s budget. UI returns sanitized errors rather than raw HTTP body or credentials.
 
 - 2026-10-24: Keep QQ API fixed host while diagnosing. Current/legacy Tencent sources differ; do not blindly switch to api.sgroup.qq.com or bots.qq.com on UNKNOWN. Add safe QQ_AUTH_FETCH_FAILED and QQ_SEND_FETCH_FAILED classification, timeout/redirect/numeric business codes. Never send credentials or raw QQ response bodies into logs/KV.
+
+- 2026-10-24: New QQ AI dashboard uses self-contained responsive UI in dashboard.js, signed 8h HttpOnly/Secure/SameSite=Strict HMAC session auth derived from ADMIN_TOKEN Worker Secret, same-origin write checks, bearer backward compatibility, no browser key storage. Existing worker secrets/KV and QQ callback intact. Preserve newlines in text replies; Qwen installed capabilities vs actual QQ integration must be reported separately.
